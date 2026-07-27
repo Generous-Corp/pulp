@@ -1,11 +1,12 @@
 #include <pulp/timeline/transaction.hpp>
 
+#include "media_reference_validation.hpp"
+#include "owned_identity_traversal.hpp"
+#include "sequence_graph_validation.hpp"
 #include "transaction_automation_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
 #include "transaction_scene_internal.hpp"
-#include "media_reference_validation.hpp"
-#include "owned_identity_traversal.hpp"
 #include "transaction_note_internal.hpp"
 #include "transaction_reduction_support.hpp"
 #include "transaction_sequence_internal.hpp"
@@ -36,9 +37,8 @@ std::vector<detail::OwnedIdentity> owned_identities(const Clip& clip, ItemId seq
             result.push_back(
                 {identity.id,
                  ItemLocation{identity.kind,
-                              immediate_parent_id(identity.kind, {}, sequence,
-                                                  identity.track, identity.clip,
-                                                  identity.lane),
+                              immediate_parent_id(identity.kind, {}, sequence, identity.track,
+                                                  identity.clip, identity.lane),
                               sequence, identity.track, identity.clip, true}});
         });
     return result;
@@ -117,18 +117,14 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                                          expected_location(ItemKind::Track, project,
                                                            insert->sequence_id, insert->track_id)))
                 return fail_target(*code, insert->track_id, insert->sequence_id);
-            if (const auto media_error =
-                    detail::validate_clip_media(project, insert->clip))
+            if (const auto media_error = detail::validate_clip_media(project, insert->clip))
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(detail::model_failure(transaction, envelope.id, *media_error)));
-            if (const auto* reference =
-                    std::get_if<SequenceRef>(&insert->clip.content()))
+            if (const auto* reference = std::get_if<SequenceRef>(&insert->clip.content()))
                 if (const auto graph_error = validate_sequence_edge(
-                        project.sequences(), insert->sequence_id,
-                        reference->sequence_id))
-                    return runtime::Result<ReducedTransaction, TransactionError>(
-                        runtime::Err(detail::model_failure(
-                            transaction, envelope.id, *graph_error)));
+                        project.sequences(), insert->sequence_id, reference->sequence_id))
+                    return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
+                        detail::model_failure(transaction, envelope.id, *graph_error)));
             const auto identities =
                 owned_identities(insert->clip, insert->sequence_id, insert->track_id);
             auto identity_plan = detail::plan_identity_insert(
@@ -235,9 +231,8 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             inverses.push_back(std::move(reduced->inverse));
             dirty.push_back(reduced->dirty);
         } else if (detail::is_sequence_command(envelope.command)) {
-            auto reduced = detail::reduce_sequence_command(
-                project, envelope.command, transaction, envelope.id,
-                allow_tombstone_restore);
+            auto reduced = detail::reduce_sequence_command(project, envelope.command, transaction,
+                                                           envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));
@@ -372,7 +367,7 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 project, sequence->with_groove(groove->replacement));
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(
                 SetGroove{groove->sequence_id, groove->replacement, groove->expected});

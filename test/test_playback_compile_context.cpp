@@ -35,8 +35,8 @@ ContentHash hash_of(char digit) {
     return *ContentHash::from_hex(std::string(64, digit));
 }
 
-runtime::Result<std::shared_ptr<const void>, PersistenceError>
-decode_marker(const JsonValue&, const void*) noexcept {
+runtime::Result<std::shared_ptr<const void>, PersistenceError> decode_marker(const JsonValue&,
+                                                                             const void*) noexcept {
     return runtime::Ok(std::shared_ptr<const void>(std::make_shared<const int>(1)));
 }
 
@@ -64,8 +64,8 @@ SchemaRegistry generator_schema_registry() {
 }
 
 ClipContent generator_content(const SchemaRegistry& registry, std::string_view type_name) {
-    return take(registry.create_registered_no_owned_ids(
-        {std::string(type_name), 1}, std::make_shared<const int>(1), 1024));
+    return take(registry.create_registered_no_owned_ids({std::string(type_name), 1},
+                                                        std::make_shared<const int>(1), 1024));
 }
 
 // Ids: sequence 2; track 10 holds a chord-following generator, track 20 holds a
@@ -112,25 +112,32 @@ std::shared_ptr<const Project> make_project(const SchemaRegistry& registry, Chor
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
-std::shared_ptr<const Project> make_project_with_inactive_arrangement(
-    const SchemaRegistry& registry, bool frozen) {
-    auto clip = take(Clip::create(
-        {110}, {0}, {480}, generator_content(registry, kFollowsHarmony)));
-    std::vector<MediaAsset> assets{
-        {{500}, "selected.wav", 480, {48'000, 1}, hash_of('a'),
-         AssetStoragePolicy::External, {}, {}, {}}};
+enum class ProviderSelection { Arrangement, Frozen, Take };
+
+std::shared_ptr<const Project> make_project_with_provider_selection(const SchemaRegistry& registry,
+                                                                    ProviderSelection selection) {
+    auto clip = take(Clip::create({110}, {0}, {480}, generator_content(registry, kFollowsHarmony)));
+    std::vector<MediaAsset> assets{{{500},
+                                    "selected.wav",
+                                    480,
+                                    {48'000, 1},
+                                    hash_of('a'),
+                                    AssetStoragePolicy::External,
+                                    {},
+                                    {},
+                                    {}}};
 
     TrackInput track_input{
         .id = {10},
-        .name = frozen ? "frozen" : "take-selected",
+        .name = selection == ProviderSelection::Frozen ? "frozen"
+                : selection == ProviderSelection::Take ? "take-selected"
+                                                       : "arrangement",
         .clips = {std::move(clip)},
     };
-    if (frozen) {
-        track_input.freeze =
-            TrackFreeze{MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}, hash_of('b')};
-    } else {
-        auto recorded_take =
-            take(Take::create({501}, MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}));
+    if (selection == ProviderSelection::Frozen) {
+        track_input.freeze = TrackFreeze{MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}, hash_of('b')};
+    } else if (selection == ProviderSelection::Take) {
+        auto recorded_take = take(Take::create({501}, MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}));
         track_input.take_lanes = {
             take(TakeLane::create({502}, "selected", {std::move(recorded_take)}))};
         track_input.active_take_lane_id = {502};
@@ -146,13 +153,11 @@ std::shared_ptr<const Project> make_project_with_inactive_arrangement(
     project_input.root_sequence_id = {2};
     project_input.assets = std::move(assets);
     project_input.sequences = {std::move(sequence)};
-    return std::make_shared<const Project>(
-        take(Project::create(std::move(project_input))));
+    return std::make_shared<const Project>(take(Project::create(std::move(project_input))));
 }
 
-std::shared_ptr<const Project>
-make_project_with_nested_generator(const SchemaRegistry& registry,
-                                   std::size_t reference_count = 1) {
+std::shared_ptr<const Project> make_project_with_nested_generator(const SchemaRegistry& registry,
+                                                                  std::size_t reference_count = 1) {
     auto generator =
         take(Clip::create({30}, {0}, {480}, generator_content(registry, kFollowsHarmony)));
     auto child_track = take(Track::create({20}, "child", {std::move(generator)}));
@@ -161,14 +166,12 @@ make_project_with_nested_generator(const SchemaRegistry& registry,
 
     std::vector<Track> root_tracks;
     for (std::size_t index = 0; index < reference_count; ++index) {
-        auto reference = take(
-            Clip::create({100 + index * 2}, {0}, {480}, SequenceRef{{3}, {0}}));
+        auto reference = take(Clip::create({100 + index * 2}, {0}, {480}, SequenceRef{{3}, {0}}));
         root_tracks.push_back(
             take(Track::create({101 + index * 2}, "root", {std::move(reference)})));
     }
     auto root =
-        take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
-                              std::move(root_tracks)));
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, std::move(root_tracks)));
 
     ProjectInput input;
     input.id = {1};
@@ -269,22 +272,24 @@ std::uint64_t published_revision(const PlaybackProgramStore& store) {
     return live->document_revision();
 }
 
-DirtySet chord_lane_edit(const Project& before, const Project& after) {
+ReducedTransaction chord_lane_edit(const Project& before, const Project& after) {
     Transaction transaction;
     transaction.id = {{1}, 1};
     transaction.commands.push_back(
-        {{{1}, 1}, SetChordScaleLane{{2}, before.find_sequence({2})->chord_scale_lane(),
-                                     after.find_sequence({2})->chord_scale_lane()}});
-    return take(reduce_transaction(before, transaction)).dirty;
+        {{{1}, 1},
+         SetChordScaleLane{{2},
+                           before.find_sequence({2})->chord_scale_lane(),
+                           after.find_sequence({2})->chord_scale_lane()}});
+    return take(reduce_transaction(before, transaction));
 }
 
-DirtySet groove_edit(const Project& before, const Project& after) {
+ReducedTransaction groove_edit(const Project& before, const Project& after) {
     Transaction transaction;
     transaction.id = {{1}, 1};
-    transaction.commands.push_back({{{1}, 1},
-                                    SetGroove{{2}, before.find_sequence({2})->groove(),
-                                              after.find_sequence({2})->groove()}});
-    return take(reduce_transaction(before, transaction)).dirty;
+    transaction.commands.push_back(
+        {{{1}, 1},
+         SetGroove{{2}, before.find_sequence({2})->groove(), after.find_sequence({2})->groove()}});
+    return take(reduce_transaction(before, transaction));
 }
 
 } // namespace
@@ -302,8 +307,7 @@ TEST_CASE("a context registry refuses an empty or duplicate content type",
     REQUIRE_FALSE(registry.declare({"vendor.one", reads_harmony}));
     // Two renderers disagreeing about what a content kind reads would make the
     // invalidation depend on registration order, so the second is refused.
-    const auto duplicate =
-        registry.declare({"vendor.one", CompileContextSubscriptions::none()});
+    const auto duplicate = registry.declare({"vendor.one", CompileContextSubscriptions::none()});
     REQUIRE(duplicate);
     REQUIRE(duplicate->code == ContextRegistrationErrorCode::DuplicateContentType);
     REQUIRE(registry.size() == 1);
@@ -318,7 +322,7 @@ TEST_CASE("the subscriber index names only the tracks that declared the context"
           "[playback][compile-context][subscription]") {
     const auto schemas = generator_schema_registry();
     const auto project = make_project(schemas, one_chord(), straight_groove());
-    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*project, {2}, context_registry());
 
     const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
     REQUIRE(subscribers.size() == 1);
@@ -326,30 +330,32 @@ TEST_CASE("the subscriber index names only the tracks that declared the context"
 
     // With nothing registered, the same document has no subscribers at all —
     // the index reflects declarations, not the presence of the lane.
-    REQUIRE(ContextSubscriberIndex::build(*project, {2}, CompileContextRegistry{}).empty());
-    REQUIRE(ContextSubscriberIndex::build(*project, {99}, context_registry()).empty());
+    const auto valid_empty =
+        CompileInvalidationIndex::build(*project, {2}, CompileContextRegistry{});
+    REQUIRE(valid_empty.valid());
+    REQUIRE(valid_empty.empty());
+    const auto invalid = CompileInvalidationIndex::build(*project, {99}, context_registry());
+    REQUIRE_FALSE(invalid.valid());
+    REQUIRE(invalid.empty());
 }
 
 TEST_CASE("a root track subscribes to contexts read through a sequence reference",
           "[playback][compile-context][subscription][sequence-ref]") {
     const auto schemas = generator_schema_registry();
     const auto project = make_project_with_nested_generator(schemas);
-    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*project, {2}, context_registry());
 
     const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
     REQUIRE(subscribers.size() == 1);
     REQUIRE(subscribers[0] == ItemId{101});
     REQUIRE(index.subscribers({2}, CompileContextKind::ChordScale).empty());
-    const auto child_subscribers =
-        index.subscribers({3}, CompileContextKind::ChordScale);
+    const auto child_subscribers = index.subscribers({3}, CompileContextKind::ChordScale);
     REQUIRE(child_subscribers.size() == 1);
     REQUIRE(child_subscribers[0] == ItemId{101});
 
-    const DirtySet child_context_edit(
-        {{{3}, {}, {3}, DirtyFlags::Context}},
-        {{{3}, CompileContextKind::ChordScale}});
-    const auto resolved =
-        resolve_dirty_tracks(*project, {2}, child_context_edit, index);
+    const DirtySet child_context_edit({{{3}, {}, {3}, DirtyFlags::Context}},
+                                      {{{3}, CompileContextKind::ChordScale}});
+    const auto resolved = resolve_dirty_tracks(*project, {2}, child_context_edit, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks == std::vector<ItemId>{ItemId{101}});
 }
@@ -359,7 +365,7 @@ TEST_CASE("shared referenced sequences fan out subscriptions without repeated gr
     const auto schemas = generator_schema_registry();
     constexpr std::size_t reference_count = 1'000;
     const auto project = make_project_with_nested_generator(schemas, reference_count);
-    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*project, {2}, context_registry());
 
     const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
     REQUIRE(subscribers.size() == reference_count);
@@ -367,21 +373,80 @@ TEST_CASE("shared referenced sequences fan out subscriptions without repeated gr
     REQUIRE(subscribers.back() == ItemId{101 + (reference_count - 1) * 2});
 }
 
+TEST_CASE("a stale structural index fails closed instead of under-invalidating",
+          "[playback][compile-context][subscription][sequence-ref]") {
+    const auto schemas = generator_schema_registry();
+    const auto before = make_project_with_nested_generator(schemas);
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
+    const auto after = make_project_with_nested_generator(schemas, 2);
+    const DirtySet child_context_edit({{{3}, {}, {3}, DirtyFlags::Context}},
+                                      {{{3}, CompileContextKind::ChordScale}});
+
+    const auto resolved = resolve_dirty_tracks(*after, {2}, child_context_edit, index);
+    REQUIRE(resolved.all);
+    REQUIRE(resolved.tracks.empty());
+}
+
+TEST_CASE("root and registry mismatches invalidate the bundled index",
+          "[playback][compile-context][subscription][invalidation]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project_with_nested_generator(schemas);
+    auto registry = context_registry();
+    const auto index = CompileInvalidationIndex::build(*project, {2}, registry);
+    const DirtySet child_context_edit({{{3}, {}, {3}, DirtyFlags::Context}},
+                                      {{{3}, CompileContextKind::ChordScale}});
+
+    const auto wrong_root = resolve_dirty_tracks(*project, {3}, child_context_edit, index);
+    REQUIRE(wrong_root.all);
+    REQUIRE(wrong_root.tracks.empty());
+
+    auto reads_harmony = CompileContextSubscriptions::none();
+    reads_harmony.subscribe(CompileContextKind::ChordScale);
+    REQUIRE_FALSE(registry.declare({"vendor.late-reader", reads_harmony}));
+    REQUIRE_FALSE(index.valid());
+    const auto stale_registry = resolve_dirty_tracks(*project, {2}, child_context_edit, index);
+    REQUIRE(stale_registry.all);
+    REQUIRE(stale_registry.tracks.empty());
+}
+
+TEST_CASE("registry assignment invalidates prior indices and leaves moved-from registries usable",
+          "[playback][compile-context][subscription][invalidation]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project_with_nested_generator(schemas);
+
+    auto copy_destination = context_registry();
+    const auto copy_index = CompileInvalidationIndex::build(*project, {2}, copy_destination);
+    const CompileContextRegistry empty_source;
+    copy_destination = empty_source;
+    REQUIRE_FALSE(copy_index.valid());
+
+    auto move_destination = context_registry();
+    const auto move_index = CompileInvalidationIndex::build(*project, {2}, move_destination);
+    auto move_source = CompileContextRegistry{};
+    move_destination = std::move(move_source);
+    REQUIRE_FALSE(move_index.valid());
+
+    auto reads_harmony = CompileContextSubscriptions::none();
+    reads_harmony.subscribe(CompileContextKind::ChordScale);
+    REQUIRE_FALSE(move_source.declare({"vendor.after-move", reads_harmony}));
+    REQUIRE(move_source.size() == 1);
+}
+
 TEST_CASE("context resolution excludes arrangement clips replaced in playback",
           "[playback][compile-context][subscription]") {
     const auto schemas = generator_schema_registry();
     const auto registry = context_registry();
-    const DirtySet context_edit(
-        {{{2}, {}, {2}, DirtyFlags::Context}},
-        {{{2}, CompileContextKind::ChordScale}});
+    const DirtySet context_edit({{{2}, {}, {2}, DirtyFlags::Context}},
+                                {{{2}, CompileContextKind::ChordScale}});
 
-    const auto frozen = make_project_with_inactive_arrangement(schemas, true);
-    const auto frozen_index = ContextSubscriberIndex::build(*frozen, {2}, registry);
+    const auto frozen = make_project_with_provider_selection(schemas, ProviderSelection::Frozen);
+    const auto frozen_index = CompileInvalidationIndex::build(*frozen, {2}, registry);
     REQUIRE(frozen_index.subscribers(CompileContextKind::ChordScale).size() == 1);
     REQUIRE(resolve_dirty_tracks(*frozen, {2}, context_edit, frozen_index).tracks.empty());
 
-    const auto take_selected = make_project_with_inactive_arrangement(schemas, false);
-    const auto take_index = ContextSubscriberIndex::build(*take_selected, {2}, registry);
+    const auto take_selected =
+        make_project_with_provider_selection(schemas, ProviderSelection::Take);
+    const auto take_index = CompileInvalidationIndex::build(*take_selected, {2}, registry);
     REQUIRE(take_index.subscribers(CompileContextKind::ChordScale).size() == 1);
     REQUIRE(resolve_dirty_tracks(*take_selected, {2}, context_edit, take_index).tracks.empty());
 }
@@ -390,18 +455,23 @@ TEST_CASE("the subscriber index remains valid across provider selection changes"
           "[playback][compile-context][subscription]") {
     const auto schemas = generator_schema_registry();
     const auto registry = context_registry();
-    const DirtySet context_edit(
-        {{{2}, {}, {2}, DirtyFlags::Context}},
-        {{{2}, CompileContextKind::ChordScale}});
-    const auto frozen = make_project_with_inactive_arrangement(schemas, true);
-    const auto frozen_index = ContextSubscriberIndex::build(*frozen, {2}, registry);
+    const DirtySet context_edit({{{2}, {}, {2}, DirtyFlags::Context}},
+                                {{{2}, CompileContextKind::ChordScale}});
+    const auto frozen = make_project_with_provider_selection(schemas, ProviderSelection::Frozen);
+    const auto frozen_index = CompileInvalidationIndex::build(*frozen, {2}, registry);
 
     // The same index becomes effective again from the current snapshot when
     // playback returns to the arrangement; no selection-state rebuild is
     // required and no live reader can disappear from invalidation.
-    const auto arrangement = make_project(schemas, one_chord(), straight_groove());
+    Transaction unfreeze;
+    unfreeze.id = {{1}, 1};
+    unfreeze.commands.push_back(
+        {{{1}, 1},
+         SetTrackFreeze{
+             {2}, {10}, frozen->find_sequence({2})->find_track({10})->freeze(), std::nullopt}});
+    const auto arrangement = take(reduce_transaction(*frozen, unfreeze));
     const auto after_unfreeze =
-        resolve_dirty_tracks(*arrangement, {2}, context_edit, frozen_index);
+        resolve_dirty_tracks(arrangement.project, {2}, context_edit, frozen_index);
     REQUIRE(after_unfreeze.tracks == std::vector<ItemId>{ItemId{10}});
 }
 
@@ -410,10 +480,10 @@ TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, lane_of({}), straight_groove());
     const auto after = make_project(schemas, one_chord(), straight_groove());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
 
-    const auto resolved =
-        resolve_dirty_tracks(*after, {2}, chord_lane_edit(*before, *after), index);
+    const auto edit = chord_lane_edit(*before, *after);
+    const auto resolved = resolve_dirty_tracks(edit.project, {2}, edit.dirty, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.size() == 1);
     REQUIRE(resolved.tracks[0] == ItemId{10});
@@ -422,9 +492,8 @@ TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
     Transaction elsewhere;
     elsewhere.id = {{1}, 2};
     elsewhere.commands.push_back({{{1}, 2}, SetChordScaleLane{{2}, lane_of({}), one_chord()}});
-    const auto other_sequence =
-        resolve_dirty_tracks(*before, {77},
-                             take(reduce_transaction(*before, elsewhere)).dirty, index);
+    const auto other_sequence = resolve_dirty_tracks(
+        *before, {77}, take(reduce_transaction(*before, elsewhere)).dirty, index);
     REQUIRE_FALSE(other_sequence.all);
     REQUIRE(other_sequence.tracks.empty());
 
@@ -436,8 +505,7 @@ TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
     const auto replacement = take(TempoMap::create(faster));
     tempo.commands.push_back({{{1}, 3}, SetTempoMap{before->tempo_map(), replacement}});
     const auto project_scoped =
-        resolve_dirty_tracks(*before, {2},
-                             take(reduce_transaction(*before, tempo)).dirty, index);
+        resolve_dirty_tracks(*before, {2}, take(reduce_transaction(*before, tempo)).dirty, index);
     REQUIRE(project_scoped.all);
 }
 
@@ -446,7 +514,7 @@ TEST_CASE("editing the chord lane recompiles its subscribers and reuses everythi
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, lane_of({}), straight_groove());
     const auto after = make_project(schemas, one_chord(), straight_groove());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
 
     PlaybackProgramStore store;
     InlineExecutor executor;
@@ -460,9 +528,10 @@ TEST_CASE("editing the chord lane recompiles its subscribers and reuses everythi
     const auto* plain_before = track_program(store, {30});
     const auto generation_before = published_generation(store);
 
-    const auto resolved =
-        resolve_dirty_tracks(*after, {2}, chord_lane_edit(*before, *after), index);
-    REQUIRE(compiler.submit(request(after, map, 2, resolved)));
+    const auto edit = chord_lane_edit(*before, *after);
+    const auto edited = std::make_shared<const Project>(edit.project);
+    const auto resolved = resolve_dirty_tracks(edit.project, {2}, edit.dirty, index);
+    REQUIRE(compiler.submit(request(edited, map, 2, resolved)));
     REQUIRE_FALSE(compiler.status().busy);
 
     // The program really was republished, so "unchanged pointer" below means
@@ -488,33 +557,63 @@ TEST_CASE("an undeclared reader is not recompiled by a chord-lane edit",
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, lane_of({}), straight_groove());
     const auto after = make_project(schemas, one_chord(), straight_groove());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, CompileContextRegistry{});
+    const auto index = CompileInvalidationIndex::build(*before, {2}, CompileContextRegistry{});
 
-    const auto resolved =
-        resolve_dirty_tracks(*after, {2}, chord_lane_edit(*before, *after), index);
+    const auto edit = chord_lane_edit(*before, *after);
+    const auto resolved = resolve_dirty_tracks(edit.project, {2}, edit.dirty, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.empty());
+
+    const DirtySet direct_edit({{{300}, {30}, {2}, DirtyFlags::Structure | DirtyFlags::Removed}});
+    const auto invalid_index =
+        resolve_dirty_tracks(*after, {2}, direct_edit, CompileInvalidationIndex{});
+    REQUIRE(invalid_index.all);
+    REQUIRE(invalid_index.tracks.empty());
 }
 
 TEST_CASE("a structural edit and a context edit in one transaction dirty both",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, lane_of({}), straight_groove());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
 
     Transaction transaction;
     transaction.id = {{1}, 1};
-    transaction.commands.push_back(
-        {{{1}, 1}, RemoveClip{{2}, {30}, {300}}});
-    transaction.commands.push_back(
-        {{{1}, 2}, SetChordScaleLane{{2}, lane_of({}), one_chord()}});
-    const auto dirty = take(reduce_transaction(*before, transaction)).dirty;
+    transaction.commands.push_back({{{1}, 1}, RemoveClip{{2}, {30}, {300}}});
+    transaction.commands.push_back({{{1}, 2}, SetChordScaleLane{{2}, lane_of({}), one_chord()}});
+    const auto reduced = take(reduce_transaction(*before, transaction));
+    REQUIRE(reduced.project.sequence_compile_structure_token() ==
+            before->sequence_compile_structure_token());
 
-    const auto resolved = resolve_dirty_tracks(*before, {2}, dirty, index);
+    const auto resolved = resolve_dirty_tracks(reduced.project, {2}, reduced.dirty, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.size() == 2);
     REQUIRE(resolved.tracks[0] == ItemId{10});
     REQUIRE(resolved.tracks[1] == ItemId{30});
+}
+
+TEST_CASE("a new registered-content reader invalidates the structural token",
+          "[playback][compile-context][dirty-set][invalidation]") {
+    const auto schemas = generator_schema_registry();
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
+    Transaction insert;
+    insert.id = {{1}, 1};
+    insert.commands.push_back(
+        {{{1}, 1},
+         InsertClip{{2},
+                    {30},
+                    take(Clip::create({500}, {960}, {480},
+                                      generator_content(schemas, kFollowsHarmony)))}});
+    const auto reduced = take(reduce_transaction(*before, insert));
+    REQUIRE(reduced.project.sequence_compile_structure_token() !=
+            before->sequence_compile_structure_token());
+    const DirtySet context_edit({{{2}, {}, {2}, DirtyFlags::Context}},
+                                {{{2}, CompileContextKind::ChordScale}});
+
+    const auto resolved = resolve_dirty_tracks(reduced.project, {2}, context_edit, index);
+    REQUIRE(resolved.all);
+    REQUIRE(resolved.tracks.empty());
 }
 
 TEST_CASE("marker metadata does not dirty compiled track programs",
@@ -522,10 +621,9 @@ TEST_CASE("marker metadata does not dirty compiled track programs",
     const auto schemas = generator_schema_registry();
     const auto project = make_project(schemas, lane_of({}), straight_groove());
     const DirtySet marker_edit(
-        {{{400}, {}, {2},
-          DirtyFlags::Structure | DirtyFlags::Marker | DirtyFlags::Added}});
+        {{{400}, {}, {2}, DirtyFlags::Structure | DirtyFlags::Marker | DirtyFlags::Added}});
     const auto resolved =
-        resolve_dirty_tracks(*project, {2}, marker_edit, ContextSubscriberIndex{});
+        resolve_dirty_tracks(*project, {2}, marker_edit, CompileInvalidationIndex{});
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.empty());
 }
@@ -534,7 +632,7 @@ TEST_CASE("the subscriber index separates the two context kinds",
           "[playback][compile-context][subscription]") {
     const auto schemas = generator_schema_registry();
     const auto project = make_project(schemas, one_chord(), shuffle());
-    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*project, {2}, context_registry());
 
     const auto harmony_readers = index.subscribers(CompileContextKind::ChordScale);
     REQUIRE(harmony_readers.size() == 1);
@@ -552,10 +650,11 @@ TEST_CASE("editing the groove recompiles its subscribers and reuses everything e
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, one_chord(), straight_groove());
     const auto after = make_project(schemas, one_chord(), shuffle());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*before, {2}, context_registry());
 
-    const auto resolved =
-        resolve_dirty_tracks(*after, {2}, groove_edit(*before, *after), index);
+    const auto edit = groove_edit(*before, *after);
+    const auto edited = std::make_shared<const Project>(edit.project);
+    const auto resolved = resolve_dirty_tracks(edit.project, {2}, edit.dirty, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.size() == 1);
     REQUIRE(resolved.tracks[0] == ItemId{40});
@@ -573,7 +672,7 @@ TEST_CASE("editing the groove recompiles its subscribers and reuses everything e
     const auto* swinger_before = track_program(store, {40});
     const auto generation_before = published_generation(store);
 
-    REQUIRE(compiler.submit(request(after, map, 2, resolved)));
+    REQUIRE(compiler.submit(request(edited, map, 2, resolved)));
     REQUIRE_FALSE(compiler.status().busy);
     REQUIRE(published_generation(store) != generation_before);
     REQUIRE(published_revision(store) == 2);
@@ -594,15 +693,15 @@ TEST_CASE("a chord-lane edit leaves the groove reader alone and the reverse",
     const auto plain = make_project(schemas, lane_of({}), straight_groove());
     const auto harmonised = make_project(schemas, one_chord(), straight_groove());
     const auto swung = make_project(schemas, lane_of({}), shuffle());
-    const auto index = ContextSubscriberIndex::build(*plain, {2}, context_registry());
+    const auto index = CompileInvalidationIndex::build(*plain, {2}, context_registry());
 
-    const auto after_chord =
-        resolve_dirty_tracks(*harmonised, {2}, chord_lane_edit(*plain, *harmonised), index);
+    const auto chord_edit = chord_lane_edit(*plain, *harmonised);
+    const auto after_chord = resolve_dirty_tracks(chord_edit.project, {2}, chord_edit.dirty, index);
     REQUIRE(after_chord.tracks.size() == 1);
     REQUIRE(after_chord.tracks[0] == ItemId{10});
 
-    const auto after_groove =
-        resolve_dirty_tracks(*swung, {2}, groove_edit(*plain, *swung), index);
+    const auto groove = groove_edit(*plain, *swung);
+    const auto after_groove = resolve_dirty_tracks(groove.project, {2}, groove.dirty, index);
     REQUIRE(after_groove.tracks.size() == 1);
     REQUIRE(after_groove.tracks[0] == ItemId{40});
 }
@@ -615,10 +714,10 @@ TEST_CASE("an undeclared reader is not recompiled by a groove edit",
     const auto schemas = generator_schema_registry();
     const auto before = make_project(schemas, lane_of({}), straight_groove());
     const auto after = make_project(schemas, lane_of({}), shuffle());
-    const auto index = ContextSubscriberIndex::build(*before, {2}, CompileContextRegistry{});
+    const auto index = CompileInvalidationIndex::build(*before, {2}, CompileContextRegistry{});
 
-    const auto resolved =
-        resolve_dirty_tracks(*after, {2}, groove_edit(*before, *after), index);
+    const auto edit = groove_edit(*before, *after);
+    const auto resolved = resolve_dirty_tracks(edit.project, {2}, edit.dirty, index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.empty());
 }

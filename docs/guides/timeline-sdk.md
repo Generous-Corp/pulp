@@ -237,12 +237,21 @@ audio thread. Stage 1 fails closed when a child contains device processing,
 automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
 closed because Stage 1 has no envelope-offset representation. Set
-`ProgramCompileRequest::max_expanded_note_events` to bound note
-expansion; `audio_limits.max_clips` also caps the total clip materialization
-and reference traversal performed by nested lowering, including charges carried
-by reused track programs. When compiling incrementally, pass child
-dirtiness through `lower_dirty_set(project, root_sequence_id, dirty)` so every
-root track that places the child is rebuilt.
+`ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
+`ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
+and reference traversal, including charges carried by reused track programs.
+`AudioRendererLimits::max_clips` remains the separate ceiling for compiled audio
+regions. When compiling incrementally, build and retain one snapshot-scoped
+`CompileInvalidationIndex` from the project, root sequence, and
+`CompileContextRegistry`, then pass each transaction dirty set through
+`resolve_dirty_tracks()`. The bundled index combines direct edits, transitive
+sequence dependencies, and nested context readers so every affected root track
+is rebuilt. Resolution compares an O(1) immutable Project structure token plus
+the root identity and registry generation; it fails closed to a full recompile
+when any of them is stale or mismatched. Rebuild the index after a relevant
+structural edit or registry declaration. Context lane contents, ordinary
+note/audio edits, freeze selection, and active-take selection preserve the
+structure token.
 
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree

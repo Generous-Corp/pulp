@@ -79,16 +79,21 @@ artifact is needed. Never modify canonical project JSON text directly.
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
   reference gain/fades. Source windows that intersect child audio fades also
   fail closed because Stage 1 cannot represent an envelope offset. Expansion
-  is bounded by `ProgramCompileRequest::max_expanded_note_events` and by
-  `audio_limits.max_clips` across materialized clips, reference traversal, and
-  reused track programs.
+  is bounded by `ProgramCompileRequest::max_expanded_note_events` and
+  `ProgramCompileRequest::max_expanded_clips` across materialized clips,
+  reference traversal, and reused track programs. The independent
+  `audio_limits.max_clips` ceiling counts compiled audio regions only.
 - Shared edits affect every placement. Use `build_diverge_transaction()` for
   eager copy-on-edit: it emits a complete-ID `CloneSequence` followed by
   `SetClipSequenceRef`. Pass two command IDs allocated from the session
   `WriterToken`; the helper consumes item IDs from `Project::next_item_id`
   before publication but never synthesizes writer-scoped IDs.
-  `lower_dirty_set()` maps child dirtiness through all transitive references to
-  the root tracks that must be recompiled.
+- For incremental compilation, build and retain one snapshot-scoped
+  `CompileInvalidationIndex` from the project, root sequence, and context
+  registry, then call `resolve_dirty_tracks()`; it maps direct edits, child
+  dirtiness, and nested context readers to the root tracks that must be
+  recompiled and fails closed on a stale structure token, root, or registry
+  generation.
 - `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
   and positions are unique within a curve; values are finite; curvature is in
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
@@ -436,8 +441,9 @@ exact:
   declaration — the whole point is that a hook cannot depend on context the
   compiler does not know to invalidate it for.
 - The **invalidate** side lives in `core/playback` (see the playback skill):
-  `ContextSubscriberIndex` is the kind → reader-track reverse index, and
-  `resolve_dirty_tracks()` turns a `DirtySet` into an exact `DirtyTrackSet`.
+  `CompileInvalidationIndex` bundles the nested dependency and context-reader
+  reverse indices, and `resolve_dirty_tracks()` turns a `DirtySet` into an
+  exact `DirtyTrackSet`.
 - A context edit emits **two** things: a `DirtyContext{sequence, kind}` (which
   names what changed) and a companion `DirtyItem` flagged `DirtyFlags::Context`
   with no owning track (so an item-scanning consumer still sees the transaction

@@ -1,5 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
+#include "sequence_graph_validation.hpp"
+
 #include <algorithm>
 #include <optional>
 #include <vector>

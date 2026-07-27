@@ -1,12 +1,13 @@
 #pragma once
 
-#include <pulp/playback/program_compiler.hpp>
+#include <pulp/playback/dirty_track_resolver.hpp>
 #include <pulp/timeline/compile_context.hpp>
 #include <pulp/timeline/transaction.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,6 +15,11 @@
 #include <vector>
 
 namespace pulp::playback {
+
+namespace detail {
+struct CompileInvalidationData;
+struct ContextRegistryGeneration;
+} // namespace detail
 
 /// One content renderer's registration, reduced to the part the dirty set
 /// depends on: which content kind it renders, and which timeline context its
@@ -50,6 +56,12 @@ class CompileContextRegistry {
   public:
     static constexpr std::size_t kMaxRegistrations = 1024;
 
+    CompileContextRegistry();
+    CompileContextRegistry(const CompileContextRegistry& other);
+    CompileContextRegistry(CompileContextRegistry&& other);
+    CompileContextRegistry& operator=(const CompileContextRegistry& other);
+    CompileContextRegistry& operator=(CompileContextRegistry&& other);
+
     /// Returns the refusal, or nothing when the registration was accepted.
     std::optional<ContextRegistrationError> declare(ContentRendererRegistration registration);
 
@@ -64,25 +76,29 @@ class CompileContextRegistry {
     }
 
   private:
+    friend class CompileInvalidationIndex;
+
     // Sorted by content_type_name so lookup is a binary search on a hot path.
     std::vector<ContentRendererRegistration> registrations_;
+    std::shared_ptr<detail::ContextRegistryGeneration> generation_;
 };
 
-/// The reverse index §3.2 requires: context owner + kind -> the root tracks
-/// whose clips declared they read it.
+/// Bundled reverse index for nested dependencies and compile-context readers.
 ///
-/// Built from one pinned snapshot, it is what turns "the chord lane changed"
-/// into an exact track set instead of a full recompile. It is rebuilt when the
-/// document's structure changes; a context edit alone does not invalidate it,
-/// because editing a lane's contents does not change who reads it.
+/// Built atomically from one pinned snapshot, root, and registry, it turns "the
+/// chord lane changed" into an exact track set instead of a full recompile.
+/// Project structure identity and registry generation are checked in O(1);
+/// stale or mismatched indices fail closed. A context edit alone does not
+/// invalidate the index because editing a lane's contents does not change who
+/// reads it.
 /// Arrangement declarations remain indexed while a freeze or take lane is
 /// selected. Resolution filters them against the current snapshot, which keeps
 /// the index valid when playback later returns to the arrangement.
-class ContextSubscriberIndex {
+class CompileInvalidationIndex {
   public:
-    static ContextSubscriberIndex build(const timeline::Project& project,
-                                        timeline::ItemId sequence_id,
-                                        const CompileContextRegistry& registry);
+    static CompileInvalidationIndex build(const timeline::Project& project,
+                                          timeline::ItemId sequence_id,
+                                          const CompileContextRegistry& registry);
 
     /// Sorted, deduplicated track ids that declared a read of `kind`.
     /// This aggregate query includes declarations reached through references.
@@ -90,38 +106,21 @@ class ContextSubscriberIndex {
 
     /// Sorted, deduplicated root track ids that read `kind` from
     /// `owner_sequence`.
-    std::span<const timeline::ItemId>
-    subscribers(timeline::ItemId owner_sequence,
-                timeline::CompileContextKind kind) const noexcept;
+    std::span<const timeline::ItemId> subscribers(timeline::ItemId owner_sequence,
+                                                  timeline::CompileContextKind kind) const noexcept;
 
     bool empty() const noexcept;
 
+    bool valid() const noexcept;
+    bool matches(const timeline::Project& project,
+                 timeline::ItemId root_sequence_id) const noexcept;
+
   private:
-    struct OwnedSubscribers {
-        timeline::ItemId owner_sequence;
-        std::array<std::vector<timeline::ItemId>, timeline::kCompileContextKindCount> by_kind;
-    };
+    friend DirtyTrackSet resolve_dirty_tracks(const timeline::Project&, timeline::ItemId,
+                                              const timeline::DirtySet&,
+                                              const CompileInvalidationIndex&);
 
-    std::array<std::vector<timeline::ItemId>, timeline::kCompileContextKindCount> by_kind_;
-    std::vector<OwnedSubscribers> by_owner_sequence_;
+    std::shared_ptr<const detail::CompileInvalidationData> data_;
 };
-
-/// Translates a committed transaction's dirty set into the exact set of tracks
-/// the program compiler must recompile for `sequence_id`.
-///
-/// Precision, by dirty-item shape:
-///   * an item owning a track in this sequence dirties that track;
-///   * a context entry dirties exactly the index's subscribers for its kind,
-///     and nothing else — this is the contract's whole point;
-///   * an item with no owning sequence is project-scoped (tempo, meter, the
-///     asset table) and requests a full recompile, matching what the compiler
-///     already does for a tempo-map swap;
-///   * an item owning this sequence but no track, other than a context entry's
-///     companion or non-playback marker metadata, is a structural sequence
-///     edit and requests a full recompile.
-/// Items belonging to another sequence are ignored.
-DirtyTrackSet resolve_dirty_tracks(const timeline::Project& project,
-                                   timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
-                                   const ContextSubscriberIndex& index);
 
 } // namespace pulp::playback

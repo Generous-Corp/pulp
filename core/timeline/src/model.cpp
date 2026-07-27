@@ -7,8 +7,10 @@
 #include "media_reference_validation.hpp"
 #include "owned_identity_traversal.hpp"
 #include "project_state_access.hpp"
+#include "sequence_graph_validation.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -16,6 +18,18 @@
 namespace pulp::timeline {
 
 namespace {
+
+std::atomic<std::uint64_t> g_next_sequence_compile_structure_token{1};
+
+std::uint64_t next_sequence_compile_structure_token() noexcept {
+    const auto token =
+        g_next_sequence_compile_structure_token.fetch_add(1, std::memory_order_relaxed);
+    // Exhausting 64 bits of process-local structural publications is not a
+    // recoverable operating mode. Keep zero reserved as the invalid token.
+    return token == 0
+               ? g_next_sequence_compile_structure_token.fetch_add(1, std::memory_order_relaxed)
+               : token;
+}
 
 template <typename T>
 runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
@@ -159,9 +173,8 @@ void visit_project_identities(const ProjectInput& input, Visitor&& visit) {
     for (const auto& sequence : input.sequences)
         detail::visit_sequence_owned_identities(
             sequence, [&](const detail::ModelOwnedIdentity& identity) {
-                visit(identity.id,
-                      location(identity.kind, sequence.id(), identity.track,
-                               identity.clip, identity.lane));
+                visit(identity.id, location(identity.kind, sequence.id(), identity.track,
+                                            identity.clip, identity.lane));
             });
 }
 
@@ -290,8 +303,7 @@ runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition
     }
     if (const auto* reference = std::get_if<SequenceRef>(&content)) {
         if (!reference->sequence_id.valid() || reference->source_start.value < 0)
-            return fail<Clip>(ModelErrorCode::MissingSequenceReference, id,
-                              reference->sequence_id);
+            return fail<Clip>(ModelErrorCode::MissingSequenceReference, id, reference->sequence_id);
         if (duration.value >
             std::numeric_limits<std::int64_t>::max() - reference->source_start.value)
             return fail<Clip>(ModelErrorCode::InvalidDuration, id, reference->sequence_id);
@@ -406,6 +418,7 @@ struct Project::Data {
     timebase::MeterMap meter_map;
     std::optional<SessionStart> session_start;
     detail::IdentityDirectory identities;
+    std::uint64_t sequence_compile_structure_token = 0;
 };
 
 bool detail::ProjectStateAccess::identities_equivalent(const Project& lhs,
@@ -652,17 +665,18 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     if (const auto error = validate_sequence_graph(input.sequences))
         return fail<Project>(error->code, error->item, error->related_item);
     auto identities = detail::IdentityDirectory::from_sorted_entries(identity_entries);
-    return runtime::Result<Project, ModelError>(runtime::Ok(
-        Project(std::make_shared<const Data>(Data{.id = input.id,
-                                                  .name = std::move(input.name),
-                                                  .next_item_id = input.next_item_id,
-                                                  .root_sequence_id = input.root_sequence_id,
-                                                  .assets = std::move(input.assets),
-                                                  .sequences = std::move(input.sequences),
-                                                  .tempo_map = std::move(input.tempo_map),
-                                                  .meter_map = std::move(input.meter_map),
-                                                  .session_start = input.session_start,
-                                                  .identities = std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
+        Data{.id = input.id,
+             .name = std::move(input.name),
+             .next_item_id = input.next_item_id,
+             .root_sequence_id = input.root_sequence_id,
+             .assets = std::move(input.assets),
+             .sequences = std::move(input.sequences),
+             .tempo_map = std::move(input.tempo_map),
+             .meter_map = std::move(input.meter_map),
+             .session_start = input.session_start,
+             .identities = std::move(identities),
+             .sequence_compile_structure_token = next_sequence_compile_structure_token()}))));
 }
 
 ItemId Project::id() const noexcept {
@@ -723,14 +737,22 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     const auto next = requested_next.value_or(data_->next_item_id);
     if (next < data_->next_item_id || next == 0)
         return fail<Project>(ModelErrorCode::NextItemIdNotMonotonic, {next}, {data_->next_item_id});
+    const auto index = static_cast<std::size_t>(found - data_->sequences.begin());
+    const bool compile_shape_changed = !found->shares_compile_structure_with(sequence);
+    const bool references_changed = !std::equal(
+        found->outgoing_sequence_refs().begin(), found->outgoing_sequence_refs().end(),
+        sequence.outgoing_sequence_refs().begin(), sequence.outgoing_sequence_refs().end());
     auto sequences = data_->sequences;
-    sequences[static_cast<std::size_t>(found - data_->sequences.begin())] = std::move(sequence);
-    if (const auto error = validate_sequence_graph(sequences))
-        return runtime::Result<Project, ModelError>(runtime::Err(*error));
+    sequences[index] = std::move(sequence);
+    if (references_changed)
+        if (const auto error = validate_sequence_graph(sequences))
+            return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto next_data = *data_;
     next_data.next_item_id = next;
     next_data.sequences = std::move(sequences);
     next_data.identities = std::move(identities);
+    if (compile_shape_changed)
+        next_data.sequence_compile_structure_token = next_sequence_compile_structure_token();
     return runtime::Result<Project, ModelError>(
         runtime::Ok(Project(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -757,12 +779,12 @@ Project::append_sequence(Sequence sequence, std::span<const IdentityMutation> mu
     next_data.next_item_id = next;
     next_data.sequences = std::move(sequences);
     next_data.identities = std::move(identities);
+    next_data.sequence_compile_structure_token = next_sequence_compile_structure_token();
     return runtime::Ok(Project(std::make_shared<const Data>(std::move(next_data))));
 }
 
 runtime::Result<Project, ModelError>
-Project::remove_sequence(ItemId sequence_id,
-                         std::span<const IdentityMutation> mutations) const {
+Project::remove_sequence(ItemId sequence_id, std::span<const IdentityMutation> mutations) const {
     if (sequence_id == data_->root_sequence_id)
         return fail<Project>(ModelErrorCode::MissingRootSequence, sequence_id);
     const auto found =
@@ -783,6 +805,7 @@ Project::remove_sequence(ItemId sequence_id,
     auto next_data = *data_;
     next_data.sequences = std::move(sequences);
     next_data.identities = std::move(identities);
+    next_data.sequence_compile_structure_token = next_sequence_compile_structure_token();
     return runtime::Ok(Project(std::make_shared<const Data>(std::move(next_data))));
 }
 
@@ -807,17 +830,18 @@ Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutati
         std::lower_bound(assets.begin(), assets.end(), asset.id,
                          [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
     assets.insert(position, std::move(asset));
-    return runtime::Result<Project, ModelError>(runtime::Ok(
-        Project(std::make_shared<const Data>(Data{.id = data_->id,
-                                                  .name = data_->name,
-                                                  .next_item_id = next,
-                                                  .root_sequence_id = data_->root_sequence_id,
-                                                  .assets = std::move(assets),
-                                                  .sequences = data_->sequences,
-                                                  .tempo_map = data_->tempo_map,
-                                                  .meter_map = data_->meter_map,
-                                                  .session_start = data_->session_start,
-                                                  .identities = std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
+        Data{.id = data_->id,
+             .name = data_->name,
+             .next_item_id = next,
+             .root_sequence_id = data_->root_sequence_id,
+             .assets = std::move(assets),
+             .sequences = data_->sequences,
+             .tempo_map = data_->tempo_map,
+             .meter_map = data_->meter_map,
+             .session_start = data_->session_start,
+             .identities = std::move(identities),
+             .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }
 
 runtime::Result<Project, ModelError>
@@ -852,17 +876,18 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
         return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto assets = data_->assets;
     assets.erase(assets.begin() + (found - data_->assets.begin()));
-    return runtime::Result<Project, ModelError>(runtime::Ok(
-        Project(std::make_shared<const Data>(Data{.id = data_->id,
-                                                  .name = data_->name,
-                                                  .next_item_id = data_->next_item_id,
-                                                  .root_sequence_id = data_->root_sequence_id,
-                                                  .assets = std::move(assets),
-                                                  .sequences = data_->sequences,
-                                                  .tempo_map = data_->tempo_map,
-                                                  .meter_map = data_->meter_map,
-                                                  .session_start = data_->session_start,
-                                                  .identities = std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
+        Data{.id = data_->id,
+             .name = data_->name,
+             .next_item_id = data_->next_item_id,
+             .root_sequence_id = data_->root_sequence_id,
+             .assets = std::move(assets),
+             .sequences = data_->sequences,
+             .tempo_map = data_->tempo_map,
+             .meter_map = data_->meter_map,
+             .session_start = data_->session_start,
+             .identities = std::move(identities),
+             .sequence_compile_structure_token = data_->sequence_compile_structure_token}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {
@@ -883,6 +908,10 @@ std::size_t Project::shared_identity_nodes_with(const Project& other) const {
 
 bool Project::shares_storage_with(const Project& other) const noexcept {
     return data_.get() == other.data_.get();
+}
+
+SequenceCompileStructureToken Project::sequence_compile_structure_token() const noexcept {
+    return SequenceCompileStructureToken(data_->sequence_compile_structure_token);
 }
 
 ProjectIdentityStats Project::identity_stats() noexcept {

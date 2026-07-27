@@ -3,6 +3,7 @@
 #include "audio_renderer_internal.hpp"
 #include "budgeted_stable_merge.hpp"
 #include "clip_content_role.hpp"
+#include "sequence_compile_bookkeeping.hpp"
 #include "sequence_content_lowerer.hpp"
 #include "track_automation_compiler.hpp"
 
@@ -59,12 +60,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::size_t note_index_ = 0;
     bool clip_started_ = false;
     bool track_prepared_ = false;
-    std::uint64_t track_expanded_clip_start_ = 0;
-    std::uint64_t track_expanded_note_event_start_ = 0;
-    std::uint64_t track_generated_id_start_ = 0;
-    std::uint64_t current_expanded_clip_count_ = 0;
-    std::uint64_t current_expanded_note_event_count_ = 0;
-    std::uint64_t current_generated_id_count_ = 0;
+    detail::SequenceCompileBookkeeping sequence_bookkeeping_;
     std::unique_ptr<SequenceContentLowerer> sequence_flattener_;
     std::vector<LoweredClip> current_flattened_clips_;
     std::vector<timeline::ItemId> current_clip_ids_;
@@ -232,12 +228,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->audio_assets_owner().get() != request_->audio_assets.get() ||
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
-                     live->generated_id_base() !=
-                         request_->project->next_item_id() ||
+                     live->generated_id_base() != request_->project->next_item_id() ||
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
-            *request_->project, *request_->tempo_map,
-            request_->max_expanded_note_events, request_->audio_limits.max_clips);
+            *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
+            request_->max_expanded_clips);
         tracks_.reserve(sequence_->tracks().size());
         merge_buffer_.reserve(sequence_->tracks().size());
         stage_ = Stage::SeedConverterCache;
@@ -272,12 +267,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});
                 }
-                const auto& host_rate_converter =
-                    clip.conversion_artifact->host_rate_converter();
+                const auto& host_rate_converter = clip.conversion_artifact->host_rate_converter();
                 if (host_rate_converter) {
                     auto seeded = sample_rate_converters_.seed_host(
-                        clip.audio, clip.source_start, clip.source_frame_count,
-                        host_rate_converter, clip.id, clip.asset_id, request_->audio_limits);
+                        clip.audio, clip.source_start, clip.source_frame_count, host_rate_converter,
+                        clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});
@@ -297,31 +291,23 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             const auto& track = sequence_->tracks()[track_index_];
-            const bool requested_dirty =
-                std::binary_search(request_->dirty.tracks.begin(),
-                                   request_->dirty.tracks.end(), track.id());
-            bool dirty =
-                all_dirty_ || requested_dirty || generated_layout_dirty_;
+            const bool requested_dirty = std::binary_search(
+                request_->dirty.tracks.begin(), request_->dirty.tracks.end(), track.id());
+            bool dirty = all_dirty_ || requested_dirty || generated_layout_dirty_;
             const auto& live = core_->store.live();
-            const auto* old =
-                !dirty && live ? live->find_track_owner(track.id()) : nullptr;
+            const auto* old = !dirty && live ? live->find_track_owner(track.id()) : nullptr;
             if (!dirty && !old)
-                return fail({CompileErrorCode::InvalidStructure, track.id(),
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, track.id(), request_->document_revision});
             if (!dirty &&
-                (*old)->generated_id_start() !=
-                    sequence_flattener_->next_generated_id()) {
+                !sequence_bookkeeping_.generated_layout_matches(**old, *sequence_flattener_)) {
                 dirty = true;
                 generated_layout_dirty_ = true;
             }
             if (!dirty) {
-                if (const auto error = sequence_flattener_->charge_reused(
-                        (*old)->expanded_clip_count(),
-                        (*old)->expanded_note_event_count(),
-                        (*old)->generated_id_count(), track.id()))
-                    return fail(
-                        {error->code, error->item,
-                         request_->document_revision});
+                if (const auto error = sequence_bookkeeping_.charge_reused(
+                        **old, *sequence_flattener_, track.id()))
+                    return fail({error->code, error->item, request_->document_revision});
                 if ((*old)->audio_program()) {
                     const auto count = (*old)->audio_program()->clips().size();
                     if (count > request_->audio_limits.max_clips - total_audio_clips_)
@@ -337,37 +323,27 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (!track_prepared_) {
-                track_generated_id_start_ =
-                    sequence_flattener_->next_generated_id();
-                track_expanded_clip_start_ =
-                    sequence_flattener_->expanded_clip_count();
-                track_expanded_note_event_start_ =
-                    sequence_flattener_->expanded_note_event_count();
+                sequence_bookkeeping_.begin_track(*sequence_flattener_);
                 const auto begun =
                     sequence_flattener_->begin_track(track, current_flattened_clips_);
                 if (begun.error)
-                    return fail({begun.error->code, begun.error->item,
-                                 request_->document_revision});
-                current_track_frozen_ =
-                    begun.plan.kind == TrackContentKind::Freeze;
+                    return fail(
+                        {begun.error->code, begun.error->item, request_->document_revision});
+                current_track_frozen_ = begun.plan.kind == TrackContentKind::Freeze;
                 current_take_lane_ = begun.plan.active_take_lane;
                 if (begun.plan.kind == TrackContentKind::Arrangement) {
                     stage_ = Stage::FlattenTrack;
                     continue;
                 }
-                current_clip_ids_.reserve(
-                    current_take_lane_ || current_track_frozen_
-                        ? 0
-                        : current_flattened_clips_.size());
+                current_clip_ids_.reserve(current_take_lane_ || current_track_frozen_
+                                              ? 0
+                                              : current_flattened_clips_.size());
                 const auto remaining =
                     request_->audio_limits.max_clips -
                     std::min<std::uint64_t>(total_audio_clips_, request_->audio_limits.max_clips);
-                current_expanded_clip_count_ =
-                    sequence_flattener_->expanded_clip_count() -
-                    track_expanded_clip_start_;
-                const auto audio_capacity =
-                    static_cast<std::size_t>(
-                        std::min<std::uint64_t>(begun.plan.source_count, remaining));
+                sequence_bookkeeping_.finish_flattened_track(*sequence_flattener_);
+                const auto audio_capacity = static_cast<std::size_t>(
+                    std::min<std::uint64_t>(begun.plan.source_count, remaining));
                 current_audio_clips_.reserve(audio_capacity);
                 current_audio_ids_.reserve(
                     current_take_lane_ || current_track_frozen_ ? 0 : audio_capacity);
@@ -422,11 +398,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
 
             const auto& lowered_clip = current_flattened_clips_[clip_index_];
             const auto& clip = lowered_clip.clip;
-            const detail::ClipContentRole role =
-                detail::clip_content_role(clip);
+            const detail::ClipContentRole role = detail::clip_content_role(clip);
             if (role == detail::ClipContentRole::Sequence)
-                return fail({CompileErrorCode::InvalidStructure, clip.id(),
-                             request_->document_revision});
+                return fail(
+                    {CompileErrorCode::InvalidStructure, clip.id(), request_->document_revision});
             if (!clip_started_) {
                 if (role == detail::ClipContentRole::Audio) {
                     if (!request_->audio_assets)
@@ -498,31 +473,21 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             const auto flattened = sequence_flattener_->step();
             ++work;
             if (flattened.error)
-                return fail({flattened.error->code, flattened.error->item,
-                             request_->document_revision});
+                return fail(
+                    {flattened.error->code, flattened.error->item, request_->document_revision});
             if (!flattened.complete)
                 continue;
             current_clip_ids_.reserve(current_flattened_clips_.size());
             const auto remaining =
                 request_->audio_limits.max_clips -
-                std::min<std::uint64_t>(total_audio_clips_,
-                                        request_->audio_limits.max_clips);
+                std::min<std::uint64_t>(total_audio_clips_, request_->audio_limits.max_clips);
             const auto capacity = static_cast<std::size_t>(
-                std::min<std::uint64_t>(current_flattened_clips_.size(),
-                                        remaining));
+                std::min<std::uint64_t>(current_flattened_clips_.size(), remaining));
             current_audio_clips_.reserve(capacity);
             current_audio_ids_.reserve(capacity);
             audio_id_merge_buffer_.reserve(capacity);
             audio_merge_buffer_.reserve(capacity);
-            current_expanded_clip_count_ =
-                sequence_flattener_->expanded_clip_count() -
-                track_expanded_clip_start_;
-            current_expanded_note_event_count_ =
-                sequence_flattener_->expanded_note_event_count() -
-                track_expanded_note_event_start_;
-            current_generated_id_count_ =
-                sequence_flattener_->next_generated_id() -
-                track_generated_id_start_;
+            sequence_bookkeeping_.finish_flattened_track(*sequence_flattener_);
             track_prepared_ = true;
             stage_ = Stage::CompileTracks;
             continue;
@@ -666,11 +631,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
                 std::move(current_note_events_), std::move(audio_program),
                 std::move(current_automation_.ordered_device_placement_ids),
-                std::move(current_automation_.program),
-                current_expanded_clip_count_,
-                current_expanded_note_event_count_,
-                track_generated_id_start_,
-                current_generated_id_count_)));
+                std::move(current_automation_.program), sequence_bookkeeping_.expanded_clip_count(),
+                sequence_bookkeeping_.expanded_note_event_count(),
+                sequence_bookkeeping_.generated_id_start(),
+                sequence_bookkeeping_.generated_id_count())));
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
@@ -687,9 +651,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             clip_started_ = false;
             track_prepared_ = false;
             generated_layout_dirty_ = false;
-            current_expanded_clip_count_ = 0;
-            current_expanded_note_event_count_ = 0;
-            current_generated_id_count_ = 0;
+            sequence_bookkeeping_.reset_current();
             ++track_index_;
             ++work;
             stage_ = Stage::CompileTracks;
@@ -748,11 +710,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             continue;
         }
-        auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
-            generation_, request_->document_revision, request_->project->id(),
-            request_->sequence_id, request_->tempo_map, request_->audio_assets,
-            request_->audio_limits, request_->automation_limits,
-            request_->project->next_item_id(), std::move(tracks_)));
+        auto program = std::shared_ptr<const PlaybackProgram>(
+            new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
+                                request_->sequence_id, request_->tempo_map, request_->audio_assets,
+                                request_->audio_limits, request_->automation_limits,
+                                request_->project->next_item_id(), std::move(tracks_)));
         core_->store.publish(std::move(program));
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
@@ -787,7 +749,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
     };
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
         request.document_revision == 0 || !request.automation_limits.valid() ||
-        request.max_expanded_note_events == 0 ||
+        request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

@@ -269,9 +269,8 @@ class OpaqueContent {
     OpaqueContentLimits limits_;
 };
 
-using ClipContent =
-    std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent,
-                 SequenceRef>;
+using ClipContent = std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent,
+                                 OpaqueContent, SequenceRef>;
 
 /// Overload set for visiting a ClipContent with **no generic fallback**.
 ///
@@ -562,7 +561,9 @@ class Track {
     static TrackIndexStats index_stats() noexcept;
 
   private:
+    friend class Sequence;
     struct Data;
+    bool shares_compile_structure_with(const Track& other) const noexcept;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
@@ -936,8 +937,10 @@ class Sequence {
     static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
+    friend class Project;
     friend struct detail::SequenceEditAccess;
     struct Data;
+    bool shares_compile_structure_with(const Sequence& other) const noexcept;
     // Annotation edits validate only the annotation lists and share the existing
     // track storage and identity index; they never re-walk the arrangement.
     runtime::Result<Sequence, ModelError>
@@ -948,15 +951,6 @@ class Sequence {
 };
 
 inline constexpr std::size_t kMaxSequenceNestingDepth = 8;
-
-// Canonical SequenceRef graph admission. The full validator owns target,
-// cycle, and maximum-depth invariants; the prospective-edge form applies the
-// same rules before an immutable edit adds one new parent-to-child edge.
-std::optional<ModelError>
-validate_sequence_graph(std::span<const Sequence> sequences);
-std::optional<ModelError>
-validate_sequence_edge(std::span<const Sequence> sequences,
-                       ItemId parent_id, ItemId child_id);
 
 // Where this session's zero sits on the source/house clock — the document form
 // of "this session starts at 01:00:00:00". Stored as an absolute sample offset
@@ -1074,6 +1068,24 @@ struct ProjectIdentityStats {
     std::uint64_t nodes_created = 0;
 };
 
+/// Opaque, process-local identity for the part of a Project snapshot that
+/// determines nested-sequence and registered-content compile subscribers.
+class SequenceCompileStructureToken {
+  public:
+    SequenceCompileStructureToken() noexcept = default;
+
+    bool valid() const noexcept {
+        return value_ != 0;
+    }
+
+    constexpr bool operator==(const SequenceCompileStructureToken&) const noexcept = default;
+
+  private:
+    friend class Project;
+    explicit SequenceCompileStructureToken(std::uint64_t value) noexcept : value_(value) {}
+    std::uint64_t value_ = 0;
+};
+
 class Project {
   public:
     static runtime::Result<Project, ModelError> create(ProjectInput input);
@@ -1092,6 +1104,11 @@ class Project {
     std::optional<ItemLocation> locate(ItemId id) const noexcept;
     std::size_t shared_identity_nodes_with(const Project& other) const;
     bool shares_storage_with(const Project& other) const noexcept;
+    /// Process-local identity of the sequence-reference and registered-content
+    /// placement shape used by incremental playback invalidation. The token is
+    /// preserved across edits that cannot change dependency subscribers and is
+    /// replaced before publishing a structurally incompatible snapshot.
+    SequenceCompileStructureToken sequence_compile_structure_token() const noexcept;
     static ProjectIdentityStats identity_stats() noexcept;
     ItemIdAllocator item_id_allocator() const noexcept {
         return ItemIdAllocator(next_item_id());

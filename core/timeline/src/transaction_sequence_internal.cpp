@@ -2,6 +2,7 @@
 
 #include "media_reference_validation.hpp"
 #include "owned_identity_traversal.hpp"
+#include "sequence_graph_validation.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <utility>

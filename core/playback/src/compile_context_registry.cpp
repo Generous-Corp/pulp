@@ -1,8 +1,11 @@
 #include <pulp/playback/compile_context_registry.hpp>
 
+#include "compile_invalidation_internal.hpp"
+
 #include <algorithm>
+#include <array>
 #include <iterator>
-#include <optional>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -18,85 +21,44 @@ std::size_t kind_index(timeline::CompileContextKind kind) noexcept {
     return static_cast<std::size_t>(kind);
 }
 
-struct OwnedContextSubscription {
-    timeline::ItemId owner_sequence;
-    timeline::CompileContextKind kind;
-
-    constexpr auto operator<=>(const OwnedContextSubscription&) const = default;
-};
-
-void append_subscriptions(std::vector<OwnedContextSubscription>& destination,
-                          timeline::ItemId owner_sequence,
-                          timeline::CompileContextSubscriptions source) {
-    for (std::size_t kind = 0; kind < timeline::kCompileContextKindCount; ++kind) {
-        const auto context = static_cast<timeline::CompileContextKind>(kind);
-        const OwnedContextSubscription subscription{owner_sequence, context};
-        if (source.reads(context) &&
-            std::find(destination.begin(), destination.end(), subscription) ==
-                destination.end())
-            destination.push_back(subscription);
-    }
-}
-
-void merge_subscriptions(std::vector<OwnedContextSubscription>& destination,
-                         const std::vector<OwnedContextSubscription>& source) {
-    for (const auto& subscription : source) {
-        if (std::find(destination.begin(), destination.end(), subscription) ==
-            destination.end())
-            destination.push_back(subscription);
-    }
-}
-
-class ReferencedSequenceSubscriptionCache {
-  public:
-    ReferencedSequenceSubscriptionCache(const timeline::Project& project,
-                                        const CompileContextRegistry& registry)
-        : project_(project), registry_(registry), cached_(project.sequences().size()) {}
-
-    const std::vector<OwnedContextSubscription>&
-    subscriptions_for(timeline::ItemId sequence_id) {
-        static const std::vector<OwnedContextSubscription> empty;
-        const auto* sequence = project_.find_sequence(sequence_id);
-        if (!sequence)
-            return empty;
-        const auto index =
-            static_cast<std::size_t>(sequence - project_.sequences().data());
-        if (cached_[index])
-            return *cached_[index];
-
-        std::vector<OwnedContextSubscription> result;
-        for (const timeline::Track& track : sequence->tracks()) {
-            for (const timeline::Clip& clip : track.clips()) {
-                std::visit(timeline::ClipContentCases{
-                               [](const timeline::EmptyContent&) {},
-                               [](const timeline::MediaRef&) {},
-                               [](const timeline::NoteContent&) {},
-                               [&](const timeline::RegisteredContent& content) {
-                                   append_subscriptions(
-                                       result, sequence_id,
-                                       registry_.subscriptions_for(
-                                           content.schema().type_name));
-                               },
-                               [](const timeline::OpaqueContent&) {},
-                               [&](const timeline::SequenceRef& reference) {
-                                   merge_subscriptions(
-                                       result, subscriptions_for(reference.sequence_id));
-                               },
-                           },
-                           clip.content());
-            }
-        }
-        cached_[index] = result;
-        return *cached_[index];
-    }
-
-  private:
-    const timeline::Project& project_;
-    const CompileContextRegistry& registry_;
-    std::vector<std::optional<std::vector<OwnedContextSubscription>>> cached_;
-};
-
 } // namespace
+
+CompileContextRegistry::CompileContextRegistry()
+    : generation_(std::make_shared<detail::ContextRegistryGeneration>()) {}
+
+CompileContextRegistry::CompileContextRegistry(const CompileContextRegistry& other)
+    : registrations_(other.registrations_),
+      generation_(std::make_shared<detail::ContextRegistryGeneration>()) {}
+
+CompileContextRegistry::CompileContextRegistry(CompileContextRegistry&& other)
+    : CompileContextRegistry() {
+    registrations_ = std::move(other.registrations_);
+    other.registrations_.clear();
+    ++other.generation_->revision;
+}
+
+CompileContextRegistry& CompileContextRegistry::operator=(const CompileContextRegistry& other) {
+    if (this == &other)
+        return *this;
+    auto replacement = other.registrations_;
+    auto new_generation = std::make_shared<detail::ContextRegistryGeneration>();
+    ++generation_->revision;
+    registrations_ = std::move(replacement);
+    generation_ = std::move(new_generation);
+    return *this;
+}
+
+CompileContextRegistry& CompileContextRegistry::operator=(CompileContextRegistry&& other) {
+    if (this == &other)
+        return *this;
+    auto new_generation = std::make_shared<detail::ContextRegistryGeneration>();
+    ++generation_->revision;
+    registrations_ = std::move(other.registrations_);
+    other.registrations_.clear();
+    ++other.generation_->revision;
+    generation_ = std::move(new_generation);
+    return *this;
+}
 
 std::optional<ContextRegistrationError>
 CompileContextRegistry::declare(ContentRendererRegistration registration) {
@@ -114,6 +76,7 @@ CompileContextRegistry::declare(ContentRendererRegistration registration) {
         return ContextRegistrationError{ContextRegistrationErrorCode::DuplicateContentType,
                                         std::move(registration.content_type_name)};
     registrations_.insert(position, std::move(registration));
+    ++generation_->revision;
     return std::nullopt;
 }
 
@@ -126,156 +89,113 @@ CompileContextRegistry::subscriptions_for(std::string_view content_type_name) co
                : timeline::CompileContextSubscriptions::none();
 }
 
-ContextSubscriberIndex ContextSubscriberIndex::build(const timeline::Project& project,
-                                                     timeline::ItemId sequence_id,
-                                                     const CompileContextRegistry& registry) {
-    ContextSubscriberIndex index;
+CompileInvalidationIndex CompileInvalidationIndex::build(const timeline::Project& project,
+                                                         timeline::ItemId sequence_id,
+                                                         const CompileContextRegistry& registry) {
+    CompileInvalidationIndex index;
     const auto* sequence = project.find_sequence(sequence_id);
-    if (!sequence)
+    auto data = detail::build_sequence_dependencies(project, sequence_id);
+    if (!sequence || !data)
         return index;
-    ReferencedSequenceSubscriptionCache referenced_subscriptions(project, registry);
-    for (const timeline::Track& track : sequence->tracks()) {
-        for (const timeline::Clip& clip : track.clips()) {
-            const auto subscriptions = std::visit(
-                timeline::ClipContentCases{
-                    // Built-in content is rendered by built-in renderers, none
-                    // of which read anything outside their own clip.
-                    [](const timeline::EmptyContent&) {
-                        return std::vector<OwnedContextSubscription>{};
-                    },
-                    [](const timeline::MediaRef&) {
-                        return std::vector<OwnedContextSubscription>{};
-                    },
-                    [](const timeline::NoteContent&) {
-                        return std::vector<OwnedContextSubscription>{};
-                    },
-                    [&](const timeline::RegisteredContent& content) {
-                        std::vector<OwnedContextSubscription> result;
-                        append_subscriptions(
-                            result, sequence_id,
-                            registry.subscriptions_for(content.schema().type_name));
-                        return result;
-                    },
-                    // Opaque content is content no renderer claimed. Once one
-                    // does, the same bytes decode as RegisteredContent and take
-                    // the branch above; until then there is no program to
-                    // invalidate, so it subscribes to nothing.
-                    [](const timeline::OpaqueContent&) {
-                        return std::vector<OwnedContextSubscription>{};
-                    },
-                    [&](const timeline::SequenceRef& reference) {
-                        return std::vector<OwnedContextSubscription>(
-                            referenced_subscriptions
-                                .subscriptions_for(reference.sequence_id));
-                    },
-                },
-                clip.content());
-            if (subscriptions.empty())
+    data->registry_generation = registry.generation_;
+    data->registry_revision = registry.generation_->revision;
+
+    const auto append = [&](timeline::ItemId owner_sequence,
+                            timeline::CompileContextSubscriptions subscriptions,
+                            std::span<const timeline::ItemId> root_tracks) {
+        auto owner = std::find_if(data->context_by_owner.begin(), data->context_by_owner.end(),
+                                  [&](const detail::OwnedContextSubscribers& entry) {
+                                      return entry.owner_sequence == owner_sequence;
+                                  });
+        if (owner == data->context_by_owner.end()) {
+            data->context_by_owner.push_back({.owner_sequence = owner_sequence});
+            owner = std::prev(data->context_by_owner.end());
+        }
+        for (std::size_t kind = 0; kind < timeline::kCompileContextKindCount; ++kind) {
+            const auto context = static_cast<timeline::CompileContextKind>(kind);
+            if (!subscriptions.reads(context))
                 continue;
-            for (const auto& subscription : subscriptions) {
-                const auto kind = kind_index(subscription.kind);
-                index.by_kind_[kind].push_back(track.id());
-                auto owner = std::find_if(
-                    index.by_owner_sequence_.begin(),
-                    index.by_owner_sequence_.end(),
-                    [&](const ContextSubscriberIndex::OwnedSubscribers& entry) {
-                        return entry.owner_sequence == subscription.owner_sequence;
-                    });
-                if (owner == index.by_owner_sequence_.end()) {
-                    index.by_owner_sequence_.push_back(
-                        {.owner_sequence = subscription.owner_sequence});
-                    owner = std::prev(index.by_owner_sequence_.end());
-                }
-                owner->by_kind[kind].push_back(track.id());
+            data->context_by_kind[kind].insert(data->context_by_kind[kind].end(),
+                                               root_tracks.begin(), root_tracks.end());
+            owner->by_kind[kind].insert(owner->by_kind[kind].end(), root_tracks.begin(),
+                                        root_tracks.end());
+        }
+    };
+
+    for (const auto& owner_sequence : project.sequences()) {
+        const bool root_owner = owner_sequence.id() == sequence_id;
+        const auto nested_tracks = data->root_tracks_for(owner_sequence.id());
+        if (!root_owner && nested_tracks.empty())
+            continue;
+        for (const auto& track : owner_sequence.tracks()) {
+            const std::array direct_track{track.id()};
+            const auto root_tracks =
+                root_owner ? std::span<const timeline::ItemId>(direct_track) : nested_tracks;
+            for (const auto& clip : track.clips()) {
+                const auto* content = std::get_if<timeline::RegisteredContent>(&clip.content());
+                if (!content)
+                    continue;
+                append(owner_sequence.id(), registry.subscriptions_for(content->schema().type_name),
+                       root_tracks);
             }
         }
     }
-    for (auto& subscribers : index.by_kind_) {
+    for (auto& subscribers : data->context_by_kind) {
         std::sort(subscribers.begin(), subscribers.end());
         subscribers.erase(std::unique(subscribers.begin(), subscribers.end()), subscribers.end());
     }
-    for (auto& owner : index.by_owner_sequence_) {
+    for (auto& owner : data->context_by_owner) {
         for (auto& subscribers : owner.by_kind) {
             std::sort(subscribers.begin(), subscribers.end());
             subscribers.erase(std::unique(subscribers.begin(), subscribers.end()),
                               subscribers.end());
         }
     }
+    index.data_ = std::move(data);
     return index;
 }
 
 std::span<const timeline::ItemId>
-ContextSubscriberIndex::subscribers(timeline::CompileContextKind kind) const noexcept {
-    return by_kind_[kind_index(kind)];
+CompileInvalidationIndex::subscribers(timeline::CompileContextKind kind) const noexcept {
+    return data_ ? std::span<const timeline::ItemId>(data_->context_by_kind[kind_index(kind)])
+                 : std::span<const timeline::ItemId>{};
 }
 
 std::span<const timeline::ItemId>
-ContextSubscriberIndex::subscribers(timeline::ItemId owner_sequence,
-                                    timeline::CompileContextKind kind) const noexcept {
-    const auto owner =
-        std::find_if(by_owner_sequence_.begin(), by_owner_sequence_.end(),
-                     [&](const OwnedSubscribers& entry) {
-                         return entry.owner_sequence == owner_sequence;
-                     });
-    return owner != by_owner_sequence_.end()
-               ? std::span<const timeline::ItemId>(owner->by_kind[kind_index(kind)])
-               : std::span<const timeline::ItemId>{};
+CompileInvalidationIndex::subscribers(timeline::ItemId owner_sequence,
+                                      timeline::CompileContextKind kind) const noexcept {
+    return data_ ? data_->subscribers(owner_sequence, kind) : std::span<const timeline::ItemId>{};
 }
 
-bool ContextSubscriberIndex::empty() const noexcept {
-    for (const auto& subscribers : by_kind_) {
+bool CompileInvalidationIndex::empty() const noexcept {
+    if (!data_)
+        return true;
+    for (const auto& subscribers : data_->context_by_kind) {
         if (!subscribers.empty())
             return false;
     }
     return true;
 }
 
-DirtyTrackSet resolve_dirty_tracks(const timeline::Project& project,
-                                   timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
-                                   const ContextSubscriberIndex& index) {
-    DirtyTrackSet result;
-    for (const timeline::DirtyItem& item : dirty.items()) {
-        const auto flags = static_cast<std::uint16_t>(item.flags);
-        if (!item.owner_sequence.valid()) {
-            // Project-scoped: tempo, meter, or the asset table. Every track's
-            // program is derived from those, so none of them can be reused.
-            result.all = true;
-            continue;
-        }
-        if (item.owner_sequence != sequence_id)
-            continue;
-        if (item.owner_track.valid()) {
-            result.tracks.push_back(item.owner_track);
-            continue;
-        }
-        // Context companions name no track on purpose: their readers come from
-        // the reverse index. Markers are sequence metadata and do not
-        // contribute to any compiled track program. Any other trackless item
-        // is a structural edit to the sequence itself.
-        const auto ignored = static_cast<std::uint16_t>(timeline::DirtyFlags::Context) |
-                             static_cast<std::uint16_t>(timeline::DirtyFlags::Marker);
-        if ((flags & ignored) == 0)
-            result.all = true;
-    }
-    for (const timeline::DirtyContext& context : dirty.contexts()) {
-        const auto* sequence = project.find_sequence(sequence_id);
-        const auto subscribers =
-            index.subscribers(context.owner_sequence, context.kind);
-        for (const auto track_id : subscribers) {
-            const auto* track = sequence ? sequence->find_track(track_id) : nullptr;
-            // A freeze or selected take comp replaces the arrangement
-            // wholesale, so its arrangement renderer is not live in this
-            // snapshot. The declaration remains indexed so returning to the
-            // arrangement cannot make the index stale.
-            if (track && !track->freeze().has_value() &&
-                !track->active_take_lane_id().valid())
-                result.tracks.push_back(track_id);
-        }
-    }
-    std::sort(result.tracks.begin(), result.tracks.end());
-    result.tracks.erase(std::unique(result.tracks.begin(), result.tracks.end()),
-                        result.tracks.end());
-    return result;
+bool CompileInvalidationIndex::valid() const noexcept {
+    return data_ && data_->valid();
+}
+
+bool CompileInvalidationIndex::matches(const timeline::Project& project,
+                                       timeline::ItemId root_sequence_id) const noexcept {
+    return data_ && data_->matches(project, root_sequence_id);
+}
+
+std::span<const timeline::ItemId>
+detail::CompileInvalidationData::subscribers(timeline::ItemId owner_sequence,
+                                             timeline::CompileContextKind kind) const noexcept {
+    const auto owner = std::find_if(context_by_owner.begin(), context_by_owner.end(),
+                                    [&](const OwnedContextSubscribers& entry) {
+                                        return entry.owner_sequence == owner_sequence;
+                                    });
+    return owner != context_by_owner.end()
+               ? std::span<const timeline::ItemId>(owner->by_kind[static_cast<std::size_t>(kind)])
+               : std::span<const timeline::ItemId>{};
 }
 
 } // namespace pulp::playback

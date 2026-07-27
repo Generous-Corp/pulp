@@ -237,7 +237,8 @@ TEST_CASE("Frozen track playback accounts for capacity and rejects coordinate ov
     request.audio_limits.max_clips = 1;
     REQUIRE(compiler.submit(std::move(request)));
     REQUIRE_FALSE(store.has_value());
-    REQUIRE(compiler.status().last_error.code == CompileErrorCode::ExpansionBudgetExceeded);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
+    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
     REQUIRE(compiler.status().last_error.item == ItemId{11});
 
     auto overflow = take(

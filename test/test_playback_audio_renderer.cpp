@@ -211,10 +211,7 @@ TEST_CASE("host-tempo audio decimation rejects aliases without muting the passba
     const auto assets = pool({{3, audio_data({source})}});
     CompiledFixture compiled(project, map, assets);
     auto program = compiled.store.read();
-    REQUIRE(program->find_track({10})
-                ->audio_program()
-                ->clips()[0]
-                .uses_host_rate_conversion());
+    REQUIRE(program->find_track({10})->audio_program()->clips()[0].uses_host_rate_conversion());
 
     auto render = [&](std::int64_t tick_end) {
         auto mapped = snapshot(*program, 100);
@@ -412,8 +409,9 @@ TEST_CASE("take comp compilation validates asset rate and whole program capacity
     request.audio_limits.max_clips = 2;
     REQUIRE(compiler.submit(std::move(request)));
     REQUIRE_FALSE(store.has_value());
-    REQUIRE(compiler.status().last_error.code == CompileErrorCode::ExpansionBudgetExceeded);
-    REQUIRE(compiler.status().last_error.item == ItemId{10});
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
+    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+    REQUIRE(compiler.status().last_error.item == ItemId{30});
 }
 
 TEST_CASE("take comp boundary projection is exact beyond floating point integer precision") {

@@ -52,7 +52,9 @@ pulp_add_test_suite(pulp-test-playback-program
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
 pulp_add_test_suite(pulp-test-timeline-nesting
-    SOURCES test_timeline_nesting.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_timeline_nesting_model.cpp
+        test_timeline_nesting_playback.cpp
+        harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
         pulp::runtime)
 if(PULP_BENCHMARK)
