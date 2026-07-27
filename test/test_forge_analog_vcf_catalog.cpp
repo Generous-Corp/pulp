@@ -5,6 +5,7 @@
 #include <pulp/host/forge_analog_vcf_catalog.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -128,8 +129,11 @@ TEST_CASE("Forge analog VCF exposes four stable Pulp identities and one param co
 
 TEST_CASE("Forge analog VCF baked render is deterministic across identical instances",
           "[host][forge][analog-vcf][determinism]") {
-    BakedVcfFixture first(pulp::signal::AnalogVcf::Voicing::prophet5);
-    BakedVcfFixture second(pulp::signal::AnalogVcf::Voicing::prophet5);
+    // Minimoog carries the catalog's deterministic stochastic drift state;
+    // exact agreement here proves independent bake/create/prepare lifecycles
+    // seed and advance that hidden state identically.
+    BakedVcfFixture first(pulp::signal::AnalogVcf::Voicing::minimoog);
+    BakedVcfFixture second(pulp::signal::AnalogVcf::Voicing::minimoog);
     auto first_injector = first.processor().claim_param_injection(first.filter);
     auto second_injector = second.processor().claim_param_injection(second.filter);
     REQUIRE(first_injector.valid());
@@ -143,8 +147,11 @@ TEST_CASE("Forge analog VCF baked render is deterministic across identical insta
         input[static_cast<std::size_t>(i)] =
             0.2f * std::sin(0.071f * static_cast<float>(i));
     for (int block = 0; block < 64; ++block) {
-        CHECK(render_block(*first.result.processor, input) ==
-              render_block(*second.result.processor, input));
+        const auto first_output = render_block(*first.result.processor, input);
+        const auto second_output = render_block(*second.result.processor, input);
+        CHECK(first_output == second_output);
+        CHECK(std::any_of(first_output.begin(), first_output.end(),
+                          [](float sample) { return sample != 0.0f; }));
     }
 }
 
