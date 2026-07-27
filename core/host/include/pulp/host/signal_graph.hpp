@@ -266,6 +266,20 @@ struct CustomNodeType {
                        const audio::BufferView<const float>& /*input*/,
                        int /*num_samples*/, const BakedParamView& /*params*/)>
         process_instance_baked_param;
+
+    // Fixed processing latency added by this type, in base-rate samples. Kept
+    // last to preserve source compatibility for positional aggregate
+    // initializers written before the latency contract was added. The graph
+    // captures it at prepare; changing it requires re-registration/re-prepare
+    // and an identity version bump for persisted graphs.
+    static constexpr int kMaxLatencySamples = 65535;
+    int latency_samples = 0;
+
+    bool is_valid_registration() const noexcept {
+        return !type_id.empty() && version > 0 && num_input_ports >= 0 &&
+               num_output_ports >= 0 && latency_samples >= 0 &&
+               latency_samples <= kMaxLatencySamples;
+    }
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -761,6 +775,9 @@ public:
     // GraphNode::transport_sensitive was resolved true.
     const CustomNodeTransportProcessFn* live_custom_transport_processor(
         NodeId id) const noexcept;
+    // Fixed latency captured for a resolved Custom node in the live snapshot.
+    // Zero for unresolved/non-Custom nodes.
+    int live_custom_latency_samples(NodeId id) const noexcept;
     // The live compiled snapshot's bound param-aware custom callback for a Custom
     // node whose type declared baked_params + process_instance_baked_param, or
     // nullptr otherwise. The pointee captured the stateful instance shared_ptr by
@@ -1131,8 +1148,8 @@ private:
 
         // PDC: cumulative samples of latency from AudioInput to this node's
         // input ports (input_latency) and output ports (output_latency).
-        // output_latency = input_latency + (plugin->latency_samples() for
-        // Plugin nodes, 0 otherwise).
+        // output_latency = input_latency + the node's captured processing
+        // latency (Plugin metadata or CustomNodeType::latency_samples).
         int64_t input_latency = 0;
         int64_t output_latency = 0;
 
@@ -1261,6 +1278,9 @@ private:
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+        // Prepare-stable fixed latency for each resolved, shape-matched Custom
+        // node. Shared by the legacy PDC pass and routed snapshot builder.
+        std::unordered_map<NodeId, int> custom_latency_samples;
         // Bound param-aware custom callbacks (bake-layer injection). Populated for
         // any Custom node whose type declared baked_params +
         // process_instance_baked_param. Consumed only by bake(); the live routed

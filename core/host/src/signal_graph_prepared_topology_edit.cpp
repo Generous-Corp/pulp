@@ -22,11 +22,6 @@ std::string prepared_custom_key(std::string_view type_id, int version) {
     return key;
 }
 
-bool valid_prepared_custom_type(const CustomNodeType& type) {
-    return !type.type_id.empty() && type.version > 0 && type.num_input_ports >= 0 &&
-           type.num_output_ports >= 0;
-}
-
 bool has_feedback(const std::vector<Connection>& connections) {
     return std::any_of(connections.begin(), connections.end(),
                        [](const Connection& c) { return c.feedback; });
@@ -218,7 +213,8 @@ void SignalGraph::PreparedTopologyEdit::release_new_custom_instances_() noexcept
 }
 
 bool SignalGraph::PreparedTopologyEdit::register_custom_node_type(CustomNodeType type) {
-    if (mutation_failed_ || committed_ || prepare_attempted_ || !valid_prepared_custom_type(type)) {
+    if (mutation_failed_ || committed_ || prepare_attempted_ ||
+        !type.is_valid_registration()) {
         mutation_failed_ = true;
         return false;
     }

@@ -166,6 +166,10 @@ public:
         return engine_.latency_samples();
     }
 
+    static constexpr int latency_samples_for_oversampling(int factor) noexcept {
+        return OtaCascadeFilterT<SampleType>::latency_samples_for_oversampling(factor);
+    }
+
     // The -3 dB corner the voicing table asks for, in Hz. This is the
     // *requested* corner, not necessarily the realised one: the engine clamps
     // the derived pole to [20 Hz, 0.45 * fs], so near the top of the knob at

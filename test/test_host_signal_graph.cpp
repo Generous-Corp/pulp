@@ -1902,6 +1902,110 @@ TEST_CASE("SignalGraph PDC aligns parallel branches", "[host][graph][pdc]") {
     graph.release();
 }
 
+TEST_CASE("SignalGraph PDC aligns a fixed-latency Custom node on the parallel path",
+          "[host][graph][pdc][custom][parallel]") {
+    struct Delay4 {
+        std::array<float, 4> history{};
+        std::size_t cursor = 0;
+    };
+
+    CustomNodeType delayed;
+    delayed.type_id = "test.fixed-delay-4";
+    delayed.num_input_ports = 1;
+    delayed.num_output_ports = 1;
+    delayed.latency_samples = 4;
+    delayed.create = [] { return static_cast<void*>(new Delay4); };
+    delayed.destroy = [](void* instance) { delete static_cast<Delay4*>(instance); };
+    delayed.reset = [](void* instance) { *static_cast<Delay4*>(instance) = {}; };
+    delayed.process_instance =
+        [](void* instance, pulp::audio::BufferView<float>& output,
+           const pulp::audio::BufferView<const float>& input, int frames) {
+            auto& delay = *static_cast<Delay4*>(instance);
+            for (int i = 0; i < frames; ++i) {
+                output.channel_ptr(0)[i] = delay.history[delay.cursor];
+                delay.history[delay.cursor] = input.channel_ptr(0)[i];
+                delay.cursor = (delay.cursor + 1) % delay.history.size();
+            }
+        };
+
+    SignalGraph graph;
+    auto invalid = delayed;
+    invalid.type_id = "test.invalid-negative-latency";
+    invalid.latency_samples = -1;
+    REQUIRE_FALSE(graph.register_custom_node_type(std::move(invalid)));
+    auto excessive = delayed;
+    excessive.type_id = "test.excessive-custom-latency";
+    excessive.latency_samples = CustomNodeType::kMaxLatencySamples + 1;
+    REQUIRE_FALSE(graph.register_custom_node_type(excessive));
+    auto boundary = delayed;
+    boundary.type_id = "test.maximum-custom-latency";
+    boundary.latency_samples = CustomNodeType::kMaxLatencySamples;
+    REQUIRE(graph.register_custom_node_type(std::move(boundary)));
+    {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE_FALSE(edit->register_custom_node_type(std::move(excessive)));
+    }
+    REQUIRE(graph.register_custom_node_type(delayed));
+
+    const auto input = graph.add_input_node(1, "input");
+    const auto custom = graph.add_custom_node("test.fixed-delay-4", 1, "delayed");
+    const auto dry = graph.add_gain_node("dry");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, dry, 0));
+    REQUIRE(graph.connect(dry, 0, output, 0));
+
+    graph.set_canonical_executor_routing_enabled(true);
+    graph.set_parallel_routing_enabled(true);
+    graph.set_parallel_min_work_units(0);
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.latency_samples() == 4);
+    REQUIRE(graph.node_latency_samples(output) == 4);
+    REQUIRE(graph.routed_execution_status(16).parallel_selected);
+    REQUIRE(graph.routed_execution_status(16).routed_path_ready());
+
+    std::array<float, 16> source{};
+    source[0] = 1.0f;
+    std::array<float, 16> rendered{};
+    const float* source_ptrs[] = {source.data()};
+    float* rendered_ptrs[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_ptrs, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_ptrs, 1, rendered.size());
+    graph.process(out, in, static_cast<int>(source.size()));
+
+    for (int i = 0; i < 4; ++i) REQUIRE(rendered[i] == 0.0f);
+    REQUIRE(rendered[4] == 2.0f);
+    for (std::size_t i = 5; i < rendered.size(); ++i) REQUIRE(rendered[i] == 0.0f);
+    REQUIRE(graph.routing_executor_stats().parallel_levels_dispatched > 0);
+
+    // The transactional registrar/compile path must publish the same latency
+    // and legacy-walk PDC result, not merely accept the metadata.
+    SignalGraph committed;
+    auto edit = committed.begin_prepared_topology_edit();
+    REQUIRE(edit->register_custom_node_type(delayed));
+    const auto edit_input = edit->add_input_node(1, "input");
+    const auto edit_custom =
+        edit->add_custom_node("test.fixed-delay-4", 1, "delayed");
+    const auto edit_dry = edit->add_gain_node("dry");
+    const auto edit_output = edit->add_output_node(1, "output");
+    REQUIRE(edit->connect(edit_input, 0, edit_custom, 0));
+    REQUIRE(edit->connect(edit_custom, 0, edit_output, 0));
+    REQUIRE(edit->connect(edit_input, 0, edit_dry, 0));
+    REQUIRE(edit->connect(edit_dry, 0, edit_output, 0));
+    edit->set_canonical_executor_routing_enabled(false);
+    edit->set_parallel_routing_enabled(false);
+    REQUIRE(edit->prepare(48000.0, 16) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() ==
+            SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(committed.latency_samples() == 4);
+    rendered.fill(0.0f);
+    committed.process(out, in, static_cast<int>(source.size()));
+    for (int i = 0; i < 4; ++i) REQUIRE(rendered[i] == 0.0f);
+    REQUIRE(rendered[4] == 2.0f);
+}
+
 TEST_CASE("SignalGraph serial plugin latencies accumulate", "[host][graph][pdc]") {
     SignalGraph graph;
     auto in = graph.add_input_node(1, "in");

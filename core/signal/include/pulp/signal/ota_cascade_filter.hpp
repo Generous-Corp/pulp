@@ -191,11 +191,18 @@ public:
         snap_coefficients();
     }
 
-    int latency_samples() const noexcept {
+    static constexpr int latency_samples_for_oversampling(int factor) noexcept {
+        if (factor != 1 && factor != 2 && factor != 4 && factor != 8 &&
+            factor != 16)
+            return -1;
         int latency = 0;
-        for (int level = 0; level < stage_count(); ++level)
+        for (int level = 0; factor > 1; ++level, factor >>= 1)
             latency += 32 >> level;
         return latency;
+    }
+
+    int latency_samples() const noexcept {
+        return latency_samples_for_oversampling(factor_);
     }
 
     int oversampling() const noexcept {
