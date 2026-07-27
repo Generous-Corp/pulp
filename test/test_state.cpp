@@ -1,3 +1,7 @@
+#include <fstream>
+#include <cstdio>
+#include <unistd.h>
+#include <string>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/events/event_loop.hpp>
@@ -2725,6 +2729,49 @@ TEST_CASE("StateStore clamps an out-of-range default and round-trips it",
     auto second = store.serialize();
     REQUIRE(first == second);
     REQUIRE_THAT(store.get_value(1), WithinAbs(0.001, 1e-9));
+}
+
+TEST_CASE("StateStore reports a default it had to clamp into range",
+          "[state]") {
+    // Clamping is right at runtime but wrong for authoring: a mistyped default
+    // otherwise becomes an unremarkable min/max and the plug-in quietly starts
+    // on the wrong value. Registration says so once, on stderr.
+    const auto capture_registration = [](const pulp::state::ParamInfo& info) {
+        const std::string path =
+            std::string(std::tmpnam(nullptr)) + "-pulp-param-default.log";
+        std::fflush(stderr);
+        const int saved = dup(fileno(stderr));
+        REQUIRE(saved >= 0);
+        FILE* redirected = std::freopen(path.c_str(), "w", stderr);
+        REQUIRE(redirected != nullptr);
+
+        {
+            StateStore store;
+            store.add_parameter(info);
+        }
+
+        std::fflush(stderr);
+        dup2(saved, fileno(stderr));
+        close(saved);
+
+        std::ifstream in(path);
+        std::string text((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+        std::remove(path.c_str());
+        return text;
+    };
+
+    // Default 0.0 is BELOW the [0.001, 2.0] range.
+    const auto clamped_log =
+        capture_registration(make_param_info(1, "Attack", "s", {0.001f, 2.0f, 0.0f}));
+    REQUIRE(clamped_log.find("Attack") != std::string::npos);
+    REQUIRE(clamped_log.find("outside its range") != std::string::npos);
+
+    // Negative control: an in-range default must stay silent, or the warning
+    // is noise that authors learn to ignore.
+    const auto quiet_log =
+        capture_registration(make_param_info(2, "Decay", "s", {0.0f, 2.0f, 0.5f}));
+    REQUIRE(quiet_log.find("outside its range") == std::string::npos);
 }
 
 TEST_CASE("StateStore quantizes explicitly typed parameters on every write path",
