@@ -24,6 +24,31 @@ constexpr std::int64_t saturating_subtract(std::int64_t lhs, std::int64_t rhs) n
     return lhs - rhs;
 }
 
+constexpr std::int64_t saturating_multiply(std::int64_t lhs, std::int64_t rhs) noexcept {
+    constexpr std::int64_t max = std::numeric_limits<std::int64_t>::max();
+    constexpr std::int64_t min = std::numeric_limits<std::int64_t>::min();
+    if (lhs == 0 || rhs == 0)
+        return 0;
+    // Identity and negation are special-cased so the division tests below can
+    // assume |operand| >= 2, where the truncating division is exact enough to
+    // decide overflow. min has no positive counterpart, so negating it rails.
+    if (lhs == 1)
+        return rhs;
+    if (rhs == 1)
+        return lhs;
+    if (lhs == -1)
+        return (rhs == min) ? max : -rhs;
+    if (rhs == -1)
+        return (lhs == min) ? max : -lhs;
+    if ((lhs < 0) != (rhs < 0)) {
+        if (lhs > 0 ? (rhs < min / lhs) : (lhs < min / rhs))
+            return min;
+    } else if (lhs > 0 ? (lhs > max / rhs) : (lhs < max / rhs)) {
+        return max;
+    }
+    return lhs * rhs;
+}
+
 } // namespace detail
 
 inline constexpr std::int64_t kTicksPerQuarter = 705'600;

@@ -54,6 +54,36 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## Compiler coverage is asymmetric — GCC sees only `core/**`
+
+Before you read a green PR as "this compiles everywhere": every Linux lane in PR
+CI is **Clang** (public-headers, IWYU, RealtimeSanitizer). macOS is Clang.
+Windows is MSVC. GCC used to appear in exactly one place —
+`release-path-pr-gate.yml`, path-triggered on release files — so a GCC-only
+error in `core/` could sit on `main` until an unrelated PR happened to touch a
+Skia pin or a `Pulp*.cmake`.
+
+`gcc-compile-gate.yml` now covers `core/**`: it compiles the core libraries with
+`g++`, with `PULP_ENABLE_GPU=OFF` (no Dawn/Skia — that is what keeps it in
+minutes) and tests/examples/design-import/inspector off.
+
+Two things to know when it goes red:
+
+- **It cannot flake.** No tests run, no hardware is touched, no timing is
+  measured. A red result is a genuine compiler divergence. Do not re-run it
+  hoping — read the error.
+- **The classic offender is a duplicated designator** in a long
+  designated-initializer list. Clang accepts a repeat and silently takes the
+  last; GCC and MSVC reject it. `core/host/src/signal_graph.cpp`'s binder list
+  has acquired one **four** separate times (`git log -S '.custom_latency_for'`),
+  because it is long and sits where merges collide. If you resolve a conflict in
+  a `{ .a = …, .b = … }` block, check you did not keep both sides of the same
+  field.
+
+What it does **not** cover is GCC *behavior* — nothing is executed, so a
+construct both compilers accept but implement differently is still only caught
+by the Clang test lanes.
+
 ## Test lanes — what gates the required `macos` check
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required

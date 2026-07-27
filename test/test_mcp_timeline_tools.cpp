@@ -62,6 +62,34 @@ std::string make_timeline_project_json(
     return require_timeline_result(serialize_project(project, registry)).json;
 }
 
+/// Builds a project whose sole asset carries the given locator, and returns the
+/// Result rather than unwrapping it. Confinement is asserted at two layers, and
+/// the model layer's assertion is that construction *refuses* a hint — so this
+/// path must be able to hand back a refusal without the helper turning it into
+/// a test failure the way `require_timeline_result` would.
+pulp::runtime::Result<pulp::timeline::Project, pulp::timeline::ModelError>
+try_timeline_project_with_locator(const std::filesystem::path& source,
+                                  pulp::timeline::AssetLocatorKind locator_kind,
+                                  const std::string& hint) {
+    using namespace pulp::timeline;
+    constexpr std::uint64_t frame_count = 32;
+    auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
+                                                              MediaRef{{5}, {0}, frame_count},
+                                                              {.gain_linear = 1.0f}));
+    auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
+    auto sequence = require_timeline_result(Sequence::create(
+        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
+    std::ifstream stream(source, std::ios::binary);
+    REQUIRE(stream);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
+    REQUIRE(hash);
+    MediaAsset asset{{5},   "source.wav", frame_count, {48'000, 1}, *hash,
+                     AssetStoragePolicy::External, {{locator_kind, hint}}, {}, {}};
+    return Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}});
+}
+
 std::string
 make_nested_timeline_project_json(const std::filesystem::path& source) {
     using namespace pulp::timeline;
@@ -342,19 +370,55 @@ TEST_CASE("timeline MCP confines package-relative media to the project base",
         handle_timeline_render(arguments(nested_project, temp.path / "nested.wav"));
     require_contains(nested_response, R"JSON("frames":"32")JSON");
 
-    const auto absolute_project = make_timeline_project_json(
+    // Layer 1 -- the model. A package-relative locator that leaves the package
+    // is refused at construction, so an escaping document cannot be built in
+    // memory, let alone serialized or handed to a renderer.
+    const auto absolute_project = try_timeline_project_with_locator(
         nested_source, pulp::timeline::AssetLocatorKind::PackageRelative, nested_source.string());
-    const auto absolute_response =
-        handle_timeline_render(arguments(absolute_project, temp.path / "absolute.wav"));
-    require_contains(absolute_response, R"JSON("isError":true)JSON");
-    require_contains(absolute_response, R"JSON("stage":"render")JSON");
+    REQUIRE_FALSE(absolute_project);
+    REQUIRE(absolute_project.error().code == pulp::timeline::ModelErrorCode::InvalidAssetLocator);
 
-    const auto traversal_project = make_timeline_project_json(
+    const auto traversal_project = try_timeline_project_with_locator(
         outside_source, pulp::timeline::AssetLocatorKind::PackageRelative, "../outside.wav");
-    const auto traversal_response =
-        handle_timeline_render(arguments(traversal_project, temp.path / "traversal.wav"));
-    require_contains(traversal_response, R"JSON("isError":true)JSON");
-    require_contains(traversal_response, R"JSON("stage":"render")JSON");
+    REQUIRE_FALSE(traversal_project);
+    REQUIRE(traversal_project.error().code == pulp::timeline::ModelErrorCode::InvalidAssetLocator);
+
+    // Layer 2 -- the load path, which must not trust a document just because it
+    // arrived as JSON. The model constructor cannot run on bytes someone else
+    // wrote, so the hostile hint is spliced into serialized output rather than
+    // built through the API.
+    const auto with_hint = [&](const std::string& hint) {
+        auto hostile = nested_project;
+        const auto offset = hostile.find("media/source.wav");
+        REQUIRE(offset != std::string::npos);
+        hostile.replace(offset, std::string("media/source.wav").size(), hint);
+        return hostile;
+    };
+
+    const auto spliced_traversal =
+        handle_timeline_render(arguments(with_hint("../outside.wav"), temp.path / "spliced.wav"));
+    require_contains(spliced_traversal, R"JSON("isError":true)JSON");
+    require_contains(spliced_traversal, R"JSON("stage":"open")JSON");
+
+    // The one escape only layer 2 can catch: a hint that is lexically clean and
+    // therefore passes the model, but whose resolved target is a symlink out of
+    // the package. Nothing short of canonicalizing the path sees this, which is
+    // why the loader's `fs::canonical` + beneath-base check is not redundant
+    // with the model's lexical check.
+    std::error_code link_error;
+    std::filesystem::create_symlink(outside_source, media / "link.wav", link_error);
+    if (!link_error) {
+        const auto symlinked = try_timeline_project_with_locator(
+            outside_source, pulp::timeline::AssetLocatorKind::PackageRelative, "media/link.wav");
+        REQUIRE(symlinked); // lexically safe: the model has no basis to refuse it
+        auto registry = require_timeline_result(pulp::timeline::make_builtin_timeline_registry());
+        const auto symlink_json =
+            require_timeline_result(pulp::timeline::serialize_project(*symlinked, registry)).json;
+        const auto symlink_response =
+            handle_timeline_render(arguments(symlink_json, temp.path / "symlink.wav"));
+        require_contains(symlink_response, R"JSON("isError":true)JSON");
+        require_contains(symlink_response, R"JSON("stage":"render")JSON");
+    }
 }
 
 // The agent loop end to end: apply a command to make a second journal variant,

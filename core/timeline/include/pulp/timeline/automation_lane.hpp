@@ -13,6 +13,10 @@
 
 namespace pulp::timeline {
 
+/** @addtogroup timeline_model
+ * @{
+ */
+
 /// Format-neutral document target for a placed device parameter. The placement
 /// ID is a referenced Timeline identity, not a host graph node. The parameter ID
 /// is the device's stable host-facing 32-bit ID, scoped by the placement; it is
@@ -22,6 +26,7 @@ struct DeviceParameterTarget {
     ItemId device_placement_id;
     std::uint32_t param_id = 0;
 
+    /// Returns whether the referenced device-placement identity is nonzero.
     constexpr bool valid() const noexcept {
         return device_placement_id.valid();
     }
@@ -49,6 +54,8 @@ constexpr std::string_view track_mixer_parameter_name(TrackMixerParameter value)
     return "gain";
 }
 
+/// Parses the canonical persisted mixer-parameter spelling.
+/// @return The corresponding parameter, or `std::nullopt` for an unknown name.
 constexpr std::optional<TrackMixerParameter>
 track_mixer_parameter_from_name(std::string_view name) noexcept {
     if (name == "gain")
@@ -65,6 +72,7 @@ track_mixer_parameter_from_name(std::string_view name) noexcept {
 struct TrackMixerTarget {
     TrackMixerParameter parameter = TrackMixerParameter::Gain;
 
+    /// Returns whether the parameter names a supported track mixer control.
     constexpr bool valid() const noexcept {
         switch (parameter) {
         case TrackMixerParameter::Gain:
@@ -77,8 +85,8 @@ struct TrackMixerTarget {
     constexpr bool operator==(const TrackMixerTarget&) const = default;
 };
 
-/// Exhaustive authored-target set. Later target categories extend this variant
-/// without changing AutomationLane's factory signature or observer API.
+/// Exhaustive authored-target set. Adding a target category extends this
+/// variant without changing AutomationLane's factory signature or observer API.
 using AutomationTarget = std::variant<DeviceParameterTarget, TrackMixerTarget>;
 
 /// Overload set for visiting an AutomationTarget with **no generic fallback**.
@@ -110,12 +118,14 @@ template <class... Fs> AutomationTargetCases(Fs...) -> AutomationTargetCases<Fs.
 inline constexpr std::size_t kAutomationTargetAlternativeCount =
     std::variant_size_v<AutomationTarget>;
 
+/// Validation failures returned when constructing an AutomationLane.
 enum class AutomationLaneErrorCode : std::uint8_t {
     InvalidLaneId,
     InvalidDevicePlacementId,
     InvalidDeviceId = InvalidDevicePlacementId,
 };
 
+/// Automation lane failure with the lane and related target identity.
 struct AutomationLaneError {
     AutomationLaneErrorCode code = AutomationLaneErrorCode::InvalidLaneId;
     ItemId lane;
@@ -126,23 +136,32 @@ struct AutomationLaneError {
 /// Curve values remain in the plugin's plain parameter domain. Document
 /// attachment, playback compilation, metadata validation, normalization, and
 /// host delivery are separate concerns and intentionally absent from this value.
-/// When attached and remapped later, the lane and curve-point IDs are owned
+/// During attachment and remapping, lane and curve-point IDs are owned
 /// identities; target placement IDs are references, and parameter IDs stay verbatim.
 class AutomationLane {
   public:
+    /// Validates and constructs a lane owning `curve` for `target`.
+    ///
+    /// The lane identity and any referenced placement identity must be valid.
     static runtime::Result<AutomationLane, AutomationLaneError>
     create(ItemId id, AutomationTarget target, AutomationCurve curve);
 
+    /// Returns the lane's stable document identity.
     ItemId id() const noexcept {
         return id_;
     }
+    /// Returns the format-neutral target stored by this lane.
     const AutomationTarget& target() const noexcept {
         return target_;
     }
+    /// Returns the immutable authored curve.
     const AutomationCurve& curve() const noexcept {
         return curve_;
     }
 
+    /// Returns a lane snapshot with `replacement`, preserving identity and target.
+    ///
+    /// The original lane and its curve remain valid and unchanged.
     AutomationLane with_curve(AutomationCurve replacement) const noexcept;
 
   private:
@@ -157,5 +176,7 @@ static_assert(std::is_nothrow_copy_constructible_v<AutomationLane>);
 static_assert(std::is_nothrow_copy_assignable_v<AutomationLane>);
 static_assert(std::is_nothrow_move_constructible_v<AutomationLane>);
 static_assert(std::is_nothrow_move_assignable_v<AutomationLane>);
+
+/// @}
 
 } // namespace pulp::timeline

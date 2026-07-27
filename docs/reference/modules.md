@@ -853,6 +853,12 @@ history; inverse-command undo/redo append ordinary new transactions.
 
 **Link:** `pulp::timeline` · **Include prefix:** `<pulp/timeline/...>`
 
+For subsystem contracts and ownership, see the
+[Creative Timeline Engine SDK guide](../guides/timeline-sdk.md). For
+compile-backed project, transaction, persistence, playback, capture, launch,
+interchange, CLI, and MCP tasks, use the
+[Timeline cookbook](../guides/timeline-cookbook.md).
+
 ```cpp
 #include <pulp/timeline/model.hpp>
 
@@ -916,9 +922,9 @@ cursor programs, while host-graph parameter delivery remains outside Timeline.
 a Track-owned device chain. The chain preserves authored processing order
 through immutable clip edits, persistence, and ID remapping. A placement is
 identity/order-only: runtime instances, graph nodes, plugin formats, paths, and
-platform metadata stay outside Timeline. Durable device definition and
-configuration needed for project save/load will be future document-owned state
-keyed by placement identity.
+platform metadata stay outside Timeline. Project snapshots persist the
+placement identity and authored order, but do not persist a runtime device
+definition or configuration payload.
 
 `Take` and `TakeLane` keep recorded source identity and comp intent in the
 document. Takes reference sealed assets in absolute sample time; comp segments
@@ -1011,8 +1017,11 @@ programs before publication and fans child dirtiness out through every
 transitive placement; unsupported child processing state fails compilation
 closed.
 
-This surface intentionally excludes package I/O, playback delivery, launch
-slots, device implementation and routing, and UI.
+This surface intentionally excludes package I/O, playback delivery, runtime
+launch arbitration, device implementation and routing, and UI. Authored scenes
+and launch slots are durable document state. The compiler accepts Arrangement
+only; the embedding application owns runtime launcher interpretation and
+scene-to-track arbitration.
 
 ## playback
 

@@ -16,6 +16,35 @@ runtime::Result<T, PersistenceError> fail(PersistenceErrorCode code, std::size_t
         PersistenceError{code, offset, actual, limit, std::move(path), std::nullopt}));
 }
 
+bool contains_node(const JsonValue& root, const JsonValue* candidate) noexcept {
+    // Parser-built children retain source order and have properly nested,
+    // non-overlapping byte ranges. ParsedJson exposes the finished tree only as
+    // const, so those invariants make this a source-guided identity lookup
+    // instead of a full-tree scan.
+    if (&root == candidate)
+        return true;
+    if (candidate->begin < root.begin || candidate->end > root.end ||
+        (candidate->begin == root.begin && candidate->end == root.end))
+        return false;
+    const auto array_child = std::upper_bound(
+        root.array.begin(), root.array.end(), candidate->begin,
+        [](std::size_t begin, const JsonValue& child) { return begin < child.begin; });
+    if (array_child != root.array.begin()) {
+        const auto& child = *std::prev(array_child);
+        if (candidate->begin >= child.begin && candidate->end <= child.end)
+            return contains_node(child, candidate);
+    }
+    const auto object_child = std::upper_bound(
+        root.object.begin(), root.object.end(), candidate->begin,
+        [](std::size_t begin, const auto& member) { return begin < member.second.begin; });
+    if (object_child != root.object.begin()) {
+        const auto& child = std::prev(object_child)->second;
+        if (candidate->begin >= child.begin && candidate->end <= child.end)
+            return contains_node(child, candidate);
+    }
+    return false;
+}
+
 class Parser {
   public:
     Parser(std::shared_ptr<const std::string> source, const DecodeLimits& limits)
@@ -342,7 +371,8 @@ const JsonValue* JsonValue::find(std::string_view key) const noexcept {
 }
 
 std::string_view ParsedJson::raw(const JsonValue& value) const noexcept {
-    if (value.begin > value.end || value.end > source_->size()) return {};
+    if (!contains_node(root_, &value) || value.begin > value.end || value.end > source_->size())
+        return {};
     return std::string_view(*source_).substr(value.begin, value.end - value.begin);
 }
 
@@ -358,7 +388,7 @@ parse_json(std::string_view json, const DecodeLimits& limits) {
         return fail<std::shared_ptr<const ParsedJson>>(root.error().code, root.error().byte_offset,
                                                        root.error().actual, root.error().limit,
                                                        root.error().path);
-    auto parsed = std::make_shared<ParsedJson>();
+    auto parsed = std::shared_ptr<ParsedJson>(new ParsedJson());
     parsed->source_ = std::move(source);
     parsed->root_ = std::move(root).value();
     return runtime::Result<std::shared_ptr<const ParsedJson>, PersistenceError>(

@@ -289,6 +289,11 @@ docs:
     kind: guide
     summary: Creative Timeline Engine SDK, persistence, capture, playback, import, CLI, MCP, dependency closure, and project inspection
 
+  - slug: timeline-cookbook
+    path: guides/timeline-cookbook.md
+    kind: guide
+    summary: Task-oriented Timeline recipes for projects, transactions, persistence, playback, assets, capture, launch intent, interchange, CLI, MCP, and realtime integration
+
   - slug: example-pulp-gain
     path: examples/pulp-gain.md
     kind: guide
