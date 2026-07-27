@@ -21,6 +21,111 @@ using namespace std::chrono_literals;
 
 StreamingSampleSource::~StreamingSampleSource() { release(); }
 
+void StreamingSampleSource::DeadlinePolicy::configure(
+    const StreamingSampleSourceConfig& config,
+    std::uint64_t initial_frame) noexcept {
+    enabled =
+        config.underrun_policy == StreamingUnderrunPolicy::AdvancePosition;
+    max_read_ahead_frames = config.max_read_ahead_frames;
+    ring_start_frame.store(initial_frame, std::memory_order_relaxed);
+}
+
+void StreamingSampleSource::DeadlinePolicy::clear() noexcept {
+    enabled = false;
+    max_read_ahead_frames = 0;
+    ring_start_frame.store(0, std::memory_order_relaxed);
+}
+
+std::uint64_t StreamingSampleSource::DeadlinePolicy::effective_end(
+    std::uint64_t total_frames,
+    std::uint64_t eos_frame) const noexcept {
+    return enabled ? total_frames : eos_frame;
+}
+
+void StreamingSampleSource::DeadlinePolicy::apply_underrun(
+    std::atomic<std::uint64_t>& play_pos,
+    std::uint64_t next_position) const noexcept {
+    if (enabled)
+        play_pos.store(next_position, std::memory_order_release);
+}
+
+bool StreamingSampleSource::DeadlinePolicy::zero_is_backpressure() const noexcept {
+    return enabled;
+}
+
+std::uint64_t StreamingSampleSource::DeadlinePolicy::producer_cursor(
+    std::uint64_t play_pos,
+    std::uint64_t reader_pos) const noexcept {
+    return enabled ? play_pos : reader_pos;
+}
+
+bool StreamingSampleSource::DeadlinePolicy::discard_stale(
+    PlanarAudioRingBuffer& ring,
+    std::uint64_t play_pos) noexcept {
+    if (!enabled)
+        return true;
+    // Observe FIFO publication first. The producer stores the absolute start
+    // tag before its release-published ring write, so this acquire makes the
+    // following tag load describe that same (or a newer) interval.
+    const std::uint64_t available = ring.available_frames();
+    const std::uint64_t ring_start =
+        ring_start_frame.load(std::memory_order_acquire);
+    if (ring_start >= play_pos)
+        return true;
+    const std::uint64_t stale = std::min(play_pos - ring_start, available);
+    const std::uint64_t drained = ring.drain(stale);
+    consumed(ring_start, drained);
+    return drained >= play_pos - ring_start;
+}
+
+void StreamingSampleSource::DeadlinePolicy::consumed(
+    std::uint64_t ring_start,
+    std::uint64_t frames) noexcept {
+    if (!enabled)
+        return;
+    std::uint64_t expected_start = ring_start;
+    ring_start_frame.compare_exchange_strong(
+        expected_start, ring_start + frames,
+        std::memory_order_release, std::memory_order_relaxed);
+}
+
+bool StreamingSampleSource::DeadlinePolicy::align_reader(
+    PlanarAudioRingBuffer& ring,
+    std::uint64_t play_pos,
+    std::uint64_t& reader_pos) noexcept {
+    if (!enabled || play_pos <= reader_pos)
+        return true;
+    // One FIFO start tag describes one contiguous source interval. Let the
+    // consumer drain any stale result before seeking across a missed interval.
+    if (ring.available_frames() != 0)
+        return false;
+    reader_pos = play_pos;
+    ring_start_frame.store(reader_pos, std::memory_order_release);
+    return true;
+}
+
+std::uint64_t StreamingSampleSource::DeadlinePolicy::read_ahead_room(
+    std::uint64_t total_frames,
+    std::uint64_t play_pos,
+    std::uint64_t reader_pos) const noexcept {
+    if (max_read_ahead_frames == 0)
+        return total_frames - reader_pos;
+    const std::uint64_t horizon_frames =
+        std::min(total_frames, max_read_ahead_frames);
+    const std::uint64_t horizon =
+        play_pos >= total_frames - horizon_frames
+            ? total_frames
+            : play_pos + horizon_frames;
+    return reader_pos >= horizon ? 0 : horizon - reader_pos;
+}
+
+void StreamingSampleSource::DeadlinePolicy::publish_start_if_empty(
+    PlanarAudioRingBuffer& ring,
+    std::uint64_t frame) noexcept {
+    if (enabled && ring.available_frames() == 0)
+        ring_start_frame.store(frame, std::memory_order_release);
+}
+
 bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
                                     FrameReader reader) {
     if (!reader) {
@@ -49,6 +154,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     channels_ = config.channels;
     total_frames_ = config.total_frames;
     sample_rate_ = config.sample_rate;
+    deadline_.configure(config, 0);
     reader_ = std::move(reader);
     reader_stop_requested_.store(false, std::memory_order_release);
 
@@ -108,6 +214,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
             1, ring_capacity);
         read_scratch_.resize(channels_, static_cast<std::size_t>(read_chunk_));
         reader_pos_.store(preload_valid_, std::memory_order_relaxed);
+        deadline_.configure(config, preload_valid_);
 
         // Prime the ring before any audio is pulled.
         while (pump_background() > 0) {
@@ -153,6 +260,7 @@ void StreamingSampleSource::release() noexcept {
     fully_resident_ = false;
     prepared_ = false;
     use_thread_ = false;
+    deadline_.clear();
     play_pos_.store(0, std::memory_order_relaxed);
     reader_pos_.store(0, std::memory_order_relaxed);
     eos_frame_.store(0, std::memory_order_relaxed);
@@ -178,6 +286,8 @@ bool StreamingSampleSource::reset() noexcept {
     if (!fully_resident_) {
         ring_.reset();
         reader_pos_.store(preload_valid_, std::memory_order_relaxed);
+        deadline_.ring_start_frame.store(preload_valid_,
+                                         std::memory_order_relaxed);
         while (pump_background() > 0) {
             if (ring_.free_frames() == 0) break;
         }
@@ -242,7 +352,8 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             // Use the effective end (may have been shrunk by the reader on an
             // early source end) so a one-shot terminates at the real last frame
             // instead of waiting forever for tail frames that never arrive.
-            const std::uint64_t end = eos_frame_.load(std::memory_order_acquire);
+            const std::uint64_t end = deadline_.effective_end(
+                total_frames_, eos_frame_.load(std::memory_order_acquire));
             if (pos >= end) break;  // one-shot reached the end
             segment_end = end;
         }
@@ -258,6 +369,11 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             produced += from_preload;
             play_pos_.store(pos + from_preload, std::memory_order_relaxed);
         } else {
+            if (!deadline_.discard_stale(ring_, pos)) {
+                underrun_frames_.fetch_add(want, std::memory_order_relaxed);
+                deadline_.apply_underrun(play_pos_, pos + want);
+                break;
+            }
             // Streamed tail: consume sequentially from the ring. The ring is a
             // strict FIFO whose Nth frame is source frame preload_valid_+N, so
             // on an underrun we must advance play_pos_ only by what we actually
@@ -266,19 +382,25 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             const std::uint64_t avail =
                 std::min<std::uint64_t>(want, ring_.available_frames());
             if (avail == 0) {
-                // Underrun: hold position so the late-arriving frames still play
-                // in order on the next pull. Remainder is zero-filled below.
                 underrun_frames_.fetch_add(want, std::memory_order_relaxed);
+                // Deadline-bound generated content owns source time, not the
+                // producer. Its policy consumes this missing interval; ordinary
+                // sample streaming leaves the cursor unchanged.
+                deadline_.apply_underrun(play_pos_, pos + want);
                 break;
             }
             BufferView<float> sub =
                 dest.slice(static_cast<std::size_t>(produced),
                            static_cast<std::size_t>(avail));
+            const std::uint64_t ring_start =
+                deadline_.ring_start_frame.load(std::memory_order_acquire);
             ring_.read(sub, avail);
+            deadline_.consumed(ring_start, avail);
             produced += avail;
             play_pos_.store(pos + avail, std::memory_order_relaxed);
             if (avail < want) {
                 underrun_frames_.fetch_add(want - avail, std::memory_order_relaxed);
+                deadline_.apply_underrun(play_pos_, pos + want);
                 break;  // ring drained mid-block
             }
         }
@@ -297,13 +419,21 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // this method before flipping prepared_ true.
     if (fully_resident_ || !reader_.read) return 0;
 
-    const std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
+    std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
+    const std::uint64_t play_pos =
+        play_pos_.load(std::memory_order_acquire);
+    if (!deadline_.align_reader(ring_, play_pos, rpos))
+        return 0;
+    reader_pos_.store(rpos, std::memory_order_relaxed);
     if (rpos >= total_frames_) return 0;  // tail fully streamed
 
     const std::uint64_t room = ring_.free_frames();
     if (room == 0) return 0;
 
-    std::uint64_t want = std::min({read_chunk_, total_frames_ - rpos, room,
+    const std::uint64_t read_ahead_room =
+        deadline_.read_ahead_room(total_frames_, play_pos, rpos);
+
+    std::uint64_t want = std::min({read_chunk_, read_ahead_room, room,
                                    static_cast<std::uint64_t>(
                                        read_scratch_.num_samples())});
     if (want == 0) return 0;
@@ -312,27 +442,47 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // The FrameReader may allocate/decode and is not noexcept; a throw must not
     // escape this noexcept function (→ std::terminate). Treat it as a read error.
     std::uint64_t got = 0;
+    bool read_failed = false;
     try {
         got = reader_.read(rpos, scratch, want,
                            FrameReaderStopToken{reader_stop_requested_});
     } catch (...) {
-        got = 0;
+        read_failed = true;
     }
     if (reader_stop_requested_.load(std::memory_order_acquire)) return 0;
     if (got == 0) {
+        if (read_failed || !deadline_.zero_is_backpressure())
+            read_errors_.fetch_add(1, std::memory_order_relaxed);
+        if (deadline_.zero_is_backpressure()) {
+            // Deadline-bound generated content may simply not be ready for
+            // this refill. Keep the reader cursor live so a later pump can
+            // retry at this frame, or seek to a playhead that advanced while
+            // the producer was unavailable.
+            return 0;
+        }
         // EOF or read error before the declared end. All frames [0, rpos) are
         // already available (preload + what's in the ring), so rpos is the true
         // length. Publish it so the audio thread terminates one-shot playback
         // and reports finished() here instead of stalling on never-arriving
         // tail frames. release-store pairs with the acquire-load in pull().
-        read_errors_.fetch_add(1, std::memory_order_relaxed);
         eos_frame_.store(rpos, std::memory_order_release);
         reader_pos_.store(total_frames_, std::memory_order_relaxed);
         return 0;
     }
     const std::uint64_t clamped = std::min(got, want);
-    const std::uint64_t written = ring_.write(read_scratch_.view(), clamped);
-    reader_pos_.store(rpos + written, std::memory_order_relaxed);
+    const std::uint64_t current_play_pos = deadline_.producer_cursor(
+        play_pos_.load(std::memory_order_acquire), rpos);
+    const std::uint64_t skipped =
+        current_play_pos > rpos
+            ? std::min(clamped, current_play_pos - rpos)
+            : 0;
+    const std::uint64_t ready = clamped - skipped;
+    deadline_.publish_start_if_empty(ring_, rpos + skipped);
+    const std::uint64_t written =
+        ring_.write(read_scratch_.view().slice(static_cast<std::size_t>(skipped),
+                                               static_cast<std::size_t>(ready)),
+                    ready);
+    reader_pos_.store(rpos + clamped, std::memory_order_relaxed);
     streamed_frames_.fetch_add(written, std::memory_order_relaxed);
     return written;
 }
@@ -363,8 +513,9 @@ bool StreamingSampleSource::finished() const noexcept {
     // Compare against the effective end so a stream that ended early (reader
     // returned 0 mid-tail) still reports finished once its realized frames have
     // played out — not only when play_pos_ reaches the optimistic declared total.
-    return play_pos_.load(std::memory_order_relaxed) >=
-           eos_frame_.load(std::memory_order_acquire);
+    const std::uint64_t end = deadline_.effective_end(
+        total_frames_, eos_frame_.load(std::memory_order_acquire));
+    return play_pos_.load(std::memory_order_relaxed) >= end;
 }
 
 StreamingSampleSource::Stats StreamingSampleSource::stats() const noexcept {

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/audio_renderer.hpp>
+#include <pulp/playback/compile_executor.hpp>
+#include <pulp/playback/dirty_track_resolver.hpp>
 #include <pulp/playback/program.hpp>
 
 #include <chrono>
@@ -11,11 +12,6 @@
 #include <vector>
 
 namespace pulp::playback {
-
-struct DirtyTrackSet {
-    bool all = false;
-    std::vector<timeline::ItemId> tracks;
-};
 
 struct TrackCompilePolicy {
     timeline::ItemId track_id;
@@ -33,6 +29,8 @@ struct ProgramCompileRequest {
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets;
     AudioRendererLimits audio_limits;
     AutomationPlaybackLimits automation_limits = AutomationPlaybackLimits::platform_defaults();
+    std::uint64_t max_expanded_note_events = 1'000'000u;
+    std::uint64_t max_expanded_clips = 1'000'000u;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -44,6 +42,8 @@ enum class CompileErrorCode : std::uint8_t {
     CompilerAlreadyBound,
     AudioProgramInvalid,
     AutomationProgramInvalid,
+    NestedSequenceUnsupported,
+    ExpansionBudgetExceeded,
 };
 
 struct CompileError {
@@ -53,7 +53,9 @@ struct CompileError {
     AudioRendererErrorCode audio_detail = AudioRendererErrorCode::InvalidAsset;
 };
 
-struct CompileTicket { std::uint64_t revision = 0; };
+struct CompileTicket {
+    std::uint64_t revision = 0;
+};
 
 struct CompilerStatus {
     std::uint64_t latest_submitted_revision = 0;
@@ -77,9 +79,9 @@ class PlaybackProgramCompiler {
     /// state and may finish without dereferencing the facade.
     /// Exactly one control thread submits requests; task execution may occur on
     /// any executor thread.
-    PlaybackProgramCompiler(PlaybackProgramStore& store, CompileExecutor& executor,
-                            std::chrono::microseconds coalescing_window =
-                                std::chrono::milliseconds(10));
+    PlaybackProgramCompiler(
+        PlaybackProgramStore& store, CompileExecutor& executor,
+        std::chrono::microseconds coalescing_window = std::chrono::milliseconds(10));
     ~PlaybackProgramCompiler();
     PlaybackProgramCompiler(const PlaybackProgramCompiler&) = delete;
     PlaybackProgramCompiler& operator=(const PlaybackProgramCompiler&) = delete;

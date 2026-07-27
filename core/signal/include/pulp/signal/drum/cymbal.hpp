@@ -2,6 +2,7 @@
 
 #include <pulp/signal/decay_envelope.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/frequency_shifter.hpp>
 #include <pulp/signal/noise_source.hpp>
@@ -35,9 +36,10 @@ namespace pulp::signal::drum {
 /// row differ the way two real strikes do; setting variation to zero makes the
 /// voice bit-reproducible again.
 ///
-/// The comb technique is a widely-taught approach to metallic synthesis; the
-/// implementation here is original, and the frequency shifter it depends on is
-/// Pulp's own (`pulp::signal::FrequencyShifterT`).
+/// The parallel-comb cymbal technique is credited to Zion Jaymes' cymbal
+/// synthesis tutorial. The implementation here is original, and the frequency
+/// shifter it depends on is Pulp's own
+/// (`pulp::signal::FrequencyShifterT`).
 ///
 /// RT contract: `prepare()` allocates the delay lines. Everything else,
 /// including `note_on` and `process`, allocates nothing.
@@ -69,6 +71,30 @@ public:
     /// modes losing energy first is what makes a crash settle into a wash.
     void set_decay_tilt(double tilt) { decay_tilt_ = std::clamp(tilt, 0.5, 1.0); }
 
+    /// Extra high-mode level at the top comb, interpolated from zero dB at the
+    /// bottom comb. This changes the plate balance without changing the shared
+    /// output tone filter.
+    void set_high_mode_emphasis_db(double db) {
+        high_mode_emphasis_db_ = std::clamp(db, -18.0, 18.0);
+    }
+
+    /// Velocity-dependent feedback and high-mode emphasis. Both are explicit
+    /// because feedback also changes ring time: zero keeps decay independent
+    /// of velocity; one doubles the top comb's T60 at full velocity. A positive
+    /// value opts into the harder-hit-rings-harder cymbal behavior.
+    void set_velocity_feedback(double amount) {
+        velocity_feedback_ = std::clamp(amount, 0.0, 1.0);
+    }
+    void set_velocity_high_mode_db(double db) {
+        velocity_high_mode_db_ = std::clamp(db, 0.0, 18.0);
+    }
+
+    /// Base cutoff of the extra high-pass stages in the upper half of the comb
+    /// bank. Successive upper modes rise from this corner; zero bypasses them.
+    void set_upper_highpass_hz(double hz) {
+        upper_highpass_hz_ = std::clamp(hz, 0.0, 8000.0);
+    }
+
     /// How far the combs are spread from unison (0) to their full plate ratios
     /// (1).
     void set_spread(double amount) { spread_ = std::clamp(amount, 0.0, 1.0); }
@@ -92,12 +118,35 @@ public:
     void set_tone_hz(double hz) { tone_hz_ = std::clamp(hz, 500.0, 20000.0); }
     void set_low_cut_hz(double hz) { low_cut_hz_ = std::clamp(hz, 20.0, 2000.0); }
 
-    /// How much successive hits differ, 0 (bit-identical) to 1.
-    void set_variation(double amount) { variation_ = std::clamp(amount, 0.0, 1.0); }
+    /// How much successive excitations differ, 0 (bit-identical) to 1.
+    ///
+    /// This is a convenience over `set_hit_life()`, not a separate policy: it
+    /// selects one of the two body-preserving modes, because a cymbal that
+    /// reset its body on every hit would cut its own ring off.
+    void set_variation(double amount) {
+        variation_ = std::clamp(amount, 0.0, 1.0);
+        set_hit_life(variation_ > 0.0
+                         ? HitLifeMode::advancing_seed_preserved_body
+                         : HitLifeMode::fixed_seed_preserved_body);
+    }
+
+    void set_hit_life(HitLifeMode mode) { hit_life_.set_mode(mode); }
+    HitLifeMode hit_life() const { return hit_life_.mode(); }
 
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {
@@ -107,6 +156,9 @@ protected:
         const int longest = static_cast<int>(sample_rate / 40.0) + 4;
         for (auto& comb : combs_) comb.prepare(longest);
         for (auto& damper : dampers_) damper.prepare(static_cast<float>(sample_rate));
+        for (auto& highpass : upper_highpasses_) {
+            highpass.prepare(static_cast<float>(sample_rate));
+        }
         shifter_.set_sample_rate(sample_rate);
         tone_.prepare(static_cast<float>(sample_rate));
         low_cut_.prepare(static_cast<float>(sample_rate));
@@ -114,15 +166,11 @@ protected:
     }
 
     void on_reset() override {
-        for (auto& comb : combs_) comb.reset();
-        for (auto& damper : dampers_) damper.reset();
+        reset_dsp_memory();
         strike_env_.reset();
-        shifter_.reset();
-        tone_.reset();
-        low_cut_.reset();
         output_.reset();
         noise_.reset();
-        seed_advance_ = 0;
+        hit_life_.reset();
         level_ = 0.0;
         strike_phase_ = 0.0;
     }
@@ -131,17 +179,18 @@ protected:
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         const double brightness = response.brightness_scale(velocity);
+        velocity_ = velocity;
 
-        // Variation advances the seed per hit, so two crashes differ; at zero
-        // the seed is fixed and the voice is reproducible.
-        if (variation_ > 0.0) {
-            ++seed_advance_;
-            noise_.set_seed(NoiseSource::default_seed +
-                            static_cast<std::uint32_t>(seed_advance_ * 2654435761u));
-        } else {
-            noise_.set_seed(NoiseSource::default_seed);
+        const auto life = hit_life_.trigger(NoiseSource::default_seed);
+        if (life.reset_dsp_state) {
+            reset_dsp_memory();
+            output_.reset_nonlinear_state();
         }
-        noise_.reset();
+        if (life.reseed_excitation) {
+            noise_.set_seed(life.seed);
+            noise_.reset();
+        }
+        output_.trigger();
 
         update_combs();
         shifter_.set_shift_hz(shift_hz_);
@@ -157,7 +206,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return strike_env_.is_active() || level_ > kSilenceLevel;
+        return strike_env_.is_active() || level_ > kSilenceLevel ||
+               output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -183,10 +233,15 @@ protected:
                 const auto index = static_cast<std::size_t>(c);
                 const float delayed =
                     combs_[index].read(static_cast<float>(delay_samples_[index]));
-                const float damped = dampers_[index].process_lowpass(delayed);
+                float damped = dampers_[index].process_lowpass(delayed);
+                if (c >= kUpperCombFirst) {
+                    const float highpassed =
+                        upper_highpasses_[index].process_highpass(damped);
+                    if (upper_highpass_hz_ > 0.0) damped = highpassed;
+                }
                 combs_[index].push(static_cast<float>(
                     excitation + static_cast<double>(damped) * feedback_[index]));
-                summed += static_cast<double>(delayed);
+                summed += static_cast<double>(delayed) * mode_gain_[index];
             }
             summed /= static_cast<double>(comb_count);
 
@@ -211,6 +266,15 @@ private:
     static constexpr double kSilenceLevel = 1e-5;
     static constexpr double kLevelDecay = 0.99995;
 
+    void reset_dsp_memory() {
+        for (auto& comb : combs_) comb.reset();
+        for (auto& damper : dampers_) damper.reset();
+        for (auto& highpass : upper_highpasses_) highpass.reset();
+        shifter_.reset();
+        tone_.reset();
+        low_cut_.reset();
+    }
+
     void update_combs() {
         for (int c = 0; c < comb_count; ++c) {
             const auto index = static_cast<std::size_t>(c);
@@ -230,20 +294,44 @@ private:
             // different comb frequencies.) The modal tilt sits on top of it.
             const double trips = std::max(0.001 * decay_ms_ * f, 1.0);
             const double tilt = std::pow(decay_tilt_, static_cast<double>(c));
+            const double upper_position =
+                static_cast<double>(c) / static_cast<double>(comb_count - 1);
+            const double velocity_ring =
+                1.0 + velocity_feedback_ * velocity_ * upper_position;
             feedback_[index] =
-                std::min(std::pow(10.0, -3.0 / (trips * tilt)), 0.9995);
+                std::min(std::pow(10.0, -3.0 / (trips * tilt * velocity_ring)),
+                         0.9995);
+
+            mode_gain_[index] = std::pow(
+                10.0, (high_mode_emphasis_db_ +
+                       velocity_high_mode_db_ * velocity_) *
+                          upper_position / 20.0);
 
             // Higher combs are damped harder in the loop, so the wash darkens
             // as it decays instead of staying uniformly bright.
             const double corner =
                 std::min(0.45 * sample_rate(), 16000.0 * std::pow(0.72, static_cast<double>(c)));
             dampers_[index].set_cutoff(static_cast<float>(corner));
+            if (c >= kUpperCombFirst) {
+                const double highpass_corner =
+                    std::min(0.45 * sample_rate(),
+                             std::max(upper_highpass_hz_, 1.0) *
+                                 std::pow(1.35, static_cast<double>(c - kUpperCombFirst)));
+                upper_highpasses_[index].set_cutoff(
+                    static_cast<float>(highpass_corner));
+            }
         }
     }
+
+    static constexpr int kUpperCombFirst = comb_count / 2;
 
     double tune_hz_ = 320.0;
     double decay_ms_ = 1800.0;
     double decay_tilt_ = 0.93;
+    double high_mode_emphasis_db_ = 0.0;
+    double velocity_feedback_ = 0.35;
+    double velocity_high_mode_db_ = 4.0;
+    double upper_highpass_hz_ = 500.0;
     double spread_ = 1.0;
     double inharmonicity_ = 0.4;
     double shift_hz_ = 45.0;
@@ -255,8 +343,12 @@ private:
     double variation_ = 0.5;
 
     NoiseSource noise_;
+    // Matches the default `variation_` above: a struck cymbal keeps ringing
+    // through the next hit, and successive excitations differ.
+    HitLife hit_life_{HitLifeMode::advancing_seed_preserved_body};
     std::array<DelayLine, comb_count> combs_;
     std::array<TptFilter, comb_count> dampers_;
+    std::array<TptFilter, comb_count> upper_highpasses_;
     DecayEnvelope64 strike_env_;
     FrequencyShifter shifter_;
     TptFilter tone_;
@@ -265,11 +357,12 @@ private:
 
     std::array<double, comb_count> delay_samples_{};
     std::array<double, comb_count> feedback_{};
+    std::array<double, comb_count> mode_gain_{};
 
     double velocity_gain_ = 1.0;
+    double velocity_ = 1.0;
     double level_ = 0.0;
     double strike_phase_ = 0.0;
-    unsigned seed_advance_ = 0;
 };
 
 }  // namespace pulp::signal::drum

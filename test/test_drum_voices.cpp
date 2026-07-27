@@ -11,11 +11,13 @@
 // The lifecycle rules the base class enforces are covered once, in
 // test_drum_kick.cpp, against the kick; the suites here assume them.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/drum/clap.hpp>
+#include <pulp/signal/drum/engine_registry.hpp>
 #include <pulp/signal/drum/hat.hpp>
 #include <pulp/signal/drum/kit.hpp>
 #include <pulp/signal/drum/snare.hpp>
@@ -30,15 +32,37 @@ namespace {
 
 using pulp::signal::NoiseColor;
 using pulp::signal::drum::ClapVoice;
+using pulp::signal::drum::EngineId;
+using pulp::signal::drum::EngineProvenance;
 using pulp::signal::drum::HatVoice;
 using pulp::signal::drum::Kit;
+using pulp::signal::drum::OutputOversampling;
+using pulp::signal::drum::ShellLayer;
 using pulp::signal::drum::SnareVoice;
 using pulp::signal::drum::TomVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
+using pulp::signal::drum::create_engine;
+using pulp::signal::drum::engine_registry;
+using pulp::signal::drum::find_engine;
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kFs = 48000.0;
+
+class LegacyVoice : public Voice {
+protected:
+    void on_prepare(double) override {}
+    void on_reset() override { active_ = false; }
+    void on_note_on(float) override { active_ = true; }
+    bool on_is_active() const override { return active_; }
+    void render_add(float* out, int num_samples) override {
+        for (int i = 0; i < num_samples; ++i) out[i] += 0.25f;
+        active_ = false;
+    }
+
+private:
+    bool active_ = false;
+};
 
 std::vector<float> render(Voice& voice, int num_samples, int block = 64) {
     std::vector<float> out(static_cast<std::size_t>(num_samples), 0.0f);
@@ -51,6 +75,24 @@ std::vector<float> render(Voice& voice, int num_samples, int block = 64) {
 std::vector<float> hit(Voice& voice, float velocity, int num_samples) {
     voice.note_on(velocity);
     return render(voice, num_samples);
+}
+
+struct StereoRender {
+    std::vector<float> left;
+    std::vector<float> right;
+};
+
+StereoRender stereo_hit(Voice& voice, float velocity, int num_samples,
+                        int block = 64) {
+    StereoRender result{
+        std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f),
+        std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f)};
+    voice.note_on(velocity);
+    for (int i = 0; i < num_samples; i += block) {
+        voice.process_stereo(result.left.data() + i, result.right.data() + i,
+                             std::min(block, num_samples - i));
+    }
+    return result;
 }
 
 double peak(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0) {
@@ -69,6 +111,22 @@ double rms(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0
         sum += static_cast<double>(x[i]) * x[i];
     }
     return std::sqrt(sum / static_cast<double>(to - from));
+}
+
+double peak_normalized_difference(const std::vector<float>& a,
+                                  const std::vector<float>& b) {
+    const double a_peak = peak(a);
+    const double b_peak = peak(b);
+    if (a_peak <= 0.0 || b_peak <= 0.0) return 0.0;
+    double sum = 0.0;
+    const auto count = std::min(a.size(), b.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        const double difference =
+            static_cast<double>(a[i]) / a_peak -
+            static_cast<double>(b[i]) / b_peak;
+        sum += difference * difference;
+    }
+    return std::sqrt(sum / static_cast<double>(count));
 }
 
 // Hann-windowed Goertzel amplitude at one frequency.
@@ -309,27 +367,42 @@ TEST_CASE("Velocity shifts the snare toward its wires",
     REQUIRE(high_fraction(loud, 1000.0) > high_fraction(soft, 1000.0) * 1.1);
 }
 
-TEST_CASE("The snare's second lo-fi chain acts only on the wires",
+TEST_CASE("The snare's tone and wire lo-fi chains are independent",
           "[signal][drum][snare]") {
-    // One shared chain cannot crush the wires harder than the shell, which is
-    // a standard sound. The control is that the tone path is untouched.
+    // One shared chain cannot age the pitched shell and wires independently.
+    // Each direction has a negative control so a disconnected setter cannot
+    // satisfy the test merely because the deterministic render repeated.
     SnareVoice voice;
     voice.prepare(kFs);
     voice.set_noise_level(0.0);
     voice.set_snap_level(0.0);
     voice.set_tone_level(1.0);
-    const auto tone_before = hit(voice, 1.0f, 12000);
+    auto reset_hit = [&voice] {
+        voice.reset();
+        return hit(voice, 1.0f, 12000);
+    };
+    const auto tone_before = reset_hit();
 
     voice.noise_lofi().set_bits(3.0);
-    const auto tone_after = hit(voice, 1.0f, 12000);
+    const auto tone_after = reset_hit();
     REQUIRE(tone_before == tone_after);
+
+    voice.tone_lofi().set_bits(3.0);
+    const auto tone_crushed = reset_hit();
+    REQUIRE_FALSE(tone_before == tone_crushed);
 
     voice.set_tone_level(0.0);
     voice.set_noise_level(1.0);
+    voice.tone_lofi().set_bits(24.0);
     voice.noise_lofi().set_bits(24.0);
-    const auto wires_clean = hit(voice, 1.0f, 12000);
+    const auto wires_clean = reset_hit();
+
+    voice.tone_lofi().set_bits(3.0);
+    const auto wires_after_tone_change = reset_hit();
+    REQUIRE(wires_clean == wires_after_tone_change);
+
     voice.noise_lofi().set_bits(3.0);
-    const auto wires_crushed = hit(voice, 1.0f, 12000);
+    const auto wires_crushed = reset_hit();
     REQUIRE_FALSE(wires_clean == wires_crushed);
 }
 
@@ -446,6 +519,36 @@ TEST_CASE("Successive hat hits are not identical", "[signal][drum][hat]") {
     voice.reset();
     const auto fourth = hit(voice, 1.0f, 12000);
     REQUIRE(third == fourth);
+}
+
+TEST_CASE("Physical drum retriggers preserve shared output history",
+          "[signal][drum][retrigger][output]") {
+    auto retrigger_ratio = [](auto& uninterrupted, auto& retriggered,
+                              int lead_samples) {
+        uninterrupted.prepare(kFs);
+        retriggered.prepare(kFs);
+        uninterrupted.note_on(1.0f);
+        retriggered.note_on(1.0f);
+        (void)render(uninterrupted, lead_samples);
+        (void)render(retriggered, lead_samples);
+        retriggered.note_on(1.0f);
+        const auto control = render(uninterrupted, 32);
+        const auto after_retrigger = render(retriggered, 32);
+        const double control_energy = rms(control);
+        INFO("control energy=" << control_energy
+                                << " retrigger energy="
+                                << rms(after_retrigger));
+        REQUIRE(control_energy > 1.0e-6);
+        return rms(after_retrigger) / control_energy;
+    };
+
+    HatVoice hat_control;
+    HatVoice hat_retrigger;
+    REQUIRE(retrigger_ratio(hat_control, hat_retrigger, 1000) > 0.1);
+
+    SnareVoice snare_control;
+    SnareVoice snare_retrigger;
+    REQUIRE(retrigger_ratio(snare_control, snare_retrigger, 1000) > 0.1);
 }
 
 // -- Clap --------------------------------------------------------------------
@@ -625,6 +728,204 @@ TEST_CASE("Alternating polarity flips every other burst",
     REQUIRE(correlation < 0.0);
 }
 
+TEST_CASE("Clap stereo alternates bursts and preserves the mono sum",
+          "[signal][drum][clap][stereo]") {
+    auto configure = [](ClapVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_burst_count(4);
+        voice.set_burst_spacing_ms(12.0);
+        voice.set_burst_decay_ms(3.0);
+        voice.set_burst_falloff(1.0);
+        voice.set_tail_level(0.0);
+        voice.set_gap_jitter(0.0);
+        voice.set_stereo_width(1.0);
+    };
+
+    ClapVoice mono_voice;
+    configure(mono_voice);
+    const auto mono = hit(mono_voice, 1.0f, 6000);
+
+    ClapVoice stereo_voice;
+    configure(stereo_voice);
+    const auto stereo = stereo_hit(stereo_voice, 1.0f, 6000);
+
+    REQUIRE(mono.size() == stereo.left.size());
+    for (std::size_t i = 0; i < mono.size(); ++i) {
+        REQUIRE(stereo.left[i] + stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+    }
+
+    const std::size_t spacing = static_cast<std::size_t>(0.012 * kFs);
+    auto channel_energy = [](const std::vector<float>& channel,
+                             std::size_t burst) {
+        double energy = 0.0;
+        const std::size_t begin = burst * spacing;
+        const std::size_t end = std::min(begin + spacing, channel.size());
+        for (std::size_t i = begin; i < end; ++i)
+            energy += static_cast<double>(channel[i]) * channel[i];
+        return energy;
+    };
+    for (std::size_t burst = 0; burst < 4; ++burst) {
+        const double left = channel_energy(stereo.left, burst);
+        const double right = channel_energy(stereo.right, burst);
+        INFO("burst " << burst);
+        if ((burst & 1u) == 0)
+            REQUIRE(left > right * 100.0);
+        else
+            REQUIRE(right > left * 100.0);
+    }
+}
+
+TEST_CASE("Clap burst panning follows the oversampled audio latency",
+          "[signal][drum][clap][stereo][latency]") {
+    ClapVoice voice;
+    voice.prepare(kFs);
+    voice.set_burst_count(6);
+    voice.set_burst_spacing_ms(1.0);
+    voice.set_burst_decay_ms(0.5);
+    voice.set_burst_falloff(1.0);
+    voice.set_tail_level(0.0);
+    voice.set_gap_jitter(1.0);
+    voice.set_stereo_width(1.0);
+    voice.output().set_oversampling(
+        pulp::signal::drum::OutputOversampling::x4);
+    const auto stereo = stereo_hit(voice, 1.0f, 512);
+
+    double left = 0.0;
+    double right = 0.0;
+    for (std::size_t i = 206; i < 218; ++i) {
+        left += static_cast<double>(stereo.left[i]) * stereo.left[i];
+        right += static_cast<double>(stereo.right[i]) * stereo.right[i];
+    }
+    REQUIRE(right > left * 2.0);
+}
+
+TEST_CASE("Clap stereo keeps its room tail centred",
+          "[signal][drum][clap][stereo]") {
+    ClapVoice voice;
+    voice.prepare(kFs);
+    voice.set_burst_count(1);
+    voice.set_burst_decay_ms(1.0);
+    voice.set_tail_level(1.0);
+    voice.set_tail_decay_ms(300.0);
+    voice.set_stereo_width(1.0);
+
+    const auto stereo = stereo_hit(voice, 1.0f, 12000);
+    const std::size_t tail_begin = static_cast<std::size_t>(0.050 * kFs);
+    double difference = 0.0;
+    double level = 0.0;
+    for (std::size_t i = tail_begin; i < stereo.left.size(); ++i) {
+        difference += std::fabs(static_cast<double>(stereo.left[i]) -
+                                stereo.right[i]);
+        level += std::fabs(static_cast<double>(stereo.left[i])) +
+                 std::fabs(static_cast<double>(stereo.right[i]));
+    }
+    REQUIRE(level > 1.0e-3);
+    REQUIRE(difference < level * 1.0e-4);
+}
+
+TEST_CASE("Centered clap layers do not alter the burst side signal",
+          "[signal][drum][clap][stereo]") {
+    auto render_with_centre = [](double tail, double body) {
+        ClapVoice voice;
+        voice.prepare(kFs);
+        voice.set_burst_count(1);
+        voice.set_burst_decay_ms(20.0);
+        voice.set_tail_level(tail);
+        voice.set_tail_decay_ms(100.0);
+        voice.set_body_level(body);
+        voice.set_body_hz(271.0);
+        voice.set_stereo_width(1.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        return stereo_hit(voice, 1.0f, 4000);
+    };
+
+    const auto burst_only = render_with_centre(0.0, 0.0);
+    const auto layered = render_with_centre(1.0, 0.8);
+    double side_error = 0.0;
+    double side_level = 0.0;
+    for (std::size_t i = 0; i < burst_only.left.size(); ++i) {
+        const double expected =
+            static_cast<double>(burst_only.left[i] - burst_only.right[i]);
+        const double actual =
+            static_cast<double>(layered.left[i] - layered.right[i]);
+        side_error += std::fabs(actual - expected);
+        side_level += std::fabs(expected);
+    }
+    INFO("side error=" << side_error << " side level=" << side_level);
+    REQUIRE(side_level > 1.0e-3);
+    REQUIRE(side_error < side_level * 1.0e-5);
+}
+
+TEST_CASE("Clap burst width carries the fully processed output",
+          "[signal][drum][clap][stereo][output]") {
+    auto configure = [](ClapVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_burst_count(1);
+        voice.set_burst_decay_ms(20.0);
+        voice.set_tail_level(0.0);
+        voice.set_body_level(0.0);
+        voice.set_stereo_width(1.0);
+        voice.output().set_drive(0.8);
+        voice.output().set_fold(0.4);
+        voice.output().lofi().set_bits(5.0);
+        voice.output().lofi().set_hold_rate_hz(12000.0);
+        voice.output().lofi().set_dead_zone(0.05);
+    };
+
+    ClapVoice mono_voice;
+    configure(mono_voice);
+    const auto mono = hit(mono_voice, 1.0f, 4000);
+
+    ClapVoice stereo_voice;
+    configure(stereo_voice);
+    const auto stereo = stereo_hit(stereo_voice, 1.0f, 4000);
+
+    const double processed_peak = peak(mono);
+    for (std::size_t i = 0; i < mono.size(); ++i) {
+        REQUIRE(stereo.left[i] - stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+        REQUIRE(stereo.left[i] + stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+        REQUIRE(std::fabs(stereo.left[i]) <= processed_peak + 1.0e-6);
+        REQUIRE(std::fabs(stereo.right[i]) <= processed_peak + 1.0e-6);
+    }
+}
+
+TEST_CASE("A stereo clap retrigger preserves the burst-side history",
+          "[signal][drum][clap][stereo][output][lifecycle]") {
+    ClapVoice control;
+    ClapVoice retriggered;
+    control.prepare(kFs);
+    retriggered.prepare(kFs);
+    (void)stereo_hit(control, 1.0f, 1000);
+    (void)stereo_hit(retriggered, 1.0f, 1000);
+
+    auto render_current = [](Voice& voice, int num_samples) {
+        StereoRender result{
+            std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f),
+            std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f)};
+        voice.process_stereo(result.left.data(), result.right.data(),
+                             num_samples);
+        return result;
+    };
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render_current(control, 32);
+    const auto after_retrigger = render_current(retriggered, 32);
+    double control_side = 0.0;
+    double retrigger_side = 0.0;
+    for (std::size_t i = 0; i < uninterrupted.left.size(); ++i) {
+        control_side += std::fabs(
+            static_cast<double>(uninterrupted.left[i] - uninterrupted.right[i]));
+        retrigger_side += std::fabs(
+            static_cast<double>(after_retrigger.left[i] -
+                                after_retrigger.right[i]));
+    }
+    REQUIRE(control_side > 1.0e-5);
+    REQUIRE(retrigger_side > control_side * 0.1);
+}
+
 TEST_CASE("A clap renders identically for the same parameters",
           "[signal][drum][clap]") {
     ClapVoice voice;
@@ -668,6 +969,84 @@ TEST_CASE("A snare with a silenced layer still finishes",
         REQUIRE(voice.is_active());
         render(voice, static_cast<int>(kFs));
         INFO("silenced layer index " << silenced);
+        REQUIRE_FALSE(voice.is_active());
+    }
+}
+
+TEST_CASE("The reusable shell block bypasses cleanly and preserves its ring",
+          "[signal][drum][layers][shell]") {
+    ShellLayer shell;
+    shell.prepare(kFs);
+    CHECK(shell.process(0.5) == 0.5);
+
+    shell.set_level(1.0);
+    shell.set_frequency_hz(1000.0);
+    shell.set_resonance(12.0);
+    double ring_energy = 0.0;
+    (void)shell.process(1.0);
+    CHECK(shell.is_ringing());
+    for (int i = 0; i < 2048; ++i) {
+        const double sample = shell.process(0.0);
+        ring_energy += sample * sample;
+    }
+    CHECK(ring_energy > 1.0e-4);
+
+    shell.set_level(0.0);
+    shell.set_level(1.0);
+    CHECK_FALSE(shell.is_ringing());
+    for (int i = 0; i < 512; ++i) {
+        CHECK(shell.process(0.0) == 0.0);
+    }
+
+    shell.reset();
+    CHECK_FALSE(shell.is_ringing());
+    for (int i = 0; i < 512; ++i) {
+        CHECK(shell.process(0.0) == 0.0);
+    }
+}
+
+TEST_CASE("The snare drains its shell resonance after the strike ends",
+          "[signal][drum][snare][shell][lifecycle]") {
+    SnareVoice voice;
+    voice.prepare(kFs);
+    voice.set_tone_level(0.0);
+    voice.set_noise_level(0.0);
+    voice.set_snap_level(1.0);
+    voice.set_snap_decay_ms(0.5);
+    voice.set_shell_level(1.0);
+    voice.set_shell_resonance(30.0);
+    voice.output().set_oversampling(
+        pulp::signal::drum::OutputOversampling::bypass);
+
+    voice.note_on(1.0f);
+    (void)render(voice, 256);
+    REQUIRE(voice.is_active());
+    (void)render(voice, 48000);
+    REQUIRE_FALSE(voice.is_active());
+}
+
+TEST_CASE("The snare drains private lo-fi tails in output bypass mode",
+          "[signal][drum][snare][lofi][lifecycle]") {
+    for (int selected = 0; selected < 2; ++selected) {
+        SnareVoice voice;
+        voice.prepare(kFs);
+        voice.set_tone_level(selected == 0 ? 1.0 : 0.0);
+        voice.set_noise_level(selected == 1 ? 1.0 : 0.0);
+        voice.set_snap_level(0.0);
+        voice.set_tone_decay_ms(20.0);
+        voice.set_noise_decay_ms(20.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        if (selected == 0)
+            voice.tone_lofi().set_hold_rate_hz(1.0);
+        else
+            voice.noise_lofi().set_hold_rate_hz(1.0);
+
+        voice.note_on(1.0f);
+        (void)render(voice, 4800);
+        INFO("private lo-fi path " << selected);
+        REQUIRE(voice.is_active());
+        (void)render(voice, 48000);
         REQUIRE_FALSE(voice.is_active());
     }
 }
@@ -717,7 +1096,9 @@ TEST_CASE("The tom's bend depth sets where the dive starts",
         voice.set_click_level(0.0);
         voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
         const auto y = hit(voice, 1.0f, 24000);
-        return crossing_rate(y, 0, 960);
+        const auto latency =
+            static_cast<std::size_t>(voice.output().latency_samples());
+        return crossing_rate(y, latency, latency + 960);
     };
 
     REQUIRE(opening(3.0) > opening(1.0) * 2.0);
@@ -739,7 +1120,10 @@ TEST_CASE("Velocity deepens the tom's dive rather than only raising its level",
 
     const auto soft = hit(voice, 0.15f, 24000);
     const auto loud = hit(voice, 1.0f, 24000);
-    REQUIRE(crossing_rate(loud, 0, 960) > crossing_rate(soft, 0, 960) * 1.4);
+    const auto latency =
+        static_cast<std::size_t>(voice.output().latency_samples());
+    REQUIRE(crossing_rate(loud, latency, latency + 960) >
+            crossing_rate(soft, latency, latency + 960) * 1.4);
 
     // ...and both land on the same tuning, because velocity moves the dive and
     // not the pitch it arrives at.
@@ -826,7 +1210,118 @@ TEST_CASE("The tom stays finite at extreme settings", "[signal][drum][tom]") {
     }
 }
 
+TEST_CASE("The one tom topology ships all named clean voicings",
+          "[signal][drum][tom][preset]") {
+    REQUIRE(TomVoice::presets.size() == 8);
+
+    std::vector<std::vector<float>> renders;
+    for (const auto& preset : TomVoice::presets) {
+        INFO("preset " << preset.name);
+        REQUIRE_FALSE(preset.name.empty());
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.apply_preset(preset.id);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        auto y = hit(voice, 1.0f, 24000);
+        REQUIRE(peak(y) > 1e-4);
+        for (float sample : y) REQUIRE(std::isfinite(sample));
+        renders.push_back(std::move(y));
+    }
+
+    for (std::size_t i = 1; i < renders.size(); ++i) {
+        REQUIRE_FALSE(renders[i] == renders[i - 1]);
+    }
+}
+
+TEST_CASE("Low, mid, and high tom presets settle in pitch order",
+          "[signal][drum][tom][preset]") {
+    auto settled = [](TomVoice::Preset preset) {
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.apply_preset(preset);
+        voice.set_noise_balance(0.0);
+        voice.set_click_level(0.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 24000);
+        return period_frequency(y, 9600, 22000);
+    };
+
+    const double low = settled(TomVoice::Preset::low_tom);
+    const double mid = settled(TomVoice::Preset::mid_tom);
+    const double high = settled(TomVoice::Preset::hi_tom);
+    REQUIRE(low < mid);
+    REQUIRE(mid < high);
+}
+
+TEST_CASE("Tom preset application allocates nothing on the audio thread",
+          "[signal][drum][tom][rt-safety]") {
+    TomVoice voice;
+    voice.prepare(kFs);
+    std::vector<float> buffer(256, 0.0f);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (const auto& preset : TomVoice::presets) {
+            voice.apply_preset(preset.id);
+            voice.note_on(0.8f);
+            for (int block = 0; block < 4; ++block) {
+                std::fill(buffer.begin(), buffer.end(), 0.0f);
+                voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            }
+            voice.reset();
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
+
 // -- Kit ---------------------------------------------------------------------
+
+TEST_CASE("A kit publishes and enforces one output latency",
+          "[signal][drum][kit][latency]") {
+    SnareVoice snare;
+    HatVoice hat;
+    snare.output().set_oversampling(OutputOversampling::bypass);
+
+    Kit kit;
+    kit.add_voice(&snare, 38);
+    kit.add_voice(&hat, 42);
+    REQUIRE(kit.latency_samples() == 32);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+    REQUIRE(hat.latency_samples() == kit.latency_samples());
+
+    kit.set_output_oversampling(OutputOversampling::x4);
+    REQUIRE(kit.latency_samples() == 48);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+    REQUIRE(hat.latency_samples() == kit.latency_samples());
+
+    // A caller retaining the concrete voice can still reach its output stage,
+    // but the kit restores its own summed-path contract before the next hit.
+    snare.output().set_oversampling(OutputOversampling::bypass);
+    kit.trigger(38, 1.0f);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+}
+
+TEST_CASE("A legacy custom voice keeps the kit source-compatible and aligned",
+          "[signal][drum][kit][latency][compatibility]") {
+    LegacyVoice legacy;
+    SnareVoice snare;
+    Kit kit;
+    kit.add_voice(&snare, 38);
+    REQUIRE(kit.latency_samples() == 32);
+
+    kit.add_voice(&legacy, 60);
+    REQUIRE(legacy.latency_samples() == 0);
+    REQUIRE(legacy.output_oversampling() == OutputOversampling::bypass);
+    REQUIRE(kit.output_oversampling() == OutputOversampling::bypass);
+    REQUIRE(kit.latency_samples() == 0);
+    REQUIRE(snare.latency_samples() == 0);
+
+    kit.trigger(60, 1.0f);
+    std::vector<float> out(16, 0.0f);
+    kit.process(out.data(), static_cast<int>(out.size()));
+    REQUIRE(peak(out) > 0.0);
+}
 
 TEST_CASE("A voice registered after the kit was prepared still runs at the "
           "kit's rate",
@@ -1057,6 +1552,28 @@ TEST_CASE("The voices and the kit allocate nothing on the audio thread",
     REQUIRE(allocations == 0);
 }
 
+TEST_CASE("Stereo drum rendering and choking allocate nothing",
+          "[signal][drum][stereo][rt-safety]") {
+    ClapVoice clap;
+    clap.prepare(kFs);
+    clap.set_burst_count(ClapVoice::max_bursts);
+    std::vector<float> left(1024, 0.0f);
+    std::vector<float> right(1024, 0.0f);
+
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        clap.note_on(1.0f);
+        clap.process_stereo(left.data(), right.data(),
+                            static_cast<int>(left.size()));
+        clap.choke(4.0f);
+        clap.process_stereo(left.data(), right.data(),
+                            static_cast<int>(left.size()));
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
+
 TEST_CASE("Every voice stays finite at extreme settings",
           "[signal][drum]") {
     SnareVoice snare;
@@ -1096,5 +1613,84 @@ TEST_CASE("Every voice stays finite at extreme settings",
             for (float v : y) REQUIRE(std::isfinite(v));
             REQUIRE(peak(y) < 20.0);
         }
+    }
+}
+
+TEST_CASE("The engine registry has stable unique names and an explicit DX7 hold",
+          "[signal][drum][registry]") {
+    for (std::size_t i = 0; i < engine_registry.size(); ++i) {
+        const auto& engine = engine_registry[i];
+        REQUIRE_FALSE(engine.name.empty());
+        REQUIRE_FALSE(engine.display_name.empty());
+        REQUIRE_FALSE(engine.lineage.empty());
+        REQUIRE(engine.velocity_changes_timbre == engine.available);
+        REQUIRE(find_engine(engine.name) == &engine);
+        for (std::size_t j = i + 1; j < engine_registry.size(); ++j) {
+            REQUIRE(engine.name != engine_registry[j].name);
+            REQUIRE(engine.id != engine_registry[j].id);
+        }
+    }
+
+    REQUIRE(find_engine("not-a-drum") == nullptr);
+    const auto* held = find_engine("dx7.msfa");
+    REQUIRE(held != nullptr);
+    REQUIRE_FALSE(held->available);
+    REQUIRE_FALSE(held->velocity_changes_timbre);
+    REQUIRE(held->provenance == EngineProvenance::license_hold);
+    REQUIRE(create_engine(EngineId::dx7_msfa) == nullptr);
+}
+
+TEST_CASE("Every available engine changes timbre with velocity without hidden decay",
+          "[signal][drum][registry][velocity]") {
+    constexpr int render_samples = static_cast<int>(2.0 * kFs);
+    for (const auto& engine : engine_registry) {
+        if (!engine.available) continue;
+        INFO("engine " << engine.name);
+
+        auto soft_voice = create_engine(engine.id);
+        auto loud_voice = create_engine(engine.id);
+        REQUIRE(soft_voice != nullptr);
+        REQUIRE(loud_voice != nullptr);
+        soft_voice->prepare(kFs);
+        loud_voice->prepare(kFs);
+        const auto soft = hit(*soft_voice, 0.2f, render_samples);
+        const auto loud = hit(*loud_voice, 1.0f, render_samples);
+        const double soft_peak = peak(soft);
+        const double loud_peak = peak(loud);
+        REQUIRE(soft_peak > 1.0e-6);
+        REQUIRE(loud_peak > 1.0e-6);
+
+        // Peak normalization removes velocity gain. What remains must still
+        // differ, proving pitch/brightness/noise balance reaches the render.
+        REQUIRE(peak_normalized_difference(soft, loud) > 1.0e-4);
+
+        if (!engine.velocity_may_change_decay) {
+            const int soft_length =
+                audible_length(soft, soft_peak * 1.0e-3);
+            const int loud_length =
+                audible_length(loud, loud_peak * 1.0e-3);
+            const int tolerance =
+                std::max(256, std::max(soft_length, loud_length) / 10);
+            REQUIRE(std::abs(soft_length - loud_length) <= tolerance);
+        }
+    }
+}
+
+TEST_CASE("Every available registry entry constructs a finite audible voice",
+          "[signal][drum][registry]") {
+    for (const auto& engine : engine_registry) {
+        auto voice = create_engine(engine.id);
+        INFO(engine.name);
+        if (!engine.available) {
+            REQUIRE(voice == nullptr);
+            continue;
+        }
+
+        REQUIRE(voice != nullptr);
+        REQUIRE(voice->latency_samples() == 32);
+        voice->prepare(kFs);
+        const auto y = hit(*voice, 0.8f, 4096);
+        for (float sample : y) REQUIRE(std::isfinite(sample));
+        REQUIRE(peak(y) > 1e-6);
     }
 }

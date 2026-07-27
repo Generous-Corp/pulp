@@ -118,6 +118,7 @@ std::pair<int, int> derive_bus_arity(const SignalGraph& graph) {
     }
     return {input_channels, output_channels};
 }
+
 } // namespace
 
 LowerabilityProof lowerability_of(
@@ -219,10 +220,11 @@ LowerabilityProof lowerability_of(
         }
     }
 
-    if (!signal_graph_topology_executor_eligible(nodes, connections)) {
+    if (!validate_signal_graph_executor_topology(nodes, connections)) {
         proof.reason = LowerRejectReason::NotExecutorEligible;
         proof.message =
-            "graph is outside the routed executor's bit-exact subset; refusing to bake";
+            "graph is outside the routed executor's supported topology or resource "
+            "limits; refusing to bake";
         return proof;
     }
 
@@ -266,11 +268,8 @@ static LowerResult bake_impl(const SignalGraph& graph,
         return result;
     }
 
-    // Accepted: capture the plan into owned storage. Copy each node's identity +
-    // arity (the snapshot builder resolves connections by NodeId and reads ports
-    // off these specs), the gain for each Gain node via the public node_gain()
-    // accessor, and the connection list verbatim. Derive the bus arity from the
-    // AudioInput/AudioOutput nodes.
+    // Capture owned node specs, Gain values, connections, and bus arity for the
+    // immutable baked plan.
     std::vector<GraphNode> nodes;
     nodes.reserve(graph.nodes().size());
     // For each lowerable Custom node, capture a COPY of the live resolved process
@@ -283,6 +282,7 @@ static LowerResult bake_impl(const SignalGraph& graph,
     // contents) would survive into the baked stream, breaking the fresh-stream
     // contract documented in the header.
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+    std::unordered_map<NodeId, int> custom_latency_samples;
     std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles;
     // Bake-layer param-injection bindings for any lowerable custom node whose
     // type declared baked_params + process_instance_baked_param. The bound
@@ -300,12 +300,12 @@ static LowerResult bake_impl(const SignalGraph& graph,
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
         } else if (src.type == NodeType::Custom) {
+            const CustomNodeType* type = graph.custom_node_type(
+                src.custom_type_id, src.custom_type_version);
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
                 custom_processors[src.id] = *fn;
             }
             if (src.custom_instance) {
-                const CustomNodeType* type =
-                    graph.custom_node_type(src.custom_type_id, src.custom_type_version);
                 const std::vector<std::uint8_t>* restore_state = nullptr;
                 if (restore_states) {
                     const auto restore_it = restore_states->find(src.id);
@@ -338,11 +338,16 @@ static LowerResult bake_impl(const SignalGraph& graph,
             }
             if (const CustomNodeParamProcessFn* pfn =
                     graph.live_custom_param_processor(src.id)) {
-                if (const CustomNodeType* type = graph.custom_node_type(
-                        src.custom_type_id, src.custom_type_version)) {
+                if (type) {
                     param_bindings[src.id] =
                         BakedCustomParamBinding{*pfn, type->baked_params};
                 }
+            }
+            // Mirror the live rule: attach latency only when a plain or
+            // baked-param callback will actually execute.
+            if (type && (custom_processors.contains(src.id) ||
+                         param_bindings.contains(src.id))) {
+                custom_latency_samples[src.id] = type->latency_samples;
             }
         }
         nodes.push_back(std::move(n));
@@ -353,7 +358,8 @@ static LowerResult bake_impl(const SignalGraph& graph,
         std::move(nodes), std::move(conns),
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
-        "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors),
+        "Baked Graph", "com.pulp.baked-graph",
+        std::move(custom_processors), std::move(custom_latency_samples),
         std::move(custom_lifecycles), std::move(param_bindings));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
@@ -579,17 +585,24 @@ BakedGraphProcessor::BakedGraphProcessor(
     std::string name,
     std::string bundle_id,
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors,
+    std::unordered_map<NodeId, int> custom_latency_samples,
     std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles,
     std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       custom_processors_(std::move(custom_processors)),
+      custom_latency_samples_(std::move(custom_latency_samples)),
       custom_lifecycles_(std::move(custom_lifecycles)),
       param_bindings_(std::move(param_bindings)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
       input_channels_(input_channels),
       output_channels_(output_channels) {
+    latency_samples_ = calculate_lowerable_graph_latency_samples(nodes_, conns_,
+        [this](NodeId id) {
+            const auto it = custom_latency_samples_.find(id);
+            return it == custom_latency_samples_.end() ? 0 : it->second;
+        });
     // One single-writer mailbox per param-declaring node, allocated here (not in
     // prepare()) so a control-side claim/inject is valid before the first
     // prepare() and survives every re-prepare — the mailbox is fixed-capacity, so
@@ -666,19 +679,24 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     // plan, resolving each Gain node to its owned atomic and each lowerable Custom
     // node to its captured process callback. No Plugin nodes exist in the lowerable
     // subset, so plugin_for always yields nullptr.
-    if (!build_executor_snapshot(
-            nodes_, conns_,
-            [this](NodeId id) -> std::atomic<float>* {
-                auto it = gain_index_.find(id);
-                return it == gain_index_.end() ? nullptr : gains_[it->second].get();
-            },
-            [](NodeId) -> PluginSlot* { return nullptr; },
-            plugin_ctx_, plugin_scratch_, snapshot_, /*parallel_safe=*/false,
-            /*load_for=*/{}, &custom_ctx_,
-            [this](NodeId id) -> const CustomNodeProcessFn* {
-                auto it = custom_processors_.find(id);
-                return it == custom_processors_.end() ? nullptr : &it->second;
-            })) {
+    const ExecutorSnapshotBinders binders{
+        .gain_for = [this](NodeId id) -> std::atomic<float>* {
+            auto it = gain_index_.find(id);
+            return it == gain_index_.end() ? nullptr : gains_[it->second].get();
+        },
+        .plugin_for = [](NodeId) -> PluginSlot* { return nullptr; },
+        .custom_for = [this](NodeId id) -> const CustomNodeProcessFn* {
+            auto it = custom_processors_.find(id);
+            return it == custom_processors_.end() ? nullptr : &it->second;
+        },
+        .custom_latency_for = [this](NodeId id) {
+            const auto it = custom_latency_samples_.find(id);
+            return it == custom_latency_samples_.end() ? 0 : it->second;
+        },
+    };
+    if (!build_executor_snapshot(nodes_, conns_, binders, plugin_ctx_,
+                                 plugin_scratch_, snapshot_,
+                                 /*parallel_safe=*/false, &custom_ctx_)) {
         return;
     }
 

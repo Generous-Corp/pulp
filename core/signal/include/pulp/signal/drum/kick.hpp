@@ -2,6 +2,7 @@
 
 #include <pulp/signal/bridged_t_resonator.hpp>
 #include <pulp/signal/decay_envelope.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/noise_source.hpp>
@@ -85,8 +86,11 @@ public:
     void set_body_decay_ms(double ms) { body_decay_ms_ = std::clamp(ms, 10.0, 4000.0); }
 
     /// Depth of the downward pitch sweep, in octaves, and how quickly it
-    /// settles. Applies to the oscillator body; the circuit body produces its
-    /// sweep from the network and ignores these.
+    /// settles. These apply to the oscillator body only. The resonant body is
+    /// struck at a fixed frequency, and the circuit body produces its sweep
+    /// from the network; both ignore these. The velocity bend is carried on
+    /// the same term, so it too reaches the oscillator body alone -- which is
+    /// why the Forge catalog declares neither control on the other bodies.
     ///
     /// Octaves rather than a linear multiplier, so the sweep composes
     /// additively with the velocity bend, which is also in octaves. A depth
@@ -114,6 +118,17 @@ public:
 
     /// The saturation and degradation stage the voice ends with.
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
     // -- Oscillator-body controls -------------------------------------------
 
@@ -176,6 +191,13 @@ public:
     /// sigh is emergent rather than scripted, and is a usable sound in itself.
     void set_circuit_sigh(bool enabled) { circuit_.set_sigh_enabled(enabled); }
 
+    /// Select whether circuit retriggers restart, vary their excitation, or
+    /// preserve the network memory. The authentic default is preserved_state.
+    void set_circuit_hit_life(HitLifeMode mode) {
+        circuit_life_.set_mode(mode);
+    }
+    HitLifeMode circuit_hit_life() const { return circuit_life_.mode(); }
+
 protected:
     void on_prepare(double sample_rate) override {
         noise_.prepare(sample_rate);
@@ -204,6 +226,7 @@ protected:
         circuit_.set_attack_shunt(false);
         output_.reset();
         noise_.reset();
+        circuit_life_.reset();
         shaper_.reset();
         tone_.reset();
         phase_ = 0.0;
@@ -216,14 +239,26 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        HitLifeDecision circuit_life;
+        if (body_mode_ == KickBody::circuit)
+            circuit_life =
+                circuit_life_.trigger(NoiseSource::default_seed);
+
+        if (body_mode_ == KickBody::oscillator ||
+            (body_mode_ == KickBody::circuit &&
+             circuit_life.reset_dsp_state))
+            output_.reset_nonlinear_state();
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         bend_octaves_ = pitch_sweep_oct_ + response.bend(velocity);
         brightness_ = response.brightness_scale(velocity);
 
-        // Reseeding here is what makes a hit reproducible: the same parameters
-        // and velocity render the same samples every time.
-        noise_.reset();
+        if (body_mode_ != KickBody::circuit) {
+            // Non-circuit bodies intentionally restart their procedural
+            // excitation on every hit.
+            noise_.reset();
+        }
 
         pitch_env_.set_decay_time_constant_ms(pitch_sweep_ms_);
         pitch_env_.set_attack_ms(0.0);
@@ -255,9 +290,18 @@ protected:
                 break;
 
             case KickBody::circuit:
-                // The network is deliberately not reset: a trigger adds energy
-                // to a body that may still be ringing, which is what stops
-                // repeated hits sounding identical and mechanical.
+                // The authentic default does not reset the network: a trigger
+                // adds energy to a body that may still be ringing. Fixed and
+                // advancing modes explicitly restart it.
+                if (circuit_life.reset_dsp_state) {
+                    reset_circuit_memory();
+                    if (circuit_life.reseed_excitation) {
+                        noise_.set_seed(circuit_life.seed);
+                        noise_.reset();
+                    }
+                }
+                circuit_excitation_gain_ =
+                    1.0 + 0.03 * static_cast<double>(noise_.white());
                 pulse_remaining_ = std::max(
                     1, static_cast<int>(0.001 * circuit_pulse_ms_ * sample_rate()));
                 shunt_remaining_ =
@@ -270,12 +314,14 @@ protected:
     bool on_is_active() const override {
         if (body_mode_ == KickBody::circuit) {
             return body_env_.is_active() || layers_active() ||
-                   pulse_remaining_ > 0 || ring_level_ > kRingSilenceLevel;
+                   pulse_remaining_ > 0 || ring_level_ > kRingSilenceLevel ||
+                   output_.has_tail();
         }
         if (body_mode_ == KickBody::resonant) {
-            return resonator_.is_ringing() || layers_active() || excite_remaining_ > 0;
+            return resonator_.is_ringing() || layers_active() || excite_remaining_ > 0 ||
+                   output_.has_tail();
         }
-        return body_env_.is_active() || layers_active();
+        return body_env_.is_active() || layers_active() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -302,6 +348,17 @@ protected:
     }
 
 private:
+    void reset_circuit_memory() {
+        circuit_.reset();
+        circuit_.set_attack_shunt(false);
+        shaper_.reset();
+        tone_.reset();
+        feedback_z_ = 0.0;
+        ring_level_ = 0.0;
+        pulse_remaining_ = 0;
+        shunt_remaining_ = 0;
+    }
+
     double render_oscillator_body(double body_env) {
         const double pitch_env = pitch_env_.process();
         const double f = tune_hz_ * std::exp2(bend_octaves_ * pitch_env);
@@ -352,7 +409,8 @@ private:
 
         const double drive_volts =
             kPulseVoltsMin + circuit_drive_ * (kPulseVoltsMax - kPulseVoltsMin);
-        const auto ring = circuit_.process(diode * drive_volts, feedback_z_, 0.0);
+        const auto ring = circuit_.process(
+            diode * drive_volts * circuit_excitation_gain_, feedback_z_, 0.0);
 
         // One sample of delay breaks the delay-free loop. The sign is negative
         // because the network already subtracts its feedback injection, so a
@@ -435,6 +493,7 @@ private:
     SubLayer sub_;
     TwoPoleResonator resonator_;
     BridgedTResonator circuit_;
+    HitLife circuit_life_{HitLifeMode::preserved_state};
     OutputStage output_;
 
     double velocity_gain_ = 1.0;
@@ -448,6 +507,7 @@ private:
     double mod_phase_ = 0.0;
     double feedback_z_ = 0.0;
     double ring_level_ = 0.0;
+    double circuit_excitation_gain_ = 1.0;
     int pulse_remaining_ = 0;
     int shunt_remaining_ = 0;
     int excite_remaining_ = 0;

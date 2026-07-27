@@ -4,12 +4,20 @@
 #include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/karplus_strong.hpp>
+#include <pulp/signal/lowpass_gate.hpp>
 #include <pulp/signal/noise_source.hpp>
 
 #include <algorithm>
 #include <cmath>
 
 namespace pulp::signal::drum {
+
+enum class StringModulation {
+    none,
+    fm,
+    ring,
+    sync,
+};
 
 /// A plucked or struck string, as a percussion voice.
 ///
@@ -88,31 +96,89 @@ public:
     /// not sound like one sample fired twice.
     void set_restart_on_hit(bool restart) { restart_on_hit_ = restart; }
 
+    /// Optional post-body modulation. `mix` crossfades from the unmodified
+    /// string to the selected mode. FM bends the delay length, Ring multiplies
+    /// by a sine, and Sync substitutes a slave saw reset by the string pitch.
+    /// The independent FM path is armed on the next hit after FM is selected;
+    /// this keeps the default and non-FM realtime paths at one string model.
+    void set_modulation(StringModulation mode) {
+        if (modulation_ == StringModulation::fm &&
+            mode != StringModulation::fm) {
+            fm_string_.reset();
+            fm_path_active_ = false;
+        }
+        modulation_ = mode;
+    }
+    void set_modulation_mix(double mix) {
+        modulation_mix_ = std::clamp(mix, 0.0, 1.0);
+    }
+    void set_modulation_ratio(double ratio) {
+        modulation_ratio_ = std::clamp(ratio, 0.125, 16.0);
+    }
+    void set_fm_depth_octaves(double octaves) {
+        fm_depth_octaves_ = std::clamp(octaves, 0.0, 2.0);
+        if (fm_depth_octaves_ == 0.0)
+            fm_string_.set_frequency(base_frequency_);
+    }
+
+    /// Amount of the lowpass-gate stage after modulation. Zero is a transparent
+    /// bypass; one applies the full coupled level/brightness decay.
+    void set_lpg_amount(double amount) { lpg_amount_ = std::clamp(amount, 0.0, 1.0); }
+    LowpassGate& gate() { return gate_; }
+
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {
         noise_.prepare(sample_rate);
-        string_.prepare(sample_rate, 30.0);
+        // FM can bend the 30 Hz public tuning floor down to the Karplus
+        // primitive's 20 Hz limit, so both paths need storage for that delay.
+        string_.prepare(sample_rate, 20.0);
+        fm_string_.prepare(sample_rate, 20.0);
         exciter_env_.set_sample_rate(sample_rate);
+        gate_env_.set_sample_rate(sample_rate);
+        sync_env_.set_sample_rate(sample_rate);
+        gate_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
     }
 
     void on_reset() override {
         string_.reset();
+        fm_string_.reset();
+        fm_path_active_ = false;
         exciter_env_.reset();
+        gate_env_.reset();
+        sync_env_.reset();
+        gate_.reset();
         output_.reset();
         noise_.reset();
+        modulation_phase_ = 0.0;
+        master_phase_ = 0.0;
+        sync_phase_ = 0.0;
     }
 
     void on_note_on(float velocity) override {
+        if (restart_on_hit_) output_.reset_nonlinear_state();
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
 
         noise_.reset();
-        string_.set_frequency(tune_hz_ * std::exp2(response.bend(velocity)));
+        base_frequency_ = tune_hz_ * std::exp2(response.bend(velocity));
+        string_.set_frequency(base_frequency_);
         string_.set_decay_seconds(decay_s_);
         string_.set_damping(damping_);
         string_.set_stiffness(stiffness_);
@@ -122,24 +188,114 @@ protected:
         string_.set_dynamic_bandwidth_hz(
             brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
         string_.pluck(restart_on_hit_);
+        const bool was_fm_path_active = fm_path_active_;
+        fm_path_active_ = modulation_ == StringModulation::fm;
+        if (fm_path_active_) {
+            if (!was_fm_path_active) fm_string_.reset();
+            fm_string_.set_frequency(base_frequency_);
+            fm_string_.set_decay_seconds(decay_s_);
+            fm_string_.set_damping(damping_);
+            fm_string_.set_stiffness(stiffness_);
+            fm_string_.set_pluck_position(pluck_position_);
+            fm_string_.set_pick_direction(pick_direction_);
+            fm_string_.set_dynamic_bandwidth_hz(
+                brightness_hz_ *
+                static_cast<double>(response.brightness_scale(velocity)));
+            fm_string_.pluck(restart_on_hit_);
+        } else if (was_fm_path_active) {
+            fm_string_.reset();
+        }
 
         exciter_env_.set_attack_ms(0.0);
         exciter_env_.set_decay_time_constant_ms(exciter_ms_);
         exciter_env_.trigger();
+
+        gate_env_.reset();
+        gate_env_.set_attack_ms(0.5);
+        gate_env_.set_decay_t60_ms(decay_s_ * 1000.0);
+        gate_env_.trigger();
+        sync_env_.reset();
+        sync_env_.set_attack_ms(0.0);
+        sync_env_.set_decay_t60_ms(decay_s_ * 1000.0);
+        sync_env_.trigger();
+        modulation_phase_ = 0.0;
+        master_phase_ = 0.0;
+        sync_phase_ = 0.0;
     }
 
-    bool on_is_active() const override { return string_.is_active(); }
+    bool on_is_active() const override {
+        return string_.is_active() ||
+               (fm_path_active_ && fm_string_.is_active()) ||
+               output_.has_tail();
+    }
 
     void render_add(float* out, int num_samples) override {
         for (int i = 0; i < num_samples; ++i) {
+            modulation_phase_ +=
+                base_frequency_ * modulation_ratio_ / sample_rate();
+            if (modulation_phase_ >= 1.0) {
+                modulation_phase_ -= std::floor(modulation_phase_);
+            }
+            const double modulator =
+                std::sin(2.0 * 3.14159265358979323846 * modulation_phase_);
+            if (fm_path_active_ && modulation_ == StringModulation::fm &&
+                fm_depth_octaves_ > 0.0) {
+                fm_string_.set_modulated_frequency(
+                    base_frequency_ *
+                    std::exp2(fm_depth_octaves_ * modulator));
+            }
+
+            // process() rather than white(): the pluck is this voice's only
+            // noise consumer, so routing it through the colour filter is what
+            // makes set_noise_color() audible at all. A darker excitation
+            // reaches the string with less energy above its own brightness
+            // corner, which is the difference between a pick and a thumb.
             const double burst = exciter_env_.is_active()
-                                     ? static_cast<double>(noise_.white()) *
+                                     ? static_cast<double>(noise_.process()) *
                                            exciter_env_.process()
                                      : 0.0;
-            const double y = static_cast<double>(
+            const double dry = static_cast<double>(
                 string_.process(static_cast<float>(burst)));
+            const double fm =
+                fm_path_active_
+                    ? static_cast<double>(
+                          fm_string_.process(static_cast<float>(burst)))
+                    : dry;
+            const double sync_level =
+                sync_env_.is_active() ? sync_env_.process() : 0.0;
+
+            double effected = dry;
+            if (modulation_ == StringModulation::fm) {
+                effected = fm;
+            } else if (modulation_ == StringModulation::ring) {
+                effected = dry * modulator;
+            } else if (modulation_ == StringModulation::sync) {
+                master_phase_ += base_frequency_ / sample_rate();
+                const bool wrapped = master_phase_ >= 1.0;
+                if (wrapped) {
+                    master_phase_ -= std::floor(master_phase_);
+                    sync_phase_ = 0.0;
+                } else {
+                    sync_phase_ +=
+                        base_frequency_ * modulation_ratio_ / sample_rate();
+                    if (sync_phase_ >= 1.0) {
+                        sync_phase_ -= std::floor(sync_phase_);
+                    }
+                }
+                effected =
+                    (2.0 * sync_phase_ - 1.0) * sync_level;
+            }
+            const double modulated =
+                dry + modulation_mix_ * (effected - dry);
+            const double gate_target =
+                gate_env_.is_active() ? gate_env_.process() : 0.0;
+            const double gated =
+                static_cast<double>(gate_.process(static_cast<float>(modulated),
+                                                  gate_target));
+            const double lpg =
+                modulated + lpg_amount_ * (gated - modulated);
             out[i] += static_cast<float>(
-                output_.process(static_cast<float>(y)) * velocity_gain_);
+                output_.process(static_cast<float>(lpg)) * velocity_gain_);
         }
     }
 
@@ -153,13 +309,27 @@ private:
     double brightness_hz_ = 1800.0;
     double pick_direction_ = 0.0;
     bool restart_on_hit_ = false;
+    bool fm_path_active_ = false;
+    StringModulation modulation_ = StringModulation::none;
+    double modulation_mix_ = 0.0;
+    double modulation_ratio_ = 2.0;
+    double fm_depth_octaves_ = 0.25;
+    double lpg_amount_ = 0.0;
 
     NoiseSource noise_;
     KarplusStrong string_;
+    KarplusStrong fm_string_;
     DecayEnvelope64 exciter_env_;
+    DecayEnvelope64 gate_env_;
+    DecayEnvelope64 sync_env_;
+    LowpassGate gate_;
     OutputStage output_;
 
     double velocity_gain_ = 1.0;
+    double base_frequency_ = 220.0;
+    double modulation_phase_ = 0.0;
+    double master_phase_ = 0.0;
+    double sync_phase_ = 0.0;
 };
 
 }  // namespace pulp::signal::drum

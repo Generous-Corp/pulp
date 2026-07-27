@@ -349,6 +349,15 @@ Uses `tanh()` saturation per stage for analog-style nonlinearity. The feedback p
 
 ---
 
+### Analog VCF
+
+For measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings—or for
+building a custom voicing directly on Pulp's nonlinear four-pole OTA cascade—
+see the [Analog VCF guide](analog-vcf.md). It documents control ranges,
+real-time use, oversampling latency, graph PDC, and both public APIs.
+
+---
+
 ### LinkwitzRiley
 
 4th-order Linkwitz-Riley crossover filter (-6 dB at crossover frequency). Provides lowpass and highpass outputs that sum flat. Built from two cascaded Biquad lowpass and two cascaded Biquad highpass filters.
@@ -408,6 +417,16 @@ float out = delay.process(input_sample, delay_in_samples);
 **Sample rate dependency:** Convert time to samples manually (`seconds * sample_rate`).
 
 **Caveat:** `prepare()` allocates memory. Call it in `Processor::prepare()`, never on the audio thread.
+
+---
+
+### CharacterDelay
+
+Stereo, wet-only delay with clean, vintage-digital, tape, BBD, and diffusion
+processors inside the feedback loop. It includes reverse, freeze, ducking,
+crossfeed, per-character time slew, and a physical tape tier. See the
+[Character Delay guide](character-delay.md) for lifecycle, complete per-method
+API documentation, character selection, and recipes.
 
 ---
 
@@ -744,6 +763,47 @@ These values are base-rate samples and do not depend on sample rate or host bloc
 The oversampler reports but does not remove its delay. For linear-phase processing, report that delay to the host and align any internal dry path. Pulp's latency-proof harness renders an identity path through every factor and quality, proves the measured delay matches the report, and pins the intended values so a tap-count refactor cannot silently add latency. Minimum-phase modes deliberately do not claim a constant delay; use a frequency-aware phase strategy when parallel alignment is required.
 
 **Sample rate dependency:** `set_sample_rate()` required.
+
+### Drum output-stage oversampling
+
+Every `pulp::signal::drum` voice reaches the same `OutputStage` for wavefolding,
+tanh drive, word-length reduction, sample-rate reduction, dead-zone shaping,
+and final level. That shared stage owns the drum-specific quality policy:
+
+- `OutputOversampling::x2` is the default. It wraps the nonlinear and lo-fi
+  chain in the established 65-tap, 81.3 dB Kaiser half-band pair
+  used by character-delay hysteresis and adds exactly 32 host samples.
+- `OutputOversampling::x4` cascades a second house pair for hard fold/drive
+  settings and adds exactly 48 host samples.
+- `OutputOversampling::bypass` deliberately runs the chain at the host rate,
+  adds no latency, and preserves the aliasing of period-authentic digital drum
+  machines.
+
+`OutputStage::latency_samples()` reports the selected constant.
+`OutputStage::latency_samples_for()` exposes the same contract at compile time
+for processors that select a fixed quality without owning a prepared stage.
+`Voice::latency_samples()` makes the same report available through registry-
+constructed engines without recovering their concrete types. `Kit` publishes
+one latency for its summed output and applies one quality to every registered
+voice before triggering or rendering, so layered voices cannot drift apart
+when a caller retains and reconfigures a concrete voice. Existing custom
+`Voice` subclasses remain source-compatible: their default quality contract is
+zero-latency bypass, and registering one makes the whole kit fall back to that
+common aligned quality. A processor mixing a voice or kit with an undelayed
+parallel path must compensate the dry path or report that latency to its host.
+Voices keep rendering while the FIR owns delayed samples, so their final filter
+tail is drained rather than cut.
+`prepare()` creates the FIR storage; quality changes and the audio path are
+allocation-free, but a quality change resets the filter and lo-fi clock and
+therefore belongs outside the audio callback unless a kit is restoring its
+already-selected factor through the idempotent setter.
+
+Drum voices expose additive mono `process()` and additive
+`process_stereo()`. The default stereo realization is centered and its two
+channels sum exactly to the mono render. `ClapVoice` specializes that hook:
+successive bursts alternate left and right according to `set_stereo_width()`,
+while its room tail and optional tonal body remain centered. Both paths retain
+the base voice's allocation-free choke fade.
 
 ### Resampling Helpers
 

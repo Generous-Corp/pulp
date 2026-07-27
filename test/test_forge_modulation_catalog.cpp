@@ -97,15 +97,15 @@ std::vector<float> run_block(pulp::format::Processor& proc,
                              const std::vector<std::vector<float>>& in_channels) {
     const auto num_ch = static_cast<std::uint32_t>(in_channels.size());
     std::vector<const float*> in_ptrs(in_channels.size());
-    for (std::size_t c = 0; c < in_channels.size(); ++c) in_ptrs[c] = in_channels[c].data();
+    for (std::size_t c = 0; c < in_channels.size(); ++c)
+        in_ptrs[c] = in_channels[c].data();
 
     std::vector<float> output(static_cast<std::size_t>(kFrames), 0.0f);
     float* out_ptr = output.data();
 
     pulp::audio::BufferView<const float> in_view(in_ptrs.data(), num_ch,
                                                  static_cast<std::uint32_t>(kFrames));
-    pulp::audio::BufferView<float> out_view(&out_ptr, 1u,
-                                            static_cast<std::uint32_t>(kFrames));
+    pulp::audio::BufferView<float> out_view(&out_ptr, 1u, static_cast<std::uint32_t>(kFrames));
     pulp::midi::MidiBuffer midi_in, midi_out;
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = kSr;
@@ -134,35 +134,43 @@ std::vector<float> constant(float value) {
     return std::vector<float>(static_cast<std::size_t>(kFrames), value);
 }
 
-std::vector<float> silence() { return constant(0.0f); }
+std::vector<float> silence() {
+    return constant(0.0f);
+}
 
 float rms(const std::vector<float>& b) {
-    if (b.empty()) return 0.0f;
+    if (b.empty())
+        return 0.0f;
     double sum = 0.0;
-    for (float v : b) sum += static_cast<double>(v) * v;
+    for (float v : b)
+        sum += static_cast<double>(v) * v;
     return static_cast<float>(std::sqrt(sum / static_cast<double>(b.size())));
 }
 
 float peak(const std::vector<float>& b) {
     float m = 0.0f;
-    for (float v : b) m = std::max(m, std::fabs(v));
+    for (float v : b)
+        m = std::max(m, std::fabs(v));
     return m;
 }
 
 /// Crude spectral-centroid proxy: the RMS of the first difference, normalized by
 /// the RMS of the signal. Enough to say "this is brighter than that".
 float brightness(const std::vector<float>& b) {
-    if (b.size() < 2) return 0.0f;
+    if (b.size() < 2)
+        return 0.0f;
     std::vector<float> difference;
     difference.reserve(b.size() - 1);
-    for (std::size_t i = 1; i < b.size(); ++i) difference.push_back(b[i] - b[i - 1]);
+    for (std::size_t i = 1; i < b.size(); ++i)
+        difference.push_back(b[i] - b[i - 1]);
     return rms(difference) / std::max(rms(b), 1.0e-9f);
 }
 
 int upward_crossings(const std::vector<float>& b, float level) {
     int count = 0;
     for (std::size_t i = 1; i < b.size(); ++i)
-        if (b[i - 1] <= level && b[i] > level) ++count;
+        if (b[i - 1] <= level && b[i] > level)
+            ++count;
     return count;
 }
 
@@ -236,8 +244,7 @@ TEST_CASE("mod_lfo output is a unipolar control signal", "[forge][catalog][mod]"
         REQUIRE_THAT(x, WithinAbs(0.5f, 1e-6f));
 }
 
-TEST_CASE("mod_lfo delay holds the neutral output for exactly the delay",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_lfo delay holds the neutral output for exactly the delay", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_lfo_node());
     inject(fixture, mod_cat::kModLfoRateHz, 10.0f);
     inject(fixture, mod_cat::kModLfoDepth, 1.0f);
@@ -252,8 +259,51 @@ TEST_CASE("mod_lfo delay holds the neutral output for exactly the delay",
     REQUIRE(*std::max_element(after.begin(), after.end()) > 0.9f);
 }
 
-TEST_CASE("mod_lfo random waveforms bake deterministically",
+TEST_CASE("mod_lfo lifecycle controls apply at their exact injected sample offset",
           "[forge][catalog][mod]") {
+    BakedFixture fixture(mod_cat::make_mod_lfo_node());
+    auto injector =
+        fixture.baked().claim_param_injection(fixture.custom_node);
+    REQUIRE(injector.valid());
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push(immediate(mod_cat::kModLfoRateHz, 2000.0f, 0)));
+    REQUIRE(events.push(immediate(mod_cat::kModLfoDepth, 1.0f, 0)));
+    REQUIRE(events.push(immediate(mod_cat::kModLfoDelayMs, 100.0f, 0)));
+    REQUIRE(events.push(immediate(mod_cat::kModLfoDelayMs, 0.0f, 64)));
+    REQUIRE(injector.inject(events) == InjectStatus::Ok);
+
+    const auto cv = run_block(*fixture.result.processor, silence());
+    for (int i = 0; i <= 64; ++i)
+        REQUIRE_THAT(cv[static_cast<std::size_t>(i)],
+                     WithinAbs(0.5f, 1.0e-6f));
+    // The first active sample evaluates the sine at its zero crossing; the
+    // following sample proves that phase advancement resumed in this block.
+    REQUIRE_THAT(cv[65], WithinAbs(0.5f, 1.0e-6f));
+    REQUIRE(cv[66] > 0.6f);
+}
+
+TEST_CASE("mod_lfo quadratic fade is distinct from linear fade",
+          "[forge][catalog][mod]") {
+    auto faded = [](bool quadratic) {
+        BakedFixture fixture(mod_cat::make_mod_lfo_node());
+        inject(fixture, mod_cat::kModLfoRateHz, 10.0f);
+        inject(fixture, mod_cat::kModLfoDepth, 1.0f);
+        inject(fixture, mod_cat::kModLfoWave, 4.0f); // positive square
+        inject(fixture, mod_cat::kModLfoFadeInMs, 100.0f);
+        inject(fixture, mod_cat::kModLfoFadeQuadratic,
+               quadratic ? 1.0f : 0.0f);
+        return render(*fixture.result.processor, {silence()}, 10);
+    };
+
+    const auto linear = faded(false);
+    const auto quadratic = faded(true);
+    REQUIRE(linear[1200] > quadratic[1200] + 0.05f);
+    REQUIRE_THAT(linear[1200], WithinAbs(0.625f, 0.002f));
+    REQUIRE_THAT(quadratic[1200], WithinAbs(0.53125f, 0.002f));
+}
+
+TEST_CASE("mod_lfo random waveforms bake deterministically", "[forge][catalog][mod]") {
     auto render_random = [](float wave_id) {
         BakedFixture fixture(mod_cat::make_mod_lfo_node());
         inject(fixture, mod_cat::kModLfoRateHz, 12.0f);
@@ -268,8 +318,8 @@ TEST_CASE("mod_lfo random waveforms bake deterministically",
         const auto b = render_random(wave);
         REQUIRE(a == b);
         // A random waveform that never moves is not one.
-        REQUIRE(*std::max_element(a.begin(), a.end())
-                - *std::min_element(a.begin(), a.end()) > 0.3f);
+        REQUIRE(*std::max_element(a.begin(), a.end()) - *std::min_element(a.begin(), a.end()) >
+                0.3f);
     }
 
     // The two random waves are genuinely different shapes: sample-and-hold
@@ -279,10 +329,72 @@ TEST_CASE("mod_lfo random waveforms bake deterministically",
     REQUIRE(brightness(stepped) > brightness(glided));
 }
 
+TEST_CASE("mod_lfo injects morph, triangle bias, and phase", "[forge][catalog][mod]") {
+    auto lfo_render = [](float wave, float morph, bool morph_enabled, float triangle_bias,
+                         float phase_degrees) {
+        BakedFixture fixture(mod_cat::make_mod_lfo_node());
+        inject(fixture, mod_cat::kModLfoRateHz, 10.0f);
+        inject(fixture, mod_cat::kModLfoDepth, 1.0f);
+        inject(fixture, mod_cat::kModLfoWave, wave);
+        inject(fixture, mod_cat::kModLfoShapeMorph, morph);
+        inject(fixture, mod_cat::kModLfoMorphEnabled, morph_enabled ? 1.0f : 0.0f);
+        inject(fixture, mod_cat::kModLfoTriangleBias, triangle_bias);
+        inject(fixture, mod_cat::kModLfoPhaseDegrees, phase_degrees);
+        return render(*fixture.result.processor, {silence()}, 40);
+    };
+
+    const auto pure_triangle = lfo_render(1.0f, 0.0f, false, 0.0f, 0.0f);
+    const auto morphed_triangle = lfo_render(0.0f, 1.0f, true, 0.0f, 0.0f);
+    REQUIRE(pure_triangle == morphed_triangle);
+
+    const auto biased_triangle = lfo_render(1.0f, 0.0f, false, 0.8f, 0.0f);
+    const auto pure_peak =
+        std::distance(pure_triangle.begin(),
+                      std::max_element(pure_triangle.begin(), pure_triangle.begin() + 4800));
+    const auto biased_peak =
+        std::distance(biased_triangle.begin(),
+                      std::max_element(biased_triangle.begin(), biased_triangle.begin() + 4800));
+    REQUIRE(biased_peak > pure_peak);
+
+    const auto unshifted_sine = lfo_render(0.0f, 0.0f, false, 0.0f, 0.0f);
+    const auto quarter_phase = lfo_render(0.0f, 0.0f, false, 0.0f, 90.0f);
+    REQUIRE_THAT(unshifted_sine.front(), WithinAbs(0.5f, 1.0e-6f));
+    REQUIRE_THAT(quarter_phase.front(), WithinAbs(1.0f, 1.0e-6f));
+}
+
+TEST_CASE("mod_lfo random segments and finite fade-out change its lifecycle",
+          "[forge][catalog][mod]") {
+    auto smooth_random = [](float segments) {
+        BakedFixture fixture(mod_cat::make_mod_lfo_node());
+        inject(fixture, mod_cat::kModLfoRateHz, 8.0f);
+        inject(fixture, mod_cat::kModLfoDepth, 1.0f);
+        inject(fixture, mod_cat::kModLfoWave, 6.0f);
+        inject(fixture, mod_cat::kModLfoRandomSegments, segments);
+        return render(*fixture.result.processor, {silence()}, 100);
+    };
+
+    const auto one_segment = smooth_random(1.0f);
+    const auto eight_segments = smooth_random(8.0f);
+    std::vector<float> difference(one_segment.size());
+    for (std::size_t i = 0; i < difference.size(); ++i)
+        difference[i] = one_segment[i] - eight_segments[i];
+    REQUIRE(rms(difference) > 0.05f);
+
+    BakedFixture finite(mod_cat::make_mod_lfo_node());
+    inject(finite, mod_cat::kModLfoRateHz, 20.0f);
+    inject(finite, mod_cat::kModLfoDepth, 1.0f);
+    inject(finite, mod_cat::kModLfoRepeatCount, 1.0f);
+    inject(finite, mod_cat::kModLfoFadeOutMs, 25.0f);
+    const auto one_shot = render(*finite.result.processor, {silence()}, 40);
+
+    REQUIRE(peak(one_shot) > 0.9f);
+    for (auto it = one_shot.end() - kFrames; it != one_shot.end(); ++it)
+        REQUIRE_THAT(*it, WithinAbs(0.5f, 1.0e-5f));
+}
+
 // ── mod_lpg ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("mod_lpg gated mode opens and closes with its control",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_lpg gated mode opens and closes with its control", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
     inject(fixture, mod_cat::kModLpgColour, 0.0f); // pure VCA, filter wide open
 
@@ -299,8 +411,7 @@ TEST_CASE("mod_lpg gated mode opens and closes with its control",
     REQUIRE(rms(settled) > 0.1f);
 }
 
-TEST_CASE("mod_lpg struck mode pings, decays, and accumulates on a roll",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_lpg struck mode pings, decays, and accumulates on a roll", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
     inject(fixture, mod_cat::kModLpgStruck, 1.0f);
     inject(fixture, mod_cat::kModLpgDecayMs, 150.0f);
@@ -364,8 +475,8 @@ TEST_CASE("mod_lpg struck velocity follows the control's peak, not its threshold
         return highest;
     };
 
-    const float stepped = struck_peak(0);  // instant control
-    const float ramped = struck_peak(4);   // ~10 ms rise, as a slew would give
+    const float stepped = struck_peak(0); // instant control
+    const float ramped = struck_peak(4);  // ~10 ms rise, as a slew would give
 
     REQUIRE(stepped > 0.1f);
     // Before the peak-tracking fix the ramped hit came back at roughly a third
@@ -373,8 +484,7 @@ TEST_CASE("mod_lpg struck velocity follows the control's peak, not its threshold
     REQUIRE(ramped > 0.8f * stepped);
 }
 
-TEST_CASE("mod_lpg colour trades amplitude for brightness",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_lpg colour trades amplitude for brightness", "[forge][catalog][mod]") {
     auto render_at_colour = [](float colour, float control) {
         BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
         inject(fixture, mod_cat::kModLpgColour, colour);
@@ -407,7 +517,8 @@ TEST_CASE("mod_lpg colour trades amplitude for brightness",
             phase += step;
         }
         const auto block = run_block(*tone_fixture.result.processor, {tone, constant(0.5f)});
-        if (b >= 40) measured.insert(measured.end(), block.begin(), block.end());
+        if (b >= 40)
+            measured.insert(measured.end(), block.begin(), block.end());
     }
     const float expected_gain = std::pow(0.5f, 1.5f);
     REQUIRE_THAT(rms(measured) * std::sqrt(2.0f), WithinRel(expected_gain, 0.01f));
@@ -424,8 +535,7 @@ TEST_CASE("mod_lpg never boosts", "[forge][catalog][mod]") {
     }
 }
 
-TEST_CASE("mod_lpg never boosts at full brightness near Nyquist",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_lpg never boosts at full brightness near Nyquist", "[forge][catalog][mod]") {
     // Adversarial version of the noise probe above: an open cell at the
     // brightness ceiling, full-scale Nyquist-rate alternation to pump the
     // filter's integrator state, then a DC step to read that state out. The
@@ -440,18 +550,70 @@ TEST_CASE("mod_lpg never boosts at full brightness near Nyquist",
         alternating[static_cast<std::size_t>(i)] = (i % 2 == 0) ? 1.0f : -1.0f;
 
     (void)render(*fixture.result.processor, {silence(), constant(1.0f)}, 40); // open the cell
-    const auto pumped =
-        render(*fixture.result.processor, {alternating, constant(1.0f)}, 8);
-    const auto exposed =
-        render(*fixture.result.processor, {constant(1.0f), constant(1.0f)}, 2);
+    const auto pumped = render(*fixture.result.processor, {alternating, constant(1.0f)}, 8);
+    const auto exposed = render(*fixture.result.processor, {constant(1.0f), constant(1.0f)}, 2);
     REQUIRE(peak(pumped) <= 1.0f + 1e-4f);
     REQUIRE(peak(exposed) <= 1.0f + 1e-4f);
 }
 
+TEST_CASE("mod_lpg rise and darkness injections change the gated response",
+          "[forge][catalog][mod]") {
+    auto gated = [](float rise_ms, float darkness_hz, float control,
+                    const std::vector<float>& excitation) {
+        BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
+        inject(fixture, mod_cat::kModLpgColour, control > 0.0f ? 0.0f : 1.0f);
+        inject(fixture, mod_cat::kModLpgRiseMs, rise_ms);
+        inject(fixture, mod_cat::kModLpgDarknessHz, darkness_hz);
+        return render(*fixture.result.processor, {excitation, constant(control)}, 20);
+    };
+
+    const auto fast = gated(0.05f, 40.0f, 1.0f, constant(1.0f));
+    const auto slow = gated(100.0f, 40.0f, 1.0f, constant(1.0f));
+    REQUIRE(rms(std::vector<float>(fast.begin(), fast.begin() + kFrames)) >
+            4.0f * rms(std::vector<float>(slow.begin(), slow.begin() + kFrames)));
+
+    // 375 Hz is exactly one cycle per block at this fixture's 48 kHz / 128
+    // geometry. It is high enough to distinguish a 40 Hz floor from a 500 Hz
+    // floor, but unlike Nyquist alternation it exercises the filter's stable
+    // in-band response rather than its guarded edge.
+    std::vector<float> tone(static_cast<std::size_t>(kFrames));
+    for (int i = 0; i < kFrames; ++i)
+        tone[static_cast<std::size_t>(i)] =
+            std::sin(6.2831853071795864769f * static_cast<float>(i) / static_cast<float>(kFrames));
+    const auto dark = gated(2.0f, 40.0f, 0.0f, tone);
+    const auto open = gated(2.0f, 500.0f, 0.0f, tone);
+    const std::vector<float> dark_settled(dark.end() - 4 * kFrames, dark.end());
+    const std::vector<float> open_settled(open.end() - 4 * kFrames, open.end());
+    REQUIRE(rms(open_settled) > 4.0f * rms(dark_settled));
+}
+
+TEST_CASE("mod_lpg strike threshold and refractory injections gate repeated hits",
+          "[forge][catalog][mod]") {
+    auto struck = [](float threshold, float refractory_ms, float pulse_level, int blocks) {
+        BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
+        inject(fixture, mod_cat::kModLpgStruck, 1.0f);
+        inject(fixture, mod_cat::kModLpgColour, 0.0f);
+        inject(fixture, mod_cat::kModLpgRiseMs, 0.05f);
+        inject(fixture, mod_cat::kModLpgDecayMs, 400.0f);
+        inject(fixture, mod_cat::kModLpgStrikeThreshold, threshold);
+        inject(fixture, mod_cat::kModLpgRefractoryMs, refractory_ms);
+        auto pulse = constant(0.0f);
+        pulse.front() = pulse_level;
+        return render(*fixture.result.processor, {constant(1.0f), pulse}, blocks);
+    };
+
+    REQUIRE(peak(struck(0.3f, 0.0f, 0.5f, 1)) > 0.01f);
+    REQUIRE(peak(struck(0.7f, 0.0f, 0.5f, 1)) < 1.0e-6f);
+
+    const auto repeated = struck(0.3f, 0.0f, 1.0f, 10);
+    const auto suppressed = struck(0.3f, 100.0f, 1.0f, 10);
+    REQUIRE(peak(std::vector<float>(repeated.end() - kFrames, repeated.end())) >
+            peak(std::vector<float>(suppressed.end() - kFrames, suppressed.end())));
+}
+
 // ── mod_slew ─────────────────────────────────────────────────────────────────
 
-TEST_CASE("mod_slew linear rise takes exactly the injected time",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_slew linear rise takes exactly the injected time", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_slew_node());
     inject(fixture, mod_cat::kModSlewRiseMs, 10.0f); // 480 samples
     inject(fixture, mod_cat::kModSlewFallMs, 10.0f);
@@ -490,7 +652,8 @@ TEST_CASE("mod_slew starts at its control, not at zero", "[forge][catalog][mod]"
 
     // A control already sitting at 0.8 when the render begins.
     const auto out = render(*fixture.result.processor, {constant(0.8f)}, 8);
-    for (float x : out) REQUIRE_THAT(x, WithinAbs(0.8f, 1e-6f));
+    for (float x : out)
+        REQUIRE_THAT(x, WithinAbs(0.8f, 1e-6f));
 
     // The limiter still limits once it is running: a step away from the adopted
     // value is slewed, not followed.
@@ -499,8 +662,7 @@ TEST_CASE("mod_slew starts at its control, not at zero", "[forge][catalog][mod]"
     REQUIRE(stepped.back() > 0.7f); // 128 samples of a 1 s ramp is a small move
 }
 
-TEST_CASE("mod_slew fall time is independent of rise time",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_slew fall time is independent of rise time", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_slew_node());
     inject(fixture, mod_cat::kModSlewRiseMs, 1.0f);   // fast up
     inject(fixture, mod_cat::kModSlewFallMs, 100.0f); // slow down
@@ -513,8 +675,7 @@ TEST_CASE("mod_slew fall time is independent of rise time",
 
 // ── mod_transient ────────────────────────────────────────────────────────────
 
-TEST_CASE("mod_transient output does not depend on input level",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_transient output does not depend on input level", "[forge][catalog][mod]") {
     auto detect = [](float scale) {
         BakedFixture fixture(mod_cat::make_mod_transient_node());
         std::uint32_t seed = 31337u;
@@ -523,7 +684,8 @@ TEST_CASE("mod_transient output does not depend on input level",
             auto excitation = seeded_noise(seed);
             // A burst every 16 blocks.
             const float envelope = (b % 16 < 2) ? 1.0f : 0.05f;
-            for (auto& sample : excitation) sample *= scale * envelope;
+            for (auto& sample : excitation)
+                sample *= scale * envelope;
             const auto block = run_block(*fixture.result.processor, {excitation});
             out.insert(out.end(), block.begin(), block.end());
         }
@@ -537,8 +699,7 @@ TEST_CASE("mod_transient output does not depend on input level",
         REQUIRE_THAT(quiet[i], WithinAbs(loud[i], 1e-3f));
 }
 
-TEST_CASE("mod_transient invert produces a ducking control",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_transient invert produces a ducking control", "[forge][catalog][mod]") {
     auto detect = [](float invert) {
         BakedFixture fixture(mod_cat::make_mod_transient_node());
         inject(fixture, mod_cat::kModTransientInvert, invert);
@@ -547,7 +708,8 @@ TEST_CASE("mod_transient invert produces a ducking control",
         for (int b = 0; b < 40; ++b) {
             auto excitation = seeded_noise(seed);
             const float envelope = (b % 16 < 2) ? 1.0f : 0.05f;
-            for (auto& sample : excitation) sample *= 0.5f * envelope;
+            for (auto& sample : excitation)
+                sample *= 0.5f * envelope;
             const auto block = run_block(*fixture.result.processor, {excitation});
             out.insert(out.end(), block.begin(), block.end());
         }
@@ -584,12 +746,96 @@ TEST_CASE("mod_env fires on a rising control edge and runs its full shape",
     REQUIRE(all[1400] > 0.0f);
 }
 
-TEST_CASE("mod_env ignores a control that never crosses the threshold",
-          "[forge][catalog][mod]") {
+TEST_CASE("mod_env ignores a control that never crosses the threshold", "[forge][catalog][mod]") {
     BakedFixture fixture(mod_cat::make_mod_env_node());
     inject(fixture, mod_cat::kModEnvThreshold, 0.8f);
     const auto out = render(*fixture.result.processor, {constant(0.5f)}, 20);
-    for (float x : out) REQUIRE_THAT(x, WithinAbs(0.0f, 1e-6f));
+    for (float x : out)
+        REQUIRE_THAT(x, WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("mod_env delay, depth, and velocity are independently injectable",
+          "[forge][catalog][mod]") {
+    auto shaped = [](float delay_ms, float depth, bool velocity_sensitive, float trigger_level) {
+        BakedFixture fixture(mod_cat::make_mod_env_node());
+        inject(fixture, mod_cat::kModEnvDelayMs, delay_ms);
+        inject(fixture, mod_cat::kModEnvAttackMs, 1.0f);
+        inject(fixture, mod_cat::kModEnvHoldMs, 5.0f);
+        inject(fixture, mod_cat::kModEnvDecayMs, 5.0f);
+        inject(fixture, mod_cat::kModEnvThreshold, 0.3f);
+        inject(fixture, mod_cat::kModEnvDepth, depth);
+        inject(fixture, mod_cat::kModEnvVelocitySensitive, velocity_sensitive ? 1.0f : 0.0f);
+        return render(*fixture.result.processor, {constant(trigger_level)}, 12);
+    };
+
+    const auto delayed = shaped(10.0f, 1.0f, false, 0.5f);
+    for (int i = 0; i < 480; ++i)
+        REQUIRE_THAT(delayed[static_cast<std::size_t>(i)], WithinAbs(0.0f, 1.0e-7f));
+    REQUIRE(peak(std::vector<float>(delayed.begin() + 480, delayed.end())) > 0.9f);
+
+    const auto half_depth = shaped(0.0f, 0.5f, false, 0.5f);
+    const auto velocity = shaped(0.0f, 1.0f, true, 0.5f);
+    REQUIRE_THAT(peak(half_depth), WithinAbs(0.5f, 1.0e-4f));
+    REQUIRE_THAT(peak(velocity), WithinAbs(0.5f, 1.0e-4f));
+}
+
+TEST_CASE("mod_env can unlink its attack and decay curves",
+          "[forge][catalog][mod]") {
+    auto shaped = [](bool independent, float attack_curve, float decay_curve) {
+        BakedFixture fixture(mod_cat::make_mod_env_node());
+        inject(fixture, mod_cat::kModEnvAttackMs, 10.0f);
+        inject(fixture, mod_cat::kModEnvHoldMs, 0.0f);
+        inject(fixture, mod_cat::kModEnvDecayMs, 10.0f);
+        inject(fixture, mod_cat::kModEnvCurve, 0.0f);
+        inject(fixture, mod_cat::kModEnvIndependentCurves,
+               independent ? 1.0f : 0.0f);
+        inject(fixture, mod_cat::kModEnvAttackCurve, attack_curve);
+        inject(fixture, mod_cat::kModEnvDecayCurve, decay_curve);
+        const auto fired =
+            run_block(*fixture.result.processor, {constant(1.0f)});
+        auto tail = render(*fixture.result.processor, {constant(0.0f)}, 8);
+        tail.insert(tail.begin(), fired.begin(), fired.end());
+        return tail;
+    };
+
+    const auto linked = shaped(false, 1.0f, -1.0f);
+    const auto attack_shaped = shaped(true, 1.0f, 0.0f);
+    const auto decay_shaped = shaped(true, 0.0f, -1.0f);
+
+    REQUIRE(rms(std::vector<float>(linked.begin(), linked.begin() + 480))
+            != rms(std::vector<float>(attack_shaped.begin(),
+                                      attack_shaped.begin() + 480)));
+    REQUIRE(rms(std::vector<float>(linked.begin() + 480,
+                                   linked.begin() + 960))
+            != rms(std::vector<float>(decay_shaped.begin() + 480,
+                                      decay_shaped.begin() + 960)));
+}
+
+TEST_CASE("mod_env loop and refractory injections control repeated shapes",
+          "[forge][catalog][mod]") {
+    auto repeated = [](bool loop, int loop_count, float refractory_ms, int blocks) {
+        BakedFixture fixture(mod_cat::make_mod_env_node());
+        inject(fixture, mod_cat::kModEnvAttackMs, 0.1f);
+        inject(fixture, mod_cat::kModEnvHoldMs, 0.0f);
+        inject(fixture, mod_cat::kModEnvDecayMs, 1.0f);
+        inject(fixture, mod_cat::kModEnvThreshold, 0.3f);
+        inject(fixture, mod_cat::kModEnvLoop, loop ? 1.0f : 0.0f);
+        inject(fixture, mod_cat::kModEnvLoopCount, static_cast<float>(loop_count));
+        inject(fixture, mod_cat::kModEnvRefractoryMs, refractory_ms);
+        auto pulse = constant(0.0f);
+        pulse.front() = 1.0f;
+        return render(*fixture.result.processor, {pulse}, blocks);
+    };
+
+    const auto one_shot = repeated(false, 0, 100.0f, 2);
+    const auto three_loops = repeated(true, 3, 100.0f, 2);
+    REQUIRE(peak(std::vector<float>(one_shot.begin() + kFrames, one_shot.end())) < 1.0e-6f);
+    REQUIRE(peak(std::vector<float>(three_loops.begin() + kFrames, three_loops.end())) > 0.1f);
+
+    const auto retriggered = repeated(false, 0, 0.0f, 8);
+    const auto refractory = repeated(false, 0, 100.0f, 8);
+    REQUIRE(peak(std::vector<float>(retriggered.end() - kFrames, retriggered.end())) > 0.1f);
+    REQUIRE(peak(std::vector<float>(refractory.end() - kFrames, refractory.end())) < 1.0e-6f);
 }
 
 // ── RT safety ────────────────────────────────────────────────────────────────
@@ -618,14 +864,14 @@ TEST_CASE("Modulation catalog nodes are allocation-free in process",
         // the probe arms. The convenience `run_block()` builds two vectors per
         // call, which would be counted against the node under test.
         std::vector<const float*> in_ptrs(in.size());
-        for (std::size_t ch = 0; ch < in.size(); ++ch) in_ptrs[ch] = in[ch].data();
+        for (std::size_t ch = 0; ch < in.size(); ++ch)
+            in_ptrs[ch] = in[ch].data();
         std::vector<float> output(static_cast<std::size_t>(kFrames), 0.0f);
         float* out_ptr = output.data();
-        pulp::audio::BufferView<const float> in_view(
-            in_ptrs.data(), static_cast<std::uint32_t>(in.size()),
-            static_cast<std::uint32_t>(kFrames));
-        pulp::audio::BufferView<float> out_view(&out_ptr, 1u,
-                                                static_cast<std::uint32_t>(kFrames));
+        pulp::audio::BufferView<const float> in_view(in_ptrs.data(),
+                                                     static_cast<std::uint32_t>(in.size()),
+                                                     static_cast<std::uint32_t>(kFrames));
+        pulp::audio::BufferView<float> out_view(&out_ptr, 1u, static_cast<std::uint32_t>(kFrames));
         pulp::midi::MidiBuffer midi_in, midi_out;
         pulp::format::ProcessContext ctx;
         ctx.sample_rate = kSr;
@@ -635,10 +881,12 @@ TEST_CASE("Modulation catalog nodes are allocation-free in process",
         auto render_one = [&] { proc.process(out_view, in_view, midi_in, midi_out, ctx); };
 
         // Settle first so the probe sees the steady state, not first-touch.
-        for (int b = 0; b < 4; ++b) render_one();
+        for (int b = 0; b < 4; ++b)
+            render_one();
 
         pulp::test::RtAllocationProbe probe;
-        for (int b = 0; b < 8; ++b) render_one();
+        for (int b = 0; b < 8; ++b)
+            render_one();
         REQUIRE(probe.allocation_count() == 0);
     }
 }

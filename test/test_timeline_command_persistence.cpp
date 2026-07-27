@@ -85,6 +85,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         R"({"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"})";
     const std::string comp =
         R"([{"sample_count":"50","sample_rate":{"denominator":"1","numerator":"48000"},"start":"0","take_id":"13"}])";
+    const std::string note =
+        R"({"channel":0,"duration_ticks":"25","id":"10","pitch":60,"start_ticks":"0","velocity":32768})";
+    const std::string transformed_note =
+        R"({"channel":0,"duration_ticks":"25","id":"10","pitch":72,"start_ticks":"0","velocity":32768})";
 
     std::vector<std::string> encoded{
         envelope("pulp.timeline.command.insert_clip",
@@ -104,6 +108,9 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope(
             "pulp.timeline.command.set_note_velocity",
             R"({"clip_id":"7","expected_velocity":32768,"note_id":"10","replacement_velocity":49152,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.replace_note_content",
+                 R"({"clip_id":"7","expected":[)" + note + R"(],"replacement":[)" +
+                     transformed_note + R"(],"sequence_id":"5","track_id":"6"})"),
         envelope("pulp.timeline.command.set_clip_playback_properties",
                  R"({"clip_id":"7","expected":)" + playback + R"(,"replacement":)" + quieter +
                      R"(,"sequence_id":"5","track_id":"6"})"),
@@ -158,6 +165,14 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
             R"({"before_slot_id":"33","scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}})"),
         envelope("pulp.timeline.command.remove_slot",
                  R"({"scene_id":"30","sequence_id":"5","slot_id":"31"})"),
+        envelope("pulp.timeline.command.insert_sequence",
+                 "{\"sequence\":" + std::string(parsed->raw(sequence)) + "}"),
+        envelope("pulp.timeline.command.clone_sequence",
+                 R"({"cloned_sequence_id":"30","id_remap":[{"new_id":"30","old_id":"5"},{"new_id":"31","old_id":"6"},{"new_id":"32","old_id":"7"},{"new_id":"33","old_id":"8"},{"new_id":"34","old_id":"9"},{"new_id":"35","old_id":"10"},{"new_id":"36","old_id":"11"},{"new_id":"37","old_id":"12"},{"new_id":"38","old_id":"13"},{"new_id":"39","old_id":"14"},{"new_id":"40","old_id":"15"}],"source_sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_sequence", R"({"sequence_id":"30"})"),
+        envelope(
+            "pulp.timeline.command.set_clip_sequence_ref",
+            R"({"clip_id":"7","expected":{"sequence_id":"30","source_start":"0"},"replacement":{"sequence_id":"30","source_start":"100"},"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -175,31 +190,36 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<RemoveAutomationLane>(commands[3]));
     REQUIRE(std::holds_alternative<MoveClip>(commands[4]));
     REQUIRE(std::holds_alternative<SetNoteVelocity>(commands[5]));
-    REQUIRE(std::holds_alternative<SetClipPlaybackProperties>(commands[6]));
-    REQUIRE(std::holds_alternative<SetTempoMap>(commands[7]));
-    REQUIRE(std::holds_alternative<SetMeterMap>(commands[8]));
-    REQUIRE(std::holds_alternative<CreateAsset>(commands[9]));
-    REQUIRE(std::holds_alternative<RemoveAsset>(commands[10]));
-    REQUIRE(std::holds_alternative<InsertTakeLane>(commands[11]));
-    REQUIRE(std::holds_alternative<RemoveTakeLane>(commands[12]));
-    REQUIRE(std::holds_alternative<InsertTake>(commands[13]));
-    REQUIRE(std::holds_alternative<RemoveTake>(commands[14]));
-    REQUIRE(std::holds_alternative<SetRecordArm>(commands[15]));
-    REQUIRE(std::holds_alternative<SetActiveTakeLane>(commands[16]));
-    REQUIRE(std::holds_alternative<SetTakeComp>(commands[17]));
-    REQUIRE(std::holds_alternative<SetTrackFreeze>(commands[18]));
-    REQUIRE(std::holds_alternative<InsertMarker>(commands[19]));
-    REQUIRE(std::holds_alternative<RemoveMarker>(commands[20]));
-    REQUIRE(std::holds_alternative<InsertRegion>(commands[21]));
-    REQUIRE(std::holds_alternative<RemoveRegion>(commands[22]));
-    REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[23]));
-    REQUIRE(std::holds_alternative<SetGroove>(commands[24]));
-    REQUIRE(std::holds_alternative<InsertScene>(commands[25]));
-    REQUIRE(std::get<InsertScene>(commands[25]).before_scene_id == ItemId{32});
-    REQUIRE(std::holds_alternative<RemoveScene>(commands[26]));
-    REQUIRE(std::holds_alternative<InsertSlot>(commands[27]));
-    REQUIRE(std::get<InsertSlot>(commands[27]).before_slot_id == ItemId{33});
-    REQUIRE(std::holds_alternative<RemoveSlot>(commands[28]));
+    REQUIRE(std::holds_alternative<ReplaceNoteContent>(commands[6]));
+    REQUIRE(std::holds_alternative<SetClipPlaybackProperties>(commands[7]));
+    REQUIRE(std::holds_alternative<SetTempoMap>(commands[8]));
+    REQUIRE(std::holds_alternative<SetMeterMap>(commands[9]));
+    REQUIRE(std::holds_alternative<CreateAsset>(commands[10]));
+    REQUIRE(std::holds_alternative<RemoveAsset>(commands[11]));
+    REQUIRE(std::holds_alternative<InsertTakeLane>(commands[12]));
+    REQUIRE(std::holds_alternative<RemoveTakeLane>(commands[13]));
+    REQUIRE(std::holds_alternative<InsertTake>(commands[14]));
+    REQUIRE(std::holds_alternative<RemoveTake>(commands[15]));
+    REQUIRE(std::holds_alternative<SetRecordArm>(commands[16]));
+    REQUIRE(std::holds_alternative<SetActiveTakeLane>(commands[17]));
+    REQUIRE(std::holds_alternative<SetTakeComp>(commands[18]));
+    REQUIRE(std::holds_alternative<SetTrackFreeze>(commands[19]));
+    REQUIRE(std::holds_alternative<InsertMarker>(commands[20]));
+    REQUIRE(std::holds_alternative<RemoveMarker>(commands[21]));
+    REQUIRE(std::holds_alternative<InsertRegion>(commands[22]));
+    REQUIRE(std::holds_alternative<RemoveRegion>(commands[23]));
+    REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[24]));
+    REQUIRE(std::holds_alternative<SetGroove>(commands[25]));
+    REQUIRE(std::holds_alternative<InsertScene>(commands[26]));
+    REQUIRE(std::get<InsertScene>(commands[26]).before_scene_id == ItemId{32});
+    REQUIRE(std::holds_alternative<RemoveScene>(commands[27]));
+    REQUIRE(std::holds_alternative<InsertSlot>(commands[28]));
+    REQUIRE(std::get<InsertSlot>(commands[28]).before_slot_id == ItemId{33});
+    REQUIRE(std::holds_alternative<RemoveSlot>(commands[29]));
+    REQUIRE(std::holds_alternative<InsertSequence>(commands[30]));
+    REQUIRE(std::holds_alternative<CloneSequence>(commands[31]));
+    REQUIRE(std::holds_alternative<RemoveSequence>(commands[32]));
+    REQUIRE(std::holds_alternative<SetClipSequenceRef>(commands[33]));
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

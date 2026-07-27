@@ -435,6 +435,15 @@ send_sysex(inquiry);  // Send over MIDI port
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
 
+### MIDI effects
+
+Pulp's format layer hosts MIDI-only processors, and Forge supplies a bounded,
+hot-swappable ordered transform chain with 20 transforms, fixed host macros,
+pattern/chord data, note-balance enforcement, and realtime-safe publication.
+See the [MIDI FX guide](../guides/midi-fx.md) for the complete transform
+parameter reference, structured authoring schema, cookbook, C++ method API, and
+host-validation contract.
+
 ---
 
 ## signal
@@ -442,6 +451,10 @@ send_sysex(inquiry);  // Send over MIDI port
 30+ real-time-safe DSP processors. Process methods operate on single samples or buffers and are safe for the audio thread after the helper's documented construction/configuration/`prepare()` step. Setup methods that allocate storage must run off the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
+
+For synthesized percussion, including the complete voice API, recipes,
+provenance, and Forge bake-layer controls, see
+[Percussion synthesis](percussion-synthesis.md).
 
 ### Using a processor
 
@@ -521,7 +534,7 @@ a working convolution and would hide the bug. Assert
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
-| Analog VCF | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
+| [Analog VCF](../guides/analog-vcf.md) | `analog_vcf.hpp` / `ota_cascade_filter.hpp` | Four measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings over a shared zero-delay nonlinear four-pole cascade |
 | Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
 | State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |
@@ -530,6 +543,7 @@ a working convolution and would hide the bug. Assert
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
+| Character Delay | `character_delay.hpp` | Wet-only stereo delay with clean, vintage-digital, tape, BBD, and diffusion feedback-loop characters — see the [dedicated guide](../guides/character-delay.md) |
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
@@ -908,9 +922,11 @@ does not make Timeline responsible for sample traversal or rendering.
 immutable registry with typed extension codecs and bounded per-version
 migrations. `schema_release.hpp` exposes release-labeled structural version
 maps, and `serialize_project_for_release()` uses them to produce canonical
-snapshots for `v0.736.0`, `v0.744.0`, or `v0.748.0`. Older-release export fails
+snapshots for `v0.736.0`, `v0.744.0`, `v0.748.0`, or `v0.750.0`. The latter
+records the historical Track-v4 schema set; it predates `SequenceRef` content
+and sequence mutation commands. Release export fails
 when it would discard populated device, automation, take, audio-loop, or
-extension state.
+extension state, including nested-sequence content unsupported by the target.
 It removes inactive identity tombstones for kinds the target release cannot
 name while preserving `next_item_id` as the durable no-reuse boundary.
 `serialize.hpp` reads and writes deterministic JSON snapshots: 64-bit values are
@@ -946,8 +962,17 @@ journal files are rejected because atomic checkpoint replacement cannot
 preserve hard-link identity. Package containers remain outside this module
 surface.
 
+`SequenceRef` clips place another project-owned sequence without transferring
+ownership. Project construction rejects missing references, cycles, and depth
+greater than eight. Sequence mutation, eager copy-on-edit divergence, and
+reference retargeting use typed commands and the ordinary journal/undo path.
+Playback expands supported child note/audio content into immutable root-track
+programs before publication and fans child dirtiness out through every
+transitive placement; unsupported child processing state fails compilation
+closed.
+
 This surface intentionally excludes package I/O, playback delivery, launch
-slots, nesting, device implementation and routing, and UI.
+slots, device implementation and routing, and UI.
 
 ## playback
 

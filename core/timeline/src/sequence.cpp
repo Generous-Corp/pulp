@@ -90,6 +90,21 @@ std::optional<ModelError> validate_track_span(
     return std::nullopt;
 }
 
+std::vector<ItemId> canonical_sequence_refs(std::span<const Track> tracks) {
+    std::vector<ItemId> result;
+    for (const auto& track : tracks)
+        for (const auto& clip : track.clips())
+            if (const auto* reference = std::get_if<SequenceRef>(&clip.content()))
+                result.push_back(reference->sequence_id);
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
+
+std::vector<ItemId> canonical_sequence_refs(const Track& track) {
+    return canonical_sequence_refs(std::span<const Track>(&track, 1));
+}
+
 } // namespace
 
 struct Sequence::Data {
@@ -104,6 +119,8 @@ struct Sequence::Data {
     ChordScaleLane chord_scale_lane;
     GrooveTemplate groove;
     std::shared_ptr<const detail::LauncherStore> launcher;
+    std::shared_ptr<const std::uint8_t> compile_structure;
+    std::vector<ItemId> outgoing_sequence_refs;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -195,11 +212,13 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
     auto launcher = detail::build_launcher(std::move(input.scenes), input.tracks);
     if (!launcher)
         return runtime::Err(launcher.error());
+    auto outgoing_sequence_refs = canonical_sequence_refs(input.tracks);
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{input.id, std::move(input.name), input.musical_duration, input.absolute_duration,
              std::move(input.tracks), std::move(track_id_index), std::move(input.markers),
              std::move(input.regions), std::move(*input.chord_scale_lane), std::move(*input.groove),
-             std::move(launcher).value()})));
+             std::move(launcher).value(), std::make_shared<const std::uint8_t>(0),
+             std::move(outgoing_sequence_refs)})));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -216,6 +235,9 @@ std::optional<AbsoluteTimelineDuration> Sequence::absolute_duration() const noex
 }
 std::span<const Track> Sequence::tracks() const noexcept {
     return data_->tracks;
+}
+std::span<const ItemId> Sequence::outgoing_sequence_refs() const noexcept {
+    return data_->outgoing_sequence_refs;
 }
 const Track* Sequence::find_track(ItemId id) const noexcept {
     const auto found =
@@ -289,10 +311,10 @@ Sequence::with_annotations(std::vector<SequenceMarker> markers,
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, *duplicate, data_->id);
     std::sort(markers.begin(), markers.end(), marker_less);
     std::sort(regions.begin(), regions.end(), region_less);
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, std::move(markers), std::move(regions),
-             data_->chord_scale_lane, data_->groove, data_->launcher})));
+    return runtime::Ok(Sequence(std::make_shared<const Data>(Data{
+        data_->id, data_->name, data_->musical_duration, data_->absolute_duration, data_->tracks,
+        data_->track_id_index, std::move(markers), std::move(regions), data_->chord_scale_lane,
+        data_->groove, data_->launcher, data_->compile_structure, data_->outgoing_sequence_refs})));
 }
 
 runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
@@ -335,7 +357,8 @@ Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
+             data_->chord_scale_lane, data_->groove, std::move(launcher).value(),
+             data_->compile_structure, data_->outgoing_sequence_refs})));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
     auto erased = detail::SequenceEditAccess::erase_scene(*this, id);
@@ -357,7 +380,8 @@ Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_s
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
+             data_->chord_scale_lane, data_->groove, std::move(launcher).value(),
+             data_->compile_structure, data_->outgoing_sequence_refs})));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_slot(ItemId scene_id, ItemId slot_id) const {
     auto erased = detail::SequenceEditAccess::erase_slot(*this, scene_id, slot_id);
@@ -380,7 +404,8 @@ detail::SequenceEditAccess::erase_scene(const Sequence& source, ItemId id) {
         source.data_->id, source.data_->name, source.data_->musical_duration,
         source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
         source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
-        source.data_->groove, std::move(result.store)}));
+        source.data_->groove, std::move(result.store), source.data_->compile_structure,
+        source.data_->outgoing_sequence_refs}));
     return runtime::Ok(SequenceSceneEraseResult{
         std::move(sequence), removed,
         result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
@@ -402,7 +427,8 @@ detail::SequenceEditAccess::erase_slot(const Sequence& source, ItemId scene_id, 
         source.data_->id, source.data_->name, source.data_->musical_duration,
         source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
         source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
-        source.data_->groove, std::move(result.store)}));
+        source.data_->groove, std::move(result.store), source.data_->compile_structure,
+        source.data_->outgoing_sequence_refs}));
     return runtime::Ok(SequenceSlotEraseResult{
         std::move(sequence), removed,
         result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
@@ -426,12 +452,21 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
                 return fail<Sequence>(ModelErrorCode::MissingItem, clip.id(), *source);
         }
     }
+    const auto previous_references = canonical_sequence_refs(previous);
+    const auto replacement_references = canonical_sequence_refs(track);
+    const bool topology_unchanged = previous_references == replacement_references;
+    const bool compile_structure_unchanged = previous.shares_compile_structure_with(track);
     auto tracks = data_->tracks;
     tracks[found->second] = std::move(track);
+    auto outgoing_sequence_refs =
+        topology_unchanged ? data_->outgoing_sequence_refs : canonical_sequence_refs(tracks);
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, data_->launcher})));
+             data_->chord_scale_lane, data_->groove, data_->launcher,
+             compile_structure_unchanged ? data_->compile_structure
+                                         : std::make_shared<const std::uint8_t>(0),
+             std::move(outgoing_sequence_refs)})));
 }
 
 const GrooveTemplate& Sequence::groove() const noexcept {
@@ -441,16 +476,17 @@ const ChordScaleLane& Sequence::chord_scale_lane() const noexcept {
     return data_->chord_scale_lane;
 }
 Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
-    return Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions, std::move(lane),
-             data_->groove, data_->launcher}));
+    return Sequence(std::make_shared<const Data>(Data{
+        data_->id, data_->name, data_->musical_duration, data_->absolute_duration, data_->tracks,
+        data_->track_id_index, data_->markers, data_->regions, std::move(lane), data_->groove,
+        data_->launcher, data_->compile_structure, data_->outgoing_sequence_refs}));
 }
 Sequence Sequence::with_groove(GrooveTemplate groove) const {
     return Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, std::move(groove), data_->launcher}));
+             data_->chord_scale_lane, std::move(groove), data_->launcher, data_->compile_structure,
+             data_->outgoing_sequence_refs}));
 }
 
 bool Sequence::shares_launcher_storage_with(const Sequence& other) const noexcept {
@@ -458,6 +494,9 @@ bool Sequence::shares_launcher_storage_with(const Sequence& other) const noexcep
 }
 bool Sequence::shares_storage_with(const Sequence& other) const noexcept {
     return data_ == other.data_;
+}
+bool Sequence::shares_compile_structure_with(const Sequence& other) const noexcept {
+    return data_->compile_structure == other.data_->compile_structure;
 }
 LauncherIndexStats Sequence::launcher_index_stats() noexcept {
     return detail::launcher_index_stats();

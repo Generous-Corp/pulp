@@ -296,9 +296,15 @@ private:
 /// the host, so echo timing stays right and the loop's total delay is unchanged.
 class HalfBandOversampler4x {
 public:
+    static constexpr int oversampling_factor() noexcept { return 4; }
+
     void prepare() {
-        stage_a_.configure(0.45, kHysteresisHalfBandStopbandDb, kHysteresisHalfBandTaps);
-        stage_b_.configure(0.225, kHysteresisHalfBandStopbandDb, kHysteresisHalfBandTaps);
+        stage_a_.configure(kHouseHalfBandStageOnePassband,
+                           kHysteresisHalfBandStopbandDb,
+                           kHysteresisHalfBandTaps);
+        stage_b_.configure(kHouseHalfBandStageTwoPassband,
+                           kHysteresisHalfBandStopbandDb,
+                           kHysteresisHalfBandTaps);
         reset();
     }
 
@@ -329,11 +335,105 @@ private:
         double even = 0.0;
         double odd = 0.0;
         stage_b_.upsample(x, even, odd);
-        return stage_b_.downsample(callback(even), callback(odd));
+        // The callback owns time-dependent magnetic state. Function-argument
+        // evaluation order is not left-to-right, so evaluate the phases
+        // explicitly in chronological order before passing them onward.
+        const double processed_even = callback(even);
+        const double processed_odd = callback(odd);
+        return stage_b_.downsample(processed_even, processed_odd);
     }
 
     detail::LinearPhaseOversamplingStage2x<double> stage_a_;
     detail::LinearPhaseOversamplingStage2x<double> stage_b_;
 };
+
+/// Eight-times wrapper used by the max-drive physical hysteresis stage.
+///
+/// Four times was the original modeling estimate, but the exact-bin 2947 Hz
+/// acceptance measurement found a folded high-order product at about -40 dBc.
+/// One additional house half-band stage moves the nonlinear solve to 8x and
+/// clears the -60 dBc contract without retuning the magnetic model's drive.
+/// Keeping the 4x wrapper as the outer stage also provides a direct regression
+/// control for the acceptance test.
+class HysteresisOversampler8x {
+public:
+    static constexpr int oversampling_factor() noexcept { return 8; }
+
+    void prepare() {
+        outer_.prepare();
+        inner_.configure(0.1125, kHysteresisHalfBandStopbandDb,
+                         kHysteresisHalfBandTaps);
+        reset();
+    }
+
+    void reset() noexcept {
+        outer_.reset();
+        inner_.reset();
+    }
+
+    /// Group delay of all three up/down stages, in host samples.
+    static int latency_samples() noexcept {
+        const auto taps = static_cast<int>(kHysteresisHalfBandTaps);
+        return HalfBandOversampler4x::latency_samples() + (taps - 1) / 8;
+    }
+
+    template <typename Callback>
+    double process(double x, Callback&& callback) {
+        return outer_.process(x, [this, &callback](double sample) {
+            double even = 0.0;
+            double odd = 0.0;
+            inner_.upsample(sample, even, odd);
+            const double processed_even = callback(even);
+            const double processed_odd = callback(odd);
+            return inner_.downsample(processed_even, processed_odd);
+        });
+    }
+
+private:
+    HalfBandOversampler4x outer_;
+    detail::LinearPhaseOversamplingStage2x<double> inner_;
+};
+
+/// Production-owned composition of a fixed wrapper and magnetic solver.
+/// Keeping rate derivation, reset ordering, latency, and processing together
+/// prevents runtime, calibration, and acceptance tests from silently modeling
+/// different paths.
+template <typename Wrapper>
+class OversampledHysteresis {
+public:
+    static constexpr int oversampling_factor() noexcept {
+        return Wrapper::oversampling_factor();
+    }
+
+    static int latency_samples() noexcept {
+        return Wrapper::latency_samples();
+    }
+
+    void prepare(double host_rate_hz) {
+        wrapper_.prepare();
+        solver_.prepare(host_rate_hz * static_cast<double>(oversampling_factor()));
+    }
+
+    void reset() noexcept {
+        wrapper_.reset();
+        solver_.reset();
+    }
+
+    void set_character(double drive, double bias) noexcept {
+        solver_.set_character(drive, bias);
+    }
+
+    double process(double input) {
+        return wrapper_.process(
+            input, [this](double sample) { return solver_.process(sample); });
+    }
+
+private:
+    Wrapper wrapper_;
+    JilesAthertonHysteresis solver_;
+};
+
+using OversampledHysteresis4x = OversampledHysteresis<HalfBandOversampler4x>;
+using OversampledHysteresis8x = OversampledHysteresis<HysteresisOversampler8x>;
 
 }  // namespace pulp::signal::chardelay

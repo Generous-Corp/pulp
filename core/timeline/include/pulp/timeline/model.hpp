@@ -75,6 +75,9 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
     InvalidGrooveTemplate,
+    MissingSequenceReference,
+    SequenceReferenceCycle,
+    SequenceNestingTooDeep,
 };
 
 struct ModelError {
@@ -122,6 +125,16 @@ struct MediaRef {
     ItemId asset_id;
     timebase::SamplePosition source_start;
     std::uint64_t frame_count = 0;
+};
+
+// A reference to another sequence in the same Project pool. The referenced
+// sequence remains a project-owned sibling: this clip owns neither the
+// sequence nor any of its identities.
+struct SequenceRef {
+    ItemId sequence_id;
+    timebase::TickPosition source_start{0};
+
+    constexpr auto operator<=>(const SequenceRef&) const = default;
 };
 
 enum class ClipTimeAnchor : std::uint8_t { Musical, Absolute };
@@ -256,8 +269,8 @@ class OpaqueContent {
     OpaqueContentLimits limits_;
 };
 
-using ClipContent =
-    std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent>;
+using ClipContent = std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent,
+                                 OpaqueContent, SequenceRef>;
 
 /// Overload set for visiting a ClipContent with **no generic fallback**.
 ///
@@ -548,7 +561,9 @@ class Track {
     static TrackIndexStats index_stats() noexcept;
 
   private:
+    friend class Sequence;
     struct Data;
+    bool shares_compile_structure_with(const Track& other) const noexcept;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
@@ -885,6 +900,8 @@ class Sequence {
     std::optional<timebase::TickDuration> duration() const noexcept;
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
+    // Sorted, unique, derived from SequenceRef clips, and never serialized.
+    std::span<const ItemId> outgoing_sequence_refs() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
     // Always present; empty when the sequence states no harmony.
     const ChordScaleLane& chord_scale_lane() const noexcept;
@@ -920,8 +937,10 @@ class Sequence {
     static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
+    friend class Project;
     friend struct detail::SequenceEditAccess;
     struct Data;
+    bool shares_compile_structure_with(const Sequence& other) const noexcept;
     // Annotation edits validate only the annotation lists and share the existing
     // track storage and identity index; they never re-walk the arrangement.
     runtime::Result<Sequence, ModelError>
@@ -930,6 +949,8 @@ class Sequence {
     explicit Sequence(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
+
+inline constexpr std::size_t kMaxSequenceNestingDepth = 8;
 
 // Where this session's zero sits on the source/house clock — the document form
 // of "this session starts at 01:00:00:00". Stored as an absolute sample offset
@@ -1047,6 +1068,24 @@ struct ProjectIdentityStats {
     std::uint64_t nodes_created = 0;
 };
 
+/// Opaque, process-local identity for the part of a Project snapshot that
+/// determines nested-sequence and registered-content compile subscribers.
+class SequenceCompileStructureToken {
+  public:
+    SequenceCompileStructureToken() noexcept = default;
+
+    bool valid() const noexcept {
+        return value_ != 0;
+    }
+
+    constexpr bool operator==(const SequenceCompileStructureToken&) const noexcept = default;
+
+  private:
+    friend class Project;
+    explicit SequenceCompileStructureToken(std::uint64_t value) noexcept : value_(value) {}
+    std::uint64_t value_ = 0;
+};
+
 class Project {
   public:
     static runtime::Result<Project, ModelError> create(ProjectInput input);
@@ -1065,6 +1104,11 @@ class Project {
     std::optional<ItemLocation> locate(ItemId id) const noexcept;
     std::size_t shared_identity_nodes_with(const Project& other) const;
     bool shares_storage_with(const Project& other) const noexcept;
+    /// Process-local identity of the sequence-reference and registered-content
+    /// placement shape used by incremental playback invalidation. The token is
+    /// preserved across edits that cannot change dependency subscribers and is
+    /// replaced before publishing a structurally incompatible snapshot.
+    SequenceCompileStructureToken sequence_compile_structure_token() const noexcept;
     static ProjectIdentityStats identity_stats() noexcept;
     ItemIdAllocator item_id_allocator() const noexcept {
         return ItemIdAllocator(next_item_id());
@@ -1077,6 +1121,11 @@ class Project {
     runtime::Result<Project, ModelError>
     replace_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},
                      std::optional<std::uint64_t> next_item_id = std::nullopt) const;
+    runtime::Result<Project, ModelError>
+    append_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},
+                    std::optional<std::uint64_t> next_item_id = std::nullopt) const;
+    runtime::Result<Project, ModelError>
+    remove_sequence(ItemId sequence_id, std::span<const IdentityMutation> identities = {}) const;
     // Appends a sealed media asset as a pinned project input. The asset carries
     // its own ContentHash identity; identity mutations register (or reactivate)
     // the ItemKind::Asset entry the same way clip inserts do.
@@ -1113,6 +1162,11 @@ struct ExternalIdFixup {
     runtime::Result<ItemId, ModelError> apply(ItemId id) const noexcept;
 };
 
+struct RemapIdFixups {
+    ExternalIdFixup asset;
+    ExternalIdFixup sequence;
+};
+
 struct RemappedClip {
     Clip clip;
     IdRemapTable ids;
@@ -1128,10 +1182,19 @@ struct RemappedSequence {
 
 runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
                                                     ExternalIdFixup external = {});
+runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
+                                                    RemapIdFixups fixups);
 runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
                                                      ExternalIdFixup external = {});
+runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
+                                                     RemapIdFixups fixups);
 runtime::Result<RemappedSequence, ModelError>
 remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup external = {});
+runtime::Result<RemappedSequence, ModelError>
+remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, RemapIdFixups fixups);
+runtime::Result<RemappedSequence, ModelError>
+remap_ids(const Sequence& sequence, std::span<const std::pair<ItemId, ItemId>> carried_ids,
+          RemapIdFixups fixups = {});
 
 struct RemappedProject {
     Project project;

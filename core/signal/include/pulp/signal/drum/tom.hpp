@@ -8,7 +8,9 @@
 #include <pulp/signal/tpt_filter.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string_view>
 
 namespace pulp::signal::drum {
 
@@ -49,6 +51,53 @@ public:
     /// carries odd harmonics that survive a small speaker where a sine does
     /// not.
     enum class Wave { triangle, sine };
+
+    enum class Preset {
+        generic_tom,
+        low_tom,
+        mid_tom,
+        hi_tom,
+        bass,
+        snary,
+        zap,
+        cosmic,
+    };
+
+    struct PresetData {
+        Preset id;
+        std::string_view name;
+        double tune_hz;
+        double bend_octaves;
+        double bend_ms;
+        double decay_ms;
+        Wave wave;
+        double noise_balance;
+        double noise_cutoff_hz;
+        double noise_resonance;
+        double click_level;
+    };
+
+    /// Original Pulp-authored voicings of this one SDS-V-family topology. They
+    /// are clean starting points, not values copied from a sample library or a
+    /// commercial preset bank.
+    static constexpr std::array<PresetData, 8> presets{{
+        {Preset::generic_tom, "Generic Tom", 130.0, 0.35, 30.0, 450.0,
+         Wave::triangle, 0.25, 2200.0, 0.25, 0.35},
+        {Preset::low_tom, "LowTom", 75.0, 0.80, 45.0, 700.0,
+         Wave::triangle, 0.08, 1100.0, 0.25, 0.30},
+        {Preset::mid_tom, "MidTom", 110.0, 0.90, 35.0, 550.0,
+         Wave::triangle, 0.10, 1600.0, 0.28, 0.32},
+        {Preset::hi_tom, "HiTom", 170.0, 1.00, 28.0, 400.0,
+         Wave::triangle, 0.12, 2400.0, 0.30, 0.35},
+        {Preset::bass, "Bass", 55.0, 0.55, 55.0, 1100.0,
+         Wave::sine, 0.04, 900.0, 0.18, 0.22},
+        {Preset::snary, "Snary", 155.0, 0.25, 18.0, 320.0,
+         Wave::triangle, 0.70, 2500.0, 0.82, 0.50},
+        {Preset::zap, "Zap", 210.0, 3.20, 55.0, 500.0,
+         Wave::triangle, 0.02, 3200.0, 0.20, 0.15},
+        {Preset::cosmic, "Cosmic", 280.0, 2.40, 180.0, 1800.0,
+         Wave::sine, 0.20, 6000.0, 0.70, 0.25},
+    }};
 
     TomVoice() {
         VelocityResponse r;
@@ -95,7 +144,34 @@ public:
     void set_click_cutoff_hz(double hz) { click_.set_cutoff_hz(hz); }
     void set_click_decay_ms(double ms) { click_.set_decay_ms(ms); }
 
+    void apply_preset(Preset preset) {
+        const auto it = std::find_if(
+            presets.begin(), presets.end(),
+            [preset](const PresetData& data) { return data.id == preset; });
+        if (it == presets.end()) return;
+        set_tune_hz(it->tune_hz);
+        set_bend_octaves(it->bend_octaves);
+        set_bend_ms(it->bend_ms);
+        set_decay_ms(it->decay_ms);
+        set_wave(it->wave);
+        set_noise_balance(it->noise_balance);
+        set_noise_cutoff_hz(it->noise_cutoff_hz);
+        set_noise_resonance(it->noise_resonance);
+        set_click_level(it->click_level);
+    }
+
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {
@@ -119,6 +195,8 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset_nonlinear_state();
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         // The bend deepens with velocity; the decay deliberately does not, so a
@@ -147,7 +225,7 @@ protected:
     }
 
     bool on_is_active() const override {
-        return amp_env_.is_active() || click_.is_active();
+        return amp_env_.is_active() || click_.is_active() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

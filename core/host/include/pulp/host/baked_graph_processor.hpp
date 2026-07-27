@@ -221,6 +221,10 @@ public:
                         // state. Empty for a custom-free graph.
                         std::unordered_map<NodeId, CustomNodeProcessFn>
                             custom_processors = {},
+                        // Fixed per-node latency captured from each registered
+                        // Custom type. Feeds the baked routed executor's PDC.
+                        std::unordered_map<NodeId, int>
+                            custom_latency_samples = {},
                         // Per-node lifecycle hooks (NodeId → prepare/reset) for
                         // stateful Custom instances, run by prepare() so a
                         // re-prepare re-inits the instance's DSP state at the
@@ -243,6 +247,7 @@ public:
                  pulp::midi::MidiBuffer& midi_in,
                  pulp::midi::MidiBuffer& midi_out,
                  const pulp::format::ProcessContext& context) override;
+    int latency_samples() const override { return latency_samples_; }
 
     // Claim exclusive parameter-injection rights for a baked custom node. Returns
     // a valid ParamInjector iff `node` is a param-declaring baked custom node AND
@@ -281,6 +286,7 @@ private:
     // instance keepalive) + the executor's Custom binding storage. Empty for a
     // custom-free graph; prepare() binds custom_ctx_ from custom_processors_.
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors_;
+    std::unordered_map<NodeId, int> custom_latency_samples_;
     std::vector<CustomBindingContext> custom_ctx_;
     // Per-node stateful-Custom lifecycle hooks captured at bake(); prepare()
     // runs each (prepare at the host's real rate/block, then reset) so stale
@@ -316,6 +322,7 @@ private:
     std::string bundle_id_;
     int input_channels_ = 2;
     int output_channels_ = 2;
+    int latency_samples_ = 0;
     int prepared_max_block_ = 0;
     bool prepared_ = false;
 };
