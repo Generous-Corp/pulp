@@ -1900,3 +1900,50 @@ If the duplicated bodies are identical, removing either is behaviour-preserving 
 clang was already using the last. If they differ, clang has been running the
 second and GCC has never compiled it at all, so decide which is correct before
 deleting.
+
+## A custom node declares its latency; it does not dodge it
+
+`CustomNodeType::latency_samples` is a `std::function<int(double sample_rate)>`,
+evaluated once off the audio thread at compile/lower time and fed into both the
+legacy and routed PDC plans. It is rate-taking rather than a fixed count because
+the two things that usually need it — a lookahead quoted in milliseconds, and an
+oversampler's half-band group delay — resolve differently per rate.
+
+Before it existed, a node with intrinsic delay had one option: remove the delay.
+The Forge drum catalog did exactly that, forcing every voice's output stage to
+`bypass` so it could keep the zero-latency contract. That workaround outlived
+its reason by several releases, because the comment explaining it was never
+revisited — it still claimed no latency surface existed.
+
+Worth knowing how that ended, because "the constraint is gone, so lift the
+workaround" turned out to be wrong: measured, the oversampled path was a net
+loss at the shipped defaults. Every nonlinear stage is inactive by default
+(drive 0, fold 0, quantiser at 24 bits), so the signal made a pure half-band
+round trip and paid the FIR's linear-phase pre-ringing for a stage doing
+nothing to it — about -0.1 dB above 8 kHz gained, against a material attack
+smear on the voices whose character is dense transients. The node still
+bypasses, but now it says so on evidence and derives its declared latency from
+that one choice, so flipping it cannot leave a stale number behind.
+
+The general lesson: removing a workaround is a behaviour change and wants the
+same measurement any other behaviour change would. `tools/audio/quality-lab`
+(`compare a.wav b.wav --profile transient-integrity --align latency`) is what
+caught it; `--align latency` matters, because the delay you just introduced
+will otherwise read as a difference all by itself.
+
+Two things to know when wiring it up:
+
+- **Where the value is captured depends on how the node runs.** The live compile
+  only records latency for a node that has a live callback
+  (`custom_processors.contains(id) && type->latency_samples`) — a node with no
+  live callback is transparent on the live graph and must not add delay there.
+  A **baked-only** node (`create` + `process_instance_baked_param`, no `process`)
+  therefore reports 0 from `SignalGraph::live_custom_latency_samples` and carries
+  its latency through lowering into `BakedGraphProcessor` instead. Asserting on
+  the wrong one of those two paths looks like the feature is broken.
+- **Derive the number, never restate it.** The latency the host compensates and
+  the latency the DSP introduces have to be the same value. If a node names its
+  quality/lookahead in one place and its latency in another, they drift the
+  moment either default moves, and nothing fails — the drum sits a few dozen
+  samples off every undelayed path beside it. Name the choice once
+  (`OutputStage::kDefaultOversampling`) and compute the latency from it.

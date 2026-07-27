@@ -87,6 +87,13 @@ public:
     /// Exact host-rate latency for a quality choice. This is constexpr so a
     /// processor that selects one fixed drum quality can report its latency
     /// without constructing or preparing an output stage.
+    /// The quality a voice runs at unless a caller chooses otherwise. Named
+    /// so a consumer that must DECLARE its latency ahead of rendering (a graph
+    /// doing plugin delay compensation, say) derives the same answer the voice
+    /// will actually produce, instead of restating the factor and drifting the
+    /// moment this default moves.
+    static constexpr OutputOversampling kDefaultOversampling = OutputOversampling::x2;
+
     static constexpr int latency_samples_for(
         OutputOversampling factor) noexcept {
         switch (factor) {
@@ -369,7 +376,7 @@ private:
     std::array<bool, kMaxLatency + 1> ahd_triggers_{};
     int ahd_trigger_cursor_ = 0;
     AhdPhase ahd_phase_ = AhdPhase::inactive;
-    OutputOversampling oversampling_ = OutputOversampling::x2;
+    OutputOversampling oversampling_ = kDefaultOversampling;
     std::size_t tail_samples_remaining_ = 0;
     bool nonlinear_activity_this_sample_ = false;
 };

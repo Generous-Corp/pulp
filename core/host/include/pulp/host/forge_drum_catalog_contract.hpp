@@ -4,9 +4,28 @@
 //
 // Engine identity is construction-time topology. Everything in baked_params is
 // an RT-safe, node-local performance or voicing control consumed through
-// BakedParamView. Output oversampling is deliberately fixed to bypass because
-// CustomNodeType has no latency-reporting surface; changing it would both reset
-// the output stage and make parallel graph paths misaligned.
+// BakedParamView.
+//
+// Output oversampling is bypassed, and `kDrumNodeOversampling` is the single
+// place that says so -- the prepare hook and the declared latency both derive
+// from it, so the two cannot drift.
+//
+// It is bypassed on measurement, not on inability. `CustomNodeType` can report
+// a group delay now (`latency_samples`), so an oversampled node would be
+// compensated correctly rather than sitting misaligned against parallel paths.
+// Oversampling was tried and measured: at the shipped defaults the output
+// stage's nonlinearities are all inactive (drive 0, fold 0, quantiser at 24
+// bits), so the signal makes a pure half-band round trip -- paying the FIR's
+// linear-phase pre-ringing for a stage that does nothing to it. The
+// perceptual comparison put the benefit at -0.0 to -0.2 dB above 8 kHz and
+// the cost at a material attack-smear on the two voices whose character is
+// dense transients (cymbal 0.83 deficit across 20 of 21 onsets; bridged-T
+// kick 0.13 across 8 of 13).
+//
+// So the trade only pays once a caller drives the nonlinear stages, and it is
+// the caller who knows that. Anything reaching for a different quality here
+// should re-measure rather than assume: flip `kDrumNodeOversampling` and the
+// latency follows automatically.
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/drum/engine_registry.hpp>
@@ -268,6 +287,12 @@ inline constexpr auto kFm2ClickCutoffHz = kControl22;
 /// automation lane and a UI can map the range, which neither can do against
 /// an implementation sentinel.
 inline constexpr float kHoldRateBypassHz = 192000.0f;
+
+/// The output quality every drum node runs at, named once so the prepare hook
+/// and the declared latency derive from the same choice. See the header
+/// comment for why this is bypass and what to measure before changing it.
+inline constexpr signal::drum::OutputOversampling kDrumNodeOversampling =
+    signal::drum::OutputOversampling::bypass;
 
 inline constexpr state::ParamID kOperatorRatioBase = 200;
 inline constexpr state::ParamID kOperatorLevelBase = 220;
