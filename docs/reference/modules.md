@@ -539,6 +539,7 @@ a working convolution and would hide the bug. Assert
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
+| Character Delay | `character_delay.hpp` | Wet-only stereo delay with clean, vintage-digital, tape, BBD, and diffusion feedback-loop characters — see the [dedicated guide](../guides/character-delay.md) |
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
