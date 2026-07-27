@@ -968,3 +968,62 @@ TEST_CASE("swing saturates rather than wrapping at the signed tick domain") {
     REQUIRE(unswing_position({maximum}, grid, kTripletSwing).value <= maximum);
     REQUIRE(unswing_position({minimum}, grid, kTripletSwing).value >= minimum);
 }
+
+TEST_CASE("saturating_multiply is total across the signed 64-bit range", "[timebase]") {
+    using detail::saturating_multiply;
+    constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+    constexpr std::int64_t kMin = std::numeric_limits<std::int64_t>::min();
+
+    SECTION("zero and identity are exact") {
+        CHECK(saturating_multiply(0, kMax) == 0);
+        CHECK(saturating_multiply(kMin, 0) == 0);
+        CHECK(saturating_multiply(1, kMin) == kMin);
+        CHECK(saturating_multiply(kMax, 1) == kMax);
+    }
+
+    SECTION("negation rails only where it must") {
+        // kMin has no positive counterpart, so negating it is the one case
+        // that cannot be represented and has to saturate.
+        CHECK(saturating_multiply(-1, kMin) == kMax);
+        CHECK(saturating_multiply(kMin, -1) == kMax);
+        CHECK(saturating_multiply(-1, kMax) == kMin + 1);
+        CHECK(saturating_multiply(-1, 5) == -5);
+    }
+
+    SECTION("in-range products stay exact") {
+        CHECK(saturating_multiply(3, 4) == 12);
+        CHECK(saturating_multiply(-3, 4) == -12);
+        CHECK(saturating_multiply(3, -4) == -12);
+        CHECK(saturating_multiply(-3, -4) == 12);
+        // The largest product that still fits, so an over-eager overflow test
+        // would be caught here rather than silently railing.
+        CHECK(saturating_multiply(3037000499LL, 3037000499LL) == 9223372030926249001LL);
+    }
+
+    SECTION("overflow saturates toward the correct rail") {
+        CHECK(saturating_multiply(kMax, 2) == kMax);
+        CHECK(saturating_multiply(2, kMax) == kMax);
+        CHECK(saturating_multiply(kMin, 2) == kMin);
+        CHECK(saturating_multiply(kMax, -2) == kMin);
+        CHECK(saturating_multiply(-2, kMax) == kMin);
+        CHECK(saturating_multiply(kMin, -2) == kMax);
+        CHECK(saturating_multiply(4000000000LL, 4000000000LL) == kMax);
+        CHECK(saturating_multiply(-4000000000LL, -4000000000LL) == kMax);
+        CHECK(saturating_multiply(4000000000LL, -4000000000LL) == kMin);
+    }
+
+    SECTION("agrees with a wide reference over an exhaustive small grid") {
+        // Independent oracle: __int128 is available to the test on the
+        // toolchains that have it, and is exactly what the shipped code may
+        // not use, so this cross-checks the portable path against the maths
+        // it replaced rather than against itself.
+#if defined(__SIZEOF_INT128__)
+        for (std::int64_t a = -40; a <= 40; ++a) {
+            for (std::int64_t b = -40; b <= 40; ++b) {
+                const __int128 wide = static_cast<__int128>(a) * static_cast<__int128>(b);
+                REQUIRE(saturating_multiply(a, b) == static_cast<std::int64_t>(wide));
+            }
+        }
+#endif
+    }
+}
