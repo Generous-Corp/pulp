@@ -150,7 +150,11 @@ protected:
     void on_note_on(float velocity) override {
         output_.reset_nonlinear_state();
         output_.trigger();
-        stereo_path_active_ = false;
+        if (stereo_path_active_) {
+            burst_output_.sync_configuration_from(output_);
+            burst_output_.reset_nonlinear_state();
+            burst_output_.trigger();
+        }
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         brightness_ = response.brightness_scale(velocity);

@@ -869,6 +869,39 @@ TEST_CASE("Clap burst width carries the fully processed output",
     }
 }
 
+TEST_CASE("A stereo clap retrigger preserves the burst-side history",
+          "[signal][drum][clap][stereo][output][lifecycle]") {
+    ClapVoice control;
+    ClapVoice retriggered;
+    control.prepare(kFs);
+    retriggered.prepare(kFs);
+    (void)stereo_hit(control, 1.0f, 1000);
+    (void)stereo_hit(retriggered, 1.0f, 1000);
+
+    auto render_current = [](Voice& voice, int num_samples) {
+        StereoRender result{
+            std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f),
+            std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f)};
+        voice.process_stereo(result.left.data(), result.right.data(),
+                             num_samples);
+        return result;
+    };
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render_current(control, 32);
+    const auto after_retrigger = render_current(retriggered, 32);
+    double control_side = 0.0;
+    double retrigger_side = 0.0;
+    for (std::size_t i = 0; i < uninterrupted.left.size(); ++i) {
+        control_side += std::fabs(
+            static_cast<double>(uninterrupted.left[i] - uninterrupted.right[i]));
+        retrigger_side += std::fabs(
+            static_cast<double>(after_retrigger.left[i] -
+                                after_retrigger.right[i]));
+    }
+    REQUIRE(control_side > 1.0e-5);
+    REQUIRE(retrigger_side > control_side * 0.1);
+}
+
 TEST_CASE("A clap renders identically for the same parameters",
           "[signal][drum][clap]") {
     ClapVoice voice;
