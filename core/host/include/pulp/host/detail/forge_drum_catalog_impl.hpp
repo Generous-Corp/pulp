@@ -194,10 +194,13 @@ inline void add_voice_params(CustomNodeType& type, EngineId id) {
         // frequency; the bridged-T network produces its own pitch and decay
         // from its component values, which are declared below. Declaring a
         // control on a body that cannot consume it would ship a dead knob.
-        if (id != EngineId::kick_circuit) {
-            add(type, kTuneHz, 20, 400, 55);
+        // Every body takes a tune control. The circuit body has no frequency
+        // parameter of its own -- it retunes by substituting capacitors, the
+        // way the instrument does on the bench -- but that is an implementation
+        // detail, not a reason to withhold the control.
+        add(type, kTuneHz, 20, 400, 55);
+        if (id != EngineId::kick_circuit)
             add(type, kDecay, 10, 4000, 400);
-        }
         if (id == EngineId::kick_oscillator) {
             add(type, kPitchSweepOctaves, 0, 6, 2);
             add(type, kPitchSweepMs, 0.5f, 500, 30);
