@@ -825,3 +825,21 @@ no lane-list edit and cannot break the gate. Skill-sync still flags such a
 change here (it maps whole directories, not file kinds); confirm the diff adds
 no TU under `core/{timebase,timeline,playback}/src/` before treating the flag
 as a real source-closure obligation.
+
+## A new CLAP adapter TU must be added to `PulpWclap.cmake` as well
+
+`tools/cmake/PulpWclap.cmake` keeps its OWN list of `core/format/src/*.cpp`
+sources rather than linking `pulp::format`, because the wasm module is built
+standalone. So adding a translation unit to the CLAP adapter means editing two
+build files, not one.
+
+Miss the second and every WebCLAP target fails at link with an undefined symbol
+— and **native builds stay green**, so it only shows up in CI. The native test
+targets that compile `clap_adapter.cpp` directly (see
+`super_convolver_dsp_tests.cmake`, `canvas_text_tests.cmake`) also link
+`pulp::format`, so the missing symbol resolves out of the archive. The wasm
+module has no archive to fall back on.
+
+The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
+already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
+`clap_adapter.cpp` for exactly this reason.
