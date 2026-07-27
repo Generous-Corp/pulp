@@ -1,6 +1,7 @@
 #include <pulp/view/text_editor.hpp>
 #include "text_edit_model.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -120,6 +121,22 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             current_offsets.push_back(current_start);
         };
 
+        // Soft wrap prefers the last word boundary on the line. Breaking at
+        // whatever cluster happens to overflow splits words mid-glyph
+        // ("opens u" / "p the harder"), which reads as a rendering fault
+        // rather than as wrapping. A word longer than the column still breaks
+        // at the cluster, because an editor that let it overflow would push
+        // text out of view with no way to reach it.
+        //
+        // Rewinding to the boundary means un-appending what was already
+        // accumulated past it, so the break point records the string length
+        // and offset count alongside the byte index — all three have to move
+        // back together or the caret column desyncs from the painted glyphs.
+        int ws_break_byte = -1;
+        std::size_t ws_current_len = 0;
+        std::size_t ws_offsets_count = 0;
+        auto forget_break = [&] { ws_break_byte = -1; };
+
         for (int i = 0; i < static_cast<int>(display.size());) {
             const int next = text_edit::next_cluster(display, i);
             char c = display[static_cast<size_t>(i)];
@@ -128,6 +145,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                 current_start = next;
                 current_offsets.clear();
                 current_offsets.push_back(current_start);
+                forget_break();
                 i = next;
                 continue;
             }
@@ -136,13 +154,32 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                                                  static_cast<std::size_t>(next - i));
             std::string candidate = current + segment;
             if (!current.empty() && canvas.measure_text(candidate) > inner_w) {
+                if (ws_break_byte > current_start) {
+                    // Drop back to the boundary and re-run the loop from
+                    // there, so the wrapped word is laid out on the new line
+                    // by the same path as any other text.
+                    current.resize(ws_current_len);
+                    current_offsets.resize(ws_offsets_count);
+                    flush_line(ws_break_byte);
+                    i = ws_break_byte;
+                    forget_break();
+                    continue;
+                }
                 flush_line(i);
                 current_start = i;
                 current_offsets.clear();
                 current_offsets.push_back(current_start);
+                forget_break();
             }
             current += segment;
             current_offsets.push_back(next);
+            // Record the opportunity AFTER the space, so trailing spaces stay
+            // on the line they end rather than opening the next one.
+            if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+                ws_break_byte = next;
+                ws_current_len = current.size();
+                ws_offsets_count = current_offsets.size();
+            }
             i = next;
         }
 
