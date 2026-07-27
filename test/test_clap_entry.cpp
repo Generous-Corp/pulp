@@ -9,6 +9,7 @@
 #include <pulp/format/clap_entry.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <clap/ext/preset-load.h>
+#include <clap/ext/note-name.h>
 #include <clap/ext/remote-controls.h>
 #include <clocale>
 #include <cmath>
@@ -30,6 +31,13 @@ inline TestProcessor* g_last_processor = nullptr;
 class TestProcessor : public pulp::format::Processor {
 public:
     TestProcessor() { g_last_processor = this; }
+
+    // Note names a test can publish after the plugin is created, so the
+    // note-name extension can be exercised against a live adapter.
+    std::vector<pulp::format::NoteName> published_note_names;
+    std::vector<pulp::format::NoteName> note_names() const override {
+        return published_note_names;
+    }
 
     pulp::format::PluginDescriptor descriptor() const override {
         return {
@@ -1443,4 +1451,78 @@ TEST_CASE("CLAP editor resize handler fails closed after bridge teardown",
 
     pulp::format::clap_adapter::PulpClapPlugin empty;
     install_editor_resize_handler(empty);
+}
+
+TEST_CASE("CLAP publishes Processor note names to the host",
+          "[clap][entry][note-name]") {
+    REQUIRE(clap_entry.init("test"));
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* note_name = static_cast<const clap_plugin_note_name_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_NOTE_NAME));
+    // Offered unconditionally: a plugin that names notes only after loading a
+    // kit still needs the extension, and hosts query it once at init.
+    REQUIRE(note_name != nullptr);
+
+    // A processor that names nothing reports nothing, and the host falls back
+    // to bare pitches.
+    REQUIRE(note_name->count(plugin) == 0);
+    clap_note_name_t out{};
+    REQUIRE_FALSE(note_name->get(plugin, 0, &out));
+
+    auto* proc = test_clap::g_last_processor;
+    REQUIRE(proc != nullptr);
+    proc->published_note_names = {
+        {.name = "Kick", .port = -1, .channel = -1, .key = 36},
+        {.name = "Snare", .port = 0, .channel = 9, .key = 38},
+    };
+
+    REQUIRE(note_name->count(plugin) == 2);
+
+    REQUIRE(note_name->get(plugin, 0, &out));
+    REQUIRE(std::string(out.name) == "Kick");
+    REQUIRE(out.key == 36);
+    REQUIRE(out.port == -1);
+    REQUIRE(out.channel == -1);
+
+    REQUIRE(note_name->get(plugin, 1, &out));
+    REQUIRE(std::string(out.name) == "Snare");
+    REQUIRE(out.key == 38);
+    REQUIRE(out.port == 0);
+    REQUIRE(out.channel == 9);
+
+    // Out-of-range index declines rather than reading past the list.
+    REQUIRE_FALSE(note_name->get(plugin, 2, &out));
+    // A null out-pointer is refused rather than dereferenced.
+    REQUIRE_FALSE(note_name->get(plugin, 0, nullptr));
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+TEST_CASE("Processor note-name change flag is a one-shot edge",
+          "[clap][note-name]") {
+    test_clap::TestProcessor processor;
+
+    REQUIRE_FALSE(processor.note_names_change_pending());
+    REQUIRE_FALSE(processor.consume_note_names_changed_flag());
+
+    processor.flag_note_names_changed();
+    // Peeking must not drain the edge — the adapter peeks on the audio thread
+    // to decide whether to ask the host for a main-thread callback, then
+    // consumes it there.
+    REQUIRE(processor.note_names_change_pending());
+    REQUIRE(processor.note_names_change_pending());
+
+    REQUIRE(processor.consume_note_names_changed_flag());
+    REQUIRE_FALSE(processor.consume_note_names_changed_flag());
+    REQUIRE_FALSE(processor.note_names_change_pending());
 }

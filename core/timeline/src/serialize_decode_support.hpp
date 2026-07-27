@@ -33,4 +33,9 @@ decode_rational_rate(const JsonValue& value, std::string path);
 runtime::Result<std::optional<TrackFreeze>, PersistenceError>
 decode_track_freeze(const JsonValue* freeze, std::string path);
 
+// An absent member is how the canonical form spells a default mixer, so this
+// yields the default rather than refusing.
+runtime::Result<TrackMixer, PersistenceError> decode_track_mixer(const JsonValue* mixer,
+                                                                 std::string path);
+
 } // namespace pulp::timeline::detail

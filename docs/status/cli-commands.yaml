@@ -2266,7 +2266,7 @@ commands:
     summary: Manage the pinned Pulp SDK installation at ~/.pulp/sdk*/ used by standalone projects.
     subcommands:
       - name: install
-        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --version X.Y.Z pins a version
+        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --profile forge-dev creates an immutable development-only arm64 SDK; --version X.Y.Z pins a version
         args:
           - name: --version
             kind: option
@@ -2274,12 +2274,20 @@ commands:
           - name: --local
             kind: flag
             required: false
+          - name: --profile
+            kind: option
+            required: false
+            description: "Local SDK policy profile; forge-dev requires a clean committed Apple Silicon checkout and enables GPU, design import, AU, VST3, CLAP, and Standalone support"
+          - name: --print-path
+            kind: flag
+            required: false
+            description: Print only the completed forge-dev SDK prefix on stdout for command substitution; build progress remains on stderr
       - name: available
         summary: List SDK versions available on GitHub releases
       - name: status
-        summary: Show cached and locally-built SDK versions
+        summary: Show downloaded, locally-built, and immutable development SDKs
       - name: clean
-        summary: Remove all cached SDK versions
+        summary: Remove all cached SDK versions and development SDK profiles
     docs: reference/cli.md#sdk
 
   - name: dev

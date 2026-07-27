@@ -14,6 +14,7 @@
 #include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 
+#include "app_menu_mac.hpp"
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
 #include "window_host_mac_view.h"
@@ -111,36 +112,6 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
     });
 }
 
-@interface PulpAppTerminationHandler : NSObject
-+ (instancetype)sharedHandler;
-- (void)quit:(id)sender;
-@end
-
-@implementation PulpAppTerminationHandler
-
-+ (instancetype)sharedHandler {
-    static PulpAppTerminationHandler* handler = nil;
-    static dispatch_once_t once_token;
-    dispatch_once(&once_token, ^{
-        handler = [[PulpAppTerminationHandler alloc] init];
-    });
-    return handler;
-}
-
-- (void)quit:(id)sender {
-    (void)sender;
-    // cmd+Q / Quit terminates the WHOLE app in one press. Previously this did
-    // performClose on only the KEY window, so with the floating inspector
-    // focused cmd+Q closed just the inspector and a second cmd+Q was needed.
-    // [NSApp stop:nil] returns from the [NSApp run] in run_event_loop, main()
-    // unwinds, and every WindowHost destructor closes its window (canvas +
-    // inspector + any others) — a single, clean quit. (cmd+W still closes one
-    // window via the standard responder chain.)
-    request_cocoa_app_stop();
-}
-
-@end
-
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
@@ -170,22 +141,6 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             return [NSThread isMainThread];
         },
     };
-}
-
-static void install_app_menu(NSString* appName) {
-    NSMenu* menuBar = [[NSMenu alloc] init];
-    NSMenuItem* appItem = [[NSMenuItem alloc] init];
-    [menuBar addItem:appItem];
-    [NSApp setMainMenu:menuBar];
-
-    NSMenu* appMenu = [[NSMenu alloc] init];
-    (void)appName;  // available for override if needed
-    NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit"
-                                                      action:@selector(quit:)
-                                               keyEquivalent:@"q"];
-    [quitItem setTarget:[PulpAppTerminationHandler sharedHandler]];
-    [appMenu addItem:quitItem];
-    [appItem setSubmenu:appMenu];
 }
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
@@ -1450,7 +1405,7 @@ std::vector<WindowHost::MonitorInfo> mac_enumerate_monitors() {
 class MacWindowHost : public WindowHost {
 public:
     MacWindowHost(View& root, const WindowOptions& options)
-        : root_(root) {
+        : root_(root), menu_commands_(options.menu_commands) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
@@ -1668,7 +1623,8 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title]);
+                mac_menu::install_application_menu(
+                    menu_commands_, [] { request_cocoa_app_stop(); });
                 show();
                 [NSApp activateIgnoringOtherApps:YES];
             }
@@ -1691,6 +1647,7 @@ private:
     std::function<void()> idle_callback_;
     ResizeCallback resize_callback_;
     bool options_initially_hidden_ = false;
+    std::vector<WindowOptions::MenuCommand> menu_commands_;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -1700,7 +1657,7 @@ private:
 class MacGpuWindowHost : public WindowHost {
 public:
     MacGpuWindowHost(View& root, const WindowOptions& options)
-        : root_(root) {
+        : root_(root), menu_commands_(options.menu_commands) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
 
@@ -1753,6 +1710,10 @@ public:
             // Initialize GPU render stack
             init_gpu(options.width, options.height);
         }
+    }
+
+    bool is_gpu_backed() const override {
+        return gpu_surface_ && skia_surface_ && skia_surface_->is_available();
     }
 
     ~MacGpuWindowHost() override {
@@ -2035,7 +1996,8 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title]);
+                mac_menu::install_application_menu(
+                    menu_commands_, [] { request_cocoa_app_stop(); });
             }
 
             // Start display-linked render loop
@@ -2172,6 +2134,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    std::vector<WindowOptions::MenuCommand> menu_commands_;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;

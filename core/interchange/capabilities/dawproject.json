@@ -32,6 +32,7 @@
     "clip.warp": { "level": "none", "refusal": "warped clip content" },
     "clip.launch": { "level": "none", "refusal": "scenes and clip-launcher content" },
     "clip.gain": { "level": "none", "refusal": "per-clip gain" },
+    "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
     "clip.fades": { "level": "none", "refusal": "per-clip fades" },
     "context.chord-scale": { "level": "none", "refusal": "chord and scale context lanes" },
     "context.groove": { "level": "none", "refusal": "groove templates and swing" },
@@ -39,6 +40,8 @@
     "tempo.map": { "level": "none", "refusal": "tempo changing after bar 1" },
     "meter.map": { "level": "none", "refusal": "time signature changing after bar 1" },
     "automation.device-param": { "level": "none", "refusal": "automation lanes" },
+    "automation.track-gain": { "level": "none", "refusal": "volume automation lanes" },
+    "automation.track-pan": { "level": "none", "refusal": "pan automation lanes" },
     "device.placement": { "level": "none", "refusal": "device chains" },
     "device.payload": { "level": "none", "refusal": "plugin state" },
     "mixer.track-gain": { "level": "none", "refusal": "channel volume" },
@@ -80,10 +83,35 @@
     },
     "clip.gain": { "level": "full" },
     "clip.fades": { "level": "full" },
+    "clip.note-modifier": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once"
+    },
     "automation.device-param": {
       "level": "drop",
       "loss_class": "dropped",
       "loss": "device identity does not survive without a device payload, so its automation has no target"
+    },
+    "mixer.track-gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit a channel volume, so an authored track gain is dropped and the track exports at unity"
+    },
+    "mixer.track-pan": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit a channel pan, so an authored track pan is dropped and the track exports centred"
+    },
+    "automation.track-gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "a volume automation lane has no export target while channel volume itself is dropped"
+    },
+    "automation.track-pan": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "a pan automation lane has no export target while channel pan itself is dropped"
     },
     "device.placement": {
       "level": "drop",

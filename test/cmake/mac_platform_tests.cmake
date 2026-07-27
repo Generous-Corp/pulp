@@ -106,4 +106,17 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
     )
     catch_discover_tests(pulp-test-foreign-framework-coexistence)
+
+    # One CoreMIDI client per process, not one per open port. Drives the real
+    # CoreMIDI framework because that registration is what the invariant is
+    # about; needs no MIDI hardware and opens no ports.
+    add_executable(pulp-test-coremidi-shared-client
+        test_coremidi_shared_client.cpp
+    )
+    target_link_libraries(pulp-test-coremidi-shared-client PRIVATE
+        pulp::midi
+        Catch2::Catch2WithMain
+        "-framework CoreMIDI"
+    )
+    catch_discover_tests(pulp-test-coremidi-shared-client)
 endif()

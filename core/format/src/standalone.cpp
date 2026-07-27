@@ -2,6 +2,7 @@
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
+#include <pulp/format/detail/standalone_musical_typing.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/editor_ui.hpp>
@@ -11,6 +12,7 @@
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/command_registry.hpp>
 
 #include <algorithm>
 #include <array>
@@ -51,7 +53,6 @@
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
-#include <pulp/view/command_registry.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -265,6 +266,11 @@ void StandaloneApp::render_audio_block(
                 : 0.0;
         ui_midi_collector_.drain_into(midi_in, block_start_seconds,
                                       ctx.buffer_size, ctx.sample_rate);
+        // Recovery events sit at the end of the block so sorting cannot move
+        // them ahead of the queued note-on they are cancelling. The helper is
+        // created before audio starts and remains stable until after it stops.
+        if (musical_typing_)
+            musical_typing_->drain_recovery_into(midi_in, ctx.buffer_size);
         midi_in.sort();
 
 #if PULP_ENABLE_AUDIO_PROBES
@@ -580,6 +586,13 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
 }
 
 bool StandaloneApp::run_with_editor(bool use_gpu) {
+    if (musical_typing_) musical_typing_->shutdown();
+    musical_typing_.reset();
+#if PULP_ENABLE_AUDIO_PROBES
+    audio_inspector_.reset();
+#endif
+    command_registry_.reset();
+
     const auto effective_config = detail::standalone_config_from_environment(config_);
 #if !PULP_ENABLE_AUDIO_PROBES
     if (detail::standalone_probe_json_requested_but_disabled(effective_config)) {
@@ -594,6 +607,16 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             "Standalone: headless/CI mode requires a screenshot path; "
             "set StandaloneConfig::screenshot_path or PULP_SCREENSHOT");
         return false;
+    }
+
+    // Construct before start(): the audio callback may begin immediately and
+    // reads this stable helper to drain its lock-free stuck-note recovery.
+    if (effective_config.enable_musical_typing_keyboard) {
+        command_registry_ = std::make_unique<view::CommandRegistry>();
+        musical_typing_ = std::make_unique<detail::StandaloneMusicalTyping>(
+            [this](const midi::MidiEvent& event) {
+                return ui_midi_collector_.push_now(event);
+            });
     }
 
     config_ = effective_config;
@@ -661,11 +684,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto* settings_ptr = chrome.settings_panel();
     auto& window_root = chrome.window_root();
 
+    if (effective_config.enable_musical_typing_keyboard) {
+        musical_typing_->register_command(*command_registry_);
+        musical_typing_->install_key_route(window_root);
+    }
+
     // Build WindowOptions from the bridge's cached ViewSize hints so
     // min_width/min_height propagate to platform window hosts that honor them.
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
     opts.initially_hidden = effective_config.headless;
+    if (musical_typing_) musical_typing_->add_menu_command(opts);
 
     auto window = view::WindowHost::create(window_root, opts);
     if (!window) {
@@ -674,6 +703,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
         return false;
     }
+    if (musical_typing_) musical_typing_->set_primary_window(window.get());
     detail::configure_standalone_design_viewport(*window, size_hints, chrome);
 
     // Grow the window when the Settings tab is active so the Audio/MIDI panel —
@@ -739,17 +769,19 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         // Fresh registry + window per run (a prior run's window referenced an
         // already-destroyed root view). Destroy the window before the registry
         // so its RAII handler removal targets a live registry.
-        audio_inspector_.reset();
-        command_registry_ = std::make_unique<view::CommandRegistry>();
+        if (!command_registry_)
+            command_registry_ = std::make_unique<view::CommandRegistry>();
         audio_inspector_ = std::make_unique<view::AudioInspectorWindow>(
             nullptr, window.get(), view::AudioInspectorWindow::HostFactory{},
             desc.name);
         audio_inspector_->set_probe(&output_probe_);
         audio_inspector_->register_command_handler(*command_registry_);
-        view::route_global_keys(window_root, *command_registry_);
         audio_inspector_ptr = audio_inspector_.get();
     }
 #endif
+
+    if (command_registry_)
+        view::route_global_keys(window_root, *command_registry_);
 
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts
@@ -1056,14 +1088,15 @@ void StandaloneApp::stop_audio_keep_processor() {
 }
 
 void StandaloneApp::stop() {
+    if (musical_typing_) musical_typing_->shutdown();
     stop_audio_keep_processor();
 #if PULP_ENABLE_AUDIO_PROBES
     // Tear the Audio Inspector down before the processor / probe so its raw
     // `output_probe_` pointer never dangles. Destroying the window first also
     // removes its handler from `command_registry_` (RAII in its destructor);
-    // destroy the registry after, so the removal has a live registry to target.
+    // keep the registry alive until the primary window has left its event loop,
+    // because that window's global-key callback still references it.
     audio_inspector_.reset();
-    command_registry_.reset();
 #endif
     if (processor_) {
         processor_->release();

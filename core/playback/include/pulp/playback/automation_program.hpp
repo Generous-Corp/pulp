@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <variant>
 #include <vector>
 
 namespace pulp::playback {
@@ -67,8 +68,14 @@ class AutomationProgram {
     timeline::ItemId lane_id() const noexcept {
         return lane_id_;
     }
-    timeline::DeviceParameterTarget target() const noexcept {
+    const timeline::AutomationTarget& target() const noexcept {
         return target_;
+    }
+    /// The device parameter this lane drives, or none when it drives a control
+    /// the owning track holds itself. Device delivery only ever concerns the
+    /// former; returning a pointer keeps that split explicit at every consumer.
+    const timeline::DeviceParameterTarget* device_target() const noexcept {
+        return std::get_if<timeline::DeviceParameterTarget>(&target_);
     }
     const timebase::CompiledTempoMap& tempo_map() const noexcept {
         return *tempo_map_;
@@ -89,18 +96,33 @@ class AutomationProgram {
   private:
     friend class detail::AutomationProgramCompiler;
     AutomationProgram(ProgramGeneration generation, AutomationProgramInstanceToken instance_token,
-                      timeline::ItemId lane_id,
-                      timeline::DeviceParameterTarget target,
+                      timeline::ItemId lane_id, timeline::AutomationTarget target,
                       std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                       std::vector<AutomationProgramSegment> segments, float leading_value) noexcept;
 
     ProgramGeneration generation_ = 0;
     AutomationProgramInstanceToken instance_token_;
     timeline::ItemId lane_id_;
-    timeline::DeviceParameterTarget target_;
+    timeline::AutomationTarget target_;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map_;
     std::vector<AutomationProgramSegment> segments_;
     float leading_value_ = 0.0f;
 };
+
+/// Selects the segment governing an absolute timeline sample. A cold call
+/// searches; a warm one advances forward from `segment_index`, which is the
+/// amortized O(1) path monotonic playback takes. Never called on an empty
+/// program.
+std::size_t select_automation_segment(const AutomationProgram& program,
+                                      timebase::SamplePosition sample, bool cold,
+                                      std::size_t segment_index) noexcept;
+
+/// The authored value of one already-selected segment at an exact tick. The
+/// sample is needed only to recognise a zero-length terminal segment. Every
+/// consumer that needs a curve value at a position goes through here, so device
+/// delivery and track-mixer application can never drift apart.
+float evaluate_automation_segment(const AutomationProgram& program, std::size_t segment_index,
+                                  timebase::SamplePosition sample,
+                                  timebase::TickPosition tick) noexcept;
 
 } // namespace pulp::playback

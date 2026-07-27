@@ -278,13 +278,81 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   output, multichannel-to-mono averages, wider sources map by channel, and the
   engine does not clip or normalize deterministic float sums.
 
+### A per-pass decision splits across compile and render — put each half where its inputs are
+
+Per-note playback modifiers (probability, pass condition, ratchet) are the
+worked example. The split is not a style choice; each half sits where its inputs
+exist:
+
+- **Authored, pass-independent → compile time.** A ratchet count is a pure
+  function of the content, so `program_compiler.cpp` lowers a ratcheted note into
+  N on/off pairs that tile the authored span, with the last subdivision landing
+  on the note's own end so repeats never drift. A subdivision that collapses to
+  zero samples at the compiled tempo fails the compile rather than emitting an
+  on with no off.
+- **Pass-dependent → the renderer.** Probability and the pass condition cannot be
+  decided at compile time without freezing every pass to one answer, so they are
+  evaluated in `ArrangementNoteRenderer::process()` against a pass index.
+
+The pass index is **transport-owned, never renderer-local**. Each
+`TransportRange` carries `loop_pass_index`; the master transport and host
+projector advance it at a wrap and re-anchor it on start, seek/jump, or loop
+identity changes (including precise fractional host bounds). A renderer may be
+created mid-playback, skip a callback, or fail a bounded output flush and still
+observes the authoritative pass on its next range. Do not reconstruct the pass
+from `MonotonicBeat`: its signed tick storage intentionally saturates at the
+domain boundary.
+
+Two properties make the gate safe to apply per event. The pass index is constant
+across a range, because a wrap always starts a new range — so a note's on and its
+off resolve against the same pass and the gate can never admit one without the
+other. And the decision is a pure function of `(draw key, pass index)`, so no
+draw state crosses blocks and evaluation order cannot change a result. Anything
+seeded on the audio thread must have this shape: fold the seed and the identity
+into one key at compile time, then mix it with the pass index in `process()`.
+
+Side data a renderer needs per event goes in a **sparse table on `TrackProgram`
+looked up by item id**, not a field on `NoteProgramEvent`. That struct is 40
+bytes and the scale suite compiles ten million of them; a `std::uint32_t` index
+would not fit the existing padding and would grow every event by eight bytes to
+carry data almost no note has. An empty-span check makes the common case free.
+Sorting such a table is real work, so it gets its own budgeted
+`BudgetedStableMergeState` stage rather than a bare `std::sort` inside a compile
+slice.
+
+### Track mixer
+
+- **Track mixer.** `TrackProgram::mixer()` carries the track's own
+  `gain_linear`/`pan` with any lanes that automate them already resolved to
+  borrowed `AutomationProgram` pointers. It is applied inside the clip
+  accumulate in `audio_renderer_render.cpp`, so the whole-program mixdown and
+  the per-track graph renderer stay in agreement — applying it in only one would
+  break offline/live parity. A lane **supersedes** the authored constant rather
+  than multiplying with it, and `TrackMixerProgram::transparent()` short-circuits
+  an untouched track back onto the exact pre-mixer code path. Pan is a balance:
+  it attenuates the opposite side, never boosts, is inert below two channels, and
+  is exactly unity at centre.
+- **Mixer lanes never reach device delivery.** `TrackAutomationRenderer` skips
+  any lane whose `device_target()` is null, and so does the admission scan in
+  `core/host/src/timeline_automation_delivery.cpp`. A mixer lane still lives in
+  the track's `TrackAutomationProgram`; it just has no device to address.
+- **One curve evaluator.** `select_automation_segment` and
+  `evaluate_automation_segment` in `automation_program.cpp` are shared by the
+  device-delivery cursor and `TrackMixerControlCursor`, so an automated fader and
+  an automated plugin parameter cannot read the same curve differently.
+  `TrackMixerControlCursor` is forward-only — `restart()` before revisiting an
+  earlier position, which the render loop does per channel and per transport
+  range.
+
 ## Validation
 
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
 `pulp-test-playback-track-automation-renderer`, `pulp-test-playback-program`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
-`pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
+`pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`
+(which carries the track-mixer cases, including the proof that a gain lane moves
+the rendered samples rather than merely existing in the document). Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
 Track-freeze changes also require `pulp-test-timeline-graph-binding`: prove the
 artifact routes directly after the authored chain, a stale device mapping is

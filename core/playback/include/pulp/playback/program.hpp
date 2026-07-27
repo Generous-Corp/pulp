@@ -3,6 +3,7 @@
 #include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
 #include <pulp/playback/program_identity.hpp>
+#include <pulp/playback/track_mixer_program.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -74,6 +75,20 @@ struct NoteProgramEvent {
     constexpr auto operator<=>(const NoteProgramEvent&) const = default;
 };
 
+/// One note's playback modifier, lowered with its draw key already folded from
+/// the content's authored seed and the note identity. Only notes that actually
+/// carry a modifier appear here, so an arrangement that authors none carries no
+/// per-note modifier data and the renderer's gate costs one empty-span check.
+struct CompiledNoteModifier {
+    std::uint64_t draw_key = 0;
+    timeline::NoteModifier modifier;
+};
+
+/// Looks up the modifier for `note_id` in a table sorted by note id. Returns
+/// nullptr when the note plays unconditionally, which is the common case.
+const CompiledNoteModifier* find_note_modifier(std::span<const CompiledNoteModifier> modifiers,
+                                               timeline::ItemId note_id) noexcept;
+
 constexpr bool note_program_event_less(const NoteProgramEvent& lhs,
                                        const NoteProgramEvent& rhs) noexcept {
     if (lhs.sample != rhs.sample)
@@ -107,6 +122,10 @@ class TrackProgram {
     std::span<const NoteProgramEvent> arrangement_note_events() const noexcept {
         return note_events_;
     }
+    /// Sorted by note id. Empty for a track whose notes all play by default.
+    std::span<const CompiledNoteModifier> note_modifiers() const noexcept {
+        return note_modifiers_;
+    }
     const AudioTrackRendererProgram* audio_program() const noexcept {
         return audio_program_.get();
     }
@@ -132,18 +151,27 @@ class TrackProgram {
         return generated_id_start_;
     }
 
+    /// The track's own level and stereo placement, with any lanes that automate
+    /// them already resolved. Borrows from automation_program_, which this
+    /// program holds alive.
+    const TrackMixerProgram& mixer() const noexcept {
+        return mixer_;
+    }
+
   private:
     friend class ProgramCompilerTask;
     TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                  ProviderSelectorProgram provider, RendererStatePolicy state_policy,
                  std::vector<timeline::ItemId> clip_ids, std::vector<NoteProgramEvent> note_events,
+                 std::vector<CompiledNoteModifier> note_modifiers,
                  std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                  std::vector<timeline::ItemId> device_placement_ids,
                  std::shared_ptr<const TrackAutomationProgram> automation_program,
                  std::uint64_t expanded_clip_count,
                  std::uint64_t expanded_note_event_count,
                  std::uint64_t generated_id_start,
-                 std::uint64_t generated_id_count) noexcept;
+                 std::uint64_t generated_id_count,
+                 TrackMixerProgram mixer) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
@@ -151,6 +179,7 @@ class TrackProgram {
     RendererStatePolicy state_policy_ = RendererStatePolicy::CarryByItemId;
     std::vector<timeline::ItemId> clip_ids_;
     std::vector<NoteProgramEvent> note_events_;
+    std::vector<CompiledNoteModifier> note_modifiers_;
     std::shared_ptr<const AudioTrackRendererProgram> audio_program_;
     std::vector<timeline::ItemId> device_placement_ids_;
     std::shared_ptr<const TrackAutomationProgram> automation_program_;
@@ -158,6 +187,7 @@ class TrackProgram {
     std::uint64_t expanded_note_event_count_ = 0;
     std::uint64_t generated_id_start_ = 0;
     std::uint64_t generated_id_count_ = 0;
+    TrackMixerProgram mixer_;
 };
 
 class PlaybackProgram {

@@ -54,9 +54,10 @@ enum class Concept : std::uint16_t {
     EditRateNonAudio = 40,
     ContextChordScale = 41,
     ContextGroove = 42,
+    ClipNoteModifier = 43,
 };
 
-inline constexpr std::size_t kConceptCount = 43;
+inline constexpr std::size_t kConceptCount = 44;
 
 namespace detail {
 struct ConceptRecord {
@@ -87,12 +88,12 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"marker", "A named point or range on the timeline.", false},
     {"timecode.origin", "The wall-clock timecode the document's zero position represents.", false},
     {"media.provenance", "Where a media asset came from: source timecode, reel or tape name, original locator.", false},
-    {"mixer.track-gain", "Static per-track gain.", false},
-    {"mixer.track-pan", "Static per-track pan position.", false},
+    {"mixer.track-gain", "Static per-track gain.", true},
+    {"mixer.track-pan", "Static per-track pan position.", true},
     {"mixer.sends", "Track routing to busses and auxiliary sends.", false},
     {"automation.device-param", "An automation lane targeting a device parameter.", true},
-    {"automation.track-gain", "An automation lane targeting a track's gain.", false},
-    {"automation.track-pan", "An automation lane targeting a track's pan.", false},
+    {"automation.track-gain", "An automation lane targeting a track's gain.", true},
+    {"automation.track-pan", "An automation lane targeting a track's pan.", true},
     {"device.placement", "A device occupying a slot in a track's chain, by identity.", true},
     {"device.payload", "A device's type and saved parameter state.", false},
     {"effect.timewarp", "An effect that remaps time rather than processing content.", false},
@@ -109,6 +110,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"edit-rate.non-audio", "Positions at a rate that does not convert exactly to the document's rate.", false},
     {"context.chord-scale", "A sequence-owned lane of chord and scale statements that other items read while compiling.", true},
     {"context.groove", "A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling.", true},
+    {"clip.note-modifier", "Per-note playback modifiers: probability, pass condition, and ratchet.", true},
 };
 } // namespace detail
 

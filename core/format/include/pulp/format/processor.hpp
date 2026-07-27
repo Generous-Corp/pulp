@@ -7,6 +7,7 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <pulp/format/note_name.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/prepare_resources.hpp>
@@ -354,6 +355,22 @@ public:
     }
     bool tail_change_pending() const noexcept {
         return tail_changed_.load(std::memory_order_acquire);
+    }
+
+    /// Note-name change notification, same shape as the latency / tail pair
+    /// above. A sampler that loads a new kit, or an instrument that switches
+    /// articulation maps, raises this so the adapter republishes
+    /// `note_names()` and the host relabels its piano roll.
+    ///
+    /// **Audio-thread-safe**, so a processor may raise it from `process()`.
+    void flag_note_names_changed() noexcept {
+        note_names_changed_.store(true, std::memory_order_release);
+    }
+    bool consume_note_names_changed_flag() noexcept {
+        return note_names_changed_.exchange(false, std::memory_order_acq_rel);
+    }
+    bool note_names_change_pending() const noexcept {
+        return note_names_changed_.load(std::memory_order_acquire);
     }
 
     /// Process one buffer of audio. Called on the real-time audio thread.
@@ -795,6 +812,22 @@ public:
         }
     }
 
+    /// Names for individual notes, shown by hosts in the piano roll and drum
+    /// editors. Default empty: the host labels notes with bare pitches, which
+    /// is what every plug-in did before this hook existed.
+    ///
+    /// Override for instruments whose keys mean something other than pitch —
+    /// a drum kit ("Kick", "Snare", "Closed Hat"), a sampler's keyswitch range
+    /// ("Legato", "Staccato"), a step trigger grid. Entries may use the -1
+    /// wildcard for port and channel to name a key across all of them.
+    ///
+    /// Called on the host / main thread, never from `process()`. Raise
+    /// `flag_note_names_changed()` when the list changes so the adapter
+    /// republishes it.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual std::vector<NoteName> note_names() const { return {}; }
+
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
@@ -841,6 +874,7 @@ private:
     // on the host / main thread.
     std::atomic<bool> latency_changed_{false};
     std::atomic<bool> tail_changed_{false};
+    std::atomic<bool> note_names_changed_{false};
 };
 
 /// Factory function type — plugins provide this to create processor instances.

@@ -2932,6 +2932,16 @@
                 "name": "--local",
                 "kind": "flag",
                 "required": false
+              },
+              {
+                "name": "--profile",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--print-path",
+                "kind": "flag",
+                "required": false
               }
             ],
             "subcommands": []
@@ -4470,7 +4480,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.391.0",
+        "version": "0.391.1",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4485,13 +4495,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.391.0",
+        "catalog_version": "0.391.1",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.391.0",
+        "version": "0.391.1",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

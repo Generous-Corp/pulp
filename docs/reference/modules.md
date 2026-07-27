@@ -886,7 +886,13 @@ before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
 overloads distinguish owned IDs from external media-asset references and accept
 an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
 before allocator state changes. `NoteContent` is a flat POD array sorted by
-`(start, ItemId)`. Fallible construction uses
+`(start, ItemId)`, alongside a sparse companion array of per-note playback
+modifiers sorted by note ID and an authored seed. A modifier carries a
+probability, a loop-pass condition, and a ratchet count; notes that play
+unconditionally and once carry no entry. Evaluation is a pure function of the
+seed, the note identity, and the loop-pass index, so an identical document and
+transport trace always reproduces the same sounding decisions.
+Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
 `automation_curve.hpp` provides immutable, position-ordered automation points
@@ -929,6 +935,20 @@ or comp playback without deleting authored clips, takes, automation, or device
 placements. Publish `CreateAsset` before `SetTrackFreeze` in one transaction;
 clear the freeze before removing the asset. A journal replay selects the sealed
 artifact and never performs a hidden render.
+
+`TrackMixer` is the track's own level and stereo placement: a linear
+`gain_linear` and a `pan` balance in `[-1, 1]`, edited with `SetTrackMixer`.
+`AutomationTarget` accordingly names either a placed device parameter or one of
+these mixer controls, so volume and pan automation is expressible without
+inventing an out-of-band convention for which device is the fader. Sends, mute,
+solo, and routing are not modeled. Playback applies the mixer where the track's
+audio is accumulated; the graph binding uses a stable post-device node so
+instrument output, effects, and tails are governed too. Hosted chains with a
+nontransparent mixer must identify their post-device source and post-mixer
+destination in `TimelineTrackGraphRoute`; the binding replaces and later
+restores the exact direct edge. A lane supersedes the authored constant rather
+than multiplying with it, and pan attenuates the opposite side without ever
+boosting.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. An audio asset may also carry typed

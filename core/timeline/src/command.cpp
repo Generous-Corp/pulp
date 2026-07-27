@@ -40,10 +40,17 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
                        left.frame_count == right.frame_count;
             },
             [&](const NoteContent& left) {
-                const auto right = std::get<NoteContent>(rhs).notes();
+                const auto& other = std::get<NoteContent>(rhs);
+                const auto right = other.notes();
+                // The modifiers and the seed are part of how the clip plays, so
+                // a change to either is an edit the journal must keep.
                 return left.notes().size() == right.size() &&
                        std::equal(left.notes().begin(), left.notes().end(), right.begin(),
-                                  equal_note);
+                                  equal_note) &&
+                       left.modifier_seed() == other.modifier_seed() &&
+                       left.modifiers().size() == other.modifiers().size() &&
+                       std::equal(left.modifiers().begin(), left.modifiers().end(),
+                                  other.modifiers().begin());
             },
             [&](const RegisteredContent& left) {
                 const auto& right = std::get<RegisteredContent>(rhs);
@@ -82,7 +89,10 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
             [](const EmptyContent&) { return sizeof(Clip); },
             [](const MediaRef&) { return sizeof(Clip); },
             [](const NoteContent& notes) {
-                return saturated_add(sizeof(Clip), notes.notes().size() * sizeof(NoteEvent));
+                return saturated_add(
+                    saturated_add(sizeof(Clip),
+                                  saturated_multiply(notes.notes().size(), sizeof(NoteEvent))),
+                    saturated_multiply(notes.modifiers().size(), sizeof(NoteModifier)));
             },
             [](const RegisteredContent& registered) {
                 return saturated_add(sizeof(Clip), registered.retained_bytes());
@@ -404,7 +414,8 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.lane_id == right.lane_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
-            } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
+            } else if constexpr (std::is_same_v<T, SetTrackFreeze> ||
+                                 std::is_same_v<T, SetTrackMixer>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetChordScaleLane> ||

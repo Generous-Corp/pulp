@@ -1511,6 +1511,25 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 #endif  // __APPLE__
 
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship refuses to package a development SDK build",
+                 "[cli][shellout][ship][sdk-provenance]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("development-sdk-package", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=FALSE\n";
+    }
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only"));
+    REQUIRE(contains(combined, "distribution_eligible=false"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}
+
 // ── Linux packaging CLI routing ──────────────────────────────────────────
 // Regression guard: `pulp ship package` on Linux must invoke the first-party
 // .deb/.tar.gz packagers (ship/platform/linux/package_linux.cpp), NOT fall

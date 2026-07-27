@@ -2,6 +2,7 @@
 // Handles: sign, notarize, package, appcast, check
 
 #include "cli_common.hpp"
+#include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
 #include "ship_tracing_guard.hpp"
 #include "xcode_developer_path.hpp"
@@ -2035,6 +2036,14 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub != "swap-pack" && !fs::exists(build_dir / "CMakeCache.txt")) {
         std::cerr << "Build directory not found. Run `pulp build` first.\n";
         return 1;
+    }
+
+    if (sub == "package" || sub == "notarize" || sub == "release" || sub == "share") {
+        std::string distribution_error;
+        if (!pulp::cli::sdk_allows_distribution(build_dir, distribution_error)) {
+            std::cerr << "Error: " << distribution_error << ".\n";
+            return 1;
+        }
     }
 
     if (sub == "sign")           return ship_sign(args, root, build_dir);

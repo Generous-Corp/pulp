@@ -116,6 +116,8 @@ TEST_CASE("host transport projection re-anchors after an exact second loop wrap"
     TransportSnapshot projected;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[0].loop_pass_index == 0);
+    REQUIRE(projected.ranges[1].loop_pass_index == 1);
     REQUIRE(projected.ranges[1].timeline_sample_start.value == 0);
     REQUIRE(projected.ranges[1].frame_count == 64);
 
@@ -250,10 +252,24 @@ TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
     context.num_samples = 1'000;
     context.position_beats = 1.0 + 4'000.0 / 48'000.0;
     context.position_samples = 68'000;
+    // Format adapters flag the backwards host playhead movement as a jump.
+    // Because it lands at the projector's expected loop continuation, it must
+    // advance the pass rather than re-anchor the epoch.
+    context.transport_jump = true;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE(projected.ranges[0].loop_pass_index == 1);
     REQUIRE(projected.ranges[0].timeline_tick_start.value ==
             kTicksPerQuarter + kTicksPerQuarter / 12);
+
+    const auto rounded_loop = projected.loop;
+    context.transport_jump = false;
+    context.position_samples = 69'000;
+    context.position_beats += 1'000.0 / 48'000.0;
+    context.loop_start_beats += 0.000'000'000'1;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.loop == rounded_loop);
+    REQUIRE(projected.ranges[0].loop_pass_index == 0);
 }
 
 TEST_CASE("host beat-domain loop projection keeps the final fractional frame cell") {

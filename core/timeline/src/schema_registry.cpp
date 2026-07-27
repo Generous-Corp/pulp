@@ -2,6 +2,7 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "note_content_schema_migrations.hpp"
 #include "project_schema_migrations.hpp"
 #include "project_schema_policy.hpp"
 #include "sequence_schema_migrations.hpp"
@@ -365,6 +366,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                           {"device_chain", SchemaValueKind::Array},
                           {"freeze", SchemaValueKind::Object, false},
                           {"id", SchemaValueKind::U64String},
+                          {"mixer", SchemaValueKind::Object, false},
                           {"name", SchemaValueKind::String},
                           {"record_armed", SchemaValueKind::Boolean},
                           {"take_lanes", SchemaValueKind::Array}},
@@ -374,6 +376,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     track.upgrades.push_back({3, 4, {}, detail::migrate_track_v3_to_v4});
     track.upgrades.push_back({4, 5, {}, detail::migrate_track_v4_to_v5});
     track.upgrades.push_back({5, 6, {}, detail::migrate_track_v5_to_v6});
+    track.upgrades.push_back({6, 7, {}, detail::migrate_track_v6_to_v7});
+    track.downgrades.push_back({7, 6, {}, detail::migrate_track_v7_to_v6});
     track.downgrades.push_back({6, 5, {}, detail::migrate_track_v6_to_v5});
     track.downgrades.push_back({5, 4, {}, detail::migrate_track_v5_to_v4});
     track.downgrades.push_back({4, 3, {}, detail::migrate_track_v4_to_v3});
@@ -388,6 +392,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               SchemaDomain::Document,
                               {{"device_placement_id", SchemaValueKind::U64String},
                                {"parameter_id", SchemaValueKind::U32}}));
+    schemas.push_back(builtin("pulp.timeline.automation_target.track_mixer", SchemaDomain::Document,
+                              {{"parameter", SchemaValueKind::String}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
     auto take_lane = builtin("pulp.timeline.take_lane", SchemaDomain::Document,
@@ -418,8 +424,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"asset_id", SchemaValueKind::U64String},
                                {"frame_count", SchemaValueKind::U64String},
                                {"source_start", SchemaValueKind::I64String}}));
-    schemas.push_back(builtin("pulp.timeline.content.notes", SchemaDomain::Content,
-                              {{"notes", SchemaValueKind::Array}}));
+    auto notes = builtin("pulp.timeline.content.notes", SchemaDomain::Content,
+                         {{"modifier_seed", SchemaValueKind::U64String},
+                          {"modifiers", SchemaValueKind::Array},
+                          {"notes", SchemaValueKind::Array}},
+                         2);
+    notes.upgrades.push_back({1, 2, {}, detail::migrate_note_content_v1_to_v2});
+    notes.downgrades.push_back({2, 1, {}, detail::migrate_note_content_v2_to_v1});
+    schemas.push_back(std::move(notes));
     schemas.push_back(builtin("pulp.timeline.content.sequence_ref", SchemaDomain::Content,
                               {{"sequence_id", SchemaValueKind::U64String},
                                {"source_start", SchemaValueKind::I64String}}));
@@ -548,6 +560,11 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"scene_id", SchemaValueKind::U64String},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"slot_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_track_mixer", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Object},
+                               {"replacement", SchemaValueKind::Object},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_freeze", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Object, false},
                                {"replacement", SchemaValueKind::Object, false},

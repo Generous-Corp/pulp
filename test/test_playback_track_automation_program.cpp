@@ -151,7 +151,8 @@ TEST_CASE("track automation program rejects duplicate targets but preserves devi
         REQUIRE(duplicate.error().code == TrackAutomationProgramErrorCode::DuplicateTarget);
         REQUIRE(duplicate.error().lane == ItemId{20});
         REQUIRE(duplicate.error().related_lane == ItemId{10});
-        REQUIRE(duplicate.error().target == DeviceParameterTarget{{100}, 7});
+        REQUIRE(std::get<DeviceParameterTarget>(duplicate.error().target) ==
+                DeviceParameterTarget{{100}, 7});
     }
 
     const auto other_device = program({30}, {{200}, 7}, map, 4);

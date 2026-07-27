@@ -148,6 +148,9 @@ it through the governor), not the machine's core count.
 ./build/pulp version             # show SDK and project version
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
+./build/pulp sdk install --local --profile forge-dev --print-path
+                                # immutable arm64 SDK for local Forge iteration
+                                # Forge configure must opt in; ship/release refuses it
 ./build/pulp dev --test          # watch + rebuild + test loop
 ./build/pulp build --watch       # watch + rebuild loop
 ```
@@ -264,6 +267,16 @@ Pulp has **two mature measurement lanes**. Load the [`audio-harness`](.agents/sk
 skill at the **start** of any DSP or audio-pipeline work — when you are choosing
 acceptance gates, not only when something already sounds wrong. Most of what a
 DSP task needs is already written; hand-rolling it is the default failure mode.
+
+### Forge reachability is part of the DSP lifecycle
+
+Landing or removing a musician-facing audio, MIDI, instrument, or timeline
+capability includes classifying and updating its Forge exposure in the same
+delivery slice. Internal implementation behind an unchanged higher-level
+catalog is exempt, but must name that owner. The detailed lane, safe-control,
+stable-ID, removal, and executable catalog-index contracts live in the
+[`hosting`](.agents/skills/hosting/SKILL.md) skill under "`CustomNodeType`
+pack" and bake-layer parameter injection.
 
 | Lane | What | Use for |
 |------|------|---------|

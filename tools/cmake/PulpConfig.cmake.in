@@ -18,6 +18,9 @@ set(PULP_SDK_SHARED_LIBRARY_PREFIX "@CMAKE_SHARED_LIBRARY_PREFIX@")
 set(PULP_SDK_SHARED_LIBRARY_SUFFIX "@CMAKE_SHARED_LIBRARY_SUFFIX@")
 set(PULP_SDK_LIBRARY_DIR "${PULP_SDK_DIR}/@CMAKE_INSTALL_LIBDIR@")
 
+# Resolve development-vs-release provenance before consumer policy runs.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpSdkProvenance.cmake")
+
 set(PULP_CLAP_INCLUDE_DIR "${PULP_SDK_DIR}/external/clap/include")
 set(PULP_LV2_INCLUDE_DIR "${PULP_SDK_DIR}/external/lv2/include")
 set(PULP_VST3_INCLUDE_DIR "${PULP_SDK_DIR}/external/vst3sdk")

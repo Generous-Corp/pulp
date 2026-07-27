@@ -478,9 +478,16 @@ void MusicalTypingKeyboard::on_focus_changed(bool gained) {
     DesignFrameView::on_focus_changed(gained);
     if (!gained) {
         // Lost focus: release our QWERTY-held notes (you can't hold keys while
-        // unfocused), then re-apply the external held set so host-driven
-        // highlights persist while QWERTY-only highlights clear.
+        // unfocused) and momentary controls whose key-up can no longer arrive,
+        // then re-apply the external held set so host-driven highlights persist
+        // while QWERTY-only highlights clear.
         controller_.all_notes_off();
+        if (pb_value_ < 0)
+            control_release("pb_down");
+        else if (pb_value_ > 0)
+            control_release("pb_up");
+        if (sustain_)
+            control_release("sustain");
         apply_held_notes();
     }
 }

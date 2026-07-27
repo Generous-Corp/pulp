@@ -103,7 +103,7 @@ TEST_CASE("timeline graph binding transactionally adds and removes PDC tracks") 
         REQUIRE(binding.prepare(*one, one_route, config(1), 48'000.0, 4));
         const auto stable_audio = binding.audio_node_for({10});
         const auto stable_midi = binding.midi_input_node_for({10});
-        REQUIRE(graph.custom_node_type_count() == 2);
+        REQUIRE(graph.custom_node_type_count() == 3);
 
         Buffer input(1, 4);
         Buffer output(1, 4);
@@ -119,7 +119,7 @@ TEST_CASE("timeline graph binding transactionally adds and removes PDC tracks") 
         REQUIRE(binding.prepare(*two, two_routes, config(1), 48'000.0, 4));
         REQUIRE(binding.audio_node_for({10}) == stable_audio);
         REQUIRE(binding.midi_input_node_for({10}) == stable_midi);
-        REQUIRE(graph.custom_node_type_count() == 3);
+        REQUIRE(graph.custom_node_type_count() == 5);
         REQUIRE(binding.process(output_view, input.const_view(), snapshot(*two, 4, 4)));
         REQUIRE(output.storage[0] == std::vector<float>{1.0f, 1.0f, 1.5f, 1.5f});
 
@@ -129,9 +129,8 @@ TEST_CASE("timeline graph binding transactionally adds and removes PDC tracks") 
         REQUIRE(binding.audio_node_for({10}) == stable_audio);
         REQUIRE(binding.midi_input_node_for({10}) == stable_midi);
         REQUIRE(binding.audio_node_for({11}) == 0);
-        REQUIRE(graph.custom_node_type_count() == 2);
-        REQUIRE(binding.process(output_view, input.const_view(),
-                                snapshot(*one_again, 4, 8)));
+        REQUIRE(graph.custom_node_type_count() == 3);
+        REQUIRE(binding.process(output_view, input.const_view(), snapshot(*one_again, 4, 8)));
         REQUIRE(output.storage[0] == std::vector<float>{1.0f, 1.0f, 1.0f, 1.0f});
         pinned_old_snapshot = graph.live_snapshot_handle();
     }

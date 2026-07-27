@@ -40,12 +40,12 @@ is not a reason to add a model feature.
 | `marker` | format-only | A named point or range on the timeline. |
 | `timecode.origin` | format-only | The wall-clock timecode the document's zero position represents. |
 | `media.provenance` | format-only | Where a media asset came from: source timecode, reel or tape name, original locator. |
-| `mixer.track-gain` | format-only | Static per-track gain. |
-| `mixer.track-pan` | format-only | Static per-track pan position. |
+| `mixer.track-gain` | yes | Static per-track gain. |
+| `mixer.track-pan` | yes | Static per-track pan position. |
 | `mixer.sends` | format-only | Track routing to busses and auxiliary sends. |
 | `automation.device-param` | yes | An automation lane targeting a device parameter. |
-| `automation.track-gain` | format-only | An automation lane targeting a track's gain. |
-| `automation.track-pan` | format-only | An automation lane targeting a track's pan. |
+| `automation.track-gain` | yes | An automation lane targeting a track's gain. |
+| `automation.track-pan` | yes | An automation lane targeting a track's pan. |
 | `device.placement` | yes | A device occupying a slot in a track's chain, by identity. |
 | `device.payload` | format-only | A device's type and saved parameter state. |
 | `effect.timewarp` | format-only | An effect that remaps time rather than processing content. |
@@ -62,6 +62,7 @@ is not a reason to add a model feature.
 | `edit-rate.non-audio` | format-only | Positions at a rate that does not convert exactly to the document's rate. |
 | `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
 | `context.groove` | yes | A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling. |
+| `clip.note-modifier` | yes | Per-note playback modifiers: probability, pass condition, and ratchet. |
 
 ## DAWproject
 
@@ -96,8 +97,8 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `mixer.track-pan` | none | channel pan |
 | `mixer.sends` | none | not declared |
 | `automation.device-param` | none | automation lanes |
-| `automation.track-gain` | none | not declared |
-| `automation.track-pan` | none | not declared |
+| `automation.track-gain` | none | volume automation lanes |
+| `automation.track-pan` | none | pan automation lanes |
 | `device.placement` | none | device chains |
 | `device.payload` | none | plugin state |
 | `effect.timewarp` | none | not declared |
@@ -114,6 +115,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `edit-rate.non-audio` | none | not declared |
 | `context.chord-scale` | none | chord and scale context lanes |
 | `context.groove` | none | groove templates and swing |
+| `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
 
 ### Export
 
@@ -140,12 +142,12 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `marker` | drop | | dropped | not declared |
 | `timecode.origin` | drop | | dropped | not declared |
 | `media.provenance` | drop | | dropped | not declared |
-| `mixer.track-gain` | drop | | dropped | not declared |
-| `mixer.track-pan` | drop | | dropped | not declared |
+| `mixer.track-gain` | drop |  | dropped | the writer does not emit a channel volume, so an authored track gain is dropped and the track exports at unity |
+| `mixer.track-pan` | drop |  | dropped | the writer does not emit a channel pan, so an authored track pan is dropped and the track exports centred |
 | `mixer.sends` | drop | | dropped | not declared |
 | `automation.device-param` | drop |  | dropped | device identity does not survive without a device payload, so its automation has no target |
-| `automation.track-gain` | drop | | dropped | not declared |
-| `automation.track-pan` | drop | | dropped | not declared |
+| `automation.track-gain` | drop |  | dropped | a volume automation lane has no export target while channel volume itself is dropped |
+| `automation.track-pan` | drop |  | dropped | a pan automation lane has no export target while channel pan itself is dropped |
 | `device.placement` | drop |  | dropped | devices are identity-only in the document; DAWproject requires a device type to place one |
 | `device.payload` | drop | | dropped | not declared |
 | `effect.timewarp` | drop | | dropped | not declared |
@@ -162,6 +164,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `edit-rate.non-audio` | drop | | dropped | not declared |
 | `context.chord-scale` | drop | | dropped | not declared |
 | `context.groove` | drop | | dropped | not declared |
+| `clip.note-modifier` | drop |  | dropped | DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once |
 
 ## Adding a format
 

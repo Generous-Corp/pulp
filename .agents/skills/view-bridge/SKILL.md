@@ -1463,6 +1463,27 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   every native editor is sized correctly without per-plugin hardcoding — do not
   reintroduce per-plugin window-size constants to work around clipped editors.
 
+### Standalone tool-window commands share one shell registry
+
+Standalone-owned floating tools (the Audio Inspector and the opt-in Musical
+Typing Keyboard) register with one shell-owned `CommandRegistry`. Register every
+handler first, then call `route_global_keys(window_root, registry)` once; each
+call replaces `window_root.on_global_key`, so independently routing each tool
+silently disconnects the previous shortcut. `WindowOptions::menu_commands` is
+only the native menu's discoverability/action surface. It does not install the
+root key route, and non-macOS hosts may ignore it, so Cmd/Ctrl shortcuts still
+dispatch through the registry.
+
+The Musical Typing helper is created before standalone audio starts because the
+audio callback drains its lock-free failed-note-off recovery. Keep that helper
+object stable until after the callback has stopped; `shutdown()` may release UI
+state while audio is live because the recovery handoff is atomic, but destroying
+the helper would leave the callback with a dangling pointer. Its application key
+monitor must consult each owned root's `interaction().focused_input`, never the
+process-global `View::focused_input_` shim: a text field in another editor/window
+must not suppress notes in this standalone. Key-up remains routable after focus
+changes so every accepted note-on can still receive its note-off.
+
 ## In-DAW scripted-UI hot reload is opt-in (dev only)
 
 The DAW editor paths (`au_view_controller_mac.mm`, `au_v2_cocoa_view.mm`,
@@ -1822,3 +1843,34 @@ is harmless (no adapter sets a handler, so `request_editor_resize` returns
 false). Reaching a downstream SDK (e.g. Forge on M5) with WORKING resize still
 needs a full SDK rebuild + reinstall (the adapters that install the handler live
 in the libs), but it will not crash in the meantime.
+
+## An editor-driven state load is gated against the audio thread
+
+`Processor::deserialize_plugin_state()` is documented as running "on a
+host/main thread with the audio thread stopped". Format adapters now enforce
+that with `format::StateRestoreGate`: the restoring thread takes a unique lock,
+the audio thread takes a non-blocking shared lock around its call into the
+Processor, and a contended block passes through instead of rendering.
+
+What this means for editor code: a preset load or state restore driven from the
+UI briefly makes the audio thread pass through. Keep the deserialize bounded —
+the audio thread degrades for as long as the gate is held, so a multi-second
+sample reload belongs on a worker with the heavy payload published afterwards,
+not inside `deserialize_plugin_state()`.
+
+`Processor::suspend()` / `resume()` remain opt-in and are still not called
+automatically by the adapters; the gate is what actually protects the restore.
+
+## Note names are a Processor hook, not a view concern
+
+`Processor::note_names()` lets a plug-in label individual keys — a drum kit's
+"Kick", a sampler's articulation switches — and the format adapters publish that
+list to the host (CLAP `note-name`, VST3 `IKeyswitchController`; AU has no
+equivalent). It is a HOST-facing surface, so it does not travel through the view
+bridge and an editor never needs to render it.
+
+What matters here is the notification: a processor whose names change — a
+sampler loading a new kit from its editor — must call
+`flag_note_names_changed()`. The adapter drains that flag on the host/main
+thread and tells the host to relabel. An editor that swaps the kit without
+raising the flag leaves the DAW's piano roll showing the previous kit's names.

@@ -106,6 +106,7 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
                 left_track.record_armed() != right_track.record_armed() ||
                 left_track.active_take_lane_id() != right_track.active_take_lane_id() ||
                 left_track.freeze() != right_track.freeze() ||
+                left_track.mixer() != right_track.mixer() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
                             right_track.device_chain().begin()) ||
                 !std::equal(left_track.take_lanes().begin(), left_track.take_lanes().end(),

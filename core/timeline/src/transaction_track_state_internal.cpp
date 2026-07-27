@@ -61,10 +61,52 @@ reduce_set_track_freeze(const Project& project, const SetTrackFreeze& set,
         {set.track_id, set.track_id, set.sequence_id, DirtyFlags::Content | DirtyFlags::Freeze}});
 }
 
+runtime::Result<TrackStateCommandReduction, TransactionError>
+reduce_set_track_mixer(const Project& project, const SetTrackMixer& set,
+                       const Transaction& transaction, CommandId command) {
+    const ItemLocation expected{
+        ItemKind::Track,
+        immediate_parent_id(ItemKind::Track, project.id(), set.sequence_id, set.track_id, {}),
+        set.sequence_id,
+        set.track_id,
+        {},
+        true};
+    if (const auto code = target_error(project, set.track_id, expected))
+        return reject_reduction<TrackStateCommandReduction>(*code, transaction, command,
+                                                            set.track_id, set.sequence_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence ? sequence->find_track(set.track_id) : nullptr;
+    if (!track)
+        return reject_reduction<TrackStateCommandReduction>(
+            ConflictCode::TargetMissing, transaction, command, set.track_id, set.sequence_id);
+    if (track->mixer() != set.expected)
+        return reject_reduction<TrackStateCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                            transaction, command, set.track_id);
+
+    // Range and NaN refusal lives in the model, so an out-of-range replacement
+    // surfaces here as a model failure rather than a silently clamped fader.
+    auto next_track = track->with_mixer(set.replacement);
+    if (!next_track)
+        return runtime::Err(model_failure(transaction, command, next_track.error()));
+    auto next_sequence = sequence->replace_track(std::move(next_track).value());
+    if (!next_sequence)
+        return runtime::Err(model_failure(transaction, command, next_sequence.error()));
+    auto next_project =
+        ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
+    if (!next_project)
+        return runtime::Err(model_failure(transaction, command, next_project.error()));
+
+    return runtime::Ok(TrackStateCommandReduction{
+        std::move(next_project).value(),
+        SetTrackMixer{set.sequence_id, set.track_id, set.replacement, set.expected},
+        {set.track_id, set.track_id, set.sequence_id, DirtyFlags::Content | DirtyFlags::Mixer}});
+}
+
 } // namespace
 
 bool is_track_state_command(const Command& command) noexcept {
-    return std::holds_alternative<SetTrackFreeze>(command);
+    return std::holds_alternative<SetTrackFreeze>(command) ||
+           std::holds_alternative<SetTrackMixer>(command);
 }
 
 runtime::Result<TrackStateCommandReduction, TransactionError>
@@ -72,6 +114,8 @@ reduce_track_state_command(const Project& project, const Command& command,
                            const Transaction& transaction, CommandId command_id) {
     if (const auto* freeze = std::get_if<SetTrackFreeze>(&command))
         return reduce_set_track_freeze(project, *freeze, transaction, command_id);
+    if (const auto* mixer = std::get_if<SetTrackMixer>(&command))
+        return reduce_set_track_mixer(project, *mixer, transaction, command_id);
     return reject_reduction<TrackStateCommandReduction>(ConflictCode::ModelInvariant, transaction,
                                                         command_id);
 }

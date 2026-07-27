@@ -104,6 +104,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
     }
 
     SECTION("concepts the document does not use are absent") {
+        REQUIRE_FALSE(counted.contains(Concept::ClipNoteModifier));
         REQUIRE_FALSE(counted.contains(Concept::TakeLane));
         REQUIRE_FALSE(counted.contains(Concept::TrackFreeze));
         REQUIRE_FALSE(counted.contains(Concept::DevicePlacement));
@@ -199,4 +200,93 @@ TEST_CASE("a census records authored groove state even when it currently sounds 
     REQUIRE(recorded.contains(Concept::ContextGroove));
     REQUIRE(recorded.count(Concept::ContextGroove) == 1);
     REQUIRE(recorded.owners(Concept::ContextGroove)[0] == ItemId{2});
+}
+
+TEST_CASE("a census records per-note modifiers so an export cannot drop them silently",
+          "[interchange]") {
+    NoteModifier chance;
+    chance.note_id = {8};
+    chance.probability = 0x4000;
+    auto content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
+    auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
+    auto track = take_value(Track::create({6}, "musical", {clip}));
+    auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
+    const Project project = take_value(
+        Project::create(ProjectInput{{1}, "modified", 100, {2}, {}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNote) == 1);
+    REQUIRE(counted.count(Concept::ClipNoteModifier) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteModifier).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteModifier)[0] == ItemId{5});
+    REQUIRE(concept_detectable_in_model(Concept::ClipNoteModifier));
+
+    // The same notes without a modifier record only the note concept, so the
+    // new row cannot be a constant that fires on every note clip.
+    auto plain_content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
+    auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
+    auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
+                                                      {plain_track}));
+    const Project plain = take_value(
+        Project::create(ProjectInput{{1}, "plain", 100, {2}, {}, {plain_sequence}}));
+    const ConceptCensus plain_census = census(plain);
+    REQUIRE(plain_census.count(Concept::ClipNote) == 1);
+    REQUIRE_FALSE(plain_census.contains(Concept::ClipNoteModifier));
+
+    // A seed is authored modifier state even when every note currently uses
+    // neutral defaults. Formats that cannot carry it must still disclose the
+    // loss rather than silently changing future probability decisions.
+    auto seeded_content =
+        take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
+    auto seeded_clip =
+        take_value(Clip::create({5}, {200}, {100}, std::move(seeded_content)));
+    auto seeded_track = take_value(Track::create({6}, "musical", {seeded_clip}));
+    auto seeded_sequence = take_value(
+        Sequence::create({2}, "root", TickDuration{1'000}, {seeded_track}));
+    const Project seeded = take_value(
+        Project::create(ProjectInput{{1}, "seeded", 100, {2}, {}, {seeded_sequence}}));
+    REQUIRE(census(seeded).count(Concept::ClipNoteModifier) == 1);
+}
+
+TEST_CASE("a census records track mixer state and the lanes that automate it",
+          "[interchange]") {
+    // Without this the export loss manifest for a mixed session would claim
+    // nothing was lost while dropping its levels — a lying manifest, which is
+    // worse than a refusal.
+    const auto lane = [](ItemId id, TrackMixerParameter parameter) {
+        auto curve = AutomationCurve::create(
+            {AutomationPoint{{id.value + 1}, {0}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}});
+        REQUIRE(curve.has_value());
+        auto created =
+            AutomationLane::create(id, TrackMixerTarget{parameter}, std::move(curve).value());
+        REQUIRE(created.has_value());
+        return std::move(created).value();
+    };
+    auto track = take_value(Track::create(
+        TrackInput{.id = {6},
+                   .name = "mixed",
+                   .automation_lanes = {lane({20}, TrackMixerParameter::Gain),
+                                        lane({30}, TrackMixerParameter::Pan)},
+                   .mixer = TrackMixer{0.5f, -0.25f}}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {track}));
+    const ConceptCensus counted = census(
+        take_value(Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {sequence}})));
+
+    REQUIRE(counted.contains(Concept::MixerTrackGain));
+    REQUIRE(counted.contains(Concept::MixerTrackPan));
+    REQUIRE(counted.contains(Concept::AutomationTrackGain));
+    REQUIRE(counted.contains(Concept::AutomationTrackPan));
+    REQUIRE(counted.owners(Concept::AutomationTrackGain)[0] == ItemId{20});
+    REQUIRE_FALSE(counted.contains(Concept::AutomationDeviceParam));
+
+    // A track that was never touched must not report mixer state, or every
+    // document would claim to carry levels it does not have.
+    auto plain = take_value(Track::create({6}, "plain", {}));
+    auto plain_sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {plain}));
+    const ConceptCensus untouched = census(take_value(
+        Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {plain_sequence}})));
+    REQUIRE_FALSE(untouched.contains(Concept::MixerTrackGain));
+    REQUIRE_FALSE(untouched.contains(Concept::MixerTrackPan));
 }

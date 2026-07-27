@@ -20,6 +20,8 @@ struct TrackCompilePolicy {
 };
 
 struct ProgramCompileRequest {
+    static constexpr std::size_t default_maximum_note_events_per_track = 1'000'000;
+
     std::shared_ptr<const timeline::Project> project;
     timeline::ItemId sequence_id;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map;
@@ -31,6 +33,7 @@ struct ProgramCompileRequest {
     AutomationPlaybackLimits automation_limits = AutomationPlaybackLimits::platform_defaults();
     std::uint64_t max_expanded_note_events = 1'000'000u;
     std::uint64_t max_expanded_clips = 1'000'000u;
+    std::size_t maximum_note_events_per_track = default_maximum_note_events_per_track;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -44,6 +47,7 @@ enum class CompileErrorCode : std::uint8_t {
     AutomationProgramInvalid,
     NestedSequenceUnsupported,
     ExpansionBudgetExceeded,
+    NoteProgramCapacityExceeded,
 };
 
 struct CompileError {

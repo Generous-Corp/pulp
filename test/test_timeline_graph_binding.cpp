@@ -237,6 +237,86 @@ TEST_CASE("timeline graph binding injects separately rendered notes") {
     REQUIRE(graph.routed_walk_fallbacks() == 0);
 }
 
+TEST_CASE("timeline graph mixer controls hosted instrument output after the device") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    const auto no_assets = take(DecodedAudioAssetPool::create({}));
+    programs.publish(device_project(), map, no_assets, 1);
+    auto neutral = programs.store.read();
+    REQUIRE(neutral);
+
+    SignalGraph graph;
+    auto instrument = std::make_unique<ConstantInstrumentSlot>();
+    auto* instrument_ptr = instrument.get();
+    const auto instrument_node = graph.add_plugin_node(std::move(instrument), 0, 1, "instrument");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(instrument_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, 64));
+    const std::array devices{TimelineDeviceGraphRoute{{20}, instrument_node}};
+    {
+        TimelineGraphPlaybackBinding binding(graph, programs.store);
+
+        const std::array incomplete{TimelineTrackGraphRoute{
+            .track_id = {10},
+            .audio_destination = output_node,
+            .midi_destination = instrument_node,
+            .device_routes = devices,
+        }};
+        REQUIRE(binding.prepare(*neutral, incomplete, config(1), 48'000.0, 64));
+
+        programs.publish(instrument_mixer_project(*map), map, no_assets, 2);
+        auto pinned = programs.store.read();
+        REQUIRE(pinned);
+        REQUIRE(binding.adopt_program(*pinned).code ==
+                TimelineGraphAdmissionCode::MissingPostDeviceRoute);
+        REQUIRE(binding.preflight(*pinned, incomplete, config(1), 64).code ==
+                TimelineGraphAdmissionCode::MissingPostDeviceRoute);
+
+        const std::array routes{TimelineTrackGraphRoute{
+            .track_id = {10},
+            .audio_destination = output_node,
+            .midi_destination = instrument_node,
+            .device_routes = devices,
+            .post_device_audio_source = instrument_node,
+            .post_mixer_audio_destination = output_node,
+        }};
+        const auto admission = binding.prepare(*pinned, routes, config(1), 48'000.0, 64);
+        INFO("admission code " << static_cast<int>(admission.code) << " actual "
+                               << admission.actual << " node " << admission.node);
+        REQUIRE(admission);
+        REQUIRE(std::none_of(
+            graph.connections().begin(), graph.connections().end(),
+            [&](const Connection& connection) {
+                return connection.source_node == instrument_node &&
+                       connection.source_port == 0 &&
+                       connection.dest_node == output_node &&
+                       connection.dest_port == 0 && !connection.midi &&
+                       !connection.feedback && !connection.automation &&
+                       !connection.audio_rate_modulation &&
+                       !connection.sidechain;
+            }));
+        Buffer input(1, 64);
+        Buffer output(1, 64);
+        auto output_view = output.view();
+        REQUIRE(binding.process(output_view, input.const_view(),
+                                snapshot(*pinned, 64)));
+        REQUIRE(instrument_ptr->event_count == 2);
+        REQUIRE(std::all_of(output.storage[0].begin(), output.storage[0].end(),
+                            [](float sample) { return sample == 0.5f; }));
+    }
+    REQUIRE(std::any_of(
+        graph.connections().begin(), graph.connections().end(),
+        [&](const Connection& connection) {
+            return connection.source_node == instrument_node &&
+                   connection.source_port == 0 &&
+                   connection.dest_node == output_node &&
+                   connection.dest_port == 0 && !connection.midi &&
+                   !connection.feedback && !connection.automation &&
+                   !connection.audio_rate_modulation &&
+                   !connection.sidechain;
+        }));
+}
+
 TEST_CASE("timeline graph binding reports exact routed capacity axes") {
     const auto map = tempo_map();
     ProgramHarness programs;
@@ -261,9 +341,9 @@ TEST_CASE("timeline graph binding reports exact routed capacity axes") {
     graph.set_limits(graph_limits);
     auto result = binding.preflight(*pinned, routes, config(), 64);
     REQUIRE(result.code == TimelineGraphAdmissionCode::NodeLimitExceeded);
-    REQUIRE(result.actual == 3);
+    REQUIRE(result.actual == 4);
     REQUIRE(result.limit == 2);
-    graph_limits.max_nodes = 3;
+    graph_limits.max_nodes = 4;
     graph.set_limits(graph_limits);
     REQUIRE(binding.preflight(*pinned, routes, config(), 64));
 
@@ -272,9 +352,9 @@ TEST_CASE("timeline graph binding reports exact routed capacity axes") {
     graph.set_limits(graph_limits);
     result = binding.preflight(*pinned, routes, config(), 64);
     REQUIRE(result.code == TimelineGraphAdmissionCode::ConnectionLimitExceeded);
-    REQUIRE(result.actual == 2);
+    REQUIRE(result.actual == 4);
     REQUIRE(result.limit == 1);
-    graph_limits.max_connections = 2;
+    graph_limits.max_connections = 4;
     graph.set_limits(graph_limits);
     REQUIRE(binding.preflight(*pinned, routes, config(), 64));
 
@@ -283,9 +363,9 @@ TEST_CASE("timeline graph binding reports exact routed capacity axes") {
     graph.set_limits(graph_limits);
     result = binding.preflight(*pinned, routes, config(), 64);
     REQUIRE(result.code == TimelineGraphAdmissionCode::TotalPortLimitExceeded);
-    REQUIRE(result.actual == 5);
+    REQUIRE(result.actual == 9);
     REQUIRE(result.limit == 4);
-    graph_limits.max_ports = 5;
+    graph_limits.max_ports = 9;
     graph.set_limits(graph_limits);
     REQUIRE(binding.preflight(*pinned, routes, config(), 64));
 }
@@ -384,7 +464,7 @@ TEST_CASE("timeline graph binding uses the SignalGraph executor routed limits") 
     auto pinned = programs.store.read();
     SignalGraph graph;
     const auto output_node = graph.add_output_node(2);
-    for (std::size_t index = 0; index < 509; ++index)
+    for (std::size_t index = 0; index < 508; ++index)
         REQUIRE(graph.add_gain_node() != 0);
     TimelineGraphPlaybackBinding binding(graph, programs.store);
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};

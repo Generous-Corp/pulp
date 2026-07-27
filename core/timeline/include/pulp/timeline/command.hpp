@@ -299,6 +299,15 @@ struct SetClipSequenceRef {
     SequenceRef replacement;
 };
 
+// Replaces the track's own level and stereo placement under an exact optimistic
+// gate. Carrying both values keeps undo and journal replay self-contained.
+struct SetTrackMixer {
+    ItemId sequence_id;
+    ItemId track_id;
+    TrackMixer expected;
+    TrackMixer replacement;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, ReplaceNoteContent, SetClipPlaybackProperties, SetTempoMap,
@@ -306,7 +315,7 @@ using Command =
                  SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
                  SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
-                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef>;
+                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer>;
 
 struct CommandEnvelope {
     CommandId id;

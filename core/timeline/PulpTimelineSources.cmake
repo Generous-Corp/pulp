@@ -22,6 +22,7 @@ function(pulp_resolve_timeline_sources root output)
         note_transform.cpp
         production_mode.cpp
         project_schema_migrations.cpp
+        note_content_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp
         transaction_marker_internal.cpp

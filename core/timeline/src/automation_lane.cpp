@@ -23,9 +23,16 @@ AutomationLane::create(ItemId id, AutomationTarget target, AutomationCurve curve
             runtime::Err(AutomationLaneError{AutomationLaneErrorCode::InvalidLaneId, id, {}}));
     }
     const auto validation = std::visit(
-        [](const DeviceParameterTarget& candidate) -> TargetValidation {
-            return {candidate.valid(), AutomationLaneErrorCode::InvalidDevicePlacementId,
-                    candidate.device_placement_id};
+        AutomationTargetCases{
+            [](const DeviceParameterTarget& candidate) -> TargetValidation {
+                return {candidate.valid(), AutomationLaneErrorCode::InvalidDevicePlacementId,
+                        candidate.device_placement_id};
+            },
+            // A mixer target names a control the owning track always has, so
+            // there is no referenced identity that could be missing.
+            [](const TrackMixerTarget& candidate) -> TargetValidation {
+                return {candidate.valid(), AutomationLaneErrorCode::InvalidLaneId, {}};
+            },
         },
         target);
     if (!validation.valid) {

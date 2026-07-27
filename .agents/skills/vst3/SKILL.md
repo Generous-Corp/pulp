@@ -1086,3 +1086,42 @@ The adapter calls `runtime::Tracing::attach()`/`detach()` over its lifetime
 (no-op unless `PULP_TRACING=ON`). A plug-in has no `main()`, so this is where a
 dev build picks up `$PULP_TRACE_PATH`; the final `detach()` flushes the
 `.pftrace`.
+
+## `setState` can arrive mid-render — it runs under the state-restore gate
+
+`Processor::deserialize_plugin_state()` is documented as running "with the audio
+thread stopped". VST3 gives no such guarantee: hosts call `setState` on the main
+thread while the plug-in is active. The host-quirk catalog carries row R6
+(`reaper_n`) for a DAW that does exactly this.
+
+`PulpVst3Processor::setState` therefore holds `state_restore_gate_` across the
+deserialize, and `process()` takes the matching non-blocking render lock. On
+contention the block passes its input through and returns `kResultOk` rather
+than reading plug-in state a restore is halfway through rewriting.
+
+The render lock is acquired BEFORE `processor_->set_param_events(…)`, not just
+around the `process()` call — everything that reaches into the Processor must be
+inside it. If you add work to the render path that touches `processor_`, keep it
+below that acquisition.
+
+`reaper_n` remains `Speculative` because the daw-bench smoke never reopens a
+session, so the quirk is recorded as "Not Triggered" even though the exposure is
+real. Do not read that status as "this does not happen".
+
+## Note names map onto `IKeyswitchController`
+
+VST3 has no general note-name API. Its nearest surface is
+`IKeyswitchController`, which is what a host reads to label individual keys, so
+`Processor::note_names()` is published there — each name becomes a single-key
+switch with `keyswitchMin == keyswitchMax == key`.
+
+Traps:
+
+* `queryInterface` must hand out `IKeyswitchController::iid` or the surface is
+  unreachable no matter how correct the methods are. There is a regression test
+  for exactly this.
+* Entries carry `-1` wildcards for port and channel; a request for a specific
+  bus/channel matches an entry that names it exactly OR wildcards it.
+* A name that identifies no single key — a key wildcard, or a value outside
+  0..127 — is SKIPPED, because a VST3 key switch must carry a concrete min/max
+  note. It cannot be represented, so it is dropped rather than clamped.

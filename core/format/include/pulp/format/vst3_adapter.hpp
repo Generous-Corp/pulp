@@ -27,6 +27,7 @@
 
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_restart_publisher.hpp>
@@ -71,7 +72,8 @@ namespace pulp::format::vst3 {
 // expression -> per-note pressure, and brightness -> per-note timbre (CC74).
 class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                           public Steinberg::Vst::IMidiMapping,
-                          public Steinberg::Vst::INoteExpressionController {
+                          public Steinberg::Vst::INoteExpressionController,
+                          public Steinberg::Vst::IKeyswitchController {
 public:
     PulpVst3Processor(ProcessorFactory factory);
     ~PulpVst3Processor() override;
@@ -120,6 +122,19 @@ public:
         Steinberg::Vst::NoteExpressionTypeID id,
         const Steinberg::Vst::TChar* string /*in*/,
         Steinberg::Vst::NoteExpressionValue& valueNormalized /*out*/) override;
+
+    // IKeyswitchController — publishes Processor::note_names() as VST3 key
+    // switches, which is the surface a VST3 host uses to label individual keys
+    // (a drum instrument's "Kick", a sampler's articulation switches) instead
+    // of showing bare pitches. Each name becomes a single-key switch. A plug-in
+    // that names no notes reports a count of 0 and the host falls back to
+    // pitches, so nothing changes for existing plug-ins.
+    Steinberg::int32 PLUGIN_API getKeyswitchCount(
+        Steinberg::int32 busIndex, Steinberg::int16 channel) override;
+    Steinberg::tresult PLUGIN_API getKeyswitchInfo(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::int32 keySwitchIndex,
+        Steinberg::Vst::KeyswitchInfo& info /*out*/) override;
 
     // IEditController — parameter value/string conversion. Route through the
     // author-supplied ParamInfo::to_string / from_string so a host's generic
@@ -192,6 +207,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Keeps a host setState() off the processor while process() is inside it.
+    // Declared after processor_ so it outlives every render that consults it.
+    StateRestoreGate state_restore_gate_;
     // Declared after processor_ so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive_;

@@ -310,6 +310,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   not native render jobs, so list them in the native timeline target,
   no-exceptions target, WAM, and WebCLAP together. Browser replay consumes the
   persisted artifact reference; it must never attempt to rerender a freeze.
+  Track mixer state (gain/pan plus its automation targets) is the counter-case
+  worth knowing: it added **no** translation unit at all. The document field and
+  the new variant alternative land in existing timeline units, and the render-side
+  `track_mixer_program.hpp` is deliberately header-only, so the WAM and WebCLAP
+  lists are untouched and `web-timeline-source-closure` stays green without an
+  edit. Check whether a change adds a `.cpp` rather than assuming a feature-sized
+  change must touch the web lists — and keep new small render-path helpers
+  header-only when they have no state to define, so the closure surface does not
+  grow for free.
   These builds also share Timeline's persistent indexes: initial Track/Project
   construction and identity restoration bulk-build sorted balanced trees,
   while ordinary edits path-copy only the changed search paths. Do not replace
@@ -343,6 +352,20 @@ per-ABI entry point for it.** Go through the plugin's own state:
   (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
   build. The closure checker scans sources, so adding such a header is
   correct even though it touches `core/timeline`.
+- A new `core/timeline` translation unit belongs in **two** source lists:
+  `core/timeline/PulpTimelineSources.cmake` and the
+  `pulp-test-timeline-no-exceptions` OBJECT library in
+  `test/cmake/timeline_tests.cmake`. The native target
+  (`core/timeline/CMakeLists.txt`), `PulpWam.cmake`, and `PulpWclap.cmake` all
+  call `pulp_resolve_timeline_sources()`, so one edit to the resolver feeds all
+  three and hand-editing the web lists for a timeline unit is not just
+  unnecessary, it is wrong. Timeline is the exception here: engine units from
+  other modules are still hand-listed per lane, so check which shape the module
+  uses before assuming either one. `web-timeline-source-closure` compares only
+  the WAM and WebCLAP lanes — which the resolver satisfies automatically — so a
+  missing no-exceptions entry passes that check and surfaces instead as an
+  undefined symbol when the no-exceptions target links. That target is the only
+  list a timeline TU can actually be missed from.
 
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked
@@ -384,6 +407,17 @@ per-ABI entry point for it.** Go through the plugin's own state:
   remain green while the generated browser API silently degrades the value to
   `unknown`. Regenerate the JSON Schema and TypeScript facade together and keep
   the schema/codegen drift gates in the same change.
+
+- Per-note probability, pass conditions, and ratchets are portable playback
+  behavior too. WAM and WebCLAP compile the same bounded note program and use the
+  authored modifier seed with note identity and loop-pass index, so decisions are
+  replayable without mutable RNG state in the worklet. Scrub windows deliberately
+  stay on pass zero; seeks, play starts, and loop-boundary changes re-anchor the
+  pass epoch, while ordinary program adoption and host recording-state changes do
+  not. Keep modifier expansion behind
+  `ProgramCompileRequest::maximum_note_events_per_track`: wasm's memory ceiling
+  makes an unbounded ratchet fan-out especially dangerous. This engine support
+  does not by itself add a JavaScript authoring surface.
 
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
@@ -834,3 +868,21 @@ no lane-list edit and cannot break the gate. Skill-sync still flags such a
 change here (it maps whole directories, not file kinds); confirm the diff adds
 no TU under `core/{timebase,timeline,playback}/src/` before treating the flag
 as a real source-closure obligation.
+
+## A new CLAP adapter TU must be added to `PulpWclap.cmake` as well
+
+`tools/cmake/PulpWclap.cmake` keeps its OWN list of `core/format/src/*.cpp`
+sources rather than linking `pulp::format`, because the wasm module is built
+standalone. So adding a translation unit to the CLAP adapter means editing two
+build files, not one.
+
+Miss the second and every WebCLAP target fails at link with an undefined symbol
+— and **native builds stay green**, so it only shows up in CI. The native test
+targets that compile `clap_adapter.cpp` directly (see
+`super_convolver_dsp_tests.cmake`, `canvas_text_tests.cmake`) also link
+`pulp::format`, so the missing symbol resolves out of the archive. The wasm
+module has no archive to fall back on.
+
+The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
+already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
+`clap_adapter.cpp` for exactly this reason.

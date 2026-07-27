@@ -38,6 +38,11 @@ export interface PulpTimelineAutomationTargetDeviceParameter {
   parameter_id: number | string;
 }
 
+/** `pulp.timeline.automation_target.track_mixer` — domain Document, schema version 1. */
+export interface PulpTimelineAutomationTargetTrackMixer {
+  parameter: string;
+}
+
 /** `pulp.timeline.chord_scale_event` — domain Document, schema version 1. */
 export interface PulpTimelineChordScaleEvent {
   chord_quality: string;
@@ -299,6 +304,14 @@ export interface PulpTimelineCommandSetTrackFreeze {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_track_mixer` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTrackMixer {
+  expected: Record<string, unknown>;
+  replacement: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.content.empty` — domain Content, schema version 1. */
 export interface PulpTimelineContentEmpty {}
 
@@ -309,8 +322,10 @@ export interface PulpTimelineContentMedia {
   source_start: number | string;
 }
 
-/** `pulp.timeline.content.notes` — domain Content, schema version 1. */
+/** `pulp.timeline.content.notes` — domain Content, schema version 2. */
 export interface PulpTimelineContentNotes {
+  modifier_seed: number | string;
+  modifiers: readonly unknown[];
   notes: readonly unknown[];
 }
 
@@ -421,7 +436,7 @@ export interface PulpTimelineTakeLane {
   takes: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 6. */
+/** `pulp.timeline.track` — domain Document, schema version 7. */
 export interface PulpTimelineTrack {
   active_take_lane_id: number | string;
   automation_lanes: readonly unknown[];
@@ -429,6 +444,7 @@ export interface PulpTimelineTrack {
   device_chain: readonly unknown[];
   freeze?: Record<string, unknown>;
   id: number | string;
+  mixer?: Record<string, unknown>;
   name: string;
   record_armed: boolean;
   take_lanes: readonly unknown[];
@@ -440,6 +456,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.asset_representation"
   | "pulp.timeline.automation_lane"
   | "pulp.timeline.automation_target.device_parameter"
+  | "pulp.timeline.automation_target.track_mixer"
   | "pulp.timeline.chord_scale_event"
   | "pulp.timeline.clip"
   | "pulp.timeline.command.clone_sequence"
@@ -476,6 +493,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_take_comp"
   | "pulp.timeline.command.set_tempo_map"
   | "pulp.timeline.command.set_track_freeze"
+  | "pulp.timeline.command.set_track_mixer"
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
@@ -499,6 +517,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.asset_representation": PulpTimelineAssetRepresentation;
   "pulp.timeline.automation_lane": PulpTimelineAutomationLane;
   "pulp.timeline.automation_target.device_parameter": PulpTimelineAutomationTargetDeviceParameter;
+  "pulp.timeline.automation_target.track_mixer": PulpTimelineAutomationTargetTrackMixer;
   "pulp.timeline.chord_scale_event": PulpTimelineChordScaleEvent;
   "pulp.timeline.clip": PulpTimelineClip;
   "pulp.timeline.command.clone_sequence": PulpTimelineCommandCloneSequence;
@@ -535,6 +554,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;
   "pulp.timeline.command.set_tempo_map": PulpTimelineCommandSetTempoMap;
   "pulp.timeline.command.set_track_freeze": PulpTimelineCommandSetTrackFreeze;
+  "pulp.timeline.command.set_track_mixer": PulpTimelineCommandSetTrackMixer;
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;

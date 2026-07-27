@@ -237,7 +237,7 @@ TEST_CASE("program compiler lowers track automation without runtime graph identi
     REQUIRE(track->automation_program()->programs()[0]->lane_id() == ItemId{41});
     REQUIRE(track->automation_program()->programs()[1]->lane_id() == ItemId{42});
     REQUIRE(track->automation_program()->find_lane({41})->generation() == 1);
-    REQUIRE(track->automation_program()->find_lane({41})->target() ==
+    REQUIRE(*track->automation_program()->find_lane({41})->device_target() ==
             DeviceParameterTarget{{20}, 7});
 }
 

@@ -117,6 +117,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
+    ${_PULP_WCLAP_ROOT}/core/format/src/clap_note_name.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_quirks.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/host_version.cpp

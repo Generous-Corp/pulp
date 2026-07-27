@@ -348,8 +348,8 @@ visit and not a chain ending in `std::get<OpaqueContent>`.
   `ReplaceNoteContent`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
   `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
-  `RemoveMarker`, `InsertRegion`, `RemoveRegion`, and `SetChordScaleLane` are the
-  bounded mutation
+  `RemoveMarker`, `InsertRegion`, `RemoveRegion`, `SetChordScaleLane`,
+  `SetGroove`, and `SetTrackMixer` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.
@@ -551,6 +551,36 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 alternative, in variant order).
 
 ## Schema codegen & drift gate
+
+### Bumping a schema version touches two hand-written validators the codegen never reaches
+
+The registry entry, the migration pair, and the encode/decode sites are the
+obvious edits. Two more are hand-maintained, are not generated, and produce no
+compile error when they go stale:
+
+- `core/timeline/src/structural_registry_validation.cpp` holds a literal
+  `ExpectedField[]` per structural type plus its `{current_version,
+  oldest_readable_version}` pair, and rejects a registry whose field list or
+  version does not match exactly. Miss it and `serialize_project` fails on a
+  document you just built in memory, with `InvalidSchema` /
+  `UnsupportedSchemaVersion` and no path — it reads like an encoder bug.
+- `core/timeline/src/schema_json_preflight.cpp` gates the structural scan on a
+  literal version (`content_type != "…" || version != 1`). A version bump that
+  leaves it pinned sends every new document down the opaque-passthrough branch
+  and skips its validation entirely — a silent weakening, not a failure.
+
+Both must accept the whole readable range, not just the newest version: a v1
+document is preflighted *before* migration runs, so the older shape has to pass
+too. Field lists in the validator are ordered, and the registry lists fields
+alphabetically, so a new field goes in its sorted position, not at the end.
+
+A bump also invalidates any test that pins a **"future version" sentinel** —
+`test_timeline_persistence_limits.cpp` asserts that a known built-in type name at
+an unknown version stays opaque and quota-terminal, using a literal version one
+past the current one. When the schema catches up to that literal the case still
+passes trivially while no longer testing the opaque path at all, so raise the
+sentinel in the same change.
+
 
 The `SchemaRegistry` is the single generative source for the timeline's agent
 surfaces (JS facade, TypeScript definitions, MCP tool definitions, CLI verbs):
@@ -756,6 +786,47 @@ opt-in Audio Quality Lab tool is installed.
   than defaulting, so a document from a newer build never silently reads as the
   strongest claim. Aggregate several classes with `weakest`, never by picking the
   first.
+
+## Track mixer state
+
+A `Track` owns a `TrackMixer` — a linear `gain_linear` and a stereo balance
+`pan` — and `AutomationTarget` has a `TrackMixerTarget` alternative naming one of
+those controls. Sends, mute, solo, and routing are deliberately absent.
+
+Things that are easy to get wrong here:
+
+- **A default mixer is written as absence.** `write_track` emits the `mixer`
+  member only when the value differs from `TrackMixer{}`, so a document that
+  never touched a fader stays byte-identical to its pre-mixer form and existing
+  golden renders do not shift. The v6→v7 upgrade is therefore a version stamp
+  and nothing else; the v7→v6 downgrade refuses outright when a `mixer` member
+  is present, because a v6 track has nowhere to put a gain and dropping one
+  silently changes how the document sounds.
+- **A mixer target references no identity.** Validation must not demand a device
+  placement for it (`validate_attached_automation`), the insert reduction must
+  not prove one live, and the remap must return it unchanged. The
+  one-lane-per-control rule still applies: duplicate detection compares a
+  normalized key whose leading discriminator keeps a mixer target from colliding
+  with a device target that shares its zeroed placement ID.
+- **Widening `AutomationTarget` reaches four consumers.** `serialize_encode.cpp`,
+  `automation_document_internal.cpp`, `transaction_automation_internal.cpp`, and
+  `core/interchange/src/census.cpp`. Dispatch through `AutomationTargetCases`
+  (no generic fallback) at every one so a future alternative is a compile error
+  rather than a `std::terminate` under `-fno-exceptions` or a silent omission
+  from a census.
+- **Adding a document field touches `structural_registry_validation.cpp` too.**
+  That table is an exact field-by-field comparison against the registry, so a
+  new field or a new registered type there fails serialization with
+  `InvalidSchema` at path `/` until the table matches — an error that names
+  nothing useful if you do not know to look.
+- **Graph-hosted mixing is post-device.** `TimelineGraphPlaybackBinding` owns a
+  stable mixer node per track. A hosted device chain with a nontransparent mixer
+  must provide `post_device_audio_source` and
+  `post_mixer_audio_destination`; the binding transactionally replaces that
+  exact direct audio edge and restores it when the route or binding goes away.
+  Program adoption fails closed if a hosted mixer becomes nontransparent
+  without that route. Keep stopped automation parked, and evaluate precise
+  host-mapped ticks without round-tripping through integer samples.
 
 ## Scope boundary
 

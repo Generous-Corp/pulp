@@ -141,6 +141,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"device_chain", SchemaValueKind::Array},
         {"freeze", SchemaValueKind::Object, false},
         {"id", SchemaValueKind::U64String},
+        {"mixer", SchemaValueKind::Object, false},
         {"name", SchemaValueKind::String},
         {"record_armed", SchemaValueKind::Boolean},
         {"take_lanes", SchemaValueKind::Array},
@@ -168,6 +169,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"device_placement_id", SchemaValueKind::U64String},
         {"parameter_id", SchemaValueKind::U32},
     };
+    static constexpr ExpectedField track_mixer_target_fields[] = {
+        {"parameter", SchemaValueKind::String},
+    };
     static constexpr ExpectedField clip_fields[] = {
         {"content", SchemaValueKind::Object},
         {"fade_in_duration", SchemaValueKind::U64String, false},
@@ -182,6 +186,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"source_start", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField notes_fields[] = {
+        {"modifier_seed", SchemaValueKind::U64String},
+        {"modifiers", SchemaValueKind::Array},
         {"notes", SchemaValueKind::Array},
     };
     static constexpr ExpectedField sequence_ref_fields[] = {
@@ -209,13 +215,15 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_lane", automation_lane_fields},
         {SchemaDomain::Document, "pulp.timeline.automation_target.device_parameter",
          automation_target_fields},
+        {SchemaDomain::Document, "pulp.timeline.automation_target.track_mixer",
+         track_mixer_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
         {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
-        {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields},
+        {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields, 2, 1},
         {SchemaDomain::Content, "pulp.timeline.content.sequence_ref", sequence_ref_fields},
     };
     for (const auto& expected : required) {

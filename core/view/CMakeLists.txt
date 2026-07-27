@@ -803,6 +803,7 @@ if(APPLE)
         endif()
     else()
         target_sources(pulp-view-core PRIVATE
+            platform/mac/app_menu_mac.mm
             platform/mac/window_host_mac.mm
             platform/mac/window_host_mac_capture.mm
             platform/mac/window_host_mac_geometry.mm

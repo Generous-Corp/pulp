@@ -11,6 +11,7 @@
 #include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/note_modifier.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -75,9 +76,11 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
     InvalidGrooveTemplate,
+    InvalidNoteModifier,
     MissingSequenceReference,
     SequenceReferenceCycle,
     SequenceNestingTooDeep,
+    InvalidTrackMixer,
 };
 
 struct ModelError {
@@ -178,18 +181,46 @@ struct NoteEvent {
 
 class NoteContent {
   public:
+    /// Notes alone: no modifiers, and a zero seed. Every note plays once,
+    /// unconditionally.
     static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes);
+    /// Notes plus their sparse modifier companion array. Each modifier must
+    /// name a note in `notes`, must be well-formed, and must not be neutral —
+    /// a neutral entry is a second encoding of a note that already plays that
+    /// way. `modifier_seed` is the document's authored seed for probability
+    /// draws; the same seed always reproduces the same decisions.
+    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes,
+                                                           std::vector<NoteModifier> modifiers,
+                                                           std::uint64_t modifier_seed);
     runtime::Result<NoteContent, ModelError> replace_note(NoteEvent note) const;
 
     std::span<const NoteEvent> notes() const noexcept {
-        return *notes_;
+        return data_->notes;
     }
 
-  private:
-    explicit NoteContent(std::shared_ptr<const std::vector<NoteEvent>> notes)
-        : notes_(std::move(notes)) {}
+    /// Sorted by note id and containing only notes whose playback differs from
+    /// the default, so a document that authors no modifiers carries none.
+    std::span<const NoteModifier> modifiers() const noexcept {
+        return data_->modifiers;
+    }
 
-    std::shared_ptr<const std::vector<NoteEvent>> notes_;
+    std::uint64_t modifier_seed() const noexcept {
+        return data_->modifier_seed;
+    }
+
+    /// The modifier for `note_id`, or nullptr when the note plays by default.
+    const NoteModifier* modifier_for(ItemId note_id) const noexcept;
+
+  private:
+    struct Data {
+        std::vector<NoteEvent> notes;
+        std::vector<NoteModifier> modifiers;
+        std::uint64_t modifier_seed = 0;
+    };
+
+    explicit NoteContent(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+
+    std::shared_ptr<const Data> data_;
 };
 
 // Registered content is an extension-defined typed C++ value. The schema
@@ -451,6 +482,23 @@ class TakeLane {
     std::shared_ptr<const Data> data_;
 };
 
+// The track's own level and stereo placement, owned by the document rather than
+// by any device it hosts. Gain is a linear multiplier, not decibels, so the
+// document never has to agree with a host on a dB reference. Pan is a stereo
+// balance in [-1, 1] that attenuates the opposite side and never boosts, so a
+// centred track renders bit-identically to one carrying no mixer state at all.
+// Sends, mute, solo, and routing are deliberately absent.
+struct TrackMixer {
+    float gain_linear = 1.0f;
+    float pan = 0.0f;
+    constexpr bool operator==(const TrackMixer&) const = default;
+};
+
+// The largest linear gain a track may author. A fader needs headroom above
+// unity, but an unbounded multiplier turns one bad value into a full-scale
+// output, so the document refuses rather than clips.
+inline constexpr float kMaximumTrackGainLinear = 64.0f;
+
 struct TrackInput {
     ItemId id;
     std::string name;
@@ -462,6 +510,7 @@ struct TrackInput {
     // Zero selects the arrangement rather than a take playlist/comp lane.
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
+    TrackMixer mixer;
 };
 
 class Track {
@@ -530,6 +579,7 @@ class Track {
     Track with_record_armed(bool armed) const;
     runtime::Result<Track, ModelError> with_active_take_lane(ItemId lane_id) const;
     runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
+    runtime::Result<Track, ModelError> with_mixer(TrackMixer mixer) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -553,6 +603,7 @@ class Track {
     // of this track's take lanes; full segment-comp data remains a later layer.
     ItemId active_take_lane_id() const noexcept;
     const std::optional<TrackFreeze>& freeze() const noexcept;
+    const TrackMixer& mixer() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     // True when both snapshots are proven to contain exactly the same clip
     // identities. Clip content/timing may differ.

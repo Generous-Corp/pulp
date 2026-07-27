@@ -263,7 +263,72 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
                               static_cast<std::uint8_t>(decoded_channel.value())});
         }
         counts.notes += events.size();
-        auto created = NoteContent::create(std::move(events));
+        auto seed = required(*data.value(), "modifier_seed", path + "/data");
+        auto modifiers = required(*data.value(), "modifiers", path + "/data");
+        if (!seed || !modifiers)
+            return fail<ClipContent>(PersistenceErrorCode::MissingField, path + "/data");
+        if (modifiers.value()->kind != JsonValue::Kind::Array)
+            return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
+                                     path + "/data/modifiers");
+        auto decoded_seed =
+            parse_canonical_u64_string(*seed.value(), path + "/data/modifier_seed");
+        if (!decoded_seed)
+            return fail<ClipContent>(PersistenceErrorCode::InvalidNumber,
+                                     path + "/data/modifier_seed");
+        // A modifier names a note, so the array can never outgrow the notes it
+        // annotates; bounding it against the same budget keeps a hostile
+        // document from spending unbounded memory on annotations alone.
+        if (modifiers.value()->array.size() > events.size())
+            return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, path + "/data/modifiers",
+                                     modifiers.value()->begin, modifiers.value()->array.size(),
+                                     events.size());
+        std::vector<NoteModifier> decoded_modifiers;
+        decoded_modifiers.reserve(modifiers.value()->array.size());
+        for (std::size_t index = 0; index < modifiers.value()->array.size(); ++index) {
+            const auto modifier_path = path + "/data/modifiers/" + std::to_string(index);
+            const auto& entry = modifiers.value()->array[index];
+            auto condition = required(entry, "condition", modifier_path);
+            auto condition_offset = required(entry, "condition_offset", modifier_path);
+            auto condition_period = required(entry, "condition_period", modifier_path);
+            auto note_id = required(entry, "note_id", modifier_path);
+            auto probability = required(entry, "probability", modifier_path);
+            auto ratchet_count = required(entry, "ratchet_count", modifier_path);
+            if (!condition || !condition_offset || !condition_period || !note_id || !probability ||
+                !ratchet_count)
+                return fail<ClipContent>(PersistenceErrorCode::MissingField, modifier_path);
+            if (condition.value()->kind != JsonValue::Kind::String)
+                return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
+                                         modifier_path + "/condition");
+            NoteConditionKind decoded_condition{};
+            if (!parse_note_condition(condition.value()->scalar, decoded_condition))
+                return fail<ClipContent>(PersistenceErrorCode::InvalidSchema,
+                                         modifier_path + "/condition");
+            auto decoded_note_id =
+                parse_canonical_u64_string(*note_id.value(), modifier_path + "/note_id");
+            auto decoded_offset =
+                parse_u32_number(*condition_offset.value(), modifier_path + "/condition_offset");
+            auto decoded_period =
+                parse_u32_number(*condition_period.value(), modifier_path + "/condition_period");
+            auto decoded_probability =
+                parse_u32_number(*probability.value(), modifier_path + "/probability");
+            auto decoded_ratchet =
+                parse_u32_number(*ratchet_count.value(), modifier_path + "/ratchet_count");
+            if (!decoded_note_id || !decoded_offset || !decoded_period || !decoded_probability ||
+                !decoded_ratchet ||
+                decoded_offset.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_period.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_probability.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_ratchet.value() > std::numeric_limits<std::uint16_t>::max())
+                return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, modifier_path);
+            decoded_modifiers.push_back(
+                {ItemId{decoded_note_id.value()},
+                 static_cast<std::uint16_t>(decoded_probability.value()),
+                 static_cast<std::uint16_t>(decoded_period.value()),
+                 static_cast<std::uint16_t>(decoded_offset.value()),
+                 static_cast<std::uint16_t>(decoded_ratchet.value()), decoded_condition});
+        }
+        auto created = NoteContent::create(std::move(events), std::move(decoded_modifiers),
+                                           decoded_seed.value());
         if (!created)
             return model_fail<ClipContent>(created.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(
@@ -518,6 +583,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto clips = required(data, "clips", path + "/data");
     const auto* active_take_lane = data.find("active_take_lane_id");
     const auto* freeze = data.find("freeze");
+    const auto* mixer = data.find("mixer");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
     const auto* take_lanes = data.find("take_lanes");
@@ -532,6 +598,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.requires_active_take_lane(envelope.value().version);
     const auto supports_freeze =
         detail::track_schema_policy.supports_freeze(envelope.value().version);
+    const auto supports_mixer =
+        detail::track_schema_policy.supports_mixer(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -543,7 +611,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         (!requires_active_take_lane && active_take_lane) ||
         (requires_active_take_lane &&
          (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
-        (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object))
+        (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object) ||
+        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -616,6 +685,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto decoded_freeze = detail::decode_track_freeze(freeze, path);
     if (!decoded_freeze)
         return runtime::Err(decoded_freeze.error());
+    auto decoded_mixer = detail::decode_track_mixer(mixer, path);
+    if (!decoded_mixer)
+        return runtime::Err(decoded_mixer.error());
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
@@ -624,7 +696,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .take_lanes = std::move(decoded_take_lanes),
                                             .record_armed = decoded_record_armed,
                                             .active_take_lane_id = decoded_active_take_lane,
-                                            .freeze = std::move(decoded_freeze).value()});
+                                            .freeze = std::move(decoded_freeze).value(),
+                                            .mixer = decoded_mixer.value()});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));

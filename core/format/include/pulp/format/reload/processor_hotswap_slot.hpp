@@ -38,6 +38,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <algorithm>
@@ -306,18 +307,9 @@ private:
 
     static void passthrough(audio::BufferView<float>& out,
                             const audio::BufferView<const float>& in) {
-        const std::size_t channels = std::min(out.num_channels(), in.num_channels());
-        const std::size_t frames = out.num_samples();
-        for (std::size_t ch = 0; ch < channels; ++ch) {
-            auto o = out.channel(ch);
-            auto i = in.channel(ch);
-            for (std::size_t n = 0; n < frames; ++n) o[n] = i[n];
-        }
-        // Zero any output channels with no matching input.
-        for (std::size_t ch = channels; ch < out.num_channels(); ++ch) {
-            auto o = out.channel(ch);
-            for (std::size_t n = 0; n < frames; ++n) o[n] = 0.0f;
-        }
+        // Shared with the format adapters' state-restore gate so every
+        // "Processor unavailable this block" path degrades identically.
+        passthrough_block(out, in);
     }
 
     mutable std::shared_mutex mutex_;

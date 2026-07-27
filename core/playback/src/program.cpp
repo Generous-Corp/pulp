@@ -13,26 +13,37 @@ next_program_generation(ProgramGeneration current) noexcept {
     return runtime::Ok(current + 1);
 }
 
+const CompiledNoteModifier* find_note_modifier(std::span<const CompiledNoteModifier> modifiers,
+                                               timeline::ItemId note_id) noexcept {
+    const auto found = std::lower_bound(modifiers.begin(), modifiers.end(), note_id.value,
+                                        [](const CompiledNoteModifier& entry, std::uint64_t wanted) {
+                                            return entry.modifier.note_id.value < wanted;
+                                        });
+    return found != modifiers.end() && found->modifier.note_id == note_id ? &*found : nullptr;
+}
+
 TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                            ProviderSelectorProgram provider, RendererStatePolicy state_policy,
                            std::vector<timeline::ItemId> clip_ids,
                            std::vector<NoteProgramEvent> note_events,
+                           std::vector<CompiledNoteModifier> note_modifiers,
                            std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                            std::vector<timeline::ItemId> device_placement_ids,
                            std::shared_ptr<const TrackAutomationProgram> automation_program,
                            std::uint64_t expanded_clip_count,
                            std::uint64_t expanded_note_event_count,
                            std::uint64_t generated_id_start,
-                           std::uint64_t generated_id_count) noexcept
+                           std::uint64_t generated_id_count,
+                           TrackMixerProgram mixer) noexcept
     : id_(id), generation_(generation), provider_(provider), state_policy_(state_policy),
       clip_ids_(std::move(clip_ids)), note_events_(std::move(note_events)),
-      audio_program_(std::move(audio_program)),
+      note_modifiers_(std::move(note_modifiers)), audio_program_(std::move(audio_program)),
       device_placement_ids_(std::move(device_placement_ids)),
       automation_program_(std::move(automation_program)),
       expanded_clip_count_(expanded_clip_count),
       expanded_note_event_count_(expanded_note_event_count),
       generated_id_start_(generated_id_start),
-      generated_id_count_(generated_id_count) {}
+      generated_id_count_(generated_id_count), mixer_(mixer) {}
 
 PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                                  timeline::ItemId project_id, timeline::ItemId sequence_id,

@@ -32,7 +32,7 @@
 #define PulpView                       PULP_VIEW_OBJC_NAME(PulpView)
 #define PulpMetalView                  PULP_VIEW_OBJC_NAME(PulpMetalView)
 #define PulpWindowDelegate             PULP_VIEW_OBJC_NAME(PulpWindowDelegate)
-#define PulpAppTerminationHandler      PULP_VIEW_OBJC_NAME(PulpAppTerminationHandler)
+#define PulpMenuCommandTarget          PULP_VIEW_OBJC_NAME(PulpMenuCommandTarget)
 // Plug-in editor host (plugin_view_host_mac.mm).
 #define PulpPluginView                 PULP_VIEW_OBJC_NAME(PulpPluginView)
 #define PulpGpuPluginView              PULP_VIEW_OBJC_NAME(PulpGpuPluginView)

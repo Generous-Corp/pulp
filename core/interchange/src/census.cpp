@@ -21,7 +21,16 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
             // EmptyContent is the absence of content, not a concept to carry.
             [&](const timeline::EmptyContent&) {},
             [&](const timeline::MediaRef&) { out.record(Concept::ClipMedia, id, limits); },
-            [&](const timeline::NoteContent&) { out.record(Concept::ClipNote, id, limits); },
+            [&](const timeline::NoteContent& notes) {
+                out.record(Concept::ClipNote, id, limits);
+                // Modifiers decide whether a note sounds at all, so a format
+                // that cannot carry them loses audible content. A seed with no
+                // modifiers still selects a replay, so it counts too. Recording
+                // both is what keeps an export's loss manifest from claiming
+                // nothing was lost.
+                if (!notes.modifiers().empty() || notes.modifier_seed() != 0)
+                    out.record(Concept::ClipNoteModifier, id, limits);
+            },
             [&](const timeline::RegisteredContent&) {
                 out.record(Concept::ContentRegistered, id, limits);
             },
@@ -51,14 +60,25 @@ void record_track(ConceptCensus& out, const timeline::Track& track, const Census
     for (const timeline::DevicePlacement& device : track.device_chain())
         out.record(Concept::DevicePlacement, device.id, limits);
 
+    const timeline::TrackMixer mixer = track.mixer();
+    if (mixer.gain_linear != 1.0f)
+        out.record(Concept::MixerTrackGain, id, limits);
+    if (mixer.pan != 0.0f)
+        out.record(Concept::MixerTrackPan, id, limits);
+
     for (const timeline::AutomationLane& lane : track.automation_lanes()) {
-        std::visit(
-            timeline::AutomationTargetCases{
-                [&](const timeline::DeviceParameterTarget&) {
-                    out.record(Concept::AutomationDeviceParam, lane.id(), limits);
-                },
-            },
-            lane.target());
+        std::visit(timeline::AutomationTargetCases{
+                       [&](const timeline::DeviceParameterTarget&) {
+                           out.record(Concept::AutomationDeviceParam, lane.id(), limits);
+                       },
+                       [&](const timeline::TrackMixerTarget& target) {
+                           out.record(target.parameter == timeline::TrackMixerParameter::Gain
+                                          ? Concept::AutomationTrackGain
+                                          : Concept::AutomationTrackPan,
+                                      lane.id(), limits);
+                       },
+                   },
+                   lane.target());
     }
 
     for (const timeline::TakeLane& lane : track.take_lanes()) {

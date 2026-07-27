@@ -135,7 +135,13 @@ TimelineGraphAdmission validate_timeline_automation_routes(
     if (automation == nullptr) return {};
     std::vector<std::pair<NodeId, timeline::ItemId>> track_claims;
     for (const auto& lane : automation->programs()) {
-        const auto target = lane->target();
+        // A lane driving one of the track's own mixer controls addresses no
+        // device, so it is neither admitted nor refused here — it is applied
+        // where that control is applied, in the track's audio render.
+        const auto* device = lane->device_target();
+        if (device == nullptr)
+            continue;
+        const auto target = *device;
         const auto mapping = std::lower_bound(
             metadata.begin(), metadata.end(), target.device_placement_id,
             [](const auto& candidate, timeline::ItemId id) {

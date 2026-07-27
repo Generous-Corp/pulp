@@ -23,6 +23,7 @@
 #include <mach/mach_time.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -453,8 +454,15 @@ OSStatus save_pulp_state(state::StateStore& store,
 /// Read the `pulp-state` blob back out of an AU class-info dictionary. A
 /// dictionary without the key restores nothing and succeeds (an AU preset
 /// saved by a different plugin version is not an error).
+///
+/// @p gate is held across the restore so it cannot run while the audio thread
+/// is inside `Processor::process()`. Hosts set class info on the main thread
+/// while the unit is initialized and rendering, and
+/// `Processor::deserialize_plugin_state()` is documented as running with the
+/// audio thread stopped.
 OSStatus restore_pulp_state(state::StateStore& store,
                             Processor& processor,
+                            StateRestoreGate& gate,
                             CFPropertyListRef plist);
 
 // ── MIDI output callback publishing ──────────────────────────────────────

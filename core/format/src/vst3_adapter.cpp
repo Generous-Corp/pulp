@@ -246,7 +246,64 @@ tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj)
     // IAudioProcessor / IEditController surface stays intact.
     QUERY_INTERFACE(iid, obj, IMidiMapping::iid, IMidiMapping)
     QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, INoteExpressionController)
+    QUERY_INTERFACE(iid, obj, IKeyswitchController::iid, IKeyswitchController)
     return SingleComponentEffect::queryInterface(iid, obj);
+}
+
+namespace {
+
+// Entries carry -1 wildcards for port and channel, so one name can cover every
+// bus / channel. A request for a specific bus and channel matches an entry that
+// names that bus and channel exactly, or wildcards it.
+bool note_name_matches(const NoteName& name, int32 busIndex, int16 channel) {
+    if (name.port >= 0 && name.port != static_cast<int16_t>(busIndex)) return false;
+    if (name.channel >= 0 && name.channel != channel) return false;
+    // A key wildcard names no single key, so it cannot become a key switch.
+    return name.key >= 0 && name.key <= 127;
+}
+
+std::vector<NoteName> matching_note_names(const Processor* processor,
+                                          int32 busIndex, int16 channel) {
+    if (!processor) return {};
+    std::vector<NoteName> matched;
+    for (auto& name : processor->note_names()) {
+        if (note_name_matches(name, busIndex, channel))
+            matched.push_back(std::move(name));
+    }
+    return matched;
+}
+
+}  // namespace
+
+int32 PLUGIN_API PulpVst3Processor::getKeyswitchCount(int32 busIndex,
+                                                      int16 channel) {
+    return static_cast<int32>(
+        matching_note_names(processor_.get(), busIndex, channel).size());
+}
+
+tresult PLUGIN_API PulpVst3Processor::getKeyswitchInfo(
+    int32 busIndex, int16 channel, int32 keySwitchIndex, KeyswitchInfo& info) {
+    const auto matched = matching_note_names(processor_.get(), busIndex, channel);
+    if (keySwitchIndex < 0 ||
+        static_cast<std::size_t>(keySwitchIndex) >= matched.size())
+        return kResultFalse;
+
+    const auto& name = matched[static_cast<std::size_t>(keySwitchIndex)];
+    std::memset(&info, 0, sizeof(info));
+    // A named note is a key that means something other than its pitch, which is
+    // what a host presses before the note it qualifies.
+    info.typeId = kNoteOnKeyswitchTypeID;
+    Steinberg::UString(info.title, str16BufferSize(String128))
+        .fromAscii(name.name.c_str());
+    Steinberg::UString(info.shortTitle, str16BufferSize(String128))
+        .fromAscii(name.name.c_str());
+    // One name, one key: min and max are the same note.
+    info.keyswitchMin = name.key;
+    info.keyswitchMax = name.key;
+    info.keyRemapped = -1;  // no alternate placement on the keyboard
+    info.unitId = -1;       // not scoped to a unit
+    info.flags = 0;         // reserved by the SDK
+    return kResultTrue;
 }
 
 bool PulpVst3Processor::is_registered_controller(state::ParamID id) const {
@@ -2018,6 +2075,25 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     auto ctx = build_process_context(data, processSetup, num_samples,
                                      playhead_prev_);
 
+    // Prove no state restore is installing underneath this block. setState may
+    // arrive on the main thread while the host keeps calling process() —
+    // host-quirk row R6 records a DAW that does exactly that — and
+    // Processor::deserialize_plugin_state() is documented as running with the
+    // audio thread stopped. On contention pass the input through rather than
+    // read plugin state a restore is halfway through rewriting.
+    auto render_lock = state_restore_gate_.lock_for_render();
+    if (!render_lock) {
+        if (native_f64) {
+            passthrough_block(output64_view, input64_view);
+        } else {
+            passthrough_block(output_view, input_view);
+        }
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            data.outputs[b].silenceFlags = 0;
+        }
+        return kResultOk;
+    }
+
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
@@ -2124,7 +2200,15 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
         data.insert(data.end(), buf, buf + read_count);
     }
     if (!processor_) return kResultFalse;
-    if (!plugin_state_io::deserialize(data, store_, *processor_)) return kResultFalse;
+    {
+        // Hosts call setState while the plug-in is active and rendering, so
+        // hold the gate across the restore: acquiring it proves no audio
+        // callback is inside process(), which is the condition
+        // Processor::deserialize_plugin_state() is documented to run under.
+        auto restore_lock = state_restore_gate_.lock_for_restore();
+        if (!plugin_state_io::deserialize(data, store_, *processor_))
+            return kResultFalse;
+    }
 
     // Sync restored values back to VST3 parameter system
     for (const auto& param : store_.all_params()) {

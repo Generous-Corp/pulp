@@ -1775,12 +1775,49 @@ pulp sdk                                      # Show help
 pulp sdk install                              # Download and cache the pinned SDK from GitHub releases
 pulp sdk install --version 0.2.0              # Install a specific version
 pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
+pulp sdk install --local --profile forge-dev --print-path
+                                              # Print an immutable Apple Silicon Forge-development SDK prefix
 pulp sdk available                            # List SDK versions available on GitHub releases
 pulp sdk status                               # Show cached and locally-built SDK versions
 pulp sdk clean                                # Remove all cached SDK versions
 ```
 
 Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
+
+The `forge-dev` profile is for trying newly committed Pulp DSP in a local Forge
+build before publishing a versioned SDK. It is deliberately stricter than the
+ordinary `--local` cache:
+
+- The selected Pulp checkout must be completely clean, including no untracked
+  files. The build runs from a temporary detached clone of that exact commit,
+  so another session editing the original checkout cannot change its inputs.
+- The install is keyed by the full Pulp commit and a toolchain/dependency
+  fingerprint under
+  `$PULP_HOME/sdk-dev/forge-v1/darwin-arm64/<sha>/<fingerprint>/`.
+- It builds Release arm64 with GPU and design import enabled, and refuses the
+  staged SDK unless AU, VST3, CLAP, and Standalone support are present.
+- The SDK version comes from that commit's `project(Pulp VERSION ...)`, not the
+  running CLI. `--version` is therefore rejected with `--profile forge-dev`.
+- Publication is an atomic rename from a same-filesystem staging directory.
+  Existing valid prefixes are reused; an invalid prefix is never overwritten.
+- `sdk-provenance.json` marks the result as `development` and
+  `distribution_eligible: false`. `find_package(Pulp)` exports that contract to
+  the consumer build, and `pulp ship package|notarize|release|share` refuses the
+  resulting build cache.
+
+Use the printed path as the exact CMake package location in a fresh Forge build:
+
+```bash
+PULP_DEV_SDK="$(pulp sdk install --local --profile forge-dev --print-path)"
+cmake -S /path/to/forge -B /path/to/forge/build-local \
+  -DPulp_DIR="$PULP_DEV_SDK/lib/cmake/Pulp" \
+  -DFORGE_ALLOW_DEVELOPMENT_SDK=ON
+```
+
+`--print-path` reserves stdout for the final absolute prefix; progress and
+diagnostics go to stderr. This profile does not dynamically load DSP into an
+existing Forge binary: Forge still recompiles normally against the selected SDK,
+which keeps compile-time APIs and linked libraries coherent.
 
 ### dev
 
