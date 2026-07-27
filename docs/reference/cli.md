@@ -2111,6 +2111,48 @@ same source consumed by the GitHub Actions coverage workflow.
 Set `PULP_SKIP_DIFF_COVER=1` for docs-only or workflow-only changes where the
 diff-coverage build is intentionally out of scope.
 
+### dsp
+
+**Status**: experimental
+
+The canonical DSP capability registry: which nodes the Forge bake catalogs
+expose, and what each advertises as an injectable baked parameter.
+
+```bash
+pulp dsp capabilities           # summarise the surface
+pulp dsp capabilities --json    # emit the canonical registry
+pulp dsp capabilities --check   # validate collisions + snapshot freshness
+pulp dsp capabilities --write   # regenerate the committed snapshot
+```
+
+Shells out to `tools/scripts/dsp_capability_registry.py`; the snapshot lives at
+`docs/status/dsp-capabilities.json`.
+
+**Why it exists.** Until this landed there was no machine-readable enumeration
+of the DSP capability surface anywhere in the tree. Forge hand-maintained its
+own registry, the test suites hand-maintained their own `kAll*` arrays, and
+nothing reconciled them — so Pulp's modulation nodes grew 21 runtime controls
+that Forge's registry never bound a name to. The DSP was reachable from the
+catalog and unreachable from generation, and it took a Forge-side contract test
+to notice, one repository downstream and one merge late. `--check` moves that
+detection to the side of the boundary where the catalogs actually live.
+
+`--check` is non-zero on any of:
+
+- two catalog headers declaring the same type id **string**;
+- one node declaring the same baked-param id twice;
+- a snapshot that no longer matches the headers (i.e. a capability was added or
+  changed without regenerating).
+
+**What it deliberately does not cover.** The registry is a STATIC extraction
+from the catalog headers, not a runtime reflection of constructed nodes. A
+static reader cannot evaluate a callback, so a node's intrinsic latency — which
+since the Round 2 integration is a `std::function<int(double)>` resolved at the
+graph's sample rate — is absent rather than present-and-wrong. Two catalogs
+build their params from a spec table at construction time; those nodes are
+marked `baked_params_computed_at_runtime` instead of being reported as having
+no controls.
+
 ### minos
 
 **Status**: experimental
