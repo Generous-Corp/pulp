@@ -452,6 +452,14 @@ TEST_CASE("lowerability_of proves the bakeable subset and refuses with a reason"
         CHECK(proof.reason == LowerRejectReason::NonAudioLaneNotLowerable);
         CHECK(proof.offending_node == mi);
     }
+    SECTION("a graph above the routed executor node limit is not lowerable") {
+        SignalGraph g;
+        for (int i = 0; i < 513; ++i)
+            REQUIRE(g.add_gain_node("Gain") != 0);
+        const auto proof = lowerability_of(g.nodes(), g.connections());
+        CHECK_FALSE(proof.accepted);
+        CHECK(proof.reason == LowerRejectReason::NotExecutorEligible);
+    }
 }
 
 TEST_CASE("Baked graph with a lowerable Custom node matches the live graph bit-exactly",

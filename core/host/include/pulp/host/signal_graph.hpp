@@ -267,18 +267,30 @@ struct CustomNodeType {
                        int /*num_samples*/, const BakedParamView& /*params*/)>
         process_instance_baked_param;
 
-    // Fixed processing latency added by this type, in base-rate samples. Kept
-    // last to preserve source compatibility for positional aggregate
-    // initializers written before the latency contract was added. The graph
-    // captures it at prepare; changing it requires re-registration/re-prepare
-    // and an identity version bump for persisted graphs.
+    // Fixed processing latency added by this type, in base-rate samples. A
+    // latent transport-aware execution path must have a resolvable plain
+    // fallback: PDC is prepare-stable and cannot change when a block gains or
+    // loses a transport context. Kept last to preserve source compatibility for
+    // positional aggregate initializers written before the latency contract was
+    // added. The graph captures it at prepare; changing it requires
+    // re-registration/re-prepare and an identity version bump for persisted
+    // graphs.
     static constexpr int kMaxLatencySamples = 65535;
     int latency_samples = 0;
 
     bool is_valid_registration() const noexcept {
+        const bool has_plain_callback =
+            static_cast<bool>(process) ||
+            (static_cast<bool>(create) && static_cast<bool>(process_instance));
+        const bool has_transport_callback =
+            static_cast<bool>(process_transport) ||
+            (static_cast<bool>(create) &&
+             static_cast<bool>(process_instance_transport));
         return !type_id.empty() && version > 0 && num_input_ports >= 0 &&
                num_output_ports >= 0 && latency_samples >= 0 &&
-               latency_samples <= kMaxLatencySamples;
+               latency_samples <= kMaxLatencySamples &&
+               (latency_samples == 0 || !has_transport_callback ||
+                has_plain_callback);
     }
 };
 

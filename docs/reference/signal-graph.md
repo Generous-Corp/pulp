@@ -222,7 +222,9 @@ a source-level change, and bump the custom type's serialized `version` when a
 latency change affects persisted graphs. A type without a resolved live process
 callback remains transparent on the live graph and contributes zero live
 latency; a lowerable baked callback carries the registered fixed latency into
-the baked processor.
+the baked processor. A transport-aware execution path with non-zero latency must
+also resolve a plain fallback; registration rejects a timing contract
+that would change with per-block transport presence.
 
 During `prepare()` the
 graph walks the topology, computes each node's input / output latency,

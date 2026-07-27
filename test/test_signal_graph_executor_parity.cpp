@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -2406,6 +2407,25 @@ TEST_CASE("Standalone translated routing carries Custom latency into diamond PDC
     expect_equal(actual, expected);
     for (int i = 0; i < 4; ++i) REQUIRE(actual[0][i] == 0.0f);
     REQUIRE(actual[0][4] == 2.0f);
+}
+
+TEST_CASE("Lowerable Custom latency clamps to the signed host-reporting range",
+          "[host][graph][executor][routing][custom][pdc]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto first =
+        graph.add_unresolved_custom_node("pulp.test.latency-clamp", 1, 1, 1, "first");
+    const auto second =
+        graph.add_unresolved_custom_node("pulp.test.latency-clamp", 1, 1, 1, "second");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, first, 0));
+    REQUIRE(graph.connect(first, 0, second, 0));
+    REQUIRE(graph.connect(second, 0, output, 0));
+
+    CHECK(pulp::host::calculate_lowerable_graph_latency_samples(
+              graph.nodes(), graph.connections(),
+              [](pulp::host::NodeId) { return std::numeric_limits<int>::max(); }) ==
+          std::numeric_limits<int>::max());
 }
 
 TEST_CASE("Parallel routing matches SignalGraph: wide stateful custom level",

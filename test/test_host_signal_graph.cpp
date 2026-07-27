@@ -1937,6 +1937,54 @@ TEST_CASE("SignalGraph PDC aligns a fixed-latency Custom node on the parallel pa
     excessive.type_id = "test.excessive-custom-latency";
     excessive.latency_samples = CustomNodeType::kMaxLatencySamples + 1;
     REQUIRE_FALSE(graph.register_custom_node_type(excessive));
+    CustomNodeType latent_transport_only;
+    latent_transport_only.type_id = "test.latent-transport-only";
+    latent_transport_only.num_input_ports = 1;
+    latent_transport_only.num_output_ports = 1;
+    latent_transport_only.latency_samples = 4;
+    latent_transport_only.process_transport =
+        [](pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int,
+           const pulp::format::ProcessContext&) {};
+    REQUIRE_FALSE(graph.register_custom_node_type(latent_transport_only));
+    auto latent_transport_with_plain = latent_transport_only;
+    latent_transport_with_plain.type_id = "test.latent-transport-with-plain";
+    latent_transport_with_plain.process =
+        [](pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int) {};
+    REQUIRE(graph.register_custom_node_type(std::move(latent_transport_with_plain)));
+
+    auto stateful_plain_stateless_transport = latent_transport_only;
+    stateful_plain_stateless_transport.type_id =
+        "test.latent-stateful-plain-stateless-transport";
+    stateful_plain_stateless_transport.create = []() -> void* { return nullptr; };
+    stateful_plain_stateless_transport.process_instance =
+        [](void*, pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int) {};
+    REQUIRE(graph.register_custom_node_type(
+        std::move(stateful_plain_stateless_transport)));
+
+    auto stateless_plain_stateful_transport = latent_transport_only;
+    stateless_plain_stateful_transport.type_id =
+        "test.latent-stateless-plain-stateful-transport";
+    stateless_plain_stateful_transport.process_transport = {};
+    stateless_plain_stateful_transport.process =
+        [](pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int) {};
+    stateless_plain_stateful_transport.create = []() -> void* { return nullptr; };
+    stateless_plain_stateful_transport.process_instance_transport =
+        [](void*, pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int,
+           const pulp::format::ProcessContext&) {};
+    REQUIRE(graph.register_custom_node_type(
+        std::move(stateless_plain_stateful_transport)));
+
+    auto unresolved_stateful_plain = latent_transport_only;
+    unresolved_stateful_plain.type_id = "test.latent-unresolved-stateful-plain";
+    unresolved_stateful_plain.process_instance =
+        [](void*, pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int) {};
+    REQUIRE_FALSE(graph.register_custom_node_type(unresolved_stateful_plain));
     auto boundary = delayed;
     boundary.type_id = "test.maximum-custom-latency";
     boundary.latency_samples = CustomNodeType::kMaxLatencySamples;

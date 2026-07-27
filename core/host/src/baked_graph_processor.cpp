@@ -220,10 +220,11 @@ LowerabilityProof lowerability_of(
         }
     }
 
-    if (!signal_graph_topology_executor_eligible(nodes, connections)) {
+    if (!validate_signal_graph_executor_topology(nodes, connections)) {
         proof.reason = LowerRejectReason::NotExecutorEligible;
         proof.message =
-            "graph is outside the routed executor's bit-exact subset; refusing to bake";
+            "graph is outside the routed executor's supported topology or resource "
+            "limits; refusing to bake";
         return proof;
     }
 

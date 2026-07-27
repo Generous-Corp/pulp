@@ -171,8 +171,9 @@ bool plugin_binding(fmt::ProcessBlock& block,
 // Custom binding: invoke the node's resolved process callback exactly as
 // SignalGraph's Custom node does — over the node's mono input/output slots
 // (ctx.node_inputs gathered from upstream, ctx.node_outputs the assigned
-// scratch). Custom nodes are audio-only (no MIDI/automation/latency), so unlike
-// plugin_binding there is no bus/MIDI/parameter marshaling. When the context's
+// scratch). Custom nodes are audio-only (no MIDI/automation); fixed latency is
+// handled by plan assignment, so unlike plugin_binding there is no
+// bus/MIDI/parameter marshaling here. When the context's
 // process callback is empty (an unresolved custom type or a shape mismatch — the
 // same condition SignalGraph checks with custom_type_matches_node_shape), this
 // reproduces SignalGraph's pass_through_or_zero: copy min(in,out) channels
@@ -395,7 +396,10 @@ int calculate_lowerable_graph_latency_samples(
     const auto plan = graph::build_graph_runtime_plan(shape.nodes, shape.connections);
     if (!plan.ok()) return 0;
     const auto assignment = graph::build_graph_runtime_buffer_assignment(plan.plan);
-    return assignment.ok ? static_cast<int>(assignment.total_latency_samples) : 0;
+    if (!assignment.ok) return 0;
+    return static_cast<int>(std::min<std::uint32_t>(
+        assignment.total_latency_samples,
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
 }
 
 bool build_executor_snapshot(std::span<const GraphNode> nodes,

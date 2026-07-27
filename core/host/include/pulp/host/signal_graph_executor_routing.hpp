@@ -220,8 +220,10 @@ bool signal_graph_executor_eligible(const SignalGraph& graph);
 
 // Calculate host-visible latency for a lowerable audio graph using the exact
 // runtime-plan lane classification and buffer-assignment PDC pass. `custom_latency_for`
-// supplies fixed latency only for Custom nodes that will execute. Returns 0 if
-// the plan/assignment cannot be built.
+// supplies fixed latency only for Custom nodes that will execute. The result is
+// clamped to INT_MAX; returns 0 if the plan/assignment cannot be built. Callers
+// admitting a graph must validate the topology first so failure cannot be
+// mistaken for genuine zero latency.
 int calculate_lowerable_graph_latency_samples(
     std::span<const GraphNode> nodes,
     std::span<const Connection> connections,

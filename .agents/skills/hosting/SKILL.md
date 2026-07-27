@@ -836,7 +836,9 @@ Two things that bite when baking analog VCF nodes:
   the same metadata to legacy PDC, serial/parallel routed snapshots, prepared
   edits, and host latency reporting. Lowering captures the registered value
   separately, so a baked-only callback can be transparent live yet latent when
-  baked. Changing the value requires re-registration/re-prepare and a type
+  baked. A transport-aware execution path with non-zero latency must also resolve
+  a plain fallback; PDC cannot vary with per-block transport presence.
+  Changing the value requires re-registration/re-prepare and a type
   version bump when persisted graphs must distinguish the timing contract.
   Derive catalog values from the DSP implementation (for example, Analog VCF's
   fixed-2x FIR), never a duplicated host constant. Add dry/wet impulse parity

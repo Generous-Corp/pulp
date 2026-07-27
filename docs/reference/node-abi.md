@@ -360,8 +360,10 @@ registrars reject negative values and values above
 `prepare()`, uses it for PDC and host reporting only when a live callback is
 resolved, and carries it into a lowerable baked processor when the baked
 callback is resolved. Latency is prepare-stable metadata, not an audio-thread
-query. Changing it requires re-registration/re-prepare and should bump the
-custom type `version` whenever serialized graphs must distinguish the old
+query. A transport-aware execution path with non-zero latency must also resolve
+a plain fallback because graph PDC cannot vary with per-block transport
+presence. Changing latency requires re-registration/re-prepare and should bump
+the custom type `version` whenever serialized graphs must distinguish the old
 timing contract.
 
 The node type enum only appends `NodeType::Custom`; built-in enum values stay

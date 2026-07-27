@@ -120,8 +120,9 @@ four-pole nonlinear feedback topology; they are not separate filter objects.
 ## Oversampling, latency, and graph PDC
 
 The valid oversampling factors are `1`, `2`, `4`, `8`, and `16`. Passing any
-other value to `set_oversampling()` selects 2x. A factor change resets filter
-and oversampler history. Latency is always reported in base-rate graph samples:
+other value to `set_oversampling()` selects 2x. `OtaCascadeFilterT` resets on an
+effective factor change; `AnalogVcfT::set_oversampling()` resets on every call.
+Latency is always reported in base-rate graph samples:
 
 | Factor | Latency |
 |---:|---:|
@@ -146,8 +147,9 @@ type-version bump when persisted graphs must distinguish the old timing.
 
 - `reset()` clears pole and oversampling history, restores deterministic drift
   state, and snaps smoothed coefficients to their current targets.
-- `set_sample_rate()` and an effective `set_oversampling()` change reset the
-  engine. `AnalogVcfT::set_voicing()` also resets it.
+- `set_sample_rate()` resets both layers. `OtaCascadeFilterT` resets on an
+  effective oversampling-factor change; `AnalogVcfT::set_oversampling()` resets
+  on every call. `AnalogVcfT::set_voicing()` also resets when the voicing changes.
 - The in-place `process(buffer, count)` overload is a no-op for a null buffer or
   non-positive count.
 - Setter arguments are clamped as documented below. No setter, reset, or
@@ -174,7 +176,7 @@ type-version bump when persisted graphs must distinguish the old timing.
 | `reset()` | Clears history and restores deterministic drift state without changing controls. |
 | `latency_samples()` | Returns current fixed oversampling latency in base-rate samples. |
 | `latency_samples_for_oversampling(factor)` | Returns the table above, or `-1` for an invalid factor. Does not require an instance. |
-| `cutoff_hz()` | Returns the requested table-derived corner in Hz. The realised corner may be lower because the engine clamps its pole to `[20 Hz, 0.45 * sample_rate]`. |
+| `cutoff_hz()` | Returns the requested table-derived corner in Hz. The realised corner may differ because the engine clamps its pole to `[20 Hz, 0.45 * sample_rate]` (higher at the floor or lower at the ceiling). |
 | `requested_cutoff_hz_for(voicing, knob, modulation = 0)` | Returns the requested Hz readout without an instance; clamps knob to `[0, 1]` and modulation to `[-16, 16]`. |
 | `oversampling()` | Returns the active factor. |
 | `voicing()` | Returns the active measured voicing. |
