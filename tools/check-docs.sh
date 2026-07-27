@@ -209,6 +209,14 @@ if [ -x "$ROOT/tools/check-docs-consistency.py" ]; then
     fi
 fi
 
+# Round 2's hand-authored API reference must move with the public headers. The
+# checker derives method names from class public sections rather than blessing a
+# second hand-maintained API list.
+echo "Checking advanced DSP public-method coverage..."
+if ! python3 "$ROOT/tools/scripts/check_advanced_dsp_api.py"; then
+    ERRORS=$((ERRORS + 1))
+fi
+
 # ── Status ladder (warn-mode during phase-in) ─────────────────────────────────
 if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
     echo "Checking status ladder (usable ⇒ validation evidence)..."
