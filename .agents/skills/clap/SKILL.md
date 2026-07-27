@@ -990,3 +990,18 @@ Two consequences when working in this adapter:
 The gate is released before `on_non_realtime_tick()` so a processor that
 reconciles derived state there cannot stall the audio thread for the length of
 that work.
+
+## Note names (`clap.note-name`)
+
+`Processor::note_names()` is published through `clap_note_name.cpp`. The
+extension is offered from `clap_get_extension` UNCONDITIONALLY — do not gate it
+on the list being non-empty. Hosts query `get_extension` once at init, so a
+sampler that names notes only after loading a kit would be locked out for the
+whole session if the empty-list case refused the extension.
+
+Both entry points are `[main-thread]` per the extension, and `note_names()` is a
+main-thread call, so re-reading the processor there needs no gate.
+
+`flag_note_names_changed()` rides the existing `request_callback` set alongside
+the latency / tail pending flags, and the `clap_host_note_name->changed()` push
+happens in `clap_on_main_thread()` — never from `process()`.

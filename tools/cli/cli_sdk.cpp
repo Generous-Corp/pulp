@@ -805,13 +805,8 @@ std::string read_project_cmake_version(const fs::path& project_root) {
     if (!fs::exists(cmake_path)) return {};
 
     std::ifstream f(cmake_path);
-    std::string line;
+    const std::string text{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
     std::regex version_re(R"(project\s*\([^)]*VERSION\s+(\d+\.\d+\.\d+))");
-    while (std::getline(f, line)) {
-        std::smatch m;
-        if (std::regex_search(line, m, version_re)) {
-            return m[1].str();
-        }
-    }
-    return {};
+    std::smatch match;
+    return std::regex_search(text, match, version_re) ? match[1].str() : std::string{};
 }

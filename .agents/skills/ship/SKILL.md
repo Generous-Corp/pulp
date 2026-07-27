@@ -141,6 +141,33 @@ built with PULP_TRACING=ON," the fix is to rebuild with tracing off (the
 default `pulp build`), not to reach for `--allow-tracing`. The scanner lives in
 `tools/cli/ship_tracing_guard.hpp` (unit-tested in `test/test_ship_tracing_guard.cpp`).
 
+## Development-SDK ship guard
+
+`package`, `notarize`, `release`, and `share` **refuse** a project configured
+against a *development* Pulp SDK — the local-only SDK `pulp sdk` can build from
+a clean committed checkout so Forge can iterate against an unreleased Pulp.
+`sign` is deliberately NOT guarded: signing a dev build for local testing is
+fine; handing it to anyone else is not.
+
+`tools/cmake/PulpSdkProvenance.cmake` writes
+`PULP_SDK_DISTRIBUTION_ELIGIBLE` (and `PULP_SDK_DEVELOPMENT`) into the SDK's
+CMake cache via `CACHE INTERNAL`, and `pulp::cli::sdk_allows_distribution()`
+(`tools/cli/sdk_distribution_guard.cpp`) reads that cache from the build dir.
+A development SDK fails with a message naming the reason; released SDKs are
+unaffected.
+
+**There is no override flag.** If a ship step stops with "the configured Pulp
+SDK is development-only," the fix is to reconfigure against a released SDK — the
+whole point of the marker is that a locally-built SDK cannot be identified later
+by whoever receives the artifact. Note the guard is deliberately fail-*open* on
+a missing or unrecognised cache, so that SDKs predating the marker keep working;
+it is a tripwire against the development profile, not an attestation that any
+given SDK is releasable.
+
+Unit-tested in both directions in `test/test_sdk_distribution_guard.cpp`, plus
+the CMake-level provenance contract in
+`test/cmake/test_sdk_provenance_contract.cmake`.
+
 ## Workflows
 
 ### One-off share (macOS): hand a build to a friend, properly signed

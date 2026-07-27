@@ -58,6 +58,15 @@ if(APPLE AND NOT PULP_IOS)
     set_tests_properties(cmake-ios-hostapp-bundle-guard PROPERTIES
         LABELS "cmake;ios;auv3" TIMEOUT 60)
 endif()
+# CLAP bundle Info.plist guard (template-only, fast): CMake's default bundle
+# plist leaves CFBundleIdentifier empty and stamps APPL, which costs a real
+# bundle id at Developer ID signing and notarisation time.
+# See cmake/test_clap_bundle_plist.sh.
+add_test(NAME cmake-clap-bundle-plist
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_clap_bundle_plist.sh
+            ${CMAKE_SOURCE_DIR})
+set_tests_properties(cmake-clap-bundle-plist PROPERTIES
+    LABELS "cmake;clap;ship" TIMEOUT 60)
 # AU v2 component-type selection smoke — hardens the aufx→aumf flip
 # for descriptor.accepts_midi=true. Runs under `cmake -P` so it works
 # on every platform without building the Pulp tree.
@@ -255,6 +264,15 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
+
+add_test(NAME cmake-sdk-provenance-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-sdk-provenance-contract
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sdk_provenance_contract.cmake)
+set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 30)
 # PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
 # option. ON must produce a clear configure warning rather than silently doing
 # nothing or implying Swift is globally enabled.

@@ -406,6 +406,47 @@ TEST_CASE("The snare's tone and wire lo-fi chains are independent",
     REQUIRE_FALSE(wires_clean == wires_crushed);
 }
 
+TEST_CASE("The tom's body and skin lo-fi chains are independent",
+          "[signal][drum][tom]") {
+    // A tom is an oscillator body under a filtered noise skin, and the machines
+    // this voice descends from crushed those paths separately: a bit-reduced
+    // body under clean hiss is a different instrument from a clean body under a
+    // decimated skin, and one shared chain could only produce the average.
+    //
+    // Each direction carries a negative control, so a setter wired to the wrong
+    // chain cannot pass merely because the deterministic render repeated.
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_click_level(0.0);
+    voice.set_noise_balance(0.0);  // body only
+    auto reset_hit = [&voice] {
+        voice.reset();
+        return hit(voice, 1.0f, 12000);
+    };
+    const auto body_before = reset_hit();
+
+    voice.noise_lofi().set_bits(3.0);
+    const auto body_after = reset_hit();
+    REQUIRE(body_before == body_after);
+
+    voice.body_lofi().set_bits(3.0);
+    const auto body_crushed = reset_hit();
+    REQUIRE_FALSE(body_before == body_crushed);
+
+    voice.set_noise_balance(1.0);  // skin only
+    voice.body_lofi().set_bits(24.0);
+    voice.noise_lofi().set_bits(24.0);
+    const auto skin_clean = reset_hit();
+
+    voice.body_lofi().set_bits(3.0);
+    const auto skin_after_body_change = reset_hit();
+    REQUIRE(skin_clean == skin_after_body_change);
+
+    voice.noise_lofi().set_bits(3.0);
+    const auto skin_crushed = reset_hit();
+    REQUIRE_FALSE(skin_clean == skin_crushed);
+}
+
 // -- Hi-hat ------------------------------------------------------------------
 
 TEST_CASE("The hat's oscillator bank is inharmonic",
@@ -1693,4 +1734,23 @@ TEST_CASE("Every available registry entry constructs a finite audible voice",
         for (float sample : y) REQUIRE(std::isfinite(sample));
         REQUIRE(peak(y) > 1e-6);
     }
+}
+
+TEST_CASE("The tom clears its skin filter on reset",
+          "[signal][drum][tom][rt-safety]") {
+    // reset() promises the voice is silenced and its state cleared. The skin's
+    // 4-pole ladder holds four stages plus a saturated feedback sample, and
+    // leaving them behind made the promise partial: the same hit rendered twice
+    // from a reset voice did not produce the same samples, which is also what
+    // stops a deterministic corpus from reproducing.
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_noise_balance(1.0);  // skin only, so the ladder carries the sound
+    voice.set_click_level(0.0);
+
+    voice.reset();
+    const auto first = hit(voice, 1.0f, 4000);
+    voice.reset();
+    const auto second = hit(voice, 1.0f, 4000);
+    REQUIRE(first == second);
 }

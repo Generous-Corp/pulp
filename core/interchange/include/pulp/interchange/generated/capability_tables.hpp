@@ -66,7 +66,7 @@ struct FormatRecord {
 };
 
 inline constexpr FormatRecord kFormatRecords[kFormatCount] = {
-    {"dawproject", "DAWproject", false},
+    {"dawproject", "DAWproject", true},
 };
 
 inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
@@ -130,8 +130,8 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::ClipMusical, LossClass::Approximated, "sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick"}, // clip.absolute
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.media
-        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.gain
-        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.fades
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity"}, // clip.gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges"}, // clip.fades
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.crossfade"}, // clip.crossfade
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.warp"}, // clip.warp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.launch"}, // clip.launch
@@ -140,8 +140,8 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for tempo.map"}, // tempo.map
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // meter.single
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for meter.map"}, // meter.map
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for marker"}, // marker
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for timecode.origin"}, // timecode.origin
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit markers or regions, so every named point and range on the timeline is dropped"}, // marker
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a session timecode origin, so the exported document starts at zero and every timecode reference shifts"}, // timecode.origin
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for media.provenance"}, // media.provenance
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a channel volume, so an authored track gain is dropped and the track exports at unity"}, // mixer.track-gain
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a channel pan, so an authored track pan is dropped and the track exports centred"}, // mixer.track-pan
@@ -156,7 +156,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::ClipMedia, LossClass::Flattened, "comp segment boundaries become clip boundaries; the selection is no longer editable"}, // take.comp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped"}, // track.freeze
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.sealed-hash
-        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.embedded-media
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve"}, // asset.embedded-media
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.referenced-media
         {ExportLevel::Degrade, Concept::TrackFlat, LossClass::Flattened, "only the root sequence is written; other sequences are dropped"}, // sequence.multiple
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for sequence.nested"}, // sequence.nested

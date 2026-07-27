@@ -297,6 +297,8 @@ inline void add_voice_params(CustomNodeType& type, EngineId id) {
         add(type, kTomClickLevel, 0, 2, id == EngineId::tom_generic ? .35f : .30f);
         add(type, kTomClickCutoffHz, 20, 20000, 4000);
         add(type, kTomClickDecayMs, 0.05f, 200, 2);
+        add_lofi_params(type, kToneLofiBits);
+        add_lofi_params(type, kNoiseLofiBits);
         break;
     case EngineId::membrane_modal:
         add(type, kTuneHz, 20, 2000, 90);

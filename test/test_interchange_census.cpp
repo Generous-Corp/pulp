@@ -104,6 +104,11 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
     }
 
     SECTION("concepts the document does not use are absent") {
+        // Marker and TimecodeOrigin ARE expressible in the model; this fixture
+        // simply carries none. They belong here rather than in the
+        // model-cannot-express section below.
+        REQUIRE_FALSE(counted.contains(Concept::Marker));
+        REQUIRE_FALSE(counted.contains(Concept::TimecodeOrigin));
         REQUIRE_FALSE(counted.contains(Concept::ClipNoteModifier));
         REQUIRE_FALSE(counted.contains(Concept::TakeLane));
         REQUIRE_FALSE(counted.contains(Concept::TrackFreeze));
@@ -119,7 +124,6 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         for (Concept concept_value : present)
             REQUIRE(concept_detectable_in_model(concept_value));
         REQUIRE_FALSE(counted.contains(Concept::Unknown));
-        REQUIRE_FALSE(counted.contains(Concept::Marker));
         REQUIRE_FALSE(counted.contains(Concept::ClipCrossfade));
         REQUIRE_FALSE(counted.contains(Concept::MixerTrackGain));
     }
@@ -289,4 +293,55 @@ TEST_CASE("a census records track mixer state and the lanes that automate it",
         Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {plain_sequence}})));
     REQUIRE_FALSE(untouched.contains(Concept::MixerTrackGain));
     REQUIRE_FALSE(untouched.contains(Concept::MixerTrackPan));
+}
+
+namespace {
+
+// A document carrying exactly the annotations the census used to be blind to:
+// two markers, one region, and a session timecode origin.
+Project annotated_project() {
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "annotated",
+        .musical_duration = TickDuration{4'000},
+        .markers = {SequenceMarker{{20}, "verse", TickPosition{0}, {}},
+                    SequenceMarker{{21}, "chorus", TickPosition{1'000}, {}}},
+        .regions = {SequenceRegion{{22}, "bridge", TickPosition{2'000}, TickDuration{500}, {}}},
+    }));
+    ProjectInput input{{1}, "annotated", 40, {3}, {}, {sequence}};
+    input.session_start = SessionStart{{48'000}, {48'000, 1}};
+    return take_value(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("a census records markers, regions, and the session timecode origin",
+          "[interchange]") {
+    // These are shipped model features. A census that cannot see them makes
+    // plan_export report is_lossless() on a document that would lose every
+    // named location and its wall-clock origin — a manifest that lies is worse
+    // than a refusal, so the walker must observe them.
+    const Project project = annotated_project();
+    const ConceptCensus counted = census(project);
+
+    // Markers and regions share one concept: the vocabulary defines it as "a
+    // named point or range on the timeline", so two markers plus one region is
+    // three occurrences of the same concept, not two concepts.
+    REQUIRE(counted.contains(Concept::Marker));
+    REQUIRE(counted.count(Concept::Marker) == 3);
+    REQUIRE(counted.contains(Concept::TimecodeOrigin));
+    REQUIRE(counted.count(Concept::TimecodeOrigin) == 1);
+
+    // Owners name the items the concept was found on, so a loss manifest can
+    // point at what would be dropped.
+    const auto owners = counted.owners(Concept::Marker);
+    REQUIRE(owners.size() == 3);
+
+    // Both concepts must now declare themselves model-detectable, or the
+    // census invariant ("never claim a concept the model cannot express")
+    // would fail on this very document.
+    REQUIRE(concept_detectable_in_model(Concept::Marker));
+    REQUIRE(concept_detectable_in_model(Concept::TimecodeOrigin));
+    for (Concept concept_value : counted.present())
+        REQUIRE(concept_detectable_in_model(concept_value));
 }

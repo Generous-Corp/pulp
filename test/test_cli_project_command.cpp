@@ -838,6 +838,12 @@ TEST_CASE("cli common project metadata and compatibility helpers cover edge path
                "cmake_minimum_required(VERSION 3.20)\n"
                "project(Clock VERSION 1.2.3 LANGUAGES CXX)\n");
     REQUIRE(read_project_cmake_version(project) == "1.2.3");
+    write_file(project / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.20)\n"
+               "project(Clock\n"
+               "  VERSION 1.2.4\n"
+               "  LANGUAGES CXX)\n");
+    REQUIRE(read_project_cmake_version(project) == "1.2.4");
 
     write_file(project / "pulp.toml", "[pulp]\nsdk_version = \"99.0.0\"\n");
     REQUIRE(enforce_project_cli_compatibility(project, "pulp build", true));

@@ -319,6 +319,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPkgConfigImports.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkProvenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWebGpuImportedTarget.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"

@@ -1847,3 +1847,56 @@ take both renders under them, so the gate separates "needs a partner" from
 Confirm such a gate can fail before trusting it green: reintroduce one dead knob
 and check it is reported. A parameter-efficacy gate that silently passes
 everything looks identical to a clean contract.
+
+## A voice's `reset()` must clear every filter it owns, not most of them
+
+A drum voice's `reset()` is the contract the bake layer leans on: the node's
+`type.reset` calls it, a kit calls it when transport stops, and a deterministic
+corpus depends on it. "Clears all state" has to mean all of it.
+
+The failure mode is quiet. `TomVoice::on_reset()` cleared its envelopes, click,
+noise source, output stage and phase — and left the skin's 4-pole ladder holding
+four stages plus a saturated feedback sample. Nothing sounds obviously broken:
+the voice still starts, still decays, still chokes. What breaks is *repeatability* —
+the same hit rendered twice from a reset voice produces different samples, so a
+regenerated corpus never reproduces and a golden-file test fails on the second
+run rather than the first. The sibling snare had always reset its filter, which
+is why the gap survived review: the pattern looked established.
+
+When adding or auditing a voice, list its stateful members and check each appears
+in `on_reset()`. Filters and delay lines are the ones that get missed, because
+they have no `is_active()` to make their leftover state visible.
+
+The check that catches it is one assertion, and it is worth writing for every
+voice: reset, render a hit, reset, render the same hit, require the two buffers
+equal. Run it with the voice's *noisiest* path at full level — a path that is
+silent in the test cannot carry stale filter state into the output, which is how
+a partial reset passes a determinism test that looks thorough.
+
+## A repeated designated initializer compiles on macOS and breaks Linux
+
+`ExecutorSnapshotBinders` and the other binder structs are filled with designated
+initializers, which makes them pleasant to extend and makes one mistake invisible
+locally: naming the same field twice.
+
+Clang accepts a repeated designator as an extension and silently keeps the LAST
+one. GCC rejects it — `error: '.field' designator used multiple times in the same
+initializer list`. So the whole macOS lane, including the required gate, stays
+green while every Linux build in the repository fails. On a merge queue that
+groups on all-green, that blocks PRs which never touched the host.
+
+It arrives through merges rather than through typing: a hunk that adds a binder
+gets applied to both sides of a merge and lands twice. `git diff` on the merge
+looks unremarkable because each copy is individually correct.
+
+When a binder initializer grows, or after resolving a merge that touched one,
+count the designators:
+
+```bash
+grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp   # expect 1
+```
+
+If the duplicated bodies are identical, removing either is behaviour-preserving —
+clang was already using the last. If they differ, clang has been running the
+second and GCC has never compiled it at all, so decide which is correct before
+deleting.
