@@ -1,4 +1,4 @@
-// Multirate FDN reverb — bake-layer catalog node tests.
+// Multirate FDN reverb — Forge bake-layer catalog node tests.
 //
 // The engine's own DSP claims are proven in test_fdn_reverb.cpp. What is proven
 // here is everything the CATALOG adds: that all five modes bake and register,
@@ -9,6 +9,9 @@
 // mono halves, and that none of it allocates on the audio thread — including
 // the one operation most likely to: a live tank-rate change, which re-derives
 // every delay length, filter coefficient and resampler ratio in the engine.
+// The suite also owns the host-boundary contracts: identical baked artifacts
+// render bit-identically, and hostile non-finite injections resolve to each
+// parameter's declared default before they can poison the DSP.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using namespace pulp::host;
@@ -273,6 +277,67 @@ TEST_CASE("fdn reverb catalog injects every declared parameter",
         for (std::size_t i = 0; i < low.size(); ++i) {
             REQUIRE(std::isfinite(low[i]));
             REQUIRE(std::isfinite(high[i]));
+        }
+    }
+}
+
+TEST_CASE("fdn reverb catalog render is bit-deterministic",
+          "[fdn][catalog][reverb][determinism]") {
+    BakedReverb first(fdn::Mode::hall);
+    BakedReverb second(fdn::Mode::hall);
+    auto first_injector = first.baked().claim_param_injection(first.node);
+    auto second_injector = second.baked().claim_param_injection(second.node);
+
+    // Exercise the injectable path rather than comparing untouched defaults.
+    // Midpoints are stable plain-domain values; stepped controls are rounded by
+    // the same StateStore boundary used in production.
+    for (int p = 0; p < fdn::kNumParams; ++p) {
+        const auto param = static_cast<fdn::Param>(p);
+        const auto& spec = fdn::kParamSpecs[static_cast<std::size_t>(p)];
+        const float value = static_cast<float>((spec.min + spec.max) * 0.5);
+        const auto event = immediate(catalog::param_id_for(param), value);
+        REQUIRE(first_injector.inject(event) == InjectStatus::Ok);
+        REQUIRE(second_injector.inject(event) == InjectStatus::Ok);
+    }
+
+    const auto first_render = excited(*first.result.processor, 120);
+    const auto second_render = excited(*second.result.processor, 120);
+    // Exact equality is intentional: two realizations of the same baked node
+    // and control stream must produce the same artifact, not merely sound
+    // approximately alike.
+    REQUIRE(std::equal(first_render.begin(), first_render.end(), second_render.begin(),
+                       second_render.end()));
+}
+
+TEST_CASE("fdn reverb catalog maps non-finite injections to declared defaults",
+          "[fdn][catalog][reverb][injection][nan][security]") {
+    constexpr std::array<float, 3> kHostileValues = {
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+
+    // StateStore is the shared Forge boundary that constrains baked parameter
+    // events. Prove its default fallback through the real catalog path for all
+    // twelve controls, including the stepped tank-rate selector.
+    for (int p = 0; p < fdn::kNumParams; ++p) {
+        const auto param = static_cast<fdn::Param>(p);
+        const auto param_id = catalog::param_id_for(param);
+        for (float hostile : kHostileValues) {
+            CAPTURE(fdn::kParamSpecs[static_cast<std::size_t>(p)].id, hostile);
+            BakedReverb expected(fdn::Mode::hall);
+            BakedReverb actual(fdn::Mode::hall);
+            auto injector = actual.baked().claim_param_injection(actual.node);
+            REQUIRE(injector.inject(immediate(param_id, hostile)) == InjectStatus::Ok);
+
+            const auto default_render = excited(*expected.result.processor, 40);
+            const auto hostile_render = excited(*actual.result.processor, 40);
+            INFO("parameter " << fdn::kParamSpecs[static_cast<std::size_t>(p)].id);
+            for (float sample : hostile_render) REQUIRE(std::isfinite(sample));
+            // Exact parity proves fallback to the mode's declared default; a
+            // merely finite output could hide an arbitrary clamp or stale value.
+            REQUIRE(std::equal(hostile_render.begin(), hostile_render.end(),
+                               default_render.begin(), default_render.end()));
         }
     }
 }
