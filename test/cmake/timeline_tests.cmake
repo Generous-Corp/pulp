@@ -406,3 +406,16 @@ target_include_directories(pulp-test-timeline-phase1-examples PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
     ${CMAKE_SOURCE_DIR}/test)
 catch_discover_tests(pulp-test-timeline-phase1-examples)
+
+# The Timeline API-contract checker only ever runs inside build-api-docs.sh,
+# which needs Doxygen and therefore runs in the docs lanes rather than the test
+# suite. That left the checker's own logic — the exemptions for internal
+# namespaces, destructors, defaulted and deleted members, and the public-header
+# path filter — with nothing asserting it still discriminates. An exemption that
+# widens by accident turns the gate silent while every lane stays green.
+#
+# The self-test needs no Doxygen: it drives check() over synthetic compounddef
+# XML and asserts both directions, so it belongs in the normal suite.
+add_test(NAME timeline-api-docs-check-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_api_docs_check.py --self-test)

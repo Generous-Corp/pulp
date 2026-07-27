@@ -7,6 +7,10 @@
 
 namespace pulp::timeline {
 
+/** @addtogroup timeline_compile
+ * @{
+ */
+
 /// A kind of timeline context a renderer's compile hook may read *beyond its
 /// own clip's content*.
 ///
@@ -32,6 +36,7 @@ enum class CompileContextKind : std::uint8_t {
     Groove,
 };
 
+/// Number of CompileContextKind values represented by the subscription bitset.
 inline constexpr std::size_t kCompileContextKindCount = 2;
 
 /// The declared set of context kinds one content renderer reads.
@@ -41,25 +46,31 @@ inline constexpr std::size_t kCompileContextKindCount = 2;
 /// the invalidation of anything that existed before it.
 class CompileContextSubscriptions {
   public:
+    /// Constructs an empty subscription set.
     constexpr CompileContextSubscriptions() noexcept = default;
 
+    /// Returns an empty subscription set.
     static constexpr CompileContextSubscriptions none() noexcept {
         return {};
     }
 
+    /// Adds `kind` to this set and returns this object for chaining.
     constexpr CompileContextSubscriptions& subscribe(CompileContextKind kind) noexcept {
         bits_ = static_cast<std::uint8_t>(bits_ | mask(kind));
         return *this;
     }
 
+    /// Returns whether `kind` is present in this set.
     constexpr bool reads(CompileContextKind kind) const noexcept {
         return (bits_ & mask(kind)) != 0;
     }
 
+    /// Returns whether this set contains any context kind.
     constexpr bool any() const noexcept {
         return bits_ != 0;
     }
 
+    /// Compares the complete subscribed-kind set.
     constexpr bool operator==(const CompileContextSubscriptions&) const noexcept = default;
 
   private:
@@ -84,9 +95,14 @@ static_assert(kCompileContextKindCount <= 8,
 /// paperwork filed at registration.
 class CompileContextView {
   public:
+    /// Creates a borrowed view of `sequence_id` narrowed to `subscriptions`.
+    ///
+    /// `project` must outlive this view. A missing sequence produces a view whose
+    /// context accessors all return `nullptr`.
     CompileContextView(const Project& project, ItemId sequence_id,
                        CompileContextSubscriptions subscriptions) noexcept;
 
+    /// Returns the context kinds this view permits callers to read.
     CompileContextSubscriptions subscriptions() const noexcept {
         return subscriptions_;
     }
@@ -109,5 +125,7 @@ class CompileContextView {
     const Sequence* sequence_ = nullptr;
     CompileContextSubscriptions subscriptions_;
 };
+
+/// @}
 
 } // namespace pulp::timeline

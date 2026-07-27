@@ -8,10 +8,12 @@
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
 #include <pulp/timeline/automation_lane.hpp>
+#include <pulp/timeline/clip.hpp>
 #include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
 #include <pulp/timeline/note_modifier.hpp>
+#include <pulp/timeline/recording.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -28,477 +30,31 @@
 
 namespace pulp::timeline {
 
+/** @addtogroup timeline_model
+ * @{
+ */
+
 namespace detail {
 class ProjectStateAccess;
 class LauncherStore;
 struct SequenceEditAccess;
 } // namespace detail
-class SchemaRegistry;
-
-enum class ModelErrorCode : std::uint8_t {
-    InvalidItemId,
-    DuplicateItemId,
-    ItemIdExhausted,
-    InvalidDuration,
-    InvalidMediaRange,
-    InvalidSampleRate,
-    InvalidNote,
-    OverlappingClips,
-    MissingAsset,
-    MissingRootSequence,
-    NextItemIdNotMonotonic,
-    MixedTimeAnchors,
-    IncompatibleSampleRate,
-    MissingItem,
-    IdentityConflict,
-    InvalidIdentityTransition,
-    InvalidSchemaIdentity,
-    InvalidContentHash,
-    InvalidAssetLocator,
-    DuplicateAssetRepresentation,
-    InvalidOpaqueContent,
-    OpaqueContentLimitExceeded,
-    OpaqueContentCannotRemap,
-    InvalidClipPlaybackProperties,
-    MissingAutomationTarget,
-    DuplicateAutomationTarget,
-    InvalidTake,
-    DuplicateTake,
-    ActiveTakeLaneRemoval,
-    InvalidTakeComp,
-    OverlappingTakeComp,
-    ActiveCompTakeRemoval,
-    InvalidAudioLoopInfo,
-    InvalidAssetStoragePolicy,
-    InvalidMarker,
-    InvalidRegion,
-    InvalidSessionStart,
-    InvalidChordScaleEvent,
-    UnorderedChordScaleLane,
-    InvalidGrooveTemplate,
-    InvalidNoteModifier,
-    MissingSequenceReference,
-    SequenceReferenceCycle,
-    SequenceNestingTooDeep,
-    InvalidTrackMixer,
-};
-
-struct ModelError {
-    ModelErrorCode code = ModelErrorCode::InvalidItemId;
-    ItemId item;
-    ItemId related_item;
-};
-
-struct SchemaIdentity {
-    std::string type_name;
-    std::uint32_t version = 0;
-
-    bool valid() const noexcept;
-    auto operator<=>(const SchemaIdentity&) const = default;
-};
-
-class ItemIdAllocator {
-  public:
-    explicit constexpr ItemIdAllocator(std::uint64_t next = 1) noexcept : next_(next) {}
-
-    runtime::Result<ItemId, ModelError> allocate() noexcept;
-    constexpr std::uint64_t next_value() const noexcept {
-        return next_;
-    }
-
-  private:
-    std::uint64_t next_ = 1;
-};
-
-struct EmptyContent {};
-
-struct MediaAsset {
-    ItemId id;
-    std::string name;
-    std::uint64_t frame_count = 0;
-    timebase::RationalRate sample_rate;
-    ContentHash content_hash;
-    AssetStoragePolicy storage_policy = AssetStoragePolicy::External;
-    std::vector<AssetLocator> locators;
-    std::vector<AssetRepresentation> representations;
-    std::optional<AudioLoopInfo> loop_info;
-};
-
-struct MediaRef {
-    ItemId asset_id;
-    timebase::SamplePosition source_start;
-    std::uint64_t frame_count = 0;
-};
-
-// A reference to another sequence in the same Project pool. The referenced
-// sequence remains a project-owned sibling: this clip owns neither the
-// sequence nor any of its identities.
-struct SequenceRef {
-    ItemId sequence_id;
-    timebase::TickPosition source_start{0};
-
-    constexpr auto operator<=>(const SequenceRef&) const = default;
-};
-
-enum class ClipTimeAnchor : std::uint8_t { Musical, Absolute };
-
-struct MusicalTimeRange {
-    timebase::TickPosition start;
-    timebase::TickDuration duration;
-};
-
-struct AbsoluteTimeRange {
-    timebase::SamplePosition start;
-    std::uint64_t sample_count = 0;
-    timebase::RationalRate sample_rate;
-};
-
-struct AbsoluteTimelineDuration {
-    std::uint64_t sample_count = 0;
-    timebase::RationalRate sample_rate;
-};
-
-/// Clip-level audio controls. Fade lengths use the clip anchor's native
-/// unit: canonical ticks for musical clips and timeline samples for absolute
-/// clips. The playback compiler resolves both to sample-exact frame counts.
-struct ClipPlaybackProperties {
-    float gain_linear = 1.0f;
-    std::uint64_t fade_in_duration = 0;
-    std::uint64_t fade_out_duration = 0;
-    constexpr auto operator<=>(const ClipPlaybackProperties&) const = default;
-};
-
-using ClipTimeRange = std::variant<MusicalTimeRange, AbsoluteTimeRange>;
-
-struct NoteEvent {
-    ItemId id;
-    timebase::TickPosition start;
-    timebase::TickDuration duration;
-    std::uint16_t velocity = 0xffff;
-    std::uint8_t pitch = 60;
-    std::uint8_t channel = 0;
-};
-
-class NoteContent {
-  public:
-    /// Notes alone: no modifiers, and a zero seed. Every note plays once,
-    /// unconditionally.
-    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes);
-    /// Notes plus their sparse modifier companion array. Each modifier must
-    /// name a note in `notes`, must be well-formed, and must not be neutral —
-    /// a neutral entry is a second encoding of a note that already plays that
-    /// way. `modifier_seed` is the document's authored seed for probability
-    /// draws; the same seed always reproduces the same decisions.
-    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes,
-                                                           std::vector<NoteModifier> modifiers,
-                                                           std::uint64_t modifier_seed);
-    runtime::Result<NoteContent, ModelError> replace_note(NoteEvent note) const;
-
-    std::span<const NoteEvent> notes() const noexcept {
-        return data_->notes;
-    }
-
-    /// Sorted by note id and containing only notes whose playback differs from
-    /// the default, so a document that authors no modifiers carries none.
-    std::span<const NoteModifier> modifiers() const noexcept {
-        return data_->modifiers;
-    }
-
-    std::uint64_t modifier_seed() const noexcept {
-        return data_->modifier_seed;
-    }
-
-    /// The modifier for `note_id`, or nullptr when the note plays by default.
-    const NoteModifier* modifier_for(ItemId note_id) const noexcept;
-
-  private:
-    struct Data {
-        std::vector<NoteEvent> notes;
-        std::vector<NoteModifier> modifiers;
-        std::uint64_t modifier_seed = 0;
-    };
-
-    explicit NoteContent(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
-
-    std::shared_ptr<const Data> data_;
-};
-
-// Registered content is an extension-defined typed C++ value. The schema
-// registry owns serialization; the model deliberately stores no generic
-// string-keyed property bag. Registered payloads must own no ItemIds, so
-// subtree remapping can preserve them without hidden reference corruption.
-class RegisteredContent {
-  public:
-    const SchemaIdentity& schema() const noexcept {
-        return schema_;
-    }
-    const std::shared_ptr<const void>& value() const noexcept {
-        return value_;
-    }
-    const std::string& canonical_payload_json() const noexcept {
-        return canonical_payload_json_;
-    }
-    std::size_t retained_bytes() const noexcept {
-        return retained_bytes_;
-    }
-
-    template <typename T> const T* value_as() const noexcept {
-        return static_cast<const T*>(value_.get());
-    }
-
-  private:
-    friend class SchemaRegistry;
-    RegisteredContent(SchemaIdentity schema, std::shared_ptr<const void> value,
-                      std::string canonical_payload_json, std::size_t retained_bytes)
-        : schema_(std::move(schema)), value_(std::move(value)),
-          canonical_payload_json_(std::move(canonical_payload_json)),
-          retained_bytes_(retained_bytes) {}
-    SchemaIdentity schema_;
-    std::shared_ptr<const void> value_;
-    std::string canonical_payload_json_;
-    std::size_t retained_bytes_ = 0;
-};
-
-// Opaque extension envelopes retain the exact parser bounds under which they
-// were admitted. This keeps a caller-selected trust boundary stable when the
-// immutable value is later serialized again.
-struct OpaqueContentLimits {
-    std::size_t max_input_bytes = 1024ull * 1024ull * 1024ull;
-    std::size_t max_depth = 64;
-    std::size_t max_total_values = 30'000'000;
-    std::size_t max_array_elements = 10'000'000;
-    std::size_t max_object_members = 4'096;
-    std::size_t max_string_bytes = 16ull * 1024ull * 1024ull;
-    std::size_t max_opaque_bytes = 64ull * 1024ull * 1024ull;
-
-    constexpr auto operator<=>(const OpaqueContentLimits&) const = default;
-};
-
-// Unknown extension content remains an exact validated JSON envelope. It is
-// safe to retain and re-save but cannot be copied/imported because its internal
-// identity/reference shape is unavailable.
-class OpaqueContent {
-  public:
-    static runtime::Result<OpaqueContent, ModelError>
-    create(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits = {});
-
-    const SchemaIdentity& schema() const noexcept {
-        return schema_;
-    }
-    const std::string& raw_json() const noexcept {
-        return raw_json_;
-    }
-    const OpaqueContentLimits& validation_limits() const noexcept {
-        return limits_;
-    }
-
-  private:
-    OpaqueContent(SchemaIdentity schema, std::string raw_json, OpaqueContentLimits limits)
-        : schema_(std::move(schema)), raw_json_(std::move(raw_json)), limits_(limits) {}
-    SchemaIdentity schema_;
-    std::string raw_json_;
-    OpaqueContentLimits limits_;
-};
-
-using ClipContent = std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent,
-                                 OpaqueContent, SequenceRef>;
-
-/// Overload set for visiting a ClipContent with **no generic fallback**.
-///
-/// What a clip *is* decides whether it renders audio, contributes notes, owns
-/// ItemIds that must be remapped, or survives a save. Every one of those
-/// decisions is a per-alternative dispatch, and none of them has a defensible
-/// default: a content kind nobody wrote a branch for is not "nothing", it is a
-/// clip whose data was dropped. Consumers that dispatch through a generic
-/// lambda (`[](const auto&)`, or an `if`/`if constexpr` chain that falls
-/// through) keep compiling when the variant grows and then quietly treat the
-/// new alternative as absent — a clip that renders silence, an export manifest
-/// that reports no loss while losing data, a remap that leaves stale ItemIds
-/// behind. Visiting through this type makes a new alternative a compile error
-/// at every call site until someone decides what it means.
-///
-///     std::visit(ClipContentCases{
-///                    [&](const EmptyContent&) { ... },
-///                    [&](const MediaRef& media) { ... },
-///                    [&](const NoteContent& notes) { ... },
-///                    [&](const RegisteredContent& registered) { ... },
-///                    [&](const OpaqueContent& opaque) { ... },
-///                },
-///                clip.content());
-template <class... Fs> struct ClipContentCases : Fs... {
-    using Fs::operator()...;
-};
-template <class... Fs> ClipContentCases(Fs...) -> ClipContentCases<Fs...>;
-
-/// Guard for code that can only be correct while ClipContent holds exactly the
-/// alternatives it does today — a decoder keyed on envelope type names, a
-/// referential-integrity scan that assumes MediaRef is the only alternative
-/// naming an asset, an audio path that assumes MediaRef is the only alternative
-/// carrying samples. Those sites cannot be expressed as a visit, so they assert
-/// on the alternative count instead: widening the variant stops the build with a
-/// message naming the decision that site owes, rather than shipping a document
-/// that silently loses the new content on load, save, or render.
-inline constexpr std::size_t kClipContentAlternativeCount = std::variant_size_v<ClipContent>;
-
-class Clip {
-  public:
-    static runtime::Result<Clip, ModelError> create(ItemId id, timebase::TickPosition start,
-                                                    timebase::TickDuration duration,
-                                                    ClipContent content,
-                                                    ClipPlaybackProperties playback = {});
-    static runtime::Result<Clip, ModelError>
-    create_absolute(ItemId id, timebase::SamplePosition start, std::uint64_t sample_count,
-                    timebase::RationalRate sample_rate, ClipContent content,
-                    ClipPlaybackProperties playback = {});
-
-    ItemId id() const noexcept;
-    ClipTimeAnchor time_anchor() const noexcept;
-    const ClipTimeRange& time_range() const noexcept;
-    timebase::TickPosition start() const noexcept;
-    timebase::TickDuration duration() const noexcept;
-    timebase::TickPosition end() const noexcept;
-    timebase::SamplePosition absolute_start() const noexcept;
-    std::uint64_t absolute_duration_samples() const noexcept;
-    timebase::RationalRate absolute_sample_rate() const noexcept;
-    timebase::SamplePosition absolute_end() const noexcept;
-    const ClipContent& content() const noexcept;
-    runtime::Result<Clip, ModelError> with_time_range(ClipTimeRange range) const;
-    runtime::Result<Clip, ModelError> with_content(ClipContent content) const;
-    runtime::Result<Clip, ModelError>
-    with_playback_properties(ClipPlaybackProperties playback) const;
-    ClipPlaybackProperties playback_properties() const noexcept;
-
-  private:
-    struct Data;
-    explicit Clip(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
-    std::shared_ptr<const Data> data_;
-};
-
+/// Opaque node type retained by snapshot-owned Track::ClipView values.
 struct ClipIndexNode;
 
+/// Diagnostic counters for persistent track clip-index allocation.
 struct TrackIndexStats {
     std::uint64_t live_nodes = 0;
     std::uint64_t nodes_created = 0;
 };
 
+/// Diagnostic counters for persistent launcher-index allocation.
 struct LauncherIndexStats {
     std::uint64_t live_nodes = 0;
     std::uint64_t nodes_created = 0;
 };
 
-// A Take is one recorded region that references a sealed media asset. It lives
-// in a TakeLane on a Track and is anchored to absolute (sample) time: raw
-// captures are sample-accurate against the transport, not musical. The take's
-// timeline length is its media frame_count. A Take owns a stable ItemId because
-// comps (a follow-up) select take segments by identity. The asset reference is
-// external (Project::create validates it exists); the take never owns the asset.
-class Take {
-  public:
-    static runtime::Result<Take, ModelError> create(ItemId id, MediaRef media,
-                                                    timebase::SamplePosition placement_start,
-                                                    timebase::RationalRate sample_rate);
-
-    ItemId id() const noexcept {
-        return id_;
-    }
-    const MediaRef& media() const noexcept {
-        return media_;
-    }
-    timebase::SamplePosition placement_start() const noexcept {
-        return placement_start_;
-    }
-    timebase::RationalRate sample_rate() const noexcept {
-        return sample_rate_;
-    }
-
-  private:
-    Take(ItemId id, MediaRef media, timebase::SamplePosition placement_start,
-         timebase::RationalRate sample_rate) noexcept
-        : id_(id), media_(media), placement_start_(placement_start), sample_rate_(sample_rate) {}
-
-    ItemId id_;
-    MediaRef media_;
-    timebase::SamplePosition placement_start_;
-    timebase::RationalRate sample_rate_;
-};
-
-static_assert(std::is_nothrow_copy_constructible_v<Take>);
-static_assert(std::is_nothrow_move_constructible_v<Take>);
-
-// One exact absolute-time selection in a take comp. The selected timeline range
-// must lie inside the referenced take and use its normalized sample rate.
-struct TakeCompSegment {
-    ItemId take_id;
-    AbsoluteTimeRange range;
-    constexpr bool operator==(const TakeCompSegment& other) const noexcept {
-        return take_id == other.take_id && range.start == other.range.start &&
-               range.sample_count == other.range.sample_count &&
-               range.sample_rate == other.range.sample_rate;
-    }
-};
-
-// A track freeze selects a sealed offline-rendered asset without discarding the
-// authored track. The render-plan hash identifies the exact immutable inputs
-// used to derive the artifact, so callers can detect and replace stale caches.
-struct TrackFreeze {
-    MediaRef media;
-    timebase::SamplePosition placement_start;
-    timebase::RationalRate sample_rate;
-    ContentHash render_plan_hash;
-    constexpr bool operator==(const TrackFreeze& other) const noexcept {
-        return media.asset_id == other.media.asset_id &&
-               media.source_start == other.media.source_start &&
-               media.frame_count == other.media.frame_count &&
-               placement_start == other.placement_start && sample_rate == other.sample_rate &&
-               render_plan_hash == other.render_plan_hash;
-    }
-};
-
-// Immutable ownership of one alternate recording lane on a Track: an ordered
-// set of takes keyed by identity and an optional sample-exact comp assembled
-// from non-overlapping take segments. The comp is document intent; playback can
-// derive and cache a flattened artifact without changing this source data.
-class TakeLane {
-  public:
-    static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
-                                                        std::vector<Take> takes,
-                                                        std::vector<TakeCompSegment> comp = {});
-    runtime::Result<TakeLane, ModelError> insert_take(Take take) const;
-    runtime::Result<TakeLane, ModelError> erase_take(ItemId id) const;
-    runtime::Result<TakeLane, ModelError>
-    with_comp_segments(std::vector<TakeCompSegment> comp) const;
-
-    ItemId id() const noexcept;
-    const std::string& name() const noexcept;
-    // Canonical order by take identity; carries no playback semantics.
-    std::span<const Take> takes() const noexcept;
-    // Canonical order by timeline start, then take identity.
-    std::span<const TakeCompSegment> comp_segments() const noexcept;
-    const Take* find_take(ItemId id) const noexcept;
-
-  private:
-    struct Data;
-    explicit TakeLane(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
-    std::shared_ptr<const Data> data_;
-};
-
-// The track's own level and stereo placement, owned by the document rather than
-// by any device it hosts. Gain is a linear multiplier, not decibels, so the
-// document never has to agree with a host on a dB reference. Pan is a stereo
-// balance in [-1, 1] that attenuates the opposite side and never boosts, so a
-// centred track renders bit-identically to one carrying no mixer state at all.
-// Sends, mute, solo, and routing are deliberately absent.
-struct TrackMixer {
-    float gain_linear = 1.0f;
-    float pan = 0.0f;
-    constexpr bool operator==(const TrackMixer&) const = default;
-};
-
-// The largest linear gain a track may author. A fader needs headroom above
-// unity, but an unbounded multiplier turns one bad value into a full-scale
-// output, so the document refuses rather than clips.
-inline constexpr float kMaximumTrackGainLinear = 64.0f;
-
+/// Complete input for constructing a Track and its owned collections.
 struct TrackInput {
     ItemId id;
     std::string name;
@@ -513,19 +69,29 @@ struct TrackInput {
     TrackMixer mixer;
 };
 
+/// Immutable identity-bearing arrangement track.
+///
+/// Owned collections use persistent storage. Successful edits return a new
+/// Track and preserve this snapshot and all borrowed views into it.
 class Track {
   public:
+    /// Snapshot-owned random-access view of clips in timeline order.
     class ClipView {
       public:
+        /// Forward iterator that keeps the underlying persistent index alive.
         class Iterator {
           public:
             using value_type = Clip;
             using difference_type = std::ptrdiff_t;
             using iterator_category = std::forward_iterator_tag;
 
+            /// Borrows the current clip; retained index storage keeps it alive.
             const Clip& operator*() const noexcept;
+            /// Returns the address of the current borrowed clip.
             const Clip* operator->() const noexcept;
+            /// Advances in canonical timeline order.
             Iterator& operator++() noexcept;
+            /// Compares iterator position and retained index identity.
             bool operator==(const Iterator&) const noexcept = default;
 
           private:
@@ -536,16 +102,21 @@ class Track {
             std::size_t index_ = 0;
         };
 
+        /// Returns the number of clips in the view.
         std::size_t size() const noexcept {
             return size_;
         }
+        /// Returns whether the view contains no clips.
         bool empty() const noexcept {
             return size_ == 0;
         }
+        /// Returns the clip at `index`; precondition: `index < size()`.
         const Clip& operator[](std::size_t index) const noexcept;
+        /// Returns an iterator to the first clip.
         Iterator begin() const noexcept {
             return Iterator(root_, 0);
         }
+        /// Returns the sentinel iterator after the final clip.
         Iterator end() const noexcept {
             return Iterator(root_, size_);
         }
@@ -558,57 +129,84 @@ class Track {
         std::size_t size_ = 0;
     };
 
+    /// Creates a track containing only its identity, name, and clips.
     static runtime::Result<Track, ModelError> create(ItemId id, std::string name,
                                                      std::vector<Clip> clips);
+    /// Validates and creates a track from all authored collections.
     static runtime::Result<Track, ModelError> create(TrackInput input);
+    /// Returns a snapshot with a validated, non-overlapping clip inserted.
     runtime::Result<Track, ModelError> insert_clip(Clip clip) const;
+    /// Returns a snapshot without the identified clip, or MissingItem.
     runtime::Result<Track, ModelError> erase_clip(ItemId id) const;
-    // Replaces one clip by identity with O(log n) path-copy updates. The old
-    // Track remains valid and unchanged; untouched index subtrees are shared.
+    /// Replaces one clip by identity with O(log n) path-copy updates.
+    ///
+    /// The old Track remains valid; untouched index subtrees are shared.
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
+    /// Returns a snapshot with a validated automation lane inserted.
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
+    /// Returns a snapshot without the identified automation lane.
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    /// Returns a snapshot with a validated take lane inserted.
     runtime::Result<Track, ModelError> insert_take_lane(TakeLane lane) const;
+    /// Removes a take lane unless it is currently selected.
     runtime::Result<Track, ModelError> erase_take_lane(ItemId id) const;
+    /// Inserts a take into `lane_id` and returns the new track snapshot.
     runtime::Result<Track, ModelError> insert_take(ItemId lane_id, Take take) const;
+    /// Removes a take unless the lane comp still references it.
     runtime::Result<Track, ModelError> erase_take(ItemId lane_id, ItemId take_id) const;
+    /// Replaces one lane's comp with validated, canonical segments.
     runtime::Result<Track, ModelError> with_take_comp(ItemId lane_id,
                                                       std::vector<TakeCompSegment> comp) const;
-    // Sets the record-arm intent flag. Path-copies only the Track's own Data;
-    // clip, automation, and take index storage is shared with the old Track.
+    /// Returns a snapshot with record-arm intent set to `armed`.
+    ///
+    /// Owned collection storage is shared with the old Track.
     Track with_record_armed(bool armed) const;
+    /// Selects arrangement when zero, or an existing take lane otherwise.
     runtime::Result<Track, ModelError> with_active_take_lane(ItemId lane_id) const;
+    /// Publishes or clears a validated freeze artifact.
     runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
+    /// Returns a snapshot with finite, in-range gain and pan.
     runtime::Result<Track, ModelError> with_mixer(TrackMixer mixer) const;
 
+    /// Returns the stable track identity.
     ItemId id() const noexcept;
+    /// Returns the authored track name.
     const std::string& name() const noexcept;
-    // Ordered by (anchor, start, id) over a persistent AVL timeline index.
+    /// Returns clips ordered by anchor, start, then identity.
     ClipView clips() const noexcept;
-    // Binary-searches the persistent ID index. Returned storage is snapshot-owned.
+    /// Finds a clip by identity, or returns `nullptr`.
+    ///
+    /// Returned storage is snapshot-owned.
     const Clip* find_clip(ItemId id) const noexcept;
-    // Preserves authored processing order. Returned storage is snapshot-owned.
+    /// Returns device placements in authored processing order.
     std::span<const DevicePlacement> device_chain() const noexcept;
+    /// Finds a device placement by identity, or returns `nullptr`.
     const DevicePlacement* find_device_placement(ItemId id) const noexcept;
-    // Automation lane order is canonical by identity and carries no processing semantics.
+    /// Returns automation lanes in canonical identity order.
     std::span<const AutomationLane> automation_lanes() const noexcept;
+    /// Finds an automation lane by identity, or returns `nullptr`.
     const AutomationLane* find_automation_lane(ItemId id) const noexcept;
-    // Take-lane order is canonical by identity and carries no processing semantics.
+    /// Returns take lanes in canonical identity order.
     std::span<const TakeLane> take_lanes() const noexcept;
+    /// Finds a take lane by identity, or returns `nullptr`.
     const TakeLane* find_take_lane(ItemId id) const noexcept;
-    // Whether this track is armed to capture into a take lane. Pure document
-    // intent; the capture engine reads it but never mutates it here.
+    /// Returns document intent for capture into a take lane.
     bool record_armed() const noexcept;
-    // Zero means the arrangement is active. A non-zero value always names one
-    // of this track's take lanes; full segment-comp data remains a later layer.
+    /// Returns zero for arrangement playback or the selected take-lane identity.
     ItemId active_take_lane_id() const noexcept;
+    /// Returns the published optional freeze artifact.
     const std::optional<TrackFreeze>& freeze() const noexcept;
+    /// Returns the authored track mixer.
     const TrackMixer& mixer() const noexcept;
+    /// Counts persistent clip-index nodes shared with `other`.
     std::size_t shared_index_nodes_with(const Track& other) const;
-    // True when both snapshots are proven to contain exactly the same clip
-    // identities. Clip content/timing may differ.
+    /// Returns whether both snapshots contain the same clip identities.
+    ///
+    /// Clip content and timing may differ.
     bool shares_clip_membership_with(const Track& other) const noexcept;
+    /// Returns whether both values reference the same complete track storage.
     bool shares_storage_with(const Track& other) const noexcept;
+    /// Returns process-wide persistent clip-index diagnostic counters.
     static TrackIndexStats index_stats() noexcept;
 
   private:
@@ -619,9 +217,9 @@ class Track {
     std::shared_ptr<const Data> data_;
 };
 
-// The harmonic quality of a chord symbol on the context lane. Spelling is
-// deliberately absent: the lane states harmony, not notation, so a renderer
-// derives voicings from (root, quality) rather than from an authored note set.
+/// Harmonic quality of a chord statement.
+///
+/// Spelling and voicing are presentation and generation concerns.
 enum class ChordQuality : std::uint8_t {
     Major,
     Minor,
@@ -635,9 +233,7 @@ enum class ChordQuality : std::uint8_t {
     Suspended4,
 };
 
-// The scale a passage is drawn from. A chord names the vertical, a scale names
-// the horizontal; a generator following the lane usually needs both, and one
-// does not determine the other (the same chord sits in several scales).
+/// Scale mode associated with a harmonic context event.
 enum class ScaleMode : std::uint8_t {
     Major,
     NaturalMinor,
@@ -651,9 +247,9 @@ enum class ScaleMode : std::uint8_t {
     Chromatic,
 };
 
-// One harmonic statement, in force from `position` until the next event. Roots
-// are pitch classes (0 = C .. 11 = B), not MIDI notes: the lane says what the
-// harmony is, never which octave to play it in.
+/// Harmonic statement in force from `position` until the next event.
+///
+/// Roots are pitch classes in [0, 11], where zero is C.
 struct ChordScaleEvent {
     timebase::TickPosition position;
     ChordQuality chord_quality = ChordQuality::Major;
@@ -664,32 +260,33 @@ struct ChordScaleEvent {
     constexpr auto operator<=>(const ChordScaleEvent&) const = default;
 };
 
-// The chord/scale context lane a sequence carries. Events are strictly ordered
-// by position with no duplicates, so "the harmony at tick t" is a single
-// well-defined answer rather than a resolution policy.
-//
-// The lane is sequence-owned context, not clip content: it is read by other
-// items' compile hooks. Reading it across entities is what the compile-context
-// subscription contract governs (see compile_context.hpp) — a renderer declares
-// that it reads this lane, and the compiler dirties exactly those declared
-// readers when the lane is edited.
+/// Immutable chord/scale context lane owned by a sequence.
+///
+/// Events are strictly ordered by position with no duplicates. The lane is
+/// sequence-owned context read through the compile-context subscription
+/// contract described in compile_context.hpp.
 class ChordScaleLane {
   public:
+    /// Validates, orders, and stores harmonic events.
     static runtime::Result<ChordScaleLane, ModelError> create(std::vector<ChordScaleEvent> events);
 
+    /// Returns events in strictly increasing position order.
     std::span<const ChordScaleEvent> events() const noexcept {
         return *events_;
     }
+    /// Returns whether no harmonic context is authored.
     bool empty() const noexcept {
         return events_->empty();
     }
-    // The event in force at `position`: the last one starting at or before it.
-    // Null before the first event — the lane states harmony where it was
-    // authored and never invents a default key.
+    /// Returns the last event starting at or before `position`.
+    ///
+    /// Returns `nullptr` before the first event; no default harmony is invented.
     const ChordScaleEvent* at(timebase::TickPosition position) const noexcept;
+    /// Returns whether both lanes share the same immutable event storage.
     bool shares_storage_with(const ChordScaleLane& other) const noexcept {
         return events_.get() == other.events_.get();
     }
+    /// Compares authored event values.
     bool operator==(const ChordScaleLane& other) const noexcept;
 
   private:
@@ -699,22 +296,10 @@ class ChordScaleLane {
     std::shared_ptr<const std::vector<ChordScaleEvent>> events_;
 };
 
-// A marker is a named point on the sequence timeline; a region is a named span.
-// Both are anchored in canonical ticks — the same musical domain a musical clip
-// uses — and both carry a stable ItemId so a command can address one by identity.
-// A region is not a clip: it holds no content and never renders. When the
-// sequence declares a musical duration, a marker's position and a region's whole
-// span must lie inside it.
-//
-// Both are owned by the Sequence, not the Project. A Project holds many
-// sequences, so a project-level annotation list could not say which timeline it
-// annotates; sequence ownership makes the annotated timeline structural rather
-// than conventional.
-//
-// `color` is a packed 0xRRGGBBAA value, not a float colour: the document model
-// stores exact bytes that compare and re-serialize identically, and the float
-// colour types live in render layers outside this module's dependency floor.
-// It is optional — absent means the presentation layer chooses.
+/// Named point on a sequence's musical timeline.
+///
+/// Position is in canonical ticks. `color` is optional packed 0xRRGGBBAA;
+/// absence delegates color choice to presentation.
 struct SequenceMarker {
     ItemId id;
     std::string name;
@@ -722,11 +307,10 @@ struct SequenceMarker {
     std::optional<std::uint32_t> color;
 };
 
-// Regions MAY overlap, including full containment. Named sections nest by
-// nature ("chorus" inside "part B"), so disjointness is deliberately not an
-// invariant: Sequence::create accepts any set of in-bounds, positive-length,
-// uniquely identified regions. The only ordering guarantee is the canonical
-// sort below.
+/// Named positive-duration span on a sequence's musical timeline.
+///
+/// Regions may overlap or contain one another. Position and duration are in
+/// canonical ticks; `color` has the same encoding as SequenceMarker::color.
 struct SequenceRegion {
     ItemId id;
     std::string name;
@@ -735,16 +319,14 @@ struct SequenceRegion {
     std::optional<std::uint32_t> color;
 };
 
-// Scales are per-mille integers rather than floats because a groove is
-// document data whose effect is a tick and a velocity: two machines must agree
-// on the result exactly, and a float would make that agreement depend on
-// rounding.
+/// Per-mille identity scale for deterministic groove strengths and velocity.
 inline constexpr std::int32_t kGrooveUnitScale = 1000;
+/// Largest admitted per-step groove velocity multiplier, in per-mille.
 inline constexpr std::int32_t kMaxGrooveVelocityScale = 4000;
+/// Largest admitted number of entries in a repeating groove table.
 inline constexpr std::size_t kMaxGrooveSteps = 1024;
 
-// One step of a groove's table: how far material inside that step moves, and
-// how hard it is played relative to what was authored.
+/// One timing offset and per-mille accent in a repeating groove table.
 struct GrooveStep {
     timebase::TickDuration timing_offset{};
     std::int32_t velocity_scale = kGrooveUnitScale;
@@ -752,6 +334,7 @@ struct GrooveStep {
     constexpr auto operator<=>(const GrooveStep&) const = default;
 };
 
+/// Complete validated construction input for a GrooveTemplate.
 struct GrooveTemplateInput {
     std::string name;
     // Zero means the groove states no swing. A swing grid is a subdivision:
@@ -770,8 +353,8 @@ struct GrooveTemplateInput {
 //
 // Groove carries velocity as well as timing deliberately. A feel is as much
 // accent as it is placement — the same timing with flat velocities does not
-// sound like the groove it was sampled from — and modelling accent now costs
-// one array rather than a second schema version later. The two are separately
+// sound like the groove it was sampled from. Timing and accent share one
+// canonical owned array. The two are separately
 // attenuated so a project can borrow a groove's placement without its accents,
 // which is the common editing request.
 //
@@ -789,49 +372,55 @@ struct GrooveTemplateInput {
 // The template is sequence-owned context, not clip content: it is read by other
 // items' compile hooks. Reading it across entities is what the compile-context
 // subscription contract governs (see compile_context.hpp).
+/// Immutable sequence-owned swing, timing-offset, and accent context.
 class GrooveTemplate {
   public:
+    /// Validates and stores one immutable groove template.
     static runtime::Result<GrooveTemplate, ModelError> create(GrooveTemplateInput input);
 
+    /// Returns the authored display name.
     const std::string& name() const noexcept {
         return data_->name;
     }
+    /// Returns the swung subdivision width in canonical ticks; zero disables swing.
     timebase::TickDuration swing_grid() const noexcept {
         return data_->swing_grid;
     }
+    /// Returns the rational swing ratio.
     timebase::SwingRatio swing() const noexcept {
         return data_->swing;
     }
+    /// Returns the repeating table-step width in canonical ticks; zero means no table.
     timebase::TickDuration step() const noexcept {
         return data_->step;
     }
+    /// Returns authored groove steps in repeating order.
     std::span<const GrooveStep> steps() const noexcept {
         return data_->steps;
     }
+    /// Returns timing-offset strength in per-mille.
     std::int32_t timing_strength() const noexcept {
         return data_->timing_strength;
     }
+    /// Returns velocity-accent strength in per-mille.
     std::int32_t velocity_strength() const noexcept {
         return data_->velocity_strength;
     }
-    // True when the groove displaces nothing: no swing and no table. This is
-    // what a sequence carries when it states no feel, and applying it is the
-    // identity on every position and every velocity.
+    /// Returns whether timing and velocity application are both identity operations.
     bool states_no_feel() const noexcept;
-    // True only for the canonical default serialized by a newly created
-    // sequence. Authored metadata and controls count even when they currently
-    // produce no audible displacement.
+    /// Returns whether this is the exact default value carried by a new sequence.
     bool is_canonical_default() const noexcept;
 
-    // Where material authored at `position` sounds.
+    /// Returns the deterministic sounding tick for authored `position`.
     timebase::TickPosition apply_timing(timebase::TickPosition position) const noexcept;
-    // The accent multiplier for material authored at `position`, in per-mille
-    // of the authored velocity.
+    /// Returns the accent multiplier at `position`, in per-mille.
     std::int32_t velocity_scale_at(timebase::TickPosition position) const noexcept;
 
+    /// Returns whether both templates share the same immutable backing data.
     bool shares_storage_with(const GrooveTemplate& other) const noexcept {
         return data_.get() == other.data_.get();
     }
+    /// Compares complete authored groove values.
     bool operator==(const GrooveTemplate& other) const noexcept;
 
   private:
@@ -854,16 +443,9 @@ class GrooveTemplate {
     std::shared_ptr<const Data> data_;
 };
 
-// The full construction surface for a Sequence, and the one to extend from here
-// on. The positional create() overloads below predate it and remain as thin
-// forwarders so no existing call site had to change; a new owned collection
-// belongs in this struct rather than in a ninth argument.
-//
-// The two context members are optional only so the struct stays
-// default-constructible for designated initializers — neither ChordScaleLane
-// nor GrooveTemplate has a default constructor, because both validate on
-// creation. Absent means the default the sequence would otherwise carry: a lane
-// stating no harmony, and a groove stating no feel.
+/// Complete construction input for a Sequence and its owned collections.
+///
+/// Absent context values select the canonical empty chord lane and no-feel groove.
 struct SequenceInput {
     ItemId id;
     std::string name;
@@ -879,10 +461,13 @@ struct SequenceInput {
     std::vector<Scene> scenes;
 };
 
+/// Immutable identity-bearing arrangement with tracks, annotations, context, and launch scenes.
 class Sequence {
   public:
+    /// Snapshot-owned random-access view preserving authored scene order.
     class SceneView {
       public:
+        /// Forward iterator that keeps the persistent launcher store alive.
         class Iterator {
           public:
             using value_type = Scene;
@@ -891,14 +476,19 @@ class Sequence {
             using reference = const Scene&;
             using iterator_category = std::forward_iterator_tag;
 
+            /// Borrows the current scene; retained launcher storage keeps it alive.
             const Scene& operator*() const noexcept;
+            /// Returns the address of the current borrowed scene.
             const Scene* operator->() const noexcept;
+            /// Advances in authored scene order.
             Iterator& operator++() noexcept;
+            /// Advances in authored order and returns the prior iterator value.
             Iterator operator++(int) noexcept {
                 auto copy = *this;
                 ++*this;
                 return copy;
             }
+            /// Compares iterator position and retained launcher-store identity.
             bool operator==(const Iterator&) const noexcept = default;
 
           private:
@@ -909,12 +499,17 @@ class Sequence {
             ItemId current_;
         };
 
+        /// Returns the number of scenes.
         std::size_t size() const noexcept;
+        /// Returns whether the view contains no scenes.
         bool empty() const noexcept {
             return size() == 0;
         }
+        /// Returns the scene at `index`; precondition: `index < size()`.
         const Scene& operator[](std::size_t index) const noexcept;
+        /// Returns an iterator to the first scene.
         Iterator begin() const noexcept;
+        /// Returns the sentinel iterator after the final scene.
         Iterator end() const noexcept;
 
       private:
@@ -924,67 +519,94 @@ class Sequence {
         std::shared_ptr<const detail::LauncherStore> store_;
     };
 
+    /// Creates a musical sequence with tracks and no annotations or launch scenes.
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> duration,
            std::vector<Track> tracks);
+    /// Creates a mixed-domain sequence with tracks and explicit optional durations.
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks);
+    /// Creates a sequence with annotations and canonical default context.
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
            std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions);
-    // Sequence is pimpl'd behind a shared Data, so a new owned collection never
-    // forces a layout change on a call site. The positional overloads above are
-    // the historical arities and forward into this one; groove was the next
-    // owned collection, and the arity note they carried said to stop adding
-    // arguments at that point, so groove and scenes live in SequenceInput.
+    /// Validates and creates a sequence from all authored collections.
     static runtime::Result<Sequence, ModelError> create(SequenceInput input);
+    /// Creates a sequence with an explicit chord/scale context lane.
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
            std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions,
            ChordScaleLane chord_scale_lane);
 
+    /// Returns the stable sequence identity.
     ItemId id() const noexcept;
+    /// Returns the authored sequence name.
     const std::string& name() const noexcept;
+    /// Returns the optional musical duration in canonical ticks.
     std::optional<timebase::TickDuration> duration() const noexcept;
+    /// Returns the optional absolute duration and its rational rate.
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
+    /// Returns tracks in canonical identity order.
     std::span<const Track> tracks() const noexcept;
-    // Sorted, unique, derived from SequenceRef clips, and never serialized.
+    /// Returns sorted unique referenced sequence identities derived from clips.
+    ///
+    /// This index is not serialized.
     std::span<const ItemId> outgoing_sequence_refs() const noexcept;
+    /// Finds a track by identity, or returns `nullptr`.
     const Track* find_track(ItemId id) const noexcept;
-    // Always present; empty when the sequence states no harmony.
+    /// Returns the always-present chord/scale context lane.
     const ChordScaleLane& chord_scale_lane() const noexcept;
-    // Always present; states no feel when the sequence plays straight.
+    /// Returns the always-present groove context.
     const GrooveTemplate& groove() const noexcept;
-    // Ordered by (position, id). Markers and regions share one identity space:
-    // no marker may reuse a region's ItemId within the same sequence.
+    /// Returns markers ordered by position then identity.
     std::span<const SequenceMarker> markers() const noexcept;
-    // Ordered by (position, duration, id). Overlap is permitted.
+    /// Returns regions ordered by position, duration, then identity.
     std::span<const SequenceRegion> regions() const noexcept;
+    /// Returns authored scenes and slots in persistent snapshot-owned storage.
     SceneView scenes() const noexcept;
+    /// Finds a marker by identity, or returns `nullptr`.
     const SequenceMarker* find_marker(ItemId id) const noexcept;
+    /// Finds a region by identity, or returns `nullptr`.
     const SequenceRegion* find_region(ItemId id) const noexcept;
+    /// Finds a scene by identity, or returns `nullptr`.
     const Scene* find_scene(ItemId id) const noexcept;
+    /// Finds a slot across all scenes by identity, or returns `nullptr`.
     const Slot* find_slot(ItemId id) const noexcept;
+    /// Returns a snapshot replacing an existing track by identity.
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    /// Inserts a validated marker and returns a new snapshot.
     runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
+    /// Removes a marker by identity and returns a new snapshot.
     runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
+    /// Inserts a validated region and returns a new snapshot.
     runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
+    /// Removes a region by identity and returns a new snapshot.
     runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
+    /// Inserts `scene` before an existing scene, or appends when no position is supplied.
     runtime::Result<Sequence, ModelError>
     insert_scene(Scene scene, std::optional<ItemId> before_scene_id = std::nullopt) const;
+    /// Removes a scene and its owned slots by identity.
     runtime::Result<Sequence, ModelError> erase_scene(ItemId id) const;
+    /// Inserts `slot` in `scene_id`, before an existing slot or at the end.
     runtime::Result<Sequence, ModelError>
     insert_slot(ItemId scene_id, Slot slot,
                 std::optional<ItemId> before_slot_id = std::nullopt) const;
+    /// Removes `slot_id` from `scene_id`.
     runtime::Result<Sequence, ModelError> erase_slot(ItemId scene_id, ItemId slot_id) const;
+    /// Returns a snapshot with replacement harmonic context.
     Sequence with_chord_scale_lane(ChordScaleLane lane) const;
+    /// Returns a snapshot with replacement groove context.
     Sequence with_groove(GrooveTemplate groove) const;
+    /// Counts persistent launcher nodes shared with `other`.
     std::size_t shared_launcher_nodes_with(const Sequence& other) const;
+    /// Returns whether both sequences share launcher collection storage.
     bool shares_launcher_storage_with(const Sequence& other) const noexcept;
+    /// Returns whether both values share complete immutable sequence storage.
     bool shares_storage_with(const Sequence& other) const noexcept;
+    /// Returns process-wide persistent launcher-index diagnostic counters.
     static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
@@ -1001,6 +623,7 @@ class Sequence {
     std::shared_ptr<const Data> data_;
 };
 
+/// Maximum admitted depth of an acyclic SequenceRef graph.
 inline constexpr std::size_t kMaxSequenceNestingDepth = 8;
 
 // Where this session's zero sits on the source/house clock — the document form
@@ -1008,15 +631,29 @@ inline constexpr std::size_t kMaxSequenceNestingDepth = 8;
 // paired with its own rational rate, never as a formatted timecode string:
 // frame-rate formatting is a presentation concern and a string would make the
 // same instant compare unequal across display rates.
+/// Validates all SequenceRef targets, cycles, and maximum graph depth.
+std::optional<ModelError>
+validate_sequence_graph(std::span<const Sequence> sequences);
+/// Validates one prospective parent-to-child edge against a sequence pool.
+std::optional<ModelError>
+validate_sequence_edge(std::span<const Sequence> sequences,
+                       ItemId parent_id, ItemId child_id);
+
+/// Absolute source/house-clock position corresponding to project time zero.
+///
+/// The value is stored in samples at an explicit rational rate; timecode
+/// formatting remains a presentation concern.
 struct SessionStart {
     timebase::SamplePosition start;
     timebase::RationalRate sample_rate;
 
+    /// Compares the exact sample position and rational rate.
     constexpr bool operator==(const SessionStart& other) const noexcept {
         return start == other.start && sample_rate == other.sample_rate;
     }
 };
 
+/// Complete input for constructing a Project and its identity domain.
 struct ProjectInput {
     ItemId id;
     std::string name;
@@ -1029,6 +666,7 @@ struct ProjectInput {
     std::optional<SessionStart> session_start;
 };
 
+/// Kind of an identity-bearing item in a Project.
 enum class ItemKind : std::uint8_t {
     Project,
     Asset,
@@ -1047,14 +685,10 @@ enum class ItemKind : std::uint8_t {
     Slot,
 };
 
-// Canonical immediate parent for a kind. Every parent that an item's own
-// coordinates determine is derived here, so identity construction has one
-// parent-computation path for all kinds. AutomationPoint and Take are the
-// exceptions whose parent (their owning lane or scene) is not among (sequence,
-// track, clip): that owner is supplied by construction context via lane_id and is
-// otherwise recoverable only from the stored parent_id itself — never re-derive
-// it from coordinates. The lane_id parameter carries an AutomationLane for a
-// point, a TakeLane for a take, and a Scene for a slot.
+/// Derives the canonical immediate owner from an item's kind and coordinates.
+///
+/// `lane_id` supplies the owning automation lane, take lane, or scene for
+/// AutomationPoint, Take, and Slot respectively.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
                                      ItemId track_id, ItemId clip_id,
                                      ItemId lane_id = {}) noexcept {
@@ -1085,6 +719,7 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     return {};
 }
 
+/// Canonical ownership and ancestor coordinates for one project identity.
 struct ItemLocation {
     ItemKind kind = ItemKind::Project;
     // Immediate ownership is canonical; the remaining IDs cache ancestor navigation.
@@ -1095,25 +730,30 @@ struct ItemLocation {
     bool active = false;
 
     constexpr ItemLocation() noexcept = default;
+    /// Creates one canonical location from its kind, immediate owner, ancestors, and state.
     constexpr ItemLocation(ItemKind item_kind, ItemId parent, ItemId sequence, ItemId track,
                            ItemId clip, bool is_active) noexcept
         : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track), clip_id(clip),
           active(is_active) {}
 
+    /// Returns whether two locations have the same kind and immediate owner.
     constexpr bool has_same_owner(const ItemLocation& other) const noexcept {
         return kind == other.kind && parent_id == other.parent_id;
     }
     constexpr auto operator<=>(const ItemLocation&) const = default;
 };
 
+/// Allowed transition applied to one identity-index entry.
 enum class IdentityMutationKind : std::uint8_t { Insert, Deactivate, Reactivate };
 
+/// Planned identity-index transition accompanying an immutable model edit.
 struct IdentityMutation {
     IdentityMutationKind mutation = IdentityMutationKind::Insert;
     ItemId item;
     ItemLocation location;
 };
 
+/// Diagnostic counters for persistent project identity-index allocation.
 struct ProjectIdentityStats {
     std::uint64_t live_nodes = 0;
     std::uint64_t nodes_created = 0;
@@ -1125,6 +765,15 @@ class SequenceCompileStructureToken {
   public:
     SequenceCompileStructureToken() noexcept = default;
 
+    /// Whether this token names a real structure snapshot.
+    ///
+    /// A default-constructed token is invalid and compares equal only to other
+    /// default-constructed tokens, so it can be held as "no snapshot observed
+    /// yet" without a separate flag. Comparing two *invalid* tokens therefore
+    /// says nothing about structure — check `valid()` before treating equality
+    /// as evidence that subscribers need no recompile.
+    ///
+    /// @returns true when the token was issued by a Project snapshot.
     bool valid() const noexcept {
         return value_ != 0;
     }
@@ -1137,30 +786,48 @@ class SequenceCompileStructureToken {
     std::uint64_t value_ = 0;
 };
 
+/// Immutable root of a Timeline document and its monotonic identity domain.
 class Project {
   public:
+    /// Validates referential integrity, ownership, durations, and identity monotonicity.
     static runtime::Result<Project, ModelError> create(ProjectInput input);
 
+    /// Returns the stable project identity.
     ItemId id() const noexcept;
+    /// Returns the authored project name.
     const std::string& name() const noexcept;
+    /// Returns the next unallocated numeric ItemId.
     std::uint64_t next_item_id() const noexcept;
+    /// Returns the identity of the arrangement's root sequence.
     ItemId root_sequence_id() const noexcept;
+    /// Returns project-owned media assets in canonical identity order.
     std::span<const MediaAsset> assets() const noexcept;
+    /// Returns project-owned sequences in canonical identity order.
     std::span<const Sequence> sequences() const noexcept;
+    /// Returns the project's immutable tempo map.
     const timebase::TempoMap& tempo_map() const noexcept;
+    /// Returns the project's immutable meter map.
     const timebase::MeterMap& meter_map() const noexcept;
+    /// Returns the optional absolute source-clock origin.
     const std::optional<SessionStart>& session_start() const noexcept;
+    /// Finds a media asset by identity, or returns `nullptr`.
     const MediaAsset* find_asset(ItemId id) const noexcept;
+    /// Finds a sequence by identity, or returns `nullptr`.
     const Sequence* find_sequence(ItemId id) const noexcept;
+    /// Returns canonical location data for active or inactive `id`, if known.
     std::optional<ItemLocation> locate(ItemId id) const noexcept;
+    /// Counts persistent identity-index nodes shared with `other`.
     std::size_t shared_identity_nodes_with(const Project& other) const;
+    /// Returns whether both values share complete immutable project storage.
     bool shares_storage_with(const Project& other) const noexcept;
     /// Process-local identity of the sequence-reference and registered-content
     /// placement shape used by incremental playback invalidation. The token is
     /// preserved across edits that cannot change dependency subscribers and is
     /// replaced before publishing a structurally incompatible snapshot.
     SequenceCompileStructureToken sequence_compile_structure_token() const noexcept;
+    /// Returns process-wide persistent identity-index diagnostic counters.
     static ProjectIdentityStats identity_stats() noexcept;
+    /// Returns an allocator initialized to this snapshot's identity frontier.
     ItemIdAllocator item_id_allocator() const noexcept {
         return ItemIdAllocator(next_item_id());
     }
@@ -1191,11 +858,14 @@ class Project {
     std::shared_ptr<const Data> data_;
 };
 
+/// Canonically ordered mapping from source identities to remapped identities.
 class IdRemapTable {
   public:
+    /// Returns mappings ordered by source identity.
     std::span<const std::pair<ItemId, ItemId>> entries() const noexcept {
         return entries_;
     }
+    /// Returns the remapped identity for `old_id`, or `std::nullopt`.
     std::optional<ItemId> find(ItemId old_id) const noexcept;
 
   private:
@@ -1203,58 +873,76 @@ class IdRemapTable {
     std::vector<std::pair<ItemId, ItemId>> entries_;
 };
 
-// Subtree remaps treat MediaRef::asset_id as an external reference. A null
-// callback preserves it; a callback can translate it into the destination
-// domain. Callback failure leaves the caller's allocator unchanged.
+/// Optional non-throwing translation for an externally referenced identity.
+///
+/// A null callback preserves the identity. Callback failure makes the enclosing
+/// remap fail without advancing its allocator.
 struct ExternalIdFixup {
     void* context = nullptr;
     runtime::Result<ItemId, ModelError> (*map)(void*, ItemId) noexcept = nullptr;
 
+    /// Applies the callback or returns `id` unchanged when none is installed.
     runtime::Result<ItemId, ModelError> apply(ItemId id) const noexcept;
 };
 
+/// Independent external-reference fixups for media assets and sequences.
 struct RemapIdFixups {
     ExternalIdFixup asset;
     ExternalIdFixup sequence;
 };
 
+/// Remapped clip snapshot and its complete owned-identity table.
 struct RemappedClip {
     Clip clip;
     IdRemapTable ids;
 };
+/// Remapped track snapshot and its complete owned-identity table.
 struct RemappedTrack {
     Track track;
     IdRemapTable ids;
 };
+/// Remapped sequence snapshot and its complete owned-identity table.
 struct RemappedSequence {
     Sequence sequence;
     IdRemapTable ids;
 };
 
+/// Remaps a clip's owned identities, optionally translating asset references.
 runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
                                                     ExternalIdFixup external = {});
+/// Remaps a clip with independent asset and sequence reference fixups.
 runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
                                                     RemapIdFixups fixups);
+/// Remaps a track's owned subtree, optionally translating asset references.
 runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
                                                      ExternalIdFixup external = {});
+/// Remaps a track with independent asset and sequence reference fixups.
 runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
                                                      RemapIdFixups fixups);
+/// Remaps a sequence's owned subtree, optionally translating asset references.
 runtime::Result<RemappedSequence, ModelError>
 remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup external = {});
+/// Remaps a sequence with independent asset and sequence reference fixups.
 runtime::Result<RemappedSequence, ModelError>
 remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, RemapIdFixups fixups);
+/// Rebuilds a sequence from an explicit carried identity table and reference fixups.
 runtime::Result<RemappedSequence, ModelError>
 remap_ids(const Sequence& sequence, std::span<const std::pair<ItemId, ItemId>> carried_ids,
           RemapIdFixups fixups = {});
 
+/// Remapped project snapshot and complete source-to-destination identity table.
 struct RemappedProject {
     Project project;
     IdRemapTable ids;
 };
 
-// Two-pass remap: allocate every owned identity first, then rebuild references.
-// `first_id` selects the destination project's monotonic identity domain.
+/// Remaps every project-owned identity starting at `first_id`.
+///
+/// The deterministic two-pass operation allocates all owned identities before
+/// rebuilding references.
 runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                                        std::uint64_t first_id);
+
+/// @}
 
 } // namespace pulp::timeline
