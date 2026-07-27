@@ -243,3 +243,66 @@ TEST_CASE("Forge drum sanitizes non-finite injection and allocates nothing in pr
         for (const float sample : channel)
             CHECK(std::isfinite(sample));
 }
+
+TEST_CASE("Forge drum resolves a non-finite injection to the declared default",
+          "[host][forge][drum][rt-safety]") {
+    // End-to-end guard on the boundary the node relies on instead of
+    // re-implementing. The bake layer registers each declared parameter with
+    // its range and reads through state::ParamCursor, so a non-finite value
+    // arrives as the declared default. "Finite output" is too weak to pin that
+    // down -- substituting zero also renders finite audio, while putting the
+    // voice below the minimum of its own declared range -- so this asserts the
+    // value it actually lands on.
+    const auto type = drum::make_drum_node(pulp::signal::drum::EngineId::cymbal_comb);
+    const auto& tune = parameter(type, drum::kTuneHz);
+    REQUIRE(tune.min_value > 0.0f);
+    REQUIRE(tune.default_value > tune.min_value);
+
+    const auto render_with_tune = [&type](float value) {
+        Fixture fixture(type);
+        if (!std::isnan(value))
+            inject(fixture, drum::kTuneHz, value);
+        else
+            inject(fixture, drum::kTuneHz, std::numeric_limits<float>::quiet_NaN());
+        inject(fixture, drum::kTrigger, 1.0f);
+        std::array<std::vector<float>, 2> last{};
+        for (int block = 0; block < 4; ++block)
+            last = render(fixture);
+        return last;
+    };
+
+    const auto at_default = render_with_tune(tune.default_value);
+    const auto at_nan = render_with_tune(std::numeric_limits<float>::quiet_NaN());
+    const auto at_minimum = render_with_tune(tune.min_value);
+
+    CHECK(at_nan == at_default);
+    // Guards the assertion above against being satisfied by a voice that
+    // ignores tuning altogether.
+    CHECK_FALSE(at_minimum == at_default);
+}
+
+TEST_CASE("Forge drum parameter table refuses to index on an undeclared id",
+          "[host][forge][drum][rt-safety]") {
+    // Persistent ParamIDs are sparse by design, so they are not storage
+    // offsets. The table has to answer for every id, including ones far past
+    // the largest it declares, rather than letting one reach a cache.
+    using pulp::host::forge_drum::detail::DrumParamTable;
+    const auto type = drum::make_drum_node(pulp::signal::drum::EngineId::fm8);
+    const DrumParamTable table(type.baked_params);
+
+    REQUIRE(table.size() == type.baked_params.size());
+    pulp::state::ParamID highest = 0;
+    for (const auto& declared : type.baked_params) {
+        const auto slot = table.slot(declared.id);
+        REQUIRE(slot != DrumParamTable::kNoSlot);
+        REQUIRE(slot < table.size());
+        CHECK(table.descriptor(slot).id == declared.id);
+        highest = std::max(highest, declared.id);
+    }
+    // The FM operator banks already run past 280, so this is the range a
+    // fixed-size cache would have been sized against.
+    CHECK(highest > 280);
+    CHECK(table.slot(highest + 1) == DrumParamTable::kNoSlot);
+    CHECK(table.slot(highest + 1000) == DrumParamTable::kNoSlot);
+    CHECK(table.slot(0) == DrumParamTable::kNoSlot);
+}

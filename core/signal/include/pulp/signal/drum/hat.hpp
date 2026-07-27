@@ -93,6 +93,7 @@ public:
 
     OutputStage& output() { return output_; }
     const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
     int latency_samples() const noexcept override {
         return output_.latency_samples();
     }

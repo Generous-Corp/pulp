@@ -130,6 +130,7 @@ public:
 
     OutputStage& output() { return output_; }
     const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
     int latency_samples() const noexcept override {
         return output_.latency_samples();
     }
@@ -244,8 +245,13 @@ protected:
                     std::exp2(fm_depth_octaves_ * modulator));
             }
 
+            // process() rather than white(): the pluck is this voice's only
+            // noise consumer, so routing it through the colour filter is what
+            // makes set_noise_color() audible at all. A darker excitation
+            // reaches the string with less energy above its own brightness
+            // corner, which is the difference between a pick and a thumb.
             const double burst = exciter_env_.is_active()
-                                     ? static_cast<double>(noise_.white()) *
+                                     ? static_cast<double>(noise_.process()) *
                                            exciter_env_.process()
                                      : 0.0;
             const double dry = static_cast<double>(

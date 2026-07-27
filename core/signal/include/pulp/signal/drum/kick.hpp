@@ -86,8 +86,11 @@ public:
     void set_body_decay_ms(double ms) { body_decay_ms_ = std::clamp(ms, 10.0, 4000.0); }
 
     /// Depth of the downward pitch sweep, in octaves, and how quickly it
-    /// settles. Applies to the oscillator body; the circuit body produces its
-    /// sweep from the network and ignores these.
+    /// settles. These apply to the oscillator body only. The resonant body is
+    /// struck at a fixed frequency, and the circuit body produces its sweep
+    /// from the network; both ignore these. The velocity bend is carried on
+    /// the same term, so it too reaches the oscillator body alone -- which is
+    /// why the Forge catalog declares neither control on the other bodies.
     ///
     /// Octaves rather than a linear multiplier, so the sweep composes
     /// additively with the velocity bend, which is also in octaves. A depth
@@ -116,6 +119,7 @@ public:
     /// The saturation and degradation stage the voice ends with.
     OutputStage& output() { return output_; }
     const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
     int latency_samples() const noexcept override {
         return output_.latency_samples();
     }
