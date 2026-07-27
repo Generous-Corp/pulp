@@ -1,8 +1,16 @@
 # host-probe — the bench oracle lane
 
-`au_instrument_probe` loads an installed Audio Unit instrument, renders it
-offline, and writes a WAV. It is generic SDK tooling for measuring a licensed
-or otherwise locally installed reference instrument as a black box.
+Two probes, same lane and same rules:
+
+- `au_instrument_probe` loads an installed Audio Unit **instrument**, renders it
+  offline, and writes a WAV.
+- `au_effect_ab` renders one deterministic source through either an installed
+  Audio Unit **effect** or one of Pulp's own `CharacterDelay` engines, and writes
+  a WAV. Running it once per engine with the same source and `--seconds` yields
+  renders the audio quality lab can compare directly.
+
+Both are generic SDK tooling for measuring a licensed or otherwise locally
+installed reference as a black box.
 
 Rendering is driven from the calling thread through `AudioUnitRender`. No
 output device is ever opened, so a probe run is silent and safe to invoke from
@@ -62,6 +70,64 @@ experiment intentionally targets a silent note or trigger condition.
 `--list-params` dumps the loaded instrument's parameter IDs. Capture this output
 with the experiment recipe because Audio Unit parameter IDs are chosen by the
 instrument vendor and cannot be inferred from display names.
+
+## Usage — `au_effect_ab` (effects)
+
+```bash
+# Our engine, and a reference effect, through the identical source.
+./build/tools/audio/pulp-au-effect-ab --pulp bbd --time-ms 375 --feedback 0.45 \
+    --out /tmp/pulp-bbd.wav
+./build/tools/audio/pulp-au-effect-ab --au aumf:MeBr:Artu --out /tmp/ref.wav
+```
+
+An AU is addressed by **identity** (`TYPE:SUBT:MANU`) rather than by scanning.
+The identity is the complete loader descriptor, so this never walks every
+installed bundle and never instantiates unrelated third-party plugins. Read the
+codes off a bundle with:
+
+```bash
+/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:type" \
+  -c "Print :AudioComponents:0:subtype" -c "Print :AudioComponents:0:manufacturer" \
+  "/Library/Audio/Plug-Ins/Components/<Name>.component/Contents/Info.plist"
+```
+
+`--src-gen impulse|pluck|tone` picks a deterministic in-tool source (default
+`pluck`), so an A/B needs no asset and is bit-identical across machines;
+`--src FILE` uses a WAV instead. `--pulp` accepts `clean`, `tape`,
+`tape-physical`, `bbd`, `vintage-digital`, `diffusion`.
+
+**`--list-params` prepares the unit first, on purpose.** An Audio Unit generally
+does not publish its parameter list until it is initialised, so enumerating
+before `prepare()` reports *zero* parameters for every plugin — including
+Apple's own `aufx:dely:appl`, which obviously has four. That reads as "this
+plugin exposes nothing" when it means "we asked too early". If a probe ever
+reports no parameters, check it against a known-good control such as
+`aufx:dely:appl` before concluding anything about the plugin.
+
+### Matching controls before comparing — required, and not the same as fitting
+
+Two delays at their factory defaults are not comparable. Observed on real
+plugins: a reference delay shipped in **tempo-sync** mode, which in an offline
+render with no transport leaves its delay time undefined; its blend was 50%
+dry while the Pulp render was wet-dominant; and its feedback differed. A
+spectral difference measured across that is a difference of *settings*, not of
+character, and must not be reported as one.
+
+So before comparing, match what you can — delay time, feedback, wet/dry blend,
+sync off — and verify the match from the render itself rather than trusting the
+control values: an impulse through the engine shows the true echo spacing (Pulp
+at `--time-ms 375` measures 372.5 ms between taps).
+
+This is measurement hygiene and is explicitly **not** the parameter-fitting this
+lane forbids. Matching two engines' controls so an A/B is apples-to-apples is
+legitimate. Sweeping *our* coefficients to minimise error against a reference
+render is reverse-engineering, just automated — see the rule above.
+
+Note also that **peak is the wrong metric for a band-limited engine**. An
+impulse through a bucket-brigade path is smeared across time by its
+reconstruction filtering, collapsing peak while preserving energy: Pulp's `bbd`
+peaks ~28 dB below `clean` on an impulse but only ~5 dB below it in RMS on
+musical material. Compare energy, not peaks.
 
 ## Feeding the measurement back
 
