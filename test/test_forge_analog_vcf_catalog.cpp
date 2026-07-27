@@ -1,13 +1,88 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <pulp/host/forge_analog_vcf_catalog.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace lofi = pulp::host::forge_lofi;
+
+namespace {
+
+constexpr double kSampleRate = 48000.0;
+constexpr int kBlockSize = 128;
+
+struct BakedVcfFixture {
+    pulp::host::SignalGraph graph;
+    pulp::host::LowerResult result;
+    pulp::host::NodeId filter = 0;
+
+    explicit BakedVcfFixture(pulp::signal::AnalogVcf::Voicing voicing) {
+        const auto type = lofi::make_analog_vcf_node(voicing);
+        REQUIRE(graph.register_custom_node_type(type));
+        const auto input = graph.add_input_node(1, "input");
+        filter = graph.add_custom_node(type.type_id, type.version, "filter");
+        const auto output = graph.add_output_node(1, "output");
+        REQUIRE(graph.connect(input, 0, filter, 0));
+        REQUIRE(graph.connect(filter, 0, output, 0));
+        graph.set_canonical_executor_routing_enabled(true);
+        REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+
+        result = pulp::host::bake(graph);
+        REQUIRE(result.accepted);
+        REQUIRE(result.processor);
+        pulp::format::PrepareContext prepare;
+        prepare.sample_rate = kSampleRate;
+        prepare.max_buffer_size = kBlockSize;
+        prepare.input_channels = 1;
+        prepare.output_channels = 1;
+        result.processor->prepare(prepare);
+    }
+
+    pulp::host::BakedGraphProcessor& processor() {
+        return *static_cast<pulp::host::BakedGraphProcessor*>(result.processor.get());
+    }
+};
+
+std::vector<float> render_block(pulp::format::Processor& processor,
+                                const std::vector<float>& input) {
+    std::vector<float> output(input.size(), 0.0f);
+    const float* input_ptr = input.data();
+    float* output_ptr = output.data();
+    pulp::audio::BufferView<const float> in(&input_ptr, 1,
+                                            static_cast<std::uint32_t>(input.size()));
+    pulp::audio::BufferView<float> out(&output_ptr, 1,
+                                      static_cast<std::uint32_t>(output.size()));
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    pulp::format::ProcessContext process;
+    process.num_samples = static_cast<int>(input.size());
+    process.sample_rate = kSampleRate;
+    processor.process(out, in, midi_in, midi_out, process);
+    return output;
+}
+
+void inject_controls(pulp::host::ParamInjector& injector,
+                     const std::array<float, 4>& values) {
+    constexpr std::array ids{
+        lofi::kAnalogVcfCutoff,
+        lofi::kAnalogVcfCutoffMod,
+        lofi::kAnalogVcfResonance,
+        lofi::kAnalogVcfDriveDb,
+    };
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        REQUIRE(injector.inject({ids[i], 0, values[i], 0}) ==
+                pulp::host::InjectStatus::Ok);
+    }
+}
+
+}  // namespace
 
 TEST_CASE("Forge analog VCF exposes four stable Pulp identities and one param contract",
           "[host][forge][analog-vcf][contract]") {
@@ -26,19 +101,117 @@ TEST_CASE("Forge analog VCF exposes four stable Pulp identities and one param co
     for (const auto& item : cases) {
         const auto node = lofi::make_analog_vcf_node(item.voicing);
         CHECK(node.type_id == item.type_id);
+        CHECK(node.version == 1);
+        CHECK(node.num_input_ports == 1);
+        CHECK(node.num_output_ports == 1);
         CHECK(node.lowerable);
+        CHECK(static_cast<bool>(node.create));
+        CHECK(static_cast<bool>(node.process_instance));
+        CHECK(static_cast<bool>(node.process_instance_baked_param));
         REQUIRE(node.baked_params.size() == 4);
-        CHECK(node.baked_params[0].id == lofi::kAnalogVcfCutoff);
-        CHECK(node.baked_params[0].min_value == 0.0f);
-        CHECK(node.baked_params[0].max_value == 1.0f);
-        CHECK(node.baked_params[0].default_value == 0.5f);
-        CHECK(node.baked_params[1].id == lofi::kAnalogVcfCutoffMod);
-        CHECK(node.baked_params[1].min_value == -5.0f);
-        CHECK(node.baked_params[1].max_value == 5.0f);
-        CHECK(node.baked_params[2].id == lofi::kAnalogVcfResonance);
-        CHECK(node.baked_params[3].id == lofi::kAnalogVcfDriveDb);
-        CHECK(node.baked_params[3].min_value == -24.0f);
-        CHECK(node.baked_params[3].max_value == 48.0f);
+        constexpr std::array expected{
+            pulp::host::CustomNodeBakedParam{lofi::kAnalogVcfCutoff, 0.0f, 1.0f, 0.5f},
+            pulp::host::CustomNodeBakedParam{lofi::kAnalogVcfCutoffMod, -5.0f, 5.0f, 0.0f},
+            pulp::host::CustomNodeBakedParam{lofi::kAnalogVcfResonance, 0.0f, 1.0f, 0.0f},
+            pulp::host::CustomNodeBakedParam{lofi::kAnalogVcfDriveDb, -24.0f, 48.0f, 0.0f},
+        };
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            CHECK(node.baked_params[i].id == expected[i].id);
+            CHECK(node.baked_params[i].min_value == expected[i].min_value);
+            CHECK(node.baked_params[i].max_value == expected[i].max_value);
+            CHECK(node.baked_params[i].default_value == expected[i].default_value);
+            for (std::size_t j = i + 1; j < expected.size(); ++j)
+                CHECK(node.baked_params[i].id != node.baked_params[j].id);
+        }
+    }
+}
+
+TEST_CASE("Forge analog VCF baked render is deterministic across identical instances",
+          "[host][forge][analog-vcf][determinism]") {
+    BakedVcfFixture first(pulp::signal::AnalogVcf::Voicing::prophet5);
+    BakedVcfFixture second(pulp::signal::AnalogVcf::Voicing::prophet5);
+    auto first_injector = first.processor().claim_param_injection(first.filter);
+    auto second_injector = second.processor().claim_param_injection(second.filter);
+    REQUIRE(first_injector.valid());
+    REQUIRE(second_injector.valid());
+    constexpr std::array controls{0.63f, -0.75f, 0.58f, 9.0f};
+    inject_controls(first_injector, controls);
+    inject_controls(second_injector, controls);
+
+    std::vector<float> input(kBlockSize);
+    for (int i = 0; i < kBlockSize; ++i)
+        input[static_cast<std::size_t>(i)] =
+            0.2f * std::sin(0.071f * static_cast<float>(i));
+    for (int block = 0; block < 64; ++block) {
+        CHECK(render_block(*first.result.processor, input) ==
+              render_block(*second.result.processor, input));
+    }
+}
+
+TEST_CASE("Forge analog VCF maps non-finite injection to declared defaults",
+          "[host][forge][analog-vcf][non-finite]") {
+    BakedVcfFixture defaults(pulp::signal::AnalogVcf::Voicing::jupiter);
+    BakedVcfFixture hostile(pulp::signal::AnalogVcf::Voicing::jupiter);
+    auto injector = hostile.processor().claim_param_injection(hostile.filter);
+    REQUIRE(injector.valid());
+    inject_controls(injector,
+                    {std::numeric_limits<float>::quiet_NaN(),
+                     std::numeric_limits<float>::infinity(),
+                     -std::numeric_limits<float>::infinity(),
+                     std::numeric_limits<float>::quiet_NaN()});
+
+    std::vector<float> input(kBlockSize, 0.125f);
+    input[0] = 0.5f;
+    const auto expected = render_block(*defaults.result.processor, input);
+    const auto actual = render_block(*hostile.result.processor, input);
+    REQUIRE(actual == expected);
+    for (const float sample : actual) CHECK(std::isfinite(sample));
+}
+
+TEST_CASE("Forge analog VCF injection and steady-state render allocate nothing",
+          "[host][forge][analog-vcf][rt]") {
+    constexpr std::array voicings{
+        pulp::signal::AnalogVcf::Voicing::juno,
+        pulp::signal::AnalogVcf::Voicing::jupiter,
+        pulp::signal::AnalogVcf::Voicing::prophet5,
+        pulp::signal::AnalogVcf::Voicing::minimoog,
+    };
+    for (const auto voicing : voicings) {
+        BakedVcfFixture fixture(voicing);
+        auto injector = fixture.processor().claim_param_injection(fixture.filter);
+        REQUIRE(injector.valid());
+
+        std::array<float, kBlockSize> input{};
+        std::array<float, kBlockSize> output{};
+        input[0] = 0.5f;
+        const float* input_ptr = input.data();
+        float* output_ptr = output.data();
+        pulp::audio::BufferView<const float> in(&input_ptr, 1, kBlockSize);
+        pulp::audio::BufferView<float> out(&output_ptr, 1, kBlockSize);
+        pulp::midi::MidiBuffer midi_in;
+        pulp::midi::MidiBuffer midi_out;
+        pulp::format::ProcessContext process;
+        process.num_samples = kBlockSize;
+        process.sample_rate = kSampleRate;
+
+        REQUIRE(injector.inject({lofi::kAnalogVcfCutoff, 0, 0.4f, 0}) ==
+                pulp::host::InjectStatus::Ok);
+        fixture.result.processor->process(out, in, midi_in, midi_out, process);
+
+        pulp::host::InjectStatus status = pulp::host::InjectStatus::InvalidHandle;
+        std::size_t allocation_count = 0;
+        std::size_t allocated_bytes = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            status = injector.inject({lofi::kAnalogVcfCutoff, 0, 0.7f, 32});
+            for (int block = 0; block < 8; ++block)
+                fixture.result.processor->process(out, in, midi_in, midi_out, process);
+            allocation_count = probe.allocation_count();
+            allocated_bytes = probe.allocated_bytes();
+        }
+        CHECK(status == pulp::host::InjectStatus::Ok);
+        CHECK(allocation_count == 0);
+        CHECK(allocated_bytes == 0);
     }
 }
 

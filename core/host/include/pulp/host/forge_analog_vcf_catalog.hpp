@@ -26,6 +26,11 @@ inline constexpr state::ParamID kAnalogVcfCutoffMod = 2;  // octave modulation
 inline constexpr state::ParamID kAnalogVcfResonance = 3;
 inline constexpr state::ParamID kAnalogVcfDriveDb = 4;
 
+// Oversampling changes the realized topology and fixed latency, so it is an
+// adapter construction policy rather than an injectable musical parameter.
+// Keep prepare and the published latency contract tied to this one value.
+inline constexpr int kAnalogVcfOversampling = 2;
+
 struct AnalogVcfInstance {
     explicit AnalogVcfInstance(signal::AnalogVcf::Voicing selected) noexcept {
         filter.set_voicing(selected);
@@ -62,14 +67,15 @@ inline CustomNodeType make_analog_vcf_node(signal::AnalogVcf::Voicing voicing) {
     type.num_input_ports = 1;
     type.num_output_ports = 1;
     type.default_name = identity.name;
-    type.latency_samples = signal::AnalogVcf::latency_samples_for_oversampling(2);
+    type.latency_samples =
+        signal::AnalogVcf::latency_samples_for_oversampling(kAnalogVcfOversampling);
     type.lowerable = true;
     type.create = [voicing]() -> void* { return new AnalogVcfInstance(voicing); };
     type.destroy = [](void* p) { delete static_cast<AnalogVcfInstance*>(p); };
     type.prepare = [](void* p, double sample_rate, int /*max_block*/) {
         auto* instance = static_cast<AnalogVcfInstance*>(p);
         instance->filter.set_sample_rate(sample_rate);
-        instance->filter.set_oversampling(2);
+        instance->filter.set_oversampling(kAnalogVcfOversampling);
         instance->filter.set_smoothing_time_ms(3.0);
         instance->filter.reset();
     };

@@ -10,6 +10,7 @@
 #include <pulp/state/store.hpp>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -119,6 +120,11 @@ private:
     float clamp_value(ParamID id, float value) const {
         if (store_) {
             if (const auto* info = store_->info(id)) {
+                // Match StateStore's public write contract: hostile automation
+                // must not smuggle NaN/Inf past the bake-layer range table and
+                // poison DSP state. The declared plain-domain default is the
+                // deterministic fallback for every non-finite value.
+                if (!std::isfinite(value)) value = info->range.default_value;
                 return std::clamp(value, info->range.min, info->range.max);
             }
         }

@@ -543,6 +543,9 @@ catch_discover_tests(pulp-test-character-delay)
 # Focused host-boundary contract for the separately owned analog VCF adapter.
 add_executable(pulp-test-forge-analog-vcf-catalog
     test_forge_analog_vcf_catalog.cpp)
+target_sources(pulp-test-forge-analog-vcf-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
 target_link_libraries(pulp-test-forge-analog-vcf-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-analog-vcf-catalog)
