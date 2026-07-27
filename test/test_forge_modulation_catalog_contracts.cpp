@@ -54,24 +54,21 @@ std::vector<CatalogCase> catalog_cases() {
             "forge_mod_lfo",
             0,
             {
-                P{catalog::kModLfoRateHz, 0.001f, 2000.0f, 2.0f},
-                P{catalog::kModLfoDepth, 0.0f, 1.0f, 1.0f},
-                P{catalog::kModLfoWave, 0.0f, 6.0f, 0.0f},
-                P{catalog::kModLfoPulseWidth, 0.05f, 0.95f, 0.5f},
-                P{catalog::kModLfoRandomBlend, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModLfoDelayMs, 0.0f, 5000.0f, 0.0f},
-                P{catalog::kModLfoFadeInMs, 0.0f, 5000.0f, 0.0f},
-                P{catalog::kModLfoShapeMorph, 0.0f, 3.0f, 0.0f},
-                P{catalog::kModLfoMorphEnabled, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModLfoTriangleBias, -1.0f, 1.0f, 0.0f},
-                P{catalog::kModLfoRandomSegments, 1.0f,
-                  static_cast<float>(pulp::signal::Lfo::kMaxRandomSegments),
-                  static_cast<float>(pulp::signal::Lfo::kDefaultRandomSegments)},
-                P{catalog::kModLfoPhaseDegrees, 0.0f, 360.0f, 0.0f},
-                P{catalog::kModLfoFadeOutMs, 0.0f, 5000.0f, 0.0f},
-                P{catalog::kModLfoFadeQuadratic, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModLfoRepeatCount, 0.0f,
-                  static_cast<float>(pulp::signal::Lfo::kMaxRepeatCount), 0.0f},
+                P{1, 0.001f, 2000.0f, 2.0f}, // rate
+                P{2, 0.0f, 1.0f, 1.0f},      // depth
+                P{3, 0.0f, 6.0f, 0.0f},      // wave
+                P{4, 0.05f, 0.95f, 0.5f},    // pulse width
+                P{5, 0.0f, 1.0f, 0.0f},      // random blend
+                P{6, 0.0f, 5000.0f, 0.0f},   // delay
+                P{7, 0.0f, 5000.0f, 0.0f},   // fade in
+                P{8, 0.0f, 3.0f, 0.0f},      // shape morph
+                P{9, 0.0f, 1.0f, 0.0f},      // morph enabled
+                P{10, -1.0f, 1.0f, 0.0f},    // triangle bias
+                P{11, 1.0f, 16.0f, 4.0f},    // random segments
+                P{12, 0.0f, 360.0f, 0.0f},   // phase
+                P{13, 0.0f, 5000.0f, 0.0f},  // fade out
+                P{14, 0.0f, 1.0f, 0.0f},     // quadratic fade
+                P{15, 0.0f, 128.0f, 0.0f},   // repeat count
             },
         },
         {
@@ -79,18 +76,15 @@ std::vector<CatalogCase> catalog_cases() {
             "forge_mod_lpg",
             2,
             {
-                P{catalog::kModLpgDecayMs, 20.0f, 2000.0f, 150.0f},
-                P{catalog::kModLpgColour, 0.0f, 1.0f, 0.5f},
-                P{catalog::kModLpgDroop, 0.0f, 0.95f, 0.5f},
-                P{catalog::kModLpgBrightnessHz, 500.0f, 12000.0f, 12000.0f},
-                P{catalog::kModLpgStruck, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModLpgRiseMs, 0.05f, 100.0f,
-                  static_cast<float>(pulp::signal::Lpg::kRiseMs)},
-                P{catalog::kModLpgDarknessHz, pulp::signal::Lpg::kMinFcHz,
-                  500.0f, pulp::signal::Lpg::kDefaultFcMinHz},
-                P{catalog::kModLpgStrikeThreshold, 0.01f, 0.99f,
-                  catalog::kDefaultModLpgStrikeThreshold},
-                P{catalog::kModLpgRefractoryMs, 0.0f, 100.0f, 2.0f},
+                P{1, 20.0f, 2000.0f, 150.0f},    // decay
+                P{2, 0.0f, 1.0f, 0.5f},          // colour
+                P{3, 0.0f, 0.95f, 0.5f},         // droop
+                P{4, 500.0f, 12000.0f, 12000.0f}, // brightness
+                P{5, 0.0f, 1.0f, 0.0f},          // struck mode
+                P{6, 0.05f, 100.0f, 1.5f},       // rise
+                P{7, 10.0f, 500.0f, 40.0f},      // darkness
+                P{8, 0.01f, 0.99f, 0.25f},       // strike threshold
+                P{9, 0.0f, 100.0f, 2.0f},        // refractory time
             },
         },
         {
@@ -98,9 +92,9 @@ std::vector<CatalogCase> catalog_cases() {
             "forge_mod_slew",
             1,
             {
-                P{catalog::kModSlewRiseMs, 0.0f, 2000.0f, 20.0f},
-                P{catalog::kModSlewFallMs, 0.0f, 2000.0f, 20.0f},
-                P{catalog::kModSlewCurved, 0.0f, 1.0f, 0.0f},
+                P{1, 0.0f, 2000.0f, 20.0f}, // rise
+                P{2, 0.0f, 2000.0f, 20.0f}, // fall
+                P{3, 0.0f, 1.0f, 0.0f},     // curved mode
             },
         },
         {
@@ -108,10 +102,10 @@ std::vector<CatalogCase> catalog_cases() {
             "forge_mod_transient",
             1,
             {
-                P{catalog::kModTransientFastMs, 0.5f, 20.0f, 2.0f},
-                P{catalog::kModTransientSlowMs, 10.0f, 500.0f, 40.0f},
-                P{catalog::kModTransientSensitivity, 0.1f, 8.0f, 1.0f},
-                P{catalog::kModTransientInvert, 0.0f, 1.0f, 0.0f},
+                P{1, 0.5f, 20.0f, 2.0f},   // fast time
+                P{2, 10.0f, 500.0f, 40.0f}, // slow time
+                P{3, 0.1f, 8.0f, 1.0f},    // sensitivity
+                P{4, 0.0f, 1.0f, 0.0f},    // invert
             },
         },
         {
@@ -119,20 +113,20 @@ std::vector<CatalogCase> catalog_cases() {
             "forge_mod_env",
             1,
             {
-                P{catalog::kModEnvAttackMs, 0.1f, 500.0f, 2.0f},
-                P{catalog::kModEnvHoldMs, 0.0f, 500.0f, 0.0f},
-                P{catalog::kModEnvDecayMs, 1.0f, 2000.0f, 150.0f},
-                P{catalog::kModEnvCurve, -1.0f, 1.0f, 0.0f},
-                P{catalog::kModEnvThreshold, 0.05f, 0.95f, 0.3f},
-                P{catalog::kModEnvDelayMs, 0.0f, 5000.0f, 0.0f},
-                P{catalog::kModEnvDepth, 0.0f, 1.0f, 1.0f},
-                P{catalog::kModEnvLoop, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModEnvLoopCount, 0.0f, 128.0f, 0.0f},
-                P{catalog::kModEnvRefractoryMs, 0.0f, 100.0f, 2.0f},
-                P{catalog::kModEnvVelocitySensitive, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModEnvIndependentCurves, 0.0f, 1.0f, 0.0f},
-                P{catalog::kModEnvAttackCurve, -1.0f, 1.0f, 0.0f},
-                P{catalog::kModEnvDecayCurve, -1.0f, 1.0f, 0.0f},
+                P{1, 0.1f, 500.0f, 2.0f},   // attack
+                P{2, 0.0f, 500.0f, 0.0f},   // hold
+                P{3, 1.0f, 2000.0f, 150.0f}, // decay
+                P{4, -1.0f, 1.0f, 0.0f},    // linked curve
+                P{5, 0.05f, 0.95f, 0.3f},   // threshold
+                P{6, 0.0f, 5000.0f, 0.0f},  // delay
+                P{7, 0.0f, 1.0f, 1.0f},     // depth
+                P{8, 0.0f, 1.0f, 0.0f},     // loop
+                P{9, 0.0f, 128.0f, 0.0f},   // loop count
+                P{10, 0.0f, 100.0f, 2.0f},  // refractory time
+                P{11, 0.0f, 1.0f, 0.0f},    // velocity sensitivity
+                P{12, 0.0f, 1.0f, 0.0f},    // independent curves
+                P{13, -1.0f, 1.0f, 0.0f},   // attack curve
+                P{14, -1.0f, 1.0f, 0.0f},   // decay curve
             },
         },
     };
