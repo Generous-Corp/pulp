@@ -48,6 +48,28 @@ CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
 
+# Diff coverage is a local pre-push mirror of the required PR gate, not the
+# full/nightly test lane. Keep its CTest selection aligned with the required
+# gate so a coverage check cannot spend tens of minutes in an unrelated slow
+# platform smoke or validator. Full/nightly/main CI invoke CTest separately and
+# continue to run these labels.
+DIFF_COVER_CTEST_LABEL_EXCLUDE="${PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE:-validation|slow|performance|bench|quality-lab}"
+
+run_coverage_ctest() {
+    local build_dir="$1"
+    local test_regex="${2:-}"
+    local args=(
+        --test-dir "${build_dir}"
+        --output-on-failure
+        --label-exclude "${DIFF_COVER_CTEST_LABEL_EXCLUDE}"
+    )
+    if [ -n "${test_regex}" ]; then
+        echo "[local_diff_cover] limiting ctest to regex: ${test_regex}" >&2
+        args+=(-R "${test_regex}")
+    fi
+    ctest "${args[@]}"
+}
+
 # The report lives beside the coverage data it describes, under this
 # worktree's build-cov. $TMPDIR is per-USER, not per-worktree, so a fixed
 # filename under it is a shared mailbox: concurrent runs from other worktrees
@@ -386,12 +408,7 @@ find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 
 echo "=== Running tests ==="
-CTEST_ARGS=(--test-dir "${BUILD_DIR}" --output-on-failure)
-if [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
-    echo "[local_diff_cover] limiting ctest to regex: ${PULP_DIFF_COVER_CTEST_REGEX}" >&2
-    CTEST_ARGS+=(-R "${PULP_DIFF_COVER_CTEST_REGEX}")
-fi
-ctest "${CTEST_ARGS[@]}" || \
+run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" || \
     echo "[local_diff_cover] WARN: ctest exited non-zero — generating partial report" >&2
 
 # Second ctest pass for the importer CLI cases. ctest's `-R` takes a single
@@ -404,8 +421,7 @@ ctest "${CTEST_ARGS[@]}" || \
 # an un-narrowed full run already covers these.
 if [ "${importer_diff_touched}" -eq 1 ] && [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
     echo "[local_diff_cover] running importer CLI ctest cases so their in-process coverage is attributed" >&2
-    ctest --test-dir "${BUILD_DIR}" --output-on-failure \
-        -R "${IMPORTER_COVERAGE_CTEST_REGEX}" \
+    run_coverage_ctest "${BUILD_DIR}" "${IMPORTER_COVERAGE_CTEST_REGEX}" \
         || echo "[local_diff_cover] WARN: importer ctest pass exited non-zero — continuing with partial report" >&2
 fi
 
@@ -414,8 +430,7 @@ fi
 # would be filtered out, leaving the slot coverage maps present but unexecuted.
 if [ "${hosted_slot_diff_touched}" -eq 1 ] && [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
     echo "[local_diff_cover] running hosted-slot no-alloc ctest cases for coverage attribution" >&2
-    ctest --test-dir "${BUILD_DIR}" --output-on-failure \
-        -R "${HOSTED_SLOT_COVERAGE_CTEST_REGEX}" \
+    run_coverage_ctest "${BUILD_DIR}" "${HOSTED_SLOT_COVERAGE_CTEST_REGEX}" \
         || echo "[local_diff_cover] WARN: hosted-slot ctest pass exited non-zero — continuing with partial report" >&2
 fi
 
