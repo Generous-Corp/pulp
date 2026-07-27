@@ -679,6 +679,12 @@ inline CustomNodeType make_speaker_cabinet_node() {
     return t;
 }
 
+/// Compatibility spelling retained for the original public design contract.
+/// Both names return the same stable node type and parameter surface.
+inline CustomNodeType make_speaker_emulation_node() {
+    return make_speaker_cabinet_node();
+}
+
 } // namespace cabinet
 
 }  // namespace pulp::host::space

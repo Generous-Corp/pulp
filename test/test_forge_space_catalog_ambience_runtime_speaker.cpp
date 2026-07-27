@@ -295,3 +295,63 @@ TEST_CASE("Forge speaker cabinet declares and renders its complete mono node",
                              pulp::signal::units::db_to_linear(
                                  pulp::signal::SpeakerModel::kOutputTrimDbMax)));
 }
+
+TEST_CASE("Forge speaker compatibility and baked-control contracts stay stable",
+          "[host][baked][param-injection][forge][forge-space][cabinet][rt-safety]") {
+    const auto type = cabinet::make_speaker_cabinet_node();
+    const auto compatibility = cabinet::make_speaker_emulation_node();
+    REQUIRE(compatibility.type_id == type.type_id);
+    REQUIRE(compatibility.baked_params.size() == type.baked_params.size());
+    REQUIRE(type.lowerable);
+
+    const std::array<pulp::state::ParamID, 14> ids{{
+        cabinet::kDriver, cabinet::kBox, cabinet::kVolumeL,
+        cabinet::kResonanceTrimSt, cabinet::kQ, cabinet::kBreakupPct,
+        cabinet::kTrebleHz, cabinet::kDriveDb, cabinet::kCompressionPct,
+        cabinet::kMicDistanceCm, cabinet::kMicPositionPct, cabinet::kMicAxisDeg,
+        cabinet::kDiffractionPct, cabinet::kOutputTrimDb,
+    }};
+    REQUIRE(type.baked_params.size() == ids.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        CHECK(type.baked_params[i].id == ids[i]);
+        CHECK(type.baked_params[i].min_value <= type.baked_params[i].default_value);
+        CHECK(type.baked_params[i].default_value <= type.baked_params[i].max_value);
+        CHECK(compatibility.baked_params[i].id == type.baked_params[i].id);
+        CHECK(compatibility.baked_params[i].min_value == type.baked_params[i].min_value);
+        CHECK(compatibility.baked_params[i].max_value == type.baked_params[i].max_value);
+        CHECK(compatibility.baked_params[i].default_value == type.baked_params[i].default_value);
+    }
+
+    auto render = [&](bool hostile) {
+        pulp::test::BakedNodeFixture<1> fx(type, kSr, kFrames);
+        auto injector = fx.claim_injector();
+        pulp::state::ParameterEventQueue q;
+        for (const auto& p : type.baked_params)
+            REQUIRE(q.push(immediate(p.id, hostile ? std::numeric_limits<float>::quiet_NaN()
+                                                   : p.max_value)));
+        REQUIRE(injector.inject(q) == InjectStatus::Ok);
+        auto input = pulp::test::sine_block(kFrames, 375.0, kSr, 0.2f);
+        if (hostile) input[31] = std::numeric_limits<float>::infinity();
+        std::vector<float> last;
+        for (int block = 0; block < 80; ++block) last = fx.render({input})[0];
+        REQUIRE(std::all_of(last.begin(), last.end(), [](float x) { return std::isfinite(x); }));
+        return last;
+    };
+    CHECK(render(false) == render(false));
+    render(true);
+
+    pulp::test::BakedNodeFixture<1> fx(type, kSr, kFrames);
+    auto injector = fx.claim_injector();
+    const auto input = pulp::test::sine_block(kFrames, 375.0, kSr, 0.2f);
+    pulp::test::ReusableRenderer<1> renderer(fx, {input});
+    std::vector<pulp::state::ParameterEventQueue> queues(type.baked_params.size());
+    for (std::size_t i = 0; i < type.baked_params.size(); ++i)
+        REQUIRE(queues[i].push(immediate(type.baked_params[i].id,
+                                         type.baked_params[i].max_value)));
+    pulp::test::RtAllocationProbe probe;
+    for (auto& q : queues) {
+        REQUIRE(injector.inject(q) == InjectStatus::Ok);
+        renderer.render();
+    }
+    REQUIRE(probe.allocation_count() == 0);
+}

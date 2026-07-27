@@ -1,5 +1,7 @@
 #include "test_forge_synthesis_catalog_support.hpp"
 
+#include <limits>
+
 TEST_CASE("synthesis catalog nodes declare the shapes their families need",
           "[host][baked][param-injection][forge][synthesis]") {
     const auto organ = additive::make_additive_bank_node(additive::Voice::organ);
@@ -122,6 +124,66 @@ TEST_CASE("granular catalog bakes its 1-to-2 live-ring path",
           static_cast<float>(signal::GranularEngine::kMaxGrainBudget) * 1.25f *
               static_cast<float>(signal::units::db_to_linear(
                   signal::GranularEngine::kMaxLevelDb)));
+}
+
+TEST_CASE("granular baked controls are complete, deterministic, and RT safe",
+          "[host][baked][param-injection][forge][synthesis][granular][rt-safety]") {
+    const auto type = granular::make_granular_node();
+    REQUIRE(type.type_id == granular::kTypeId);
+    REQUIRE(type.lowerable);
+    const std::array<state::ParamID, 10> ids{{
+        granular::kDensityHz, granular::kGrainMs, granular::kPosition,
+        granular::kPositionSprayMs, granular::kPitchSt, granular::kPitchSpraySt,
+        granular::kPanSpray, granular::kJitter, granular::kLevelDb, granular::kMix,
+    }};
+    REQUIRE(type.baked_params.size() == ids.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        CHECK(type.baked_params[i].id == ids[i]);
+        CHECK(type.baked_params[i].min_value < type.baked_params[i].max_value);
+        CHECK(type.baked_params[i].default_value >= type.baked_params[i].min_value);
+        CHECK(type.baked_params[i].default_value <= type.baked_params[i].max_value);
+    }
+
+    auto render = [&](bool hostile) {
+        GranularGraph graph;
+        state::ParameterEventQueue q;
+        for (const auto& p : type.baked_params)
+            REQUIRE(q.push(immediate(p.id, hostile ? std::numeric_limits<float>::quiet_NaN()
+                                                   : p.max_value)));
+        graph.inject(q);
+        std::uint32_t rng = 0xBADC0DEu;
+        std::vector<float> tail;
+        for (int block = 0; block < 48; ++block) {
+            for (auto& sample : graph.input()) {
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+                sample = static_cast<float>(static_cast<double>(rng) / 2147483648.0 - 1.0);
+            }
+            if (hostile && block == 12)
+                graph.input()[17] = std::numeric_limits<float>::infinity();
+            graph.render();
+            tail.insert(tail.end(), graph.left().begin(), graph.left().end());
+            tail.insert(tail.end(), graph.right().begin(), graph.right().end());
+        }
+        REQUIRE(std::all_of(tail.begin(), tail.end(), [](float x) { return std::isfinite(x); }));
+        return tail;
+    };
+    CHECK(render(false) == render(false));
+    render(true);
+
+    GranularGraph graph;
+    std::fill(graph.input().begin(), graph.input().end(), 0.125f);
+    std::vector<state::ParameterEventQueue> queues(type.baked_params.size());
+    for (std::size_t i = 0; i < type.baked_params.size(); ++i)
+        REQUIRE(queues[i].push(immediate(type.baked_params[i].id,
+                                         type.baked_params[i].max_value)));
+    pulp::test::RtAllocationProbe probe;
+    for (auto& q : queues) {
+        graph.inject(q);
+        graph.render();
+    }
+    REQUIRE(probe.allocation_count() == 0);
 }
 
 TEST_CASE("additive node speaks only when its gate CV opens",

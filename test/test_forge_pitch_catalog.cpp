@@ -49,8 +49,10 @@
 #include <pulp/host/forge_pitch_catalog.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -913,5 +915,70 @@ TEST_CASE("The harmony factory exposes the complete canonical parameter surface"
     for (float x : renderer.output()) REQUIRE(std::isfinite(x));
     pulp::test::RtAllocationProbe probe;
     for (int i = 0; i < 16; ++i) renderer.render();
+    REQUIRE(probe.allocation_count() == 0);
+}
+
+TEST_CASE("Harmony baked controls are stable, deterministic, and hostile-input safe",
+          "[host][baked][param-injection][forge][pitch][harmony][rt-safety]") {
+    const auto type = harmony::make_harmony_engine_node();
+    REQUIRE(type.type_id == harmony::kTypeId);
+    REQUIRE(type.lowerable);
+    REQUIRE(type.create);
+    REQUIRE(type.process_instance_baked_param);
+
+    const std::array<pulp::state::ParamID, 12> ids{{
+        harmony::kKey, harmony::kScale, harmony::kV1Interval, harmony::kV1Detune,
+        harmony::kV1Level, harmony::kV2Enable, harmony::kV2Interval,
+        harmony::kV2Detune, harmony::kV2Level, harmony::kGlideMs,
+        harmony::kDryLevel, harmony::kHumanize,
+    }};
+    REQUIRE(type.baked_params.size() == ids.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        CHECK(type.baked_params[i].id == ids[i]);
+        CHECK(type.baked_params[i].min_value <= type.baked_params[i].default_value);
+        CHECK(type.baked_params[i].default_value <= type.baked_params[i].max_value);
+    }
+    CHECK(type.baked_params[0].min_value == 0.0f);
+    CHECK(type.baked_params[0].max_value == 11.0f);
+    CHECK(type.baked_params[1].max_value ==
+          static_cast<float>(pulp::signal::kScaleCount - 1));
+    CHECK(type.baked_params[9].max_value ==
+          static_cast<float>(pulp::signal::HarmonyEngine::kGlideMsMax));
+    CHECK(type.baked_params[11].max_value ==
+          static_cast<float>(pulp::signal::HarmonyEngine::kHumanizeMaxCents));
+
+    auto render = [&](bool hostile) {
+        Fixture fx(type, kSr, kFrames);
+        auto injector = fx.claim_injector();
+        pulp::state::ParameterEventQueue q;
+        for (const auto& p : type.baked_params) {
+            const float value = hostile ? std::numeric_limits<float>::quiet_NaN()
+                                        : (p.id == harmony::kV2Enable ? 1.0f : p.max_value);
+            REQUIRE(q.push(immediate(p.id, value)));
+        }
+        REQUIRE(injector.inject(q) == InjectStatus::Ok);
+        auto input = sine_block(kFrames, 375.0, kSr, 0.25f);
+        if (hostile) input[kFrames / 2] = std::numeric_limits<float>::infinity();
+        std::vector<float> last;
+        for (int block = 0; block < 160; ++block) last = fx.render({input})[0];
+        REQUIRE(std::all_of(last.begin(), last.end(), [](float x) { return std::isfinite(x); }));
+        return last;
+    };
+    CHECK(render(false) == render(false));
+    render(true);
+
+    Fixture fx(type, kSr, kFrames);
+    auto injector = fx.claim_injector();
+    auto input = sine_block(kFrames, 375.0, kSr, 0.25f);
+    pulp::test::ReusableRenderer<1> renderer(fx, {input});
+    std::vector<pulp::state::ParameterEventQueue> queues(type.baked_params.size());
+    for (std::size_t i = 0; i < type.baked_params.size(); ++i)
+        REQUIRE(queues[i].push(immediate(type.baked_params[i].id,
+                                         type.baked_params[i].max_value)));
+    pulp::test::RtAllocationProbe probe;
+    for (auto& q : queues) {
+        REQUIRE(injector.inject(q) == InjectStatus::Ok);
+        renderer.render();
+    }
     REQUIRE(probe.allocation_count() == 0);
 }

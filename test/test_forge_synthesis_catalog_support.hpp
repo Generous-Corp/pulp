@@ -294,6 +294,10 @@ class GranularGraph {
         REQUIRE(injector_.inject(q) == InjectStatus::Ok);
     }
 
+    void inject(state::ParameterEventQueue& q) {
+        REQUIRE(injector_.inject(q) == InjectStatus::Ok);
+    }
+
     void render() {
         audio::BufferView<const float> in(in_ptrs_.data(), 1u, kFrames);
         audio::BufferView<float> out(out_ptrs_.data(), 2u, kFrames);
