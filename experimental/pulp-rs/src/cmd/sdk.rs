@@ -5,8 +5,9 @@
 //! Two SDK-cache subcommands are Rust-native:
 //!
 //! - **`status`** — enumerate installed SDK versions under
-//!   `$PULP_HOME/sdk/` (download cache) and `$PULP_HOME/sdk-local/`
-//!   (local-build cache). Pure filesystem read.
+//!   `$PULP_HOME/sdk/` (download cache), `$PULP_HOME/sdk-local/`
+//!   (version cache), and `$PULP_HOME/sdk-dev/` (immutable development
+//!   profiles). Pure filesystem read.
 //! - **`clean`** — remove both cache roots plus the scratch build
 //!   dir. Pure filesystem.
 //!
@@ -294,13 +295,18 @@ fn print_help(out: &mut impl Write) -> Result<()> {
     writeln!(out, "Subcommands:").map_err(io_err)?;
     writeln!(
         out,
-        "  status      Show installed SDK versions from $PULP_HOME/sdk{{,-local}}"
+        "  status      Show installed SDKs from $PULP_HOME/sdk{{,-local,-dev}}"
     )
     .map_err(io_err)?;
     writeln!(out, "  clean       Remove all cached SDK versions").map_err(io_err)?;
     writeln!(
         out,
         "  install     Download/cache SDK (delegates to C++ `pulp-cpp`)"
+    )
+    .map_err(io_err)?;
+    writeln!(
+        out,
+        "              Use `install --local --profile forge-dev --print-path` for an immutable Apple Silicon development SDK"
     )
     .map_err(io_err)?;
     writeln!(
@@ -316,10 +322,9 @@ fn print_help(out: &mut impl Write) -> Result<()> {
 pub struct SdkEntry {
     /// The version folder name (e.g. `0.40.0`).
     pub version: String,
-    /// `downloaded` for `$PULP_HOME/sdk/` entries, `local` for
-    /// `$PULP_HOME/sdk-local/<platform>/<version>/` entries.
+    /// `downloaded`, `local`, or `forge-dev`.
     pub kind: &'static str,
-    /// Optional platform tag — only set for `kind = "local"`.
+    /// Optional platform tag for local and development entries.
     pub platform: Option<String>,
     /// Absolute path to the SDK root.
     pub path: PathBuf,
@@ -385,6 +390,56 @@ pub fn list_entries(home: &Path) -> Vec<SdkEntry> {
         });
         out.extend(buf);
     }
+
+    let dev_root = home.join("sdk-dev");
+    let mut pending = vec![dev_root];
+    let mut dev_entries = Vec::new();
+    while let Some(dir) = pending.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            if entry.file_type().ok().is_some_and(|t| t.is_dir()) {
+                pending.push(entry.path());
+                continue;
+            }
+            if entry.file_name() != "sdk-provenance.json" {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(entry.path()) else {
+                continue;
+            };
+            let Ok(provenance) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                continue;
+            };
+            if provenance["schema"] != "pulp.sdk-provenance.v1"
+                || provenance["kind"] != "development"
+                || provenance["profile"] != "forge-dev"
+                || provenance["distribution_eligible"] != false
+                || provenance["source_git_dirty"] != false
+                || provenance["architectures"] != serde_json::json!(["arm64"])
+            {
+                continue;
+            }
+            let Some(version) = provenance["sdk_version"].as_str() else {
+                continue;
+            };
+            let platform = provenance["platform"].as_str().map(ToOwned::to_owned);
+            let provenance_path = entry.path();
+            let prefix = provenance_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or(provenance_path);
+            dev_entries.push(SdkEntry {
+                version: version.to_owned(),
+                kind: "forge-dev",
+                platform,
+                path: prefix,
+            });
+        }
+    }
+    dev_entries.sort_by(|a, b| a.path.cmp(&b.path));
+    out.extend(dev_entries);
     out
 }
 
@@ -419,7 +474,16 @@ fn do_status(home: &Path, json: bool, out: &mut impl Write) -> Result<()> {
         return Ok(());
     }
     for e in entries {
-        if let Some(ref plat) = e.platform {
+        if e.kind == "forge-dev" {
+            writeln!(
+                out,
+                "  v{} (forge-dev, development-only, {}) — {}",
+                e.version,
+                e.platform.as_deref().unwrap_or("unknown"),
+                e.path.display()
+            )
+            .map_err(io_err)?;
+        } else if let Some(ref plat) = e.platform {
             writeln!(
                 out,
                 "  v{} (local build, {}) — {}",
@@ -438,7 +502,14 @@ fn do_status(home: &Path, json: bool, out: &mut impl Write) -> Result<()> {
 
 fn do_clean(home: &Path, json: bool, out: &mut impl Write) -> Result<()> {
     let mut removed: Vec<PathBuf> = Vec::new();
-    for rel in ["sdk", "sdk-local", "sdk-build"] {
+    for rel in [
+        "sdk",
+        "sdk-local",
+        "sdk-build",
+        "sdk-dev",
+        "sdk-build-dev",
+        "sdk-source-dev",
+    ] {
         let dir = home.join(rel);
         if dir.exists() {
             std::fs::remove_dir_all(&dir).map_err(|e| CliError::io(&dir, e))?;
@@ -573,6 +644,26 @@ mod tests {
         std::fs::write(dir.join("PulpConfig.cmake"), "").unwrap();
     }
 
+    fn plant_forge_dev(home: &Path, version: &str) {
+        let dir = home
+            .join("sdk-dev")
+            .join("forge-v1")
+            .join("darwin-arm64")
+            .join("a".repeat(40))
+            .join("123456789abc");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("sdk-provenance.json"),
+            format!(
+                "{{\"schema\":\"pulp.sdk-provenance.v1\",\"kind\":\"development\",\
+                 \"profile\":\"forge-dev\",\"distribution_eligible\":false,\
+                 \"source_git_dirty\":false,\"architectures\":[\"arm64\"],\
+                 \"sdk_version\":\"{version}\",\"platform\":\"darwin-arm64\"}}"
+            ),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn status_reports_empty_state() {
         let td = tempfile::tempdir().unwrap();
@@ -609,17 +700,33 @@ mod tests {
     }
 
     #[test]
+    fn status_lists_non_distributable_forge_development_sdk() {
+        let td = tempfile::tempdir().unwrap();
+        plant_forge_dev(td.path(), "0.40.0");
+        let entries = list_entries(td.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "forge-dev");
+        assert_eq!(entries[0].platform.as_deref(), Some("darwin-arm64"));
+    }
+
+    #[test]
     fn clean_removes_cache_roots_and_reports_count() {
         let td = tempfile::tempdir().unwrap();
         plant_sdk(td.path(), "0.40.0");
         plant_local(td.path(), "linux-x64", "0.40.0");
         std::fs::create_dir_all(td.path().join("sdk-build")).unwrap();
+        std::fs::create_dir_all(td.path().join("sdk-dev")).unwrap();
+        std::fs::create_dir_all(td.path().join("sdk-build-dev")).unwrap();
+        std::fs::create_dir_all(td.path().join("sdk-source-dev")).unwrap();
         let mut buf = Vec::new();
         run_with_home(Sub::Clean, td.path(), true, &mut buf).unwrap();
         let v: Value = serde_json::from_slice(&buf).unwrap();
-        assert_eq!(v["count"], 3);
+        assert_eq!(v["count"], 6);
         assert!(!td.path().join("sdk").exists());
         assert!(!td.path().join("sdk-local").exists());
+        assert!(!td.path().join("sdk-dev").exists());
+        assert!(!td.path().join("sdk-build-dev").exists());
+        assert!(!td.path().join("sdk-source-dev").exists());
     }
 
     #[test]
@@ -746,6 +853,16 @@ mod tests {
         assert_eq!(s, Sub::Install);
 
         let s = parse_sub(&["install".to_owned(), "--local".to_owned()]).unwrap();
+        assert_eq!(s, Sub::Install);
+
+        let s = parse_sub(&[
+            "install".to_owned(),
+            "--local".to_owned(),
+            "--profile".to_owned(),
+            "forge-dev".to_owned(),
+            "--print-path".to_owned(),
+        ])
+        .unwrap();
         assert_eq!(s, Sub::Install);
     }
 

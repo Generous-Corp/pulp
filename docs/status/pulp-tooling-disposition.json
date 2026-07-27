@@ -2932,6 +2932,16 @@
                 "name": "--local",
                 "kind": "flag",
                 "required": false
+              },
+              {
+                "name": "--profile",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--print-path",
+                "kind": "flag",
+                "required": false
               }
             ],
             "subcommands": []
