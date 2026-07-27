@@ -960,3 +960,52 @@ exactly against `kTicksPerQuarter`, why the vendored `choc::midi::File` reader
 cannot back this path, and the byte-stream traps (running-status cancellation,
 system-exclusive framing, FIFO note matching) a hand-rolled decoder must get
 right.
+
+## Asset confinement is two layers, and they are not redundant
+
+A `PackageRelative` asset locator is checked twice, by checks with different
+powers. Do not remove either on the grounds that the other covers it.
+
+**Model (`core/timeline/src/model.cpp`, `valid_locator`)** — lexical only.
+`Project::create` refuses a hint that is absolute or contains `..`, so an
+escaping document cannot be constructed in memory, let alone serialized. This is
+the layer that makes a bad locator unrepresentable rather than merely unusable.
+
+**Loader (`tools/timeline/src/timeline_project_loader.cpp`,
+`resolve_package_relative_asset`)** — resolves. It runs `fs::canonical` and then
+`path_is_beneath(canonical_base, candidate)`.
+
+The case that shows why both exist: a hint like `media/link.wav` that is
+lexically spotless but whose target is a **symlink out of the package**. The
+model has no basis to refuse it — nothing about the string is wrong. Only
+canonicalization sees where it actually lands. Conversely the loader cannot help
+with a document that was never loaded through it, which is why the model check is
+not just belt-and-braces.
+
+When testing this, note that hostile documents can no longer be *built* through
+the API — the model refuses them. Author them by splicing the hint into
+serialized JSON, which is also more faithful: the constructor never runs on bytes
+someone else wrote. A refusal on that path surfaces as `"stage":"open"`, not
+`"stage":"render"`.
+
+## New public API in `core/timeline/include` needs a contract or docs fail
+
+`tools/build-api-docs.sh` runs `tools/scripts/timeline_api_docs_check.py` over
+the Doxygen XML and **exits non-zero** for any public callable without an API
+contract:
+
+```
+model.hpp:768: error: public callable lacks an API contract:
+  pulp::timeline::SequenceCompileStructureToken::valid
+```
+
+It is a real gate, not advisory, and it fires on `pull_request` via
+`docs-material.yml`'s `core/**/include/**` path filter. Add the contract in the
+same commit as the API — a one-line `///` summary is not enough if the callable
+takes parameters or returns something whose meaning is not obvious from its type.
+
+Run it locally before pushing a header change; it needs Doxygen but nothing else:
+
+```bash
+tools/build-api-docs.sh     # exits 1 and names the symbol
+```
