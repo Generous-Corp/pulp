@@ -829,6 +829,18 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
+- **Custom-node fixed latency.** `CustomNodeType::latency_samples` is a
+  prepare-stable base-rate sample count, regardless of internal oversampling.
+  Keep it in `[0, kMaxLatencySamples]`; both registrars reject out-of-range
+  values. The graph captures it only when a live callback resolves and feeds
+  the same metadata to legacy PDC, serial/parallel routed snapshots, prepared
+  edits, and host latency reporting. Lowering captures the registered value
+  separately, so a baked-only callback can be transparent live yet latent when
+  baked. Changing the value requires re-registration/re-prepare and a type
+  version bump when persisted graphs must distinguish the timing contract.
+  Derive catalog values from the DSP implementation (for example, Analog VCF's
+  fixed-2x FIR), never a duplicated host constant. Add dry/wet impulse parity
+  coverage across walk, routed, prepared-edit, and baked paths.
 - **Stateful custom nodes.** `CustomNodeType` has an
   optional lifecycle: set `create` and the graph owns one opaque instance per
   node (RAII via `destroy`); `process_instance` runs instead of the stateless
