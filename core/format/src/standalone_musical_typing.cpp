@@ -101,7 +101,11 @@ void StandaloneMusicalTyping::install_key_route(view::View& root) {
 void StandaloneMusicalTyping::add_menu_command(view::WindowOptions& options) {
     std::weak_ptr<CallbackState> weak_state = callback_state_;
     options.menu_commands.push_back({
-        .menu = "Window",
+        // Application menu (empty name), not "Window": a standalone Pulp app
+        // has one window, so a Window menu holding a single toggle is a menu
+        // the user has no other reason to open. The app menu is the first one
+        // they do open, and it is otherwise just Quit.
+        .menu = "",
         .title = "Musical Typing Keyboard",
         .key = view::KeyCode::k,
         .modifiers = platform_main_modifier(),
