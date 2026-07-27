@@ -829,20 +829,51 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
-- **Custom-node fixed latency.** `CustomNodeType::latency_samples` is a
-  prepare-stable base-rate sample count, regardless of internal oversampling.
-  Keep it in `[0, kMaxLatencySamples]`; both registrars reject out-of-range
-  values. The graph captures it only when a live callback resolves and feeds
-  the same metadata to legacy PDC, serial/parallel routed snapshots, prepared
-  edits, and host latency reporting. Lowering captures the registered value
-  separately, so a baked-only callback can be transparent live yet latent when
-  baked. A transport-aware execution path with non-zero latency must also resolve
-  a plain fallback; PDC cannot vary with per-block transport presence.
-  Changing the value requires re-registration/re-prepare and a type
-  version bump when persisted graphs must distinguish the timing contract.
-  Derive catalog values from the DSP implementation (for example, Analog VCF's
-  fixed-2x FIR), never a duplicated host constant. Add dry/wet impulse parity
-  coverage across walk, routed, prepared-edit, and baked paths.
+- **Custom-node intrinsic latency is a CALLBACK, not a count.**
+  `CustomNodeType::latency_samples` is `std::function<int(double sample_rate)>`,
+  returning a prepare-stable base-rate sample count regardless of internal
+  oversampling. It is a callback because intrinsic latency is routinely
+  rate-dependent — a lookahead declared in milliseconds, an oversampler's
+  half-band group delay — so a fixed count could only ever be correct at one
+  rate. A rate-independent latency is `[](double) { return n; }`. Empty means
+  zero, which preserves the historical zero-latency contract.
+
+  Three consequences that are easy to get wrong:
+
+  1. **Range is NOT checked at registration.** The registrars cannot range-check
+     a value that does not exist until a sample rate does. `is_valid_registration()`
+     checks structure only; the EVALUATED result is clamped into
+     `[0, kMaxLatencySamples]` where it is first produced — the live compile path
+     and `bake()`. Do not write a test asserting the registrar rejects an
+     out-of-range latency; assert the clamp against a prepared graph instead.
+  2. **A baked processor's latency is resolved by `prepare()`, not by its
+     constructor.** `BakedGraphProcessor::latency_samples()` reads
+     `prepared_latency_samples_`, which is 0 until prepare() supplies a rate.
+     Querying it straight after `bake()` legitimately returns 0 — that is the
+     honest answer to "how much latency at a rate I have not been told yet",
+     not a bug to work around by assuming 48 kHz.
+  3. **Latency attaches only when a callback will actually execute.** A
+     registered type with no live callback is transparent on the live graph and
+     must not add latency there; the same gate applies in `bake()` against the
+     node's plain OR baked-param callback. This is why a baked-only node can be
+     transparent live yet latent when baked.
+
+  `is_valid_registration()` is the ONE validation entry point — shape, the
+  transport-fallback rule, AND the bake-layer obligations (coherent
+  `baked_params`/`process_instance_baked_param` pairing, finite non-inverted
+  ranges, unique non-zero ids, complete lifecycle, `lowerable` runnability).
+  Every registrar routes through it: the direct one, the transactional prepared
+  edit, and the node-adding leaf. Do not add a parallel free-function validator
+  — an earlier split let a registrar validate shape only, which silently
+  accepted malformed baked-param declarations that then degraded to passthrough.
+
+  A transport-aware execution path that declares latency must also resolve a
+  plain fallback; PDC cannot vary with per-block transport presence. Changing
+  the value requires re-registration/re-prepare and a type version bump when
+  persisted graphs must distinguish the timing contract. Derive catalog values
+  from the DSP implementation (for example, Analog VCF's fixed-2x FIR), never a
+  duplicated host constant. Add dry/wet impulse parity coverage across walk,
+  routed, prepared-edit, and baked paths.
 - **Stateful custom nodes.** `CustomNodeType` has an
   optional lifecycle: set `create` and the graph owns one opaque instance per
   node (RAII via `destroy`); `process_instance` runs instead of the stateless
