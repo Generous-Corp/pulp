@@ -1,0 +1,3121 @@
+{
+  "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
+  "counts": {
+    "catalogs": 22,
+    "type_ids": 100,
+    "factories": 62,
+    "baked_params": 374
+  },
+  "catalogs": [
+    {
+      "header": "core/host/include/pulp/host/forge_analog_vcf_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kAnalogVcfJunoTypeId",
+          "value": "vcf.juno"
+        },
+        {
+          "constant": "kAnalogVcfJupiterTypeId",
+          "value": "vcf.jupiter"
+        },
+        {
+          "constant": "kAnalogVcfProphet5TypeId",
+          "value": "vcf.prophet5"
+        },
+        {
+          "constant": "kAnalogVcfMinimoogTypeId",
+          "value": "vcf.minimoog"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_analog_vcf_node",
+          "baked_params": [
+            {
+              "id": "kAnalogVcfCutoff",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kAnalogVcfCutoffMod",
+              "min": "-5.0f",
+              "max": "5.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kAnalogVcfResonance",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kAnalogVcfDriveDb",
+              "min": "-24.0f",
+              "max": "48.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_catalog_index.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_character_delay_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kCleanTypeId",
+          "value": "delay.clean"
+        },
+        {
+          "constant": "kVintageTypeId",
+          "value": "delay.vintage"
+        },
+        {
+          "constant": "kTapeTypeId",
+          "value": "delay.tape"
+        },
+        {
+          "constant": "kBbdTypeId",
+          "value": "delay.bbd"
+        },
+        {
+          "constant": "kDiffusionTypeId",
+          "value": "delay.diffusion"
+        },
+        {
+          "constant": "kTapePhysicalTypeId",
+          "value": "delay.tape_physical"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_character_delay_node",
+          "baked_params": [
+            {
+              "id": "kTimeMs",
+              "min": "1.0f",
+              "max": "kMaxTimeMs",
+              "default": "350.0f"
+            },
+            {
+              "id": "kTimeOffset",
+              "min": "0.5f",
+              "max": "1.5f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kFeedback",
+              "min": "0.0f",
+              "max": "1.1f",
+              "default": "0.35f"
+            },
+            {
+              "id": "kCrossfeed",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kCharacter",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kModRate",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.3f"
+            },
+            {
+              "id": "kModDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDuck",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFreeze",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kReverse",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_distortion_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kToGroundX1TypeId",
+          "value": "distortion.to_ground.x1"
+        },
+        {
+          "constant": "kToGroundX2TypeId",
+          "value": "distortion.to_ground.x2"
+        },
+        {
+          "constant": "kToGroundX4TypeId",
+          "value": "distortion.to_ground.x4"
+        },
+        {
+          "constant": "kToGroundX8TypeId",
+          "value": "distortion.to_ground.x8"
+        },
+        {
+          "constant": "kInLoopX1TypeId",
+          "value": "distortion.in_loop.x1"
+        },
+        {
+          "constant": "kInLoopX2TypeId",
+          "value": "distortion.in_loop.x2"
+        },
+        {
+          "constant": "kInLoopX4TypeId",
+          "value": "distortion.in_loop.x4"
+        },
+        {
+          "constant": "kInLoopX8TypeId",
+          "value": "distortion.in_loop.x8"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_distortion_node",
+          "baked_params": [
+            {
+              "id": "kDriveDb",
+              "min": "kDriveDbMin",
+              "max": "kDriveDbMax",
+              "default": "kDriveDbDefault"
+            },
+            {
+              "id": "kSymmetry",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDiodeModel",
+              "min": "0.0f",
+              "max": "2.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPreToneHz",
+              "min": "200.0f",
+              "max": "8000.0f",
+              "default": "720.0f"
+            },
+            {
+              "id": "kPreGainDb",
+              "min": "static_cast<float>(-signal::ToneStack::kPreGainDbMax)",
+              "max": "static_cast<float>(signal::ToneStack::kPreGainDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPostToneHz",
+              "min": "500.0f",
+              "max": "12000.0f",
+              "default": "4000.0f"
+            },
+            {
+              "id": "kToneMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kOutputDb",
+              "min": "kOutputDbMin",
+              "max": "kOutputDbMax",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_drum_catalog.hpp",
+      "type_ids": [],
+      "nodes": [
+        {
+          "factory": "make_drum_node",
+          "baked_params": []
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_drum_catalog_contract.hpp",
+      "type_ids": [
+        {
+          "constant": "kKickOscillatorTypeId",
+          "value": "drum.kick.oscillator"
+        },
+        {
+          "constant": "kKickResonantTypeId",
+          "value": "drum.kick.resonant"
+        },
+        {
+          "constant": "kKickCircuitTypeId",
+          "value": "drum.kick.circuit"
+        },
+        {
+          "constant": "kSnareTypeId",
+          "value": "drum.snare"
+        },
+        {
+          "constant": "kHatTypeId",
+          "value": "drum.hat"
+        },
+        {
+          "constant": "kClapTypeId",
+          "value": "drum.clap"
+        },
+        {
+          "constant": "kTomGenericTypeId",
+          "value": "drum.tom.generic"
+        },
+        {
+          "constant": "kTomSimmonsTypeId",
+          "value": "drum.tom.simmons"
+        },
+        {
+          "constant": "kCymbalTypeId",
+          "value": "drum.cymbal.comb"
+        },
+        {
+          "constant": "kMembraneTypeId",
+          "value": "drum.membrane.modal"
+        },
+        {
+          "constant": "kStringTypeId",
+          "value": "drum.string.karplus-strong"
+        },
+        {
+          "constant": "kZapTypeId",
+          "value": "drum.zap.cz"
+        },
+        {
+          "constant": "kFm2TypeId",
+          "value": "drum.fm2"
+        },
+        {
+          "constant": "kFm6TypeId",
+          "value": "drum.fm6"
+        },
+        {
+          "constant": "kFm8TypeId",
+          "value": "drum.fm8"
+        }
+      ],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kFeedforwardCompressorTypeId",
+          "value": "dynamics.feedforward_compressor"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "dynamics.vca_compressor"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "dynamics.fet_compressor"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "dynamics.diode_bridge_compressor"
+        },
+        {
+          "constant": "kFeedforwardTypeId",
+          "value": "dynamics.diode_bridge_compressor_feedforward"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_feedforward_compressor_node",
+          "baked_params": [
+            {
+              "id": "kThresholdDb",
+              "min": "static_cast<float>(Comp::kThresholdDbMin)",
+              "max": "static_cast<float>(Comp::kThresholdDbMax)",
+              "default": "-18.0f"
+            },
+            {
+              "id": "kRatio",
+              "min": "static_cast<float>(Comp::kRatioMin)",
+              "max": "static_cast<float>(Comp::kRatioMax)",
+              "default": "4.0f"
+            },
+            {
+              "id": "kKneeDb",
+              "min": "static_cast<float>(Comp::kKneeDbMin)",
+              "max": "static_cast<float>(Comp::kKneeDbMax)",
+              "default": "6.0f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "static_cast<float>(Comp::kAttackMsMin)",
+              "max": "static_cast<float>(Comp::kAttackMsMax)",
+              "default": "10.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "static_cast<float>(Comp::kReleaseMsMin)",
+              "max": "static_cast<float>(Comp::kReleaseMsMax)",
+              "default": "120.0f"
+            },
+            {
+              "id": "kDetectorMode",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kRmsWindowMs",
+              "min": "static_cast<float>(Comp::kRmsWindowMsMin)",
+              "max": "static_cast<float>(Comp::kRmsWindowMsMax)",
+              "default": "10.0f"
+            },
+            {
+              "id": "kProgramDependent",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kMakeupDb",
+              "min": "-static_cast<float>(Comp::kMakeupDbMax)",
+              "max": "static_cast<float>(Comp::kMakeupDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kAutoMakeup",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kStereoLink",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_vca_compressor_node",
+          "baked_params": [
+            {
+              "id": "kThresholdDb",
+              "min": "static_cast<float>(Comp::kThresholdDbMin)",
+              "max": "static_cast<float>(Comp::kThresholdDbMax)",
+              "default": "-20.0f"
+            },
+            {
+              "id": "kRatio",
+              "min": "static_cast<float>(Comp::kRatioMin)",
+              "max": "static_cast<float>(Comp::kRatioMax)",
+              "default": "4.0f"
+            },
+            {
+              "id": "kKneeDb",
+              "min": "static_cast<float>(Comp::kKneeDbMin)",
+              "max": "static_cast<float>(Comp::kKneeDbMax)",
+              "default": "10.0f"
+            },
+            {
+              "id": "kTimeMs",
+              "min": "static_cast<float>(Comp::kTimeMsMin)",
+              "max": "static_cast<float>(Comp::kTimeMsMax)",
+              "default": "30.0f"
+            },
+            {
+              "id": "kMakeupDb",
+              "min": "-static_cast<float>(Comp::kMakeupDbMax)",
+              "max": "static_cast<float>(Comp::kMakeupDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kNegativeRatio",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kNegRatioAmount",
+              "min": "static_cast<float>(Comp::kNegRatioMin)",
+              "max": "static_cast<float>(Comp::kNegRatioMax)",
+              "default": "-4.0f"
+            },
+            {
+              "id": "kCeilingDb",
+              "min": "static_cast<float>(Comp::kCeilingDbMin)",
+              "max": "static_cast<float>(Comp::kCeilingDbMax)",
+              "default": "static_cast<float>(Comp::kCeilingDbDefault)"
+            }
+          ]
+        },
+        {
+          "factory": "make_fet_compressor_node",
+          "baked_params": [
+            {
+              "id": "kInputGainDb",
+              "min": "static_cast<float>(Comp::kInputGainDbMin)",
+              "max": "static_cast<float>(Comp::kInputGainDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kOutputGainDb",
+              "min": "static_cast<float>(Comp::kOutputGainDbMin)",
+              "max": "static_cast<float>(Comp::kOutputGainDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kRatio",
+              "min": "0.0f",
+              "max": "kRatioSteps",
+              "default": "0.0f"
+            },
+            {
+              "id": "kAttackUs",
+              "min": "static_cast<float>(Comp::kAttackUsMin)",
+              "max": "static_cast<float>(Comp::kAttackUsMax)",
+              "default": "200.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "static_cast<float>(Comp::kReleaseMsMin)",
+              "max": "static_cast<float>(Comp::kReleaseMsMax)",
+              "default": "300.0f"
+            },
+            {
+              "id": "kKneeDb",
+              "min": "static_cast<float>(Comp::kKneeDbMin)",
+              "max": "static_cast<float>(Comp::kKneeDbMax)",
+              "default": "1.0f"
+            },
+            {
+              "id": "kTransformerAmount",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.6f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_diode_bridge_compressor_node",
+          "baked_params": [
+            {
+              "id": "kThresholdDb",
+              "min": "static_cast<float>(Comp::kThresholdDbMin)",
+              "max": "static_cast<float>(Comp::kThresholdDbMax)",
+              "default": "-12.0f"
+            },
+            {
+              "id": "kRatio",
+              "min": "static_cast<float>(Comp::kRatioMin)",
+              "max": "static_cast<float>(Comp::kRatioMax)",
+              "default": "4.0f"
+            },
+            {
+              "id": "kKneeDb",
+              "min": "static_cast<float>(Comp::kKneeDbMin)",
+              "max": "static_cast<float>(Comp::kKneeDbMax)",
+              "default": "6.0f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "static_cast<float>(Comp::kAttackMsMin)",
+              "max": "static_cast<float>(Comp::kAttackMsMax)",
+              "default": "3.0f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "static_cast<float>(Comp::kReleaseMsMin)",
+              "max": "static_cast<float>(Comp::kReleaseMsMax)",
+              "default": "400.0f"
+            },
+            {
+              "id": "kMakeupDb",
+              "min": "0.0f",
+              "max": "static_cast<float>(Comp::kMakeupDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kCharacter",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.35f"
+            },
+            {
+              "id": "kMixPercent",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kScHpfHz",
+              "min": "static_cast<float>(Comp::kScHpfHzMin)",
+              "max": "static_cast<float>(Comp::kScHpfHzMax)",
+              "default": "100.0f"
+            },
+            {
+              "id": "kAutoRelease",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_effect_modulation_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kSsbFrequencyShifterTypeId",
+          "value": "modulation.frequency_shifter_ssb"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "modulation.vibrato.univibe"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_frequency_shifter_node",
+          "baked_params": [
+            {
+              "id": "kShiftHz",
+              "min": "static_cast<float>(-Shifter::kMaxShiftHz)",
+              "max": "static_cast<float>(Shifter::kMaxShiftHz)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFeedback",
+              "min": "0.0f",
+              "max": "static_cast<float>(Shifter::kMaxFeedback)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFeedbackDelayMs",
+              "min": "static_cast<float>(Shifter::kMinDelayMs)",
+              "max": "static_cast<float>(Shifter::kMaxLoopMs)",
+              "default": "8.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kShiftMode",
+              "min": "kModeUp",
+              "max": "kModeStereoSplit",
+              "default": "kModeUp"
+            },
+            {
+              "id": "kStereoSpread",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_chorus_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(kRateMinHz)",
+              "max": "static_cast<float>(kRateMaxHz)",
+              "default": "static_cast<float>(Engine::calibration(voicing).rate_hz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "mix_default"
+            },
+            {
+              "id": "kStereoWidth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_phaser_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(kRateMinHz)",
+              "max": "static_cast<float>(kRateMaxHz)",
+              "default": "static_cast<float>(Engine::kRateDefaultHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kCenterHz",
+              "min": "static_cast<float>(kCenterMinHz)",
+              "max": "static_cast<float>(kCenterMaxHz)",
+              "default": "400.0f"
+            },
+            {
+              "id": "kFeedback",
+              "min": "-static_cast<float>(Engine::kFeedbackMax)",
+              "max": "static_cast<float>(Engine::kFeedbackMax)",
+              "default": "static_cast<float>(Engine::kColorOffFeedback)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kMixDefault * 100.0)"
+            },
+            {
+              "id": "kStereoSpread",
+              "min": "0.0f",
+              "max": "0.5f",
+              "default": "0.25f"
+            },
+            {
+              "id": "kStaggerRatio",
+              "min": "static_cast<float>(Engine::kStaggerMin)",
+              "max": "static_cast<float>(Engine::kStaggerMax)",
+              "default": "static_cast<float>(Engine::kStaggerDefault)"
+            },
+            {
+              "id": "kWave",
+              "min": "kWaveSine",
+              "max": "kWaveSmoothRandom",
+              "default": "kWaveTriangle"
+            }
+          ]
+        },
+        {
+          "factory": "make_delay_vibrato_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "floor_hz",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "std::max(floor_hz, static_cast<float>(Engine::kDefaultRateHz))"
+            },
+            {
+              "id": "kDepthCents",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxDepthCents)",
+              "default": "static_cast<float>(Engine::kDefaultDepthCents)"
+            },
+            {
+              "id": "kDelayMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFadeInMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxLifecycleMs)",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_phase_vibrato_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(Engine::kMinRateHz)",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "static_cast<float>(Engine::kDefaultRateHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
+            },
+            {
+              "id": "kCenterHz",
+              "min": "static_cast<float>(Engine::kMinCenterHz)",
+              "max": "static_cast<float>(Engine::kMaxCenterHz)",
+              "default": "static_cast<float>(Engine::kDefaultCenterHz)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultMix * 100.0)"
+            }
+          ]
+        },
+        {
+          "factory": "make_univibe_node",
+          "baked_params": [
+            {
+              "id": "kRateHz",
+              "min": "static_cast<float>(Engine::kMinRateHz)",
+              "max": "static_cast<float>(Engine::kMaxRateHz)",
+              "default": "static_cast<float>(Engine::kDefaultRateHz)"
+            },
+            {
+              "id": "kDepth",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDefaultDepth * 100.0)"
+            },
+            {
+              "id": "kMode",
+              "min": "kModeVibrato",
+              "max": "kModeChorus",
+              "default": "kModeVibrato"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_fdn_reverb_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kRoomTypeId",
+          "value": "reverb.room"
+        },
+        {
+          "constant": "kHallTypeId",
+          "value": "reverb.hall"
+        },
+        {
+          "constant": "kGalaxyTypeId",
+          "value": "reverb.galaxy"
+        },
+        {
+          "constant": "kShimmerTypeId",
+          "value": "reverb.shimmer"
+        },
+        {
+          "constant": "kLofiTypeId",
+          "value": "reverb.lofi"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_fdn_reverb_node",
+          "baked_params": []
+        }
+      ],
+      "shared_param_declarers": [
+        {
+          "function": "declare_params",
+          "baked_params": [],
+          "baked_params_computed_at_runtime": true,
+          "note": "Builds its params from a spec table at construction time; ids are not literals."
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_fuzz_catalog.hpp",
+      "type_ids": [],
+      "nodes": [
+        {
+          "factory": "make_fuzz_node",
+          "baked_params": [
+            {
+              "id": "kFuzz",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.65f"
+            },
+            {
+              "id": "kBiasStarve",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kSourceKohm",
+              "min": "0.1f",
+              "max": "1000.0f",
+              "default": "10.0f"
+            },
+            {
+              "id": "kOutputDb",
+              "min": "-24.0f",
+              "max": "24.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kDriftEnabled",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_lofi_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kDelayTypeId",
+          "value": "forge_lofi_delay"
+        },
+        {
+          "constant": "kFilterTypeId",
+          "value": "forge_lofi_filter"
+        },
+        {
+          "constant": "kWaveshaperTypeId",
+          "value": "forge_lofi_waveshaper"
+        },
+        {
+          "constant": "kDryWetTypeId",
+          "value": "forge_lofi_drywet"
+        },
+        {
+          "constant": "kNoiseTypeId",
+          "value": "forge_lofi_noise"
+        },
+        {
+          "constant": "kBitcrushTypeId",
+          "value": "forge_lofi_bitcrush"
+        },
+        {
+          "constant": "kTrimTypeId",
+          "value": "forge_lofi_trim"
+        },
+        {
+          "constant": "kPingPongTypeId",
+          "value": "forge_lofi_ping_pong"
+        },
+        {
+          "constant": "kReverbTypeId",
+          "value": "forge_lofi_reverb"
+        },
+        {
+          "constant": "kCompressorTypeId",
+          "value": "forge_lofi_compressor"
+        },
+        {
+          "constant": "kGateTypeId",
+          "value": "forge_lofi_gate"
+        },
+        {
+          "constant": "kFilterHighpassTypeId",
+          "value": "forge_lofi_filter_highpass"
+        },
+        {
+          "constant": "kFilterBandpassTypeId",
+          "value": "forge_lofi_filter_bandpass"
+        },
+        {
+          "constant": "kFilterNotchTypeId",
+          "value": "forge_lofi_filter_notch"
+        },
+        {
+          "constant": "kLfoTypeId",
+          "value": "forge_lofi_lfo"
+        },
+        {
+          "constant": "kVcaTypeId",
+          "value": "forge_lofi_vca"
+        },
+        {
+          "constant": "kEnvFollowerTypeId",
+          "value": "forge_lofi_env_follower"
+        },
+        {
+          "constant": "kFilterCvTypeId",
+          "value": "forge_lofi_filter_cv"
+        },
+        {
+          "constant": "kDelayCvTypeId",
+          "value": "forge_lofi_delay_cv"
+        },
+        {
+          "constant": "kAutoPanTypeId",
+          "value": "forge_lofi_auto_pan"
+        },
+        {
+          "constant": "kWidthTypeId",
+          "value": "forge_lofi_width"
+        },
+        {
+          "constant": "kPhaserTypeId",
+          "value": "forge_lofi_phaser"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_delay_node",
+          "baked_params": [
+            {
+              "id": "kDelayTimeMs",
+              "min": "1.0f",
+              "max": "kDelayMaxMs",
+              "default": "250.0f"
+            },
+            {
+              "id": "kDelayFeedback",
+              "min": "0.0f",
+              "max": "0.95f",
+              "default": "0.5f"
+            }
+          ]
+        },
+        {
+          "factory": "make_filter_node",
+          "baked_params": [
+            {
+              "id": "kFilterCutoffHz",
+              "min": "20.0f",
+              "max": "20000.0f",
+              "default": "20000.0f"
+            },
+            {
+              "id": "kFilterResonance",
+              "min": "0.5f",
+              "max": "12.0f",
+              "default": "0.707f"
+            }
+          ]
+        },
+        {
+          "factory": "make_waveshaper_node",
+          "baked_params": [
+            {
+              "id": "kWaveshaperDrive",
+              "min": "1.0f",
+              "max": "64.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_drywet_node",
+          "baked_params": [
+            {
+              "id": "kDryWetMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            }
+          ]
+        },
+        {
+          "factory": "make_noise_node",
+          "baked_params": [
+            {
+              "id": "kNoiseLevel",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_bitcrush_node",
+          "baked_params": [
+            {
+              "id": "kBitcrushBitDepth",
+              "min": "1.0f",
+              "max": "16.0f",
+              "default": "16.0f"
+            },
+            {
+              "id": "kBitcrushRateDiv",
+              "min": "1.0f",
+              "max": "64.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_trim_node",
+          "baked_params": [
+            {
+              "id": "kTrimGainDb",
+              "min": "-24.0f",
+              "max": "24.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_ping_pong_node",
+          "baked_params": [
+            {
+              "id": "kPingPongTimeMs",
+              "min": "1.0f",
+              "max": "kDelayMaxMs",
+              "default": "350.0f"
+            },
+            {
+              "id": "kPingPongFeedback",
+              "min": "0.0f",
+              "max": "0.95f",
+              "default": "0.45f"
+            },
+            {
+              "id": "kPingPongWidth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_reverb_node",
+          "baked_params": [
+            {
+              "id": "kReverbDecay",
+              "min": "0.1f",
+              "max": "10.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kReverbDamping",
+              "min": "0.0f",
+              "max": "0.99f",
+              "default": "0.3f"
+            },
+            {
+              "id": "kReverbMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.3f"
+            }
+          ]
+        },
+        {
+          "factory": "make_compressor_node",
+          "baked_params": [
+            {
+              "id": "kCompThresholdDb",
+              "min": "-60.0f",
+              "max": "0.0f",
+              "default": "-18.0f"
+            },
+            {
+              "id": "kCompRatio",
+              "min": "1.0f",
+              "max": "20.0f",
+              "default": "4.0f"
+            },
+            {
+              "id": "kCompAttackMs",
+              "min": "0.1f",
+              "max": "100.0f",
+              "default": "10.0f"
+            },
+            {
+              "id": "kCompReleaseMs",
+              "min": "10.0f",
+              "max": "1000.0f",
+              "default": "150.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_gate_node",
+          "baked_params": [
+            {
+              "id": "kGateThresholdDb",
+              "min": "-80.0f",
+              "max": "0.0f",
+              "default": "-50.0f"
+            },
+            {
+              "id": "kGateAttackMs",
+              "min": "0.1f",
+              "max": "50.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kGateHoldMs",
+              "min": "0.0f",
+              "max": "500.0f",
+              "default": "50.0f"
+            },
+            {
+              "id": "kGateReleaseMs",
+              "min": "10.0f",
+              "max": "1000.0f",
+              "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_lfo_node",
+          "baked_params": [
+            {
+              "id": "kLfoRateHz",
+              "min": "0.01f",
+              "max": "40.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kLfoDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kLfoShape",
+              "min": "0.0f",
+              "max": "3.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_vca_node",
+          "baked_params": [
+            {
+              "id": "kVcaGain",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_env_follower_node",
+          "baked_params": [
+            {
+              "id": "kEnvAttackMs",
+              "min": "0.1f",
+              "max": "500.0f",
+              "default": "10.0f"
+            },
+            {
+              "id": "kEnvReleaseMs",
+              "min": "1.0f",
+              "max": "2000.0f",
+              "default": "150.0f"
+            },
+            {
+              "id": "kEnvSensitivity",
+              "min": "0.1f",
+              "max": "8.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kEnvInvert",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_filter_cv_node",
+          "baked_params": [
+            {
+              "id": "kFilterCvBaseHz",
+              "min": "20.0f",
+              "max": "20000.0f",
+              "default": "500.0f"
+            },
+            {
+              "id": "kFilterCvAmountOct",
+              "min": "0.0f",
+              "max": "8.0f",
+              "default": "3.0f"
+            },
+            {
+              "id": "kFilterCvResonance",
+              "min": "0.5f",
+              "max": "12.0f",
+              "default": "3.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_delay_cv_node",
+          "baked_params": [
+            {
+              "id": "kDelayCvBaseMs",
+              "min": "0.1f",
+              "max": "50.0f",
+              "default": "15.0f"
+            },
+            {
+              "id": "kDelayCvDepthMs",
+              "min": "0.0f",
+              "max": "25.0f",
+              "default": "5.0f"
+            },
+            {
+              "id": "kDelayCvFeedback",
+              "min": "0.0f",
+              "max": "0.95f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDelayCvMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            }
+          ]
+        },
+        {
+          "factory": "make_auto_pan_node",
+          "baked_params": [
+            {
+              "id": "kAutoPanRateHz",
+              "min": "0.01f",
+              "max": "20.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kAutoPanDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kAutoPanShape",
+              "min": "0.0f",
+              "max": "3.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_width_node",
+          "baked_params": [
+            {
+              "id": "kWidthAmount",
+              "min": "0.0f",
+              "max": "2.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_phaser_node",
+          "baked_params": [
+            {
+              "id": "kPhaserRateHz",
+              "min": "0.01f",
+              "max": "20.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kPhaserDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.7f"
+            },
+            {
+              "id": "kPhaserFeedback",
+              "min": "0.0f",
+              "max": "0.9f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kPhaserStages",
+              "min": "2.0f",
+              "max": "8.0f",
+              "default": "4.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_modulation_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kModLfoTypeId",
+          "value": "forge_mod_lfo"
+        },
+        {
+          "constant": "kModLpgTypeId",
+          "value": "forge_mod_lpg"
+        },
+        {
+          "constant": "kModSlewTypeId",
+          "value": "forge_mod_slew"
+        },
+        {
+          "constant": "kModTransientTypeId",
+          "value": "forge_mod_transient"
+        },
+        {
+          "constant": "kModEnvTypeId",
+          "value": "forge_mod_env"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_mod_lfo_node",
+          "baked_params": [
+            {
+              "id": "kModLfoRateHz",
+              "min": "0.001f",
+              "max": "2000.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kModLfoDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kModLfoWave",
+              "min": "0.0f",
+              "max": "6.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoPulseWidth",
+              "min": "0.05f",
+              "max": "0.95f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kModLfoRandomBlend",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoDelayMs",
+              "min": "0.0f",
+              "max": "5000.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoFadeInMs",
+              "min": "0.0f",
+              "max": "5000.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoShapeMorph",
+              "min": "0.0f",
+              "max": "3.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoMorphEnabled",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoTriangleBias",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoRandomSegments",
+              "min": "1.0f",
+              "max": "static_cast<float>(signal::Lfo::kMaxRandomSegments)",
+              "default": "static_cast<float>(signal::Lfo::kDefaultRandomSegments)"
+            },
+            {
+              "id": "kModLfoPhaseDegrees",
+              "min": "0.0f",
+              "max": "360.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoFadeOutMs",
+              "min": "0.0f",
+              "max": "5000.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoFadeQuadratic",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLfoRepeatCount",
+              "min": "0.0f",
+              "max": "static_cast<float>(signal::Lfo::kMaxRepeatCount)",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_mod_lpg_node",
+          "baked_params": [
+            {
+              "id": "kModLpgDecayMs",
+              "min": "20.0f",
+              "max": "2000.0f",
+              "default": "150.0f"
+            },
+            {
+              "id": "kModLpgColour",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kModLpgDroop",
+              "min": "0.0f",
+              "max": "0.95f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kModLpgBrightnessHz",
+              "min": "500.0f",
+              "max": "12000.0f",
+              "default": "12000.0f"
+            },
+            {
+              "id": "kModLpgStruck",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModLpgRiseMs",
+              "min": "0.05f",
+              "max": "100.0f",
+              "default": "static_cast<float>(signal::Lpg::kRiseMs)"
+            },
+            {
+              "id": "kModLpgDarknessHz",
+              "min": "signal::Lpg::kMinFcHz",
+              "max": "500.0f",
+              "default": "signal::Lpg::kDefaultFcMinHz"
+            },
+            {
+              "id": "kModLpgStrikeThreshold",
+              "min": "0.01f",
+              "max": "0.99f",
+              "default": "kDefaultModLpgStrikeThreshold"
+            },
+            {
+              "id": "kModLpgRefractoryMs",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "2.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_mod_slew_node",
+          "baked_params": [
+            {
+              "id": "kModSlewRiseMs",
+              "min": "0.0f",
+              "max": "2000.0f",
+              "default": "20.0f"
+            },
+            {
+              "id": "kModSlewFallMs",
+              "min": "0.0f",
+              "max": "2000.0f",
+              "default": "20.0f"
+            },
+            {
+              "id": "kModSlewCurved",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_mod_transient_node",
+          "baked_params": [
+            {
+              "id": "kModTransientFastMs",
+              "min": "0.5f",
+              "max": "20.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kModTransientSlowMs",
+              "min": "10.0f",
+              "max": "500.0f",
+              "default": "40.0f"
+            },
+            {
+              "id": "kModTransientSensitivity",
+              "min": "0.1f",
+              "max": "8.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kModTransientInvert",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_mod_env_node",
+          "baked_params": [
+            {
+              "id": "kModEnvAttackMs",
+              "min": "0.1f",
+              "max": "500.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kModEnvHoldMs",
+              "min": "0.0f",
+              "max": "500.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvDecayMs",
+              "min": "1.0f",
+              "max": "2000.0f",
+              "default": "150.0f"
+            },
+            {
+              "id": "kModEnvCurve",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvThreshold",
+              "min": "0.05f",
+              "max": "0.95f",
+              "default": "0.3f"
+            },
+            {
+              "id": "kModEnvDelayMs",
+              "min": "0.0f",
+              "max": "5000.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kModEnvLoop",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvLoopCount",
+              "min": "0.0f",
+              "max": "128.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvRefractoryMs",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kModEnvVelocitySensitive",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvIndependentCurves",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvAttackCurve",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kModEnvDecayCurve",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_pitch_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "pitch.whammy"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "pitch.harmony_engine"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_whammy_node",
+          "baked_params": [
+            {
+              "id": "kPedal",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPedalMode",
+              "min": "kModeWhammy",
+              "max": "kModeDive",
+              "default": "kModeWhammy"
+            },
+            {
+              "id": "kShiftSource",
+              "min": "kSourcePedal",
+              "max": "kSourceDirect",
+              "default": "kSourcePedal"
+            },
+            {
+              "id": "kShiftSemitones",
+              "min": "static_cast<float>(S::kShiftSemisMin)",
+              "max": "static_cast<float>(S::kShiftSemisMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kHeelSemis",
+              "min": "static_cast<float>(S::kShiftSemisMin)",
+              "max": "static_cast<float>(S::kShiftSemisMax)",
+              "default": "static_cast<float>(S::kHeelSemisDefault)"
+            },
+            {
+              "id": "kToeSemis",
+              "min": "static_cast<float>(S::kShiftSemisMin)",
+              "max": "static_cast<float>(S::kShiftSemisMax)",
+              "default": "static_cast<float>(S::kToeSemisDefault)"
+            },
+            {
+              "id": "kIntervalASemis",
+              "min": "-24.0f",
+              "max": "24.0f",
+              "default": "static_cast<float>(S::kIntervalASemisDefault)"
+            },
+            {
+              "id": "kIntervalBSemis",
+              "min": "-24.0f",
+              "max": "24.0f",
+              "default": "static_cast<float>(S::kIntervalBSemisDefault)"
+            },
+            {
+              "id": "kDetuneCents",
+              "min": "-static_cast<float>(S::kDetuneCentsMax)",
+              "max": "static_cast<float>(S::kDetuneCentsMax)",
+              "default": "static_cast<float>(S::kDetuneCentsDefault)"
+            },
+            {
+              "id": "kDiveFloorSemis",
+              "min": "static_cast<float>(S::kDiveFloorSemisMin)",
+              "max": "static_cast<float>(S::kDiveFloorSemisMax)",
+              "default": "static_cast<float>(S::kDiveFloorSemisDefault)"
+            },
+            {
+              "id": "kGlideUpMs",
+              "min": "static_cast<float>(S::kGlideMsMin)",
+              "max": "static_cast<float>(S::kGlideMsMax)",
+              "default": "static_cast<float>(S::kGlideMsDefault)"
+            },
+            {
+              "id": "kGlideDownMs",
+              "min": "static_cast<float>(S::kGlideMsMin)",
+              "max": "static_cast<float>(S::kGlideMsMax)",
+              "default": "static_cast<float>(S::kGlideMsDefault)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "whammy_default_mix_for_mode(signal::PedalMode::whammy)"
+            },
+            {
+              "id": "kDetents",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kInterp",
+              "min": "kInterpLinear",
+              "max": "kInterpCubic",
+              "default": "kInterpLinear"
+            },
+            {
+              "id": "kDriftDepth",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_harmony_engine_node",
+          "baked_params": [
+            {
+              "id": "kKey",
+              "min": "0.0f",
+              "max": "11.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kScale",
+              "min": "0.0f",
+              "max": "static_cast<float>(signal::kScaleCount - 1)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kV1Interval",
+              "min": "-14.0f",
+              "max": "14.0f",
+              "default": "static_cast<float>(Engine::kV1IntervalDefault)"
+            },
+            {
+              "id": "kV1Detune",
+              "min": "static_cast<float>(-Engine::kDetuneMaxCents)",
+              "max": "static_cast<float>(Engine::kDetuneMaxCents)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kV1Level",
+              "min": "static_cast<float>(Engine::kLevelMinDb)",
+              "max": "static_cast<float>(Engine::kLevelMaxDb)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kV2Enable",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kV2Interval",
+              "min": "-14.0f",
+              "max": "14.0f",
+              "default": "static_cast<float>(Engine::kV2IntervalDefault)"
+            },
+            {
+              "id": "kV2Detune",
+              "min": "static_cast<float>(-Engine::kDetuneMaxCents)",
+              "max": "static_cast<float>(Engine::kDetuneMaxCents)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kV2Level",
+              "min": "static_cast<float>(Engine::kLevelMinDb)",
+              "max": "static_cast<float>(Engine::kLevelMaxDb)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kGlideMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kGlideMsMax)",
+              "default": "static_cast<float>(Engine::kGlideMsDefault)"
+            },
+            {
+              "id": "kDryLevel",
+              "min": "static_cast<float>(Engine::kLevelMinDb)",
+              "max": "static_cast<float>(Engine::kLevelMaxDb)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kHumanize",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kHumanizeMaxCents)",
+              "default": "static_cast<float>(Engine::kHumanizeDefault)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_saturator_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTanhTypeId",
+          "value": "saturator.tanh"
+        },
+        {
+          "constant": "kAtanTypeId",
+          "value": "saturator.atan"
+        },
+        {
+          "constant": "kCubicTypeId",
+          "value": "saturator.cubic"
+        },
+        {
+          "constant": "kSinhArcTypeId",
+          "value": "saturator.sinh_arc"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_saturator_node",
+          "baked_params": [
+            {
+              "id": "kDriveDb",
+              "min": "static_cast<float>(Sat::kDriveDbMin)",
+              "max": "static_cast<float>(Sat::kDriveDbMax)",
+              "default": "static_cast<float>(Sat::kDriveDbDefault)"
+            },
+            {
+              "id": "kBias",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kTonePreHz",
+              "min": "0.0f",
+              "max": "static_cast<float>(Sat::kTonePreHzMax)",
+              "default": "static_cast<float>(Sat::kTonePreHzDefault)"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kOutputTrimDb",
+              "min": "-static_cast<float>(Sat::kOutputTrimDbMax)",
+              "max": "static_cast<float>(Sat::kOutputTrimDbMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kToneTracking",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kToneDeHz",
+              "min": "0.0f",
+              "max": "static_cast<float>(Sat::kTonePreHzMax)",
+              "default": "static_cast<float>(Sat::kTonePreHzDefault)"
+            },
+            {
+              "id": "kPreBoostDb",
+              "min": "0.0f",
+              "max": "static_cast<float>(Sat::kPreBoostDbMax)",
+              "default": "static_cast<float>(Sat::kPreBoostDbDefault)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_sequencing_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.stage_seq"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.cartesian_walk"
+        },
+        {
+          "constant": "kRowMajorTypeId",
+          "value": "sequencing.cartesian_walk_row_major"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.rungler"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.quantize_scale"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.gate_logic"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "sequencing.prob_gate"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_stage_seq_node",
+          "baked_params": [
+            {
+              "id": "kRun",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kNumStages",
+              "min": "1.0f",
+              "max": "static_cast<float>(Seq::kMaxStages)",
+              "default": "8.0f"
+            },
+            {
+              "id": "kDirection",
+              "min": "0.0f",
+              "max": "3.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kSlideMs",
+              "min": "1.0f",
+              "max": "500.0f",
+              "default": "static_cast<float>(Seq::kSlideMs)"
+            },
+            {
+              "id": "kRepeatDutyPct",
+              "min": "10.0f",
+              "max": "90.0f",
+              "default": "static_cast<float>(Seq::kRepeatDuty * 100.0)"
+            }
+          ]
+        },
+        {
+          "factory": "make_cartesian_walk_node",
+          "baked_params": [
+            {
+              "id": "kRun",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kGridW",
+              "min": "1.0f",
+              "max": "static_cast<float>(Walk::kMaxDim)",
+              "default": "static_cast<float>(Walk::kDefaultDim)"
+            },
+            {
+              "id": "kGridH",
+              "min": "1.0f",
+              "max": "static_cast<float>(Walk::kMaxDim)",
+              "default": "static_cast<float>(Walk::kDefaultDim)"
+            },
+            {
+              "id": "kXOffset",
+              "min": "-static_cast<float>(Walk::kMaxDim)",
+              "max": "static_cast<float>(Walk::kMaxDim)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kYOffset",
+              "min": "-static_cast<float>(Walk::kMaxDim)",
+              "max": "static_cast<float>(Walk::kMaxDim)",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_rungler_node",
+          "baked_params": [
+            {
+              "id": "kRun",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kDacBits",
+              "min": "static_cast<float>(Rung::kMinDacBits)",
+              "max": "static_cast<float>(Rung::kMaxDacBits)",
+              "default": "static_cast<float>(Rung::kDefaultDacBits)"
+            },
+            {
+              "id": "kFeedbackTap",
+              "min": "0.0f",
+              "max": "static_cast<float>(normalized_reg_bits - 2)",
+              "default": "static_cast<float>(Rung::kFeedbackTap)"
+            },
+            {
+              "id": "kRangeV",
+              "min": "0.5f",
+              "max": "5.0f",
+              "default": "static_cast<float>(Rung::kRangeV)"
+            },
+            {
+              "id": "kExternalData",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDataIn",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_quantize_scale_node",
+          "baked_params": [
+            {
+              "id": "kMode",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kEdoN",
+              "min": "1.0f",
+              "max": "static_cast<float>(Quant::kMaxEdo)",
+              "default": "static_cast<float>(Quant::kDefaultEdo)"
+            },
+            {
+              "id": "kScaleMask",
+              "min": "0.0f",
+              "max": "4095.0f",
+              "default": "static_cast<float>(Quant::kMajorMask)"
+            },
+            {
+              "id": "kRootPc",
+              "min": "0.0f",
+              "max": "11.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kHystCents",
+              "min": "0.0f",
+              "max": "50.0f",
+              "default": "static_cast<float>(Quant::kHystCents)"
+            },
+            {
+              "id": "kReset",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_gate_logic_node",
+          "baked_params": [
+            {
+              "id": "kOp",
+              "min": "0.0f",
+              "max": "5.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_prob_gate_node",
+          "baked_params": [
+            {
+              "id": "kProbabilityPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Prob::kDefaultProbability * 100.0)"
+            },
+            {
+              "id": "kReset",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_space_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "space.convolution_reverb"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "space.nonlin_ambience"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "space.speaker_cabinet"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_convolution_reverb_node",
+          "baked_params": [
+            {
+              "id": "kIrGainDb",
+              "min": "static_cast<float>(Engine::kIrGainDbMin)",
+              "max": "static_cast<float>(Engine::kIrGainDbMax)",
+              "default": "static_cast<float>(Engine::kIrGainDbDefault)"
+            },
+            {
+              "id": "kPredelayMs",
+              "min": "static_cast<float>(Engine::kPredelayMsMin)",
+              "max": "static_cast<float>(Engine::kPredelayMsMax)",
+              "default": "static_cast<float>(Engine::kPredelayMsDefault)"
+            },
+            {
+              "id": "kWetPercent",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kWetPercentDefault)"
+            },
+            {
+              "id": "kDryPercent",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDryPercentDefault)"
+            },
+            {
+              "id": "kWidthPercent",
+              "min": "static_cast<float>(Engine::kWidthPercentMin)",
+              "max": "static_cast<float>(Engine::kWidthPercentMax)",
+              "default": "static_cast<float>(Engine::kWidthPercentDefault)"
+            },
+            {
+              "id": "kLowcutHz",
+              "min": "static_cast<float>(Engine::kLowcutHzMin)",
+              "max": "static_cast<float>(Engine::kLowcutHzMax)",
+              "default": "static_cast<float>(Engine::kLowcutHzDefault)"
+            },
+            {
+              "id": "kHighcutHz",
+              "min": "static_cast<float>(Engine::kHighcutHzMin)",
+              "max": "static_cast<float>(Engine::kHighcutHzMax)",
+              "default": "static_cast<float>(Engine::kHighcutHzDefault)"
+            }
+          ]
+        },
+        {
+          "factory": "make_nonlin_ambience_node",
+          "baked_params": [
+            {
+              "id": "kProgram",
+              "min": "0.0f",
+              "max": "kProgramSteps",
+              "default": "0.0f"
+            },
+            {
+              "id": "kLengthMs",
+              "min": "kLengthMsMin",
+              "max": "static_cast<float>(normalized_max_length_ms)",
+              "default": "std::min(kLengthMsDefault, static_cast<float>(normalized_max_length_ms))"
+            },
+            {
+              "id": "kPredelayMs",
+              "min": "0.0f",
+              "max": "kPredelayMsMax",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDensityPct",
+              "min": "kDensityPctMin",
+              "max": "100.0f",
+              "default": "static_cast<float>(cal::kDensityRefPct)"
+            },
+            {
+              "id": "kDensityGrowth",
+              "min": "0.0f",
+              "max": "2.0f",
+              "default": "static_cast<float>(cal::kGammaDefault)"
+            },
+            {
+              "id": "kGateHoldPct",
+              "min": "kGateHoldPctMin",
+              "max": "kGateHoldPctMax",
+              "default": "static_cast<float>(cal::kGateHold * 100.0)"
+            },
+            {
+              "id": "kAttackPct",
+              "min": "kAttackPctMin",
+              "max": "kAttackPctMax",
+              "default": "static_cast<float>(cal::kRevRise * 100.0)"
+            },
+            {
+              "id": "kDiffusion",
+              "min": "0.0f",
+              "max": "static_cast<float>(cal::kDiffusionMax)",
+              "default": "static_cast<float>(cal::kDiffusionDefault)"
+            },
+            {
+              "id": "kTone",
+              "min": "-1.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kHfDampHz",
+              "min": "1000.0f",
+              "max": "18000.0f",
+              "default": "static_cast<float>(cal::kFcDark)"
+            },
+            {
+              "id": "kWidthPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            },
+            {
+              "id": "kConverterAmount",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kOutputGainDb",
+              "min": "-kOutputGainDbMax",
+              "max": "kOutputGainDbMax",
+              "default": "0.0f"
+            },
+            {
+              "id": "kMixPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "100.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_speaker_cabinet_node",
+          "baked_params": [
+            {
+              "id": "kDriver",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kArchetypeCount - 1)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kBox",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kVolumeL",
+              "min": "static_cast<float>(Engine::kBoxVolumeLMin)",
+              "max": "static_cast<float>(Engine::kBoxVolumeLMax)",
+              "default": "static_cast<float>(Engine::kBoxVolumeLDefault)"
+            },
+            {
+              "id": "kResonanceTrimSt",
+              "min": "static_cast<float>(Engine::kResonanceTrimSemitonesMin)",
+              "max": "static_cast<float>(Engine::kResonanceTrimSemitonesMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kQ",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kQResonanceMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kBreakupPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kConeBreakupAmountDefault)"
+            },
+            {
+              "id": "kTrebleHz",
+              "min": "static_cast<float>(Engine::kTrebleRolloffHzMin)",
+              "max": "static_cast<float>(Engine::kTrebleRolloffHzMax)",
+              "default": "static_cast<float>(Engine::kTrebleRolloffHzDefault)"
+            },
+            {
+              "id": "kDriveDb",
+              "min": "static_cast<float>(Engine::kDriveDbMin)",
+              "max": "static_cast<float>(Engine::kDriveDbMax)",
+              "default": "static_cast<float>(Engine::kDriveDbDefault)"
+            },
+            {
+              "id": "kCompressionPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kCompressionAmountDefault)"
+            },
+            {
+              "id": "kMicDistanceCm",
+              "min": "static_cast<float>(Engine::kMicDistanceCmMin)",
+              "max": "static_cast<float>(Engine::kMicDistanceCmMax)",
+              "default": "static_cast<float>(Engine::kMicDistanceCmDefault)"
+            },
+            {
+              "id": "kMicPositionPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kMicPositionPctDefault)"
+            },
+            {
+              "id": "kMicAxisDeg",
+              "min": "static_cast<float>(Engine::kMicAxisDegMin)",
+              "max": "static_cast<float>(Engine::kMicAxisDegMax)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDiffractionPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDiffractionAmountDefault)"
+            },
+            {
+              "id": "kOutputTrimDb",
+              "min": "static_cast<float>(Engine::kOutputTrimDbMin)",
+              "max": "static_cast<float>(Engine::kOutputTrimDbMax)",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_speaker_emulation_node",
+          "baked_params": []
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_synthesis_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kOrganTypeId",
+          "value": "synthesis.additive_organ"
+        },
+        {
+          "constant": "kBellTypeId",
+          "value": "synthesis.additive_bell"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "synthesis.vocoder"
+        },
+        {
+          "constant": "kShortTypeId",
+          "value": "synthesis.cyclic_stretch_short"
+        },
+        {
+          "constant": "kLongTypeId",
+          "value": "synthesis.cyclic_stretch_long"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "synthesis.granular_live"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_additive_bank_node",
+          "baked_params": [
+            {
+              "id": "kFundamentalHz",
+              "min": "static_cast<float>(Bank::kFundamentalMinHz)",
+              "max": "static_cast<float>(Bank::kFundamentalMaxHz)",
+              "default": "static_cast<float>(Bank::kFundamentalDefaultHz)"
+            },
+            {
+              "id": "kPartialCount",
+              "min": "1.0f",
+              "max": "static_cast<float>(partials)",
+              "default": "static_cast<float>(std::min(Bank::kPartialCountDefault, partials))"
+            },
+            {
+              "id": "kInharmonicity",
+              "min": "0.0f",
+              "max": "static_cast<float>(Bank::kInharmonicityMax)",
+              "default": "static_cast<float>(Bank::kInharmonicityDefault)"
+            },
+            {
+              "id": "kSpectralTilt",
+              "min": "static_cast<float>(Bank::kSpectralTiltMinDbOct)",
+              "max": "static_cast<float>(Bank::kSpectralTiltMaxDbOct)",
+              "default": "static_cast<float>(Bank::kSpectralTiltDefaultDbOct)"
+            },
+            {
+              "id": "kMasterGainDb",
+              "min": "static_cast<float>(Bank::kMasterGainMinDb)",
+              "max": "static_cast<float>(Bank::kMasterGainMaxDb)",
+              "default": "static_cast<float>(Bank::kMasterGainDefaultDb)"
+            },
+            {
+              "id": "kEnvelopeMode",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kRetrigPhase",
+              "min": "0.0f",
+              "max": "2.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "static_cast<float>(Bank::kAttackMinMs)",
+              "max": "static_cast<float>(Bank::kAttackMaxMs)",
+              "default": "static_cast<float>(Bank::kAttackDefaultMs)"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "static_cast<float>(Bank::kReleaseMinMs)",
+              "max": "static_cast<float>(Bank::kReleaseMaxMs)",
+              "default": "static_cast<float>(Bank::kReleaseDefaultMs)"
+            },
+            {
+              "id": "kDetuneCents",
+              "min": "0.0f",
+              "max": "static_cast<float>(Bank::kDetuneMaxCents)",
+              "default": "static_cast<float>(Bank::kDetuneDefaultCents)"
+            }
+          ]
+        },
+        {
+          "factory": "make_vocoder_node",
+          "baked_params": [
+            {
+              "id": "kBandCount",
+              "min": "static_cast<float>(Voc::kMinBands)",
+              "max": "static_cast<float>(Voc::kMaxBands)",
+              "default": "16.0f"
+            },
+            {
+              "id": "kFreqLoHz",
+              "min": "static_cast<float>(Voc::kFreqLoMinHz)",
+              "max": "static_cast<float>(Voc::kFreqLoMaxHz)",
+              "default": "120.0f"
+            },
+            {
+              "id": "kFreqHiHz",
+              "min": "static_cast<float>(Voc::kFreqHiMinHz)",
+              "max": "static_cast<float>(Voc::kFreqHiMaxHz)",
+              "default": "7000.0f"
+            },
+            {
+              "id": "kCarrierSource",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kInternalWave",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kInternalPw",
+              "min": "static_cast<float>(Voc::kPulseWidthMin)",
+              "max": "static_cast<float>(Voc::kPulseWidthMax)",
+              "default": "0.5f"
+            },
+            {
+              "id": "kCarrierPitchHz",
+              "min": "static_cast<float>(Voc::kMinPitchHz)",
+              "max": "static_cast<float>(Voc::kMaxPitchHz)",
+              "default": "static_cast<float>(Voc::kDefaultPitchHz)"
+            },
+            {
+              "id": "kNoiseMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.15f"
+            },
+            {
+              "id": "kAttackMs",
+              "min": "static_cast<float>(Voc::kAttackMinMs)",
+              "max": "static_cast<float>(Voc::kAttackMaxMs)",
+              "default": "1.5f"
+            },
+            {
+              "id": "kReleaseMs",
+              "min": "static_cast<float>(Voc::kReleaseMinMs)",
+              "max": "static_cast<float>(Voc::kReleaseMaxMs)",
+              "default": "15.0f"
+            },
+            {
+              "id": "kUnvoicedSens",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kSibilanceMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.35f"
+            },
+            {
+              "id": "kFormantShiftSt",
+              "min": "static_cast<float>(Voc::kFormantShiftMinSt)",
+              "max": "static_cast<float>(Voc::kFormantShiftMaxSt)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kFormantFreeze",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kOutputTrimDb",
+              "min": "static_cast<float>(Voc::kOutputTrimMinDb)",
+              "max": "static_cast<float>(Voc::kOutputTrimMaxDb)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kDryWet",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_cyclic_stretch_node",
+          "baked_params": [
+            {
+              "id": "kStretch",
+              "min": "static_cast<float>(Engine::kStretchRatioMin)",
+              "max": "static_cast<float>(Engine::kStretchRatioMax)",
+              "default": "static_cast<float>(Engine::kStretchRatioDefault)"
+            },
+            {
+              "id": "kCaptureMs",
+              "min": "static_cast<float>(Engine::kCaptureMsMin)",
+              "max": "static_cast<float>(Engine::kCaptureMsMax)",
+              "default": "static_cast<float>(Engine::kCaptureMsDefault)"
+            },
+            {
+              "id": "kCrossfadeShape",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "static_cast<float>(settings.crossfade_shape)"
+            },
+            {
+              "id": "kMixPct",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kMixDefault)"
+            },
+            {
+              "id": "kOutputDb",
+              "min": "static_cast<float>(Engine::kOutputDbMin)",
+              "max": "static_cast<float>(Engine::kOutputDbMax)",
+              "default": "static_cast<float>(Engine::kOutputDbDefault)"
+            }
+          ]
+        },
+        {
+          "factory": "make_granular_node",
+          "baked_params": [
+            {
+              "id": "kDensityHz",
+              "min": "static_cast<float>(Engine::kMinDensityHz)",
+              "max": "static_cast<float>(Engine::kMaxDensityHz)",
+              "default": "20.0f"
+            },
+            {
+              "id": "kGrainMs",
+              "min": "static_cast<float>(Engine::kMinGrainMs)",
+              "max": "static_cast<float>(Engine::kMaxGrainMs)",
+              "default": "80.0f"
+            },
+            {
+              "id": "kPosition",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPositionSprayMs",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxPositionSprayMs)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPitchSt",
+              "min": "static_cast<float>(-Engine::kMaxPitchSemitones)",
+              "max": "static_cast<float>(Engine::kMaxPitchSemitones)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPitchSpraySt",
+              "min": "0.0f",
+              "max": "static_cast<float>(Engine::kMaxPitchSpraySemitones)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kPanSpray",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kJitter",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kLevelDb",
+              "min": "static_cast<float>(Engine::kMinLevelDb)",
+              "max": "static_cast<float>(Engine::kMaxLevelDb)",
+              "default": "0.0f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_tape_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kAmpexTypeId",
+          "value": "tape.ampex350_440"
+        },
+        {
+          "constant": "kStuderTypeId",
+          "value": "tape.studer_a800"
+        },
+        {
+          "constant": "kCassetteTypeId",
+          "value": "tape.cassette"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_tape_machine_node",
+          "baked_params": [
+            {
+              "id": "kEqCurve",
+              "min": "static_cast<float>(curves.min_curve)",
+              "max": "static_cast<float>(curves.max_curve)",
+              "default": "static_cast<float>(preset.default_curve)"
+            },
+            {
+              "id": "kBias",
+              "min": "static_cast<float>(Machine::kBiasMin)",
+              "max": "static_cast<float>(Machine::kBiasMax)",
+              "default": "static_cast<float>(Machine::kBiasDefault)"
+            },
+            {
+              "id": "kDrive",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "static_cast<float>(Machine::kDriveDefault)"
+            },
+            {
+              "id": "kAge",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "static_cast<float>(preset.age01)"
+            },
+            {
+              "id": "kCrosstalkDb",
+              "min": "static_cast<float>(Machine::kCrosstalkDbMin)",
+              "max": "static_cast<float>(Machine::kCrosstalkDbMax)",
+              "default": "static_cast<float>(preset.crosstalk_db)"
+            },
+            {
+              "id": "kCompanding",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "preset.companding ? 1.0f : 0.0f"
+            },
+            {
+              "id": "kPrintThroughDb",
+              "min": "static_cast<float>(Machine::kPrintThroughDbMin)",
+              "max": "static_cast<float>(Machine::kPrintThroughDbMax)",
+              "default": "static_cast<float>(signal::tape::age_print_through_db(preset.age01))"
+            },
+            {
+              "id": "kPrintOffsetMs",
+              "min": "static_cast<float>(Machine::kPrintThroughOffsetMsMin)",
+              "max": "static_cast<float>(Machine::kPrintThroughOffsetMsMax)",
+              "default": "print_offset_default"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_drum_catalog_impl.hpp",
+      "type_ids": [],
+      "nodes": [
+        {
+          "factory": "make_drum_node_impl",
+          "baked_params": []
+        }
+      ],
+      "shared_param_declarers": [
+        {
+          "function": "add",
+          "baked_params": [],
+          "baked_params_computed_at_runtime": true,
+          "note": "Builds its params from a spec table at construction time; ids are not literals."
+        }
+      ]
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_drum_catalog_instance.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_drum_catalog_processing.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
+      "type_ids": [
+        {
+          "constant": "kTypeId",
+          "value": "modulation.flanger"
+        },
+        {
+          "constant": "kTypeId",
+          "value": "modulation.leslie"
+        },
+        {
+          "constant": "kScannerTypeId",
+          "value": "modulation.scanner_vibrato"
+        }
+      ],
+      "nodes": [
+        {
+          "factory": "make_flanger_node",
+          "baked_params": [
+            {
+              "id": "kRate",
+              "min": "static_cast<float>(Engine::kRateMinHz)",
+              "max": "static_cast<float>(Engine::kRateMaxHz)",
+              "default": "0.5f"
+            },
+            {
+              "id": "kDepth",
+              "min": "static_cast<float>(Engine::kDepthMinMs)",
+              "max": "static_cast<float>(Engine::kDepthMaxMs)",
+              "default": "1.5f"
+            },
+            {
+              "id": "kCenter",
+              "min": "static_cast<float>(Engine::kCenterMinMs)",
+              "max": "static_cast<float>(Engine::kCenterMaxMs)",
+              "default": "3.0f"
+            },
+            {
+              "id": "kFeedback",
+              "min": "static_cast<float>(-Engine::kFbClamp)",
+              "max": "static_cast<float>(Engine::kFbClamp)",
+              "default": "0.6f"
+            },
+            {
+              "id": "kMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kSpreadDeg",
+              "min": "0.0f",
+              "max": "180.0f",
+              "default": "90.0f"
+            },
+            {
+              "id": "kPolarity",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kEngine",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kBarberpoleHz",
+              "min": "static_cast<float>(-Engine::kBarberpoleShiftMaxHz)",
+              "max": "static_cast<float>(Engine::kBarberpoleShiftMaxHz)",
+              "default": "3.0f"
+            },
+            {
+              "id": "kWave",
+              "min": "0.0f",
+              "max": "6.0f",
+              "default": "0.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_leslie_node",
+          "baked_params": [
+            {
+              "id": "kSpeed",
+              "min": "0.0f",
+              "max": "2.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kHornFast",
+              "min": "5.5f",
+              "max": "7.5f",
+              "default": "6.7f"
+            },
+            {
+              "id": "kHornSlow",
+              "min": "0.6f",
+              "max": "1.0f",
+              "default": "0.8f"
+            },
+            {
+              "id": "kDrumFast",
+              "min": "4.5f",
+              "max": "6.5f",
+              "default": "5.7f"
+            },
+            {
+              "id": "kDrumSlow",
+              "min": "0.5f",
+              "max": "0.9f",
+              "default": "0.6f"
+            },
+            {
+              "id": "kHornAccel",
+              "min": "0.3f",
+              "max": "3.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kDrumAccel",
+              "min": "1.0f",
+              "max": "8.0f",
+              "default": "3.0f"
+            },
+            {
+              "id": "kCrossover",
+              "min": "700.0f",
+              "max": "900.0f",
+              "default": "800.0f"
+            },
+            {
+              "id": "kHornRadius",
+              "min": "0.1f",
+              "max": "0.25f",
+              "default": "0.18f"
+            },
+            {
+              "id": "kDrumRadius",
+              "min": "0.08f",
+              "max": "0.18f",
+              "default": "0.12f"
+            },
+            {
+              "id": "kAmDepth",
+              "min": "0.0f",
+              "max": "0.9f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kDirDepth",
+              "min": "0.0f",
+              "max": "12.0f",
+              "default": "6.0f"
+            },
+            {
+              "id": "kDirCorner",
+              "min": "1000.0f",
+              "max": "4000.0f",
+              "default": "2000.0f"
+            },
+            {
+              "id": "kDrumDirDepth",
+              "min": "0.0f",
+              "max": "6.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kDBias",
+              "min": "0.2f",
+              "max": "1.0f",
+              "default": "0.5f"
+            },
+            {
+              "id": "kMicAngle",
+              "min": "0.0f",
+              "max": "90.0f",
+              "default": "45.0f"
+            },
+            {
+              "id": "kMicDistance",
+              "min": "0.3f",
+              "max": "3.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kReflectionDb",
+              "min": "-60.0f",
+              "max": "-6.0f",
+              "default": "-12.0f"
+            },
+            {
+              "id": "kReflections",
+              "min": "1.0f",
+              "max": "4.0f",
+              "default": "2.0f"
+            },
+            {
+              "id": "kReflDelay",
+              "min": "2.5f",
+              "max": "6.0f",
+              "default": "3.5f"
+            },
+            {
+              "id": "kReflSpacing",
+              "min": "1.0f",
+              "max": "3.0f",
+              "default": "1.5f"
+            },
+            {
+              "id": "kReflCorner",
+              "min": "1000.0f",
+              "max": "8000.0f",
+              "default": "3000.0f"
+            },
+            {
+              "id": "kDrift",
+              "min": "0.0f",
+              "max": "10.0f",
+              "default": "3.0f"
+            },
+            {
+              "id": "kWetMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "1.0f"
+            }
+          ]
+        },
+        {
+          "factory": "make_scanner_vibrato_node",
+          "baked_params": [
+            {
+              "id": "kScannerMode",
+              "min": "0.0f",
+              "max": "6.0f",
+              "default": "0.0f"
+            },
+            {
+              "id": "kScanHz",
+              "min": "6.0f",
+              "max": "7.5f",
+              "default": "6.9f"
+            },
+            {
+              "id": "kLineMs",
+              "min": "0.6f",
+              "max": "1.4f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kV1",
+              "min": "0.1f",
+              "max": "0.5f",
+              "default": "0.33f"
+            },
+            {
+              "id": "kV2",
+              "min": "0.4f",
+              "max": "0.8f",
+              "default": "0.66f"
+            },
+            {
+              "id": "kV3",
+              "min": "0.7f",
+              "max": "1.0f",
+              "default": "1.0f"
+            },
+            {
+              "id": "kChorusMix",
+              "min": "0.0f",
+              "max": "1.0f",
+              "default": "0.5f"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

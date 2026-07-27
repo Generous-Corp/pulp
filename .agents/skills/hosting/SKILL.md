@@ -829,6 +829,52 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
+- **A duplicate designator in a binder initializer breaks the build — and BOTH
+  compilers told us, and it landed anyway.** The binders are designated-
+  initializer literals, so a merge that brings the same binder in from both
+  sides lists the member twice. That happened once with
+  `.custom_latency_for` in `signal_graph.cpp`.
+
+  Do NOT read this as "clang is permissive and only Linux catches it" — that is
+  the wrong lesson and it will send you looking for a diagnostic that was
+  already printed. What actually happened:
+
+  - **Clang WARNED, by default, twice.** Compiling the shape with no `-W`
+    flags at all yields `-Wreorder-init-list` ("field designators … in
+    declaration order") and `-Winitializer-overrides` ("initializer overrides
+    prior initialization of this subobject"). The root `CMakeLists.txt` already
+    adds `-Wall -Wextra -Wpedantic`, so the **required macOS gate printed both**
+    — and nobody reads a green job's log.
+  - **GCC ERRORED and the Linux job reported failure**
+    (`error: '.custom_latency_for' designator used multiple times in the same
+    initializer list`).
+  - It reached `main` regardless, because the Linux lane is **advisory**.
+
+  So this is a POLICY gap, not a coverage gap: a real compile failure was
+  detected, displayed, and merged past. Adding another GCC leg would be
+  building something that already exists. The durable fix is to make an
+  existing verdict binding — either promote those two clang warnings with
+  `-Werror=reorder-init-list -Werror=initializer-overrides` (free: clang
+  already emits them, so it can only fail on real defects), or make the Linux
+  COMPILE step blocking while leaving its tests advisory. Measure whether
+  Linux finishes inside the macOS leg's shadow before choosing; if it does,
+  blocking costs no latency.
+
+  There are **four** binder literals, not three — miss one and the grep is a
+  false all-clear:
+
+  ```bash
+  grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp                    # 1445
+  grep -c '\.custom_latency_for' core/host/src/signal_graph_executor_routing.cpp   # 427 and 689
+  grep -c '\.custom_latency_for' core/host/src/baked_graph_processor.cpp           # 623
+  ```
+
+  If the duplicated bodies are identical, deleting either is behaviour-
+  preserving — clang was already using the last one. If they DIFFER, clang has
+  been running the second and GCC has never compiled the file at all, so decide
+  which is correct before deleting. Prefer keeping the copy that sits in
+  declaration order.
+
 - **Custom-node intrinsic latency is a CALLBACK, not a count.**
   `CustomNodeType::latency_samples` is `std::function<int(double sample_rate)>`,
   returning a prepare-stable base-rate sample count regardless of internal

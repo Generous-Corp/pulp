@@ -42,6 +42,7 @@ static const Command commands[] = {
     {"bake",     "Freeze a graph into a signed .pulpbake", cmd_bake},
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
+    {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
     {"clean",    "Remove build directory",                cmd_clean},
     {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},

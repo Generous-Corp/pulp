@@ -266,6 +266,16 @@ python3 tools/scripts/tools_registry_check.py --write"
     fi
 fi
 
+# ── DSP capability registry (docs/status/dsp-capabilities.json ⇔ catalogs) ────
+if [ -f "$ROOT/tools/scripts/dsp_capability_registry.py" ]; then
+    echo "Checking DSP capability registry is free of collisions and in sync..."
+    if ! python3 "$ROOT/tools/scripts/dsp_capability_registry.py" --check; then
+        error "The DSP capability registry has a collision, or \
+docs/status/dsp-capabilities.json no longer matches the Forge bake catalog \
+headers. Regenerate with: pulp dsp capabilities --write"
+    fi
+fi
+
 # ── Skills catalog sync (docs/reference/skills.md ⇔ every SKILL.md) ────────────
 if [ -f "$ROOT/tools/scripts/skills_doc_check.py" ]; then
     echo "Checking skills catalog (docs/reference/skills.md) is in sync..."
