@@ -1580,6 +1580,31 @@
         "subcommands": []
       },
       {
+        "name": "dsp",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "capabilities",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--check",
+                "kind": "flag"
+              },
+              {
+                "name": "--write",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "export-tokens",
         "disposition": "candidate-shared-later",
         "arguments": [
