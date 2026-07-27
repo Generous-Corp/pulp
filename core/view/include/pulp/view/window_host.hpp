@@ -468,6 +468,36 @@ public:
         return true;
     }
 
+    /// Inverse of compute_design_viewport_transform: map a HOST/window-space
+    /// point back into ROOT (design) space.
+    ///
+    /// Every plug-in editor host needs this to hit-test a click against the
+    /// widget the user visually pointed at, and every one of them had its own
+    /// byte-identical copy — the macOS GPU and CPU plug-in hosts, the iOS host,
+    /// and the Windows host (WAH-10). Four copies of an inverse letterbox
+    /// transform is four chances for one of them to drift from the paint-side
+    /// transform, and the symptom of that drift is clicks landing on the wrong
+    /// control, which is not obviously a coordinate bug when you hit it.
+    ///
+    /// Returns `pt` unchanged when no design viewport is active, which is the
+    /// identity every caller wants for the un-pinned case.
+    ///
+    /// `top_align` MUST match the value used at paint, or input misaligns
+    /// vertically — the same coupling documented on the forward transform.
+    static Point design_viewport_window_to_root(Point pt,
+                                                float window_w, float window_h,
+                                                float design_w, float design_h,
+                                                bool top_align = false) {
+        float sx, sy, tx, ty;
+        if (!compute_design_viewport_transform(window_w, window_h,
+                                               design_w, design_h,
+                                               sx, sy, tx, ty, top_align)) {
+            return pt;
+        }
+        if (sx <= 0.0f || sy <= 0.0f) return pt;
+        return {(pt.x - tx) / sx, (pt.y - ty) / sy};
+    }
+
     // Report the active design-viewport transform that maps ROOT (design-space)
     // coordinates to HOST (window-space) coordinates:
     //   x' = x*sx + tx,  y' = y*sy + ty,  w' = w*sx,  h' = h*sy

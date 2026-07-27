@@ -90,6 +90,19 @@ pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 # frame path transitively.
 pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
 
+# Presentation + GPU-diagnostics policy (WAH-13): the embedded-editor
+# non-blocking default that both the Windows and Linux hosts now read from one
+# place, and the opt-in gate on Dawn timestamp queries.
+# pulp::view only: pulp::render does not exist in a no-GPU build, which is
+# the configuration the diff-coverage lane uses. The GpuSurface::Config
+# assertions are __has_include-guarded in the source.
+pulp_add_test_suite(pulp-test-present-policy LIBRARIES pulp::view)
+
+# Shared window->root inverse transform (WAH-10). Round-trip against the
+# forward transform, because that is the property that matters: the point paint
+# places at X must be the point input recovers from a click at X.
+pulp_add_test_suite(pulp-test-design-viewport-inverse LIBRARIES pulp::view)
+
 # Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
 # WindowHost dirty-region accumulation. Pins the local->root mapping, the
 # bounding-box union, and the full-repaint escalations (no-arg, transform,

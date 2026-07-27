@@ -318,3 +318,20 @@ Two other capture-shaping facts worth knowing before you blame a query:
   used to be untagged, so closing and reopening an editor inside the window let
   the FIRST session's timer stop the SECOND one — a capture that looks
   mysteriously truncated mid-gesture. A stale timer is now a no-op.
+
+## GPU render time is now OPT-IN (WAH-13)
+
+`SkiaSurface::gpu_render_timing_available()` reporting false is no longer
+evidence of an adapter that lacks `timestamp-query`. Timestamps are requested
+only when the host asks, via `PluginViewHost::Options::enable_gpu_timing`
+(default OFF), rather than whenever the adapter advertises the feature.
+
+That default is deliberate and worth understanding before you "fix" it: Dawn
+gates `writeTimestamp` behind the `allow_unsafe_apis` toggle on every backend,
+so requesting the feature forces that toggle on — and it applies to the DEVICE,
+not to the diagnostic. Ordinary rendering was silently running with relaxed
+validation on every machine whose adapter happened to offer timestamps.
+
+If you need per-recording GPU time in a capture, enable it explicitly on the
+host's Options. If a trace shows no `gpu_render_time`, check that flag before
+suspecting the adapter.

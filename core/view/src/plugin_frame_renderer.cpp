@@ -204,8 +204,27 @@ PluginFrameRenderer::Frame& PluginFrameRenderer::finish(
     return frame;
 }
 
+render::GpuSurface::Config editor_surface_config(
+    void* native_handle, const FrameGeometry& geometry,
+    PluginViewHost::PresentPolicy policy, bool enable_gpu_timing) {
+    render::GpuSurface::Config cfg{};
+    // The GPU surface is sized in PHYSICAL pixels so the swapchain matches the
+    // HiDPI display; the view tree stays in logical units.
+    cfg.width = geometry.pixel_width();
+    cfg.height = geometry.pixel_height();
+    cfg.native_surface_handle = native_handle;
+    cfg.vsync = (policy == PluginViewHost::PresentPolicy::vsync);
+    // Diagnostics are opt-in: requesting timestamp queries forces Dawn's
+    // allow_unsafe_apis toggle, which weakens validation for ordinary
+    // rendering too.
+    cfg.enable_gpu_timing = enable_gpu_timing;
+    return cfg;
+}
+
 EditorSurfaces create_editor_surfaces(void* native_handle,
                                       const FrameGeometry& geometry,
+                                      PluginViewHost::PresentPolicy policy,
+                                      bool enable_gpu_timing,
                                       bool want_partial_repaint,
                                       const char* log_tag) {
     EditorSurfaces out;
@@ -219,13 +238,9 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
         return out;
     }
 
-    render::GpuSurface::Config cfg{};
-    // The GPU surface is sized in PHYSICAL pixels so the swapchain matches the
-    // HiDPI display; the view tree stays in logical units.
-    cfg.width = geometry.pixel_width();
-    cfg.height = geometry.pixel_height();
-    cfg.native_surface_handle = native_handle;
-    cfg.vsync = false;  // see the header: never vsync-block a DAW's UI thread
+    const render::GpuSurface::Config cfg =
+        editor_surface_config(native_handle, geometry, policy,
+                              enable_gpu_timing);
     if (!out.gpu->initialize(cfg)) {
         runtime::log_warn("{}: gpu initialize failed; CPU raster only", log_tag);
         out.gpu.reset();

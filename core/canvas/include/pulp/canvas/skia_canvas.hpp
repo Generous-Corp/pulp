@@ -22,6 +22,7 @@ class SkPathBuilder;
 // declaration breaks compilation on consumers that include this
 // header without separately bringing in SkSamplingOptions.h.
 #include "include/core/SkSamplingOptions.h"
+#include <cstddef>
 #include <memory>
 #include <vector>
 class SkShader;
@@ -63,6 +64,24 @@ public:
     /// Standalone canvases may omit it and receive a private store.
     class RetainedLayerStore;
     static std::shared_ptr<RetainedLayerStore> create_retained_layer_store();
+
+    /// Drop sealed NON-CACHEABLE retained layers that were never composited,
+    /// and report how many went. Returns 0 without a shared store.
+    ///
+    /// A non-cacheable layer is consumed by its first draw; one that is sealed
+    /// and then abandoned (the caller took another branch, the widget left the
+    /// tree) has no future reader, so its GPU texture is pure waste. The
+    /// renderer calls this at the frame boundary — the point at which "never
+    /// drawn" first becomes knowable.
+    std::size_t prune_abandoned_retained_layers();
+
+    /// Retained layers currently resident. Exposed so a test can assert the
+    /// cache budget and the pruning actually take effect; a cache whose
+    /// eviction cannot be observed is a cache nobody can prove bounded.
+    std::size_t retained_layer_count() const;
+
+    /// The resident-layer cap this build enforces.
+    static std::size_t max_retained_layers();
 
     // Create wrapping an existing SkCanvas (e.g., from a surface)
     explicit SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder = nullptr);

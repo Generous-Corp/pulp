@@ -68,7 +68,8 @@ namespace {
 
 class X11PluginViewHost : public PluginViewHost {
 public:
-    X11PluginViewHost(View& root, Size size) : root_(root), size_(size) {
+    X11PluginViewHost(View& root, const Options& options)
+        : root_(root), size_(options.size), options_(options) {
 #ifdef PULP_HAS_SKIA
         // This host builds its surface in the constructor (unlike Windows,
         // which must wait for reparenting), but the window between here and
@@ -89,7 +90,7 @@ public:
         // DAW's editor window in attach_to_parent(). CopyFromParent matches the
         // parent's visual/depth/colormap.
         child_ = XCreateSimpleWindow(
-            display_, root_win, 0, 0, size.width, size.height, 0,
+            display_, root_win, 0, 0, size_.width, size_.height, 0,
             BlackPixel(display_, screen_), BlackPixel(display_, screen_));
         if (!child_) {
             runtime::log_warn("X11PluginViewHost: XCreateSimpleWindow failed");
@@ -105,7 +106,7 @@ public:
         XFlush(display_);
         scale_ = detect_dpi_scale(display_, screen_);
 #ifdef PULP_HAS_SKIA
-        init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
+        init_gpu(static_cast<float>(size_.width), static_cast<float>(size_.height));
         // Fresh editor session: the recreate budget starts clean. Deliberately
         // NOT inside init_gpu(), which the mid-session recreate path also
         // calls — resetting there would let a surface that rebuilds cleanly but
@@ -310,6 +311,9 @@ public:
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
+    // Presentation + diagnostics policy from the caller (WAH-13), shared
+    // verbatim with the Windows host.
+    Options options_{};
     Display* display_ = nullptr;
     int screen_ = 0;
     Window child_ = 0;
@@ -842,7 +846,8 @@ private:
         geometry.height = height;
         const char* env = std::getenv("PULP_PARTIAL_REPAINT");
         auto surfaces = create_editor_surfaces(
-            &x11_handle_, geometry, env && env[0] == '1', "X11PluginViewHost");
+            &x11_handle_, geometry, options_.present_policy,
+            options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
 
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
@@ -978,7 +983,7 @@ void register_platform_plugin_view_host() {
         PluginViewHost::set_factory(
             [](View& root, const PluginViewHost::Options& opts)
                 -> std::unique_ptr<PluginViewHost> {
-                return std::make_unique<X11PluginViewHost>(root, opts.size);
+                return std::make_unique<X11PluginViewHost>(root, opts);
             });
     });
 }

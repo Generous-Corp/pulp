@@ -278,6 +278,12 @@ public:
         // Graphite recording snap + insert + submit — the GPU-submit stage of
         // the frame pipeline.
         PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
+        // Prune BEFORE dropping the canvas: this is the frame boundary, and it
+        // is the first moment at which "sealed but never composited" is
+        // knowable for a non-cacheable layer. Holding those GPU textures until
+        // the store is replaced was an unbounded waste driven by whatever the
+        // UI happened to draw (WAH-12).
+        if (canvas_) canvas_->prune_abandoned_retained_layers();
         canvas_.reset();  // flush the frame's draws into the recorder
 
         if (!recorder_ || !context_) return finish_frame(FrameOutcome::failed);

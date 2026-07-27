@@ -43,6 +43,23 @@ public:
         uint32_t width = 800;
         uint32_t height = 600;
         bool vsync = true;
+
+        /// Request Dawn's `timestamp-query` feature for GPU render timing.
+        ///
+        /// OFF by default, and deliberately NOT inferred from adapter support.
+        /// Dawn gates `writeTimestamp` behind the `allow_unsafe_apis` toggle on
+        /// every backend, so requesting timestamps forces that toggle on — which
+        /// relaxes the device's validation posture for ORDINARY RENDERING, not
+        /// just for the diagnostic. Previously this was enabled whenever the
+        /// adapter advertised the feature, meaning normal rendering silently ran
+        /// with weaker validation on most machines.
+        ///
+        /// Turning it on is the caller's decision (see
+        /// `PluginViewHost::Options::enable_gpu_timing`). With it off,
+        /// `SkiaSurface::gpu_render_timing_available()` reports false and the
+        /// inspector shows an honest "GPU timing unavailable".
+        bool enable_gpu_timing = false;
+
         bool force_fallback_adapter = false;
         AdapterBackendPreference backend_preference =
             AdapterBackendPreference::default_backend;

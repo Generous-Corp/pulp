@@ -150,8 +150,11 @@ ATOM ensure_window_class() {
 class WinPluginViewHost : public PluginViewHost,
                           private win_input::InputRouterHost {
 public:
-    WinPluginViewHost(View& root, Size size, bool use_gpu)
-        : root_(root), size_(size), use_gpu_(use_gpu) {
+    WinPluginViewHost(View& root, const Options& options)
+        : root_(root),
+          size_(options.size),
+          use_gpu_(options.use_gpu),
+          options_(options) {
         // Dawn cannot configure presentation until attach_to_parent() gives the
         // HWND its final parent and style, so gpu_surface() is legitimately
         // null for the whole window between create() and attach. Say so, rather
@@ -165,7 +168,7 @@ public:
         hwnd_ = CreateWindowExW(
             0, kChildClassName, L"",
             WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-            0, 0, static_cast<int>(size.width), static_cast<int>(size.height),
+            0, 0, static_cast<int>(size_.width), static_cast<int>(size_.height),
             /*parent*/ nullptr, nullptr, GetModuleHandleW(nullptr),
             /*lpParam*/ this);
         if (!hwnd_) {
@@ -571,21 +574,24 @@ public:
     void set_fixed_aspect_ratio(float ratio) override { fixed_aspect_ratio_ = ratio; }
 
     Point window_to_root_point(Point pt) const override {
-        float sx, sy, tx, ty;
-        if (!WindowHost::compute_design_viewport_transform(
-                static_cast<float>(size_.width), static_cast<float>(size_.height),
-                design_viewport_w_, design_viewport_h_, sx, sy, tx, ty,
-                design_top_align_)) {
-            return pt;
-        }
-        if (sx <= 0.0f || sy <= 0.0f) return pt;
-        return {(pt.x - tx) / sx, (pt.y - ty) / sy};
+        // One shared inverse (WAH-10). This was byte-identical in the two
+        // macOS plug-in hosts, the iOS host and the Windows host; four copies
+        // of an inverse letterbox transform is four chances to drift from the
+        // paint-side transform, and that drift shows up as clicks landing on
+        // the wrong control rather than as an obvious coordinate bug.
+        return WindowHost::design_viewport_window_to_root(
+            pt, static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, design_top_align_);
     }
 
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
     bool use_gpu_ = false;
+    // Presentation + diagnostics policy, decided by the caller rather than
+    // hardcoded here (WAH-13). Both this host and the Linux one read the
+    // same fields, so a measured change reaches both.
+    Options options_{};
     win_input::SurfaceLifecycle surface_lifecycle_;
     HWND hwnd_ = nullptr;
     std::atomic<bool> attached_{false};
@@ -762,8 +768,8 @@ private:
         // FU-2 partial repaint, default OFF.
         const char* env = std::getenv("PULP_PARTIAL_REPAINT");
         auto surfaces = create_editor_surfaces(
-            static_cast<void*>(hwnd_), geometry, env && env[0] == '1',
-            "WinPluginViewHost");
+            static_cast<void*>(hwnd_), geometry, options_.present_policy,
+            options_.enable_gpu_timing, env && env[0] == '1', "WinPluginViewHost");
 
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
@@ -964,8 +970,7 @@ void register_platform_plugin_view_host() {
         PluginViewHost::set_factory(
             [](View& root, const PluginViewHost::Options& opts)
                 -> std::unique_ptr<PluginViewHost> {
-                return std::make_unique<WinPluginViewHost>(
-                    root, opts.size, opts.use_gpu);
+                return std::make_unique<WinPluginViewHost>(root, opts);
             });
     });
 }

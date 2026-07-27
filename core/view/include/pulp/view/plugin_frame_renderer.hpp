@@ -23,6 +23,7 @@
 // the platform hosts. This module never touches a native handle.
 
 #include <pulp/view/geometry.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/pending_damage.hpp>
 
 #include <cstdint>
@@ -209,6 +210,17 @@ struct EditorSurfaces {
     bool ok() const { return gpu != nullptr && skia != nullptr; }
 };
 
+/// Translate an editor's present policy + geometry into a GpuSurface config.
+///
+/// Pure, so the policy that WAH-13 measured is pinned by a test on the required
+/// macOS gate rather than by a comment next to a `cfg.vsync =` line. That is
+/// the whole point of the split: the Windows and Linux hosts had each hardcoded
+/// their own answer, they disagreed, and nothing could observe the
+/// disagreement.
+render::GpuSurface::Config editor_surface_config(
+    void* native_handle, const FrameGeometry& geometry,
+    PluginViewHost::PresentPolicy policy, bool enable_gpu_timing);
+
 /// Build the GPU + Skia surface pair for a plug-in editor window.
 ///
 /// Shared by the Windows and Linux hosts, which had grown near-identical copies
@@ -229,9 +241,12 @@ struct EditorSurfaces {
 ///
 /// `native_handle` is the platform's surface handle — an `HWND` on Windows, a
 /// pointer to the typed X11 handle on Linux. `log_tag` names the host in
-/// diagnostics.
+/// diagnostics. `policy` comes from the host's `Options`, so a standalone-style
+/// host can still ask for vsync without a second copy of this function.
 EditorSurfaces create_editor_surfaces(void* native_handle,
                                       const FrameGeometry& geometry,
+                                      PluginViewHost::PresentPolicy policy,
+                                      bool enable_gpu_timing,
                                       bool want_partial_repaint,
                                       const char* log_tag);
 
