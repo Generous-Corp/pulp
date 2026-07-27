@@ -124,6 +124,12 @@ set(_expected_importer_closure
     Pulp::timebase
     Pulp::timeline
 )
+# Normalise the expectation exactly as the actual closure is normalised above.
+# The expected list is hand-maintained, so two changes that each legitimately
+# add the same entry leave a duplicate behind — and a duplicate can never match
+# the de-duplicated actual closure, which fails the check for a drift that does
+# not exist.
+list(REMOVE_DUPLICATES _expected_importer_closure)
 list(SORT _expected_importer_closure)
 if(NOT _actual_importer_closure STREQUAL _expected_importer_closure)
     message(FATAL_ERROR
