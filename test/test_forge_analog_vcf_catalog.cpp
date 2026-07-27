@@ -138,7 +138,7 @@ TEST_CASE("Forge analog VCF baked render is deterministic across identical insta
     auto second_injector = second.processor().claim_param_injection(second.filter);
     REQUIRE(first_injector.valid());
     REQUIRE(second_injector.valid());
-    constexpr std::array controls{0.63f, -0.75f, 0.58f, 9.0f};
+    constexpr std::array controls{0.63f, -0.75f, 0.90f, 9.0f};
     inject_controls(first_injector, controls);
     inject_controls(second_injector, controls);
 
