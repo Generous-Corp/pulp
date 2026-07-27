@@ -29,7 +29,7 @@ owns the nodes; removing a node invalidates its id.
 
 Custom node types are registered per graph with `CustomNodeType`
 (`type_id`, `version`, input ports, output ports, default name, optional
-process callback) before calling `add_custom_node(type_id)` or
+process callback, and optional fixed latency) before calling `add_custom_node(type_id)` or
 `add_custom_node(type_id, version)`. Graph serialization stores the custom
 `type_id` and `version` so a topology can be reloaded on another machine.
 If the target graph has not registered the exact matching version and shape,
@@ -214,7 +214,19 @@ Hosts must stop and join the producer thread before any graph mutation or
 
 ## Latency & PDC
 
-Every `PluginSlot` reports `latency_samples()`. During `prepare()` the
+Every `PluginSlot` reports `latency_samples()`. A `CustomNodeType` may declare
+fixed `latency_samples` in base-rate graph samples; the value must be in
+`[0, CustomNodeType::kMaxLatencySamples]`. It is captured during `prepare()` and
+must remain stable for that prepared snapshot. Re-register and re-prepare after
+a source-level change, and bump the custom type's serialized `version` when a
+latency change affects persisted graphs. A type without a resolved live process
+callback remains transparent on the live graph and contributes zero live
+latency; a lowerable baked callback carries the registered fixed latency into
+the baked processor. A transport-aware execution path with non-zero latency must
+also resolve a plain fallback; registration rejects a timing contract
+that would change with per-block transport presence.
+
+During `prepare()` the
 graph walks the topology, computes each node's input / output latency,
 and allocates per-connection delay lines so parallel branches converge
 aligned. Query results with `SignalGraph::latency_samples()` (graph-wide

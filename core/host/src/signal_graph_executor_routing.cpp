@@ -3,6 +3,7 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/format/process_block.hpp>
+#include <pulp/graph/graph_runtime_buffer_assignment.hpp>
 
 #include <algorithm>
 #include <array>
@@ -170,8 +171,9 @@ bool plugin_binding(fmt::ProcessBlock& block,
 // Custom binding: invoke the node's resolved process callback exactly as
 // SignalGraph's Custom node does — over the node's mono input/output slots
 // (ctx.node_inputs gathered from upstream, ctx.node_outputs the assigned
-// scratch). Custom nodes are audio-only (no MIDI/automation/latency), so unlike
-// plugin_binding there is no bus/MIDI/parameter marshaling. When the context's
+// scratch). Custom nodes are audio-only (no MIDI/automation); fixed latency is
+// handled by plan assignment, so unlike plugin_binding there is no
+// bus/MIDI/parameter marshaling here. When the context's
 // process callback is empty (an unresolved custom type or a shape mismatch — the
 // same condition SignalGraph checks with custom_type_matches_node_shape), this
 // reproduces SignalGraph's pass_through_or_zero: copy min(in,out) channels
@@ -381,6 +383,25 @@ bool signal_graph_executor_eligible(const SignalGraph& graph) {
     return signal_graph_topology_executor_eligible(graph.nodes(), graph.connections());
 }
 
+int calculate_lowerable_graph_latency_samples(
+    std::span<const GraphNode> nodes,
+    std::span<const Connection> connections,
+    const std::function<int(NodeId)>& custom_latency_for) {
+    auto shape = make_executor_plan_shape(nodes, connections);
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        if (nodes[index].type != NodeType::Custom || !custom_latency_for) continue;
+        shape.nodes[index].latency_samples = static_cast<std::uint32_t>(
+            std::max(0, custom_latency_for(nodes[index].id)));
+    }
+    const auto plan = graph::build_graph_runtime_plan(shape.nodes, shape.connections);
+    if (!plan.ok()) return 0;
+    const auto assignment = graph::build_graph_runtime_buffer_assignment(plan.plan);
+    if (!assignment.ok) return 0;
+    return static_cast<int>(std::min<std::uint32_t>(
+        assignment.total_latency_samples,
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
+}
+
 bool build_executor_snapshot(std::span<const GraphNode> nodes,
                              std::span<const Connection> connections,
                              const std::function<std::atomic<float>*(NodeId)>& gain_for,
@@ -429,6 +450,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     const auto& load_for = binders.load_for;
     const auto& custom_for = binders.custom_for;
     const auto& custom_transport_for = binders.custom_transport_for;
+    const auto& custom_latency_for = binders.custom_latency_for;
     const auto& plugin_latency_for = binders.plugin_latency_for;
     const auto& plugin_params_for = binders.plugin_params_for;
     const auto& parameter_events_for = binders.parameter_events_for;
@@ -473,6 +495,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                                     : slot->latency_samples();
                 spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
             }
+        } else if (node.type == NodeType::Custom && custom_latency_for) {
+            spec.latency_samples = static_cast<std::uint32_t>(
+                std::max(0, custom_latency_for(node.id)));
         }
     }
 
@@ -666,6 +691,8 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
         .custom_for = [&graph](NodeId id) { return graph.live_custom_processor(id); },
         .custom_transport_for =
             [&graph](NodeId id) { return graph.live_custom_transport_processor(id); },
+        .custom_latency_for =
+            [&graph](NodeId id) { return graph.live_custom_latency_samples(id); },
     };
     if (!build_executor_snapshot(graph.nodes(), graph.connections(), binders,
                                  out.plugin_ctx, out.plugin_scratch, out.snapshot,

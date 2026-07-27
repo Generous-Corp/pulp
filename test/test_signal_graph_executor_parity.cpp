@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -2304,6 +2305,34 @@ pulp::host::CustomNodeType make_partial_type() {
     return t;
 }
 
+struct CustomDelay4 {
+    std::array<float, 4> history{};
+    std::size_t cursor = 0;
+};
+
+pulp::host::CustomNodeType make_delay4_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.delay4";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Delay4";
+    t.latency_samples = 4;
+    t.create = []() -> void* { return new CustomDelay4(); };
+    t.destroy = [](void* p) { delete static_cast<CustomDelay4*>(p); };
+    t.reset = [](void* p) { *static_cast<CustomDelay4*>(p) = {}; };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto& delay = *static_cast<CustomDelay4*>(p);
+        for (int i = 0; i < n; ++i) {
+            out.channel_ptr(0)[i] = delay.history[delay.cursor];
+            delay.history[delay.cursor] = in.channel_ptr(0)[i];
+            delay.cursor = (delay.cursor + 1) % delay.history.size();
+        }
+    };
+    return t;
+}
+
 }  // namespace
 
 TEST_CASE("Translated routing matches SignalGraph: stateful custom node parity",
@@ -2343,6 +2372,60 @@ TEST_CASE("Translated routing matches SignalGraph: stateful custom node parity",
         for (int i = 0; i < kFrames; ++i)
             REQUIRE(wo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
     }
+}
+
+TEST_CASE("Standalone translated routing carries Custom latency into diamond PDC",
+          "[host][graph][executor][routing][parity][custom][pdc]") {
+    auto build = [](SignalGraph& graph) {
+        REQUIRE(graph.register_custom_node_type(make_delay4_type()));
+        const auto input = graph.add_input_node(1, "input");
+        const auto delayed = graph.add_custom_node("pulp.test.delay4", 1, "delayed");
+        const auto dry = graph.add_gain_node("dry");
+        const auto output = graph.add_output_node(1, "output");
+        REQUIRE(graph.connect(input, 0, delayed, 0));
+        REQUIRE(graph.connect(delayed, 0, output, 0));
+        REQUIRE(graph.connect(input, 0, dry, 0));
+        REQUIRE(graph.connect(dry, 0, output, 0));
+        REQUIRE(graph.prepare(kSr, kFrames));
+        REQUIRE(graph.latency_samples() == 4);
+    };
+
+    SignalGraph walk;
+    SignalGraph translated;
+    build(walk);
+    build(translated);
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(translated, routing));
+    REQUIRE(routing.valid);
+
+    std::vector<float> impulse(kFrames, 0.0f);
+    impulse[0] = 1.0f;
+    const std::vector<std::vector<float>> input{impulse};
+    const auto expected = run_legacy(walk, kFrames, input, 1);
+    pulp::format::GraphRuntimeExecutor executor;
+    const auto actual = run_routed(executor, routing, kFrames, input, 1);
+    expect_equal(actual, expected);
+    for (int i = 0; i < 4; ++i) REQUIRE(actual[0][i] == 0.0f);
+    REQUIRE(actual[0][4] == 2.0f);
+}
+
+TEST_CASE("Lowerable Custom latency clamps to the signed host-reporting range",
+          "[host][graph][executor][routing][custom][pdc]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto first =
+        graph.add_unresolved_custom_node("pulp.test.latency-clamp", 1, 1, 1, "first");
+    const auto second =
+        graph.add_unresolved_custom_node("pulp.test.latency-clamp", 1, 1, 1, "second");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, first, 0));
+    REQUIRE(graph.connect(first, 0, second, 0));
+    REQUIRE(graph.connect(second, 0, output, 0));
+
+    CHECK(pulp::host::calculate_lowerable_graph_latency_samples(
+              graph.nodes(), graph.connections(),
+              [](pulp::host::NodeId) { return std::numeric_limits<int>::max(); }) ==
+          std::numeric_limits<int>::max());
 }
 
 TEST_CASE("Parallel routing matches SignalGraph: wide stateful custom level",

@@ -209,6 +209,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
 
+  - slug: analog-vcf
+    path: guides/analog-vcf.md
+    kind: guide
+    summary: Measured Analog VCF voicings, low-level OTA cascade design, real-time use, and latency/PDC contracts
+
   - slug: character-delay
     path: guides/character-delay.md
     kind: guide
