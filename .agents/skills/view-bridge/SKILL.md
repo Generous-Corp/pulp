@@ -1860,3 +1860,17 @@ not inside `deserialize_plugin_state()`.
 
 `Processor::suspend()` / `resume()` remain opt-in and are still not called
 automatically by the adapters; the gate is what actually protects the restore.
+
+## Note names are a Processor hook, not a view concern
+
+`Processor::note_names()` lets a plug-in label individual keys — a drum kit's
+"Kick", a sampler's articulation switches — and the format adapters publish that
+list to the host (CLAP `note-name`, VST3 `IKeyswitchController`; AU has no
+equivalent). It is a HOST-facing surface, so it does not travel through the view
+bridge and an editor never needs to render it.
+
+What matters here is the notification: a processor whose names change — a
+sampler loading a new kit from its editor — must call
+`flag_note_names_changed()`. The adapter drains that flag on the host/main
+thread and tells the host to relabel. An editor that swaps the kit without
+raising the flag leaves the DAW's piano roll showing the previous kit's names.

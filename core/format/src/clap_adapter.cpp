@@ -2,6 +2,7 @@
 // Implements the CLAP C API wrapping a Pulp Processor
 
 #include "clap_remote_controls.hpp"
+#include "clap_note_name.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/adapter_boundary.hpp>
@@ -1223,6 +1224,7 @@ static void clap_phase_request_callback(PulpClapPlugin* self) {
     if (self->host && self->host->request_callback && self->processor &&
         (self->processor->latency_change_pending() ||
          self->processor->tail_change_pending() ||
+         self->processor->note_names_change_pending() ||
          self->processor->non_realtime_tick_pending())) {
         self->host->request_callback(self->host);
     }
@@ -1698,6 +1700,14 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) return &s_preset_load;
     }
 
+    // Always offered. A processor that names no notes reports a count of zero,
+    // and one that loads a kit later publishes names and calls changed() — a
+    // host only queries get_extension() at init, so refusing it here when the
+    // list happens to be empty would lock that plugin out for the session.
+    if (std::strcmp(id, CLAP_EXT_NOTE_NAME) == 0) {
+        return note_name_extension();
+    }
+
     if (self->store.param_count() > 0) {
         if (std::strcmp(id, CLAP_EXT_REMOTE_CONTROLS) == 0) {
             return remote_controls_extension();
@@ -1748,6 +1758,11 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
     if (tail_changed) {
         auto* ext = static_cast<const clap_host_tail_t*>(
             self->host->get_extension(self->host, CLAP_EXT_TAIL));
+        if (ext && ext->changed) ext->changed(self->host);
+    }
+    if (self->processor->consume_note_names_changed_flag()) {
+        auto* ext = static_cast<const clap_host_note_name_t*>(
+            self->host->get_extension(self->host, CLAP_EXT_NOTE_NAME));
         if (ext && ext->changed) ext->changed(self->host);
     }
 

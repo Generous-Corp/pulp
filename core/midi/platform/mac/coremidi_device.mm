@@ -5,7 +5,36 @@
 #include <pulp/runtime/log.hpp>
 #include <CoreMIDI/CoreMIDI.h>
 
+#include "coremidi_shared_client.h"
+
 namespace pulp::midi::mac {
+
+// A CoreMIDI client is a per-process registration with the system
+// MIDIServer, not a per-port handle. Creating one per input and per output
+// multiplies those registrations by the number of open ports — and a plug-in
+// loaded at many instances multiplies that again. Every port in this process
+// shares the one client below.
+//
+// The client is created on first use and deliberately never disposed:
+// CoreMIDI ties port and endpoint lifetime to the owning client, so disposing
+// it while any other port is still open would invalidate that port. It is
+// released when the process exits.
+MIDIClientRef shared_client() {
+    // Function-local static initialisation is thread-safe, so concurrent
+    // first opens cannot race two clients into existence.
+    static const MIDIClientRef client = [] {
+        MIDIClientRef created = 0;
+        const OSStatus status =
+            MIDIClientCreate(CFSTR("Pulp"), nullptr, nullptr, &created);
+        if (status != noErr) {
+            runtime::log_error("CoreMIDI: could not create MIDI client ({})",
+                               static_cast<int>(status));
+            return MIDIClientRef{0};
+        }
+        return created;
+    }();
+    return client;
+}
 
 class CoreMidiInput : public MidiInput {
 public:
@@ -14,13 +43,10 @@ public:
     bool open(const std::string& port_id, MidiInputCallback callback) override {
         callback_ = std::move(callback);
 
-        OSStatus status = MIDIClientCreate(CFSTR("PulpMIDIIn"), nullptr, nullptr, &client_);
-        if (status != noErr) {
-            runtime::log_error("CoreMIDI: could not create input client ({})", static_cast<int>(status));
-            return false;
-        }
+        const MIDIClientRef client = shared_client();
+        if (client == 0) return false;
 
-        status = MIDIInputPortCreateWithProtocol(client_, CFSTR("PulpInput"),
+        OSStatus status = MIDIInputPortCreateWithProtocol(client, CFSTR("PulpInput"),
             kMIDIProtocol_1_0, &port_,
             ^(const MIDIEventList* evtlist, void* __nullable) {
                 // Walk UMP messages by their declared word size (MIDI 2.0
@@ -135,8 +161,9 @@ public:
     }
 
     void close() override {
+        // Only the port is ours to dispose; the client is shared by every
+        // port in the process (see shared_client()).
         if (port_) { MIDIPortDispose(port_); port_ = 0; }
-        if (client_) { MIDIClientDispose(client_); client_ = 0; }
         // Drop any in-progress sysex so a reopened port starts fresh
         // and never emits a stale partial payload.
         sysex_reassembler_.reset();
@@ -150,7 +177,6 @@ public:
     }
 
 private:
-    MIDIClientRef client_ = 0;
     MIDIPortRef port_ = 0;
     MidiInputCallback callback_;
     MidiSysexCallback sysex_callback_;
@@ -168,10 +194,10 @@ public:
     ~CoreMidiOutput() override { close(); }
 
     bool open(const std::string& port_id) override {
-        OSStatus status = MIDIClientCreate(CFSTR("PulpMIDIOut"), nullptr, nullptr, &client_);
-        if (status != noErr) return false;
+        const MIDIClientRef client = shared_client();
+        if (client == 0) return false;
 
-        status = MIDIOutputPortCreate(client_, CFSTR("PulpOutput"), &port_);
+        OSStatus status = MIDIOutputPortCreate(client, CFSTR("PulpOutput"), &port_);
         if (status != noErr) { close(); return false; }
 
         // Find destination
@@ -204,8 +230,8 @@ public:
     }
 
     void close() override {
+        // The client is shared process-wide and outlives this port.
         if (port_) { MIDIPortDispose(port_); port_ = 0; }
-        if (client_) { MIDIClientDispose(client_); client_ = 0; }
         dest_ = 0;
         is_open_ = false;
     }
@@ -230,7 +256,6 @@ public:
     }
 
 private:
-    MIDIClientRef client_ = 0;
     MIDIPortRef port_ = 0;
     MIDIEndpointRef dest_ = 0;
     bool is_open_ = false;

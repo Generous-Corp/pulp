@@ -1400,3 +1400,13 @@ contention the block passes its input through, clears the sidechain pointer and
 resets triggers, then returns `noErr` — deliberately NOT via `failClosed()`,
 which would additionally set `kAudioUnitRenderAction_OutputIsSilence` and turn a
 brief restore into a labelled dropout.
+
+## AU has no note-name surface
+
+`Processor::note_names()` lets a plug-in label individual keys — a drum kit's
+"Kick", a sampler's articulation switches — and CLAP and VST3 both publish it.
+AU has no host-side equivalent in either v2 or v3, so `note_names()` simply goes
+unread on this format.
+
+That is a gap in the AU API, not an omission in the adapter. Do not invent a
+private property for it.

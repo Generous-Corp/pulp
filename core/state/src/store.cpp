@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -11,6 +12,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/state/state_migration.hpp>
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/log.hpp>
 #include <choc/memory/choc_Endianness.h>
 
 namespace pulp::state {
@@ -329,6 +331,26 @@ void StateStore::add_parameter(const ParamInfo& info) {
     // reporting the same effective default that the store actually holds.
     ParamInfo clamped = info;
     clamped.range.default_value = constrain_stored_value(info, info.range.default_value);
+    // Clamping silently is the right runtime behaviour but the wrong authoring
+    // experience: a mistyped default (a dB value against a 0..1 range, a
+    // transposed min/max) becomes an unremarkable min or max, and the plug-in
+    // just starts up on the wrong value. Say so once, at registration, on the
+    // host thread — this is not an audio-thread path.
+    // Test the bounds directly rather than "the value changed":
+    // constrain_stored_value() also quantizes stepped/enum parameters, and a
+    // default that merely snapped to the nearest step is correct authoring, not
+    // a mistake worth warning about.
+    const float declared = info.range.default_value;
+    const bool out_of_range = !std::isfinite(declared) ||
+                              declared < info.range.min ||
+                              declared > info.range.max;
+    if (out_of_range) {
+        runtime::log_warn(
+            "StateStore: parameter '{}' (id {}) declares default {} outside its "
+            "range [{}, {}]; using {} instead",
+            info.name, info.id, declared, info.range.min, info.range.max,
+            clamped.range.default_value);
+    }
     params_.push_back(clamped);
     values_.emplace_back(clamped.range.default_value);
     id_to_index_[info.id] = index;

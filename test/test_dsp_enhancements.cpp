@@ -303,6 +303,169 @@ TEST_CASE("DryWetMixer handles empty dry pushes and grows prepared dry storage",
     REQUIRE_THAT(wet_b[3], WithinAbs(8.0f, 1e-6f));
 }
 
+TEST_CASE("DryWetMixer applies a mix change instantly when no ramp is set",
+          "[dsp][dry_wet]") {
+    DryWetMixer mixer;
+    mixer.set_curve(MixCurve::Linear);
+    mixer.set_mix(0.0f);
+    mixer.prepare(1, 8);
+    REQUIRE(mixer.ramp_samples() == 0);
+
+    // dry = 1, wet = 0 → the output IS the dry gain, so it reads the ratio
+    // back directly.
+    float dry[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const float* dry_ptrs[] = {dry};
+
+    mixer.set_mix(1.0f);
+    REQUIRE_FALSE(mixer.is_ramping());
+    REQUIRE_THAT(mixer.current_mix(), WithinAbs(1.0f, 1e-6f));
+
+    float wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float* wet_ptrs[] = {wet};
+    mixer.push_dry(dry_ptrs, 1, 4);
+    mixer.mix_wet(wet_ptrs, 1, 4);
+
+    // Fully wet from the very first sample: no dry survives.
+    for (int i = 0; i < 4; ++i) REQUIRE_THAT(wet[i], WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("DryWetMixer ramps a mix change instead of stepping",
+          "[dsp][dry_wet]") {
+    constexpr int kRamp = 64;
+    DryWetMixer mixer;
+    mixer.set_curve(MixCurve::Linear);
+    mixer.set_mix(0.0f);
+    mixer.set_ramp_samples(kRamp);
+    mixer.prepare(1, kRamp);
+
+    std::vector<float> dry(static_cast<size_t>(kRamp), 1.0f);
+    const float* dry_ptrs[] = {dry.data()};
+
+    mixer.set_mix(1.0f);
+    REQUIRE(mixer.is_ramping());
+
+    std::vector<float> wet(static_cast<size_t>(kRamp), 0.0f);
+    float* wet_ptrs[] = {wet.data()};
+    mixer.push_dry(dry_ptrs, 1, kRamp);
+    mixer.mix_wet(wet_ptrs, 1, kRamp);
+
+    // Output travels 1 → 0 across the ramp. The step at the block boundary
+    // is what produces zipper noise; assert every adjacent delta stays near
+    // the ideal 1/kRamp rather than jumping.
+    const float ideal_step = 1.0f / static_cast<float>(kRamp);
+    float previous = 1.0f;
+    for (int i = 0; i < kRamp; ++i) {
+        REQUIRE(std::abs(wet[static_cast<size_t>(i)] - previous) <
+                ideal_step * 1.5f);
+        previous = wet[static_cast<size_t>(i)];
+    }
+
+    // Settled exactly at the end of the ramp.
+    REQUIRE_FALSE(mixer.is_ramping());
+    REQUIRE_THAT(mixer.current_mix(), WithinAbs(1.0f, 1e-5f));
+    REQUIRE_THAT(wet[static_cast<size_t>(kRamp - 1)], WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("DryWetMixer ramp advances once per frame across channels",
+          "[dsp][dry_wet]") {
+    constexpr int kRamp = 16;
+    DryWetMixer mixer;
+    mixer.set_curve(MixCurve::Linear);
+    mixer.set_mix(0.0f);
+    mixer.set_ramp_samples(kRamp);
+    mixer.prepare(2, kRamp);
+
+    std::vector<float> dry_l(static_cast<size_t>(kRamp), 1.0f);
+    std::vector<float> dry_r(static_cast<size_t>(kRamp), 1.0f);
+    const float* dry_ptrs[] = {dry_l.data(), dry_r.data()};
+
+    mixer.set_mix(1.0f);
+
+    std::vector<float> wet_l(static_cast<size_t>(kRamp), 0.0f);
+    std::vector<float> wet_r(static_cast<size_t>(kRamp), 0.0f);
+    float* wet_ptrs[] = {wet_l.data(), wet_r.data()};
+    mixer.push_dry(dry_ptrs, 2, kRamp);
+    mixer.mix_wet(wet_ptrs, 2, kRamp);
+
+    // Both channels of a frame share one gain pair. Advancing the ramp per
+    // channel instead of per frame would desynchronise them.
+    for (int i = 0; i < kRamp; ++i) {
+        REQUIRE_THAT(wet_l[static_cast<size_t>(i)],
+                     WithinAbs(wet_r[static_cast<size_t>(i)], 1e-6f));
+    }
+    REQUIRE_FALSE(mixer.is_ramping());
+}
+
+TEST_CASE("DryWetMixer ramp spans block boundaries and settles on demand",
+          "[dsp][dry_wet]") {
+    constexpr int kRamp = 8;
+    DryWetMixer mixer;
+    mixer.set_curve(MixCurve::Linear);
+    mixer.set_mix(0.0f);
+    mixer.set_ramp_samples(kRamp);
+    mixer.prepare(1, 4);
+
+    float dry[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const float* dry_ptrs[] = {dry};
+    float wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float* wet_ptrs[] = {wet};
+
+    mixer.set_mix(1.0f);
+
+    // A ramp longer than one block stays in flight after the first block.
+    mixer.push_dry(dry_ptrs, 1, 4);
+    mixer.mix_wet(wet_ptrs, 1, 4);
+    REQUIRE(mixer.is_ramping());
+    REQUIRE(mixer.current_mix() > 0.0f);
+    REQUIRE(mixer.current_mix() < 1.0f);
+
+    // Dropping the ramp settles immediately rather than stranding the ratio
+    // part-way.
+    mixer.set_ramp_samples(0);
+    REQUIRE_FALSE(mixer.is_ramping());
+    REQUIRE_THAT(mixer.current_mix(), WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("DryWetMixer reset settles an in-flight mix ramp",
+          "[dsp][dry_wet]") {
+    constexpr int kRamp = 32;
+    DryWetMixer mixer;
+    mixer.set_curve(MixCurve::Linear);
+    mixer.set_mix(0.0f);
+    mixer.set_ramp_samples(kRamp);
+    mixer.prepare(1, 4);
+
+    float dry[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const float* dry_ptrs[] = {dry};
+    float wet[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float* wet_ptrs[] = {wet};
+
+    mixer.set_mix(1.0f);
+    mixer.push_dry(dry_ptrs, 1, 4);
+    mixer.mix_wet(wet_ptrs, 1, 4);
+    REQUIRE(mixer.is_ramping());
+
+    mixer.reset();
+    REQUIRE_FALSE(mixer.is_ramping());
+    REQUIRE_THAT(mixer.current_mix(), WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("DryWetMixer ramp time converts to samples and rejects bad input",
+          "[dsp][dry_wet]") {
+    DryWetMixer mixer;
+    mixer.set_ramp_time(0.01f, 48000.0f);
+    REQUIRE(mixer.ramp_samples() == 480);
+
+    mixer.set_ramp_time(0.0f, 48000.0f);
+    REQUIRE(mixer.ramp_samples() == 0);
+
+    mixer.set_ramp_time(0.01f, 0.0f);
+    REQUIRE(mixer.ramp_samples() == 0);
+
+    mixer.set_ramp_time(-1.0f, 48000.0f);
+    REQUIRE(mixer.ramp_samples() == 0);
+}
+
 // ── ProcessorDuplicator ─────────────────────────────────────────────────
 
 // Simple gain processor for testing
