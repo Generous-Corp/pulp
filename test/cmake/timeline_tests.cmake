@@ -12,6 +12,14 @@ pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
         test_timeline_dawproject_import_runtime.cpp
     LIBRARIES pulp::playback pulp::dawproject-import)
+
+# Bounded DAWproject export. Registered with the dawproject subsystem rather
+# than the interchange hub: a format adapter owns its own tests, and this one
+# needs the importer as its round-trip oracle.
+pulp_add_test_suite(pulp-test-dawproject-export
+    SOURCES test_dawproject_export.cpp
+    LIBRARIES pulp::dawproject-export pulp::dawproject-import pulp::interchange
+        pulp::timeline)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 # pulp::midi supplies the shared MIDI 2.0 velocity scaling the SMF interop
