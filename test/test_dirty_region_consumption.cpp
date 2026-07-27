@@ -152,3 +152,76 @@ TEST_CASE("paint_root after a clean frame (no marks) paints full",
     REQUIRE(count_clip_rects_at(second, 0, 0, 400, 300) == 0);
     REQUIRE(save_restore_balanced(second));
 }
+
+// ── WindowHost's take/restore pair (WAH-8) ──────────────────────────────────
+//
+// Both hosts now share ONE PendingDamage. WindowHost's half of the consume
+// contract is these two accessors: read-and-clear in one step, and hand the
+// snapshot back when the frame did not reach its output. Before the split,
+// WindowHost carried its own dirty_full_/have_dirty_bounds_/dirty_bounds_ trio
+// plus a copy of the union logic, which is how the two hosts drifted apart on
+// what a bounded mark even means.
+
+TEST_CASE("WindowHost::take_pending_dirty reads and clears in one step",
+          "[dirty-region][wah-8]") {
+    TestWindowHost host;
+    host.clear_pending_dirty();  // past the always-full first frame
+    host.mark_dirty(Rect{10, 20, 30, 40});
+    REQUIRE(host.has_pending_dirty_bounds());
+
+    const auto frame = host.take_pending_dirty();
+
+    REQUIRE(frame.is_bounded());
+    REQUIRE(frame.bounds().x == 10.0f);
+    REQUIRE(frame.bounds().width == 30.0f);
+    // Cleared, so a mark arriving now belongs to the NEXT frame.
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+    REQUIRE_FALSE(host.has_pending_dirty_bounds());
+}
+
+TEST_CASE("WindowHost::restore_pending_dirty puts a failed frame's damage back",
+          "[dirty-region][wah-8]") {
+    TestWindowHost host;
+    host.clear_pending_dirty();
+    host.mark_dirty(Rect{5, 5, 10, 10});
+    const auto frame = host.take_pending_dirty();
+
+    host.restore_pending_dirty(frame);
+
+    REQUIRE(host.has_pending_dirty_bounds());
+    REQUIRE(host.pending_dirty_bounds().x == 5.0f);
+    REQUIRE_FALSE(host.pending_repaint_is_full());
+}
+
+TEST_CASE("WindowHost restore unions with damage marked meanwhile",
+          "[dirty-region][wah-8]") {
+    // A repaint request arriving while the frame was in flight must survive the
+    // restore — overwriting instead of unioning would drop it.
+    TestWindowHost host;
+    host.clear_pending_dirty();
+    host.mark_dirty(Rect{0, 0, 10, 10});
+    const auto frame = host.take_pending_dirty();
+    host.mark_dirty(Rect{100, 100, 10, 10});
+
+    host.restore_pending_dirty(frame);
+
+    const Rect b = host.pending_dirty_bounds();
+    REQUIRE(b.x == 0.0f);
+    REQUIRE(b.x + b.width == 110.0f);
+    REQUIRE(b.y + b.height == 110.0f);
+}
+
+TEST_CASE("WindowHost restore of a full snapshot stays full",
+          "[dirty-region][wah-8]") {
+    TestWindowHost host;
+    const auto frame = host.take_pending_dirty();  // the always-full first frame
+    REQUIRE(frame.is_full());
+    host.clear_pending_dirty();
+    host.mark_dirty(Rect{1, 1, 2, 2});
+
+    host.restore_pending_dirty(frame);
+
+    // Sticky-full survives a restore: the failed frame was repainting
+    // everything, so its retry must too.
+    REQUIRE(host.pending_repaint_is_full());
+}

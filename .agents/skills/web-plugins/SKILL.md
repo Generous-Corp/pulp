@@ -886,3 +886,21 @@ module has no archive to fall back on.
 The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
+
+## The Ganesh/WebGL surface reports a frame outcome now (WAH-2)
+
+`SkiaSurface::end_frame()` returns `render::FrameOutcome` instead of
+`void`. On the browser backend (`skia_surface_ganesh.cpp`):
+
+- a normal flush reports `presented` — the browser composites the canvas
+  element itself, so a successful `flushAndSubmit()` IS the frame
+  reaching its output;
+- a LOST WebGL context reports `recreate`, not `failed`: the caller must
+  rebuild against the restored context before the frame means anything;
+- `has_presentable_target()` is always `true` here — there is no
+  offscreen-by-design mode on this backend.
+
+Hosts gate damage retirement on `render::frame_reached_output(outcome)`,
+so a backend that misreports makes the UI either repaint forever
+(false failure) or go stale (false success). If you add a web render
+path, return an honest outcome rather than defaulting to `presented`.

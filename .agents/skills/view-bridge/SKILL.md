@@ -1232,10 +1232,61 @@ through Pulp's real Dawn instance. Without it, those shims fall through
 to mocks and any JS-rendered WebGPU output (Three.js, raw WebGPU) is
 black.
 
+### Subscribe, do not sample (the Windows trap)
+
+**Never read `host->gpu_surface()` once and hand the result to the
+session.** That read is only correct on hosts that build their surface in
+the constructor (Apple, Linux). The Windows host CANNOT: Dawn configures
+presentation for the HWND's native-window shape, and the editor HWND is a
+hidden `WS_POPUP` until `attach_to_parent()` reparents it into the DAW. A
+read taken at editor-open time returns `nullptr` and never becomes
+non-null on its own — so `navigator.gpu` fell through to mocks on every
+Windows editor while the CPU-fallback diagnostic screamed about a host
+that was about to run on the GPU. The same one-shot read also had nowhere
+to learn about DETACH, so a consumer kept a raw pointer to a destroyed
+surface.
+
+Use the shared helper instead — one call, every format:
+
+```cpp
+// core/format/include/pulp/format/gpu_host_select.hpp
+gpu_surface_binding_ =
+    bind_gpu_surface(*editor_host_, bridge_.scripted_ui(), gpu, "VST3");
+```
+
+It subscribes to `PluginViewHost::observe_gpu_surface()`, forwards each
+transition into `ScriptedUiSession::attach_gpu_surface()` (including the
+`nullptr` on teardown), and owns the CPU-fallback diagnostic so it can
+only fire once the state is genuinely decided.
+
+**Surface availability is THREE states**, not two — collapsing them is
+what produced the false warning:
+
+| State | Meaning | Correct reaction |
+|---|---|---|
+| `pending` | will be created, not yet | wait; say nothing |
+| `ready` | live; `gpu_surface()` non-null | attach it |
+| `unavailable` | CPU host, or GPU init failed | detach; NOW a CPU-fallback warning is true |
+
+**Lifetime rule:** the returned `GpuSurfaceSubscription` must be
+`reset()` before the `ScriptedUiSession` it writes into is destroyed.
+Declare it AFTER the host member (reverse-destruction order drops it
+first) AND reset it explicitly in the adapter's close/removed path — the
+bridge that owns the session usually outlives both. Dropping the
+subscription is sufficient: no callback can fire afterwards, even from
+the host's destructor.
+
+Contract tests: `pulp-test-gpu-surface-lifecycle` (delayed creation,
+detach, destruction, reattach, mid-session recreation,
+no-callback-after-unsubscribe, self-unsubscribe from inside a callback).
+
+### The underlying attach points
+
 The order is fixed by the adapter editor lifecycle: `ViewBridge::open()`
 constructs the `ScriptedUiSession` (and its `WidgetBridge`) BEFORE
-`PluginViewHost::create()` allocates the `GpuSurface`. Two new API
-points close that gap:
+`PluginViewHost::create()` allocates the `GpuSurface`. Two API points
+close that gap (both now driven BY the subscription above rather than
+called directly from adapters):
 
 - `pulp::view::WidgetBridge::attach_gpu_surface(GpuSurface*)` — idempotent
   late-attach; nullable. Stores the pointer + lazily allocates the
@@ -1259,10 +1310,21 @@ The expected log line on success:
 [plugin-gpu-host] GpuSurface attached to WidgetBridge via ScriptedUiSession (<format>)
 ```
 
-`PluginViewHost::gpu_surface()` is a new virtual mirroring
-`WindowHost::gpu_surface()` (CPU hosts inherit the nullptr default; GPU
-hosts on iOS/macOS override). Future Windows/Linux factory hosts that
-want WebGPU JS plumbing must override the virtual too.
+`PluginViewHost::gpu_surface()` mirrors `WindowHost::gpu_surface()` (CPU
+hosts inherit the nullptr default; GPU hosts override). A host that
+overrides it MUST also publish its transitions:
+
+- `mark_gpu_surface_pending()` in the constructor when it intends to
+  create a surface later;
+- `publish_gpu_surface(surface, GpuSurfaceState::ready)` once the pair is
+  live;
+- `publish_gpu_surface(nullptr, GpuSurfaceState::unavailable)` BEFORE the
+  surface objects are destroyed — publishing after the reset leaves a
+  window in which consumers hold a dangling pointer they still believe is
+  current.
+
+A host that does neither reports `unavailable` forever, which is the
+correct answer for a genuinely CPU-only host.
 
 Coverage: `pulp-test-widget-bridge "[gpu-surface-plumbing]"` (ctor +
 late-attach + idempotence + detach) and `pulp-test-scripted-ui

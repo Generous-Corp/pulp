@@ -63,6 +63,10 @@ struct PulpAUEditorOwnership {
     pulp::format::Processor* processor = nullptr;
     pulp::runtime::AliveToken::Handle processor_alive;
     const void* resize_owner = nullptr;
+    // Forwards `host`'s GPU-surface transitions into `bridge`'s scripted UI
+    // session. Declared LAST so it destroys FIRST — before both the host that
+    // publishes and the bridge that is written into.
+    pulp::view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
 
     ~PulpAUEditorOwnership() {
         // Remove the owner-scoped handler before host/bridge member teardown.
@@ -72,6 +76,9 @@ struct PulpAUEditorOwnership {
             pulp::runtime::AliveToken::is_alive(processor_alive)) {
             processor->set_editor_resize_handler(resize_owner, nullptr);
         }
+        // Explicit, not just reverse-member-order luck: the host publishes
+        // `unavailable` from its own destructor.
+        gpu_surface_binding.reset();
     }
 };
 
@@ -195,7 +202,6 @@ static const char kOwnershipKey = 0;
         bridge->close();
         return nil;
     }
-    format::warn_if_unexpected_cpu_fallback(gpu, host.get());
 
     // Viewport pin + aspect lock — parity with VST3 (PulpPlugView::attached)
     // and mac AUv3 (PulpAUViewController), via the shared
@@ -218,16 +224,12 @@ static const char kOwnershipKey = 0;
     // below); the wrapper destroys host (stops the display link) before bridge.
     host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
 
-    // Route navigator.gpu / canvas.getContext('webgpu') through the host's
-    // live GpuSurface.
-    if (auto* scripted = bridge->scripted_ui()) {
-        scripted->attach_gpu_surface(host->gpu_surface());
-        if (host->gpu_surface()) {
-            runtime::log_info(
-                "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
-                "via ScriptedUiSession (AU v2)");
-        }
-    }
+    // Follow the host's GpuSurface so JS navigator.gpu /
+    // canvas.getContext('webgpu') routes through Pulp's Dawn instance, and so
+    // the session drops the pointer when the host tears the surface down. Also
+    // owns the CPU-fallback diagnostic. Moved into the ownership wrapper below.
+    auto gpu_surface_binding = format::bind_gpu_surface(
+        *host, bridge->scripted_ui(), gpu, "AU v2");
 
     // AU v2 has no host size callback — the DAW resizes the returned NSView
     // directly. Forward native frame changes to the bridge so the surfaces
@@ -307,7 +309,7 @@ static const char kOwnershipKey = 0;
     // bridge (fires Processor::on_view_closed) and frees the host.
     auto* ownership = new PulpAUEditorOwnership{
         std::move(bridge), std::move(host), ctx.processor, ctx.owner_alive,
-        (const void*)editorView};
+        (const void*)editorView, std::move(gpu_surface_binding)};
     PulpAUEditorOwner* owner = [[PulpAUEditorOwner alloc] initWithOwnership:ownership];
     objc_setAssociatedObject(editorView, &kOwnershipKey, owner,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);

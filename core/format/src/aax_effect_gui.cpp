@@ -133,24 +133,18 @@ private:
             bridge_.reset();
             return;
         }
-        warn_if_unexpected_cpu_fallback(gpu, host_.get());
-
         // Pump the scripted UI session (async results, timers, rAF) per vsync.
         host_->set_idle_callback(make_scripted_idle_pump(*bridge_));
 
-        // Route navigator.gpu / canvas.getContext('webgpu') through the host's
-        // live GpuSurface.
-        if (auto* scripted = bridge_->scripted_ui()) {
-            scripted->attach_gpu_surface(host_->gpu_surface());
-            if (host_->gpu_surface()) {
-                runtime::log_info(
-                    "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
-                    "via ScriptedUiSession (AAX)");
-            }
-        }
+        // Follow the host's GPU surface rather than sampling it once: on
+        // Windows it does not exist until try_attach_to_parent() below. Also
+        // carries the detach edge and owns the CPU-fallback diagnostic.
+        gpu_surface_binding_ =
+            bind_gpu_surface(*host_, bridge_->scripted_ui(), gpu, "AAX");
 
         if (!host_->try_attach_to_parent(parent)) {
             runtime::log_error("AAX editor: attach to native parent failed");
+            gpu_surface_binding_.reset();
             host_.reset();
             bridge_->close();
             bridge_.reset();
@@ -274,6 +268,9 @@ private:
         if (auto* model = host_model()) {
             model->release_editor_gestures();
         }
+        // Unsubscribe before the host publishes its teardown and before the
+        // bridge that owns the scripted session dies.
+        gpu_surface_binding_.reset();
         if (host_) {
             // Drop the idle/resize callbacks with the host before the bridge
             // they capture dies.
@@ -288,6 +285,7 @@ private:
 
     std::unique_ptr<ViewBridge> bridge_;
     std::unique_ptr<view::PluginViewHost> host_;
+    view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
 };
 
 } // namespace

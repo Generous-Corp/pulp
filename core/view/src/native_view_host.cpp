@@ -265,6 +265,13 @@ void PluginViewHost::unregister_native_view(NativeViewHost* view) {
 }
 
 PluginViewHost::~PluginViewHost() {
+    // Announce the surface teardown while `this` is still a valid object.
+    // Derived destructors have already released their GpuSurface by the time
+    // they chain here, so a consumer still holding the raw pointer learns it is
+    // dead now rather than on its next frame. Subscriptions that outlive the
+    // host see an expired registry and are inert.
+    publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
+
     const auto views = attached_native_views_;
     for (NativeViewHost* v : views)
         if (v) v->on_host_destroyed();

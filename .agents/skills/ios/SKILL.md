@@ -1056,3 +1056,20 @@ func discover() {
 Cleared in both the success path (inside the `Task { @MainActor in ... }` after `AVAudioUnit.instantiate` succeeds) AND the bail paths (no matching component found, instantiate callback returns `error != nil`). Forgetting either bail path leaks the in-flight flag and the discovery never retries.
 
 Grep `PULP_DISCOVER` + `PULP_INSTANTIATE` in the launch log to trace the discovery cycle; the new code reuses these existing log markers and adds no new noise.
+
+### The GPU surface reaches the scripted UI by subscription (WAH-1)
+
+`au_view_controller_ios.mm` no longer reads `_viewHost->gpu_surface()`
+once. It holds a `_gpuSurfaceBinding` from
+`pulp::format::bind_gpu_surface(...)`, which follows the host's
+surface lifecycle and forwards BOTH creation and teardown into the
+scripted UI session.
+
+Ivar order is load-bearing, same as `_viewHost`: declare
+`_gpuSurfaceBinding` AFTER `_viewHost` so reverse-order destruction drops
+the subscription before the host it observes, and reset it explicitly in
+the `-dealloc` main-thread teardown block alongside `_viewHost.reset()`.
+
+Why it changed: the read was correct on iOS (this host builds its surface
+in the constructor) but wrong on Windows, and one shared code path beats
+six per-format copies with one silently-broken member.
