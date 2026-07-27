@@ -10,6 +10,7 @@
 #include <pulp/state/store.hpp>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -119,6 +120,11 @@ private:
     float clamp_value(ParamID id, float value) const {
         if (store_) {
             if (const auto* info = store_->info(id)) {
+                // Host/injected automation is an untrusted boundary. Like
+                // StateStore::set_value(), replace NaN/Inf with the effective
+                // declared default before clamping so ramps and downstream
+                // integer/enum decoders never observe a non-finite value.
+                if (!std::isfinite(value)) value = info->range.default_value;
                 return std::clamp(value, info->range.min, info->range.max);
             }
         }
