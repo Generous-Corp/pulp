@@ -209,6 +209,11 @@ docs:
     kind: guide
     summary: Measured Analog VCF voicings, low-level OTA cascade design, real-time use, and latency/PDC contracts
 
+  - slug: fdn-reverb
+    path: guides/fdn-reverb.md
+    kind: guide
+    summary: Multirate FDN reverb usage, controls, lifecycle, architecture boundaries, finite-state recovery, and validation ownership
+
   - slug: oscillators
     path: guides/oscillators.md
     kind: guide

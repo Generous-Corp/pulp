@@ -642,6 +642,20 @@ Uses prime-number delay lengths (1087, 1283, 1481, 1693 samples at 44.1 kHz, sca
 
 ---
 
+### FdnReverb
+
+`FdnReverb` is the true-stereo, wet-only multirate reverb for richer production
+use: 16 delay lines, five data-driven modes, shimmer, modulation, Bloom,
+in-loop drive, and a selectable 16–96 kHz internal tank rate. It has a stronger
+reset/rate-switch contract and a larger prepared memory footprint than the
+compact `Reverb` above.
+
+Include `<pulp/signal/fdn_reverb.hpp>` directly. See the
+[Multirate FDN Reverb guide](fdn-reverb.md) for controls, lifecycle rules,
+module ownership, finite-state recovery, and focused validation.
+
+---
+
 ### WaveShaper
 
 Waveshaping distortion with five curve types.
