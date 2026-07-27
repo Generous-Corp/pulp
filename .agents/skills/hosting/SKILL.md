@@ -1993,3 +1993,38 @@ Two things to know when wiring it up:
   moment either default moves, and nothing fails — the drum sits a few dozen
   samples off every undelayed path beside it. Name the choice once
   (`OutputStage::kDefaultOversampling`) and compute the latency from it.
+
+## Refusing a control is the last resort, not the first
+
+A catalog node that cannot honour a control has two honest options: make the
+control mean something, or do not declare it. Refusing a *declared* control is
+the worst of the three, and it is the one that looks most rigorous.
+
+The case that made this concrete: the bridged-T kick has no frequency
+parameter — its pitch is a property of the network — so a `tune_hz` macro on
+that body was refused with an accurate, actionable message. The message was
+correct and the behaviour was wrong. A kick that cannot be tuned is not what
+anyone asking for an 808 kit means, and "an 808 style kit" failed to build
+because of it: the model generated the natural graph, was refused, regenerated,
+and the attempt budget ran out. The refusal taught the user our implementation
+detail instead of serving the request.
+
+The control was implementable the whole time. The network retunes by
+substituting capacitors, exactly as the hardware does; scaling both arms moves
+the centre frequency and leaves Q invariant. The header had even said so —
+"scaling both arms therefore retunes the drum while leaving Q exactly
+invariant, which is the signature a tune control has to reproduce" — describing
+a control nobody had built.
+
+So when a node cannot honour a control, ask in this order:
+
+1. **Can the underlying model express it another way?** Physical models usually
+   can: a frequency is some function of the components, a time is some function
+   of a decay coefficient. Solve the inverse. That is a real control, and the
+   parameter-efficacy gate will then pass it honestly.
+2. **If genuinely impossible, do not declare it.** An emergent behaviour — the
+   circuit kick's pitch droop — is not a control, and declaring one would be a
+   dead knob.
+3. **Only refuse when the pairing is expressible but wrong**, and then teach the
+   refusal wherever the capability is advertised. An untaught refusal is a retry
+   loop that costs a generation budget, not a guardrail.
