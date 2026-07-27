@@ -80,3 +80,34 @@ randomized constant/ramp cases, plus tempo-point boundary cases.
 `MonotonicBeat` is the strong type for the transport's non-looping musical
 clock; the transport owns how it advances while timeline positions seek or
 wrap.
+
+## Never use `__int128` for wide intermediates
+
+MSVC does not support `__int128` on **any** architecture, so it is not a
+portability question about 32-bit targets — it fails on `windows-x64` and
+`windows-arm64` alike with `error C4235`, and a header that uses it cascades
+into `C4430` / `C2059` / `C2064` at every use site. Clang and GCC accept it,
+so macOS and Linux build clean and the break surfaces on the Windows leg of
+the release matrix, where a failure means the GitHub release object and its
+assets are never produced.
+
+Use the portable saturating helpers in `pulp::timebase::detail`
+(`tick.hpp`): `saturating_add`, `saturating_subtract`, `saturating_multiply`.
+They are `constexpr` and total over the full signed 64-bit range.
+
+Two things to know when composing them:
+
+- **Composition saturates per operation.** `saturating_add(a,
+  saturating_multiply(b, c))` rails the product first and then the sum, where
+  a wide intermediate would clamp the exact value once. These differ only when
+  a railed product is pulled back into range by the addend. State the choice in
+  a comment where it could matter rather than leaving it implicit.
+- **`kMin` is the case that actually bites.** It has no positive counterpart,
+  so negating it must saturate, and `kMin / -1` overflows. Any new helper needs
+  that case handled explicitly before it can divide to test for overflow.
+
+When adding a helper here, cross-check it against `__int128` as an independent
+oracle *in the test* (guarded by `#if defined(__SIZEOF_INT128__)`). The test is
+not shipped to MSVC, so it may use the wide type that the header may not — that
+verifies the portable path against the maths it replaced rather than against
+itself. `test_timebase.cpp` does this over an exhaustive small grid.
