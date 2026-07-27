@@ -1,0 +1,84 @@
+name: GCC compile gate
+
+# Every Linux lane in PR CI compiles with Clang — "Public headers compile
+# standalone (Linux Clang)", "IWYU (Linux, Clang)", "RealtimeSanitizer
+# (Clang 18)". The only GCC compile anywhere in the PR path is
+# release-path-pr-gate.yml, and that is path-triggered on release files
+# (Skia pins, Pulp*.cmake, the top-level CMakeLists.txt). A GCC-only error
+# inside core/ is therefore invisible unless a PR happens to touch one of
+# those.
+#
+# Found the hard way on 2026-07-27: core/host/src/signal_graph.cpp carried two
+# identical `.custom_latency_for` entries in one designated-initializer list.
+# Clang accepts that and silently takes the last; GCC rejects it outright. It
+# sat on main until an unrelated docs PR touched tools/cmake/PulpInstallRules.cmake
+# and tripped the release-path gate by accident.
+#
+# This gate closes that hole cheaply. It compiles the core libraries with g++
+# and nothing else — no tests, no examples, no GPU. With PULP_ENABLE_GPU=OFF
+# there is no Dawn/Skia fetch or build, which is what keeps it minutes rather
+# than a full release build. It is a COMPILER-DIVERGENCE check, not a second
+# functional lane: the Clang lanes still own correctness.
+
+on:
+  pull_request:
+    paths:
+      - 'core/**'
+      - '.github/workflows/gcc-compile-gate.yml'
+  workflow_dispatch:
+
+# A new commit supersedes the previous compile of the same branch.
+concurrency:
+  group: gcc-compile-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-core:
+    name: GCC compile (core, Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report the compiler under test
+        run: |
+          g++ --version
+          cmake --version
+
+      # GPU off is what makes this cheap: no Dawn, no Skia, no prebuilt fetch.
+      # Tests and examples off because this gate asks "does core/ compile under
+      # GCC", not "does everything work" — the Clang lanes answer that.
+      - name: Configure (g++, core only)
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake -S . -B build-gcc \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_ENABLE_DESIGN_IMPORT=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF
+
+      # An explicit job count, per the repo-wide rule that no build may fan out
+      # unbounded on a shared machine.
+      - name: Build core libraries
+        run: cmake --build build-gcc --parallel 4
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "GCC compiled the core libraries with tests, examples, and GPU disabled."
+            echo ""
+            echo "A failure here is a real compiler divergence, not a flake: this lane"
+            echo "runs no tests and touches no hardware. Clang accepting the same code"
+            echo "does not make it portable."
+          } >> "$GITHUB_STEP_SUMMARY"
