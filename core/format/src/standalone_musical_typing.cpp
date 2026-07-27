@@ -341,12 +341,12 @@ bool StandaloneMusicalTyping::show() {
         window_ = host_factory_(*keyboard_, options);
         if (!window_ || !window_->is_gpu_backed()) {
             // The keyboard paints through Skia, so a CPU-only WindowHost cannot
-            // show it. Say so: the Window menu item and Cmd+K are already
-            // installed by the time we get here, and a silent bail-out reads as
-            // a dead menu item rather than an unsupported build.
+            // show it. Say so: the menu item and Cmd+K are already installed by
+            // the time we get here, and a silent bail-out reads as a dead menu
+            // item rather than an unsupported build.
             runtime::log_warn(
                 "[musical-typing] cannot open: this build's WindowHost is not GPU-backed "
-                "(Skia/Dawn unavailable). The Window > Musical Typing Keyboard command "
+                "(Skia/Dawn unavailable). The Musical Typing Keyboard command "
                 "will not work.");
             window_.reset();
             keyboard_.reset();
