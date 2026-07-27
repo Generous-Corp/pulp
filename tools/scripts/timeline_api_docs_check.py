@@ -130,10 +130,207 @@ def check(xml_dir: Path) -> list[tuple[str, int, str]]:
     return sorted(findings)
 
 
+PUBLIC_HEADER = "/src/core/timeline/include/pulp/timeline/model.hpp"
+
+
+def _compound_xml(
+    name: str,
+    *,
+    documented_type: bool = True,
+    members: list[dict] | None = None,
+    file: str = PUBLIC_HEADER,
+    kind: str = "class",
+    prot: str = "public",
+) -> str:
+    """Render one Doxygen compounddef. Shape mirrors real Doxygen output."""
+    brief = "<para>A contract.</para>" if documented_type else ""
+    body = []
+    for member in members or []:
+        member_brief = "<para>A contract.</para>" if member.get("documented") else ""
+        body.append(
+            f'<memberdef kind="{member.get("kind", "function")}" '
+            f'prot="{member.get("prot", "public")}">'
+            f'<type>{member.get("type", "bool")}</type>'
+            f'<name>{member["name"]}</name>'
+            f'<qualifiedname>{member["qualified"]}</qualifiedname>'
+            f'<argsstring>{member.get("args", "() const noexcept")}</argsstring>'
+            f"<briefdescription>{member_brief}</briefdescription>"
+            f"<detaileddescription/>"
+            f'<location file="{member.get("file", file)}" line="20"/>'
+            f"</memberdef>"
+        )
+    return (
+        '<?xml version="1.0"?><doxygen>'
+        f'<compounddef kind="{kind}" prot="{prot}" id="x">'
+        f"<compoundname>{name}</compoundname>"
+        f"<briefdescription>{brief}</briefdescription><detaileddescription/>"
+        f'<location file="{file}" line="10"/>'
+        f"<sectiondef>{''.join(body)}</sectiondef>"
+        "</compounddef></doxygen>"
+    )
+
+
+def _fixture(tmp: Path, extra: list[str]) -> Path:
+    """A tree that is clean by construction, plus whatever a case adds.
+
+    The baseline supplies every EXPECTED_PUBLIC_TYPES entry documented, so a
+    case's findings are attributable to that case rather than to the
+    representative-type guard firing on an otherwise empty directory.
+    """
+    tmp.mkdir(parents=True, exist_ok=True)
+    for index, name in enumerate(sorted(EXPECTED_PUBLIC_TYPES)):
+        (tmp / f"base{index}.xml").write_text(_compound_xml(name))
+    for index, xml in enumerate(extra):
+        (tmp / f"case{index}.xml").write_text(xml)
+    return tmp
+
+
+def self_test() -> int:
+    """Prove the checker flags what it must and stays quiet where it must.
+
+    Both directions matter. A checker that flags nothing passes every build
+    silently, and every exemption here (internal namespaces, destructors,
+    defaulted and deleted members, deduction guides, the path filter) is a
+    chance to over-match and become exactly that.
+    """
+    import tempfile
+
+    def member(**overrides) -> dict:
+        return {"name": "valid", "qualified": "pulp::timeline::Widget::valid", **overrides}
+
+    cases: list[tuple[str, list[str], int]] = [
+        ("clean tree reports nothing", [], 0),
+        (
+            "undocumented public callable is flagged",
+            [_compound_xml("pulp::timeline::Widget", members=[member(documented=False)])],
+            1,
+        ),
+        (
+            "documented public callable is not flagged",
+            [_compound_xml("pulp::timeline::Widget", members=[member(documented=True)])],
+            0,
+        ),
+        (
+            "undocumented public type is flagged",
+            [_compound_xml("pulp::timeline::Widget", documented_type=False)],
+            1,
+        ),
+        (
+            "detail namespace is exempt",
+            [
+                _compound_xml(
+                    "pulp::timeline::detail::Widget",
+                    documented_type=False,
+                    members=[
+                        {
+                            "name": "valid",
+                            "qualified": "pulp::timeline::detail::Widget::valid",
+                            "documented": False,
+                        }
+                    ],
+                )
+            ],
+            0,
+        ),
+        (
+            "destructor is exempt",
+            [
+                _compound_xml(
+                    "pulp::timeline::Widget",
+                    members=[
+                        member(name="~Widget", qualified="pulp::timeline::Widget::~Widget",
+                               documented=False)
+                    ],
+                )
+            ],
+            0,
+        ),
+        (
+            "defaulted and deleted members are exempt",
+            [
+                _compound_xml(
+                    "pulp::timeline::Widget",
+                    members=[
+                        member(documented=False, args="()=default"),
+                        member(documented=False, args="()=delete"),
+                    ],
+                )
+            ],
+            0,
+        ),
+        (
+            "a header outside the timeline public surface is ignored",
+            [
+                _compound_xml(
+                    "pulp::timeline::Widget",
+                    documented_type=False,
+                    file="/src/core/host/src/signal_graph.cpp",
+                )
+            ],
+            0,
+        ),
+        (
+            "private members are ignored",
+            [
+                _compound_xml(
+                    "pulp::timeline::Widget",
+                    members=[member(documented=False, prot="private")],
+                )
+            ],
+            0,
+        ),
+        (
+            "a missing representative public type is flagged",
+            [],
+            1,
+        ),
+    ]
+
+    failures = 0
+    with tempfile.TemporaryDirectory() as root:
+        for index, (label, extra, expected) in enumerate(cases):
+            directory = Path(root) / f"case{index}"
+            if label.startswith("a missing representative"):
+                # Drop one baseline type so the EXPECTED_PUBLIC_TYPES guard is
+                # the thing under test, not the per-symbol scan.
+                directory.mkdir(parents=True)
+                for offset, name in enumerate(sorted(EXPECTED_PUBLIC_TYPES)[1:]):
+                    (directory / f"base{offset}.xml").write_text(_compound_xml(name))
+            else:
+                _fixture(directory, extra)
+            found = len(check(directory))
+            status = "ok" if found == expected else "FAIL"
+            if found != expected:
+                failures += 1
+            print(f"  [{status}] {label}: expected {expected} finding(s), got {found}")
+
+    if failures:
+        print(f"timeline API docs checker self-test FAILED ({failures} case(s))")
+        return 1
+    print(f"timeline API docs checker self-test passed ({len(cases)} cases)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("xml_dir", type=Path, help="Doxygen XML output directory")
+    parser.add_argument(
+        "xml_dir",
+        type=Path,
+        nargs="?",
+        help="Doxygen XML output directory",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="run the checker's own controls and exit (needs no Doxygen)",
+    )
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    if args.xml_dir is None:
+        parser.error("xml_dir is required unless --self-test is given")
 
     if not args.xml_dir.is_dir():
         parser.error(f"not a Doxygen XML directory: {args.xml_dir}")
