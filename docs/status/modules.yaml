@@ -37,6 +37,25 @@ modules:
       - audio
       - runtime
     docs: reference/modules.md#dawproject
+  - name: smf
+    summary: Fail-closed Standard MIDI File format 0/1 import and export against the tempo and meter maps with exact canonical tick conversion on dividing grids and reported rounding otherwise
+    status: experimental
+    dependencies:
+      - timeline
+      - runtime
+    docs: reference/modules.md#smf
+  - name: sequence
+    summary: SequenceProcessor plugin-format adapter that plays a compiled Timeline program inside a host and projects host transport state onto the master transport
+    status: experimental
+    dependencies:
+      - playback
+      - format
+      - graph
+      - audio
+      - midi
+      - state
+      - timebase
+    docs: reference/modules.md#sequence
   - name: runtime
     summary: Core utilities — SIMD (Highway), XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing
     status: stable

@@ -1071,6 +1071,29 @@ symlink that points outside.
 **Depends on:** `interchange`, `timeline`, `audio`, `runtime`
 
 
+## smf
+
+Standard MIDI File import and export.
+
+**Link:** `pulp::smf-interop` · **Include prefix:** `<pulp/timeline/smf.hpp>`
+
+The library is separate so a consumer can leave SMF out, but its API lives with
+the timeline surface it operates on rather than under its own include prefix.
+
+Import accepts **format 0 and 1 with a metrical division**, note on/off, and the
+tempo, time-signature, track-name, and end-of-track meta events. SMPTE divisions,
+format 2, and any other event **fail the import** unless the caller explicitly
+opts into ignoring non-note events.
+
+Export covers note content plus the tempo and meter maps. Device chains,
+automation, takes, freezes, and media assets have no SMF representation. A tempo
+ramp, or a tick the requested division cannot represent exactly, is an **error
+rather than a silent approximation** — conversion is exact on dividing grids and
+any rounding is reported.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
+
 ## playback
 
 The master timeline transport publishes integer-authoritative block snapshots.
