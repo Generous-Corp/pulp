@@ -829,26 +829,51 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
-- **A duplicate designator in `ExecutorSnapshotBinders` compiles on macOS and
-  fails the build on Linux.** The binders are built with designated
-  initializers, and a merge that brings the same binder in from both sides
-  produces the member listed twice. Clang accepts the repeat silently; GCC
-  rejects it:
+- **A duplicate designator in a binder initializer breaks the build — and BOTH
+  compilers told us, and it landed anyway.** The binders are designated-
+  initializer literals, so a merge that brings the same binder in from both
+  sides lists the member twice. That happened once with
+  `.custom_latency_for` in `signal_graph.cpp`.
 
-      error: '.custom_latency_for' designator used multiple times
-             in the same initializer list
+  Do NOT read this as "clang is permissive and only Linux catches it" — that is
+  the wrong lesson and it will send you looking for a diagnostic that was
+  already printed. What actually happened:
 
-  Pulp's only GCC lane is the **advisory** Linux job, and the required gate is
-  macOS — so this class of break lands on main without any required check
-  going red. It happened exactly that way once: resolving a duplicate binder
-  MEMBER during a merge did not remove the duplicate INITIALIZER, and every
-  local build and the required gate stayed green.
+  - **Clang WARNED, by default, twice.** Compiling the shape with no `-W`
+    flags at all yields `-Wreorder-init-list` ("field designators … in
+    declaration order") and `-Winitializer-overrides` ("initializer overrides
+    prior initialization of this subobject"). The root `CMakeLists.txt` already
+    adds `-Wall -Wextra -Wpedantic`, so the **required macOS gate printed both**
+    — and nobody reads a green job's log.
+  - **GCC ERRORED and the Linux job reported failure**
+    (`error: '.custom_latency_for' designator used multiple times in the same
+    initializer list`).
+  - It reached `main` regardless, because the Linux lane is **advisory**.
 
-  After any merge that touches the binder lists, count the designators. There
-  are three such initialisers — `signal_graph.cpp`,
-  `baked_graph_processor.cpp`, `signal_graph_executor_routing.cpp` — and a
-  duplicate in any of them is a Linux-only failure you cannot reproduce on a
-  Mac.
+  So this is a POLICY gap, not a coverage gap: a real compile failure was
+  detected, displayed, and merged past. Adding another GCC leg would be
+  building something that already exists. The durable fix is to make an
+  existing verdict binding — either promote those two clang warnings with
+  `-Werror=reorder-init-list -Werror=initializer-overrides` (free: clang
+  already emits them, so it can only fail on real defects), or make the Linux
+  COMPILE step blocking while leaving its tests advisory. Measure whether
+  Linux finishes inside the macOS leg's shadow before choosing; if it does,
+  blocking costs no latency.
+
+  There are **four** binder literals, not three — miss one and the grep is a
+  false all-clear:
+
+  ```bash
+  grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp                    # 1445
+  grep -c '\.custom_latency_for' core/host/src/signal_graph_executor_routing.cpp   # 427 and 689
+  grep -c '\.custom_latency_for' core/host/src/baked_graph_processor.cpp           # 623
+  ```
+
+  If the duplicated bodies are identical, deleting either is behaviour-
+  preserving — clang was already using the last one. If they DIFFER, clang has
+  been running the second and GCC has never compiled the file at all, so decide
+  which is correct before deleting. Prefer keeping the copy that sits in
+  declaration order.
 
 - **Custom-node intrinsic latency is a CALLBACK, not a count.**
   `CustomNodeType::latency_samples` is `std::function<int(double sample_rate)>`,
