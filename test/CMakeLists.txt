@@ -1,6 +1,5 @@
 # Pulp test suite -- Catch2
-# Keep this file as shared setup plus ordered owner includes only.
-# Add new test registrations to the matching test/cmake/*_tests.cmake file.
+# Shared setup plus ordered owner includes; add registrations to test/cmake/*_tests.cmake.
 
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpTestSuite.cmake)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_rt_contract_tests.cmake")
@@ -35,6 +34,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/late_core_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/view_widget_bridge_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/design_import_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app_audio_host_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/character_delay_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fdn_reverb_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/forge_modulation_catalog_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/design_system_tests.cmake")

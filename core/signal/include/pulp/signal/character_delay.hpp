@@ -86,12 +86,23 @@ public:
     enum class Character { clean, vintage_digital, tape, bbd, diffusion };
     enum class TapeTier { standard, physical };
 
-    // ── Configuration (control thread) ────────────────────────────────────
+    // Thread contract: this object is deliberately lock-free and is not safe
+    // for concurrent mutation. Call set_sample_rate()/set_character()/the tape
+    // configuration methods while processing is stopped. Character selection
+    // is switchable between realizations/processing runs, not concurrently in
+    // a live render. Parameter setters are
+    // realtime-safe and belong on the SAME audio thread that calls process()
+    // (the catalog adapter follows this contract). A host whose controls arrive
+    // on another thread must publish them through its parameter store before
+    // the audio thread calls these setters.
+
+    // ── Configuration (processing stopped) ────────────────────────────────
 
     /// Allocates every buffer for the 2 s left-channel maximum times the
     /// largest right-channel offset, recomputes coefficients, then resets.
     /// Must be called before process().
     void set_sample_rate(double sample_rate) {
+        if (!std::isfinite(sample_rate)) return;
         sample_rate_ = std::max(sample_rate, 1000.0);
         const auto line_capacity =
             static_cast<std::size_t>(
@@ -134,44 +145,56 @@ public:
     void set_tape_tier(TapeTier tier) { tape_tier_ = tier; }
 
     void set_tape_speed_ips(SampleType ips) {
-        tape_speed_ips_ = std::clamp(static_cast<double>(ips), chardelay::kTapeSpeedsIps.front(),
+        tape_speed_ips_ = std::clamp(finite_or(static_cast<double>(ips), tape_speed_ips_),
+                                     chardelay::kTapeSpeedsIps.front(),
                                      chardelay::kTapeSpeedsIps.back());
         apply_tape_speed();
     }
 
-    // ── Parameters (control thread; smoothed on the audio thread) ─────────
+    // ── Parameters (audio thread; smoothed in process()) ──────────────────
 
     void set_time_ms(SampleType left_ms) {
-        time_ms_ = std::clamp(static_cast<double>(left_ms), 1.0, chardelay::kMaxDelayMs);
+        time_ms_ = std::clamp(finite_or(static_cast<double>(left_ms), time_ms_), 1.0,
+                              chardelay::kMaxDelayMs);
     }
 
     void set_time_offset(SampleType multiplier) {
-        time_offset_ = std::clamp(static_cast<double>(multiplier),
+        time_offset_ = std::clamp(finite_or(static_cast<double>(multiplier), time_offset_),
                                   chardelay::kTimeOffsetMin,
                                   chardelay::kTimeOffsetMax);
     }
 
     void set_feedback(SampleType feedback) {
-        feedback_target_ =
-            std::clamp(static_cast<double>(feedback), 0.0, chardelay::kSaturatedFeedbackMax);
+        feedback_target_ = std::clamp(
+            finite_or(static_cast<double>(feedback), feedback_target_), 0.0,
+            chardelay::kSaturatedFeedbackMax);
     }
 
     void set_crossfeed(SampleType crossfeed) {
-        crossfeed_target_ = std::clamp(static_cast<double>(crossfeed), 0.0, 1.0);
+        crossfeed_target_ =
+            std::clamp(finite_or(static_cast<double>(crossfeed), crossfeed_target_), 0.0, 1.0);
     }
 
     void set_character_amount(SampleType amount) {
-        character_target_ = std::clamp(static_cast<double>(amount), 0.0, 1.0);
+        character_target_ =
+            std::clamp(finite_or(static_cast<double>(amount), character_target_), 0.0, 1.0);
     }
 
     void set_mod(SampleType rate01, SampleType depth01) {
-        const double rate = std::clamp(static_cast<double>(rate01), 0.0, 1.0);
-        mod_depth_ = std::clamp(static_cast<double>(depth01), 0.0, 1.0) * chardelay::kModMaxDepth;
-        mod_rate_hz_ = chardelay::kModRateMinHz * std::pow(chardelay::kModRateMaxHz / chardelay::kModRateMinHz, rate);
+        if (const double candidate = static_cast<double>(rate01); std::isfinite(candidate)) {
+            const double rate = std::clamp(candidate, 0.0, 1.0);
+            mod_rate_hz_ = chardelay::kModRateMinHz *
+                           std::pow(chardelay::kModRateMaxHz /
+                                        chardelay::kModRateMinHz,
+                                    rate);
+        }
+        if (const double candidate = static_cast<double>(depth01); std::isfinite(candidate))
+            mod_depth_ = std::clamp(candidate, 0.0, 1.0) * chardelay::kModMaxDepth;
     }
 
     void set_duck(SampleType amount01) {
-        duck_target_ = std::clamp(static_cast<double>(amount01), 0.0, 1.0);
+        duck_target_ =
+            std::clamp(finite_or(static_cast<double>(amount01), duck_target_), 0.0, 1.0);
     }
 
     void set_freeze(bool on) { freeze_on_ = on; }
@@ -187,6 +210,8 @@ public:
     /// Allocation-free. Zeroes buffers and filter/solver state, re-seeds every
     /// PRNG, and snaps smoothed values to their targets, so two renders after a
     /// reset() are bit-identical.
+    /// Clear realtime state on the audio thread between blocks, or while
+    /// processing is stopped. Never race this against process().
     void reset() noexcept {
         for (auto& channel : channels_) {
             channel.line.reset();
@@ -244,7 +269,7 @@ public:
             double feedback = std::min(feedback_.process(feedback_target_), feedback_ceiling());
             if (physical_tape()) {
                 double physical_gain = chardelay::interpolate_knots(
-                    chardelay::kTapeAxis, chardelay::kTapeBumpFeedbackCompensation,
+                    chardelay::kTapeAxis, chardelay::kTapePhysicalFeedbackCompensation,
                     character_amount);
                 if (feedback > 1.0) {
                     const double over_unity =
@@ -303,26 +328,17 @@ public:
     double vintage_internal_rate_hz() const noexcept {
         return channels_[0].vintage.internal_rate_hz();
     }
-    double slewed_time_ms(int channel) const noexcept {
-        return time_slew_[static_cast<std::size_t>(channel)].current();
-    }
-    const chardelay::JilesAthertonHysteresis& hysteresis(int channel) const noexcept {
-        return channels_[static_cast<std::size_t>(channel)].tape_physical.hysteresis();
-    }
-    chardelay::JilesAthertonHysteresis& hysteresis(int channel) noexcept {
-        return channels_[static_cast<std::size_t>(channel)].tape_physical.hysteresis();
-    }
     std::size_t chew_state_index(int channel) const noexcept {
         return channels_[static_cast<std::size_t>(channel)].tape_physical.chew_state_index();
     }
     const std::vector<double>& tape_gap_coefficients(int channel) const noexcept {
         return channels_[static_cast<std::size_t>(channel)].tape_physical.gap_coefficients();
     }
-    chardelay::TapeLossIirParams tape_loss_parameters(int channel) const noexcept {
-        return channels_[static_cast<std::size_t>(channel)].tape_physical.loss_parameters();
+private:
+    static double finite_or(double value, double fallback) noexcept {
+        return std::isfinite(value) ? value : fallback;
     }
 
-private:
     struct ChannelState {
         chardelay::FractionalDelayLine line;
         chardelay::ReverseSegmenter reverse;
@@ -400,7 +416,14 @@ private:
         // Ducking: a control-rate follower fed the interval's PEAK, so a
         // transient between ticks still opens the ducker. The resulting gain is
         // ramped across the next interval rather than stepped.
-        const double envelope = duck_follower_.process(duck_peak_);
+        // The gain law consumes only env/threshold clamped to [0, 1]. Letting
+        // the follower retain values above that ceiling cannot increase the
+        // duck, but it does make release time depend on how far above the
+        // threshold the source happened to peak. Cap at the last meaningful
+        // detector value so every fully-ducked passage recovers on the stated
+        // release constant (and therefore within its three-tau contract).
+        const double detector = std::min(duck_peak_, chardelay::kDuckThreshold);
+        const double envelope = duck_follower_.process(detector);
         duck_peak_ = 0.0;
         const double normalized = std::clamp(envelope / chardelay::kDuckThreshold, 0.0, 1.0);
         const double knee = normalized * normalized * (3.0 - 2.0 * normalized);
