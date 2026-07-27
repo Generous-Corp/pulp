@@ -4,10 +4,22 @@
 #include <pulp/view/plugin_frame_renderer.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/repaint_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
+
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkData.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+#include "include/encode/SkPngEncoder.h"
+#endif
 
 #include <cmath>
 
@@ -190,6 +202,106 @@ PluginFrameRenderer::Frame& PluginFrameRenderer::finish(
         consecutive_recreates_ = 0;
     }
     return frame;
+}
+
+EditorSurfaces create_editor_surfaces(void* native_handle,
+                                      const FrameGeometry& geometry,
+                                      bool want_partial_repaint,
+                                      const char* log_tag) {
+    EditorSurfaces out;
+    runtime::log_info("{}: init GPU logical={}x{} physical={}x{} scale={}", log_tag,
+                      geometry.width, geometry.height, geometry.pixel_width(),
+                      geometry.pixel_height(), geometry.scale);
+
+    out.gpu = render::GpuSurface::create_dawn();
+    if (!out.gpu) {
+        runtime::log_warn("{}: gpu create_dawn failed; CPU raster only", log_tag);
+        return out;
+    }
+
+    render::GpuSurface::Config cfg{};
+    // The GPU surface is sized in PHYSICAL pixels so the swapchain matches the
+    // HiDPI display; the view tree stays in logical units.
+    cfg.width = geometry.pixel_width();
+    cfg.height = geometry.pixel_height();
+    cfg.native_surface_handle = native_handle;
+    cfg.vsync = false;  // see the header: never vsync-block a DAW's UI thread
+    if (!out.gpu->initialize(cfg)) {
+        runtime::log_warn("{}: gpu initialize failed; CPU raster only", log_tag);
+        out.gpu.reset();
+        return out;
+    }
+
+    render::SkiaSurface::Config scfg{};
+    scfg.width = static_cast<std::uint32_t>(geometry.width);    // LOGICAL
+    scfg.height = static_cast<std::uint32_t>(geometry.height);  // LOGICAL
+    scfg.scale_factor = geometry.scale;
+    out.skia = render::SkiaSurface::create(*out.gpu, scfg);
+    if (!out.skia) {
+        runtime::log_warn("{}: skia surface create failed; CPU raster only", log_tag);
+        out.gpu.reset();
+        return out;
+    }
+
+    // Negotiate partial repaint only after the surface exists: the swapchain
+    // does not preserve content between frames, so a clipped repaint is correct
+    // only against a retained scene target the backend agreed to keep.
+    out.partial_repaint = want_partial_repaint;
+    if (out.partial_repaint && !out.skia->set_persistent_scene(true)) {
+        out.partial_repaint = false;
+        runtime::log_warn("{}: backend cannot retain a scene; partial repaint "
+                          "disabled", log_tag);
+    }
+
+    runtime::log_info("{}: GPU and Skia surfaces ready", log_tag);
+    return out;
+}
+
+std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
+                                                   const FrameGeometry& geometry,
+                                                   std::uint32_t* out_w,
+                                                   std::uint32_t* out_h) {
+    const std::uint32_t w = geometry.pixel_width();
+    const std::uint32_t h = geometry.pixel_height();
+    if (w == 0 || h == 0) return {};
+
+    const SkImageInfo info = SkImageInfo::Make(
+        static_cast<int>(w), static_cast<int>(h), kRGBA_8888_SkColorType,
+        kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    if (!surface) return {};
+    auto* sk_canvas = surface->getCanvas();
+    if (!sk_canvas) return {};
+
+    // The DPI scale is a canvas transform, not a geometry change, so the paint
+    // below still works in logical units and the result is crisp on HiDPI at
+    // the same resolution the GPU surface would have used.
+    if (geometry.scale != 1.0f) sk_canvas->scale(geometry.scale, geometry.scale);
+    canvas::SkiaCanvas canvas(sk_canvas);
+    paint_plugin_scene(canvas, root, geometry, nullptr);
+
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(w) * h * 4u);
+    SkPixmap pixmap(info, pixels.data(), static_cast<std::size_t>(w) * 4u);
+    if (!surface->readPixels(pixmap, 0, 0)) return {};
+    if (out_w) *out_w = w;
+    if (out_h) *out_h = h;
+    return pixels;
+}
+
+std::vector<std::uint8_t> encode_rgba_png(const std::vector<std::uint8_t>& rgba,
+                                          std::uint32_t w, std::uint32_t h) {
+    if (rgba.empty() || w == 0 || h == 0) return {};
+    const SkImageInfo info = SkImageInfo::Make(
+        static_cast<int>(w), static_cast<int>(h), kRGBA_8888_SkColorType,
+        kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    SkPixmap pixmap(info, rgba.data(), static_cast<std::size_t>(w) * 4u);
+    // The 2-arg pixmap overload returns sk_sp<SkData>; the 3-arg SkWStream*
+    // overload returns bool. Picking the wrong one compiles and silently
+    // discards the encoded bytes.
+    sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
+    if (!png || png->isEmpty()) return {};
+    const auto* p = static_cast<const std::uint8_t*>(png->data());
+    return std::vector<std::uint8_t>(p, p + png->size());
 }
 
 #endif  // PULP_HAS_SKIA

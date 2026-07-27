@@ -67,6 +67,17 @@ struct FrameGeometry {
     bool has_design_viewport() const {
         return design_width > 0.0f && design_height > 0.0f;
     }
+
+    /// Physical-pixel dimensions = logical × scale, clamped to at least 1 so a
+    /// collapsed editor cannot ask for a zero-sized surface.
+    std::uint32_t pixel_width() const { return to_pixels(width); }
+    std::uint32_t pixel_height() const { return to_pixels(height); }
+
+private:
+    std::uint32_t to_pixels(float logical) const {
+        const float p = logical * scale;
+        return static_cast<std::uint32_t>(p < 1.0f ? 1.0f : p);
+    }
 };
 
 /// Decide the clip rect for a partial repaint, in SURFACE space.
@@ -98,10 +109,12 @@ void paint_plugin_scene(canvas::Canvas& canvas, View& root,
 
 #ifdef PULP_HAS_SKIA
 
+#include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace pulp::render {
@@ -181,6 +194,66 @@ private:
 
     int consecutive_recreates_ = 0;
 };
+
+/// The surface pair an editor renders through, plus the partial-repaint
+/// decision that can only be made once the backend has answered.
+struct EditorSurfaces {
+    std::unique_ptr<render::GpuSurface> gpu;
+    std::unique_ptr<render::SkiaSurface> skia;
+    /// True only if partial repaint was requested AND the backend agreed to
+    /// retain a scene target. A clipped repaint against a non-preserving
+    /// swapchain shows stale garbage outside the clip, so this must never be
+    /// left on speculatively.
+    bool partial_repaint = false;
+
+    bool ok() const { return gpu != nullptr && skia != nullptr; }
+};
+
+/// Build the GPU + Skia surface pair for a plug-in editor window.
+///
+/// Shared by the Windows and Linux hosts, which had grown near-identical copies
+/// that had already DIVERGED in a way nobody could see by reading either file
+/// alone: only the Windows copy set `vsync = false`. The default Fifo present
+/// mode makes the next `GetCurrentTexture()` block until the display's refresh,
+/// which is right for a standalone app that owns its frame loop and wrong for a
+/// plug-in editor rendering synchronously on the DAW's UI thread — it stalls
+/// the message pump that delivers the very input being dragged. Measured on the
+/// REAPER VM with Perfetto: ~2 ms of actual frame work inside 19–45 ms frames,
+/// the rest all acquire, and 7 frames produced across 8 drag sweeps.
+///
+/// Making it one function makes that policy true for both hosts by
+/// construction rather than by two people remembering.
+///
+/// Does NOT publish surface state: `publish_gpu_surface()` is the host's, and
+/// each host has its own rule for what a failure means to an attach in flight.
+///
+/// `native_handle` is the platform's surface handle — an `HWND` on Windows, a
+/// pointer to the typed X11 handle on Linux. `log_tag` names the host in
+/// diagnostics.
+EditorSurfaces create_editor_surfaces(void* native_handle,
+                                      const FrameGeometry& geometry,
+                                      bool want_partial_repaint,
+                                      const char* log_tag);
+
+/// CPU-raster one editor frame at physical-pixel resolution, returning tightly
+/// packed RGBA8888 and reporting the pixel dimensions through `out_w`/`out_h`.
+/// Empty on any failure.
+///
+/// Shared because Windows and Linux carried byte-identical copies of it: the
+/// same surface, the same `scale` canvas transform so `paint_plugin_scene()`
+/// keeps working in logical units, the same read-back. It is the only render
+/// path guaranteed to exist — the headless capture that proves a non-black
+/// frame with no GPU at all — so a divergence between the two copies would
+/// have meant the proof differed from the thing it proves.
+std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root,
+                                                   const FrameGeometry& geometry,
+                                                   std::uint32_t* out_w,
+                                                   std::uint32_t* out_h);
+
+/// Encode tightly packed RGBA8888 pixels as a PNG byte stream. Empty on
+/// failure or on empty input.
+std::vector<std::uint8_t> encode_rgba_png(const std::vector<std::uint8_t>& rgba,
+                                          std::uint32_t w, std::uint32_t h);
 
 }  // namespace pulp::view
 

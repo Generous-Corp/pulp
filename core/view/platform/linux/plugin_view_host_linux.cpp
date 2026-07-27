@@ -834,45 +834,25 @@ private:
             publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
-        gpu_surface_ = render::GpuSurface::create_dawn();
-        if (!gpu_surface_) {
-            runtime::log_warn("X11PluginViewHost: gpu create_dawn failed; cpu raster only");
-            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
-            return;
-        }
         x11_handle_.display = display_;
         x11_handle_.window = static_cast<unsigned long>(child_);
-        render::GpuSurface::Config cfg{};
-        // GPU surface at PHYSICAL pixels (logical × scale); view tree stays
-        // logical.
-        cfg.width = pixel_w();
-        cfg.height = pixel_h();
-        cfg.native_surface_handle = &x11_handle_;  // typed X11 handle
-        if (!gpu_surface_->initialize(cfg)) {
-            runtime::log_warn("X11PluginViewHost: gpu initialize failed; cpu raster only");
-            gpu_surface_.reset();
+
+        FrameGeometry geometry = frame_geometry();
+        geometry.width = width;    // the caller may be mid-resize
+        geometry.height = height;
+        const char* env = std::getenv("PULP_PARTIAL_REPAINT");
+        auto surfaces = create_editor_surfaces(
+            &x11_handle_, geometry, env && env[0] == '1', "X11PluginViewHost");
+
+        partial_repaint_enabled_ = surfaces.partial_repaint;
+        gpu_surface_ = std::move(surfaces.gpu);
+        skia_surface_ = std::move(surfaces.skia);
+        if (!surfaces.ok()) {
             publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
-        render::SkiaSurface::Config scfg{};
-        scfg.width = static_cast<uint32_t>(width);   // LOGICAL
-        scfg.height = static_cast<uint32_t>(height);  // LOGICAL
-        scfg.scale_factor = scale_;
-        skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
-        if (const char* env = std::getenv("PULP_PARTIAL_REPAINT"))
-            partial_repaint_enabled_ = (env[0] == '1');
-        // The swapchain does not preserve content between frames, so a clipped
-        // repaint needs a retained scene target; without one, never clip.
-        if (partial_repaint_enabled_ && skia_surface_ &&
-            !skia_surface_->set_persistent_scene(true))
-            partial_repaint_enabled_ = false;
+
         damage_.mark_full();  // a new surface has no previous frame to preserve
-        if (!skia_surface_) {
-            runtime::log_warn("X11PluginViewHost: skia surface create failed; cpu raster only");
-            gpu_surface_.reset();
-            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
-            return;
-        }
         publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
     }
 
@@ -937,25 +917,8 @@ private:
     // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
     // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        const uint32_t w = pixel_w(), h = pixel_h();
-        if (w == 0 || h == 0) return {};
         if (idle_callback_) idle_callback_();
-        auto cs = SkColorSpace::MakeSRGB();
-        SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
-                                             kPremul_SkAlphaType, cs);
-        auto surface = SkSurfaces::Raster(info);
-        if (!surface) return {};
-        auto* sk_canvas = surface->getCanvas();
-        if (!sk_canvas) return {};
-        if (scale_ != 1.0f) sk_canvas->scale(scale_, scale_);
-        pulp::canvas::SkiaCanvas canvas(sk_canvas);
-        paint_scene(canvas);
-        std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4u);
-        SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(w) * 4u);
-        if (!surface->readPixels(pixmap, 0, 0)) return {};
-        if (out_w) *out_w = w;
-        if (out_h) *out_h = h;
-        return pixels;
+        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 
     // Live CPU present: raster the scene, convert RGBA -> the X visual's pixel
@@ -1000,20 +963,6 @@ private:
         XDestroyImage(img);  // frees buf
     }
 
-    static std::vector<uint8_t> encode_rgba_png(const std::vector<uint8_t>& rgba,
-                                                uint32_t w, uint32_t h) {
-        if (rgba.empty() || w == 0 || h == 0) return {};
-        SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
-                                             kPremul_SkAlphaType,
-                                             SkColorSpace::MakeSRGB());
-        SkPixmap pixmap(info, rgba.data(), static_cast<size_t>(w) * 4u);
-        // 2-arg pixmap overload returns sk_sp<SkData> (the 3-arg SkWStream*
-        // overload returns bool).
-        sk_sp<SkData> png = SkPngEncoder::Encode(pixmap, SkPngEncoder::Options{});
-        if (!png || png->isEmpty()) return {};
-        const auto* p = static_cast<const uint8_t*>(png->data());
-        return std::vector<uint8_t>(p, p + png->size());
-    }
 #endif  // PULP_HAS_SKIA
 };
 
