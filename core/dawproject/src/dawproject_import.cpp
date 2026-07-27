@@ -86,6 +86,60 @@ std::optional<DawProjectImportError> admit(interchange::Concept concept_value,
     return err(DawProjectImportErrorCode::UnsupportedFeature, std::string(refusal));
 }
 
+/// Whether a <Volume>/<Pan> child states the format's neutral value. Absent is
+/// neutral, and a value this reader cannot parse is treated as authored rather
+/// than assumed harmless — guessing "probably unity" is how a level silently
+/// disappears.
+bool channel_control_is_neutral(const pugi::xml_node& channel, const char* element,
+                                double neutral) {
+    const auto node = channel.child(element);
+    if (node.empty())
+        return true;
+    if (node.attribute("value").empty())
+        return true;
+    double parsed = 0.0;
+    // require_double carries the reader's locale-independent parse; a value it
+    // cannot read counts as authored rather than assumed harmless, because
+    // guessing "probably unity" is how a level silently disappears.
+    if (require_double(node, "value", element, parsed))
+        return false;
+    // DAWproject writes these as plain decimals, so an exact compare would make
+    // a 0.9999999 round-trip read as authored. Allow a representation epsilon.
+    return std::abs(parsed - neutral) <= 1.0e-9;
+}
+
+/// A <Channel> is admissible when it carries no level or placement this reader
+/// would drop. When it does, the refusal comes from that concept's own row so
+/// the message names the data rather than the element.
+std::optional<DawProjectImportError> admit_channel(const pugi::xml_node& channel) {
+    if (!channel_control_is_neutral(channel, "Volume", 1.0))
+        if (auto e = admit(interchange::Concept::MixerTrackGain,
+                           "<Channel> states a volume this reader does not import"))
+            return e;
+    if (!channel_control_is_neutral(channel, "Pan", 0.5))
+        if (auto e = admit(interchange::Concept::MixerTrackPan,
+                           "<Channel> states a pan this reader does not import"))
+            return e;
+    // A channel carries more than levels. Devices, sends, and anything else this
+    // reader has no name for stay refusals — admitting the element must not
+    // become a way for its contents to arrive unexamined.
+    for (auto child : channel.children()) {
+        if (child.type() != pugi::node_element)
+            continue;
+        const std::string_view name = child.name();
+        if (name == "Volume" || name == "Pan")
+            continue;
+        static_assert(!reader_implements(interchange::Concept::DevicePlacement) &&
+                      !reader_implements(interchange::Concept::MixerSends));
+        const auto concept_value = name == "Devices"  ? interchange::Concept::DevicePlacement
+                                   : name == "Sends" ? interchange::Concept::MixerSends
+                                                     : interchange::Concept::Unknown;
+        return *admit(concept_value,
+                      std::string("<Channel> contains unsupported <") + child.name() + ">");
+    }
+    return std::nullopt;
+}
+
 std::optional<std::int64_t> beats_to_ticks(double beats) noexcept {
     constexpr long double kExclusiveUpperTick = static_cast<long double>(std::uint64_t{1} << 63u);
     const auto rounded =
@@ -301,6 +355,21 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
         for (auto track_child : track.children()) {
             if (track_child.type() != pugi::node_element)
                 continue;
+            // Every DAWproject track a real DAW writes carries a <Channel>: it
+            // is where the format keeps a track's level and stereo placement.
+            // Refusing the element outright would refuse essentially every file
+            // the format's own producers emit, and would refuse it as "unknown"
+            // rather than for the reason the capability table already states.
+            //
+            // So consult the table instead, and only for state that is actually
+            // there: a neutral channel carries nothing this reader would drop,
+            // while an authored volume or pan is a real refusal named by its own
+            // row (mixer.track-gain / mixer.track-pan).
+            if (std::string_view(track_child.name()) == "Channel") {
+                if (auto e = admit_channel(track_child))
+                    return e;
+                continue;
+            }
             // A track inside a track is grouping; anything else this reader has
             // no name for. Neither is admissible, so the lookup is the refusal.
             static_assert(!reader_implements(interchange::Concept::TrackGroup) &&

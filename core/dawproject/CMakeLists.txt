@@ -24,3 +24,34 @@ target_include_directories(pulp-dawproject-import PRIVATE
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(pulp-dawproject-import PRIVATE -fno-exceptions -fno-rtti)
 endif()
+
+# Bounded DAWproject export. A separate target from the importer because
+# pulp-dawproject-import is an installed find_package component: overloading it
+# would silently change what an existing consumer links.
+add_library(pulp-dawproject-export
+    src/dawproject_export.cpp
+)
+add_library(pulp::dawproject-export ALIAS pulp-dawproject-export)
+
+target_compile_features(pulp-dawproject-export PUBLIC cxx_std_20)
+
+target_include_directories(pulp-dawproject-export PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+
+target_link_libraries(pulp-dawproject-export
+    PUBLIC
+        pulp::interchange
+        pulp::timeline
+    PRIVATE
+        pulp::runtime
+)
+
+# Same rule as the importer: pugixml is an implementation detail, so the
+# installed target exposes only Pulp's own API.
+target_include_directories(pulp-dawproject-export PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(pulp-dawproject-export PRIVATE -fno-exceptions -fno-rtti)
+endif()

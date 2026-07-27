@@ -1001,7 +1001,10 @@ timeline_engine:
     notes: Fixed-capacity audio/MIDI capture with control-side materialization and sealed recording commit; applications own device I/O and media publication.
   dawproject_import:
     status: experimental
-    notes: Fail-closed DAWproject v1 linear subset with flat beats-timed note/audio tracks, sealed WAV identity, and explicit resource limits.
+    notes: Fail-closed DAWproject v1 linear subset with flat beats-timed note/audio tracks, sealed WAV identity, and explicit resource limits. A track's <Channel> is admitted when neutral and refused by its own concept when it states a volume or pan.
+  dawproject_export:
+    status: experimental
+    notes: Bounded DAWproject writer over the same subset the importer reads. Emits project.xml plus an in-band loss manifest; everything outside the subset is declared in the capability table and refused by run_export unless the caller accepts each concept by name.
   smf_interop:
     status: experimental
     notes: Fail-closed Standard MIDI File import/export against the tempo and meter maps, with exact canonical tick conversion on dividing grids and reported rounding otherwise.
@@ -1045,6 +1048,9 @@ limitations:
   timeline_engine.dawproject_import:
     - text: "DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped."
       tracked_in: "../guides/timeline-sdk.md#optional-dawproject-importer"
+  timeline_engine.dawproject_export:
+    - text: "DAWproject export is a bounded writer, not Tier-1 support: it emits flat tracks, beats-timed clips, inline notes, referenced audio, and a single tempo and meter. Markers, clip gain and fades, embedded media, mixer state, automation, devices, take lanes, and freeze are declared lost in the capability table and refused unless the caller accepts each concept by name. A neutral channel is emitted so a receiving DAW can register the track; that is not an export of the document's authored mixer state, which is still reported as dropped."
+      tracked_in: "../guides/timeline-sdk.md#optional-dawproject-exporter"
   timeline_engine.smf_interop:
     - text: "Standard MIDI File import accepts format 0/1 with a metrical division, note on/off, and the tempo, time-signature, track-name, and end-of-track meta events; SMPTE divisions, format 2, and any other event fail the import unless the caller opts into ignoring non-note events."
       tracked_in: "../guides/timeline-sdk.md#optional-standard-midi-file-interop"

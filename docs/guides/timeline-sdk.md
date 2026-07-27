@@ -67,6 +67,48 @@ find_package(Pulp REQUIRED COMPONENTS dawproject-import)
 target_link_libraries(my_timeline_app PRIVATE Pulp::dawproject-import)
 ```
 
+## Optional DAWproject exporter
+
+Writing DAWproject is a separate component from reading it, because the
+importer is an installed `find_package` component and overloading it would
+silently change what an existing consumer links:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS dawproject-export)
+target_link_libraries(my_timeline_app PRIVATE Pulp::dawproject-export)
+```
+
+Export is **bounded**, not Tier-1 support for the format. The writer emits the
+same subset the importer reads — flat tracks, beats-timed clips, inline notes,
+referenced audio, one tempo and one time signature — and everything else the
+document holds is declared lost in the capability table.
+
+There is no one-shot entry point. A plan is produced first, and `run_export`
+refuses before touching the writer unless the caller has accepted each lost
+concept by name:
+
+```cpp
+const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
+interchange::ExportOptions options;
+options.accepted_losses = plan.required_consent();   // review these, do not paste blindly
+auto artifacts = interchange::run_export(plan, options, dawproject::writer(project));
+```
+
+There is deliberately no force flag: a pipeline pins the exact losses it
+reviewed, so a loss kind introduced later stops that pipeline instead of riding
+in on consent given for something else.
+
+Two artifacts come back: `project.xml`, and `pulp-loss-manifest.json` naming
+every concept that was dropped. The manifest travels inside the package rather
+than scrolling past in a console, because an export whose losses are invisible
+to whoever opens the file next is the failure this contract exists to prevent.
+Packing those entries plus media into a `.dawproject` zip is the caller's step.
+
+Each exported track carries a neutral `<Channel>` — unity volume, centre pan.
+A receiving DAW registers the track from that element, and a file without one
+is rejected. It is **not** an export of the document's authored mixer state,
+which the manifest still reports as dropped.
+
 `Pulp::dawproject-import` adds the importer implementation and its audio/WAV
 dependency to the closure, and exposes
 `pulp::timeline::import_dawproject_xml`. Applications that only create or
