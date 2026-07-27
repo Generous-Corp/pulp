@@ -199,6 +199,7 @@ public:
 
     double speed_ips() const noexcept { return speed_ips_; }
     const std::vector<double>& gap_coefficients() const noexcept { return design_.gap_taps(); }
+    TapeLossIirParams loss_parameters() const noexcept { return active_.parameters(); }
 
     /// Control-rate update. In this tier `character_amount` IS the age axis.
     void update(double age) noexcept {
