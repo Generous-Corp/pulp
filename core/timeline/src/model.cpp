@@ -1,4 +1,3 @@
-#include <pulp/timeline/asset_path.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_json.hpp>
 
@@ -71,13 +70,6 @@ bool valid_locator_kind(AssetLocatorKind kind) noexcept {
     return false;
 }
 
-bool valid_locator(const AssetLocator& locator) noexcept {
-    if (!valid_locator_kind(locator.kind) || locator.hint.empty())
-        return false;
-    return locator.kind != AssetLocatorKind::PackageRelative ||
-           package_relative_path_is_lexically_safe(locator.hint);
-}
-
 // Validates a media asset and canonicalizes its representation order. Shared by
 // project construction and asset-append so both paths enforce the identical
 // sealed-identity invariant: an asset with an invalid or empty ContentHash is
@@ -93,7 +85,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
     if (!valid_storage_policy(asset.storage_policy))
         return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
     for (const auto& locator : asset.locators)
-        if (!valid_locator(locator))
+        if (!valid_locator_kind(locator.kind) || locator.hint.empty())
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     std::vector<std::string_view> roles;
     roles.reserve(asset.representations.size());
@@ -110,7 +102,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
         roles.push_back(representation.role);
         hashes.push_back(representation.content_hash);
         for (const auto& locator : representation.locators)
-            if (!valid_locator(locator))
+            if (!valid_locator_kind(locator.kind) || locator.hint.empty())
                 return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     }
     std::sort(roles.begin(), roles.end());

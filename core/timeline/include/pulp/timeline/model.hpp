@@ -759,6 +759,24 @@ struct ProjectIdentityStats {
     std::uint64_t nodes_created = 0;
 };
 
+/// Opaque, process-local identity for the part of a Project snapshot that
+/// determines nested-sequence and registered-content compile subscribers.
+class SequenceCompileStructureToken {
+  public:
+    SequenceCompileStructureToken() noexcept = default;
+
+    bool valid() const noexcept {
+        return value_ != 0;
+    }
+
+    constexpr bool operator==(const SequenceCompileStructureToken&) const noexcept = default;
+
+  private:
+    friend class Project;
+    explicit SequenceCompileStructureToken(std::uint64_t value) noexcept : value_(value) {}
+    std::uint64_t value_ = 0;
+};
+
 /// Immutable root of a Timeline document and its monotonic identity domain.
 class Project {
   public:

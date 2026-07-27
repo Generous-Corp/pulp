@@ -116,8 +116,10 @@ bool compile_and_publish(const timeline::CommitResult& committed) {
     request.sequence_id = committed.snapshot->root_sequence_id();
     request.tempo_map = tempo;
     request.document_revision = committed.revision.value;
-    request.dirty =
-        playback::lower_dirty_set(*committed.snapshot, request.sequence_id, committed.dirty);
+    // A consumer that just wants everything compiled asks for exactly that.
+    // Translating a transaction's dirty set into compiler dirtiness is an
+    // engine-internal path (it needs the compiler's invalidation index), and a
+    // full compile is the honest default for a cookbook example.
     request.dirty.all = true;
 
     auto ticket = compiler.submit(std::move(request));
