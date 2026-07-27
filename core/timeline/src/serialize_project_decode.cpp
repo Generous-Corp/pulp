@@ -145,7 +145,7 @@ runtime::Result<MediaAsset, PersistenceError> decode_asset(const JsonValue& valu
                                std::move(decoded_representations), std::move(decoded_loop_info)}));
 }
 
-static_assert(kClipContentAlternativeCount == 5,
+static_assert(kClipContentAlternativeCount == 6,
               "ClipContent gained an alternative: this decoder dispatches on envelope type "
               "names, so an alternative with no branch below is admitted as OpaqueContent "
               "and can never be remapped, exported, or rendered again. Give the new "
@@ -268,6 +268,20 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return model_fail<ClipContent>(created.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(
             runtime::Ok(ClipContent(std::move(created).value())));
+    }
+    if (type.value() == "pulp.timeline.content.sequence_ref") {
+        auto sequence = required(*data.value(), "sequence_id", path + "/data");
+        auto source = required(*data.value(), "source_start", path + "/data");
+        if (!sequence || !source)
+            return fail<ClipContent>(PersistenceErrorCode::MissingField, std::move(path));
+        auto decoded_sequence =
+            parse_canonical_u64_string(*sequence.value(), path + "/data/sequence_id");
+        auto decoded_source =
+            parse_canonical_i64_string(*source.value(), path + "/data/source_start");
+        if (!decoded_sequence || !decoded_source)
+            return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, std::move(path));
+        return runtime::Ok(ClipContent(SequenceRef{
+            ItemId{decoded_sequence.value()}, timebase::TickPosition{decoded_source.value()}}));
     }
     if (!schema->codec.decode)
         return fail<ClipContent>(PersistenceErrorCode::InvalidSchema, std::move(path));

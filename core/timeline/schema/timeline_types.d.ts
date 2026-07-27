@@ -57,6 +57,13 @@ export interface PulpTimelineClip {
   time_range: Record<string, unknown>;
 }
 
+/** `pulp.timeline.command.clone_sequence` — domain Command, schema version 1. */
+export interface PulpTimelineCommandCloneSequence {
+  cloned_sequence_id: number | string;
+  id_remap: readonly unknown[];
+  source_sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.create_asset` — domain Command, schema version 1. */
 export interface PulpTimelineCommandCreateAsset {
   asset: PulpTimelineAsset;
@@ -93,6 +100,11 @@ export interface PulpTimelineCommandInsertScene {
   before_scene_id?: number | string;
   scene: PulpTimelineScene;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_sequence` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertSequence {
+  sequence: PulpTimelineSequence;
 }
 
 /** `pulp.timeline.command.insert_slot` — domain Command, schema version 1. */
@@ -164,6 +176,11 @@ export interface PulpTimelineCommandRemoveScene {
   sequence_id: number | string;
 }
 
+/** `pulp.timeline.command.remove_sequence` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveSequence {
+  sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.remove_slot` — domain Command, schema version 1. */
 export interface PulpTimelineCommandRemoveSlot {
   scene_id: number | string;
@@ -212,6 +229,15 @@ export interface PulpTimelineCommandSetChordScaleLane {
 
 /** `pulp.timeline.command.set_clip_playback_properties` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetClipPlaybackProperties {
+  clip_id: number | string;
+  expected: Record<string, unknown>;
+  replacement: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_clip_sequence_ref` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetClipSequenceRef {
   clip_id: number | string;
   expected: Record<string, unknown>;
   replacement: Record<string, unknown>;
@@ -286,6 +312,12 @@ export interface PulpTimelineContentMedia {
 /** `pulp.timeline.content.notes` — domain Content, schema version 1. */
 export interface PulpTimelineContentNotes {
   notes: readonly unknown[];
+}
+
+/** `pulp.timeline.content.sequence_ref` — domain Content, schema version 1. */
+export interface PulpTimelineContentSequenceRef {
+  sequence_id: number | string;
+  source_start: number | string;
 }
 
 /** `pulp.timeline.device_placement` — domain Document, schema version 1. */
@@ -410,12 +442,14 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.automation_target.device_parameter"
   | "pulp.timeline.chord_scale_event"
   | "pulp.timeline.clip"
+  | "pulp.timeline.command.clone_sequence"
   | "pulp.timeline.command.create_asset"
   | "pulp.timeline.command.insert_automation_lane"
   | "pulp.timeline.command.insert_clip"
   | "pulp.timeline.command.insert_marker"
   | "pulp.timeline.command.insert_region"
   | "pulp.timeline.command.insert_scene"
+  | "pulp.timeline.command.insert_sequence"
   | "pulp.timeline.command.insert_slot"
   | "pulp.timeline.command.insert_take"
   | "pulp.timeline.command.insert_take_lane"
@@ -426,6 +460,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_marker"
   | "pulp.timeline.command.remove_region"
   | "pulp.timeline.command.remove_scene"
+  | "pulp.timeline.command.remove_sequence"
   | "pulp.timeline.command.remove_slot"
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
@@ -433,6 +468,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_active_take_lane"
   | "pulp.timeline.command.set_chord_scale_lane"
   | "pulp.timeline.command.set_clip_playback_properties"
+  | "pulp.timeline.command.set_clip_sequence_ref"
   | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
   | "pulp.timeline.command.set_note_velocity"
@@ -443,6 +479,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
+  | "pulp.timeline.content.sequence_ref"
   | "pulp.timeline.device_placement"
   | "pulp.timeline.groove_step"
   | "pulp.timeline.groove_template"
@@ -464,12 +501,14 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.automation_target.device_parameter": PulpTimelineAutomationTargetDeviceParameter;
   "pulp.timeline.chord_scale_event": PulpTimelineChordScaleEvent;
   "pulp.timeline.clip": PulpTimelineClip;
+  "pulp.timeline.command.clone_sequence": PulpTimelineCommandCloneSequence;
   "pulp.timeline.command.create_asset": PulpTimelineCommandCreateAsset;
   "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
   "pulp.timeline.command.insert_scene": PulpTimelineCommandInsertScene;
+  "pulp.timeline.command.insert_sequence": PulpTimelineCommandInsertSequence;
   "pulp.timeline.command.insert_slot": PulpTimelineCommandInsertSlot;
   "pulp.timeline.command.insert_take": PulpTimelineCommandInsertTake;
   "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
@@ -480,6 +519,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
   "pulp.timeline.command.remove_scene": PulpTimelineCommandRemoveScene;
+  "pulp.timeline.command.remove_sequence": PulpTimelineCommandRemoveSequence;
   "pulp.timeline.command.remove_slot": PulpTimelineCommandRemoveSlot;
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
@@ -487,6 +527,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
   "pulp.timeline.command.set_chord_scale_lane": PulpTimelineCommandSetChordScaleLane;
   "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;
+  "pulp.timeline.command.set_clip_sequence_ref": PulpTimelineCommandSetClipSequenceRef;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
@@ -497,6 +538,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;
+  "pulp.timeline.content.sequence_ref": PulpTimelineContentSequenceRef;
   "pulp.timeline.device_placement": PulpTimelineDevicePlacement;
   "pulp.timeline.groove_step": PulpTimelineGrooveStep;
   "pulp.timeline.groove_template": PulpTimelineGrooveTemplate;

@@ -19,6 +19,10 @@ function(pulp_resolve_playback_sources root output)
         program.cpp
         program_compiler.cpp
         recording_commit.cpp
+        sequence_compile_bookkeeping.cpp
+        sequence_content_lowerer.cpp
+        sequence_dirty_lowering.cpp
+        sequence_preflight.cpp
         stable_renderer_shell.cpp
         track_automation_compiler.cpp
         track_automation_program.cpp

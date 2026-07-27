@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include "automation_document_internal.hpp"
+#include "owned_identity_traversal.hpp"
 #include "project_state_access.hpp"
 
 #include <algorithm>
@@ -68,45 +69,29 @@ std::optional<ModelError> validate_owned_ids(std::vector<ItemId> ids) {
     return std::nullopt;
 }
 
-// Remapping a subtree is only sound when every ItemId the content owns is
-// collected here and rewritten in rebuild_clip. An alternative that owns ids but
-// has no branch would keep the originals and alias the source project, so the
-// walk is exhaustive and each alternative states whether it owns anything.
 void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
-    ids.push_back(clip.id());
-    std::visit(ClipContentCases{
-                   [](const EmptyContent&) {},
-                   // MediaRef::asset_id is an external reference, not owned.
-                   [](const MediaRef&) {},
-                   [&](const NoteContent& notes) {
-                       for (const auto& note : notes.notes())
-                           ids.push_back(note.id);
-                   },
-                   // Registered payloads must own no ItemIds; that is the
-                   // condition under which the registry admits them.
-                   [](const RegisteredContent&) {},
-                   // Opaque content may own ids in a shape we cannot read, which
-                   // is why remap_rejection refuses it outright.
-                   [](const OpaqueContent&) {},
-               },
-               clip.content());
+    detail::visit_clip_owned_identities(
+        clip, {}, [&](const detail::ModelOwnedIdentity& identity) {
+            ids.push_back(identity.id);
+        });
 }
 
 // A clip can only be remapped when its content's identity/reference shape is
 // legible. Answering this per alternative in one place keeps the preflight
 // walks, which each scan a different level of the tree, from drifting apart.
 std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexcept {
-    return std::visit(ClipContentCases{
-                          [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
-                          [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
-                          [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
-                          [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
-                          [](const OpaqueContent&) {
-                              return std::optional<ModelErrorCode>{
-                                  ModelErrorCode::OpaqueContentCannotRemap};
-                          },
-                      },
-                      content);
+    return std::visit(
+        ClipContentCases{
+            [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
+            [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const OpaqueContent&) {
+                return std::optional<ModelErrorCode>{ModelErrorCode::OpaqueContentCannotRemap};
+            },
+            [](const SequenceRef&) { return std::optional<ModelErrorCode>{}; },
+        },
+        content);
 }
 
 void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
@@ -139,74 +124,34 @@ std::optional<ModelError> preflight(const Track& track) {
     return validate_owned_ids(std::move(ids));
 }
 
-// Markers and regions are sequence-owned identities with no external references,
-// so the remap only has to allocate and rewrite their ItemIds.
-void append_annotation_ids(const Sequence& sequence, std::vector<ItemId>& ids) {
-    for (const auto& marker : sequence.markers())
-        ids.push_back(marker.id);
-    for (const auto& region : sequence.regions())
-        ids.push_back(region.id);
-    for (const auto& scene : sequence.scenes()) {
-        ids.push_back(scene.id);
-        for (const auto& slot : scene.slots)
-            ids.push_back(slot.id);
-    }
-}
-
-void allocate_annotation_owned(const Sequence& sequence, IdRemapTable& table,
-                               ItemIdAllocator& allocator, std::optional<ModelError>& error) {
-    for (const auto& marker : sequence.markers()) {
-        if (error)
-            return;
-        error = allocate_owned(table, allocator, marker.id);
-    }
-    for (const auto& region : sequence.regions()) {
-        if (error)
-            return;
-        error = allocate_owned(table, allocator, region.id);
-    }
-    for (const auto& scene : sequence.scenes()) {
-        if (error)
-            return;
-        error = allocate_owned(table, allocator, scene.id);
-        for (const auto& slot : scene.slots) {
-            if (error)
-                return;
-            error = allocate_owned(table, allocator, slot.id);
-        }
-    }
+std::vector<ItemId> owned_sequence_ids(const Sequence& sequence) {
+    std::vector<ItemId> ids;
+    detail::visit_sequence_owned_identities(
+        sequence, [&](const detail::ModelOwnedIdentity& identity) {
+            ids.push_back(identity.id);
+        });
+    return ids;
 }
 
 std::optional<ModelError> preflight(const Sequence& sequence) {
-    std::vector<ItemId> ids{sequence.id()};
-    append_annotation_ids(sequence, ids);
-    for (const auto& track : sequence.tracks()) {
-        ids.push_back(track.id());
-        for (const auto& device : track.device_chain())
-            ids.push_back(device.id);
-        detail::append_automation_owned_ids(track.automation_lanes(), ids);
-        append_take_ids(track, ids);
-        for (const auto& clip : track.clips()) {
+    for (const auto& track : sequence.tracks())
+        for (const auto& clip : track.clips())
             if (const auto rejected = remap_rejection(clip.content()))
                 return ModelError{*rejected, clip.id(), {}};
-            append_clip_ids(clip, ids);
-        }
-    }
+    auto ids = owned_sequence_ids(sequence);
     return validate_owned_ids(std::move(ids));
 }
 
 runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTable& table,
-                                               ExternalIdFixup external) {
-    // The counterpart to append_clip_ids: every id collected there is rewritten
-    // here, and every external reference is fixed up. An alternative left out of
-    // this dispatch would be carried into the remapped project still pointing at
-    // the source's ids, so it is exhaustive rather than a chain of get_ifs.
+                                               RemapIdFixups fixups) {
+    // Every owned id collected by the canonical identity traversal is rewritten
+    // here, and every external reference is fixed up.
     ClipContent content = clip.content();
     std::optional<ModelError> content_error;
     std::visit(ClipContentCases{
                    [](const EmptyContent&) {},
                    [&](MediaRef& media) {
-                       auto fixed = external.apply(media.asset_id);
+                       auto fixed = fixups.asset.apply(media.asset_id);
                        if (!fixed)
                            content_error = fixed.error();
                        else
@@ -227,6 +172,13 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                    // opaque content never reaches here — preflight refuses it.
                    [](RegisteredContent&) {},
                    [](OpaqueContent&) {},
+                   [&](SequenceRef& reference) {
+                       auto fixed = fixups.sequence.apply(reference.sequence_id);
+                       if (!fixed)
+                           content_error = fixed.error();
+                       else
+                           reference.sequence_id = fixed.value();
+                   },
                },
                content);
     if (content_error)
@@ -306,7 +258,7 @@ rebuild_take_lane(const TakeLane& lane, const IdRemapTable& table, ExternalIdFix
 }
 
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
-                                                 ExternalIdFixup external) {
+                                                 RemapIdFixups fixups) {
     std::vector<DevicePlacement> device_chain;
     device_chain.reserve(track.device_chain().size());
     for (const auto& device : track.device_chain())
@@ -314,7 +266,7 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
     std::vector<Clip> clips;
     clips.reserve(track.clips().size());
     for (const auto& clip : track.clips()) {
-        auto rebuilt = rebuild_clip(clip, table, external);
+        auto rebuilt = rebuild_clip(clip, table, fixups);
         if (!rebuilt)
             return fail<Track>(rebuilt.error().code, rebuilt.error().item,
                                rebuilt.error().related_item);
@@ -332,7 +284,7 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
     std::vector<TakeLane> take_lanes;
     take_lanes.reserve(track.take_lanes().size());
     for (const auto& lane : track.take_lanes()) {
-        auto rebuilt = rebuild_take_lane(lane, table, external);
+        auto rebuilt = rebuild_take_lane(lane, table, fixups.asset);
         if (!rebuilt)
             return fail<Track>(rebuilt.error().code, rebuilt.error().item,
                                rebuilt.error().related_item);
@@ -340,7 +292,7 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
     }
     auto freeze = track.freeze();
     if (freeze) {
-        auto fixed = external.apply(freeze->media.asset_id);
+        auto fixed = fixups.asset.apply(freeze->media.asset_id);
         if (!fixed)
             return fail<Track>(fixed.error().code, fixed.error().item, fixed.error().related_item);
         freeze->media.asset_id = fixed.value();
@@ -360,11 +312,11 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
 }
 
 runtime::Result<Sequence, ModelError>
-rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalIdFixup external) {
+rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFixups fixups) {
     std::vector<Track> tracks;
     tracks.reserve(sequence.tracks().size());
     for (const auto& track : sequence.tracks()) {
-        auto rebuilt = rebuild_track(track, table, external);
+        auto rebuilt = rebuild_track(track, table, fixups);
         if (!rebuilt)
             return fail<Sequence>(rebuilt.error().code, rebuilt.error().item,
                                   rebuilt.error().related_item);
@@ -408,6 +360,11 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
 
 runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
                                                     ExternalIdFixup external) {
+    return remap_ids(clip, allocator, RemapIdFixups{external, {}});
+}
+
+runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllocator& allocator,
+                                                    RemapIdFixups fixups) {
     if (const auto error = preflight(clip))
         return fail<RemappedClip>(error->code, error->item, error->related_item);
     auto working = allocator;
@@ -418,7 +375,7 @@ runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllo
         return fail<RemappedClip>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedClip>(table_error->code, table_error->item, table_error->related_item);
-    auto rebuilt = rebuild_clip(clip, table, external);
+    auto rebuilt = rebuild_clip(clip, table, fixups);
     if (!rebuilt)
         return fail<RemappedClip>(rebuilt.error().code, rebuilt.error().item,
                                   rebuilt.error().related_item);
@@ -429,6 +386,11 @@ runtime::Result<RemappedClip, ModelError> remap_ids(const Clip& clip, ItemIdAllo
 
 runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
                                                      ExternalIdFixup external) {
+    return remap_ids(track, allocator, RemapIdFixups{external, {}});
+}
+
+runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdAllocator& allocator,
+                                                     RemapIdFixups fixups) {
     if (const auto error = preflight(track))
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     auto working = allocator;
@@ -447,7 +409,7 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedTrack>(table_error->code, table_error->item, table_error->related_item);
-    auto rebuilt = rebuild_track(track, table, external);
+    auto rebuilt = rebuild_track(track, table, fixups);
     if (!rebuilt)
         return fail<RemappedTrack>(rebuilt.error().code, rebuilt.error().item,
                                    rebuilt.error().related_item);
@@ -458,37 +420,64 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
 
 runtime::Result<RemappedSequence, ModelError>
 remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup external) {
+    return remap_ids(sequence, allocator, RemapIdFixups{external, {}});
+}
+
+runtime::Result<RemappedSequence, ModelError>
+remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, RemapIdFixups fixups) {
     if (const auto error = preflight(sequence))
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
     auto working = allocator;
     IdRemapTable table;
-    std::optional<ModelError> error = allocate_owned(table, working, sequence.id());
-    allocate_annotation_owned(sequence, table, working, error);
-    for (const auto& track : sequence.tracks()) {
-        if (!error)
-            error = allocate_owned(table, working, track.id());
-        for (const auto& device : track.device_chain()) {
+    std::optional<ModelError> error;
+    detail::visit_sequence_owned_identities(
+        sequence, [&](const detail::ModelOwnedIdentity& identity) {
             if (!error)
-                error = allocate_owned(table, working, device.id);
-        }
-        for (const auto& clip : track.clips())
-            allocate_clip_owned(clip, table, working, error);
-        for (const auto& lane : track.automation_lanes())
-            allocate_automation_owned(lane, table, working, error);
-        allocate_take_owned(track, table, working, error);
-    }
+                error = allocate_owned(table, working, identity.id);
+        });
     if (error)
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
         return fail<RemappedSequence>(table_error->code, table_error->item,
                                       table_error->related_item);
-    auto rebuilt = rebuild_sequence(sequence, table, external);
+    auto rebuilt = rebuild_sequence(sequence, table, fixups);
     if (!rebuilt)
         return fail<RemappedSequence>(rebuilt.error().code, rebuilt.error().item,
                                       rebuilt.error().related_item);
     allocator = working;
     return runtime::Result<RemappedSequence, ModelError>(
         runtime::Ok(RemappedSequence{std::move(rebuilt).value(), std::move(table)}));
+}
+
+runtime::Result<RemappedSequence, ModelError>
+remap_ids(const Sequence& sequence,
+          std::span<const std::pair<ItemId, ItemId>> carried_ids,
+          RemapIdFixups fixups) {
+    if (const auto error = preflight(sequence))
+        return fail<RemappedSequence>(error->code, error->item, error->related_item);
+    auto expected = owned_sequence_ids(sequence);
+    std::sort(expected.begin(), expected.end());
+    if (carried_ids.size() != expected.size())
+        return fail<RemappedSequence>(ModelErrorCode::InvalidIdentityTransition, sequence.id());
+    IdRemapTable table;
+    auto& entries = IdRemapBuilder::entries(table);
+    entries.assign(carried_ids.begin(), carried_ids.end());
+    std::vector<ItemId> mapped;
+    mapped.reserve(entries.size());
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        if (entries[index].first != expected[index])
+            return fail<RemappedSequence>(ModelErrorCode::InvalidIdentityTransition,
+                                          entries[index].first, expected[index]);
+        mapped.push_back(entries[index].second);
+    }
+    if (const auto error = validate_owned_ids(std::move(mapped)))
+        return fail<RemappedSequence>(error->code, error->item, error->related_item);
+    auto rebuilt = rebuild_sequence(sequence, table, fixups);
+    if (!rebuilt)
+        return fail<RemappedSequence>(rebuilt.error().code, rebuilt.error().item,
+                                      rebuilt.error().related_item);
+    return runtime::Ok(
+        RemappedSequence{std::move(rebuilt).value(), std::move(table)});
 }
 
 runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
@@ -522,17 +511,25 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
     struct Context {
         const IdRemapTable* table;
     } context{&table};
-    const ExternalIdFixup internal{
+    const ExternalIdFixup asset_internal{
         &context, [](void* raw, ItemId id) noexcept -> runtime::Result<ItemId, ModelError> {
             const auto* ctx = static_cast<Context*>(raw);
             const auto mapped = ctx->table->find(id);
             return mapped ? runtime::Result<ItemId, ModelError>(runtime::Ok(*mapped))
                           : fail<ItemId>(ModelErrorCode::MissingAsset, {}, id);
         }};
+    const ExternalIdFixup sequence_internal{
+        &context, [](void* raw, ItemId id) noexcept -> runtime::Result<ItemId, ModelError> {
+            const auto* ctx = static_cast<Context*>(raw);
+            const auto mapped = ctx->table->find(id);
+            return mapped ? runtime::Result<ItemId, ModelError>(runtime::Ok(*mapped))
+                          : fail<ItemId>(ModelErrorCode::MissingSequenceReference, {}, id);
+        }};
     std::vector<Sequence> sequences;
     sequences.reserve(project.sequences().size());
     for (const auto& sequence : project.sequences()) {
-        auto rebuilt = rebuild_sequence(sequence, table, internal);
+        auto rebuilt =
+            rebuild_sequence(sequence, table, RemapIdFixups{asset_internal, sequence_internal});
         if (!rebuilt)
             return fail<RemappedProject>(rebuilt.error().code, rebuilt.error().item,
                                          rebuilt.error().related_item);

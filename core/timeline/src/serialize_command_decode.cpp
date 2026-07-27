@@ -221,6 +221,22 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return fail<std::array<ItemId, 3>>(PersistenceErrorCode::MissingField, data_path);
         return runtime::Ok(std::array{sequence.value(), track.value(), clip.value()});
     };
+    const auto decode_sequence_ref =
+        [&](const JsonValue& object,
+            const std::string& object_path) -> runtime::Result<SequenceRef, PersistenceError> {
+        auto sequence = decode_command_item_id(object, "sequence_id", object_path);
+        auto source = required(object, "source_start", object_path);
+        if (!sequence || !source)
+            return fail<SequenceRef>(PersistenceErrorCode::MissingField, object_path);
+        auto decoded_source =
+            parse_canonical_i64_string(*source.value(), object_path + "/source_start");
+        if (!decoded_source)
+            return fail<SequenceRef>(decoded_source.error().code,
+                                     decoded_source.error().path,
+                                     decoded_source.error().byte_offset);
+        return runtime::Ok(
+            SequenceRef{sequence.value(), timebase::TickPosition{decoded_source.value()}});
+    };
 
     if (type.value() == "pulp.timeline.command.insert_clip") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
@@ -593,6 +609,62 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         return runtime::Ok(
             Command(SetTrackFreeze{sequence.value(), track.value(), std::move(expected).value(),
                                    std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_sequence") {
+        auto sequence = required(command, "sequence", data_path);
+        if (!sequence)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_sequence(document, *sequence.value(), registry, context,
+                                       data_path + "/sequence");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(InsertSequence{std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.clone_sequence") {
+        auto source = decode_command_item_id(command, "source_sequence_id", data_path);
+        auto cloned = decode_command_item_id(command, "cloned_sequence_id", data_path);
+        auto remap = required(command, "id_remap", data_path);
+        if (!source || !cloned || !remap)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        if (remap.value()->kind != JsonValue::Kind::Array)
+            return fail<Command>(PersistenceErrorCode::UnexpectedType,
+                                 data_path + "/id_remap");
+        std::vector<std::pair<ItemId, ItemId>> entries;
+        entries.reserve(remap.value()->array.size());
+        for (std::size_t index = 0; index < remap.value()->array.size(); ++index) {
+            const auto entry_path =
+                data_path + "/id_remap/" + std::to_string(index);
+            const auto& entry = remap.value()->array[index];
+            auto old_id = decode_command_item_id(entry, "old_id", entry_path);
+            auto new_id = decode_command_item_id(entry, "new_id", entry_path);
+            if (!old_id || !new_id)
+                return fail<Command>(PersistenceErrorCode::MissingField, entry_path);
+            entries.emplace_back(old_id.value(), new_id.value());
+        }
+        return runtime::Ok(Command(
+            CloneSequence{source.value(), cloned.value(), std::move(entries)}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_sequence") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        if (!sequence)
+            return runtime::Err(sequence.error());
+        return runtime::Ok(Command(RemoveSequence{sequence.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_clip_sequence_ref") {
+        auto decoded = ids();
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!decoded || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_sequence_ref(*expected.value(), data_path + "/expected");
+        auto decoded_replacement =
+            decode_sequence_ref(*replacement.value(), data_path + "/replacement");
+        if (!decoded_expected || !decoded_replacement)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path);
+        return runtime::Ok(Command(SetClipSequenceRef{
+            decoded.value()[0], decoded.value()[1], decoded.value()[2],
+            decoded_expected.value(), decoded_replacement.value()}));
     }
     return fail<Command>(PersistenceErrorCode::UnsupportedStructuralType, std::move(path),
                          value.begin);

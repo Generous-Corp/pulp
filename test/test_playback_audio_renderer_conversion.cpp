@@ -174,10 +174,8 @@ TEST_CASE("audio renderer requires exact transport and program tempo map identit
     const auto foreign = shared_compiled_tempo_map(foreign_points, RationalRate{48'000, 1});
     CompiledFixture compiled(project, baseline, pool({{3, data}}));
     auto program = compiled.store.read();
-    REQUIRE_FALSE(program->find_track({10})
-                      ->audio_program()
-                      ->clips()[0]
-                      .uses_sample_rate_conversion());
+    REQUIRE_FALSE(
+        program->find_track({10})->audio_program()->clips()[0].uses_sample_rate_conversion());
     auto mismatched = snapshot(*program, 8);
     mismatched.tempo_map = foreign.get();
     Output rejected(1, 8);
@@ -310,29 +308,28 @@ TEST_CASE("audio compiler rejects invalid assets sample rates and capacities") {
     auto compiled_clip =
         take(compile_audio_clip_program(clip, *project, *map, *pool({{3, good}}), {}));
 
-    auto musical_clip =
-        musical_media_clip(101, 0, kTicksPerQuarter, 3, good->num_frames());
+    auto musical_clip = musical_media_clip(101, 0, kTicksPerQuarter, 3, good->num_frames());
     auto musical_track = take(Track::create({11}, "musical", {musical_clip}));
     auto musical_project =
         project_with_tracks({musical_track}, {{3, "musical", good->num_frames(), {48'000, 1}}});
-    auto compiled_musical = take(compile_audio_clip_program(
-        musical_clip, *musical_project, *map, *pool({{3, good}}), {}));
+    auto compiled_musical = take(
+        compile_audio_clip_program(musical_clip, *musical_project, *map, *pool({{3, good}}), {}));
     const auto foreign_audio = audio_data({std::vector<float>(good->num_frames(), 0.25f)});
     auto foreign_project = project_with_tracks(
         {musical_track}, {{3, "foreign", foreign_audio->num_frames(), {48'000, 1}}});
-    auto foreign_musical = take(compile_audio_clip_program(
-        musical_clip, *foreign_project, *map, *pool({{3, foreign_audio}}), {}));
+    auto foreign_musical = take(compile_audio_clip_program(musical_clip, *foreign_project, *map,
+                                                           *pool({{3, foreign_audio}}), {}));
     compiled_musical.conversion_artifact = foreign_musical.conversion_artifact;
     auto linked = link_audio_track_program({11}, {compiled_musical}, {});
     REQUIRE_FALSE(linked);
     REQUIRE(linked.error().code == AudioRendererErrorCode::InvalidAsset);
-    auto sliced_clip = take(Clip::create({102}, {0}, {kTicksPerQuarter},
-                                         MediaRef{{3}, {1}, good->num_frames() - 1}));
+    auto sliced_clip = take(
+        Clip::create({102}, {0}, {kTicksPerQuarter}, MediaRef{{3}, {1}, good->num_frames() - 1}));
     auto sliced_track = take(Track::create({12}, "sliced", {sliced_clip}));
     auto sliced_project =
         project_with_tracks({sliced_track}, {{3, "sliced", good->num_frames(), {48'000, 1}}});
-    auto sliced_musical = take(compile_audio_clip_program(
-        sliced_clip, *sliced_project, *map, *pool({{3, good}}), {}));
+    auto sliced_musical = take(
+        compile_audio_clip_program(sliced_clip, *sliced_project, *map, *pool({{3, good}}), {}));
     compiled_musical.conversion_artifact = sliced_musical.conversion_artifact;
     linked = link_audio_track_program({11}, {compiled_musical}, {});
     REQUIRE_FALSE(linked);
@@ -641,8 +638,7 @@ TEST_CASE("incremental audio compilation reuses seeded host-tempo pyramids") {
     first.audio_assets = assets;
     first.audio_limits.max_sample_rate_converters = 1;
     REQUIRE(compiler.submit(std::move(first)));
-    const auto original =
-        store.read()->find_track({10})->audio_program()->clips().front();
+    const auto original = store.read()->find_track({10})->audio_program()->clips().front();
     REQUIRE(original.uses_host_rate_conversion());
 
     ProgramCompileRequest second;
@@ -708,6 +704,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     over_limit.audio_limits.max_clips = 2;
     REQUIRE(compiler.submit(std::move(over_limit)));
     REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
     REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
     REQUIRE(store.read()->document_revision() == 1);
 

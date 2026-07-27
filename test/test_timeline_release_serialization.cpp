@@ -46,13 +46,15 @@ Project project_with_takes() {
 
 TEST_CASE("Timeline release maps name exact shipped schema sets") {
     const auto releases = builtin_timeline_schema_releases();
-    REQUIRE(releases.size() == 3);
+    REQUIRE(releases.size() == 4);
     REQUIRE(releases[0].release_label == "v0.736.0");
     REQUIRE(releases[1].release_label == "v0.744.0");
     REQUIRE(releases[2].release_label == "v0.748.0");
+    REQUIRE(releases[3].release_label == "v0.750.0");
     REQUIRE(releases[0].versions.size() == 9);
     REQUIRE(releases[1].versions.size() == 10);
     REQUIRE(releases[2].versions.size() == 12);
+    REQUIRE(releases[3].versions.size() == 14);
 
     REQUIRE(releases[0].find(SchemaDomain::Document, "pulp.timeline.track")->version == 1);
     REQUIRE(releases[1].find(SchemaDomain::Document, "pulp.timeline.track")->version == 2);
@@ -60,6 +62,12 @@ TEST_CASE("Timeline release maps name exact shipped schema sets") {
     REQUIRE(releases[0].find(SchemaDomain::Document, "pulp.timeline.device_placement") == nullptr);
     REQUIRE(releases[1].find(SchemaDomain::Document, "pulp.timeline.automation_lane") == nullptr);
     REQUIRE(releases[2].find(SchemaDomain::Document, "pulp.timeline.take_lane") == nullptr);
+    REQUIRE(releases[3].find(SchemaDomain::Document, "pulp.timeline.project")->version == 1);
+    REQUIRE(releases[3].find(SchemaDomain::Document, "pulp.timeline.track")->version == 4);
+    REQUIRE(releases[3].find(SchemaDomain::Content,
+                             "pulp.timeline.content.sequence_ref") == nullptr);
+    REQUIRE(releases[3].find(SchemaDomain::Command,
+                             "pulp.timeline.command.clone_sequence") == nullptr);
     REQUIRE(find_builtin_timeline_schema_release("v0.747.0") == nullptr);
 }
 
@@ -74,6 +82,7 @@ TEST_CASE("Timeline snapshots target each shipped release canonically") {
         Expectation{"v0.736.0", 1},
         Expectation{"v0.744.0", 2},
         Expectation{"v0.748.0", 3},
+        Expectation{"v0.750.0", 4},
     };
     for (const auto& expectation : expectations) {
         INFO(expectation.label);

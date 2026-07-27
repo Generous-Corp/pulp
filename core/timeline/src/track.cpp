@@ -120,6 +120,23 @@ std::optional<ItemId> take_identity_collision(const Clip& clip,
     return std::nullopt;
 }
 
+bool compile_relevant(const Clip& clip) noexcept {
+    return std::holds_alternative<SequenceRef>(clip.content()) ||
+           std::holds_alternative<RegisteredContent>(clip.content());
+}
+
+bool same_compile_structure(const Clip& lhs, const Clip& rhs) noexcept {
+    if (const auto* left = std::get_if<SequenceRef>(&lhs.content())) {
+        const auto* right = std::get_if<SequenceRef>(&rhs.content());
+        return right && left->sequence_id == right->sequence_id;
+    }
+    if (const auto* left = std::get_if<RegisteredContent>(&lhs.content())) {
+        const auto* right = std::get_if<RegisteredContent>(&rhs.content());
+        return right && left->schema().type_name == right->schema().type_name;
+    }
+    return !compile_relevant(rhs);
+}
+
 } // namespace
 
 static std::atomic<std::uint64_t> g_live_index_nodes{0};
@@ -336,6 +353,7 @@ struct Track::Data {
     NodePtr clips_by_start;
     NodePtr clips_by_id;
     std::shared_ptr<const std::uint8_t> clip_membership;
+    std::shared_ptr<const std::uint8_t> compile_structure;
     std::shared_ptr<const std::vector<DevicePlacement>> device_chain;
     std::shared_ptr<const std::vector<AutomationLane>> automation_lanes;
     std::shared_ptr<const std::vector<ItemId>> automation_owned_ids;
@@ -439,21 +457,21 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
     }
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(
-        std::make_shared<const Data>(Data{.id = input.id,
-                                          .name = std::move(input.name),
-                                          .clips_by_start = std::move(by_start),
-                                          .clips_by_id = std::move(by_id),
-                                          .clip_membership =
-                                              std::make_shared<const std::uint8_t>(0),
-                                          .device_chain = std::move(device_chain),
-                                          .automation_lanes = std::move(automation_lanes),
-                                          .automation_owned_ids = std::move(automation_owned_ids),
-                                          .take_lanes = std::move(take_lanes),
-                                          .take_owned_ids = std::move(take_owned_ids),
-                                          .record_armed = input.record_armed,
-                                          .active_take_lane_id = input.active_take_lane_id,
-                                          .freeze = std::move(input.freeze)}))));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
+        Data{.id = input.id,
+             .name = std::move(input.name),
+             .clips_by_start = std::move(by_start),
+             .clips_by_id = std::move(by_id),
+             .clip_membership = std::make_shared<const std::uint8_t>(0),
+             .compile_structure = std::make_shared<const std::uint8_t>(0),
+             .device_chain = std::move(device_chain),
+             .automation_lanes = std::move(automation_lanes),
+             .automation_owned_ids = std::move(automation_owned_ids),
+             .take_lanes = std::move(take_lanes),
+             .take_owned_ids = std::move(take_owned_ids),
+             .record_armed = input.record_armed,
+             .active_take_lane_id = input.active_take_lane_id,
+             .freeze = std::move(input.freeze)}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -488,6 +506,8 @@ runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
     auto next_data = *data_;
     next_data.clips_by_start = std::move(by_start);
     next_data.clips_by_id = std::move(by_id);
+    if (!same_compile_structure(*old, *inserted))
+        next_data.compile_structure = std::make_shared<const std::uint8_t>(0);
     return runtime::Result<Track, ModelError>(
         runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -526,6 +546,8 @@ runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
     next_data.clips_by_start = std::move(by_start);
     next_data.clips_by_id = std::move(by_id);
     next_data.clip_membership = std::make_shared<const std::uint8_t>(0);
+    if (compile_relevant(*inserted))
+        next_data.compile_structure = std::make_shared<const std::uint8_t>(0);
     return runtime::Result<Track, ModelError>(
         runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -540,6 +562,8 @@ runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
     next_data.clips_by_start = std::move(by_start);
     next_data.clips_by_id = std::move(by_id);
     next_data.clip_membership = std::make_shared<const std::uint8_t>(0);
+    if (compile_relevant(*old))
+        next_data.compile_structure = std::make_shared<const std::uint8_t>(0);
     return runtime::Result<Track, ModelError>(
         runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -783,6 +807,9 @@ bool Track::shares_storage_with(const Track& other) const noexcept {
 }
 bool Track::shares_clip_membership_with(const Track& other) const noexcept {
     return data_->clip_membership == other.data_->clip_membership;
+}
+bool Track::shares_compile_structure_with(const Track& other) const noexcept {
+    return data_->compile_structure == other.data_->compile_structure;
 }
 TrackIndexStats Track::index_stats() noexcept {
     return {g_live_index_nodes.load(), g_created_index_nodes.load()};

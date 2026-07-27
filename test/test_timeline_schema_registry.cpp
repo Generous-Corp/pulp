@@ -109,12 +109,14 @@ TEST_CASE("Timeline schema registry is explicit immutable and deterministic") {
 
 TEST_CASE("Built-in command registry covers the complete mutation variant") {
     constexpr std::array expected{
+        "pulp.timeline.command.clone_sequence",
         "pulp.timeline.command.create_asset",
         "pulp.timeline.command.insert_automation_lane",
         "pulp.timeline.command.insert_clip",
         "pulp.timeline.command.insert_marker",
         "pulp.timeline.command.insert_region",
         "pulp.timeline.command.insert_scene",
+        "pulp.timeline.command.insert_sequence",
         "pulp.timeline.command.insert_slot",
         "pulp.timeline.command.insert_take",
         "pulp.timeline.command.insert_take_lane",
@@ -125,6 +127,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.remove_marker",
         "pulp.timeline.command.remove_region",
         "pulp.timeline.command.remove_scene",
+        "pulp.timeline.command.remove_sequence",
         "pulp.timeline.command.remove_slot",
         "pulp.timeline.command.remove_take",
         "pulp.timeline.command.remove_take_lane",
@@ -132,6 +135,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_active_take_lane",
         "pulp.timeline.command.set_chord_scale_lane",
         "pulp.timeline.command.set_clip_playback_properties",
+        "pulp.timeline.command.set_clip_sequence_ref",
         "pulp.timeline.command.set_groove",
         "pulp.timeline.command.set_meter_map",
         "pulp.timeline.command.set_note_velocity",

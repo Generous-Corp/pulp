@@ -165,6 +165,14 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
             R"({"before_slot_id":"33","scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}})"),
         envelope("pulp.timeline.command.remove_slot",
                  R"({"scene_id":"30","sequence_id":"5","slot_id":"31"})"),
+        envelope("pulp.timeline.command.insert_sequence",
+                 "{\"sequence\":" + std::string(parsed->raw(sequence)) + "}"),
+        envelope("pulp.timeline.command.clone_sequence",
+                 R"({"cloned_sequence_id":"30","id_remap":[{"new_id":"30","old_id":"5"},{"new_id":"31","old_id":"6"},{"new_id":"32","old_id":"7"},{"new_id":"33","old_id":"8"},{"new_id":"34","old_id":"9"},{"new_id":"35","old_id":"10"},{"new_id":"36","old_id":"11"},{"new_id":"37","old_id":"12"},{"new_id":"38","old_id":"13"},{"new_id":"39","old_id":"14"},{"new_id":"40","old_id":"15"}],"source_sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_sequence", R"({"sequence_id":"30"})"),
+        envelope(
+            "pulp.timeline.command.set_clip_sequence_ref",
+            R"({"clip_id":"7","expected":{"sequence_id":"30","source_start":"0"},"replacement":{"sequence_id":"30","source_start":"100"},"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -208,6 +216,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<InsertSlot>(commands[28]));
     REQUIRE(std::get<InsertSlot>(commands[28]).before_slot_id == ItemId{33});
     REQUIRE(std::holds_alternative<RemoveSlot>(commands[29]));
+    REQUIRE(std::holds_alternative<InsertSequence>(commands[30]));
+    REQUIRE(std::holds_alternative<CloneSequence>(commands[31]));
+    REQUIRE(std::holds_alternative<RemoveSequence>(commands[32]));
+    REQUIRE(std::holds_alternative<SetClipSequenceRef>(commands[33]));
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
