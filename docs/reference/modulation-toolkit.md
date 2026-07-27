@@ -366,8 +366,28 @@ sound. Each migration needs its own compatibility proof.
 
 ## In Forge
 
-Five of these primitives are exposed to Forge's effect lane as catalog nodes
-(`pulp/host/forge_modulation_catalog.hpp`): `mod_lfo`, `lpg`, `slew`,
-`transient`, and `trig_env`. They follow the existing CV convention, where a
-control signal is a unipolar `[0, 1]` signal on an ordinary audio port, so
-modulation stays ordinary graph topology.
+Five primitives are exposed by
+`pulp/host/forge_modulation_catalog.hpp` as lowerable catalog nodes. They follow
+the existing CV convention: a control signal is a unipolar `[0, 1]` signal on
+an ordinary audio port, so modulation remains ordinary graph topology.
+
+Node type IDs and node-local parameter IDs are stable bake-layer contracts:
+
+| Node type ID | Injectable runtime parameters (`ParamID: control`) |
+|--------------|----------------------------------------------------|
+| `forge_mod_lfo` | `1: rate`, `2: depth`, `3: wave`, `4: pulse width`, `5: random blend`, `6: delay`, `7: fade in`, `8: shape morph`, `9: morph enabled`, `10: triangle bias`, `11: random segments`, `12: phase`, `13: fade out`, `14: quadratic fade`, `15: repeat count` |
+| `forge_mod_lpg` | `1: decay`, `2: colour`, `3: droop`, `4: brightness`, `5: struck mode`, `6: rise`, `7: darkness`, `8: strike threshold`, `9: refractory time` |
+| `forge_mod_slew` | `1: rise`, `2: fall`, `3: curved mode` |
+| `forge_mod_transient` | `1: fast time`, `2: slow time`, `3: sensitivity`, `4: invert` |
+| `forge_mod_env` | `1: attack`, `2: hold`, `3: decay`, `4: linked curve`, `5: threshold`, `6: delay`, `7: depth`, `8: loop`, `9: loop count`, `10: refractory time`, `11: velocity sensitivity`, `12: independent curves`, `13: attack curve`, `14: decay curve` |
+
+All listed controls consume sample-accurate `BakedParamView` automation in
+plain parameter domains. The catalog metadata in the header is authoritative
+for their minimum, maximum, and default values.
+
+Port topology is fixed by each node type. Choices that would change topology or
+reset identity are deliberately not runtime parameters: triggered or stereo /
+quadrature LFO variants require different ports, and the deterministic random
+seed belongs to instance construction/reset. Add a distinct, versioned node
+type for such variants instead of changing the meaning or port shape of an
+existing type ID.
