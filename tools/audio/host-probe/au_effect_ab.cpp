@@ -23,9 +23,12 @@
 // deliberately a manual dev tool and is not registered as a test.
 //
 // Usage:
-//   pulp-au-effect-ab --au aumf:MeBr:Artu --out /tmp/brigade.wav
+//   pulp-au-effect-ab --au TYPE:SUBT:MANU --out /tmp/reference.wav
 //   pulp-au-effect-ab --pulp tape --out /tmp/pulp-tape.wav
-//   pulp-au-effect-ab --au aumf:Eter:Artu --list-params
+//   pulp-au-effect-ab --au TYPE:SUBT:MANU --list-params
+//   pulp-au-effect-ab --au TYPE:SUBT:MANU --list-presets
+//   pulp-au-effect-ab --au TYPE:SUBT:MANU --preset 1 --out /tmp/reference.wav
+//   pulp-au-effect-ab --au TYPE:SUBT:MANU --state saved.aupreset --out /tmp/reference.wav
 //
 //   --src-gen impulse|pluck|tone   deterministic source (default pluck)
 //   --src FILE                     use a WAV instead of a generated source
@@ -36,10 +39,15 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/native_handle_visitor.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/scanner.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/signal/character_delay.hpp>
+
+#if defined(__APPLE__)
+#include <AudioToolbox/AudioToolbox.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -85,6 +93,7 @@ void print_usage(const char* program) {
         "Usage: %s (--au TYPE:SUBT:MANU | --pulp ENGINE) [--out PATH]\n"
         "       [--src-gen impulse|pluck|tone] [--src FILE] [--seconds N]\n"
         "       [--time-ms N] [--feedback N] [--list-params] [--set-param ID=VAL]\n"
+        "       [--list-presets] [--preset N] [--state FILE]\n"
         "\nPulp engines:",
         program);
     for (const auto& e : kEngines) std::printf(" %s", e.name);
@@ -127,6 +136,73 @@ std::vector<float> generate_source(const std::string& kind, int total) {
     }
     return s;
 }
+
+#if defined(__APPLE__)
+// Reaches the slot's underlying AudioComponentInstance so the probe can use the
+// AU factory-preset API. PluginSlot deliberately does not model presets — they
+// are format-specific — so this is the sanctioned typed-introspection escape
+// hatch rather than a layering violation.
+struct AudioUnitGrab final : pulp::host::NativeHandleVisitor {
+    AudioUnit unit = nullptr;
+    void visit_audio_unit(const pulp::host::PluginSlot&,
+                          const pulp::host::AudioUnitNativeHandle& h) override {
+        unit = static_cast<AudioUnit>(h.component_instance);
+    }
+};
+
+AudioUnit native_unit(const pulp::host::PluginSlot& slot) {
+    AudioUnitGrab grab;
+    slot.accept(grab);
+    return grab.unit;
+}
+
+// A plugin that hosts several modelled devices commonly exposes each device's
+// settings as FACTORY PRESETS rather than as host parameters. Selecting one is
+// then the only way a headless probe reaches a specific device: a fresh
+// instance comes up with nothing engaged, and no amount of parameter setting
+// will engage it.
+int list_factory_presets(const pulp::host::PluginSlot& slot) {
+    AudioUnit au = native_unit(slot);
+    if (!au) {
+        std::printf("FAIL: no native AudioUnit handle (not an AU slot?)\n");
+        return 7;
+    }
+    CFArrayRef presets = nullptr;
+    UInt32 size = sizeof(presets);
+    const OSStatus st = AudioUnitGetProperty(au, kAudioUnitProperty_FactoryPresets,
+                                             kAudioUnitScope_Global, 0, &presets, &size);
+    if (st != noErr || !presets) {
+        std::printf("  0 factory preset(s) (OSStatus %d) — this plugin keeps its\n"
+                    "  device/preset selection in opaque state, so a saved .aupreset\n"
+                    "  restored via --state is the only headless route.\n",
+                    static_cast<int>(st));
+        return 0;
+    }
+    const CFIndex n = CFArrayGetCount(presets);
+    std::printf("  %ld factory preset(s)\n", static_cast<long>(n));
+    for (CFIndex i = 0; i < n; ++i) {
+        const auto* p = static_cast<const AUPreset*>(CFArrayGetValueAtIndex(presets, i));
+        char name[256] = {0};
+        if (p->presetName)
+            CFStringGetCString(p->presetName, name, sizeof(name), kCFStringEncodingUTF8);
+        std::printf("  preset %-4d %s\n", static_cast<int>(p->presetNumber), name);
+    }
+    CFRelease(presets);
+    return 0;
+}
+
+bool select_factory_preset(const pulp::host::PluginSlot& slot, int number) {
+    AudioUnit au = native_unit(slot);
+    if (!au) return false;
+    AUPreset preset{};
+    preset.presetNumber = number;
+    preset.presetName = nullptr;
+    const OSStatus st = AudioUnitSetProperty(au, kAudioUnitProperty_PresentPreset,
+                                             kAudioUnitScope_Global, 0, &preset,
+                                             sizeof(preset));
+    return st == noErr;
+}
+#endif  // __APPLE__
 
 struct Stats {
     float peak = 0.0f;
@@ -176,6 +252,7 @@ int render_pulp(const Engine& engine, const std::vector<float>& src, double time
 }
 
 int render_au(const std::string& identity, const std::vector<float>& src, bool list_params,
+              bool list_presets, int preset_number, const std::string& state_path,
               const std::vector<std::pair<uint32_t, float>>& param_sets,
               std::vector<std::vector<float>>& out) {
     pulp::host::PluginInfo info;
@@ -202,6 +279,53 @@ int render_au(const std::string& identity, const std::vector<float>& src, bool l
         std::printf("FAIL: prepare(%.0f, %d)\n", kSampleRate, kBlockSize);
         return 4;
     }
+
+    // Restore saved state BEFORE anything else. For a plugin that models many
+    // devices, the device selection usually lives here and nowhere else — not
+    // in the parameter list and not necessarily in the factory presets — so a
+    // state file is what turns a blank instance into a specific device. An
+    // `.aupreset` saved by a host is exactly the ClassInfo property list this
+    // consumes, so it can be passed straight through with no conversion.
+    if (!state_path.empty()) {
+        std::FILE* f = std::fopen(state_path.c_str(), "rb");
+        if (!f) {
+            std::printf("FAIL: could not open state file '%s'\n", state_path.c_str());
+            return 9;
+        }
+        std::vector<uint8_t> bytes;
+        std::fseek(f, 0, SEEK_END);
+        bytes.resize(static_cast<std::size_t>(std::ftell(f)));
+        std::fseek(f, 0, SEEK_SET);
+        const std::size_t got = std::fread(bytes.data(), 1, bytes.size(), f);
+        std::fclose(f);
+        if (got != bytes.size() || bytes.empty()) {
+            std::printf("FAIL: could not read state file '%s'\n", state_path.c_str());
+            return 9;
+        }
+        if (!slot->restore_state(bytes)) {
+            std::printf("FAIL: restore_state rejected '%s' (%zu bytes)\n",
+                        state_path.c_str(), bytes.size());
+            return 9;
+        }
+        std::printf("restored state: %s (%zu bytes)\n", state_path.c_str(), bytes.size());
+    }
+
+#if defined(__APPLE__)
+    if (list_presets) {
+        const int rc = list_factory_presets(*slot);
+        slot->release();
+        return rc;
+    }
+    // Select the device BEFORE parameters: choosing a preset rewrites the whole
+    // parameter set, so any --set-param applied first would be discarded.
+    if (preset_number >= 0) {
+        if (!select_factory_preset(*slot, preset_number)) {
+            std::printf("FAIL: could not select factory preset %d\n", preset_number);
+            return 8;
+        }
+        std::printf("selected factory preset %d\n", preset_number);
+    }
+#endif
 
     if (list_params) {
         const auto params_list = slot->parameters();
@@ -257,7 +381,9 @@ int main(int argc, char** argv) {
     std::string au_identity, pulp_engine, out_path = "/tmp/pulp-effect-ab.wav";
     std::string src_kind = "pluck", src_file;
     double seconds = 6.0, time_ms = 375.0, feedback = 0.45;
-    bool list_params = false;
+    bool list_params = false, list_presets = false;
+    int preset_number = -1;
+    std::string state_path;
     std::vector<std::pair<uint32_t, float>> param_sets;
 
     for (int i = 1; i < argc; ++i) {
@@ -272,6 +398,9 @@ int main(int argc, char** argv) {
         else if (a == "--time-ms") { if (auto v = next()) time_ms = std::atof(v); }
         else if (a == "--feedback") { if (auto v = next()) feedback = std::atof(v); }
         else if (a == "--list-params") { list_params = true; }
+        else if (a == "--list-presets") { list_presets = true; }
+        else if (a == "--preset") { if (auto v = next()) preset_number = std::atoi(v); }
+        else if (a == "--state") { if (auto v = next()) state_path = v; }
         else if (a == "--set-param") {
             if (auto v = next()) {
                 const char* eq = std::strchr(v, '=');
@@ -304,8 +433,9 @@ int main(int argc, char** argv) {
     std::vector<std::vector<float>> out;
     int rc = 0;
     if (!au_identity.empty()) {
-        rc = render_au(au_identity, src, list_params, param_sets, out);
-        if (list_params || rc != 0) return rc;
+        rc = render_au(au_identity, src, list_params, list_presets, preset_number,
+                       state_path, param_sets, out);
+        if (list_params || list_presets || rc != 0) return rc;
     } else {
         const Engine* e = find_engine(pulp_engine);
         if (!e) {
