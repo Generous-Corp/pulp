@@ -199,6 +199,11 @@ docs:
     kind: guide
     summary: Plugin format adapters — CLAP, VST3, AU v2, optional AAX entry points, param sync, MIDI, state
 
+  - slug: midi-fx
+    path: guides/midi-fx.md
+    kind: guide
+    summary: Forge MIDI effects — all transforms and parameters, pattern/chord schemas, chain cookbook, exhaustive C++ method API, realtime lifecycle, and host validation
+
   - slug: signal-processing
     path: guides/signal-processing.md
     kind: guide
