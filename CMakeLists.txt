@@ -279,6 +279,10 @@ pulp_configure_aax_sdk()
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
+# After PulpDependencies: the runtime-staging entry point DELEGATES the wgpu
+# copy to the upstream FetchContent package's target_copy_webgpu_binaries(),
+# so that function has to exist first.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
 if(ANDROID)

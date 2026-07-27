@@ -321,6 +321,14 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkProvenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWebGpuImportedTarget.cmake"
+    # Resolved by PulpWebGpuImportedTarget.cmake relative to its own directory,
+    # so it must land beside it in the installed SDK too — a consumer that can
+    # stage sidecars but cannot verify them is exactly the gap WAH-3 closes.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake"
+    # Resolved by PulpRuntimeStaging.cmake relative to its own directory, so it
+    # must land beside it — a consumer that can stage sidecars but not verify
+    # them is exactly the gap WAH-3 closes.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"

@@ -127,9 +127,13 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         )
     endif()
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_VST3)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_VST3)
+    pulp_assert_runtime_dependencies_staged(${target}_VST3)
 endfunction()
 
 # ── Internal: CLAP target ───────────────────────────────────────────────
@@ -186,9 +190,13 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         )
     endif()
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_CLAP)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_CLAP)
+    pulp_assert_runtime_dependencies_staged(${target}_CLAP)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_CLAP)
 endfunction()
 
@@ -301,9 +309,13 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
         )
     endif()
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_AAX)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_AAX)
+    pulp_assert_runtime_dependencies_staged(${target}_AAX)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AAX)
 endfunction()
 
@@ -416,9 +428,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         COMMENT "Writing PkgInfo into ${name}.component bundle"
     )
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_AU)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_AU)
+    pulp_assert_runtime_dependencies_staged(${target}_AU)
     # AU bundles are loaded by a separate registrar/host process. Add the
     # bundle-local runtime path without replacing CMake's other build rpaths:
     # optional engines such as V8 may still need those during development.

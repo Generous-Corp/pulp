@@ -317,6 +317,39 @@ pulp_add_plugin(PulpSDKSmokeProbe
     AAX_NATIVE_CODE "SdkS"
 )
 
+# Runtime-sidecar staging proof (WAH-3).
+#
+# This is the BEHAVIORAL replacement for the source-text regex that used to
+# stand in as proof that Windows bundles carry Skia's `icudtl.dat`. A regex over
+# PulpWebGpuImportedTarget.cmake can only tell you somebody wrote a copy rule.
+# It cannot tell you the installed SDK exposes the file, that the staging helper
+# was invoked for a given format's target, or that anything reached the bundle —
+# and all three fail silently until a user's DAW crashes on the plug-in's first
+# text render.
+#
+# Running it HERE is what puts it on the truth surface that matters: this
+# consumer is built against the INSTALLED SDK by the Windows and Linux Shipyard
+# lanes (see .shipyard/config.toml), so the assertion runs on the real
+# release-path artifacts rather than in a source tree.
+#
+# Every format Pulp produced above is checked, so a format whose helper forgets
+# to stage fails here rather than in the field.
+if(COMMAND pulp_verify_runtime_dependencies_staged)
+    foreach(_pulp_sdk_smoke_format IN LISTS PULP_SDK_SMOKE_FORMATS)
+        set(_pulp_sdk_smoke_target "PulpSDKSmokeProbe_${_pulp_sdk_smoke_format}")
+        if(TARGET ${_pulp_sdk_smoke_target})
+            pulp_verify_runtime_dependencies_staged(${_pulp_sdk_smoke_target})
+        endif()
+    endforeach()
+    unset(_pulp_sdk_smoke_format)
+    unset(_pulp_sdk_smoke_target)
+else()
+    message(FATAL_ERROR
+        "Pulp SDK smoke: the installed SDK does not expose "
+        "pulp_verify_runtime_dependencies_staged(). An SDK without it cannot "
+        "prove its plug-in bundles carry their runtime sidecars.")
+endif()
+
 # GPU-audio transport export probe.
 #
 # find_package(Pulp) must expose Pulp::gpu-audio and its public headers so a
