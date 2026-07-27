@@ -547,6 +547,12 @@ target_link_libraries(pulp-test-forge-drum-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-drum-catalog)
 
+add_executable(pulp-test-forge-drum-param-efficacy
+    test_forge_drum_param_efficacy.cpp)
+target_link_libraries(pulp-test-forge-drum-param-efficacy
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-drum-param-efficacy)
+
 # Analog-modelled VCF core + four measured voicings. The dedicated executable
 # keeps its render-heavy calibration/stability suite isolated from the smaller
 # Forge lo-fi catalog contract tests while sharing the production RT probe.

@@ -223,11 +223,51 @@ inline constexpr auto kZapResonantDepth = kControl3;
 inline constexpr auto kZapDetuneCents = kControl4;
 inline constexpr auto kZapRing = kControl5;
 inline constexpr auto kZapRingRatio = kControl6;
+// Multi-operator FM (FM6/FM8) only. A two-operator voice has no algorithm to
+// select, so it deliberately does not reuse this name for its first control.
 inline constexpr auto kFmAlgorithm = kControl0;
 inline constexpr auto kFmDepth = kControl1;
 inline constexpr auto kFmFormantHz = kControl2;
 inline constexpr auto kFmFormantQ = kControl3;
+inline constexpr auto kFm6Feedback = kControl4;
+inline constexpr auto kFm8Transient = kControl4;
+inline constexpr auto kFm8NoiseLevel = kControl5;
+inline constexpr auto kFm8NoiseDecayMs = kControl6;
+inline constexpr auto kFm8ClickLevel = kControl7;
+// Two-operator FM. Its first control is the modulator ratio, not an
+// algorithm index, so it carries its own names throughout.
+inline constexpr auto kFm2Ratio = kControl0;
+inline constexpr auto kFm2Index = kControl1;
+inline constexpr auto kFm2IndexMs = kControl2;
+inline constexpr auto kFm2Feedback = kControl3;
+inline constexpr auto kFm2CarrierWave = kControl4;
+inline constexpr auto kFm2ModulatorWave = kControl5;
+inline constexpr auto kFm2CarrierWarp = kControl6;
+inline constexpr auto kFm2ModulatorWarp = kControl7;
+inline constexpr auto kFm2CarrierWarpMs = kControl8;
+inline constexpr auto kFm2ModulatorWarpMs = kControl9;
+inline constexpr auto kFm2LfoRateHz = kControl10;
+inline constexpr auto kFm2LfoDepthOctaves = kControl11;
+inline constexpr auto kFm2LfoDelayMs = kControl12;
+inline constexpr auto kFm2LfoFadeMs = kControl13;
+inline constexpr auto kFm2HardSync = kControl14;
+inline constexpr auto kFm2Transient = kControl15;
+inline constexpr auto kFm2NoiseLevel = kControl16;
+inline constexpr auto kFm2NoiseDecayMs = kControl17;
+inline constexpr auto kFm2CutoffHz = kControl18;
+inline constexpr auto kFm2Resonance = kControl19;
+inline constexpr auto kFm2Bandpass = kControl20;
+inline constexpr auto kFm2ClickLevel = kControl21;
 inline constexpr auto kFm2ClickCutoffHz = kControl22;
+
+/// Top of every sample-and-hold rate range, and their shared default.
+///
+/// The reducer bypasses its hold whenever the requested rate reaches the
+/// sample rate, so this is "no hold" at every rate Pulp supports. A bounded
+/// value rather than an infinity keeps the control normalisable: a host
+/// automation lane and a UI can map the range, which neither can do against
+/// an implementation sentinel.
+inline constexpr float kHoldRateBypassHz = 192000.0f;
 
 inline constexpr state::ParamID kOperatorRatioBase = 200;
 inline constexpr state::ParamID kOperatorLevelBase = 220;

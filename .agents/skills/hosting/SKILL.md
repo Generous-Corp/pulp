@@ -1695,3 +1695,46 @@ one: those setters recompute coefficients rather than scale a value, and a
 lifecycle whose boundaries move every sample has no boundaries. Values that
 genuinely scale (gain, depth, cutoff) stay per-sample so a knob sweep is
 sample-accurate.
+
+## A baked ParamID is a serialization contract, not a storage offset
+
+`CustomNodeType::baked_params` IDs are chosen for persistence: a semantic keeps
+its ID wherever it appears, and engine-specific banks get disjoint reserved
+ranges so a later addition never renumbers an existing preset. That makes them
+deliberately **sparse**. The drum catalog declares a few dozen controls per node
+while its FM operator banks start at 200 and its wave bank reaches 287.
+
+So never index a per-instance cache with a ParamID. Sizing an array by the
+largest ID wastes most of it and — the part that actually bites — turns the next
+reserved range into an out-of-bounds write on the audio thread, with no
+compile-time or test signal until the range is used. Build a dense table once
+when the node type is created (off the audio thread), map each declared ID to a
+slot, and size instance caches by parameter *count*. Return an explicit
+"no slot" for anything undeclared so a stray ID is inert instead of memory-unsafe.
+
+Carry each declared `min`/`max`/`default` in that same table, because it is also
+what lets injected automation be sanitized correctly. A generic "replace
+non-finite with zero" wrapper is wrong: zero sits below the minimum of every
+tuning, decay, cutoff, and component-value control, so it lands further outside
+the contract than the value it replaced. Mirror `state::ParamCursor` — a
+non-finite value becomes that parameter's **declared default**, then clamp.
+
+## Declare only what the engine actually consumes
+
+A node that registers a control its DSP ignores passes every registration test:
+the parameter exists, has a range, clamps, and round-trips through state. It
+still ships a dead knob — saved into presets, given a place in a UI, and worth
+nothing. Two variants of one engine family are where this hides, because the
+shared registration path is written once and the bodies diverge.
+
+Registration tests cannot catch it. The check that can is a rendering one: set
+each declared control to its default, render; set it elsewhere in its declared
+range, render; require the two to differ. Controls that are conditional by
+design (a decay time for a layer at zero level, an LFO rate with no depth) are
+not dead — give each one the companion settings that make it observable and
+take both renders under them, so the gate separates "needs a partner" from
+"reaches nothing".
+
+Confirm such a gate can fail before trusting it green: reintroduce one dead knob
+and check it is reported. A parameter-efficacy gate that silently passes
+everything looks identical to a clean contract.

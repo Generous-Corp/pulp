@@ -116,6 +116,16 @@ public:
     }
     virtual void set_output_oversampling(OutputOversampling) {}
 
+    /// The terminal saturation and degradation stage, at the generic voice
+    /// boundary. A registry consumer reaches it without recovering the
+    /// concrete voice type, so adding an engine cannot desynchronise a
+    /// downcast from the engine it was selected for. A voice that ends
+    /// without one returns nullptr.
+    virtual OutputStage* output_stage() noexcept { return nullptr; }
+    const OutputStage* output_stage() const noexcept {
+        return const_cast<Voice*>(this)->output_stage();
+    }
+
     void set_velocity_response(const VelocityResponse& r) { velocity_response_ = r; }
     const VelocityResponse& velocity_response() const { return velocity_response_; }
 

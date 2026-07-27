@@ -787,8 +787,15 @@ TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
           "[signal][drum][cymbal][life]") {
     CymbalVoice voice;
     voice.prepare(kFs);
+
+    // set_variation is a convenience over set_hit_life, so it must land on a
+    // real policy rather than a private fourth behaviour. Both values it can
+    // pick preserve the body: a cymbal that reset its body on every hit would
+    // cut its own ring off.
     voice.set_variation(1.0);
-    REQUIRE(voice.hit_life() == HitLifeMode::advancing_seed);
+    REQUIRE(voice.hit_life() == HitLifeMode::advancing_seed_preserved_body);
+    voice.set_variation(0.0);
+    REQUIRE(voice.hit_life() == HitLifeMode::fixed_seed_preserved_body);
 
     voice.set_hit_life(HitLifeMode::fixed_seed);
     const auto fixed_a = hit(voice, 0.8f, 12000);
@@ -804,6 +811,33 @@ TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
     const auto living_a = hit(voice, 0.8f, 12000);
     const auto living_b = hit(voice, 0.8f, 12000);
     REQUIRE_FALSE(living_a == living_b);
+}
+
+TEST_CASE("Cymbal body preservation is a policy of its own, not a side effect",
+          "[signal][drum][cymbal][life]") {
+    // The two modes below drive an identical excitation sequence and differ
+    // only in what happens to the resonating body. Landing a second hit while
+    // the first is still ringing is the only way to tell them apart, and it is
+    // exactly the arrangement the policy exists for.
+    const auto second_hit_under = [](HitLifeMode mode) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_hit_life(mode);
+        (void)hit(voice, 0.8f, 4000);
+        return hit(voice, 0.8f, 12000);
+    };
+
+    const auto reset_body = second_hit_under(HitLifeMode::advancing_seed);
+    const auto kept_body = second_hit_under(HitLifeMode::advancing_seed_preserved_body);
+    REQUIRE_FALSE(reset_body == kept_body);
+
+    const auto fixed_reset = second_hit_under(HitLifeMode::fixed_seed);
+    const auto fixed_kept = second_hit_under(HitLifeMode::fixed_seed_preserved_body);
+    REQUIRE_FALSE(fixed_reset == fixed_kept);
+
+    // The seed axis stays independent of the body axis: same body policy,
+    // different excitation, so the two must still separate.
+    REQUIRE_FALSE(kept_body == fixed_kept);
 }
 
 TEST_CASE("Cymbal decay controls how long the wash lasts",
