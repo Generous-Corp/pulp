@@ -123,6 +123,7 @@ set(_expected_importer_closure
     Pulp::timebase
     Pulp::timeline
 )
+list(REMOVE_DUPLICATES _expected_importer_closure)
 list(SORT _expected_importer_closure)
 if(NOT _actual_importer_closure STREQUAL _expected_importer_closure)
     message(FATAL_ERROR
