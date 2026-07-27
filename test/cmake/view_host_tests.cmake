@@ -367,6 +367,10 @@ pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
+# The Windows editor's input state machine. Deliberately NOT gated on WIN32:
+# win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
+# re-entrancy and capture rules run on the required macOS gate.
+pulp_add_test_suite(pulp-test-win-plugin-input-router LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract

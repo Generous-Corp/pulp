@@ -27,6 +27,7 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <functional>
 #include <string>
@@ -166,6 +167,77 @@ private:
     DragSession session_;
     DropData pending_;  // payload cached between DragEnter and Drop
     long ref_ = 1;
+};
+
+/// RAII owner of a window's inbound drag-drop registration.
+///
+/// Lives here rather than in the host because the sequence is a property of the
+/// TARGET, not of whoever happens to register it, and it is easy to get subtly
+/// wrong in three places at once:
+///
+///   * `OleInitialize` is per-thread and reference-counted, so only a host that
+///     actually brought COM up may call `OleUninitialize`. An unconditional
+///     uninitialize tears down the apartment out from under the DAW.
+///   * `RPC_E_CHANGED_MODE` means the host thread is already MTA. Drag-drop
+///     needs an STA, so the honest response is to skip it — not to fight the
+///     apartment model or to treat the failure as fatal.
+///   * `RevokeDragDrop` must precede the final `Release`, and both must be
+///     skipped entirely if registration never succeeded.
+///
+/// Move-disabled: the destructor is the only correct unregistration point.
+class DropTargetRegistration {
+public:
+    DropTargetRegistration() = default;
+    DropTargetRegistration(const DropTargetRegistration&) = delete;
+    DropTargetRegistration& operator=(const DropTargetRegistration&) = delete;
+    ~DropTargetRegistration() { reset(); }
+
+    /// Register `hwnd` for inbound drops, mapping client PHYSICAL pixels to
+    /// root coordinates through `to_root`. Returns whether drops are now live;
+    /// a false return is a supported degradation, not an error.
+    bool register_for(View& root, HWND hwnd, std::function<Point(Point)> to_root) {
+        reset();
+        if (!hwnd) return false;
+        const HRESULT hr = OleInitialize(nullptr);
+        if (hr != S_OK && hr != S_FALSE) {
+            runtime::log_warn("DropTargetRegistration: OleInitialize failed "
+                              "(0x{:08x}); drag-drop disabled",
+                              static_cast<unsigned>(hr));
+            return false;
+        }
+        ole_initialized_ = true;
+        hwnd_ = hwnd;
+        target_ = new PulpWinDropTarget(root, hwnd, std::move(to_root));
+        if (RegisterDragDrop(hwnd, target_) != S_OK) {
+            runtime::log_warn("DropTargetRegistration: RegisterDragDrop failed");
+            target_->Release();
+            target_ = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    /// Unregister and balance COM. Idempotent, so the host may call it from
+    /// both an explicit teardown and its destructor.
+    void reset() {
+        if (target_) {
+            if (hwnd_) RevokeDragDrop(hwnd_);
+            target_->Release();
+            target_ = nullptr;
+        }
+        hwnd_ = nullptr;
+        if (ole_initialized_) {
+            OleUninitialize();
+            ole_initialized_ = false;
+        }
+    }
+
+    bool registered() const noexcept { return target_ != nullptr; }
+
+private:
+    bool ole_initialized_ = false;
+    HWND hwnd_ = nullptr;
+    PulpWinDropTarget* target_ = nullptr;  // ref-counted by OLE; we hold one
 };
 
 }  // namespace pulp::view::win_drop
