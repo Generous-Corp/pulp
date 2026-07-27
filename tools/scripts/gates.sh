@@ -83,6 +83,7 @@ CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
@@ -340,6 +341,18 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
         fail=1
     fi
     if ! "$PYTHON" "$SINGLE_BACKEND_GUARD"; then
+        fail=1
+    fi
+fi
+
+# ── 9b. MSVC-only designated-initializer breaks ───────────────────────────
+# Duplicate designators compile fine under Clang and break only on MSVC, so
+# they pass every blocking gate (all macOS) and surface hours later as an
+# unrelated-looking Windows library failure. Diff-scoped and sub-second.
+if [ -f "$DESIGNATED_INIT_LINT" ]; then
+    echo "" >&2
+    echo "▸ designated-initializer lint (MSVC C7560)" >&2
+    if ! "$PYTHON" "$DESIGNATED_INIT_LINT" --mode=changed --base "$BASE" >&2; then
         fail=1
     fi
 fi

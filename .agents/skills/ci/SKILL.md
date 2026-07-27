@@ -5112,3 +5112,27 @@ run before counting it as fresh coverage (checked via the actions API — `actio
 no Codecov token). So a persistently over-budget leg raises the stalled-uploads issue
 within the window instead of hiding. If you ever make a coverage leg non-fatal, make sure
 its silent-drop is still detectable by artifact presence — do not trust run conclusion alone.
+
+## MSVC-only breaks pass every blocking gate
+
+Pulp's required gate is `macos`, the pre-push hook is macOS, and most
+contributors are on macOS. So a construct Clang accepts and MSVC rejects is
+invisible at every point where someone would look, and surfaces later as an
+unrelated-looking Windows library failure.
+
+`main` shipped one: `core/host/src/signal_graph.cpp` named `.custom_latency_for`
+twice in one designated initializer (a merge re-appended a byte-identical
+block). C++20 forbids duplicate and out-of-order designators; Clang did not care,
+MSVC failed with `C7560`, and that broke `pulp-host` → `pulp-view` → every
+Windows plug-in.
+
+`tools/scripts/designated_initializer_lint.py` now catches the duplicate case.
+It runs diff-scoped in `gates.sh` and its self-tests run in
+`version-skill-check.yml`. It checks duplicates only — declaration ORDER needs
+the struct definition and would guess wrong through macros and templates.
+
+The general lesson for this skill: when a change is Windows-affecting, a green
+`macos` gate is not evidence it builds. Compile it somewhere with MSVC. The
+retained REAPER VM (see the `hosting` skill and the consumer repo's
+`WINDOWS_REAPER_QEMU.md`) has Visual Studio Build Tools and answers over SSH,
+which is enough for a target build without any GUI.
