@@ -386,6 +386,81 @@ class FreezeUnitTests(unittest.TestCase):
                 mapping(),
             )
 
+    def test_uncovered_slice_error_names_the_slice_paths_and_the_fix(self):
+        # The bare invariant named neither the slice nor the paths, so a reader
+        # had no route from the failure to a fix — and an unactionable gate gets
+        # ignored. Everything needed to write the event must be in the message.
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [],
+                {
+                    "retained-ui-kernel": [
+                        "core/view/src/view.cpp",
+                        "core/view/src/window.cpp",
+                    ]
+                },
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("retained-ui-kernel", message)
+        self.assertIn("core/view/src/view.cpp", message)
+        self.assertIn("core/view/src/window.cpp", message)
+        self.assertIn(freeze.EVENT_PREFIX, message)
+        self.assertIn("docs/contracts/vellum-extraction-freeze.md", message)
+        for disposition in freeze.CHANGE_DISPOSITIONS:
+            self.assertIn(disposition, message)
+
+    def test_unexpected_slice_error_names_the_slice_and_not_a_missing_fix(self):
+        event = change_event("20260722-pulp-only")
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [("event.json", event)],
+                {},
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("no changed path", message)
+        # Nothing is uncovered here, so the add-an-event remedy would mislead.
+        self.assertNotIn("Fix: add one event", message)
+
+    def test_duplicate_slice_error_reports_the_claim_count(self):
+        first = change_event("20260722-pulp-only")
+        second = change_event("20260722-backport")
+        second.update({"disposition": "framework-backport", "framework_commit": "c" * 40})
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [("first.json", first), ("second.json", second)],
+                {"design-ir": ["core/view/src/design_ir_json.cpp"]},
+                set(),
+                None,
+                None,
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("claimed 2 times", message)
+
+    def test_authority_coverage_error_names_the_untransferred_slices(self):
+        with self.assertRaises(freeze.FreezeError) as caught:
+            freeze._validate_event_coverage(
+                [],
+                {},
+                {"design-ir"},
+                "b" * 40,
+                "activate",
+                mapping(),
+            )
+        message = str(caught.exception)
+        self.assertIn("design-ir", message)
+        self.assertIn("without an authority event", message)
+
     def test_historical_emergency_document_remains_parseable_after_expiry(self):
         event = change_event("20260722-replay")
         event.update({
