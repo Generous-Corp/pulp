@@ -118,15 +118,20 @@ public:
     void set_tone_hz(double hz) { tone_hz_ = std::clamp(hz, 500.0, 20000.0); }
     void set_low_cut_hz(double hz) { low_cut_hz_ = std::clamp(hz, 20.0, 2000.0); }
 
-    /// How much successive hits differ, 0 (bit-identical) to 1.
+    /// How much successive excitations differ, 0 (bit-identical) to 1.
+    /// This convenience control preserves the ringing body between hits.
     void set_variation(double amount) {
         variation_ = std::clamp(amount, 0.0, 1.0);
+        variation_only_ = true;
         hit_life_.set_mode(variation_ > 0.0
                                ? HitLifeMode::advancing_seed
                                : HitLifeMode::fixed_seed);
     }
 
-    void set_hit_life(HitLifeMode mode) { hit_life_.set_mode(mode); }
+    void set_hit_life(HitLifeMode mode) {
+        variation_only_ = false;
+        hit_life_.set_mode(mode);
+    }
     HitLifeMode hit_life() const { return hit_life_.mode(); }
 
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
@@ -177,7 +182,7 @@ protected:
         velocity_ = velocity;
 
         const auto life = hit_life_.trigger(NoiseSource::default_seed);
-        if (life.reset_dsp_state) {
+        if (life.reset_dsp_state && !variation_only_) {
             reset_dsp_memory();
             output_.reset_nonlinear_state();
         }
@@ -336,6 +341,7 @@ private:
     double tone_hz_ = 12000.0;
     double low_cut_hz_ = 300.0;
     double variation_ = 0.5;
+    bool variation_only_ = true;
 
     NoiseSource noise_;
     HitLife hit_life_{HitLifeMode::advancing_seed};

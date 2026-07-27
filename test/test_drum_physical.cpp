@@ -738,6 +738,35 @@ TEST_CASE("Variation makes successive crashes differ",
     REQUIRE_FALSE(first == second);
 }
 
+TEST_CASE("Cymbal variation preserves the ringing body",
+          "[signal][drum][cymbal][life]") {
+    auto configure = [](CymbalVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_decay_ms(8000.0);
+        voice.set_variation(1.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+    };
+
+    CymbalVoice control;
+    CymbalVoice retriggered;
+    configure(control);
+    configure(retriggered);
+    REQUIRE(hit(control, 0.8f, 6000) ==
+            hit(retriggered, 0.8f, 6000));
+
+    control.set_noise_level(0.0);
+    control.set_strike_level(0.0);
+    retriggered.set_noise_level(0.0);
+    retriggered.set_strike_level(0.0);
+    retriggered.note_on(0.8f);
+
+    const auto uninterrupted = render(control, 512);
+    const auto after_retrigger = render(retriggered, 512);
+    REQUIRE(peak(uninterrupted) > 1.0e-4);
+    REQUIRE(peak(after_retrigger) > peak(uninterrupted) * 0.5);
+}
+
 TEST_CASE("Reapplying an advancing hit-life mode preserves its sequence",
           "[signal][drum][life]") {
     constexpr std::uint32_t seed = 0x12345678u;
