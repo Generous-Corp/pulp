@@ -146,6 +146,23 @@ public:
         crossfade_remaining_ = 0;
     }
 
+    /// Fresh-state recovery without clearing dynamically sized FIR storage.
+    void recover_audio_fault() noexcept {
+        record_eq_.reset();
+        playback_eq_.reset();
+        dc_blocker_.reset();
+        hiss_filter_.reset();
+        degrade_filter_.reset();
+        head_bump_.reset();
+        hysteresis_.reset();
+        chew_.reset();
+        active_.discard_history();
+        previous_.discard_history();
+        hiss_rng_.reset();
+        degrade_rng_.reset();
+        crossfade_remaining_ = 0;
+    }
+
     void set_seeds(std::uint32_t base) noexcept {
         hiss_rng_.reseed(base ^ 0x9E3779B9u);
         degrade_rng_.reseed(base ^ 0x85EBCA6Bu);
@@ -182,6 +199,7 @@ public:
 
     double speed_ips() const noexcept { return speed_ips_; }
     const std::vector<double>& gap_coefficients() const noexcept { return design_.gap_taps(); }
+    TapeLossIirParams loss_parameters() const noexcept { return active_.parameters(); }
 
     /// Control-rate update. In this tier `character_amount` IS the age axis.
     void update(double age) noexcept {

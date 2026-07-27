@@ -2317,7 +2317,7 @@ pulp::host::CustomNodeType make_delay4_type() {
     t.num_input_ports = 1;
     t.num_output_ports = 1;
     t.default_name = "Delay4";
-    t.latency_samples = 4;
+    t.latency_samples = [](double) { return 4; };
     t.create = []() -> void* { return new CustomDelay4(); };
     t.destroy = [](void* p) { delete static_cast<CustomDelay4*>(p); };
     t.reset = [](void* p) { *static_cast<CustomDelay4*>(p) = {}; };

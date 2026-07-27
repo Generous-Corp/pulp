@@ -13,7 +13,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/format/include \
                          ../../core/midi/include \
                          ../../core/osc/include \
-                         core/host/include \
+                         ../../core/host/include \
                          ../../core/platform/include \
                          ../../core/render/include \
                          ../../core/runtime/include \

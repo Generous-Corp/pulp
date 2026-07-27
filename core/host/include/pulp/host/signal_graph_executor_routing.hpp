@@ -171,8 +171,9 @@ struct SignalGraphExecutorRouting {
 //     because its delay compensation is replicated on the routed path. A Plugin
 //     node with no live slot (unresolved/placeholder) routes as
 //     pass-through-or-zero, exactly as SignalGraph's walk does for a slot-less
-//     plugin node. A Custom node is audio-only (no MIDI/automation); its fixed
-//     registered latency participates in PDC;
+//     plugin node. A Custom node is audio-only (no MIDI/automation), and may
+//     carry prepare-stable intrinsic latency through its registered type, which
+//     participates in PDC;
 //     its binding invokes the resolved process callback, or — for an unresolved
 //     type / shape mismatch — pass-through-or-zero, so it matches the walk either
 //     way;
@@ -258,8 +259,10 @@ struct ExecutorSnapshotBinders {
     // transport-sensitive (consistent with GraphNode::transport_sensitive
     // resolved at compile).
     std::function<const CustomNodeTransportProcessFn*(NodeId)> custom_transport_for;
-    // Prepare-stable fixed latency for a resolved Custom node. Empty or a
-    // non-positive result means zero latency.
+    // Prepare-stable intrinsic latency for a resolved Custom node, resolved from
+    // CustomNodeType once at compile/prepare (the caller has already evaluated
+    // it at the snapshot's sample rate). Empty, or a non-positive result, means
+    // zero latency.
     std::function<int(NodeId)> custom_latency_for;
     // Cached plugin-metadata accessors so a swap-time build makes NO live
     // PluginSlot metadata call. Empty → fall back to `plugin_for`'s live slot

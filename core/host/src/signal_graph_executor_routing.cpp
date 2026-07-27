@@ -171,9 +171,10 @@ bool plugin_binding(fmt::ProcessBlock& block,
 // Custom binding: invoke the node's resolved process callback exactly as
 // SignalGraph's Custom node does — over the node's mono input/output slots
 // (ctx.node_inputs gathered from upstream, ctx.node_outputs the assigned
-// scratch). Custom nodes are audio-only (no MIDI/automation); fixed latency is
-// handled by plan assignment, so unlike plugin_binding there is no
-// bus/MIDI/parameter marshaling here. When the context's
+// scratch). Custom nodes are audio-only (no MIDI/automation); their intrinsic
+// latency is carried separately in plan metadata and handled by plan
+// assignment, so unlike plugin_binding there is no bus/MIDI/parameter
+// marshaling here. When the context's
 // process callback is empty (an unresolved custom type or a shape mismatch — the
 // same condition SignalGraph checks with custom_type_matches_node_shape), this
 // reproduces SignalGraph's pass_through_or_zero: copy min(in,out) channels

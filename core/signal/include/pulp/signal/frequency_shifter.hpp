@@ -1,95 +1,38 @@
 #pragma once
 
-#include <pulp/signal/denormal.hpp>
+/// @file frequency_shifter.hpp
+/// The minimal in-graph frequency shifter: shift in Hz, one knob, no feedback.
+///
+/// This is the reduced-scope member of the pair. The full Bode/Moog module —
+/// up/down/dual-mono/stereo-split modes, barberpole feedback, dry/wet,
+/// de-zippering, a stated loop-gain bound and the acceptance suite that
+/// measures all of it — is `SsbFrequencyShifterT` in
+/// `frequency_shifter_ssb.hpp`. This class stays because `drum/cymbal.hpp`
+/// composes it by name and wants exactly this much: a shift amount and a
+/// sample, inside a voice that already owns its own gain staging.
+///
+/// It owns none of the math. The quadrature network and its coefficient table
+/// live in `frequency_shifter_ssb.hpp` and are composed from here, so there is
+/// one Hilbert network in the tree rather than two that can drift apart. New
+/// work should reach for `SsbFrequencyShifterT`; this remains as the thin
+/// front end its one caller needs.
+///
+/// RT contract: `set_sample_rate` and `set_shift_hz` are scalar updates.
+/// `process()` and `reset()` allocate nothing and take no locks.
 
-#include <array>
+#include <pulp/signal/frequency_shifter_ssb.hpp>
+
 #include <cmath>
-#include <cstddef>
 
 namespace pulp::signal {
 
-/// A pair of allpass chains whose outputs are 90 degrees apart across the audio
-/// band — an analytic-signal splitter.
-///
-/// Neither output is the input: both are allpass, so both keep the input's
-/// magnitude spectrum and only its phase is moved. What matters is the
-/// *difference* between them, which holds near a quarter cycle from roughly
-/// 20 Hz to nearly Nyquist. That quadrature pair is what makes single-sideband
-/// processing possible; a single filter cannot produce it.
-///
-/// Each branch is a cascade of second-order allpass sections of the form
-///   y[n] = c*(x[n] + y[n-2]) - x[n-2]
-/// and the second branch is additionally delayed by one sample, which is what
-/// puts the two a quarter cycle apart rather than a half. The coefficients are
-/// a published, widely-reproduced design for this structure; they are constants
-/// of the filter design rather than anything measured or fitted.
-///
-/// RT contract: every member allocates nothing and takes no locks.
+/// A pair of allpass chains whose outputs stand a quarter cycle apart across
+/// the audio band — the analytic-signal splitter, spelled the way this header
+/// has always spelled it. See `HilbertQuadratureNetworkT` for the structure,
+/// the coefficient table, and why only one of the four I/Q assignments both
+/// holds phase across the band and leaves the in-phase branch undelayed.
 template <typename SampleType = double>
-class HilbertPairT {
-public:
-    struct Outputs {
-        SampleType in_phase = 0;   ///< the reference branch
-        SampleType quadrature = 0; ///< a quarter cycle behind it
-    };
-
-    void reset() {
-        for (auto& s : a_) s = Section{};
-        for (auto& s : b_) s = Section{};
-        delayed_ = 0;
-    }
-
-    Outputs process(SampleType x) {
-        SampleType branch_a = x;
-        for (auto& s : a_) branch_a = s.process(branch_a);
-
-        SampleType branch_b = x;
-        for (auto& s : b_) branch_b = s.process(branch_b);
-
-        // The one-sample delay on the reference branch is half of what puts the
-        // two in quadrature; the coefficient sets are the other half.
-        const Outputs out{delayed_, branch_b};
-        delayed_ = branch_a;
-        return out;
-    }
-
-private:
-    struct Section {
-        SampleType coefficient = 0;
-        SampleType x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-
-        SampleType process(SampleType x) {
-            const SampleType y = coefficient * (x + y2) - x2;
-            x2 = x1;
-            x1 = x;
-            y2 = y1;
-            y1 = snap_to_zero(y);
-            return y;
-        }
-    };
-
-    static constexpr std::size_t kSections = 4;
-
-    static constexpr double kBranchA[kSections] = {0.6923878, 0.9360654322959,
-                                                   0.9882295226860, 0.9987488452737};
-    static constexpr double kBranchB[kSections] = {0.4021921162426, 0.8561710882420,
-                                                   0.9722909545651, 0.9952884791278};
-
-    std::array<Section, kSections> a_ = make_branch(kBranchA);
-    std::array<Section, kSections> b_ = make_branch(kBranchB);
-    SampleType delayed_ = 0;
-
-    static std::array<Section, kSections> make_branch(const double (&coefficients)[kSections]) {
-        std::array<Section, kSections> branch{};
-        for (std::size_t i = 0; i < kSections; ++i) {
-            // The published constants are the pole positions; the section's
-            // coefficient is their square.
-            branch[i].coefficient =
-                static_cast<SampleType>(coefficients[i] * coefficients[i]);
-        }
-        return branch;
-    }
-};
+using HilbertPairT = HilbertQuadratureNetworkT<SampleType>;
 
 /// Shifts every frequency in a signal by the same number of Hz.
 ///
@@ -105,10 +48,8 @@ private:
 /// Implemented by single-sideband modulation: split the input into a quadrature
 /// pair, modulate each by a sine and cosine at the shift frequency, and
 /// subtract. Adding instead of subtracting selects the other sideband, which is
-/// why the shift can go down as well as up.
-///
-/// RT contract: `set_sample_rate` and `set_shift_hz` are scalar updates.
-/// `process()` and `reset()` allocate nothing and take no locks.
+/// why the shift can go down as well as up — here that is reached by the sign
+/// of `set_shift_hz`, which runs the carrier's phase accumulator backwards.
 template <typename SampleType = float>
 class FrequencyShifterT {
 public:
@@ -134,8 +75,7 @@ public:
         const auto pair = hilbert_.process(static_cast<double>(input));
 
         phase_ += increment_;
-        if (phase_ >= 1.0) phase_ -= std::floor(phase_);
-        if (phase_ < 0.0) phase_ -= std::floor(phase_);
+        phase_ -= std::floor(phase_);
 
         const double angle = 2.0 * 3.14159265358979323846 * phase_;
         return static_cast<SampleType>(pair.in_phase * std::cos(angle) -

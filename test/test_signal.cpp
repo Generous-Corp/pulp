@@ -93,6 +93,23 @@ TEST_CASE("DelayLine handles empty, wraparound, and reset edges",
     REQUIRE_THAT(dl.process(4.0f, 0.0f), WithinAbs(4.0f, 1e-6f));
 }
 
+TEST_CASE("DelayLine discards history logically and refills from silence",
+          "[signal][delay][rt-safety]") {
+    DelayLine dl;
+    dl.prepare(8);
+    for (int i = 1; i <= 9; ++i) dl.push(static_cast<float>(i));
+    REQUIRE(dl.read(0) == 9.0f);
+    REQUIRE(dl.read(7) == 2.0f);
+
+    dl.discard_history();
+    REQUIRE(dl.read(0) == 0.0f);
+    REQUIRE(dl.read(7) == 0.0f);
+    dl.push(10.0f);
+    REQUIRE(dl.read(0) == 10.0f);
+    REQUIRE(dl.read(1) == 0.0f);
+    REQUIRE(dl.read(0.5f) == 5.0f);
+}
+
 TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
           "[signal][delay]") {
     DelayLine dl;

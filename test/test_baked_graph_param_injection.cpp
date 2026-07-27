@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -685,5 +686,82 @@ TEST_CASE("Baked param injection: a baked-only node does not run its DSP on the 
     for (int k = 0; k < kFrames; ++k) {
         CHECK(output[static_cast<std::size_t>(k)] ==
               Catch::Approx(input[static_cast<std::size_t>(k)]));
+    }
+}
+
+TEST_CASE("Baked param injection rejects malformed declarations and missing runtime bindings",
+          "[host][graph][bake][params][validation]") {
+    const auto noop =
+        [](void*, pulp::audio::BufferView<float>&,
+           const pulp::audio::BufferView<const float>&, int,
+           const BakedParamView&) {};
+
+    SECTION("parameter declarations and callbacks must be a coherent pair") {
+        auto type = make_probe_node();
+        type.process_instance_baked_param = {};
+        SignalGraph graph;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+
+        type = make_probe_node();
+        type.baked_params.clear();
+        CHECK_FALSE(graph.register_custom_node_type(type));
+    }
+
+    SECTION("parameter ids and plain-domain ranges must be unambiguous") {
+        auto type = make_probe_node();
+        type.baked_params.push_back(type.baked_params.front());
+        SignalGraph graph;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+
+        type = make_probe_node();
+        type.baked_params.front().id = 0;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+
+        type = make_probe_node();
+        type.baked_params.front().min_value = 2.0f;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+
+        type = make_probe_node();
+        type.baked_params.front().default_value =
+            std::numeric_limits<float>::infinity();
+        CHECK_FALSE(graph.register_custom_node_type(type));
+    }
+
+    SECTION("a baked-param callback requires a complete instance lifecycle") {
+        auto type = make_probe_node();
+        type.destroy = {};
+        SignalGraph graph;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+
+        type = make_probe_node();
+        type.create = {};
+        type.process_instance_baked_param = noop;
+        CHECK_FALSE(graph.register_custom_node_type(type));
+    }
+
+    SECTION("a factory failure makes prepare and both lowering entry points fail closed") {
+        auto type = make_probe_node();
+        type.type_id = "forge_param_probe_null_factory";
+        type.create = []() -> void* { return nullptr; };
+
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(type));
+        const auto in = graph.add_input_node(1, "In");
+        const auto custom = graph.add_custom_node(type.type_id, type.version, "Node");
+        const auto out = graph.add_output_node(1, "Out");
+        REQUIRE(graph.connect(in, 0, custom, 0));
+        REQUIRE(graph.connect(custom, 0, out, 0));
+        graph.set_canonical_executor_routing_enabled(true);
+        REQUIRE_FALSE(graph.prepare(kSr, kFrames));
+
+        const auto baked = bake(graph);
+        CHECK_FALSE(baked.accepted);
+        CHECK(baked.reason == LowerRejectReason::NotPrepared);
+        CHECK_FALSE(baked.processor);
+
+        const auto plan = bake_to_plan(graph);
+        CHECK_FALSE(plan.accepted);
+        CHECK(plan.reason == LowerRejectReason::NotPrepared);
+        CHECK_FALSE(plan.plan.has_value());
     }
 }

@@ -373,6 +373,15 @@ public:
     void set_attack_curve(float c) { engine_.set_attack_curve(c); }
     void set_release_curve(float c) { engine_.set_release_curve(c); }
 
+    /// Round-2 compatibility curve: 0 is linear and 1 is the strongest
+    /// capacitor-like attack/release pair. The shared engine's signed curves
+    /// use opposite signs for rising and falling segments.
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_release_curve(curve);
+    }
+
     /// Gate edges drive the envelope; repeated calls with the same state are
     /// no-ops, so this can be called every sample from a gate signal.
     void gate(bool on) {
@@ -382,6 +391,11 @@ public:
         else engine_.release();
     }
 
+    /// Convenience spelling with exactly the same level-before-advance sample
+    /// ordering as `gate(true)`.
+    void gate_on() { gate(true); }
+    void gate_off() { gate(false); }
+
     void reset() {
         engine_.reset();
         gate_ = false;
@@ -389,6 +403,7 @@ public:
 
     SampleType next() { return engine_.next(); }
     SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
     bool active() const { return engine_.active(); }
     EnvelopeStage stage() const { return engine_.stage(); }
 
@@ -422,14 +437,23 @@ public:
     void set_attack_curve(float c) { engine_.set_attack_curve(c); }
     void set_decay_curve(float c) { engine_.set_decay_curve(c); }
 
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+    }
+
     /// @param on true to loop; `count` 0 loops forever, otherwise 1..128.
     void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
 
     void trigger(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void gate_on() { trigger(); }
+    void gate_off() {}
     void reset() { engine_.reset(); }
 
     SampleType next() { return engine_.next(); }
     SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
     bool active() const { return engine_.active(); }
     int loops_completed() const { return engine_.loops_completed(); }
     EnvelopeStage stage() const { return engine_.stage(); }
@@ -462,13 +486,21 @@ public:
     void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
     void set_attack_curve(float c) { engine_.set_attack_curve(c); }
     void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+    }
     void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
 
     void trigger(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void gate_on() { trigger(); }
+    void gate_off() {}
     void reset() { engine_.reset(); }
 
     SampleType next() { return engine_.next(); }
     SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
     bool active() const { return engine_.active(); }
     int loops_completed() const { return engine_.loops_completed(); }
     EnvelopeStage stage() const { return engine_.stage(); }
@@ -513,14 +545,24 @@ public:
     void set_decay_curve(float c) { engine_.set_decay_curve(c); }
     void set_release_curve(float c) { engine_.set_release_curve(c); }
 
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+        engine_.set_release_curve(curve);
+    }
+
     void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
 
     void note_on(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
     void note_off() { engine_.release(); }
+    void gate_on() { note_on(); }
+    void gate_off() { note_off(); }
     void reset() { engine_.reset(); }
 
     SampleType next() { return engine_.next(); }
     SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
     bool active() const { return engine_.active(); }
     int loops_completed() const { return engine_.loops_completed(); }
     EnvelopeStage stage() const { return engine_.stage(); }
@@ -553,30 +595,57 @@ public:
     void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
     void set_hold_ms(double ms) { engine_.set_hold_ms(ms); }
     void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
+    void set_release_ms(double ms) { engine_.set_release_ms(ms); }
+    void set_sustain(SampleType level) { engine_.set_sustain(level); }
     void set_attack_curve(float c) { engine_.set_attack_curve(c); }
     void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+        engine_.set_release_curve(curve);
+    }
     void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
 
     /// Signed, -1..+1. Applied by `modulation()`, not by `next()`.
     void set_depth(SampleType d) { depth_ = std::clamp(d, SampleType{-1}, SampleType{1}); }
 
-    void trigger(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void trigger(SampleType velocity = SampleType{1}) {
+        legacy_scaled_next_ = false;
+        engine_.set_has_sustain(false);
+        engine_.set_gate_driven(false);
+        engine_.trigger(velocity);
+    }
+    void gate_on() {
+        legacy_scaled_next_ = true;
+        engine_.set_has_sustain(true);
+        engine_.set_gate_driven(true);
+        engine_.trigger(SampleType{1});
+    }
+    void gate_off() { engine_.release(); }
     void reset() { engine_.reset(); }
 
     /// Raw unipolar level, 0..1.
-    SampleType next() { return engine_.next(); }
+    SampleType next() {
+        const SampleType level = engine_.next();
+        return legacy_scaled_next_ ? level * depth_ : level;
+    }
 
     /// The last `next()` scaled by the signed depth — the value to hand a
     /// modulation destination.
     SampleType modulation() const { return engine_.current() * depth_; }
 
     SampleType current() const { return engine_.current(); }
+    SampleType value() const {
+        return legacy_scaled_next_ ? engine_.current() * depth_ : engine_.current();
+    }
     bool active() const { return engine_.active(); }
     EnvelopeStage stage() const { return engine_.stage(); }
 
 private:
     detail::EnvelopeEngine<SampleType> engine_{};
     SampleType depth_ = SampleType{1};
+    bool legacy_scaled_next_ = false;
 };
 
 using ModEnv = ModEnvT<float>;

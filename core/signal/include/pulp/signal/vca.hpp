@@ -39,6 +39,8 @@
 
 namespace pulp::signal {
 
+enum class VcaResponse : std::uint8_t { linear, exponential };
+
 /// Voltage-controlled amplifier.
 ///
 /// The exponential response is `g = (e^(k*c) - 1) / (e^k - 1)` with `k = 4.6`,
@@ -50,17 +52,22 @@ namespace pulp::signal {
 template <typename SampleType = float>
 class VcaT {
 public:
-    enum class Response : std::uint8_t { linear, exponential };
+    using Response = VcaResponse;
 
-    /// ~40 dB of span for the exponential response.
-    static constexpr float kExpCurve = 4.6f;
+    /// Depth of the equal-dB exponential response.
+    static constexpr double kMinRangeDb = 12.0;
+    static constexpr double kMaxRangeDb = 120.0;
+    static constexpr double kDefaultRangeDb = 60.0;
 
     /// Default control lag. Long enough to kill the click from a hard-switched
     /// gate, short enough that a percussive envelope keeps its transient.
     static constexpr double kDefaultLagMs = 1.0;
 
     void prepare(SampleType sample_rate) {
-        sample_rate_ = sample_rate > SampleType{0} ? sample_rate : SampleType{1};
+        sample_rate_ = std::isfinite(static_cast<double>(sample_rate)) &&
+                               sample_rate > SampleType{0}
+                           ? sample_rate
+                           : SampleType{1};
         update_lag_();
         reset();
     }
@@ -68,7 +75,15 @@ public:
     void set_response(Response r) { response_ = r; }
     Response response() const { return response_; }
 
+    void set_range_db(double db) {
+        if (!std::isfinite(db)) return;
+        range_db_ = std::clamp(db, kMinRangeDb, kMaxRangeDb);
+    }
+
+    double range_db() const { return range_db_; }
+
     void set_lag_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         lag_ms_ = std::max(0.0, ms);
         update_lag_();
     }
@@ -81,17 +96,21 @@ public:
     /// Static response curve, without the lag. Exposed so a UI can draw the
     /// same curve the audio path uses.
     SampleType gain_for(SampleType control) const {
+        if (!std::isfinite(static_cast<double>(control))) return SampleType{0};
         const SampleType c = std::clamp(control, SampleType{0}, SampleType{1});
         if (response_ == Response::linear) return c;
-        // Written as a division rather than a precomputed reciprocal so that
-        // c == 1 produces exactly 1: the numerator is then literally the same
-        // expression as the denominator.
-        return (std::exp(static_cast<SampleType>(kExpCurve) * c) - SampleType{1})
-               / (std::exp(static_cast<SampleType>(kExpCurve)) - SampleType{1});
+        if (c <= SampleType{0}) return SampleType{0};
+        // Equal control travel is equal dB travel. Keep the endpoint special
+        // so a wide-open VCA remains exactly bit-transparent.
+        if (c >= SampleType{1}) return SampleType{1};
+        return static_cast<SampleType>(
+            std::pow(10.0, (-range_db_ / 20.0) *
+                               (1.0 - static_cast<double>(c))));
     }
 
     /// Advance the lag by one sample and return the gain that would be applied.
     SampleType next_gain(SampleType control) {
+        if (!std::isfinite(static_cast<double>(control))) control = SampleType{0};
         const SampleType target = std::clamp(control, SampleType{0}, SampleType{1});
         // Re-targeting every sample would restart the ramp every sample and the
         // value would approach the target without ever arriving. Only a genuine
@@ -120,6 +139,7 @@ private:
     SampleType sample_rate_ = SampleType{48000};
     SampleType last_control_ = SampleType{0};
     double lag_ms_ = kDefaultLagMs;
+    double range_db_ = kDefaultRangeDb;
     Response response_ = Response::linear;
 };
 

@@ -67,8 +67,12 @@ inline CustomNodeType make_analog_vcf_node(signal::AnalogVcf::Voicing voicing) {
     type.num_input_ports = 1;
     type.num_output_ports = 1;
     type.default_name = identity.name;
-    type.latency_samples =
-        signal::AnalogVcf::latency_samples_for_oversampling(kAnalogVcfOversampling);
+    // Rate-independent: the OTA cascade's half-band group delay is a function of
+    // the oversampling factor alone, so the callback ignores the sample rate.
+    type.latency_samples = [](double) {
+        return signal::AnalogVcf::latency_samples_for_oversampling(
+            kAnalogVcfOversampling);
+    };
     type.lowerable = true;
     type.create = [voicing]() -> void* { return new AnalogVcfInstance(voicing); };
     type.destroy = [](void* p) { delete static_cast<AnalogVcfInstance*>(p); };
