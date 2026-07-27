@@ -967,3 +967,18 @@ that call's bool (a host may refuse). This is what lets a mode switch (e.g. a
 compact "player" view) shrink the window and change its aspect at runtime — the
 design-viewport re-pin keeps content filling the new size with no letterbox. See
 the `view-bridge` skill for the cross-format seam.
+
+## Note names (`clap.note-name`)
+
+`Processor::note_names()` is published through `clap_note_name.cpp`. The
+extension is offered from `clap_get_extension` UNCONDITIONALLY — do not gate it
+on the list being non-empty. Hosts query `get_extension` once at init, so a
+sampler that names notes only after loading a kit would be locked out for the
+whole session if the empty-list case refused the extension.
+
+Both entry points are `[main-thread]` per the extension, and `note_names()` is a
+main-thread call, so re-reading the processor there needs no gate.
+
+`flag_note_names_changed()` rides the existing `request_callback` set alongside
+the latency / tail pending flags, and the `clap_host_note_name->changed()` push
+happens in `clap_on_main_thread()` — never from `process()`.

@@ -1385,3 +1385,13 @@ UMP-cursor-advance bug class: advancing an unrecognized message by 1 word re-rea
 trailing words as fresh headers. The AU v3 MIDIEventList word-cursor walk is extracted out
 of the ObjC render block so it is unit-testable (truncated-packet + multi-word-advance
 vectors) rather than only reachable through a live AU host.
+
+## AU has no note-name surface
+
+`Processor::note_names()` lets a plug-in label individual keys — a drum kit's
+"Kick", a sampler's articulation switches — and CLAP and VST3 both publish it.
+AU has no host-side equivalent in either v2 or v3, so `note_names()` simply goes
+unread on this format.
+
+That is a gap in the AU API, not an omission in the adapter. Do not invent a
+private property for it.

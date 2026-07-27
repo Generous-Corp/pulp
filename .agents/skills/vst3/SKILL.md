@@ -1086,3 +1086,21 @@ The adapter calls `runtime::Tracing::attach()`/`detach()` over its lifetime
 (no-op unless `PULP_TRACING=ON`). A plug-in has no `main()`, so this is where a
 dev build picks up `$PULP_TRACE_PATH`; the final `detach()` flushes the
 `.pftrace`.
+
+## Note names map onto `IKeyswitchController`
+
+VST3 has no general note-name API. Its nearest surface is
+`IKeyswitchController`, which is what a host reads to label individual keys, so
+`Processor::note_names()` is published there — each name becomes a single-key
+switch with `keyswitchMin == keyswitchMax == key`.
+
+Traps:
+
+* `queryInterface` must hand out `IKeyswitchController::iid` or the surface is
+  unreachable no matter how correct the methods are. There is a regression test
+  for exactly this.
+* Entries carry `-1` wildcards for port and channel; a request for a specific
+  bus/channel matches an entry that names it exactly OR wildcards it.
+* A name that identifies no single key — a key wildcard, or a value outside
+  0..127 — is SKIPPED, because a VST3 key switch must carry a concrete min/max
+  note. It cannot be represented, so it is dropped rather than clamped.
