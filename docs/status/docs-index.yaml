@@ -442,6 +442,11 @@ docs:
     kind: reference
     summary: All subsystems with status and key headers
 
+  - slug: modulation-toolkit
+    path: reference/modulation-toolkit.md
+    kind: reference
+    summary: Modulation sources, control-signal utilities, triggers, envelopes, routing, and worked patch recipes
+
   - slug: node-abi
     path: reference/node-abi.md
     kind: reference
