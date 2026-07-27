@@ -175,10 +175,21 @@ TEST_CASE("the BBD engine darkens the wet path and stays bounded",
         return transfer(f, hz, 24000, kQuiet);
     };
 
+    // The treble probe sits at 1.5x the shipped bandwidth law rather than at a
+    // round 12 kHz, for a measured reason. 12 kHz is exactly kSr/4, and this
+    // engine carries a waveshaper and a compander, so at simple submultiples of
+    // the sample rate the odd alias products fold back onto the probe's own
+    // bin and inflate the reading: the response sweeps smoothly 0.688 (10 kHz),
+    // 0.626 (11 kHz), 0.491 (13 kHz) but reads 0.775 at 12 kHz — a 2 dB spike
+    // that is the measurement, not the device. Tying the probe to the shipped
+    // constant keeps it both non-degenerate and meaningful.
+    const double bandwidth_law = chardelay::kBbdBandwidthMaxHz;
+    const double treble_hz = 1.5 * bandwidth_law;
+
     const double clean_low = wet_at(Engine::clean, 300.0);
     const double bbd_low = wet_at(Engine::bbd, 300.0);
-    const double clean_high = wet_at(Engine::clean, 12000.0);
-    const double bbd_high = wet_at(Engine::bbd, 12000.0);
+    const double clean_high = wet_at(Engine::clean, treble_hz);
+    const double bbd_high = wet_at(Engine::bbd, treble_hz);
 
     // The clean line is allpass: unity at both ends.
     REQUIRE_THAT(clean_low, WithinRel(1.0, 0.02));

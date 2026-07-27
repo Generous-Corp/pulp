@@ -580,38 +580,69 @@ TEST_CASE("chorus BBD colour narrows the wet path to the composed bandwidth law"
     const double plateau = wet_response_db(true, hz(683));
     auto relative = [&](double f) { return wet_response_db(true, f) - plateau; };
 
-    // 1. Flat well inside the bandwidth. A fifth of the corner is where a
-    //    4-pole cascade has spent 0.1 dB, so 0.5 dB is a real ceiling.
+    // What `bandwidth_hz()` MEANS is the composed path's audible −3 dB edge —
+    // the whole wet path, not one filter's coefficient cutoff. The two cascaded
+    // sections and the clocked hold each spend some of that budget, so the
+    // implementation calibrates its own cutoffs upward by
+    // `kBbdFilterCutoffScale` to place the composite edge on the law. The
+    // assertions below are therefore about WHERE THE COMPOSITE −3 dB EDGE
+    // LANDS, which is the shipped claim, rather than about the attenuation one
+    // uncalibrated 4-pole cascade would happen to reach at its own corner.
+    //
+    // Probe bins avoid exact submultiples of kSr. This path carries a
+    // waveshaper and a compander, so at kSr/4 and kSr/8 the odd alias products
+    // fold back onto the probe's own bin: the response reads −1.33 dB at
+    // 12 kHz (kSr/4) against −3.15 dB at 11 kHz and −4.91 dB at 13 kHz, and
+    // −0.14 dB at 6 kHz (kSr/8) against −0.30 dB at 4 kHz. Dropping the drive
+    // from 0.1 to 0.001 leaves the spike in place, so it is the measurement
+    // geometry rather than the compander. On non-dyadic bins the sweep is
+    // smooth and monotone throughout.
+
+    // 1. Flat well inside the bandwidth: a fifth of the edge has spent 0.06 dB.
     const double inside = 0.2 * bandwidth;
     INFO("at 0.2x the bandwidth (" << inside << " Hz): " << relative(inside) << " dB");
     REQUIRE(relative(inside) > -0.5);
 
-    // 2. Well down AT the bandwidth — the "narrowing" the toggle exists for.
+    // 2. At the law itself the composite sits on its −3 dB edge. Bounded on
+    //    BOTH sides: too little roll-off means the colour stopped narrowing the
+    //    path, too much means the edge drifted below the frequency the law
+    //    advertises. Measured −2.47 dB.
     INFO("at the bandwidth (" << bandwidth << " Hz): " << relative(bandwidth) << " dB");
-    REQUIRE(relative(bandwidth) < -10.0);
+    REQUIRE(relative(bandwidth) < -1.5);
+    REQUIRE(relative(bandwidth) > -4.5);
 
-    // 3. Monotone through the transition, so the narrowing is a rolloff and not
-    //    a resonance or an aliasing artefact.
+    // 3. Monotone through the transition, so the narrowing is a roll-off and
+    //    not a resonance. Non-dyadic bins, per the note above.
     double previous = 1.0;
-    for (int p : {683, 2731, 4096, 5461, 6827, 8192, 9557, 13653, 16384}) {
+    for (int p : {1367, 2733, 5463, 6829, 9559, 10925, 12290, 13655, 15021,
+                  17751, 19117, 20482, 23213}) {
         const double db = relative(hz(p));
         INFO("colour on at " << hz(p) << " Hz: " << db << " dB");
         REQUIRE(db < previous + 0.05);
         previous = db;
     }
 
-    // Recorded: the composite −3 dB point against the law, the number the
-    // criterion asks to be within ±15 % and structurally cannot be.
-    int lo_bin = 4096;   // 3 kHz
-    int hi_bin = 16384;  // 12 kHz
-    while (hi_bin - lo_bin > 4) {
-        const int mid = (lo_bin + hi_bin) / 2;
-        (relative(hz(mid)) > -3.0 ? lo_bin : hi_bin) = mid;
+    // 4. And it keeps falling well past the edge, so the law names a corner of
+    //    a real roll-off rather than a shelf. Measured −19.4 dB at 2x.
+    INFO("at 2x the bandwidth (" << 2.0 * bandwidth
+                                 << " Hz): " << relative(2.0 * bandwidth) << " dB");
+    REQUIRE(relative(2.0 * bandwidth) < -15.0);
+
+    // 5. The composite −3 dB crossing itself, bisected and compared against the
+    //    law it is supposed to name. Measured 1.09x. This is the assertion that
+    //    fails if `kBbdFilterCutoffScale` is ever dropped back to 1.0: the
+    //    crossing collapses to roughly half the advertised edge.
+    double lo = 0.5 * bandwidth;
+    double hi = 2.0 * bandwidth;
+    while (hi - lo > 10.0) {
+        const double mid = 0.5 * (lo + hi);
+        (relative(mid) > -3.0 ? lo : hi) = mid;
     }
-    INFO("composite −3 dB near " << hz((lo_bin + hi_bin) / 2) << " Hz, i.e. "
-                                 << hz((lo_bin + hi_bin) / 2) / bandwidth
+    const double crossing = 0.5 * (lo + hi);
+    INFO("composite −3 dB near " << crossing << " Hz, i.e. " << crossing / bandwidth
                                  << "x the bandwidth law");
-    REQUIRE(hz(lo_bin) < bandwidth);
+    REQUIRE(crossing > 0.85 * bandwidth);
+    REQUIRE(crossing < 1.30 * bandwidth);
 }
 
 TEST_CASE("chorus reports zero latency and never reads ahead", "[signal][chorus][chorus-family]") {

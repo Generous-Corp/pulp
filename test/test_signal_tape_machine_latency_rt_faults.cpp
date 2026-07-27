@@ -31,11 +31,15 @@ TEST_CASE("Tape machine: latency is constant, exact, and measurable",
         }
     }
 
-    // The oversampler's contribution is the half-band pair's own group delay,
-    // `(taps−1)/2 + (taps−1)/4` at the shipped 65 taps.
+    // The oversampler's contribution is the group delay of every half-band
+    // stage the magnetic solve is wrapped in. That wrap is `Oversampled-
+    // Hysteresis8x`: the 4x pair plus one further house stage, added so the
+    // nonlinear solve clears the -60 dBc folded-product contract. Three stages,
+    // so the shipped law is `(taps−1)/2 + (taps−1)/4 + (taps−1)/8` — 56 samples
+    // at the shipped 65 taps, not the 48 the 4x pair alone would contribute.
     const auto taps = static_cast<int>(chardelay::kHysteresisHalfBandTaps);
     REQUIRE(TapeMachine::oversampler_latency_samples() ==
-            (taps - 1) / 2 + (taps - 1) / 4);
+            (taps - 1) / 2 + (taps - 1) / 4 + (taps - 1) / 8);
 
     // Pre-echo's cost is exact, and the impulse agrees with the arithmetic.
     constexpr double kOffsetMs = 300.0;
