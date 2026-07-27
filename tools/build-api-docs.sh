@@ -52,7 +52,14 @@ STAGING_OUTPUT="$(mktemp -d "$ROOT/build/api-docs-stage.XXXXXX")"
 STRICT_OUTPUT="$(mktemp -d "$ROOT/build/api-docs-timeline-check.XXXXXX")"
 trap 'rm -f "$DOXYGEN_LOG"; rm -rf "$STAGING_OUTPUT" "$STRICT_OUTPUT"' EXIT
 
-echo "Checking exhaustive Timeline API contracts..."
+# CI installs whatever Doxygen ubuntu ships (1.9.8 at time of writing) while a
+# dev machine usually has a much newer Homebrew build. They do not agree on
+# every diagnostic — 1.9.8 errors on an `@param` block Doxygen attaches to a
+# friend declaration with unnamed parameters, and 1.17 does not — so a local
+# pass is necessary but NOT sufficient. Print the version so a CI-only failure
+# is immediately recognizable as a version difference rather than a mystery.
+echo "Checking exhaustive Timeline API contracts (local $(doxygen --version)," \
+     "CI uses ubuntu's package — a local pass does not guarantee CI passes)..."
 if ! {
     cat "$TIMELINE_STRICT_DOXYFILE"
     echo "OUTPUT_DIRECTORY = \"$STRICT_OUTPUT\""

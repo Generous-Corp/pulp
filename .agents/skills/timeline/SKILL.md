@@ -1009,3 +1009,26 @@ Run it locally before pushing a header change; it needs Doxygen but nothing else
 ```bash
 tools/build-api-docs.sh     # exits 1 and names the symbol
 ```
+
+**A local pass does not guarantee CI passes.** CI installs ubuntu's Doxygen
+(1.9.8) while a dev Mac usually has a much newer Homebrew build (1.17). They do
+not agree on every diagnostic. The one that has already bitten:
+
+```
+schema_json.hpp:221: error: argument 'json' of command @param is not found in
+  the argument list of pulp::timeline::ParsedJson::parse_json(std::string_view,
+  const DecodeLimits &)
+```
+
+Note the scope in that message — `ParsedJson::parse_json`, not the free
+function. Doxygen attached the free function's `@param` block to the **friend
+declaration** inside the class, and that declaration had *unnamed* parameters,
+so the names were unresolvable. 1.17 does not error; 1.9.8 does.
+
+The fix is to name the parameters in the friend declaration so it matches the
+definition. The general rule: if a documented free function is also declared
+`friend` somewhere, both declarations need parameter names.
+
+`build-api-docs.sh` now prints the local Doxygen version for exactly this
+reason — when CI is red and local is green, check the versions before assuming
+the tree differs.

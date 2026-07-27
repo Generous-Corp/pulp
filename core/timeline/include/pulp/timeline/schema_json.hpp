@@ -203,8 +203,12 @@ class ParsedJson {
     std::string_view raw(const JsonValue& value) const noexcept;
 
   private:
+    // Parameters are named here to match the free function's declaration.
+    // Doxygen attaches that function's `@param` block to this friend
+    // declaration, and unnamed parameters make the names unresolvable —
+    // a strict docs build then fails on `argument 'json' ... is not found`.
     friend runtime::Result<std::shared_ptr<const ParsedJson>, PersistenceError>
-    parse_json(std::string_view, const DecodeLimits&);
+    parse_json(std::string_view json, const DecodeLimits& limits);
 
     ParsedJson() = default;
     ParsedJson(const ParsedJson&) = delete;
