@@ -91,6 +91,18 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
+# Installed-SDK Windows Skia runtime contract. The ICU data file is a required
+# module sidecar, not optional packaging metadata: omitting it makes the first
+# SkParagraph label render trap inside a host such as REAPER. This source-level
+# smoke stays runnable on every platform and guards both the fail-fast check and
+# the post-build copy rule used by downstream plug-ins/apps.
+add_test(NAME cmake-windows-skia-runtime-sidecar
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_windows_skia_runtime_sidecar.cmake)
+set_tests_properties(cmake-windows-skia-runtime-sidecar PROPERTIES
+    LABELS "cmake;sdk;skia;windows;runtime"
+    TIMEOUT 30)
 # Install-layout regression: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call

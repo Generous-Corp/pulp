@@ -89,6 +89,9 @@ constexpr std::string_view v3_members[] = {"absolute_duration", "chord_scale_lan
 constexpr std::string_view v4_members[] = {
     "absolute_duration", "chord_scale_lane", "groove", "id",    "markers",
     "musical_duration",  "name",             "regions", "tracks"};
+constexpr std::string_view v5_members[] = {
+    "absolute_duration", "chord_scale_lane", "groove",  "id",    "markers",
+    "musical_duration",  "name",             "regions", "scenes", "tracks"};
 constexpr std::string_view groove_members[] = {
     "name",            "step",            "steps",           "swing_denominator", "swing_grid",
     "swing_numerator", "timing_strength", "velocity_strength"};
@@ -260,6 +263,47 @@ migrate_sequence_v4_to_v3(std::string_view source, BoundedJsonSink& output, cons
         return fail();
     std::array edits{RawEdit{groove_comma, groove.end, {}},
                      RawEdit{version->begin, version->end, "3"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v4_to_v5(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 4) || !has_exact_members(*data, v4_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& regions = data->object[7].second;
+    if (regions.begin >= regions.end)
+        return fail();
+    std::array edits{RawEdit{regions.end, regions.end, ",\"scenes\":[]"},
+                     RawEdit{version->begin, version->end, "5"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v5_to_v4(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 5) || !has_exact_members(*data, v5_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& scenes = data->object[8].second;
+    if (scenes.kind != JsonValue::Kind::Array || !scenes.array.empty())
+        return fail();
+    const auto scenes_comma = source.find(',', data->object[7].second.end);
+    if (scenes_comma == std::string_view::npos || scenes_comma >= scenes.begin)
+        return fail();
+    std::array edits{RawEdit{scenes_comma, scenes.end, {}},
+                     RawEdit{version->begin, version->end, "4"}};
     return finish(output, apply_edits(source, edits, output));
 }
 

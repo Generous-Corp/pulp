@@ -74,6 +74,8 @@ struct DecodeLimits {
     std::size_t max_take_comp_segments = 5'000'000;
     std::size_t max_markers = 100'000;
     std::size_t max_regions = 100'000;
+    std::size_t max_scenes = 100'000;
+    std::size_t max_slots = 1'000'000;
     std::size_t max_chord_scale_events = 1'000'000;
     std::size_t max_groove_steps = 100'000;
 

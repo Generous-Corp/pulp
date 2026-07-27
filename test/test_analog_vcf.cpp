@@ -332,6 +332,26 @@ TEST_CASE("Analog VCF transcribes every measured cutoff knot exactly",
     }
 }
 
+TEST_CASE("Analog VCF exposes its voicing cutoff law for host readouts",
+          "[signal][analog-vcf][api]") {
+    Vcf filter;
+    for (const auto voicing : {Voicing::juno, Voicing::jupiter,
+                               Voicing::prophet5, Voicing::minimoog}) {
+        for (const double knob : {0.0, 0.42, 0.73, 1.0}) {
+            filter.set_voicing(voicing);
+            filter.set_cutoff(knob);
+            INFO("voicing=" << static_cast<int>(voicing) << " knob=" << knob);
+            CHECK(Vcf::requested_cutoff_hz_for(voicing, knob) ==
+                  Catch::Approx(filter.cutoff_hz()).epsilon(1.0e-12));
+        }
+    }
+
+    CHECK(Vcf::requested_cutoff_hz_for(Voicing::juno, -1.0) == 20.0);
+    CHECK(Vcf::requested_cutoff_hz_for(Voicing::juno, 2.0) == 18000.0);
+    CHECK(Vcf::requested_cutoff_hz_for(Voicing::juno, 0.5, 1.0) ==
+          Catch::Approx(524.0).epsilon(1.0e-12));
+}
+
 TEST_CASE("Analog VCF batched host controls match the public individual setters",
           "[signal][analog-vcf][api]") {
     Vcf individual;
@@ -562,6 +582,18 @@ TEST_CASE("Analog VCF self-oscillation ceilings and ring positions are voicing-s
         CHECK(rms(ring, ring.size() * 3 / 4) > 1.0e-5);
         CHECK(positive_crossing_frequency(ring, ring.size() / 2) / filter.cutoff_hz() ==
               Catch::Approx(2.2).epsilon(0.05));
+    }
+
+    // The source acceptance prose says "rings at >= 0.95", but the source's
+    // authoritative taper maps the exact 0.95 knot to k = 0.93 * 4.30 = 3.999,
+    // just below its own documented k = 4.0 onset. Characterize that exact
+    // boundary instead of retuning the measured table to make the prose true.
+    {
+        configure(filter, Voicing::juno, 0.55, 0.95);
+        const auto boundary_ring = free_ring(filter, 3.0);
+        INFO("Juno exact 0.95 boundary late RMS="
+             << rms(boundary_ring, boundary_ring.size() * 3 / 4));
+        CHECK(rms(boundary_ring, boundary_ring.size() * 3 / 4) < 1.0e-7);
     }
 
     configure(filter, Voicing::juno, 0.55, 0.94);

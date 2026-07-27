@@ -8,6 +8,9 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <iterator>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -17,9 +20,14 @@
 // triggered on demand and quantized to a musical boundary. These are lightweight
 // value types describing WHAT is launchable and HOW it quantizes; the sample-
 // accurate resolution of a trigger to a boundary lives in the playback engine
-// (pulp/playback/clip_launch.hpp). They are deliberately not yet wired into the
-// persistent Project identity/serialization graph.
+// (pulp/playback/clip_launch.hpp). Sequence scenes persist these authored values;
+// transport launch progress remains runtime state.
 namespace pulp::timeline {
+
+namespace detail {
+class SlotListStore;
+class SlotListAccess;
+} // namespace detail
 
 // How a launch snaps to a musical boundary. The boundary set is
 // { phase + k * grid : k in Z } measured on the transport's monotonic clock.
@@ -51,8 +59,8 @@ constexpr LaunchQuantize launch_every_quarters(std::int64_t count) noexcept {
 // canonical ticks (kTicksPerQuarter is divisible by every supported denominator).
 constexpr LaunchQuantize launch_every_bars(std::int64_t count,
                                            timebase::MeterSignature meter) noexcept {
-    const std::int64_t ticks_per_bar = timebase::kTicksPerQuarter * meter.numerator * 4 /
-                                       meter.denominator;
+    const std::int64_t ticks_per_bar =
+        timebase::kTicksPerQuarter * meter.numerator * 4 / meter.denominator;
     return {timebase::TickDuration{count * ticks_per_bar}, timebase::TickPosition{0}};
 }
 
@@ -109,6 +117,8 @@ struct FollowActionSet {
     constexpr bool enabled() const noexcept {
         return !active().empty() && grid.value > 0 && repetitions > 0;
     }
+
+    constexpr bool operator==(const FollowActionSet&) const = default;
 };
 
 // A follow-action set built from a single unweighted action.
@@ -125,7 +135,8 @@ constexpr FollowActionSet follow_action(FollowActionKind kind, timebase::TickDur
 // A single launchable clip in a track lane. `clip_id` references a clip stored in
 // the linear model (or a launch-owned clip pool in a later slice); a null id is
 // an empty slot. Foundation slices carry identity, quantization, and the follow
-// behaviour that chooses what plays next.
+// behaviour that chooses what plays next. Persistent sequences own slots through
+// scenes; a null clip_id remains the explicit empty-slot representation.
 struct Slot {
     ItemId id;
     ItemId clip_id;
@@ -135,6 +146,73 @@ struct Slot {
     constexpr bool empty() const noexcept {
         return !clip_id.valid();
     }
+    constexpr bool operator==(const Slot&) const = default;
+};
+
+// Immutable authored slot order. Fresh Scene values may be assembled from a
+// vector, while a Scene owned by a Sequence uses a persistent AVL-backed store:
+// inserting or removing one slot path-copies only the affected index paths and
+// shares every untouched node with prior snapshots.
+class SlotList {
+  public:
+    class Iterator {
+      public:
+        using value_type = Slot;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const Slot*;
+        using reference = const Slot&;
+        using iterator_category = std::forward_iterator_tag;
+
+        const Slot& operator*() const noexcept;
+        const Slot* operator->() const noexcept;
+        Iterator& operator++() noexcept;
+        Iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        bool operator==(const Iterator&) const noexcept = default;
+
+      private:
+        friend class SlotList;
+        Iterator(std::shared_ptr<const std::vector<Slot>> raw,
+                 std::shared_ptr<const detail::SlotListStore> store, std::size_t raw_index,
+                 ItemId current) noexcept
+            : raw_(std::move(raw)), store_(std::move(store)), raw_index_(raw_index),
+              current_(current) {}
+        std::shared_ptr<const std::vector<Slot>> raw_;
+        std::shared_ptr<const detail::SlotListStore> store_;
+        std::size_t raw_index_ = 0;
+        ItemId current_;
+    };
+
+    SlotList();
+    SlotList(std::vector<Slot> slots);
+    SlotList(std::initializer_list<Slot> slots);
+
+    std::size_t size() const noexcept;
+    bool empty() const noexcept {
+        return size() == 0;
+    }
+    const Slot& operator[](std::size_t index) const noexcept;
+    const Slot& front() const noexcept {
+        return (*this)[0];
+    }
+    const Slot& back() const noexcept {
+        return (*this)[size() - 1];
+    }
+    const Slot* find(ItemId id) const noexcept;
+    Iterator begin() const noexcept;
+    Iterator end() const noexcept;
+    bool shares_storage_with(const SlotList& other) const noexcept;
+    bool operator==(const SlotList& other) const noexcept;
+
+  private:
+    friend class detail::SlotListAccess;
+    explicit SlotList(std::shared_ptr<const detail::SlotListStore> store) noexcept
+        : store_(std::move(store)) {}
+    std::shared_ptr<const std::vector<Slot>> raw_;
+    std::shared_ptr<const detail::SlotListStore> store_;
 };
 
 // A column of slots launched as a unit. The linear model reserves "scene" for no
@@ -143,7 +221,9 @@ struct Slot {
 struct Scene {
     ItemId id;
     std::string name;
-    std::vector<Slot> slots;
+    SlotList slots;
+
+    bool operator==(const Scene&) const = default;
 };
 
 // Follow-action resolution

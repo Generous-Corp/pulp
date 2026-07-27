@@ -50,6 +50,31 @@ bool dispatch_context_menu(View& root, Point root_pos);
 /// skip — the return value gates DELIVERY, never the dispatch itself.
 bool should_yield_to_gesture(View& root, const MouseEvent& event);
 
+/// Apply the host-side gesture gate and close an already-delivered press when
+/// a recognizer claims after that press. Returns true when the caller must skip
+/// normal pointer delivery for this event.
+///
+/// `drag_target` is cleared BEFORE the release callbacks run so an exception or
+/// re-entrant message cannot retry the raw drag. A claim on the initial press
+/// has no bracket to close; the target is simply cleared. Non-left buttons do
+/// not participate in the gesture arbiter and always return false.
+bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
+                                   const MouseEvent& event,
+                                   int click_count = 1);
+
+/// Move input focus within one hosted root while tolerating callbacks that
+/// synchronously unmount either the previous or requested focus target.
+/// Returns true when non-null `target` remains live after the focus protocol.
+/// A null target explicitly blurs this root and returns false. A live
+/// non-focusable target is still a valid pointer target; it simply clears any
+/// previous focus in this root. The root-owned interaction slot is the source
+/// of truth; the process-global focus shim is never consulted.
+bool transfer_input_focus(View& root, View* target);
+
+/// Return this root's live focused input. Uses RootInteractionState rather than
+/// the process-global compatibility shim.
+View* focused_input_under_root(View& root);
+
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
 ///
 /// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
@@ -75,6 +100,13 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count = 1,
                         PointerType pointer_type = PointerType::mouse,
                         float pressure = 0.5f);
+
+/// Button-aware overload. The original signature above remains exported so
+/// existing SDK clients keep their binary-compatible left-button symbol.
+void deliver_mouse_drag(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count,
+                        PointerType pointer_type, float pressure,
+                        MouseButton button);
 
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.
@@ -130,8 +162,9 @@ void deliver_mouse_wheel(View& root, Point root_pt,
 /// Liveness is re-checked between every hop: a modern handler can unmount the
 /// tree (a React state flip that frees `target`), so no later channel derefs a
 /// freed view. Returns true when `target` is still in the tree after delivery,
-/// false when it was null on entry or unmounted during delivery — the caller
-/// clears its captured drag-target slot on false.
+/// false when it was null on entry, unmounted during delivery, or a guarded
+/// overload's host continuation check stopped the stale frame. A guarded caller
+/// must clear its captured slot only if it still owns the same generation.
 ///
 /// `bubble` defaults to true (the normal press path and the plugin host).
 /// The standalone host's overlay-click path passes false to preserve its
@@ -139,6 +172,25 @@ void deliver_mouse_wheel(View& root, Point root_pt,
 bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count = 1,
                         bool bubble = true);
+
+/// Button-aware overload; the original ABI remains the left-button wrapper.
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button);
+
+/// Optional host-owned continuation check for re-entrant press delivery. The
+/// Windows host binds this to its pointer-session generation so a modern press
+/// callback that synchronously cancels/replaces the session stops before the
+/// legacy channel or ancestor bubble. Empty means always continue.
+struct MouseDownHost {
+    std::function<bool()> should_continue;
+};
+
+/// Guarded button-aware overload. Existing overloads remain ABI-compatible
+/// wrappers with an empty host.
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button, const MouseDownHost& host);
 
 /// Host hooks the portable mouse-up router calls back into. Like WheelHost,
 /// kept as a struct so the click-firing seam can gain hooks without re-touching
@@ -186,6 +238,11 @@ struct MouseUpHost {
 void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host);
+
+/// Button-aware overload; the original ABI remains the left-button wrapper.
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host, MouseButton button);
 
 /// Close the press bracket when a recognizer CLAIMS the pointer mid-gesture,
 /// after a press was already delivered to `target`.

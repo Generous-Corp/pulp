@@ -88,6 +88,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"musical_duration", SchemaValueKind::I64String},
         {"name", SchemaValueKind::String},
         {"regions", SchemaValueKind::Array},
+        {"scenes", SchemaValueKind::Array},
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField chord_scale_event_fields[] = {
@@ -121,6 +122,17 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"color", SchemaValueKind::U32, false},   {"duration", SchemaValueKind::I64String},
         {"id", SchemaValueKind::U64String},       {"name", SchemaValueKind::String},
         {"position", SchemaValueKind::I64String},
+    };
+    static constexpr ExpectedField scene_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"slots", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField slot_fields[] = {
+        {"clip_id", SchemaValueKind::U64String},
+        {"follow", SchemaValueKind::Object},
+        {"id", SchemaValueKind::U64String},
+        {"launch_quantize", SchemaValueKind::Object},
     };
     static constexpr ExpectedField track_fields[] = {
         {"active_take_lane_id", SchemaValueKind::U64String},
@@ -186,6 +198,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.groove_step", groove_step_fields},
         {SchemaDomain::Document, "pulp.timeline.marker", marker_fields},
         {SchemaDomain::Document, "pulp.timeline.region", region_fields},
+        {SchemaDomain::Document, "pulp.timeline.scene", scene_fields},
+        {SchemaDomain::Document, "pulp.timeline.slot", slot_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
          track_schema_policy.current_version, track_schema_policy.oldest_readable_version},
         {SchemaDomain::Document, "pulp.timeline.automation_lane", automation_lane_fields},

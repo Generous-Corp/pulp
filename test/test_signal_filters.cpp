@@ -1,14 +1,67 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/signal/signal.hpp>
 #include <algorithm>
 #include <array>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <numbers>
+#include <pulp/signal/signal.hpp>
 #include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+// ── TptFilter ────────────────────────────────────────────────────────────────
+
+TEST_CASE("TptFilter owns invalid sample-rate normalization", "[signal][filter][tpt]") {
+    for (const float sample_rate : {
+             0.0f,
+             -1.0f,
+             std::numeric_limits<float>::quiet_NaN(),
+             std::numeric_limits<float>::infinity(),
+         }) {
+        TptFilter filter;
+        filter.prepare(sample_rate);
+        filter.set_cutoff(1.0f);
+
+        REQUIRE(filter.sample_rate() == TptFilter::kMinSampleRate);
+        REQUIRE(filter.cutoff() == TptFilter::kMinCutoffHz);
+        REQUIRE(std::isfinite(filter.process_lowpass(0.25f)));
+    }
+
+    TptFilter64 filter64;
+    filter64.prepare(-std::numeric_limits<double>::infinity());
+    filter64.set_cutoff(1.0);
+    REQUIRE(filter64.sample_rate() == TptFilter64::kMinSampleRate);
+    REQUIRE(std::isfinite(filter64.process_lowpass(0.25)));
+}
+
+TEST_CASE("TptFilter reclamps its retained cutoff when the rate falls", "[signal][filter][tpt]") {
+    TptFilter filter;
+    filter.prepare(48000.0f);
+    filter.set_cutoff(10000.0f);
+
+    filter.prepare(TptFilter::kMinSampleRate);
+
+    REQUIRE_THAT(filter.cutoff(),
+                 WithinAbs(TptFilter::kMinSampleRate * TptFilter::kMaxCutoffFraction, 1.0e-6f));
+    REQUIRE(std::isfinite(filter.process_lowpass(0.25f)));
+}
+
+TEST_CASE("TptFilter64 calculates coefficients at double precision",
+          "[signal][filter][tpt][precision]") {
+    constexpr double sample_rate = 192000.0;
+    constexpr double cutoff = 12345.678901234;
+    TptFilter64 filter;
+    filter.prepare(sample_rate);
+    filter.set_cutoff(cutoff);
+
+    const double tangent = std::tan(std::numbers::pi_v<double> * cutoff / sample_rate);
+    const double expected_first_sample = tangent / (1.0 + tangent);
+
+    REQUIRE_THAT(filter.process_lowpass(1.0), WithinAbs(expected_first_sample, 1.0e-15));
+}
 
 // ── Biquad ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +74,8 @@ TEST_CASE("Biquad lowpass attenuates high frequencies", "[signal][biquad]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 10000.0f * i / 44100.0f);
         float output = filter.process(input);
-        if (i > 100) sum_sq += output * output; // Skip transient
+        if (i > 100)
+            sum_sq += output * output; // Skip transient
     }
     float rms = std::sqrt(sum_sq / 4310.0f);
     REQUIRE(rms < 0.01f); // Should be heavily attenuated
@@ -36,7 +90,8 @@ TEST_CASE("Biquad lowpass passes low frequencies", "[signal][biquad]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 100.0f * i / 44100.0f);
         float output = filter.process(input);
-        if (i > 200) sum_sq += output * output;
+        if (i > 200)
+            sum_sq += output * output;
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms > 0.6f); // Should pass through mostly
@@ -50,7 +105,8 @@ TEST_CASE("Biquad highpass attenuates low frequencies", "[signal][biquad]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 100.0f * i / 44100.0f);
         float output = filter.process(input);
-        if (i > 200) sum_sq += output * output;
+        if (i > 200)
+            sum_sq += output * output;
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms < 0.05f);
@@ -110,7 +166,8 @@ TEST_CASE("SVF lowpass attenuates high frequencies", "[signal][svf]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 10000.0f * i / 44100.0f);
         float output = filter.process(input);
-        if (i > 100) sum_sq += output * output;
+        if (i > 100)
+            sum_sq += output * output;
     }
     float rms = std::sqrt(sum_sq / 4310.0f);
     REQUIRE(rms < 0.01f);
@@ -127,14 +184,14 @@ TEST_CASE("SVF highpass passes high frequencies", "[signal][svf]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 5000.0f * i / 44100.0f);
         float output = filter.process(input);
-        if (i > 200) sum_sq += output * output;
+        if (i > 200)
+            sum_sq += output * output;
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms > 0.5f);
 }
 
-TEST_CASE("SVF covers bandpass notch buffer and reset paths",
-          "[signal][svf][issue-645]") {
+TEST_CASE("SVF covers bandpass notch buffer and reset paths", "[signal][svf][issue-645]") {
     Svf filter;
     filter.set_sample_rate(48000.0f);
     filter.set_frequency(1000.0f);
@@ -160,8 +217,7 @@ TEST_CASE("SVF covers bandpass notch buffer and reset paths",
     REQUIRE_THAT(after_reset, WithinAbs(0.0f, 1e-6f));
 }
 
-TEST_CASE("SVF ignores nonpositive buffer lengths",
-          "[signal][svf]") {
+TEST_CASE("SVF ignores nonpositive buffer lengths", "[signal][svf]") {
     Svf filter;
     filter.set_sample_rate(48000.0f);
     filter.set_frequency(1000.0f);
@@ -189,7 +245,8 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 10000.0f * i / 44100.0f);
         float output = ladder.process(input);
-        if (i > 200) sum_sq += output * output;
+        if (i > 200)
+            sum_sq += output * output;
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms < 0.05f); // 24dB/oct should heavily attenuate
@@ -220,11 +277,11 @@ float ladder_reference(const std::vector<float>& in, float sr, float fc, float r
 float ladder_reference_std_tanh(const std::vector<float>& in, float sr, float fc, float res) {
     return ladder_reference(in, sr, fc, res, [](float v) { return std::tanh(v); });
 }
-[[maybe_unused]] float ladder_reference_fast_tanh(
-    const std::vector<float>& in, float sr, float fc, float res) {
+[[maybe_unused]] float ladder_reference_fast_tanh(const std::vector<float>& in, float sr, float fc,
+                                                  float res) {
     return ladder_reference(in, sr, fc, res, [](float v) { return FastMath::tanh(v); });
 }
-}  // namespace
+} // namespace
 
 // Regression guard on the Padé approximation itself. This is what makes the
 // fast path safe to keep as an opt-in: a future edit to FastMath::tanh that
@@ -238,19 +295,20 @@ TEST_CASE("FastMath::tanh stays within its pinned error bound of std::tanh",
         const float x = -16.0f + 32.0f * static_cast<float>(i) / 200000.0f;
         const float e = std::abs(FastMath::tanh(x) - static_cast<float>(std::tanh(x)));
         max_err_full = std::max(max_err_full, e);
-        if (std::abs(x) <= 4.0f) max_err_4 = std::max(max_err_4, e);
-        if (std::abs(x) <= 2.0f) max_err_2 = std::max(max_err_2, e);
+        if (std::abs(x) <= 4.0f)
+            max_err_4 = std::max(max_err_4, e);
+        if (std::abs(x) <= 2.0f)
+            max_err_2 = std::max(max_err_2, e);
     }
-    REQUIRE(max_err_2 < 1e-6f);     // ~-133 dBFS — inaudible
-    REQUIRE(max_err_4 < 2e-5f);     // ~-94 dBFS  — Padé error inside |x|<4
-    REQUIRE(max_err_full < 7e-4f);  // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
+    REQUIRE(max_err_2 < 1e-6f);    // ~-133 dBFS — inaudible
+    REQUIRE(max_err_4 < 2e-5f);    // ~-94 dBFS  — Padé error inside |x|<4
+    REQUIRE(max_err_full < 7e-4f); // ~-63 dBFS  — the +/-4 hard-clamp seam (worst case)
 }
 
 // The default float ladder must be EXACT std::tanh, so a driven signal tracks
 // the libm reference to float round-off. If someone flips the default back to
 // the Padé path, this fails — the fidelity guarantee is pinned, not implicit.
-TEST_CASE("LadderFilter default saturator is exact std::tanh",
-          "[signal][ladder]") {
+TEST_CASE("LadderFilter default saturator is exact std::tanh", "[signal][ladder]") {
     constexpr float kSr = 48000.0f, kFc = 1200.0f, kRes = 0.7f;
     LadderFilter ladder;
     ladder.set_sample_rate(kSr);
@@ -286,16 +344,15 @@ TEST_CASE("LadderFilter default saturator is exact std::tanh",
         max_fast_dev = std::max(max_fast_dev,
                                 std::abs(got - ladder_reference_fast_tanh(prefix, kSr, kFc, kRes)));
     }
-    REQUIRE(max_fast_dev < 1e-3f);        // tracks the Padé reference
-    REQUIRE(max_abs_dev  > 1e-5f);        // and is provably NOT the exact filter
+    REQUIRE(max_fast_dev < 1e-3f); // tracks the Padé reference
+    REQUIRE(max_abs_dev > 1e-5f);  // and is provably NOT the exact filter
 #else
     // Default build: bit-exact to libm (snap_to_zero is a no-op at these levels).
     REQUIRE(max_abs_dev < 1e-5f);
 #endif
 }
 
-TEST_CASE("LadderFilter double instantiation still uses libm tanh",
-          "[signal][ladder]") {
+TEST_CASE("LadderFilter double instantiation still uses libm tanh", "[signal][ladder]") {
     // FastMath::tanh is float-only; the double path must remain exact enough
     // that a strict tanh-based reference matches to double tolerance.
     LadderFilter64 ladder;
@@ -352,8 +409,7 @@ TEST_CASE("LadderFilter resets buffer state and clamps resonance inputs",
     REQUIRE_THAT(unchanged[1], WithinAbs(-0.25f, 1e-6f));
 }
 
-TEST_CASE("LadderFilter reset restores fresh-filter impulse response",
-          "[signal][ladder]") {
+TEST_CASE("LadderFilter reset restores fresh-filter impulse response", "[signal][ladder]") {
     auto impulse_response = [] {
         LadderFilter filter;
         filter.set_sample_rate(48000.0f);
@@ -384,8 +440,7 @@ TEST_CASE("LadderFilter reset restores fresh-filter impulse response",
     }
 }
 
-TEST_CASE("LadderFilter ignores nonpositive buffer lengths",
-          "[signal][ladder]") {
+TEST_CASE("LadderFilter ignores nonpositive buffer lengths", "[signal][ladder]") {
     LadderFilter ladder;
     ladder.set_sample_rate(44100.0f);
     ladder.set_frequency(1200.0f);
@@ -419,7 +474,8 @@ TEST_CASE("LinkwitzRiley splits into low and high bands", "[signal][lr]") {
 
     // 5kHz signal should be mostly in the high band
     lr.reset();
-    low_energy = 0; high_energy = 0;
+    low_energy = 0;
+    high_energy = 0;
     for (int i = 0; i < 4410; ++i) {
         float input = std::sin(2.0f * 3.14159f * 5000.0f * i / 44100.0f);
         auto split = lr.process(input);
@@ -464,8 +520,7 @@ TEST_CASE("LinkwitzRiley reset clears history while preserving coefficients",
     }
 }
 
-TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
-          "[signal][lr][issue-645]") {
+TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite", "[signal][lr][issue-645]") {
     for (float cutoff : {0.0f, 20.0f, 20000.0f, 24000.0f}) {
         LinkwitzRiley lr;
         lr.set_frequency(cutoff, 48000.0f);
@@ -480,8 +535,7 @@ TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
     }
 }
 
-TEST_CASE("LinkwitzRiley retuning after active history stays finite",
-          "[signal][lr]") {
+TEST_CASE("LinkwitzRiley retuning after active history stays finite", "[signal][lr]") {
     LinkwitzRiley lr;
     lr.set_frequency(300.0f, 48000.0f);
     for (int i = 0; i < 32; ++i) {

@@ -94,18 +94,18 @@ artifact is needed. Never modify canonical project JSON text directly.
   invariant. What `Sequence::create` does enforce is a positive region length, a
   non-negative position, and containment inside the sequence's musical duration
   when it declares one — an absolute-only sequence bounds nothing above.
-- **`Sequence` is built through `create()` overloads, not aggregate init.**
-  Unlike `TrackInput`/`ProjectInput`, its `Data` is pimpl'd behind
-  `shared_ptr<const Data>`, so adding sequence-owned state means adding an
-  overload — existing call sites keep compiling and no positional brace-init
-  anywhere in the tree silently shifts a field. Preserve that: do not convert
-  `Sequence` into an input struct to add a field.
+- **`Sequence` is built through `create()`, not aggregate init.** Existing
+  partial overloads stay source-compatible; the full-fidelity path takes
+  `SequenceInput`, so new owned collections extend a named input rather than an
+  unbounded chain of positional overloads. `Sequence` remains pimpl'd behind
+  `shared_ptr<const Data>`.
 - **The `pulp.timeline.sequence` and `pulp.timeline.project` schemas are both
   versioned; the encoder must not hard-code either version.**
   `sequence_schema_policy` and `project_schema_policy` (mirroring
   `track_schema_policy`) own the type name, current version, oldest readable
-  version, and the predicate — `requires_annotations(version)` /
-  `supports_session_start(version)` — that decode and preflight both consult. A
+  version, and the predicates — `requires_annotations(version)`,
+  `requires_scenes(version)`, and `supports_session_start(version)` — that
+  decode and preflight both consult. A
   literal version in `write_sequence`, `walk_sequence`, `walk_project`, or
   `structural_registry_validation` is how these drift apart — route every one
   through the policy. `pulp.timeline.project` being versioned at all is easy to
@@ -131,6 +131,17 @@ artifact is needed. Never modify canonical project JSON text directly.
   `DirtyItem::owner_track` is legitimately zero for these commands. They emit
   inverse commands, so undo, redo, and journal replay restore the annotation and
   its tombstone ownership exactly.
+- Scenes are sequence-owned in authored order, and each scene owns its ordered
+  slots. A non-empty slot must name a clip in that sequence; a Jump follow
+  action must name an existing slot, while other kinds carry no target.
+  Sequence-owned launcher state is an immutable persistent store: scene and
+  slot identity indexes, authored-order links, and reverse clip/Jump references
+  live together in `sequence_scene_internal.cpp`. Ordinary scene/slot edits
+  path-copy only affected AVL paths; unrelated Sequence edits must retain the
+  launcher store unchanged. Never replace this with scene-vector rebuilding or
+  validate deletions by scanning every scene.
+  `InsertScene` / `RemoveScene` and `InsertSlot` / `RemoveSlot` reduce through
+  `transaction_scene_internal` with exact inverse and tombstone ownership.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -453,13 +464,13 @@ order and still say exactly the same thing. Write one refusal test per member �
 a single "a populated groove refuses" case passes even when the predicate only
 looks at one field, which is how a weakened refusal gets through review.
 
-### `Sequence` grows by overload, and each new owned field needs a version predicate
+### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
 `Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through
-`create()` overloads, so a new owned field arrives as another overload whose
-older siblings chain forward by constructing the field's default. No existing
-call site changes and there is no positional brace-init hazard — do **not**
-convert `Sequence` to a `SequenceInput` struct to add one.
+`create()`. Add full-fidelity owned state to `SequenceInput`; keep the existing
+partial overloads source-compatible by having them construct the named input
+with the new field's default. Do not extend the positional overload chain for
+new durable state.
 
 What does need care is `sequence_schema_policy.hpp`: each owned field gets its
 own `<field>_introduced_version` plus a `requires_<field>(version)` predicate,
@@ -685,20 +696,25 @@ opt-in Audio Quality Lab tool is installed.
 
 ## Scope boundary
 
-This subsystem owns authored take/comp state, the durable `JournalSink`
-ordering seam, and native `FileJournal`, but not package/container I/O,
-publication, realtime playback or automation delivery, launch slots, nesting,
-device implementations, routing, audio, format adapters, or UI. Add those in
-their owning modules instead of widening the command and persistence core
-opportunistically.
+This subsystem owns authored take/comp state, durable launch scenes, slots, and
+follow actions, the durable `JournalSink` ordering seam, and native
+`FileJournal`, but not package/container I/O, publication, realtime playback,
+launch scheduling or automation delivery, nesting, device implementations,
+routing, audio, format adapters, or UI. Add those in their owning modules
+instead of widening the command and persistence core opportunistically.
 
 ## Launch model and follow actions
 
-`Slot`, `Scene`, `FollowAction*`, and `resolve_follow_action()` in
-`clip_launch.hpp` are free-standing in-memory value types: not registered schema
-types, not serialized, and not reachable from `Sequence`. Treat a change there
-as a model-only change — it needs no schema registration and no codegen — and
-do not quietly widen it into the persistent Project graph.
+`Slot`, `Scene`, and `FollowAction*` in `clip_launch.hpp` are durable authored
+values owned by `Sequence`; both structural types are registered schemas and
+their IDs live in the Project identity directory. Sequence schema v5 introduced
+the required `scenes` array after v4 introduced groove. The v4→v5 migration
+inserts an empty array, while v5→v4 refuses to discard a non-empty one.
+Quantization and follow-action choices round-trip canonically, but sample-accurate
+launch progress remains runtime state in `core/playback/clip_launch.*`.
+`core/interchange` treats `clip.launch` as model-detectable and records each
+authored scene in the canonical census, so export loss manifests cannot omit
+launcher state silently.
 
 A random follow action (`Any`, `Other`, or a weighted candidate draw) must stay
 a **stateless hash of (session seed, slot id, draw index)**, never a stateful
@@ -729,6 +745,9 @@ the commands, transactions, journal, and undo suites, plus
 `pulp-test-timeline-persistence` in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
+Keep the 4k-scene/16k-slot launcher test proving bounded node creation, high
+structural sharing, zero launcher allocation for annotation/context edits, and
+zero sharing for an independently built equal launcher.
 Keep `pulp-test-timeline-replay-golden` green: it applies real journaled gain,
 fade, and note edits, replays from the checkpoint, and compares the resulting
 audio/MIDI byte stream with both the committed snapshot and pinned fixture.

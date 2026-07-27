@@ -616,6 +616,18 @@ TEST_CASE("fdn reverb ducks its input on transients but not on sustain",
     // A transient must produce a real dip, and a steady pad must not.
     REQUIRE(percussive < 0.9);
     REQUIRE(sustained > 0.99);
+
+    FdnReverb reset_probe;
+    reset_probe.prepare(kHostRate, 64);
+    configure_neutral(reset_probe, 2.0, 5);
+    std::array<float, 64> transient{};
+    std::array<float, 64> output{};
+    transient[0] = 1.0f;
+    reset_probe.process_block(transient.data(), transient.data(),
+                              output.data(), output.data(), 64);
+    REQUIRE(reset_probe.duck_gain() < 0.9);
+    reset_probe.reset();
+    REQUIRE(reset_probe.duck_gain() == 1.0);
 }
 
 // ── 12. Saturation neutrality ────────────────────────────────────────────────

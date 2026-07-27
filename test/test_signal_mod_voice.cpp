@@ -16,9 +16,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <span>
-#include <type_traits>
-#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -30,9 +29,11 @@ namespace {
 constexpr float kSampleRate = 48000.0f;
 
 float rms(const std::vector<float>& v) {
-    if (v.empty()) return 0.0f;
+    if (v.empty())
+        return 0.0f;
     double sum = 0.0;
-    for (float x : v) sum += static_cast<double>(x) * static_cast<double>(x);
+    for (float x : v)
+        sum += static_cast<double>(x) * static_cast<double>(x);
     return static_cast<float>(std::sqrt(sum / static_cast<double>(v.size())));
 }
 
@@ -62,29 +63,30 @@ TEST_CASE("Vca response curves hit their defining points", "[signal][mod][vca]")
     // Unity at full control is a series law, so this must be exact, not close.
     REQUIRE(vca.gain_for(1.0f) == 1.0f);
     // The exponential curve sits below the linear one everywhere in between.
-    for (float c = 0.05f; c < 1.0f; c += 0.05f) REQUIRE(vca.gain_for(c) < c);
+    for (float c = 0.05f; c < 1.0f; c += 0.05f)
+        REQUIRE(vca.gain_for(c) < c);
     // ~40 dB of span: the bottom of the control range is perceptually silent.
     REQUIRE(units::linear_to_db(vca.gain_for(0.05f)) < -35.0f);
 }
 
-TEST_CASE("Vca lag ramps over exactly the set time and lands on target",
-          "[signal][mod][vca]") {
+TEST_CASE("Vca lag ramps over exactly the set time and lands on target", "[signal][mod][vca]") {
     Vca vca;
     vca.prepare(kSampleRate);
     vca.set_lag_ms(1.0); // 48 samples
     vca.reset(0.0f);
 
-    for (int i = 0; i < 47; ++i) (void)vca.next_gain(1.0f);
+    for (int i = 0; i < 47; ++i)
+        (void)vca.next_gain(1.0f);
     REQUIRE(vca.control() < 1.0f);
     REQUIRE(vca.next_gain(1.0f) == 1.0f);
 
     // A held control must not restart the ramp every sample: after landing it
     // stays landed.
-    for (int i = 0; i < 100; ++i) REQUIRE(vca.next_gain(1.0f) == 1.0f);
+    for (int i = 0; i < 100; ++i)
+        REQUIRE(vca.next_gain(1.0f) == 1.0f);
 }
 
-TEST_CASE("Vca lag removes the step from a hard-switched gate",
-          "[signal][mod][vca]") {
+TEST_CASE("Vca lag removes the step from a hard-switched gate", "[signal][mod][vca]") {
     auto largest_jump = [](double lag_ms) {
         Vca vca;
         vca.prepare(kSampleRate);
@@ -99,8 +101,8 @@ TEST_CASE("Vca lag removes the step from a hard-switched gate",
         }
         return largest;
     };
-    REQUIRE(largest_jump(0.0) > 0.9f);   // no lag: the full step in one sample
-    REQUIRE(largest_jump(5.0) < 0.01f);  // 5 ms: spread over 240 samples
+    REQUIRE(largest_jump(0.0) > 0.9f);  // no lag: the full step in one sample
+    REQUIRE(largest_jump(5.0) < 0.01f); // 5 ms: spread over 240 samples
 }
 
 TEST_CASE("Vca is bit-transparent when held wide open", "[signal][mod][vca]") {
@@ -109,13 +111,13 @@ TEST_CASE("Vca is bit-transparent when held wide open", "[signal][mod][vca]") {
     vca.set_response(Vca::Response::exponential);
     vca.reset(1.0f);
     const auto input = sine(1000, 440.0f, 0.7f);
-    for (float x : input) REQUIRE(vca.process(x, 1.0f) == x);
+    for (float x : input)
+        REQUIRE(vca.process(x, 1.0f) == x);
 }
 
 // ── LpgT ─────────────────────────────────────────────────────────────────────
 
-TEST_CASE("Lpg strike rises to the vactrol's pulse-window level",
-          "[signal][mod][lpg]") {
+TEST_CASE("Lpg strike rises to the vactrol's pulse-window level", "[signal][mod][lpg]") {
     Lpg lpg;
     lpg.prepare(kSampleRate);
     lpg.set_droop(0.0f); // plain first-order model, for the closed form
@@ -125,17 +127,18 @@ TEST_CASE("Lpg strike rises to the vactrol's pulse-window level",
 
     // The pulse is two rise time constants long, so a cold strike reaches
     // 1 - e^-2 of the strike level.
-    for (int i = 0; i < 144; ++i) (void)lpg.process(0.0f);
+    for (int i = 0; i < 144; ++i)
+        (void)lpg.process(0.0f);
     REQUIRE_THAT(lpg.control(), WithinRel(1.0f - std::exp(-2.0f), 0.01f));
 
     // ...and then closes as a first-order decay with the set time constant.
     const float peak = lpg.control();
-    for (int i = 0; i < 7200; ++i) (void)lpg.process(0.0f); // 150 ms
+    for (int i = 0; i < 7200; ++i)
+        (void)lpg.process(0.0f); // 150 ms
     REQUIRE_THAT(lpg.control(), WithinRel(peak * std::exp(-1.0f), 0.02f));
 }
 
-TEST_CASE("Lpg droop lengthens the tail without changing the peak",
-          "[signal][mod][lpg]") {
+TEST_CASE("Lpg droop lengthens the tail without changing the peak", "[signal][mod][lpg]") {
     auto tail_after = [](float droop, int samples) {
         Lpg lpg;
         lpg.prepare(kSampleRate);
@@ -143,7 +146,8 @@ TEST_CASE("Lpg droop lengthens the tail without changing the peak",
         lpg.set_decay_ms(150.0);
         lpg.reset();
         lpg.strike(1.0f);
-        for (int i = 0; i < 144 + samples; ++i) (void)lpg.process(0.0f);
+        for (int i = 0; i < 144 + samples; ++i)
+            (void)lpg.process(0.0f);
         return lpg.control();
     };
 
@@ -151,6 +155,83 @@ TEST_CASE("Lpg droop lengthens the tail without changing the peak",
     // lengthens, so a drooping cell is *ahead* early and *behind* late.
     REQUIRE(tail_after(0.5f, 7200) > tail_after(0.0f, 7200));
     REQUIRE(tail_after(0.9f, 7200) > tail_after(0.5f, 7200));
+}
+
+TEST_CASE("Lpg reset synchronizes cutoff telemetry with the filter command", "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(kSampleRate);
+    lpg.set_range_hz(100.0f, 6400.0f);
+    lpg.set_colour(0.5f);
+    lpg.set_gate(1.0f);
+    for (int i = 0; i < 10000; ++i)
+        (void)lpg.process(0.0f);
+    REQUIRE(lpg.commanded_cutoff_hz() > 6000.0f);
+
+    lpg.reset();
+
+    // At a reset cell state of zero and colour 0.5, the filter control is
+    // halfway through the logarithmic range: sqrt(100 * 6400) = 800 Hz.
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinRel(800.0f, 1.0e-6f));
+    (void)lpg.process(0.0f);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinRel(800.0f, 1.0e-6f));
+}
+
+TEST_CASE("Lpg reset cutoff remains valid at a non-positive sample rate", "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(0.0f);
+
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinRel(1.0f, 1.0e-6f));
+    REQUIRE(std::isfinite(lpg.process(0.0f)));
+}
+
+TEST_CASE("Lpg range normalization is finite for every endpoint order", "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(96000.0f);
+    lpg.set_colour(1.0f);
+
+    lpg.set_range_hz(20000.0f, 10.0f);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(10.0f, 1.0e-6f));
+
+    lpg.set_range_hz(20000.0f, 20000.0f);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(20000.0f, 1.0e-3f));
+
+    lpg.set_range_hz(-std::numeric_limits<float>::infinity(),
+                     std::numeric_limits<float>::infinity());
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(10.0f, 1.0e-6f));
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    lpg.set_range_hz(nan, nan);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(40.0f, 1.0e-6f));
+    REQUIRE(std::isfinite(lpg.process(0.25f)));
+}
+
+TEST_CASE("Lpg cutoff-affecting setters update the supported telemetry", "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(kSampleRate);
+    lpg.reset();
+
+    lpg.set_colour(1.0f);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(40.0f, 1.0e-6f));
+
+    lpg.set_range_hz(100.0f, 6400.0f);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(100.0f, 1.0e-6f));
+}
+
+TEST_CASE("Lpg64 retains double precision in controls and mappings",
+          "[signal][mod][lpg][precision]") {
+    constexpr double velocity = 0.50000001;
+    const double mapped = Lpg64::velocity_to_strike(velocity);
+    REQUIRE_THAT(mapped, WithinAbs(std::pow(velocity, Lpg64::kVelocityCurve), 1.0e-15));
+    REQUIRE(mapped != static_cast<double>(std::pow(static_cast<float>(velocity),
+                                                   static_cast<float>(Lpg64::kVelocityCurve))));
+
+    constexpr double cutoff = 123.4567890123;
+    Lpg64 lpg;
+    lpg.prepare(192000.0);
+    lpg.set_colour(1.0);
+    lpg.set_range_hz(cutoff, cutoff);
+    REQUIRE_THAT(lpg.commanded_cutoff_hz(), WithinAbs(cutoff, 1.0e-12));
+    REQUIRE(lpg.commanded_cutoff_hz() != static_cast<double>(static_cast<float>(cutoff)));
 }
 
 TEST_CASE("Lpg re-strike accumulates: a roll crescendos", "[signal][mod][lpg]") {
@@ -184,7 +265,7 @@ TEST_CASE("Lpg re-strike accumulates: a roll crescendos", "[signal][mod][lpg]") 
         const float out = lpg.process(tone[static_cast<std::size_t>(i)]);
         control_peak = std::max(control_peak, lpg.control());
         output_peak = std::max(output_peak, std::abs(out));
-        cutoff_peak = std::max(cutoff_peak, lpg.cutoff_hz());
+        cutoff_peak = std::max(cutoff_peak, lpg.commanded_cutoff_hz());
     }
     peak_control.push_back(control_peak);
     peak_output.push_back(output_peak);
@@ -200,99 +281,35 @@ TEST_CASE("Lpg re-strike accumulates: a roll crescendos", "[signal][mod][lpg]") 
 
     // A cold strike after a full recovery lands back where the first one did:
     // the accumulation is the cell's state, not a drifting counter.
-    for (int i = 0; i < 48000; ++i) (void)lpg.process(0.0f);
+    for (int i = 0; i < 48000; ++i)
+        (void)lpg.process(0.0f);
     lpg.strike(1.0f);
     float cold_peak = 0.0f;
     float cold_cutoff = 0.0f;
     for (int i = 0; i < kSpacing; ++i) {
         (void)lpg.process(0.0f);
         cold_peak = std::max(cold_peak, lpg.control());
-        cold_cutoff = std::max(cold_cutoff, lpg.cutoff_hz());
+        cold_cutoff = std::max(cold_cutoff, lpg.commanded_cutoff_hz());
     }
     REQUIRE_THAT(cold_peak, WithinRel(peak_control[0], 0.01f));
     REQUIRE_THAT(cold_cutoff, WithinRel(peak_cutoff[0], 0.01f));
 }
 
-TEST_CASE("voice aliases start fresh and track their double forms",
-          "[signal][mod][parity][zero-init]") {
-    STATIC_REQUIRE(std::is_same_v<Vca64, VcaT<double>>);
-    STATIC_REQUIRE(std::is_same_v<Lpg64, LpgT<double>>);
-    STATIC_REQUIRE(std::is_same_v<ModMatrix64, ModMatrixT<32, double>>);
-    STATIC_REQUIRE(std::is_same_v<
-                   decltype(std::declval<Vca64&>().process(0.0, 0.0)), double>);
-    STATIC_REQUIRE(std::is_same_v<
-                   decltype(std::declval<Lpg64&>().process(0.0)), double>);
-    STATIC_REQUIRE(std::is_same_v<
-                   decltype(std::declval<ModMatrix64::Slot>().depth), double>);
-    Vca vca; Vca64 vca64;
-    vca.prepare(kSampleRate); vca64.prepare(static_cast<double>(kSampleRate));
-    REQUIRE_THAT(static_cast<double>(vca.process(0.25f, 0.75f)),
-                 WithinAbs(vca64.process(0.25, 0.75), 1.0e-6));
-
-    Lpg lpg; Lpg64 lpg64;
-    lpg.prepare(kSampleRate); lpg64.prepare(static_cast<double>(kSampleRate));
-    lpg.set_gate(0.7f); lpg64.set_gate(0.7);
-    for (int i = 0; i < 64; ++i)
-        REQUIRE_THAT(static_cast<double>(lpg.process(0.25f)),
-                     WithinAbs(lpg64.process(0.25), 1.0e-5));
-    REQUIRE_THAT(static_cast<double>(lpg.cutoff_hz()),
-                 WithinRel(lpg64.cutoff_hz(), 1.0e-5));
-
-    ModMatrix matrix; ModMatrix64 matrix64;
-    const std::array<float, 1> sources{0.5f};
-    const std::array<double, 1> sources64{0.5};
-    std::array<float, 1> dests{0.0f};
-    std::array<double, 1> dests64{0.0};
-    matrix.set_slot(0, 0, 0, 0.75f);
-    matrix64.set_slot(0, 0, 0, 0.75);
-    matrix.evaluate(std::span<const float>(sources), std::span<float>(dests));
-    matrix64.evaluate(std::span<const double>(sources64), std::span<double>(dests64));
-    REQUIRE_THAT(static_cast<double>(dests[0]), WithinAbs(dests64[0], 1.0e-6));
-}
-
-TEST_CASE("voice raw value-initialized state replays after reset",
-          "[signal][mod][zero-init]") {
-    Vca vca; Vca64 vca64;
-    const auto vca_first = vca.process(0.5f, 0.75f);
-    const auto vca64_first = vca64.process(0.5, 0.75);
-    vca.reset(); vca64.reset();
-    REQUIRE(vca.process(0.5f, 0.75f) == vca_first);
-    REQUIRE(vca64.process(0.5, 0.75) == vca64_first);
-
-    Lpg lpg; Lpg64 lpg64;
-    lpg.strike(0.8f); lpg64.strike(0.8);
-    const auto lpg_first = lpg.process(0.5f);
-    const auto lpg64_first = lpg64.process(0.5);
-    lpg.reset(); lpg64.reset();
-    lpg.strike(0.8f); lpg64.strike(0.8);
-    REQUIRE(lpg.process(0.5f) == lpg_first);
-    REQUIRE(lpg64.process(0.5) == lpg64_first);
-
-    ModMatrix matrix; ModMatrix64 matrix64;
-    const std::array<float, 1> source{0.5f};
-    const std::array<double, 1> source64{0.5};
-    std::array<float, 1> dest{0.25f};
-    std::array<double, 1> dest64{0.25};
-    matrix.evaluate(std::span<const float>(source), std::span<float>(dest));
-    matrix64.evaluate(std::span<const double>(source64), std::span<double>(dest64));
-    REQUIRE(dest[0] == 0.25f);
-    REQUIRE(dest64[0] == 0.25);
-}
-
-TEST_CASE("Lpg colour 0 is a pure VCA with the filter wide open",
-          "[signal][mod][lpg]") {
+TEST_CASE("Lpg colour 0 is a pure VCA with the filter wide open", "[signal][mod][lpg]") {
     Lpg lpg;
     lpg.prepare(kSampleRate);
     lpg.set_colour(0.0f);
     lpg.reset();
     lpg.set_gate(1.0f);
-    for (int i = 0; i < 20000; ++i) (void)lpg.process(0.0f); // settle wide open
+    for (int i = 0; i < 20000; ++i)
+        (void)lpg.process(0.0f); // settle wide open
     REQUIRE_THAT(lpg.control(), WithinAbs(1.0f, 1e-4f));
 
     const auto input = sine(4800, 1000.0f);
     std::vector<float> output;
     output.reserve(input.size());
-    for (float x : input) output.push_back(lpg.process(x));
+    for (float x : input)
+        output.push_back(lpg.process(x));
 
     const float attenuation_db = units::linear_to_db(rms(output) / rms(input));
     REQUIRE_THAT(attenuation_db, WithinAbs(0.0f, 0.1f));
@@ -307,21 +324,23 @@ TEST_CASE("Lpg colour 1 is a pure filter at unity gain", "[signal][mod][lpg]") {
     const auto input = sine(4800, 1000.0f);
     std::vector<float> closed;
     closed.reserve(input.size());
-    for (float x : input) closed.push_back(lpg.process(x));
+    for (float x : input)
+        closed.push_back(lpg.process(x));
     // Closed cell, 40 Hz cutoff: a 1 kHz tone is far down, but the gain stage
     // itself is untouched.
     REQUIRE(units::linear_to_db(rms(closed) / rms(input)) < -20.0f);
 
     lpg.set_gate(1.0f);
-    for (int i = 0; i < 20000; ++i) (void)lpg.process(0.0f);
+    for (int i = 0; i < 20000; ++i)
+        (void)lpg.process(0.0f);
     std::vector<float> open;
     open.reserve(input.size());
-    for (float x : input) open.push_back(lpg.process(x));
+    for (float x : input)
+        open.push_back(lpg.process(x));
     REQUIRE_THAT(units::linear_to_db(rms(open) / rms(input)), WithinAbs(0.0f, 0.2f));
 }
 
-TEST_CASE("Lpg peak output never exceeds the input peak near Nyquist",
-          "[signal][mod][lpg]") {
+TEST_CASE("Lpg peak output never exceeds the input peak near Nyquist", "[signal][mod][lpg]") {
     // A trapezoidal one-pole commanded above sample_rate / 4 has a
     // greater-than-one step response: full-scale near-Nyquist alternation
     // pumps the integrator state past the input bound, and the next
@@ -333,7 +352,8 @@ TEST_CASE("Lpg peak output never exceeds the input peak near Nyquist",
     lpg.set_colour(1.0f); // unity gain stage: any boost is the filter's
     lpg.set_range_hz(40.0f, 18000.0f);
     lpg.set_gate(1.0f);
-    for (int i = 0; i < 48000; ++i) (void)lpg.process(0.0f); // cell fully open
+    for (int i = 0; i < 48000; ++i)
+        (void)lpg.process(0.0f); // cell fully open
 
     float peak = 0.0f;
     float x = 1.0f;
@@ -359,20 +379,21 @@ TEST_CASE("Lpg couples loudness and brightness", "[signal][mod][lpg]") {
         Xorshift32 rng(1234u);
         std::vector<float> out;
         out.reserve(4800);
-        for (int i = 0; i < 4800; ++i) out.push_back(lpg.process(rng.next_bipolar()));
+        for (int i = 0; i < 4800; ++i)
+            out.push_back(lpg.process(rng.next_bipolar()));
         // A crude high-frequency measure: the RMS of the first difference,
         // normalized by the RMS of the signal.
         std::vector<float> difference;
         difference.reserve(out.size());
-        for (std::size_t i = 1; i < out.size(); ++i) difference.push_back(out[i] - out[i - 1]);
+        for (std::size_t i = 1; i < out.size(); ++i)
+            difference.push_back(out[i] - out[i - 1]);
         return rms(difference) / std::max(rms(out), 1e-9f);
     };
 
     REQUIRE(brightness(1.0f) > brightness(0.2f));
 }
 
-TEST_CASE("Lpg velocity mapping raises level and brightness together",
-          "[signal][mod][lpg]") {
+TEST_CASE("Lpg velocity mapping raises level and brightness together", "[signal][mod][lpg]") {
     REQUIRE(Lpg::velocity_to_strike(0.0f) == 0.0f);
     REQUIRE(Lpg::velocity_to_strike(1.0f) == 1.0f);
     // The 0.7 exponent makes soft hits louder than a linear map would, which is
@@ -383,16 +404,15 @@ TEST_CASE("Lpg velocity mapping raises level and brightness together",
 
 // ── ModMatrixT ───────────────────────────────────────────────────────────────
 
-TEST_CASE("ModMatrix routes, accumulates, and applies via",
-          "[signal][mod][matrix]") {
+TEST_CASE("ModMatrix routes, accumulates, and applies via", "[signal][mod][matrix]") {
     ModMatrix matrix;
     // sources: 0 = LFO, 1 = envelope, 2 = mod wheel
     const float sources[3] = {0.5f, 0.8f, 0.25f};
     float dests[2] = {0.0f, 0.0f};
 
-    matrix.set_slot(0, 0, 0, 1.0f);        // LFO -> cutoff, full depth
-    matrix.set_slot(1, 1, 0, 0.5f);        // envelope -> cutoff, accumulating
-    matrix.set_slot(2, 0, 1, 1.0f, 2);     // LFO -> pitch, ridden by the wheel
+    matrix.set_slot(0, 0, 0, 1.0f);    // LFO -> cutoff, full depth
+    matrix.set_slot(1, 1, 0, 0.5f);    // envelope -> cutoff, accumulating
+    matrix.set_slot(2, 0, 1, 1.0f, 2); // LFO -> pitch, ridden by the wheel
 
     matrix.evaluate(std::span<const float>(sources, 3), std::span<float>(dests, 2));
 
@@ -401,8 +421,7 @@ TEST_CASE("ModMatrix routes, accumulates, and applies via",
     REQUIRE(matrix.active_count() == 3);
 }
 
-TEST_CASE("ModMatrix accumulates onto the caller's base values",
-          "[signal][mod][matrix]") {
+TEST_CASE("ModMatrix accumulates onto the caller's base values", "[signal][mod][matrix]") {
     ModMatrix matrix;
     const float sources[1] = {-1.0f};
     float dests[1] = {1000.0f}; // an unmodulated cutoff in Hz
@@ -412,8 +431,7 @@ TEST_CASE("ModMatrix accumulates onto the caller's base values",
     REQUIRE_THAT(dests[0], WithinAbs(800.0f, 1e-3f));
 }
 
-TEST_CASE("ModMatrix ignores inactive, zeroed, and out-of-range slots",
-          "[signal][mod][matrix]") {
+TEST_CASE("ModMatrix ignores inactive, zeroed, and out-of-range slots", "[signal][mod][matrix]") {
     ModMatrix matrix;
     const float sources[1] = {1.0f};
     float dests[1] = {0.0f};
@@ -447,16 +465,14 @@ TEST_CASE("ModMatrix ignores inactive, zeroed, and out-of-range slots",
     REQUIRE(matrix.active_count() == 0);
 }
 
-TEST_CASE("ModMatrix is trivially copyable so it can be hot-swapped",
-          "[signal][mod][matrix]") {
+TEST_CASE("ModMatrix is trivially copyable so it can be hot-swapped", "[signal][mod][matrix]") {
     STATIC_REQUIRE(std::is_trivially_copyable_v<ModMatrix>);
     STATIC_REQUIRE(std::is_trivially_copyable_v<ModMatrix64>);
 }
 
 // ── composition: the patch cookbook ──────────────────────────────────────────
 
-TEST_CASE("Patch: smooth-random LFO through slew, matrix, and VCA",
-          "[signal][mod][patch]") {
+TEST_CASE("Patch: smooth-random LFO through slew, matrix, and VCA", "[signal][mod][patch]") {
     auto render = [] {
         Lfo lfo;
         lfo.prepare(static_cast<double>(kSampleRate));
@@ -505,8 +521,7 @@ TEST_CASE("Patch: smooth-random LFO through slew, matrix, and VCA",
     REQUIRE(*range.second - *range.first > 0.5f);
 }
 
-TEST_CASE("Patch: ratchet bongo — trigger, burst, AHD, and LPG strike",
-          "[signal][mod][patch]") {
+TEST_CASE("Patch: ratchet bongo — trigger, burst, AHD, and LPG strike", "[signal][mod][patch]") {
     TriggerDetect detect;
     detect.prepare(static_cast<double>(kSampleRate));
     detect.set_refractory_ms(1.0);
@@ -566,12 +581,12 @@ TEST_CASE("Patch: ratchet bongo — trigger, burst, AHD, and LPG strike",
     REQUIRE_THAT(hit_levels.front(), WithinAbs(1.0f, 1e-6f));
     REQUIRE_THAT(hit_levels.back(), WithinAbs(0.45f, 1e-6f));
 
-    for (float x : out) REQUIRE(std::isfinite(x));
+    for (float x : out)
+        REQUIRE(std::isfinite(x));
     REQUIRE(rms(out) > 0.0f);
 }
 
-TEST_CASE("Patch: comparator clock, divider, and sample-and-hold",
-          "[signal][mod][patch]") {
+TEST_CASE("Patch: comparator clock, divider, and sample-and-hold", "[signal][mod][patch]") {
     Lfo clock_source;
     clock_source.prepare(static_cast<double>(kSampleRate));
     clock_source.set_period_samples(480.0);
@@ -705,7 +720,8 @@ TEST_CASE("Patch: live echo — LPG in a feedback path struck by transients",
                               ? noise.next_bipolar() * std::exp(-static_cast<float>(phase) / 300.0f)
                               : 0.0f;
 
-        if (detect.process_signal(transient.process(dry))) loop_gate.strike(0.9f);
+        if (detect.process_signal(transient.process(dry)))
+            loop_gate.strike(0.9f);
 
         const float delayed = line[static_cast<std::size_t>(write)];
         const float fed_back = loop_gate.process(delayed * 0.75f);
@@ -720,7 +736,8 @@ TEST_CASE("Patch: live echo — LPG in a feedback path struck by transients",
     auto brightness = [](const std::vector<float>& v) {
         std::vector<float> difference;
         difference.reserve(v.size());
-        for (std::size_t i = 1; i < v.size(); ++i) difference.push_back(v[i] - v[i - 1]);
+        for (std::size_t i = 1; i < v.size(); ++i)
+            difference.push_back(v[i] - v[i - 1]);
         return rms(difference) / std::max(rms(v), 1e-9f);
     };
 
@@ -735,11 +752,11 @@ TEST_CASE("Patch: live echo — LPG in a feedback path struck by transients",
     // ...and darker each pass, which a static lowpass in the loop would not do.
     REQUIRE(brightness(third_echo) < brightness(first_echo));
 
-    for (float x : out) REQUIRE(std::isfinite(x));
+    for (float x : out)
+        REQUIRE(std::isfinite(x));
 }
 
-TEST_CASE("Patch: delayed vibrato arrives after the note settles",
-          "[signal][mod][patch]") {
+TEST_CASE("Patch: delayed vibrato arrives after the note settles", "[signal][mod][patch]") {
     // P6: the LFO's delay and fade are the performance behavior, not an
     // envelope bolted onto the depth.
     Lfo vibrato;
@@ -765,7 +782,7 @@ TEST_CASE("Patch: delayed vibrato arrives after the note settles",
         return highest - lowest;
     };
 
-    REQUIRE(depth_over(19200) == 0.0f);  // 400 ms of delay: nothing at all
+    REQUIRE(depth_over(19200) == 0.0f);   // 400 ms of delay: nothing at all
     const float early = depth_over(9600); // first 200 ms of the 600 ms fade
     (void)depth_over(19200);              // the rest of the fade
     const float late = depth_over(19200); // fully faded in

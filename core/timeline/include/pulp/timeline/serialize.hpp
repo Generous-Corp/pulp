@@ -36,6 +36,8 @@ struct ProjectSnapshotCounts {
     std::size_t take_comp_segments = 0;
     std::size_t markers = 0;
     std::size_t regions = 0;
+    std::size_t scenes = 0;
+    std::size_t slots = 0;
     std::size_t chord_scale_events = 0;
     std::size_t groove_steps = 0;
 };

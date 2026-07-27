@@ -108,7 +108,7 @@ Closed on `feature/mod-toolkit-gap-closure-20260725`:
 - G1/G3: float/double fresh-state parity rosters now drive every public
   sample-valued alias and every precision-independent event type.
 - G2: the three event-only `*64` compatibility aliases now ship and are tested.
-- G4: `LpgT::cutoff_hz()` exposes read-only commanded-cutoff telemetry, and the
+- G4: `LpgT::commanded_cutoff_hz()` exposes read-only cutoff telemetry, and the
   roll test proves each re-strike is brighter before proving cold recovery.
 - G5: the reference now carries the exact file-level migration inventory and
   compatibility boundary.

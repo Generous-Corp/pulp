@@ -653,32 +653,30 @@ decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::str
             return fail<ChordScaleLane>(PersistenceErrorCode::MissingField, item_path);
         const auto decoded_quality = detail::chord_quality_from_name(quality.value());
         const auto decoded_mode = detail::scale_mode_from_name(mode.value());
-        auto decoded_position = parse_canonical_i64_string(*position.value(),
-                                                           item_path + "/position");
+        auto decoded_position =
+            parse_canonical_i64_string(*position.value(), item_path + "/position");
         if (!decoded_quality || !decoded_mode || !decoded_position ||
             chord_root.value()->kind != JsonValue::Kind::Number ||
             scale_root.value()->kind != JsonValue::Kind::Number)
             return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
-        auto decoded_chord_root =
-            parse_u32_number(*chord_root.value(), item_path + "/chord_root");
-        auto decoded_scale_root =
-            parse_u32_number(*scale_root.value(), item_path + "/scale_root");
+        auto decoded_chord_root = parse_u32_number(*chord_root.value(), item_path + "/chord_root");
+        auto decoded_scale_root = parse_u32_number(*scale_root.value(), item_path + "/scale_root");
         // Narrowing to the model's byte-wide pitch class must not be the thing
         // that makes an out-of-range root look valid: 256 truncates to 0, which
         // the model would then happily accept as C.
-        if (!decoded_chord_root || !decoded_scale_root ||
-            decoded_chord_root.value() > 0xffu || decoded_scale_root.value() > 0xffu)
+        if (!decoded_chord_root || !decoded_scale_root || decoded_chord_root.value() > 0xffu ||
+            decoded_scale_root.value() > 0xffu)
             return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
-        events.push_back(ChordScaleEvent{timebase::TickPosition{decoded_position.value()},
-                                         *decoded_quality,
-                                         static_cast<std::uint8_t>(decoded_chord_root.value()),
-                                         *decoded_mode,
-                                         static_cast<std::uint8_t>(decoded_scale_root.value())});
+        events.push_back(
+            ChordScaleEvent{timebase::TickPosition{decoded_position.value()}, *decoded_quality,
+                            static_cast<std::uint8_t>(decoded_chord_root.value()), *decoded_mode,
+                            static_cast<std::uint8_t>(decoded_scale_root.value())});
     }
     auto created = ChordScaleLane::create(std::move(events));
     if (!created)
         return model_fail<ChordScaleLane>(created.error(), lane_path);
-    return runtime::Result<ChordScaleLane, PersistenceError>(runtime::Ok(std::move(created).value()));
+    return runtime::Result<ChordScaleLane, PersistenceError>(
+        runtime::Ok(std::move(created).value()));
 }
 
 // A null groove value is the pre-groove shape: the sequence predates the field
@@ -709,8 +707,7 @@ decode_groove(const JsonValue* value, DecodeContext& context, std::string groove
     auto timing_strength = required(*value, "timing_strength", groove_path);
     auto velocity_strength = required(*value, "velocity_strength", groove_path);
     if (!name || !step || !steps || !swing_denominator || !swing_grid || !swing_numerator ||
-        !timing_strength || !velocity_strength ||
-        steps.value()->kind != JsonValue::Kind::Array ||
+        !timing_strength || !velocity_strength || steps.value()->kind != JsonValue::Kind::Array ||
         timing_strength.value()->kind != JsonValue::Kind::Number ||
         velocity_strength.value()->kind != JsonValue::Kind::Number)
         return fail<GrooveTemplate>(PersistenceErrorCode::MissingField, groove_path);
@@ -719,14 +716,14 @@ decode_groove(const JsonValue* value, DecodeContext& context, std::string groove
     auto& counts = context.counts;
     if (steps.value()->array.size() >
         limits.max_groove_steps - std::min(counts.groove_steps, limits.max_groove_steps))
-        return fail<GrooveTemplate>(PersistenceErrorCode::LimitExceeded, groove_path + "/steps",
-                                    steps.value()->begin,
-                                    counts.groove_steps + steps.value()->array.size(),
-                                    limits.max_groove_steps);
+        return fail<GrooveTemplate>(
+            PersistenceErrorCode::LimitExceeded, groove_path + "/steps", steps.value()->begin,
+            counts.groove_steps + steps.value()->array.size(), limits.max_groove_steps);
     counts.groove_steps += steps.value()->array.size();
 
     auto decoded_step = parse_canonical_i64_string(*step.value(), groove_path + "/step");
-    auto decoded_grid = parse_canonical_i64_string(*swing_grid.value(), groove_path + "/swing_grid");
+    auto decoded_grid =
+        parse_canonical_i64_string(*swing_grid.value(), groove_path + "/swing_grid");
     auto decoded_numerator =
         parse_canonical_i64_string(*swing_numerator.value(), groove_path + "/swing_numerator");
     auto decoded_denominator =
@@ -765,78 +762,9 @@ decode_groove(const JsonValue* value, DecodeContext& context, std::string groove
     auto created = GrooveTemplate::create(std::move(input));
     if (!created)
         return model_fail<GrooveTemplate>(created.error(), groove_path);
-    return runtime::Result<GrooveTemplate, PersistenceError>(runtime::Ok(std::move(created).value()));
+    return runtime::Result<GrooveTemplate, PersistenceError>(
+        runtime::Ok(std::move(created).value()));
 }
-
-// Colour is optional on both annotation kinds: absent means the presentation
-// layer chooses, and a present value must be a whole 32-bit packed RGBA.
-runtime::Result<std::optional<std::uint32_t>, PersistenceError>
-decode_annotation_color(const JsonValue& data, const std::string& path) {
-    const auto* color = data.find("color");
-    if (!color)
-        return runtime::Ok(std::optional<std::uint32_t>{});
-    auto decoded = parse_u32_number(*color, path + "/color");
-    if (!decoded)
-        return fail<std::optional<std::uint32_t>>(decoded.error().code, decoded.error().path,
-                                                  decoded.error().byte_offset);
-    return runtime::Ok(std::optional<std::uint32_t>{decoded.value()});
-}
-
-runtime::Result<SequenceMarker, PersistenceError>
-decode_marker(const JsonValue& value, DecodeContext& context, std::string path) {
-    const auto increment = bounded_increment(context.counts.markers, context.limits.max_markers);
-    if (!increment)
-        return fail<SequenceMarker>(PersistenceErrorCode::LimitExceeded, path, value.begin,
-                                    increment.actual, context.limits.max_markers);
-    auto data = data_for(value, "pulp.timeline.marker", path);
-    if (!data)
-        return fail<SequenceMarker>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto position = required(*data.value(), "position", path + "/data");
-    if (!id || !name || !position)
-        return fail<SequenceMarker>(PersistenceErrorCode::MissingField, std::move(path));
-    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
-    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
-    if (!decoded_id || !decoded_position)
-        return fail<SequenceMarker>(PersistenceErrorCode::InvalidNumber, std::move(path));
-    auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
-    if (!decoded_color)
-        return runtime::Err(decoded_color.error());
-    return runtime::Ok(SequenceMarker{ItemId{decoded_id.value()}, std::move(name).value(),
-                                      timebase::TickPosition{decoded_position.value()},
-                                      decoded_color.value()});
-}
-
-runtime::Result<SequenceRegion, PersistenceError>
-decode_region(const JsonValue& value, DecodeContext& context, std::string path) {
-    const auto increment = bounded_increment(context.counts.regions, context.limits.max_regions);
-    if (!increment)
-        return fail<SequenceRegion>(PersistenceErrorCode::LimitExceeded, path, value.begin,
-                                    increment.actual, context.limits.max_regions);
-    auto data = data_for(value, "pulp.timeline.region", path);
-    if (!data)
-        return fail<SequenceRegion>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto position = required(*data.value(), "position", path + "/data");
-    auto duration = required(*data.value(), "duration", path + "/data");
-    if (!id || !name || !position || !duration)
-        return fail<SequenceRegion>(PersistenceErrorCode::MissingField, std::move(path));
-    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
-    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
-    auto decoded_duration = parse_canonical_i64_string(*duration.value(), path + "/data/duration");
-    if (!decoded_id || !decoded_position || !decoded_duration)
-        return fail<SequenceRegion>(PersistenceErrorCode::InvalidNumber, std::move(path));
-    auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
-    if (!decoded_color)
-        return runtime::Err(decoded_color.error());
-    return runtime::Ok(SequenceRegion{ItemId{decoded_id.value()}, std::move(name).value(),
-                                      timebase::TickPosition{decoded_position.value()},
-                                      timebase::TickDuration{decoded_duration.value()},
-                                      decoded_color.value()});
-}
-
 runtime::Result<Sequence, PersistenceError>
 decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
                 const SchemaRegistry& registry, DecodeContext& context, std::string path) {
@@ -859,16 +787,19 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     auto musical = required(*data, "musical_duration", path + "/data");
     auto absolute = required(*data, "absolute_duration", path + "/data");
     const auto* chord_lane = data->find("chord_scale_lane");
+    const auto* scenes = data->find("scenes");
     const auto requires_chord_lane =
         sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
     const auto* groove = data->find("groove");
-    const auto requires_groove =
-        sequence_schema_policy.requires_groove(structural.value().version);
+    const auto requires_groove = sequence_schema_policy.requires_groove(structural.value().version);
     if (!id || !name || !tracks || !musical || !absolute ||
         tracks.value()->kind != JsonValue::Kind::Array || (!requires_chord_lane && chord_lane) ||
         (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)) ||
         (!requires_groove && groove) ||
-        (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)))
+        (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)) ||
+        (sequence_schema_policy.requires_scenes(structural.value().version) !=
+         (scenes != nullptr)) ||
+        (scenes && scenes->kind != JsonValue::Kind::Array))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
     std::vector<SequenceMarker> decoded_markers;
     std::vector<SequenceRegion> decoded_regions;
@@ -937,15 +868,29 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
             return runtime::Err(decoded.error());
         decoded_tracks.push_back(std::move(decoded).value());
     }
-    auto created = Sequence::create(SequenceInput{{decoded_id.value()},
-                                                 std::move(name).value(),
-                                                 decoded_musical,
-                                                 decoded_absolute,
-                                                 std::move(decoded_tracks),
-                                                 std::move(decoded_markers),
-                                                 std::move(decoded_regions),
-                                                 std::move(decoded_lane).value(),
-                                                 std::move(decoded_groove).value()});
+    std::vector<Scene> decoded_scenes;
+    if (scenes) {
+        decoded_scenes.reserve(scenes->array.size());
+        for (std::size_t index = 0; index < scenes->array.size(); ++index) {
+            auto decoded = decode_scene(scenes->array[index], context,
+                                        path + "/data/scenes/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_scenes.push_back(std::move(decoded).value());
+        }
+    }
+    auto created = Sequence::create(SequenceInput{
+        .id = {decoded_id.value()},
+        .name = std::move(name).value(),
+        .musical_duration = decoded_musical,
+        .absolute_duration = decoded_absolute,
+        .tracks = std::move(decoded_tracks),
+        .markers = std::move(decoded_markers),
+        .regions = std::move(decoded_regions),
+        .chord_scale_lane = std::move(decoded_lane).value(),
+        .groove = std::move(decoded_groove).value(),
+        .scenes = std::move(decoded_scenes),
+    });
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));

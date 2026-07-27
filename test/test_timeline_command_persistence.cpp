@@ -139,19 +139,25 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                      R"(,"sequence_id":"5","track_id":"6"})"),
         envelope("pulp.timeline.command.insert_marker",
                  "{\"marker\":" + std::string(parsed->raw(marker)) + R"(,"sequence_id":"5"})"),
-        envelope("pulp.timeline.command.remove_marker",
-                 R"({"marker_id":"14","sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_marker", R"({"marker_id":"14","sequence_id":"5"})"),
         envelope("pulp.timeline.command.insert_region",
                  "{\"region\":" + std::string(parsed->raw(region)) + R"(,"sequence_id":"5"})"),
-        envelope("pulp.timeline.command.remove_region",
-                 R"({"region_id":"15","sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_region", R"({"region_id":"15","sequence_id":"5"})"),
         envelope(
             "pulp.timeline.command.set_chord_scale_lane",
             R"({"expected":[],"replacement":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"sequence_id":"5"})"),
         envelope("pulp.timeline.command.set_groove",
-                 "{\"expected\":" + std::string(parsed->raw(groove)) +
-                     ",\"replacement\":" + std::string(parsed->raw(groove)) +
-                     R"(,"sequence_id":"5"})"),
+                 "{\"expected\":" + std::string(parsed->raw(groove)) + ",\"replacement\":" +
+                     std::string(parsed->raw(groove)) + R"(,"sequence_id":"5"})"),
+        envelope(
+            "pulp.timeline.command.insert_scene",
+            R"({"before_scene_id":"32","scene":{"data":{"id":"30","name":"launch","slots":[]},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_scene", R"({"scene_id":"30","sequence_id":"5"})"),
+        envelope(
+            "pulp.timeline.command.insert_slot",
+            R"({"before_slot_id":"33","scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}})"),
+        envelope("pulp.timeline.command.remove_slot",
+                 R"({"scene_id":"30","sequence_id":"5","slot_id":"31"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -188,6 +194,24 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<RemoveRegion>(commands[22]));
     REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[23]));
     REQUIRE(std::holds_alternative<SetGroove>(commands[24]));
+    REQUIRE(std::holds_alternative<InsertScene>(commands[25]));
+    REQUIRE(std::get<InsertScene>(commands[25]).before_scene_id == ItemId{32});
+    REQUIRE(std::holds_alternative<RemoveScene>(commands[26]));
+    REQUIRE(std::holds_alternative<InsertSlot>(commands[27]));
+    REQUIRE(std::get<InsertSlot>(commands[27]).before_slot_id == ItemId{33});
+    REQUIRE(std::holds_alternative<RemoveSlot>(commands[28]));
+
+    DecodeLimits no_scenes;
+    no_scenes.max_scenes = 0;
+    auto scene_limited = deserialize_commands(batch, registry, no_scenes);
+    REQUIRE_FALSE(scene_limited);
+    REQUIRE(scene_limited.error().code == PersistenceErrorCode::LimitExceeded);
+
+    DecodeLimits no_slots;
+    no_slots.max_slots = 0;
+    auto slot_limited = deserialize_commands(batch, registry, no_slots);
+    REQUIRE_FALSE(slot_limited);
+    REQUIRE(slot_limited.error().code == PersistenceErrorCode::LimitExceeded);
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {
@@ -206,6 +230,60 @@ TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") 
         registry);
     REQUIRE_FALSE(velocity);
     REQUIRE(velocity.error().code == PersistenceErrorCode::InvalidNumber);
+}
+
+TEST_CASE("Typed InsertScene command enforces the slot quota before decoding elements") {
+    const auto registry = builtins();
+    const std::string slot =
+        R"({"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":")";
+    const auto command =
+        R"([{"data":{"scene":{"data":{"id":"30","name":"launch","slots":[)" + slot + "31" +
+        R"(","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1},)" +
+        slot + "32" +
+        R"(","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1},)" +
+        slot + "33" +
+        R"(","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}]},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"},"type_name":"pulp.timeline.command.insert_scene","version":1}])";
+    DecodeLimits limits;
+    limits.max_slots = 2;
+
+    auto rejected = deserialize_commands(command, registry, limits);
+
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(rejected.error().path == "/0/data/scene/data/slots");
+    REQUIRE(rejected.error().actual == 3);
+    REQUIRE(rejected.error().limit == 2);
+}
+
+TEST_CASE("Typed scene commands preserve exact nested field diagnostics") {
+    const auto registry = builtins();
+    auto invalid_follow = deserialize_commands(
+        R"([{"data":{"scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":null,"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}},"type_name":"pulp.timeline.command.insert_slot","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_follow);
+    REQUIRE(invalid_follow.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(invalid_follow.error().path == "/0/data/slot/data/follow");
+
+    auto missing_slots = deserialize_commands(
+        R"([{"data":{"scene":{"data":{"id":"30","name":"launch"},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"},"type_name":"pulp.timeline.command.insert_scene","version":1}])",
+        registry);
+    REQUIRE_FALSE(missing_slots);
+    REQUIRE(missing_slots.error().code == PersistenceErrorCode::MissingField);
+    REQUIRE(missing_slots.error().path == "/0/data/scene/data/slots");
+
+    auto invalid_scene_anchor = deserialize_commands(
+        R"([{"data":{"before_scene_id":"01","scene":{"data":{"id":"30","name":"launch","slots":[]},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"},"type_name":"pulp.timeline.command.insert_scene","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_scene_anchor);
+    REQUIRE(invalid_scene_anchor.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(invalid_scene_anchor.error().path == "/0/data/before_scene_id");
+
+    auto invalid_slot_anchor = deserialize_commands(
+        R"([{"data":{"before_slot_id":"01","scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}},"type_name":"pulp.timeline.command.insert_slot","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_slot_anchor);
+    REQUIRE(invalid_slot_anchor.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(invalid_slot_anchor.error().path == "/0/data/before_slot_id");
 }
 
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {

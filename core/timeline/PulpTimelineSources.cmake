@@ -15,10 +15,14 @@ function(pulp_resolve_timeline_sources root output)
         journal.cpp
         json_span_reader.cpp
         model.cpp
+        sequence.cpp
+        sequence_context.cpp
+        sequence_scene_internal.cpp
         project_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp
         transaction_marker_internal.cpp
+        transaction_scene_internal.cpp
         transaction_take_internal.cpp
         transaction_track_state_internal.cpp
         transaction_reduction_support.cpp
@@ -40,6 +44,7 @@ function(pulp_resolve_timeline_sources root output)
         serialize_command_decode.cpp
         serialize_encode.cpp
         serialize_release.cpp
+        serialize_sequence_annotations_decode.cpp
         snapshot_equivalence.cpp
         structural_registry_validation.cpp
         track.cpp
