@@ -278,6 +278,58 @@ pulp::ship::create_combined_pkg(
 );
 ```
 
+### One installer for a whole product (recommended)
+
+Most products ship more than one artifact — several formats, sometimes several
+plugins, sometimes a standalone app. Ship them as **one** signed, notarized
+installer whose Customize pane lets the user pick, rather than a pile of
+separate downloads. The shared recipe does the packaging, signing, notarizing
+and stapling:
+
+```bash
+tools/scripts/build_combined_installer.sh \
+  --name MyPlugin --version 1.0.0 \
+  --sign-identity <Developer ID Application hash> \
+  --installer-identity <Developer ID Installer hash> \
+  --out artifacts/ \
+  --plugin au   "build/AU/MyPlugin.component" \
+  --plugin vst3 "build/VST3/MyPlugin.vst3" \
+  --plugin clap "build/CLAP/MyPlugin.clap" \
+  --app "Standalone app" "build/MyPlugin.app"
+```
+
+`--plugin` and `--app` are **repeatable**, and `--plugin` accumulates per
+format — so a product with three AU plugins, two VST3s and three CLAPs passes
+eight `--plugin` flags and gets one installer with a nested Customize tree.
+Notarization is **on by default** (`--no-notarize` opts out), and the signing
+preflight runs automatically, so no separate `pulp ship doctor` is needed.
+
+The convention is a small `package.sh` at your project root that holds only the
+*inputs* and `exec`s the shared recipe — see `examples/super-convolver/package.sh`.
+Keep the packaging logic in the shared tool so every product signs identically.
+
+### Packaging a project that consumes the installed SDK
+
+If your project lives **outside** the Pulp source tree and builds against an
+installed SDK, note that `build_combined_installer.sh` is **not** installed into
+the SDK prefix (the prefix carries `bin external include lib` only). Point
+`PULP_ROOT` at a Pulp source checkout:
+
+```bash
+PULP_ROOT=/path/to/pulp ./package.sh
+```
+
+Have `package.sh` fail with an explicit message when it cannot find the recipe,
+rather than silently producing an unsigned or partial installer. Likewise assert
+that every expected artifact exists before invoking the recipe — a Customize
+pane that quietly lost a format still looks like a successful build.
+
+This indirection is a known gap: `pulp ship` itself also requires the Pulp
+source tree, because it resolves a project root containing `core/`. Tracked in
+[#6714](https://github.com/danielraffel/pulp/issues/6714); when it lands, an SDK
+consumer will be able to run `pulp ship package` directly and the `PULP_ROOT`
+step goes away.
+
 ## Step 6: Distribute
 
 ### Appcast for Auto-Updates
