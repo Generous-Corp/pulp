@@ -27,6 +27,7 @@
 
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_restart_publisher.hpp>
@@ -192,6 +193,9 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Keeps a host setState() off the processor while process() is inside it.
+    // Declared after processor_ so it outlives every render that consults it.
+    StateRestoreGate state_restore_gate_;
     // Declared after processor_ so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive_;

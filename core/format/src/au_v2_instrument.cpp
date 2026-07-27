@@ -374,6 +374,18 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     // take a blocking lock. Bracket it in ScopedNoAlloc so the RT interposition
     // guard (test/native_components/rt_intercept_test_support.cpp) traps any
     // regression in test builds. Mirrors the AU-v2 effect adapter.
+    // Prove no class-info restore is installing underneath this block. Hosts
+    // set class info on the main thread while the unit is rendering, and
+    // Processor::deserialize_plugin_state() is documented as running with the
+    // audio thread stopped. An instrument has no input to pass through, so a
+    // contended block renders silence.
+    auto render_lock = state_restore_gate_.lock_for_render();
+    if (!render_lock) {
+        for (std::size_t b = 0; b < routed; ++b)
+            silence_block(output_buses[b].buffer);
+        return noErr;
+    }
+
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in, midi_out, ctx);
@@ -402,7 +414,7 @@ OSStatus PulpAUInstrument::RestoreState(CFPropertyListRef plist)
     if (!processor_) return kAudioUnitErr_Uninitialized;
     // store_ is the source of truth (GetParameter reads it) — no Globals
     // mirror to update.
-    return restore_pulp_state(store_, *processor_, plist);
+    return restore_pulp_state(store_, *processor_, state_restore_gate_, plist);
 }
 
 bool PulpAUInstrument::SupportsTail()

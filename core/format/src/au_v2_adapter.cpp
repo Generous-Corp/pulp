@@ -553,6 +553,16 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         ProcessBusBufferSet<const float>{std::span(input_buses.data(), n_in)},
         ProcessBusBufferSet<float>{std::span(output_buses)},
     };
+    // Prove no class-info restore is installing underneath this block. Hosts
+    // set class info on the main thread while the unit is rendering, and
+    // Processor::deserialize_plugin_state() is documented as running with the
+    // audio thread stopped. On contention pass the input through rather than
+    // read plugin state a restore is halfway through rewriting.
+    auto render_lock = state_restore_gate_.lock_for_render();
+    if (!render_lock) {
+        passthrough_block(output_view, input_view);
+        return noErr;
+    }
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in, midi_out, ctx);
@@ -639,7 +649,7 @@ OSStatus PulpAUEffect::RestoreState(CFPropertyListRef plist)
     auto result = AUEffectBase::RestoreState(plist);
     if (result != noErr) return result;
     if (!processor_) return kAudioUnitErr_Uninitialized;
-    result = restore_pulp_state(store_, *processor_, plist);
+    result = restore_pulp_state(store_, *processor_, state_restore_gate_, plist);
     if (result != noErr) return result;
 
     // Mirror the restored values into the AU's own parameter storage so a host

@@ -5,6 +5,7 @@
 // Built from CLAP specification headers (MIT license)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -81,6 +82,9 @@ struct PulpClapPlugin {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Keeps a host state.load off the processor while clap_process() is inside
+    // it. Declared after processor so it outlives every render that consults it.
+    StateRestoreGate state_restore_gate;
     // Declared after processor so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive;

@@ -2018,6 +2018,25 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     auto ctx = build_process_context(data, processSetup, num_samples,
                                      playhead_prev_);
 
+    // Prove no state restore is installing underneath this block. setState may
+    // arrive on the main thread while the host keeps calling process() —
+    // host-quirk row R6 records a DAW that does exactly that — and
+    // Processor::deserialize_plugin_state() is documented as running with the
+    // audio thread stopped. On contention pass the input through rather than
+    // read plugin state a restore is halfway through rewriting.
+    auto render_lock = state_restore_gate_.lock_for_render();
+    if (!render_lock) {
+        if (native_f64) {
+            passthrough_block(output64_view, input64_view);
+        } else {
+            passthrough_block(output_view, input_view);
+        }
+        for (int32 b = 0; b < data.numOutputs; ++b) {
+            data.outputs[b].silenceFlags = 0;
+        }
+        return kResultOk;
+    }
+
     // Snapshot parameter values before processing so we can detect
     // plugin-side changes and report them to the host for automation recording
     auto all_params = store_.all_params();
@@ -2124,7 +2143,15 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
         data.insert(data.end(), buf, buf + read_count);
     }
     if (!processor_) return kResultFalse;
-    if (!plugin_state_io::deserialize(data, store_, *processor_)) return kResultFalse;
+    {
+        // Hosts call setState while the plug-in is active and rendering, so
+        // hold the gate across the restore: acquiring it proves no audio
+        // callback is inside process(), which is the condition
+        // Processor::deserialize_plugin_state() is documented to run under.
+        auto restore_lock = state_restore_gate_.lock_for_restore();
+        if (!plugin_state_io::deserialize(data, store_, *processor_))
+            return kResultFalse;
+    }
 
     // Sync restored values back to VST3 parameter system
     for (const auto& param : store_.all_params()) {

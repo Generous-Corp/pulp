@@ -932,3 +932,21 @@ Two host-conformance surfaces beyond the display-string path above:
   subclass `PulpAUEffect` and override `PropertyChanged` to capture the
   property IDs, then drive a real `ProcessBufferLists` render. Test:
   `test/test_au_v2_effect.cpp`.
+
+## Class-info restore runs under the state-restore gate
+
+`restore_pulp_state()` takes a `StateRestoreGate&` and holds it across the
+deserialize. Hosts set `kAudioUnitProperty_ClassInfo` on the main thread while
+the unit is initialized and rendering, and
+`Processor::deserialize_plugin_state()` is documented as running with the audio
+thread stopped — nothing in the AU v2 API enforces that.
+
+All three AU v2 classes own a `state_restore_gate_` and gate their render:
+
+* `PulpAUEffect::ProcessBufferLists` passes the input through on contention.
+* `PulpAUInstrument` renders silence — it has no input to pass through.
+* `PulpAUMidiProcessor` emits no MIDI for the block and clears `midi_out_`, so a
+  contended block cannot re-deliver the previous block's events.
+
+If you add a new AU v2 class, give it a gate and pass it to
+`restore_pulp_state()`; the parameter is not optional.

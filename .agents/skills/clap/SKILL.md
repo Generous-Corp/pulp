@@ -967,3 +967,26 @@ that call's bool (a host may refuse). This is what lets a mode switch (e.g. a
 compact "player" view) shrink the window and change its aspect at runtime — the
 design-viewport re-pin keeps content filling the new size with no letterbox. See
 the `view-bridge` skill for the cross-format seam.
+
+## `state.load` runs under the state-restore gate
+
+`Processor::deserialize_plugin_state()` is documented as running "with the
+audio thread stopped", but CLAP hosts call `state.load` on the main thread
+while the plug-in is active and rendering. `clap_entry.hpp`'s `state_load`
+therefore holds `PulpClapPlugin::state_restore_gate` across the deserialize;
+acquiring it proves no audio callback is inside `clap_process()`.
+
+Two consequences when working in this adapter:
+
+* The render side takes the gate BEFORE `clap_phase_prepare_sidecars`, not just
+  around the `processor->process()` call, because the sidecar phase already
+  reaches into the Processor (`mpe.run(*self->processor, …)`). A gate taken only
+  around the process call would leave that phase racing a restore.
+* On contention the block routes through `clap_phase_bypass_passthrough` — the
+  same degradation as an engaged Bypass, since both mean "the Processor did not
+  run this block". If you add a phase that touches the Processor, put it inside
+  the gated region or it will run against a half-restored plug-in.
+
+The gate is released before `on_non_realtime_tick()` so a processor that
+reconciles derived state there cannot stall the audio thread for the length of
+that work.
