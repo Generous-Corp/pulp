@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260727-menu-command-application-menu",
+  "kind": "change",
+  "created_at": "2026-07-27T18:20:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A MenuCommand may now name the application menu instead of a menu-bar submenu, by leaving its menu field empty. One transferred surface is touched and none is added: WindowOptions::MenuCommand keeps its existing fields and gains only a documented meaning for a value it already accepted, so the struct layout and the vtable are unchanged and an SDK subclass keeps its slot layout. Empty was previously a silent drop, so no existing caller changes behaviour. The macOS menu assembly that acts on this lives in macos-shell-deferred, which is not framework-authoritative-transferred, so it is not covered here. This is Pulp-specific standalone-host product work: a single-window app has no reason to own a Window menu holding one toggle, and the feature was undiscoverable because of it. There is no counterpart framework behaviour to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-app-menu-macos",
+    "pulp-test-standalone-musical-typing"
+  ],
+  "disposition": "pulp-only"
+}
