@@ -350,7 +350,9 @@ TEST_CASE("Allpass phase crosses ninety degrees at the corner", "[vibrato][allpa
         // Drive is sin, so the reference itself sits at -90 degrees in this
         // basis; the allpass adds another -90 at its corner.
         const double degrees = std::atan2(imag, real) * 180.0 / std::numbers::pi;
-        CHECK(degrees == Approx(-180.0).margin(3.0));
+        // atan2 represents the branch cut as either -180 or +180 degrees;
+        // both are the same phase and the sign can vary with rounding.
+        CHECK(std::abs(std::abs(degrees) - 180.0) < 3.0);
     }
 }
 
