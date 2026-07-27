@@ -36,8 +36,7 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
             [](const EmptyContent&) { return true; },
             [&](const MediaRef& left) {
                 const auto& right = std::get<MediaRef>(rhs);
-                return left.asset_id == right.asset_id &&
-                       left.source_start == right.source_start &&
+                return left.asset_id == right.asset_id && left.source_start == right.source_start &&
                        left.frame_count == right.frame_count;
             },
             [&](const NoteContent& left) {
@@ -75,26 +74,26 @@ std::size_t saturated_multiply(std::size_t lhs, std::size_t rhs) noexcept {
 // branch here reports its payload as free and lets the journal grow past the
 // limit the caller asked for. Each alternative states its own cost.
 std::size_t clip_retained_size(const Clip& clip) noexcept {
-    return std::visit(
-        ClipContentCases{
-            [](const EmptyContent&) { return sizeof(Clip); },
-            [](const MediaRef&) { return sizeof(Clip); },
-            [](const NoteContent& notes) {
-                return saturated_add(sizeof(Clip), notes.notes().size() * sizeof(NoteEvent));
-            },
-            [](const RegisteredContent& registered) {
-                return saturated_add(sizeof(Clip), registered.retained_bytes());
-            },
-            [](const OpaqueContent& opaque) {
-                return saturated_add(sizeof(Clip), opaque.raw_json().size());
-            },
-        },
-        clip.content());
+    return std::visit(ClipContentCases{
+                          [](const EmptyContent&) { return sizeof(Clip); },
+                          [](const MediaRef&) { return sizeof(Clip); },
+                          [](const NoteContent& notes) {
+                              return saturated_add(sizeof(Clip),
+                                                   notes.notes().size() * sizeof(NoteEvent));
+                          },
+                          [](const RegisteredContent& registered) {
+                              return saturated_add(sizeof(Clip), registered.retained_bytes());
+                          },
+                          [](const OpaqueContent& opaque) {
+                              return saturated_add(sizeof(Clip), opaque.raw_json().size());
+                          },
+                      },
+                      clip.content());
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
     return saturated_add(sizeof(AutomationLane),
-        saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
+                         saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
 }
 
 bool equal_take(const Take& lhs, const Take& rhs) noexcept {
@@ -107,8 +106,8 @@ bool equal_take(const Take& lhs, const Take& rhs) noexcept {
 std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
     auto size = saturated_add(saturated_add(sizeof(TakeLane), lane.name().size()),
                               saturated_multiply(lane.takes().size(), sizeof(Take)));
-    return saturated_add(
-        size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
+    return saturated_add(size,
+                         saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
 }
 
 bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
@@ -128,10 +127,8 @@ bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLoca
 bool equal_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
     if (lhs.id != rhs.id || lhs.name != rhs.name || lhs.frame_count != rhs.frame_count ||
         lhs.sample_rate != rhs.sample_rate || lhs.content_hash != rhs.content_hash ||
-        lhs.storage_policy != rhs.storage_policy ||
-        !equal_locators(lhs.locators, rhs.locators) ||
-        lhs.representations.size() != rhs.representations.size() ||
-        lhs.loop_info != rhs.loop_info)
+        lhs.storage_policy != rhs.storage_policy || !equal_locators(lhs.locators, rhs.locators) ||
+        lhs.representations.size() != rhs.representations.size() || lhs.loop_info != rhs.loop_info)
         return false;
     for (std::size_t i = 0; i < lhs.representations.size(); ++i) {
         const auto& left = lhs.representations[i];
@@ -156,8 +153,8 @@ std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
     if (asset.loop_info) {
         size = saturated_add(
             size, saturated_multiply(asset.loop_info->points.size(), sizeof(AudioLoopPoint)));
-        size = saturated_add(
-            size, saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
+        size = saturated_add(size,
+                             saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
         for (const auto& tag : asset.loop_info->tags)
             size = saturated_add(size, tag.size());
     }
@@ -229,6 +226,15 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.clip_id == right.clip_id && left.note_id == right.note_id &&
                        left.expected_velocity == right.expected_velocity &&
                        left.replacement_velocity == right.replacement_velocity;
+            } else if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id &&
+                       left.expected.size() == right.expected.size() &&
+                       std::equal(left.expected.begin(), left.expected.end(),
+                                  right.expected.begin(), equal_note) &&
+                       left.replacement.size() == right.replacement.size() &&
+                       std::equal(left.replacement.begin(), left.replacement.end(),
+                                  right.replacement.begin(), equal_note);
             } else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -337,14 +343,19 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());
-                return saturated_add(
-                    sizeof(T), saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+                return saturated_add(sizeof(T),
+                                     saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+            }
+            if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                const auto note_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                return saturated_add(sizeof(T), saturated_multiply(note_count, sizeof(NoteEvent)));
             }
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::TempoPoint)));
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::TempoPoint)));
             if constexpr (std::is_same_v<T, SetChordScaleLane>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
@@ -361,8 +372,8 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, SetMeterMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::MeterPoint)));
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::MeterPoint)));
             return sizeof(T);
         },
         command);

@@ -503,6 +503,77 @@ TEST_CASE("ParamCursor clamps ramp targets and treats non-positive durations as 
     REQUIRE_THAT(cursor.value(1), WithinAbs(0.0f, 1e-6f));
 }
 
+TEST_CASE("ParamCursor sanitizes non-finite injected events to declared defaults",
+          "[state][params][cursor][nan][security]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
+    store.set_value(1, 0.75f);
+
+    auto program = make_param_info(2, "Program", "", {0.0f, 3.0f, 2.0f, 1.0f});
+    program.kind = ParamKind::Enum;
+    program.value_labels = {"A", "B", "C", "D"};
+    store.add_parameter(program);
+    store.set_value(2, 3.0f);
+
+    ParameterEventQueue events;
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 1,
+        .sample_offset = 0,
+        .value = std::numeric_limits<float>::quiet_NaN(),
+    }));
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 1,
+        .sample_offset = 2,
+        .value = std::numeric_limits<float>::infinity(),
+        .ramp_duration_sample_frames = 4,
+    }));
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 1,
+        .sample_offset = 8,
+        .value = -std::numeric_limits<float>::infinity(),
+    }));
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 2,
+        .sample_offset = 0,
+        .value = std::numeric_limits<float>::quiet_NaN(),
+    }));
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 2,
+        .sample_offset = 2,
+        .value = std::numeric_limits<float>::infinity(),
+    }));
+    REQUIRE(events.push(ParameterEvent{
+        .param_id = 2,
+        .sample_offset = 4,
+        .value = -std::numeric_limits<float>::infinity(),
+    }));
+    events.sort();
+
+    ParamCursor cursor(store, &events);
+
+    cursor.advance_to(0);
+    REQUIRE_THAT(cursor.value(1), WithinAbs(0.25f, 1e-6f));
+    REQUIRE(cursor.value(2) == 2.0f);
+    REQUIRE(std::lround(cursor.value(2)) == 2);
+
+    cursor.advance_to(2);
+    REQUIRE(cursor.is_ramping(1));
+    REQUIRE_THAT(cursor.value_at(1, 4), WithinAbs(0.25f, 1e-6f));
+    REQUIRE(cursor.value(2) == 2.0f);
+    REQUIRE(std::lround(cursor.value(2)) == 2);
+
+    cursor.advance_to(4);
+    REQUIRE(std::isfinite(cursor.value(1)));
+    REQUIRE(cursor.value(2) == 2.0f);
+    REQUIRE(std::lround(cursor.value(2)) == 2);
+
+    cursor.advance_to(8);
+    REQUIRE_FALSE(cursor.is_ramping(1));
+    REQUIRE_THAT(cursor.value(1), WithinAbs(0.25f, 1e-6f));
+    REQUIRE(store.get_value(1) == 0.75f);
+    REQUIRE(store.get_value(2) == 3.0f);
+}
+
 TEST_CASE("ParameterEventQueue exposes mutable and const iteration over active events",
           "[state][params][events]") {
     ParameterEventQueue queue;

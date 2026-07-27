@@ -420,6 +420,16 @@ float out = delay.process(input_sample, delay_in_samples);
 
 ---
 
+### CharacterDelay
+
+Stereo, wet-only delay with clean, vintage-digital, tape, BBD, and diffusion
+processors inside the feedback loop. It includes reverse, freeze, ducking,
+crossfeed, per-character time slew, and a physical tape tier. See the
+[Character Delay guide](character-delay.md) for lifecycle, complete per-method
+API documentation, character selection, and recipes.
+
+---
+
 ### Chorus
 
 Stereo chorus using modulated delay lines. Produces stereo output from mono input with 90-degree LFO phase offset between channels.

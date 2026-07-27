@@ -199,6 +199,11 @@ docs:
     kind: guide
     summary: Plugin format adapters — CLAP, VST3, AU v2, optional AAX entry points, param sync, MIDI, state
 
+  - slug: midi-fx
+    path: guides/midi-fx.md
+    kind: guide
+    summary: Forge MIDI effects — all transforms and parameters, pattern/chord schemas, chain cookbook, exhaustive C++ method API, realtime lifecycle, and host validation
+
   - slug: signal-processing
     path: guides/signal-processing.md
     kind: guide
@@ -208,6 +213,11 @@ docs:
     path: guides/analog-vcf.md
     kind: guide
     summary: Measured Analog VCF voicings, low-level OTA cascade design, real-time use, and latency/PDC contracts
+
+  - slug: character-delay
+    path: guides/character-delay.md
+    kind: guide
+    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
 
   - slug: fdn-reverb
     path: guides/fdn-reverb.md
@@ -446,6 +456,11 @@ docs:
     path: reference/modules.md
     kind: reference
     summary: All subsystems with status and key headers
+
+  - slug: modulation-toolkit
+    path: reference/modulation-toolkit.md
+    kind: reference
+    summary: Modulation sources, control-signal utilities, triggers, envelopes, routing, and worked patch recipes
 
   - slug: node-abi
     path: reference/node-abi.md

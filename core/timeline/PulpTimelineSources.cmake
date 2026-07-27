@@ -18,11 +18,13 @@ function(pulp_resolve_timeline_sources root output)
         sequence.cpp
         sequence_context.cpp
         sequence_scene_internal.cpp
+        note_transform.cpp
         project_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp
         transaction_marker_internal.cpp
         transaction_scene_internal.cpp
+        transaction_note_internal.cpp
         transaction_take_internal.cpp
         transaction_track_state_internal.cpp
         transaction_reduction_support.cpp

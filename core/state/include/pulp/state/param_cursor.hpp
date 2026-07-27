@@ -120,10 +120,10 @@ private:
     float clamp_value(ParamID id, float value) const {
         if (store_) {
             if (const auto* info = store_->info(id)) {
-                // Match StateStore's public write contract: hostile automation
-                // must not smuggle NaN/Inf past the bake-layer range table and
-                // poison DSP state. The declared plain-domain default is the
-                // deterministic fallback for every non-finite value.
+                // Host/injected automation is an untrusted boundary. Like
+                // StateStore::set_value(), replace NaN/Inf with the effective
+                // declared default before clamping so ramps and downstream
+                // integer/enum decoders never observe a non-finite value.
                 if (!std::isfinite(value)) value = info->range.default_value;
                 return std::clamp(value, info->range.min, info->range.max);
             }

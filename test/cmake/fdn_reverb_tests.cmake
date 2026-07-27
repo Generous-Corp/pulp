@@ -23,7 +23,7 @@ pulp_add_test_suite(pulp-test-fdn-reverb
 # declared knob reaches the baked DSP over the production injection path, and
 # that a live tank-rate change — which re-derives every delay length and
 # coefficient in the engine — still allocates nothing.
-add_executable(pulp-test-fdn-reverb-catalog test_fdn_reverb_catalog.cpp)
+add_executable(pulp-test-fdn-reverb-catalog test_forge_fdn_reverb_catalog.cpp)
 target_sources(pulp-test-fdn-reverb-catalog PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
     $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)

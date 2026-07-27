@@ -32,6 +32,7 @@
 #include <pulp/signal/character_delay.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -66,6 +67,15 @@ inline constexpr state::ParamID kReverse = 10;     // stepped 0/1
 
 /// Longest addressable delay, in ms. Matches the DSP's own maximum.
 inline constexpr float kMaxTimeMs = 2000.0f;
+
+/// Stepped controls fail closed on malformed host automation. Numeric controls
+/// retain their last finite value in CharacterDelay's setters; switches must
+/// not turn on merely because +infinity compares greater than their threshold.
+namespace detail {
+inline bool baked_switch_on(float value) noexcept {
+    return std::isfinite(value) && value >= 0.5f;
+}
+}  // namespace detail
 
 struct CharacterDelayInstance {
     signal::CharacterDelay delay;
@@ -162,8 +172,8 @@ inline CustomNodeType make_character_delay_node(Character character,
             s->delay.set_mod(params.value_at(kModRate, offset),
                              params.value_at(kModDepth, offset));
             s->delay.set_duck(params.value_at(kDuck, offset));
-            s->delay.set_freeze(params.value_at(kFreeze, offset) >= 0.5f);
-            s->delay.set_reverse(params.value_at(kReverse, offset) >= 0.5f);
+            s->delay.set_freeze(detail::baked_switch_on(params.value_at(kFreeze, offset)));
+            s->delay.set_reverse(detail::baked_switch_on(params.value_at(kReverse, offset)));
 
             float left = in_left[static_cast<std::size_t>(k)];
             float right = in_right[static_cast<std::size_t>(k)];

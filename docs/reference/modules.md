@@ -435,6 +435,15 @@ send_sysex(inquiry);  // Send over MIDI port
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
 
+### MIDI effects
+
+Pulp's format layer hosts MIDI-only processors, and Forge supplies a bounded,
+hot-swappable ordered transform chain with 20 transforms, fixed host macros,
+pattern/chord data, note-balance enforcement, and realtime-safe publication.
+See the [MIDI FX guide](../guides/midi-fx.md) for the complete transform
+parameter reference, structured authoring schema, cookbook, C++ method API, and
+host-validation contract.
+
 ---
 
 ## signal
@@ -530,6 +539,7 @@ a working convolution and would hide the bug. Assert
 
 | Processor | Header | Description |
 |-----------|--------|-------------|
+| Character Delay | `character_delay.hpp` | Wet-only stereo delay with clean, vintage-digital, tape, BBD, and diffusion feedback-loop characters — see the [dedicated guide](../guides/character-delay.md) |
 | Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
 | Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |

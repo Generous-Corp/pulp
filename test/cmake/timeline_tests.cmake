@@ -150,6 +150,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
         test_timeline_marker_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal
     SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp
         harness/rt_allocation_probe.cpp
@@ -338,6 +339,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_context.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_scene_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/note_transform.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/project_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_codegen.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
@@ -365,6 +367,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_marker_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_note_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
