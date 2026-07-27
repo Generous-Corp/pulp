@@ -16,6 +16,10 @@ contain no sample-valued state. Their `Foo64` spellings therefore alias the same
 precision-independent implementation instead of adding a dummy template
 parameter.
 
+`LpgT` uses `SampleType` for its sample-valued audio/control state and public
+sample-valued controls. Consequently `Lpg64` keeps those calculations in double
+precision rather than only widening the final return value.
+
 ```cpp
 #include <pulp/signal/lfo.hpp>       // or the umbrella <pulp/signal/signal.hpp>
 #include <pulp/signal/envelope.hpp>

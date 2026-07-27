@@ -74,9 +74,8 @@
 namespace pulp::signal {
 
 /// Vactrol-modelled low-pass gate.
-template <typename SampleType = float>
-class LpgT {
-public:
+template <typename SampleType = float> class LpgT {
+  public:
     /// Photoresistor light-onset time constant.
     static constexpr double kRiseMs = 1.5;
 
@@ -89,34 +88,34 @@ public:
     static constexpr double kStrikePulseMs = 3.0;
 
     /// Control-to-amplitude power law.
-    static constexpr float kVcaExponent = 1.5f;
+    static constexpr SampleType kVcaExponent = SampleType{1.5};
 
-    static constexpr float kDefaultFcMinHz = 40.0f;
-    static constexpr float kDefaultFcMaxHz = 12000.0f;
+    static constexpr SampleType kDefaultFcMinHz = SampleType{40};
+    static constexpr SampleType kDefaultFcMaxHz = SampleType{12000};
+    static constexpr SampleType kMinFcHz = SampleType{10};
+    static constexpr SampleType kMaxFcHz = SampleType{20000};
     static constexpr double kDefaultDecayMs = 150.0;
 
     /// How much the closing slows as the cell darkens. 0 is a plain
     /// exponential; the default gives the lengthening tail that separates a
     /// struck object from an RC circuit. Capped below 1 because a droop of 1
     /// would stall the decay at zero instead of reaching it.
-    static constexpr float kDefaultDroop = 0.5f;
-    static constexpr float kMaxDroop = 0.95f;
+    static constexpr SampleType kDefaultDroop = SampleType{0.5};
+    static constexpr SampleType kMaxDroop = SampleType{0.95};
 
     /// Velocity-to-strike exponent for idiom 2.
-    static constexpr float kVelocityCurve = 0.7f;
+    static constexpr SampleType kVelocityCurve = SampleType{0.7};
 
     /// Map a 0..1 velocity to a strike level whose loudness and brightness rise
     /// together the way a struck object's do.
     static SampleType velocity_to_strike(SampleType velocity) {
         const SampleType v = std::clamp(velocity, SampleType{0}, SampleType{1});
-        return static_cast<SampleType>(std::pow(static_cast<float>(v), kVelocityCurve));
+        return std::pow(v, kVelocityCurve);
     }
 
     void prepare(SampleType sample_rate) {
-        // The filter accepts cutoffs down to 1 Hz, so its Nyquist-derived
-        // upper bound must not fall below that lower bound.
-        sample_rate_ = sample_rate >= SampleType{4} ? sample_rate : SampleType{4};
-        filter_.prepare(sample_rate_);
+        filter_.prepare(sample_rate);
+        sample_rate_ = filter_.sample_rate();
         update_coefficients_();
         reset();
     }
@@ -135,17 +134,29 @@ public:
 
     /// 0 = pure VCA (the filter stays wide open), 1 = pure filter (the gain
     /// stays at unity), between = both.
-    void set_colour(float c) { colour_ = std::clamp(c, 0.0f, 1.0f); }
-
-    /// The effective ceiling is additionally capped at `sample_rate / 4` in
-    /// `process()` — see the note there.
-    void set_range_hz(float min_hz, float max_hz) {
-        fc_min_ = std::clamp(min_hz, 10.0f, 20000.0f);
-        fc_max_ = std::clamp(max_hz, fc_min_ * 1.01f, 20000.0f);
-        log_range_ = std::log(fc_max_ / fc_min_);
+    void set_colour(SampleType c) {
+        if (std::isnan(c))
+            c = colour_;
+        colour_ = std::clamp(c, SampleType{0}, SampleType{1});
+        command_cutoff_();
     }
 
-    void set_droop(float d) { droop_ = std::clamp(d, 0.0f, kMaxDroop); }
+    /// The effective ceiling is additionally capped at `sample_rate / 4` when
+    /// the cutoff command is applied — see the note in `process()`.
+    void set_range_hz(SampleType min_hz, SampleType max_hz) {
+        min_hz = normalize_cutoff_endpoint_(min_hz, kDefaultFcMinHz);
+        max_hz = normalize_cutoff_endpoint_(max_hz, kDefaultFcMaxHz);
+        if (min_hz > max_hz)
+            std::swap(min_hz, max_hz);
+        fc_min_ = min_hz;
+        fc_max_ = max_hz;
+        log_range_ = std::log(fc_max_ / fc_min_);
+        command_cutoff_();
+    }
+
+    void set_droop(SampleType d) {
+        droop_ = std::clamp(d, SampleType{0}, kMaxDroop);
+    }
 
     /// Ping the cell. The strike accumulates onto whatever charge is left, which
     /// is idiom 3.
@@ -186,38 +197,49 @@ public:
         command_cutoff_();
 
         const SampleType filtered = filter_.process_lowpass(input);
-        const SampleType gain =
-            amplitude + static_cast<SampleType>(colour_) * (SampleType{1} - amplitude);
+        const SampleType gain = amplitude + colour_ * (SampleType{1} - amplitude);
         return filtered * gain;
     }
 
     /// Conditioned cell state, 0..1 — the value both the amplitude and the
     /// cutoff are derived from. Useful as a modulation source in its own right.
-    SampleType control() const { return control_; }
+    SampleType control() const {
+        return control_;
+    }
 
-    /// Effective cutoff currently commanded to the filter. `reset()` commands
-    /// the cutoff derived from the reset cell state before updating this
-    /// telemetry, so the value never describes a coefficient the filter does
-    /// not hold. This is read-only telemetry for proving the brightness half
-    /// of the coupled vactrol response; it does not participate in processing.
-    SampleType cutoff_hz() const { return cutoff_hz_; }
+    /// Last cutoff command applied to the owned filter. The value is useful for
+    /// metering or visualising the brightness component of the coupled response.
+    /// Reset, processing, and cutoff-affecting setters keep it synchronized.
+    SampleType commanded_cutoff_hz() const {
+        return commanded_cutoff_hz_;
+    }
 
-private:
+    /// Compatibility spelling for the cutoff telemetry.
+    SampleType cutoff_hz() const {
+        return commanded_cutoff_hz();
+    }
+
+  private:
+    static SampleType normalize_cutoff_endpoint_(SampleType hz, SampleType nan_fallback) {
+        if (std::isnan(hz))
+            hz = nan_fallback;
+        return std::clamp(hz, kMinFcHz, kMaxFcHz);
+    }
+
     void command_cutoff_() {
-        const float filter_control =
-            1.0f - colour_ * (1.0f - static_cast<float>(control_));
-        const auto cutoff =
-            static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control));
-        cutoff_hz_ = std::min(cutoff, SampleType{0.25} * sample_rate_);
-        filter_.set_cutoff(cutoff_hz_);
+        const SampleType filter_control = SampleType{1} - colour_ * (SampleType{1} - control_);
+        const SampleType cutoff = fc_min_ * std::exp(log_range_ * filter_control);
+        filter_.set_cutoff(std::min(cutoff, SampleType{0.25} * sample_rate_));
+        commanded_cutoff_hz_ = filter_.cutoff();
     }
 
     void update_coefficients_() {
         rise_coeff_ = coeff_for_(rise_ms_);
         fall_coeff_ = coeff_for_(decay_ms_);
-        pulse_samples_ =
-            static_cast<long long>(std::lround(kStrikePulseMs * 0.001 * static_cast<double>(sample_rate_)));
-        if (pulse_samples_ < 1) pulse_samples_ = 1;
+        pulse_samples_ = static_cast<long long>(
+            std::lround(kStrikePulseMs * 0.001 * static_cast<double>(sample_rate_)));
+        if (pulse_samples_ < 1)
+            pulse_samples_ = 1;
     }
 
     SampleType coeff_for_(double ms) const {
@@ -238,8 +260,7 @@ private:
             // darkens the recovery slows, which is the decay contour of struck
             // wood and skin. droop = 0 recovers the plain first-order model.
             const SampleType coeff =
-                fall_coeff_ * (SampleType{1}
-                               - static_cast<SampleType>(droop_) * (SampleType{1} - control_));
+                fall_coeff_ * (SampleType{1} - droop_ * (SampleType{1} - control_));
             control_ += coeff * (target - control_);
         }
         control_ = std::clamp(snap_to_zero(control_), SampleType{0}, SampleType{1});
@@ -248,7 +269,7 @@ private:
     TptFilterT<SampleType> filter_{};
     SampleType sample_rate_ = SampleType{48000};
     SampleType control_ = SampleType{0};
-    SampleType cutoff_hz_ = static_cast<SampleType>(kDefaultFcMinHz);
+    SampleType commanded_cutoff_hz_ = kDefaultFcMinHz;
     SampleType gate_ = SampleType{0};
     SampleType pulse_level_ = SampleType{0};
     SampleType rise_coeff_ = SampleType{0};
@@ -257,11 +278,11 @@ private:
     long long pulse_samples_ = 144;
     double rise_ms_ = kRiseMs;
     double decay_ms_ = kDefaultDecayMs;
-    float fc_min_ = kDefaultFcMinHz;
-    float fc_max_ = kDefaultFcMaxHz;
-    float log_range_ = 5.7037825f; // log(12000 / 40)
-    float colour_ = 0.5f;
-    float droop_ = kDefaultDroop;
+    SampleType fc_min_ = kDefaultFcMinHz;
+    SampleType fc_max_ = kDefaultFcMaxHz;
+    SampleType log_range_ = static_cast<SampleType>(5.703782474656201); // log(12000 / 40)
+    SampleType colour_ = SampleType{0.5};
+    SampleType droop_ = kDefaultDroop;
 };
 
 using Lpg = LpgT<float>;

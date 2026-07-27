@@ -164,6 +164,11 @@ public:
             flutter_lfo_[i].reset(static_cast<double>(i) /
                                   static_cast<double>(kNumChannels));
         }
+        // Reset snaps the size glide too. Recompute every length-dependent
+        // coefficients now so direct tank users cannot observe target delays
+        // paired with stale decay or damping state.
+        recompute_derived_state(controls_, true);
+        cached_ = controls_;
     }
 
     void set_active_channels(int n) {
@@ -193,6 +198,9 @@ public:
     double applied_gain(int channel) const {
         return gain_[static_cast<std::size_t>(channel)];
     }
+    // Structural telemetry for the acceptance suite: the public reverb drive
+    // must reach the in-loop saturator independently of output makeup/limiting.
+    double loop_drive() const { return drive_; }
     double worst_case_boost() const { return worst_case_boost_; }
     // Structural telemetry for the acceptance suite: delay construction is a
     // normative equation, so expose its realized sample count rather than
@@ -209,41 +217,8 @@ public:
         if (c.size != cached_.size) derive_lengths(c.size);
         for (int i = 0; i < kNumChannels; ++i) {
             current_delay_[i] += (target_delay_[i] - current_delay_[i]) * (1.0 - glide_);
-            loop_delay_[i] =
-                current_delay_[i] + loop_diffusion_[static_cast<std::size_t>(i)].total_delay();
         }
-
-        // Worst-case per-pass boost, from every stage that can add energy.
-        // Flux is absorptive-only and contributes exactly 1; the shimmer term
-        // is the injection weight, which is already 1/sqrt(active_n) scaled.
-        shimmer_weight_ = ShimmerBank<SampleType>::injection_weight(c.shimmer, active_n_);
-        worst_case_boost_ =
-            eq_.worst_case_boost() * flux_.worst_case_boost() * (1.0 + shimmer_weight_);
-
-        const double ceiling = kGainCeil / worst_case_boost_;
-        const double authority = c.bloom * bloom_authority(c.decay);
-        const double t60 = std::max(c.decay, 0.01);
-        for (int i = 0; i < kNumChannels; ++i) {
-            // Jot's absorptive law: every line reaches -60 dB at the same time
-            // regardless of its length. The length that matters is the whole
-            // LOOP — the delay line plus the in-loop diffusion cascade, which is
-            // lossless but very much not delay-free. Using the bare line length
-            // here computes the gain for a loop that does not exist and stretches
-            // the realized decay by the cascade's share of the round trip.
-            const double jot =
-                std::pow(10.0, -3.0 * loop_delay_[i] / (t60 * tank_rate_));
-            double g = std::min(jot, ceiling);
-            g += (ceiling - g) * authority;
-            gain_[i] = g;
-        }
-
-        if (c.damp_hi != cached_.damp_hi || c.damp_lo != cached_.damp_lo ||
-            c.size != cached_.size)
-            derive_damping(c.damp_hi, c.damp_lo);
-
-        mod_depth_ = c.mod * kModMaxFraction * mod_depth_shrink(c.decay);
-        loop_g_ = static_cast<SampleType>(c.diffusion * kLoopDiffusionG);
-        drive_ = c.drive;
+        recompute_derived_state(c, false);
 
         modulation_.step_walks();
         flux_.tick_control(kControlRateSamples);
@@ -322,6 +297,45 @@ public:
     }
 
 private:
+    void recompute_derived_state(const TankControls& c, bool force_damping) {
+        for (int i = 0; i < kNumChannels; ++i) {
+            loop_delay_[i] =
+                current_delay_[i] + loop_diffusion_[static_cast<std::size_t>(i)].total_delay();
+        }
+
+        // Worst-case per-pass boost, from every stage that can add energy.
+        // Flux is absorptive-only and contributes exactly 1; the shimmer term
+        // is the injection weight, which is already 1/sqrt(active_n) scaled.
+        shimmer_weight_ = ShimmerBank<SampleType>::injection_weight(c.shimmer, active_n_);
+        worst_case_boost_ =
+            eq_.worst_case_boost() * flux_.worst_case_boost() * (1.0 + shimmer_weight_);
+
+        const double ceiling = kGainCeil / worst_case_boost_;
+        const double authority = c.bloom * bloom_authority(c.decay);
+        const double t60 = std::max(c.decay, 0.01);
+        for (int i = 0; i < kNumChannels; ++i) {
+            // Jot's absorptive law: every line reaches -60 dB at the same time
+            // regardless of its length. The length that matters is the whole
+            // LOOP — the delay line plus the in-loop diffusion cascade, which is
+            // lossless but very much not delay-free. Using the bare line length
+            // here computes the gain for a loop that does not exist and stretches
+            // the realized decay by the cascade's share of the round trip.
+            const double jot =
+                std::pow(10.0, -3.0 * loop_delay_[i] / (t60 * tank_rate_));
+            double g = std::min(jot, ceiling);
+            g += (ceiling - g) * authority;
+            gain_[i] = g;
+        }
+
+        if (force_damping || c.damp_hi != cached_.damp_hi ||
+            c.damp_lo != cached_.damp_lo || c.size != cached_.size)
+            derive_damping(c.damp_hi, c.damp_lo);
+
+        mod_depth_ = c.mod * kModMaxFraction * mod_depth_shrink(c.decay);
+        loop_g_ = static_cast<SampleType>(c.diffusion * kLoopDiffusionG);
+        drive_ = c.drive;
+    }
+
     // Defense in depth. One guard at the output is not enough in a 16-line
     // recursive structure: a single corrupted channel is inaudible at the sum
     // until the matrix has already spread it into every other line.

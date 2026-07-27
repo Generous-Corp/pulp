@@ -322,7 +322,7 @@ TEST_CASE("a groove round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":4") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":5") !=
             std::string::npos);
     REQUIRE(first.value().json.find(kShuffleJson) != std::string::npos);
 
@@ -490,8 +490,12 @@ TEST_CASE("a v3 sequence document loads as a sequence with no feel",
     const auto groove_at = legacy.find(straight_member);
     REQUIRE(groove_at != std::string::npos);
     legacy.erase(groove_at, straight_member.size());
+    constexpr std::string_view empty_scenes = R"("scenes":[],)";
+    const auto scenes_at = legacy.find(empty_scenes);
+    REQUIRE(scenes_at != std::string::npos);
+    legacy.erase(scenes_at, empty_scenes.size());
     constexpr std::string_view current_version =
-        R"("type_name":"pulp.timeline.sequence","version":4)";
+        R"("type_name":"pulp.timeline.sequence","version":5)";
     const auto version_at = legacy.find(current_version);
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at, current_version.size(),

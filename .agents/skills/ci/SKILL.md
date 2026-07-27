@@ -722,6 +722,10 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   a tracked file, lower its `max_loc` to the exact new line count in the same
   change. When a new overlay companion file triggers the large-file warning,
   split it before it becomes another hotspot.
+- **Modulation toolkit tests have explicit owners.** The contract, sources,
+  tools, events, and voice/composition suites are separate frozen hotspots in
+  `hotspot_size_guard.json`. Put new coverage in the matching owner and extract
+  another behavioral domain before growing one past its recorded ceiling.
 - **Reskinnability ratchet (`token-coverage-ratchet` ctest).** Driven by
   `tools/scripts/token_coverage_check.py`: fails if a `core/view/src` paint file
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a

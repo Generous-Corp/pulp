@@ -40,8 +40,15 @@ Project rich_project() {
     // clip needs its own.
     auto musical_track = take_value(Track::create({6}, "musical", {note_clip, media_clip}));
     auto absolute_track = take_value(Track::create({10}, "absolute", {absolute}));
-    auto sequence = take_value(
-        Sequence::create({3}, "sequence", TickDuration{4'000}, {musical_track, absolute_track}));
+    auto lane = take_value(ChordScaleLane::create({}));
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .musical_duration = TickDuration{4'000},
+        .tracks = {musical_track, absolute_track},
+        .chord_scale_lane = std::move(lane),
+        .scenes = {Scene{{13}, "launcher", {Slot{{14}, {4}, launch_immediate(), {}}}}},
+    }));
     auto other = take_value(Sequence::create({7}, "other", TickDuration{100}, {}));
 
     return take_value(Project::create(ProjectInput{{1},
@@ -89,6 +96,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
     SECTION("structure the document does have is present") {
         REQUIRE(has(present, Concept::TrackFlat));
         REQUIRE(has(present, Concept::SequenceMultiple));
+        REQUIRE(counted.count(Concept::ClipLaunch) == 1);
     }
 
     SECTION("concepts the document does not use are absent") {
@@ -115,6 +123,9 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         const auto owners = counted.owners(Concept::ClipGain);
         REQUIRE(owners.size() == 1);
         REQUIRE(owners[0] == ItemId{4});
+        const auto launch_owners = counted.owners(Concept::ClipLaunch);
+        REQUIRE(launch_owners.size() == 1);
+        REQUIRE(launch_owners[0] == ItemId{13});
     }
 }
 

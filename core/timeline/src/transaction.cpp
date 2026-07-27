@@ -3,6 +3,7 @@
 #include "transaction_automation_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
+#include "transaction_scene_internal.hpp"
 #include "transaction_reduction_support.hpp"
 #include "transaction_take_internal.hpp"
 #include "transaction_track_state_internal.hpp"
@@ -210,6 +211,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         } else if (detail::is_marker_command(envelope.command)) {
             auto reduced = detail::reduce_marker_command(project, envelope.command, transaction,
                                                          envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_scene_command(envelope.command)) {
+            auto reduced = detail::reduce_scene_command(project, envelope.command, transaction,
+                                                        envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

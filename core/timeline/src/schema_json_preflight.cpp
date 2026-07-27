@@ -157,9 +157,8 @@ class StructuralScanner {
         if (!requested[2].found || !requested[0].found)
             return true;
         data = requested[0].span;
-        valid_shape = member_count == requested.size() &&
-                      u32_value(requested[2].span, version) && data.begin < data.end &&
-                      source_[data.begin] == '{';
+        valid_shape = member_count == requested.size() && u32_value(requested[2].span, version) &&
+                      data.begin < data.end && source_[data.begin] == '{';
         return true;
     }
 
@@ -175,6 +174,19 @@ class StructuralScanner {
         set_error(PersistenceErrorCode::UnsupportedSchemaVersion, offset, version, maximum_version,
                   path);
         return false;
+    }
+
+    bool structural_envelope(Span value, std::string_view expected_type, const std::string& path,
+                             EnvelopeView& result, std::uint32_t minimum_version = 1,
+                             std::uint32_t maximum_version = 1) {
+        if (!envelope(value, result.type, result.version, result.data, result.valid_shape))
+            return false;
+        if (result.type != expected_type) {
+            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        return require_structural_shape(result.valid_shape, result.version, path, value.begin,
+                                        minimum_version, maximum_version);
     }
 
     enum ValueShape : std::uint8_t {
@@ -437,18 +449,10 @@ class StructuralScanner {
     }
 
     bool walk_representation(Span value, const std::string& path) {
-        std::string type;
-        std::uint32_t version = 0;
-        Span data;
-        bool valid_shape = false;
-        if (!envelope(value, type, version, data, valid_shape))
+        EnvelopeView representation;
+        if (!structural_envelope(value, "pulp.timeline.asset_representation", path, representation))
             return false;
-        if (type != "pulp.timeline.asset_representation") {
-            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
-            return false;
-        }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
-            return false;
+        const auto data = representation.data;
         const auto data_path = path + "/data";
         if (!require_member(data, "content_hash", StringShape, data_path) ||
             !require_member(data, "role", StringShape, data_path) ||
@@ -492,6 +496,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"musical_duration"},
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"regions"},
+            detail::JsonSpanMember{"scenes"},
             detail::JsonSpanMember{"tracks"},
         };
         // These indices are positional into `requested`, which is in canonical
@@ -545,7 +550,13 @@ class StructuralScanner {
         }
         if (requested[2].found && !walk_groove(groove, data_path + "/groove"))
             return false;
-        if (!requested[8].found) {
+        const auto requires_scenes = detail::sequence_schema_policy.requires_scenes(version);
+        if (requires_scenes != requested[8].found ||
+            (requested[8].found && !has_shape(requested[8].span, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
+            return false;
+        }
+        if (!requested[9].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
@@ -566,22 +577,26 @@ class StructuralScanner {
                             }))
             return false;
         if (requested[1].found &&
-            !governed_array(chord_scale_lane, counts_.chord_scale_events,
-                            limits_.max_chord_scale_events, data_path + "/chord_scale_lane",
-                            [&](Span event, std::size_t index) {
-                                const auto event_path =
-                                    data_path + "/chord_scale_lane/" + std::to_string(index);
-                                return require_member(event, "chord_quality", StringShape,
-                                                      event_path) &&
-                                       require_member(event, "chord_root", NumberShape,
-                                                      event_path) &&
-                                       require_member(event, "position", StringShape, event_path) &&
-                                       require_member(event, "scale_mode", StringShape,
-                                                      event_path) &&
-                                       require_member(event, "scale_root", NumberShape, event_path);
+            !governed_array(
+                chord_scale_lane, counts_.chord_scale_events, limits_.max_chord_scale_events,
+                data_path + "/chord_scale_lane", [&](Span event, std::size_t index) {
+                    const auto event_path =
+                        data_path + "/chord_scale_lane/" + std::to_string(index);
+                    return require_member(event, "chord_quality", StringShape, event_path) &&
+                           require_member(event, "chord_root", NumberShape, event_path) &&
+                           require_member(event, "position", StringShape, event_path) &&
+                           require_member(event, "scale_mode", StringShape, event_path) &&
+                           require_member(event, "scale_root", NumberShape, event_path);
+                }))
+            return false;
+        if (requested[8].found &&
+            !governed_array(requested[8].span, counts_.scenes, limits_.max_scenes,
+                            data_path + "/scenes", [&](Span scene, std::size_t index) {
+                                return walk_scene(scene,
+                                                  data_path + "/scenes/" + std::to_string(index));
                             }))
             return false;
-        const auto tracks = requested[8].span;
+        const auto tracks = requested[9].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
@@ -609,41 +624,63 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, groove.begin, 0, 0, path + "/steps");
             return false;
         }
-        return governed_array(steps, counts_.groove_steps, limits_.max_groove_steps,
-                              path + "/steps", [&](Span step, std::size_t index) {
-                                  const auto step_path = path + "/steps/" + std::to_string(index);
-                                  return require_member(step, "timing_offset", StringShape,
-                                                        step_path) &&
-                                         require_member(step, "velocity_scale", NumberShape,
-                                                        step_path);
-                              });
+        return governed_array(
+            steps, counts_.groove_steps, limits_.max_groove_steps, path + "/steps",
+            [&](Span step, std::size_t index) {
+                const auto step_path = path + "/steps/" + std::to_string(index);
+                return require_member(step, "timing_offset", StringShape, step_path) &&
+                       require_member(step, "velocity_scale", NumberShape, step_path);
+            });
+    }
+
+    bool walk_scene(Span value, const std::string& path) {
+        EnvelopeView scene;
+        if (!structural_envelope(value, "pulp.timeline.scene", path, scene))
+            return false;
+        const auto data_path = path + "/data";
+        if (!require_member(scene.data, "id", StringShape, data_path) ||
+            !require_member(scene.data, "name", StringShape, data_path))
+            return false;
+        Span slots;
+        bool found = false;
+        if (!member(scene.data, "slots", slots, found))
+            return false;
+        if (!found || !has_shape(slots, ArrayShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, found ? slots.begin : scene.data.begin,
+                      0, 0, data_path + "/slots");
+            return false;
+        }
+        return governed_array(
+            slots, counts_.slots, limits_.max_slots, data_path + "/slots",
+            [&](Span slot, std::size_t index) {
+                const auto slot_path = data_path + "/slots/" + std::to_string(index);
+                EnvelopeView slot_view;
+                return structural_envelope(slot, "pulp.timeline.slot", slot_path, slot_view) &&
+                       require_member(slot_view.data, "clip_id", StringShape,
+                                      slot_path + "/data") &&
+                       require_member(slot_view.data, "follow", ObjectShape, slot_path + "/data") &&
+                       require_member(slot_view.data, "id", StringShape, slot_path + "/data") &&
+                       require_member(slot_view.data, "launch_quantize", ObjectShape,
+                                      slot_path + "/data");
+            });
     }
 
     // Markers and regions share an envelope shape; a region additionally carries
     // its span length.
     bool walk_annotation(Span value, std::string_view expected_type, bool has_duration,
                          const std::string& path) {
-        std::string type;
-        std::uint32_t version = 0;
-        Span data;
-        bool valid_shape = false;
-        if (!envelope(value, type, version, data, valid_shape))
-            return false;
-        if (type != expected_type) {
-            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
-            return false;
-        }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        EnvelopeView annotation;
+        if (!structural_envelope(value, expected_type, path, annotation))
             return false;
         const auto data_path = path + "/data";
-        if (!require_member(data, "id", StringShape, data_path) ||
-            !require_member(data, "name", StringShape, data_path) ||
-            !require_member(data, "position", StringShape, data_path) ||
-            (has_duration && !require_member(data, "duration", StringShape, data_path)))
+        if (!require_member(annotation.data, "id", StringShape, data_path) ||
+            !require_member(annotation.data, "name", StringShape, data_path) ||
+            !require_member(annotation.data, "position", StringShape, data_path) ||
+            (has_duration && !require_member(annotation.data, "duration", StringShape, data_path)))
             return false;
         Span color;
         bool has_color = false;
-        if (!member(data, "color", color, has_color))
+        if (!member(annotation.data, "color", color, has_color))
             return false;
         if (has_color && !has_shape(color, NumberShape)) {
             set_error(PersistenceErrorCode::InvalidSchema, color.begin, 0, 0, data_path + "/color");
@@ -653,20 +690,13 @@ class StructuralScanner {
     }
 
     bool walk_track(Span value, const std::string& path) {
-        std::string type;
-        std::uint32_t version = 0;
-        Span data;
-        bool valid_shape = false;
-        if (!envelope(value, type, version, data, valid_shape))
+        EnvelopeView track;
+        if (!structural_envelope(value, detail::track_schema_policy.type_name, path, track,
+                                 detail::track_schema_policy.oldest_readable_version,
+                                 detail::track_schema_policy.current_version))
             return false;
-        if (type != detail::track_schema_policy.type_name) {
-            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
-            return false;
-        }
-        if (!require_structural_shape(valid_shape, version, path, value.begin,
-                                      detail::track_schema_policy.oldest_readable_version,
-                                      detail::track_schema_policy.current_version))
-            return false;
+        const auto version = track.version;
+        const auto data = track.data;
         const auto data_path = path + "/data";
         std::array requested{
             detail::JsonSpanMember{"automation_lanes"},
@@ -812,25 +842,16 @@ class StructuralScanner {
     }
 
     bool walk_take(Span value, const std::string& path) {
-        std::string type;
-        std::uint32_t version = 0;
-        Span data;
-        bool valid_shape = false;
-        if (!envelope(value, type, version, data, valid_shape))
+        EnvelopeView take;
+        if (!structural_envelope(value, "pulp.timeline.take", path, take))
             return false;
-        if (type != "pulp.timeline.take" ||
-            !require_structural_shape(valid_shape, version, path, value.begin)) {
-            if (!has_error_)
-                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
-            return false;
-        }
         const auto data_path = path + "/data";
-        return require_member(data, "asset_id", StringShape, data_path) &&
-               require_member(data, "frame_count", StringShape, data_path) &&
-               require_member(data, "id", StringShape, data_path) &&
-               require_member(data, "placement_start", StringShape, data_path) &&
-               require_member(data, "sample_rate", ObjectShape, data_path) &&
-               require_member(data, "source_start", StringShape, data_path);
+        return require_member(take.data, "asset_id", StringShape, data_path) &&
+               require_member(take.data, "frame_count", StringShape, data_path) &&
+               require_member(take.data, "id", StringShape, data_path) &&
+               require_member(take.data, "placement_start", StringShape, data_path) &&
+               require_member(take.data, "sample_rate", ObjectShape, data_path) &&
+               require_member(take.data, "source_start", StringShape, data_path);
     }
 
     bool walk_automation_lane(Span value, const std::string& path) {

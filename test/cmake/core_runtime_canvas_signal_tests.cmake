@@ -149,11 +149,12 @@ pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
-# Modulation and utility toolkit. Split three ways by domain — sources and
-# control tools, the event kit and envelopes, then the voice-level blocks and
-# the composition patches — so each file stays well under the ~1,200-line
-# convention and the failing domain is obvious from the target name.
-pulp_add_test_suite(pulp-test-signal-mod LIBRARIES pulp::signal)
+# Modulation and utility toolkit. Contracts, sources, control tools, events,
+# and voice-level compositions have separate owners so the alias inventory and
+# behavioral suites can evolve without recreating a mixed test hotspot.
+pulp_add_test_suite(pulp-test-signal-mod-contract LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-sources LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-tools LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
 # Alias/passband claims here are measured with the shared tone-projection

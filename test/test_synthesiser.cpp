@@ -34,6 +34,11 @@ public:
         SynthesiserVoice::on_note_off();
         ++note_off_calls;
     }
+    void on_choke(float fade_ms) override {
+        last_choke_fade_ms = fade_ms;
+        ++choke_calls;
+        SynthesiserVoice::on_choke(fade_ms);
+    }
     void on_pitch_bend(float semis) override {
         ++pitch_bend_calls;
         last_pitch_bend = semis;
@@ -65,12 +70,14 @@ public:
 
     int note_on_calls = 0;
     int note_off_calls = 0;
+    int choke_calls = 0;
     int pitch_bend_calls = 0;
     int aftertouch_calls = 0;
     int cc_calls = 0;
     int rendered_samples = 0;
     uint8_t last_velocity = 0;
     float last_pitch_bend = 0.0f;
+    float last_choke_fade_ms = 0.0f;
     float last_aftertouch = 0.0f;
     uint8_t last_cc_number = 0;
     uint8_t last_cc_value = 0;
@@ -356,16 +363,52 @@ TEST_CASE("Synthesiser voice group choke releases matching held voices",
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/1);
     synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/1,
-                  /*choke_group=*/true);
+                  /*choke_group=*/true, /*choke_fade_ms=*/3.5f);
 
     REQUIRE(synth.voice(0).releasing());
     REQUIRE(synth.voice(0).note().voice_group == 1);
     REQUIRE(synth.voice(0).note_off_calls == 1);
+    REQUIRE(synth.voice(0).choke_calls == 1);
+    REQUIRE_THAT(synth.voice(0).last_choke_fade_ms, WithinAbs(3.5f, 1e-6f));
 
     REQUIRE(synth.voice(1).active());
     REQUIRE_FALSE(synth.voice(1).releasing());
     REQUIRE(synth.voice(1).note().note == 46);
     REQUIRE(synth.voice(1).note().voice_group == 1);
+}
+
+TEST_CASE("Synthesiser MIDI-buffer policy propagates group and choke fade",
+          "[midi][synth][choke]") {
+    Synthesiser<TestVoice> synth(4);
+    MidiBuffer events;
+    events.add(note_on_ev(0, 42, 100, 2));
+    events.add(note_on_ev(0, 46, 100, 6));
+    float out[12]{};
+
+    synth.process(events, out, 12, SynthesiserNoteOnPolicy{
+        .voice_group = 15,
+        .choke_group = true,
+        .choke_fade_ms = 4.0f,
+    });
+
+    REQUIRE(synth.voice(0).note().voice_group == 15);
+    REQUIRE(synth.voice(0).choke_calls == 1);
+    REQUIRE_THAT(synth.voice(0).last_choke_fade_ms, WithinAbs(4.0f, 1e-6f));
+    REQUIRE(synth.voice(1).note().voice_group == 15);
+}
+
+TEST_CASE("Synthesiser group choke reaches a ringing release tail",
+          "[midi][synth][choke]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/15);
+    synth.note_off(0, 46);
+    REQUIRE(synth.voice(0).releasing());
+
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/15,
+                  /*choke_group=*/true, /*choke_fade_ms=*/4.0f);
+
+    REQUIRE(synth.voice(0).choke_calls == 1);
+    REQUIRE_THAT(synth.voice(0).last_choke_fade_ms, WithinAbs(4.0f, 1e-6f));
 }
 
 TEST_CASE("Synthesiser voice group choke is channel-scoped",

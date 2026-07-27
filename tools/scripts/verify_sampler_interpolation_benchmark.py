@@ -50,7 +50,7 @@ SOURCE_BUNDLE_PATHS = (
     "core/signal/include/pulp/signal/interpolator.hpp",
     "test/support/sample_interpolation_render.hpp",
     "test/sample_interpolation_benchmark.cpp",
-    "test/cmake/app_audio_host_tests.cmake",
+    "test/cmake/sampler_interpolation_benchmark_tests.cmake",
 )
 
 

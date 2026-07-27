@@ -92,6 +92,64 @@ TEST_CASE("Registered payload retention participates in journal and undo byte li
     }
 }
 
+TEST_CASE("Removed persistent scenes are conservatively charged to the undo byte limit") {
+    std::vector<Slot> slots;
+    slots.reserve(128);
+    for (std::uint64_t index = 0; index < 128; ++index)
+        slots.push_back(Slot{{100 + index}, {}, launch_immediate(), {}});
+    const Scene raw_scene{{7}, "large scene", SlotList(slots)};
+    auto sequence = Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .scenes = {raw_scene},
+    });
+    REQUIRE(sequence);
+    const Scene persistent_scene = *sequence->find_scene({7});
+    const auto raw_charge = retained_size(Command{InsertScene{{3}, raw_scene}});
+    const auto persistent_charge = retained_size(Command{InsertScene{{3}, persistent_scene}});
+    REQUIRE(persistent_charge > raw_charge);
+    REQUIRE(persistent_charge >
+            sizeof(InsertScene) + persistent_scene.name.size() +
+                persistent_scene.slots.size() * sizeof(Slot));
+
+    auto project = Project::create(ProjectInput{
+        .id = {1},
+        .name = "project",
+        .next_item_id = 1'000,
+        .root_sequence_id = {3},
+        .sequences = {std::move(sequence).value()},
+    });
+    REQUIRE(project);
+    const auto candidate_charge =
+        retained_size(Command{RemoveScene{{3}, {7}}}) + persistent_charge;
+
+    SECTION("one byte below the owned-storage charge rejects atomically") {
+        SessionLimits limits;
+        limits.undo.max_retained_bytes = candidate_charge - 1;
+        auto session = std::move(DocumentSession::create(project.value(), limits)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto rejected =
+            session->submit(writer, session_transaction(writer, {}, {RemoveScene{{3}, {7}}}));
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::UndoFull);
+        REQUIRE(session->revision() == DocumentRevision{});
+        REQUIRE(session->journal().entries().empty());
+        REQUIRE(session->snapshot()->find_sequence({3})->find_scene({7}));
+    }
+
+    SECTION("the conservative owned-storage charge admits the removal") {
+        SessionLimits limits;
+        limits.undo.max_retained_bytes = candidate_charge;
+        auto session = std::move(DocumentSession::create(project.value(), limits)).value();
+        auto writer = std::move(session->register_writer()).value();
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {}, {RemoveScene{{3}, {7}}})));
+        REQUIRE_FALSE(session->snapshot()->find_sequence({3})->find_scene({7}));
+        REQUIRE(session->undo(writer));
+        REQUIRE(session->snapshot()->find_sequence({3})->find_scene({7}));
+    }
+}
+
 TEST_CASE("Registered payload retries compare canonical semantics across allocations") {
     const auto registry = registered_int_registry();
     const auto make_clip = [&](int value) {

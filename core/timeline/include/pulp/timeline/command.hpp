@@ -234,12 +234,40 @@ struct SetGroove {
     GrooveTemplate replacement;
 };
 
+struct InsertScene {
+    ItemId sequence_id;
+    Scene scene;
+    // Empty appends. An inverse names the item that originally followed the
+    // removed scene so undo restores authored order exactly.
+    std::optional<ItemId> before_scene_id = std::nullopt;
+};
+
+struct RemoveScene {
+    ItemId sequence_id;
+    ItemId scene_id;
+};
+
+struct InsertSlot {
+    ItemId sequence_id;
+    ItemId scene_id;
+    Slot slot;
+    // Empty appends. See InsertScene::before_scene_id.
+    std::optional<ItemId> before_slot_id = std::nullopt;
+};
+
+struct RemoveSlot {
+    ItemId sequence_id;
+    ItemId scene_id;
+    ItemId slot_id;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
                  RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
                  SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker,
-                 InsertRegion, RemoveRegion, SetChordScaleLane, SetGroove>;
+                 InsertRegion, RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene,
+                 InsertSlot, RemoveSlot>;
 
 struct CommandEnvelope {
     CommandId id;

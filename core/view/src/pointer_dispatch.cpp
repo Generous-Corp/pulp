@@ -76,11 +76,100 @@ bool still_in_tree(View* needle, View* root) {
         if (still_in_tree(needle, root->child_at(i))) return true;
     return false;
 }
+
+// Blur every root-local focus holder except `keep`. Focus callbacks may
+// synchronously claim a replacement (IME commit is the common case), so a
+// single snapshot is insufficient. The bounded fallback guarantees hostile
+// callbacks cannot spin forever while still leaving a focus slot latched.
+bool drain_root_focus(View& root, View* keep, View* protected_target) {
+    constexpr size_t kMaxReentrantFocusHops = 64;
+    for (size_t hop = 0; hop < kMaxReentrantFocusHops; ++hop) {
+        if (protected_target &&
+            !still_in_tree(protected_target, &root))
+            return false;
+
+        auto& focus = root.interaction().focused_input;
+        View* current = focus;
+        if (!current || current == keep) return true;
+        if (!still_in_tree(current, &root)) {
+            focus = nullptr;
+            if (View::focused_input_ == current)
+                View::focused_input_ = nullptr;
+            continue;
+        }
+
+        current->release_input_focus();
+        current->on_focus_changed(false);
+    }
+
+    // Pathological focus callbacks can form a cycle. Do not call the virtual
+    // callback again here; force-clear the final root slot and base visual
+    // state without giving the cycle another chance to relatch.
+    auto& focus = root.interaction().focused_input;
+    View* current = focus;
+    if (current && current != keep) {
+        if (still_in_tree(current, &root)) {
+            current->release_input_focus();
+            current->View::on_focus_changed(false);
+        } else {
+            focus = nullptr;
+            if (View::focused_input_ == current)
+                View::focused_input_ = nullptr;
+        }
+    }
+    return !protected_target || still_in_tree(protected_target, &root);
+}
 }  // namespace
+
+bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
+                                   const MouseEvent& event, int click_count) {
+    if (event.button != MouseButton::left ||
+        !should_yield_to_gesture(root, event))
+        return false;
+
+    View* handoff_target = drag_target;
+    drag_target = nullptr;
+    if (event.phase != MousePhase::press) {
+        deliver_gesture_handoff(root, handoff_target, event.window_position,
+                                event.modifiers, click_count);
+    }
+    return true;
+}
+
+bool transfer_input_focus(View& root, View* target) {
+    if (target && !still_in_tree(target, &root)) return false;
+    const bool target_focusable = target && target->focusable();
+    View* keep = target_focusable ? target : nullptr;
+    if (!drain_root_focus(root, keep, target)) return false;
+    if (!target) return false;
+    if (!target_focusable) return still_in_tree(target, &root);
+    if (root.interaction().focused_input == target) return true;
+
+    target->on_focus_changed(true);
+    if (!still_in_tree(target, &root)) return false;
+    // A gain callback may also claim a replacement. The explicit clicked
+    // target still wins; blur that replacement before publishing the target.
+    if (!drain_root_focus(root, target, target)) return false;
+    target->claim_input_focus();
+    return true;
+}
+
+View* focused_input_under_root(View& root) {
+    View* focused = root.interaction().focused_input;
+    return still_in_tree(focused, &root) ? focused : nullptr;
+}
 
 void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         PointerType pointer_type, float pressure) {
+    deliver_mouse_drag(root, target, root_pt, modifiers, click_count,
+                       pointer_type, pressure, MouseButton::left);
+}
+
+void deliver_mouse_drag(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count,
+                        PointerType pointer_type, float pressure,
+                        MouseButton button) {
     if (!still_in_tree(target, &root)) return;
 
     const Point local = point_to_local(root_pt, target, &root);
@@ -89,7 +178,7 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     MouseEvent me;
     me.position = local;
     me.window_position = root_pt;
-    me.button = MouseButton::left;
+    me.button = button;
     me.modifiers = modifiers;
     me.click_count = click_count;
     me.is_down = true;  // the button is still held during a drag
@@ -97,6 +186,11 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.pointer_type = pointer_type;
     me.pressure = pressure;
     target->on_mouse_event(me);
+
+    // The legacy callbacks carry no button identity and historically mean the
+    // primary/left button. Sending right or middle input through them would
+    // make an auxiliary drag adjust ordinary knobs as if it were left-dragged.
+    if (button != MouseButton::left) return;
 
     // A modern handler may unmount the tree it was dispatched into (a state
     // change that destroys the widget). Re-validate before the legacy hop.
@@ -118,7 +212,24 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
 
 bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count, bool bubble) {
+    return deliver_mouse_down(root, target, root_pt, modifiers, click_count,
+                              bubble, MouseButton::left);
+}
+
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button) {
+    return deliver_mouse_down(root, target, root_pt, modifiers, click_count,
+                              bubble, button, MouseDownHost{});
+}
+
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button, const MouseDownHost& host) {
     if (!still_in_tree(target, &root)) return false;
+    const auto should_continue = [&] {
+        return !host.should_continue || host.should_continue();
+    };
 
     const Point local = point_to_local(root_pt, target, &root);
 
@@ -126,7 +237,7 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
     MouseEvent me;
     me.position = local;
     me.window_position = root_pt;
-    me.button = MouseButton::left;
+    me.button = button;
     me.modifiers = modifiers;
     me.click_count = click_count;
     me.is_down = true;
@@ -135,11 +246,14 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
 
     // A modern handler may unmount the tree it was dispatched into. Re-validate
     // before the legacy hop and the bubble so no channel derefs a freed view.
-    if (!still_in_tree(target, &root)) return false;
+    if (!should_continue() || !still_in_tree(target, &root)) return false;
 
-    // 2. Legacy channel (bare Point). Kept for compatibility; deepest-wins.
-    target->on_mouse_down(local);
-    if (!still_in_tree(target, &root)) return false;
+    // 2. Legacy channel (bare Point). It has no button identity, so it remains
+    // left-only; right/middle continue to the modern ancestor bubble below.
+    if (button == MouseButton::left) {
+        target->on_mouse_down(local);
+        if (!should_continue() || !still_in_tree(target, &root)) return false;
+    }
 
     // 3. W3C pointerdown bubble: a wrap-div around a canvas child (which wins
     // hit_test) never sees the press otherwise. Each ancestor gets a copy of the
@@ -150,6 +264,8 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
             MouseEvent bme = me;
             bme.position = point_to_local(root_pt, b, &root);
             b->on_pointer_event(bme);
+            if (!should_continue() || !still_in_tree(target, &root))
+                return false;
         }
     }
     return true;
@@ -158,6 +274,13 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
 void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host) {
+    deliver_mouse_up(root, target, root_pt, modifiers, click_count, host,
+                     MouseButton::left);
+}
+
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host, MouseButton button) {
     if (!still_in_tree(target, &root)) return;
 
     const Point local = point_to_local(root_pt, target, &root);
@@ -172,8 +295,9 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
         click_target ? click_target->on_click : std::function<void()>{};
     const std::string clicked_id = target->id();
 
-    // 1. Legacy channel (up is legacy-before-modern, unlike drag).
-    target->on_mouse_up(local);
+    // 1. Legacy channel (up is legacy-before-modern, unlike drag). The legacy
+    // API has no button field and therefore remains primary/left-only.
+    if (button == MouseButton::left) target->on_mouse_up(local);
 
     // 2. Modern channel (release). Re-validate — on_mouse_up may have unmounted
     // the target (a React flush on release), which would leave the modern deref
@@ -182,7 +306,7 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
         MouseEvent me;
         me.position = local;
         me.window_position = root_pt;
-        me.button = MouseButton::left;
+        me.button = button;
         me.modifiers = modifiers;
         me.click_count = click_count;
         me.is_down = false;

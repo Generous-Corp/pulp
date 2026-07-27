@@ -72,6 +72,10 @@ runtime::Result<SequenceMarker, PersistenceError>
 decode_marker(const JsonValue& value, DecodeContext& context, std::string path);
 runtime::Result<SequenceRegion, PersistenceError>
 decode_region(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<Scene, PersistenceError>
+decode_scene(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<Slot, PersistenceError>
+decode_slot(const JsonValue& value, DecodeContext& context, std::string path);
 // A null value decodes as an empty lane, which is what a pre-lane sequence
 // version means. `lane_path` is the full diagnostic path of the array itself.
 runtime::Result<ChordScaleLane, PersistenceError>

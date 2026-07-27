@@ -33,4 +33,13 @@ runtime::Result<SchemaWriteSuccess, PersistenceError>
 migrate_sequence_v4_to_v3(std::string_view source, BoundedJsonSink& output,
                           const void* context) noexcept;
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v4_to_v5(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+// Refuses a non-empty scene list because v4 has no launcher representation.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v5_to_v4(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
 } // namespace pulp::timeline::detail

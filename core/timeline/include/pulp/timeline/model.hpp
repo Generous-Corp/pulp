@@ -8,6 +8,7 @@
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
 #include <pulp/timeline/automation_lane.hpp>
+#include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
 
@@ -28,7 +29,9 @@ namespace pulp::timeline {
 
 namespace detail {
 class ProjectStateAccess;
-}
+class LauncherStore;
+struct SequenceEditAccess;
+} // namespace detail
 class SchemaRegistry;
 
 enum class ModelErrorCode : std::uint8_t {
@@ -334,6 +337,11 @@ struct TrackIndexStats {
     std::uint64_t nodes_created = 0;
 };
 
+struct LauncherIndexStats {
+    std::uint64_t live_nodes = 0;
+    std::uint64_t nodes_created = 0;
+};
+
 // A Take is one recorded region that references a sealed media asset. It lives
 // in a TakeLane on a Track and is anchored to absolute (sample) time: raw
 // captures are sample-accurate against the transport, not musical. The take's
@@ -343,8 +351,8 @@ struct TrackIndexStats {
 class Take {
   public:
     static runtime::Result<Take, ModelError> create(ItemId id, MediaRef media,
-                                                     timebase::SamplePosition placement_start,
-                                                     timebase::RationalRate sample_rate);
+                                                    timebase::SamplePosition placement_start,
+                                                    timebase::RationalRate sample_rate);
 
     ItemId id() const noexcept {
         return id_;
@@ -409,8 +417,8 @@ struct TrackFreeze {
 class TakeLane {
   public:
     static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
-                                                         std::vector<Take> takes,
-                                                         std::vector<TakeCompSegment> comp = {});
+                                                        std::vector<Take> takes,
+                                                        std::vector<TakeCompSegment> comp = {});
     runtime::Result<TakeLane, ModelError> insert_take(Take take) const;
     runtime::Result<TakeLane, ModelError> erase_take(ItemId id) const;
     runtime::Result<TakeLane, ModelError>
@@ -502,8 +510,8 @@ class Track {
     runtime::Result<Track, ModelError> erase_take_lane(ItemId id) const;
     runtime::Result<Track, ModelError> insert_take(ItemId lane_id, Take take) const;
     runtime::Result<Track, ModelError> erase_take(ItemId lane_id, ItemId take_id) const;
-    runtime::Result<Track, ModelError>
-    with_take_comp(ItemId lane_id, std::vector<TakeCompSegment> comp) const;
+    runtime::Result<Track, ModelError> with_take_comp(ItemId lane_id,
+                                                      std::vector<TakeCompSegment> comp) const;
     // Sets the record-arm intent flag. Path-copies only the Track's own Data;
     // clip, automation, and take index storage is shared with the old Track.
     Track with_record_armed(bool armed) const;
@@ -533,6 +541,9 @@ class Track {
     ItemId active_take_lane_id() const noexcept;
     const std::optional<TrackFreeze>& freeze() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
+    // True when both snapshots are proven to contain exactly the same clip
+    // identities. Clip content/timing may differ.
+    bool shares_clip_membership_with(const Track& other) const noexcept;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
 
@@ -797,10 +808,56 @@ struct SequenceInput {
     std::vector<SequenceRegion> regions;
     std::optional<ChordScaleLane> chord_scale_lane;
     std::optional<GrooveTemplate> groove;
+    // Authored launch order. A scene owns its slots; every non-empty slot
+    // references a clip in this sequence.
+    std::vector<Scene> scenes;
 };
 
 class Sequence {
   public:
+    class SceneView {
+      public:
+        class Iterator {
+          public:
+            using value_type = Scene;
+            using difference_type = std::ptrdiff_t;
+            using pointer = const Scene*;
+            using reference = const Scene&;
+            using iterator_category = std::forward_iterator_tag;
+
+            const Scene& operator*() const noexcept;
+            const Scene* operator->() const noexcept;
+            Iterator& operator++() noexcept;
+            Iterator operator++(int) noexcept {
+                auto copy = *this;
+                ++*this;
+                return copy;
+            }
+            bool operator==(const Iterator&) const noexcept = default;
+
+          private:
+            friend class SceneView;
+            Iterator(std::shared_ptr<const detail::LauncherStore> store, ItemId current) noexcept
+                : store_(std::move(store)), current_(current) {}
+            std::shared_ptr<const detail::LauncherStore> store_;
+            ItemId current_;
+        };
+
+        std::size_t size() const noexcept;
+        bool empty() const noexcept {
+            return size() == 0;
+        }
+        const Scene& operator[](std::size_t index) const noexcept;
+        Iterator begin() const noexcept;
+        Iterator end() const noexcept;
+
+      private:
+        friend class Sequence;
+        explicit SceneView(std::shared_ptr<const detail::LauncherStore> store) noexcept
+            : store_(std::move(store)) {}
+        std::shared_ptr<const detail::LauncherStore> store_;
+    };
+
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> duration,
            std::vector<Track> tracks);
@@ -815,7 +872,7 @@ class Sequence {
     // forces a layout change on a call site. The positional overloads above are
     // the historical arities and forward into this one; groove was the next
     // owned collection, and the arity note they carried said to stop adding
-    // arguments at that point, so it went into SequenceInput instead.
+    // arguments at that point, so groove and scenes live in SequenceInput.
     static runtime::Result<Sequence, ModelError> create(SequenceInput input);
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
@@ -838,18 +895,32 @@ class Sequence {
     std::span<const SequenceMarker> markers() const noexcept;
     // Ordered by (position, duration, id). Overlap is permitted.
     std::span<const SequenceRegion> regions() const noexcept;
+    SceneView scenes() const noexcept;
     const SequenceMarker* find_marker(ItemId id) const noexcept;
     const SequenceRegion* find_region(ItemId id) const noexcept;
+    const Scene* find_scene(ItemId id) const noexcept;
+    const Slot* find_slot(ItemId id) const noexcept;
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
     runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
     runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
     runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
     runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
+    runtime::Result<Sequence, ModelError>
+    insert_scene(Scene scene, std::optional<ItemId> before_scene_id = std::nullopt) const;
+    runtime::Result<Sequence, ModelError> erase_scene(ItemId id) const;
+    runtime::Result<Sequence, ModelError>
+    insert_slot(ItemId scene_id, Slot slot,
+                std::optional<ItemId> before_slot_id = std::nullopt) const;
+    runtime::Result<Sequence, ModelError> erase_slot(ItemId scene_id, ItemId slot_id) const;
     Sequence with_chord_scale_lane(ChordScaleLane lane) const;
     Sequence with_groove(GrooveTemplate groove) const;
+    std::size_t shared_launcher_nodes_with(const Sequence& other) const;
+    bool shares_launcher_storage_with(const Sequence& other) const noexcept;
     bool shares_storage_with(const Sequence& other) const noexcept;
+    static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
+    friend struct detail::SequenceEditAccess;
     struct Data;
     // Annotation edits validate only the annotation lists and share the existing
     // track storage and identity index; they never re-walk the arrangement.
@@ -900,16 +971,18 @@ enum class ItemKind : std::uint8_t {
     Take,
     Marker,
     Region,
+    Scene,
+    Slot,
 };
 
 // Canonical immediate parent for a kind. Every parent that an item's own
 // coordinates determine is derived here, so identity construction has one
 // parent-computation path for all kinds. AutomationPoint and Take are the
-// exceptions whose parent (their owning lane) is not among (sequence, track,
-// clip): the lane is supplied by construction context via lane_id and is
+// exceptions whose parent (their owning lane or scene) is not among (sequence,
+// track, clip): that owner is supplied by construction context via lane_id and is
 // otherwise recoverable only from the stored parent_id itself — never re-derive
 // it from coordinates. The lane_id parameter carries an AutomationLane for a
-// point and a TakeLane for a take.
+// point, a TakeLane for a take, and a Scene for a slot.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
                                      ItemId track_id, ItemId clip_id,
                                      ItemId lane_id = {}) noexcept {
@@ -922,7 +995,10 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Track:
     case ItemKind::Marker:
     case ItemKind::Region:
+    case ItemKind::Scene:
         return sequence_id;
+    case ItemKind::Slot:
+        return lane_id;
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
     case ItemKind::AutomationLane:
