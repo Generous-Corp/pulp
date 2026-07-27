@@ -66,7 +66,7 @@ is not a reason to add a model feature.
 
 ## DAWproject
 
-Format id `dawproject`. Writer registered: no -- `run_export` refuses.
+Format id `dawproject`. Writer registered: yes.
 
 ### Import
 
@@ -129,8 +129,8 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `clip.absolute` | degrade | `clip.musical` | approximated | sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick |
 | `clip.note` | full |  |  |  |
 | `clip.media` | full |  |  |  |
-| `clip.gain` | full |  |  |  |
-| `clip.fades` | full |  |  |  |
+| `clip.gain` | drop |  | dropped | the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity |
+| `clip.fades` | drop |  | dropped | the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges |
 | `clip.crossfade` | drop | | dropped | not declared |
 | `clip.warp` | drop | | dropped | not declared |
 | `clip.launch` | drop | | dropped | not declared |
@@ -139,8 +139,8 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `tempo.map` | drop | | dropped | not declared |
 | `meter.single` | full |  |  |  |
 | `meter.map` | drop | | dropped | not declared |
-| `marker` | drop | | dropped | not declared |
-| `timecode.origin` | drop | | dropped | not declared |
+| `marker` | drop |  | dropped | the writer does not emit markers or regions, so every named point and range on the timeline is dropped |
+| `timecode.origin` | drop |  | dropped | the writer does not emit a session timecode origin, so the exported document starts at zero and every timecode reference shifts |
 | `media.provenance` | drop | | dropped | not declared |
 | `mixer.track-gain` | drop |  | dropped | the writer does not emit a channel volume, so an authored track gain is dropped and the track exports at unity |
 | `mixer.track-pan` | drop |  | dropped | the writer does not emit a channel pan, so an authored track pan is dropped and the track exports centred |
@@ -155,7 +155,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `take.comp` | degrade | `clip.media` | flattened | comp segment boundaries become clip boundaries; the selection is no longer editable |
 | `track.freeze` | drop |  | dropped | DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped |
 | `asset.sealed-hash` | full |  |  |  |
-| `asset.embedded-media` | full |  |  |  |
+| `asset.embedded-media` | drop |  | dropped | the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve |
 | `asset.referenced-media` | full |  |  |  |
 | `sequence.multiple` | degrade | `track.flat` | flattened | only the root sequence is written; other sequences are dropped |
 | `sequence.nested` | drop | | dropped | not declared |

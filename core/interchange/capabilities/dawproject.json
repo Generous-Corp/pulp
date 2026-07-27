@@ -9,55 +9,145 @@
     "importer asks this table before admitting a construct, so a row flipped to",
     "'none' turns the corresponding construct into a refusal.",
     "",
-    "Export rows are a declaration of what a writer must do. No writer is",
-    "registered yet ('writer': false), so run_export refuses; plan_export still",
-    "produces a real plan and loss manifest from these rows."
+    "Export rows are the authority for the writer's BOUNDED subset. A row rated",
+    "'full' must be a concept core/dawproject/src/dawproject_export.cpp actually",
+    "emits -- its kImplementedExports static_assert fails the build otherwise, so",
+    "the table can never promise more than the writer delivers."
   ],
-  "writer": false,
+  "writer": true,
   "import": {
-    "track.flat": { "level": "full" },
-    "clip.musical": { "level": "full" },
-    "clip.note": { "level": "full" },
-    "clip.media": { "level": "full" },
-    "tempo.single": { "level": "full" },
-    "meter.single": { "level": "full" },
-    "asset.sealed-hash": { "level": "full" },
+    "track.flat": {
+      "level": "full"
+    },
+    "clip.musical": {
+      "level": "full"
+    },
+    "clip.note": {
+      "level": "full"
+    },
+    "clip.media": {
+      "level": "full"
+    },
+    "tempo.single": {
+      "level": "full"
+    },
+    "meter.single": {
+      "level": "full"
+    },
+    "asset.sealed-hash": {
+      "level": "full"
+    },
     "asset.referenced-media": {
       "level": "full",
       "notes": "package-relative locator retained verbatim; identity sealed to the resolved bytes"
     },
-
-    "track.group": { "level": "none", "refusal": "nested group tracks" },
-    "clip.absolute": { "level": "none", "refusal": "seconds-timed lanes, clips, and notes" },
-    "clip.warp": { "level": "none", "refusal": "warped clip content" },
-    "clip.launch": { "level": "none", "refusal": "scenes and clip-launcher content" },
-    "clip.gain": { "level": "none", "refusal": "per-clip gain" },
-    "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
-    "clip.fades": { "level": "none", "refusal": "per-clip fades" },
-    "context.chord-scale": { "level": "none", "refusal": "chord and scale context lanes" },
-    "context.groove": { "level": "none", "refusal": "groove templates and swing" },
-    "marker": { "level": "none", "refusal": "arrangement markers" },
-    "tempo.map": { "level": "none", "refusal": "tempo changing after bar 1" },
-    "meter.map": { "level": "none", "refusal": "time signature changing after bar 1" },
-    "automation.device-param": { "level": "none", "refusal": "automation lanes" },
-    "automation.track-gain": { "level": "none", "refusal": "volume automation lanes" },
-    "automation.track-pan": { "level": "none", "refusal": "pan automation lanes" },
-    "device.placement": { "level": "none", "refusal": "device chains" },
-    "device.payload": { "level": "none", "refusal": "plugin state" },
-    "mixer.track-gain": { "level": "none", "refusal": "channel volume" },
-    "mixer.track-pan": { "level": "none", "refusal": "channel pan" }
+    "track.group": {
+      "level": "none",
+      "refusal": "nested group tracks"
+    },
+    "clip.absolute": {
+      "level": "none",
+      "refusal": "seconds-timed lanes, clips, and notes"
+    },
+    "clip.warp": {
+      "level": "none",
+      "refusal": "warped clip content"
+    },
+    "clip.launch": {
+      "level": "none",
+      "refusal": "scenes and clip-launcher content"
+    },
+    "clip.gain": {
+      "level": "none",
+      "refusal": "per-clip gain"
+    },
+    "clip.note-modifier": {
+      "level": "none",
+      "refusal": "per-note probability, conditions, and ratchets"
+    },
+    "clip.fades": {
+      "level": "none",
+      "refusal": "per-clip fades"
+    },
+    "context.chord-scale": {
+      "level": "none",
+      "refusal": "chord and scale context lanes"
+    },
+    "context.groove": {
+      "level": "none",
+      "refusal": "groove templates and swing"
+    },
+    "marker": {
+      "level": "none",
+      "refusal": "arrangement markers"
+    },
+    "tempo.map": {
+      "level": "none",
+      "refusal": "tempo changing after bar 1"
+    },
+    "meter.map": {
+      "level": "none",
+      "refusal": "time signature changing after bar 1"
+    },
+    "automation.device-param": {
+      "level": "none",
+      "refusal": "automation lanes"
+    },
+    "automation.track-gain": {
+      "level": "none",
+      "refusal": "volume automation lanes"
+    },
+    "automation.track-pan": {
+      "level": "none",
+      "refusal": "pan automation lanes"
+    },
+    "device.placement": {
+      "level": "none",
+      "refusal": "device chains"
+    },
+    "device.payload": {
+      "level": "none",
+      "refusal": "plugin state"
+    },
+    "mixer.track-gain": {
+      "level": "none",
+      "refusal": "channel volume"
+    },
+    "mixer.track-pan": {
+      "level": "none",
+      "refusal": "channel pan"
+    }
   },
   "export": {
-    "track.flat": { "level": "full" },
-    "clip.musical": { "level": "full" },
-    "clip.note": { "level": "full" },
-    "clip.media": { "level": "full" },
-    "tempo.single": { "level": "full" },
-    "meter.single": { "level": "full" },
-    "asset.sealed-hash": { "level": "full" },
-    "asset.referenced-media": { "level": "full" },
-    "asset.embedded-media": { "level": "full" },
-
+    "track.flat": {
+      "level": "full"
+    },
+    "clip.musical": {
+      "level": "full"
+    },
+    "clip.note": {
+      "level": "full"
+    },
+    "clip.media": {
+      "level": "full"
+    },
+    "tempo.single": {
+      "level": "full"
+    },
+    "meter.single": {
+      "level": "full"
+    },
+    "asset.sealed-hash": {
+      "level": "full"
+    },
+    "asset.referenced-media": {
+      "level": "full"
+    },
+    "asset.embedded-media": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve"
+    },
     "clip.absolute": {
       "level": "degrade",
       "to": "clip.musical",
@@ -81,8 +171,16 @@
       "loss_class": "dropped",
       "loss": "DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped"
     },
-    "clip.gain": { "level": "full" },
-    "clip.fades": { "level": "full" },
+    "clip.gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity"
+    },
+    "clip.fades": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges"
+    },
     "clip.note-modifier": {
       "level": "drop",
       "loss_class": "dropped",
@@ -124,7 +222,21 @@
       "loss_class": "flattened",
       "loss": "only the root sequence is written; other sequences are dropped"
     },
-    "content.registered": { "level": "roundtrip-only" },
-    "content.opaque": { "level": "roundtrip-only" }
+    "content.registered": {
+      "level": "roundtrip-only"
+    },
+    "content.opaque": {
+      "level": "roundtrip-only"
+    },
+    "marker": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit markers or regions, so every named point and range on the timeline is dropped"
+    },
+    "timecode.origin": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not emit a session timecode origin, so the exported document starts at zero and every timecode reference shifts"
+    }
   }
 }
