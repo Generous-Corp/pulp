@@ -249,6 +249,8 @@ inline void apply_voice(DrumInstance& instance, const BakedParamView& p, std::in
         v.set_click_level(p.value_at(kTomClickLevel, s));
         v.set_click_cutoff_hz(p.value_at(kTomClickCutoffHz, s));
         v.set_click_decay_ms(p.value_at(kTomClickDecayMs, s));
+        apply_lofi(instance, v.body_lofi(), kToneLofiBits, p, s);
+        apply_lofi(instance, v.noise_lofi(), kNoiseLofiBits, p, s);
         break;
     }
     case EngineId::membrane_modal: {

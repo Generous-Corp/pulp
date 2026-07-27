@@ -1808,3 +1808,28 @@ take both renders under them, so the gate separates "needs a partner" from
 Confirm such a gate can fail before trusting it green: reintroduce one dead knob
 and check it is reported. A parameter-efficacy gate that silently passes
 everything looks identical to a clean contract.
+
+## A voice's `reset()` must clear every filter it owns, not most of them
+
+A drum voice's `reset()` is the contract the bake layer leans on: the node's
+`type.reset` calls it, a kit calls it when transport stops, and a deterministic
+corpus depends on it. "Clears all state" has to mean all of it.
+
+The failure mode is quiet. `TomVoice::on_reset()` cleared its envelopes, click,
+noise source, output stage and phase — and left the skin's 4-pole ladder holding
+four stages plus a saturated feedback sample. Nothing sounds obviously broken:
+the voice still starts, still decays, still chokes. What breaks is *repeatability* —
+the same hit rendered twice from a reset voice produces different samples, so a
+regenerated corpus never reproduces and a golden-file test fails on the second
+run rather than the first. The sibling snare had always reset its filter, which
+is why the gap survived review: the pattern looked established.
+
+When adding or auditing a voice, list its stateful members and check each appears
+in `on_reset()`. Filters and delay lines are the ones that get missed, because
+they have no `is_active()` to make their leftover state visible.
+
+The check that catches it is one assertion, and it is worth writing for every
+voice: reset, render a hit, reset, render the same hit, require the two buffers
+equal. Run it with the voice's *noisiest* path at full level — a path that is
+silent in the test cannot carry stale filter state into the output, which is how
+a partial reset passes a determinism test that looks thorough.
