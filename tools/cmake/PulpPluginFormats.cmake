@@ -184,6 +184,28 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             BUNDLE TRUE
             BUNDLE_EXTENSION "clap"
         )
+
+        # Without an explicit plist CMake emits its default, which leaves
+        # CFBundleIdentifier, CFBundleName and CFBundleShortVersionString EMPTY
+        # and stamps CFBundlePackageType as APPL rather than BNDL. codesign then
+        # falls back to a synthesised `<name>-<hash>` identifier — tolerable for
+        # adhoc, but a Developer ID signature and notarisation want a real
+        # bundle id, and the signed artifact is otherwise unidentifiable. Same
+        # shape as the VST3 and AU paths above.
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.clap")
+            set_target_properties(${target}_CLAP PROPERTIES
+                MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.clap")
+        elseif(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.clap.in")
+            set(PULP_PLUGIN_NAME "${name}")
+            set(PULP_BUNDLE_ID "${bundle_id}")
+            set(PULP_VERSION "${version}")
+            configure_file(
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.clap.in"
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.clap"
+                @ONLY)
+            set_target_properties(${target}_CLAP PROPERTIES
+                MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.clap")
+        endif()
     endif()
 
     if(COMMAND target_copy_webgpu_binaries)
