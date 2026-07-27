@@ -156,6 +156,8 @@ nav:
   - Packages:
       - "@pulp/react": reference/pulp-react.md
   - Guides:
+      - Signal Processing: guides/signal-processing.md
+      - Multirate FDN Reverb: guides/fdn-reverb.md
       - Hosting Plugins: guides/hosting.md
       - Plugin Interrogation: guides/plugin-interrogation.md
       - Sampler Playback Chooser: guides/sampler-playback.md

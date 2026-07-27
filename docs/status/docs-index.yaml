@@ -234,6 +234,11 @@ docs:
     kind: guide
     summary: Designed nonlinear ambience and zero-latency multilevel convolution
 
+  - slug: fdn-reverb
+    path: guides/fdn-reverb.md
+    kind: guide
+    summary: Multirate FDN reverb usage, controls, lifecycle, architecture boundaries, finite-state recovery, and validation ownership
+
   - slug: oscillators
     path: guides/oscillators.md
     kind: guide
@@ -382,11 +387,6 @@ docs:
     kind: reference
     summary: Exhaustive public-method inventory for the advanced signal-processing families
 
-  - slug: modulation-toolkit
-    path: reference/modulation-toolkit.md
-    kind: reference
-    summary: Sources, control tools, triggers, envelopes, VCA, low-pass gate, modulation matrix, and unit conversions
-
   - slug: cli
     path: reference/cli.md
     kind: reference
@@ -476,6 +476,11 @@ docs:
     path: reference/modules.md
     kind: reference
     summary: All subsystems with status and key headers
+
+  - slug: modulation-toolkit
+    path: reference/modulation-toolkit.md
+    kind: reference
+    summary: Modulation sources, control-signal utilities, triggers, envelopes, routing, and worked patch recipes
 
   - slug: node-abi
     path: reference/node-abi.md
