@@ -476,6 +476,7 @@ device I/O, media publication, plugin instantiation, and UI ownership.
 | Takes, comp selection, and sealed track freeze | experimental | [timeline](modules.md#timeline) / [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
 | Bounded audio/MIDI capture and recording commit | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
 | DAWproject linear-subset import | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-importer) | [SDK consumer source](https://github.com/Generous-Corp/pulp/tree/main/examples/timeline-sdk-consumer) |
+| DAWproject bounded export (per-concept consent + loss manifest) | experimental | [dawproject](modules.md#dawproject) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-exporter) | [interchange matrix](interchange-matrix.md#dawproject) |
 | Standard MIDI File import/export against the tempo map | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-standard-midi-file-interop) | |
 | `pulp seq` validate/explain/apply and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
 | Five Timeline MCP operations + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |

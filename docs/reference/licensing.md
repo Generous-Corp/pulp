@@ -243,7 +243,9 @@ Pulp implements or builds on these open standards:
 |----------|-------------|---------|
 | [Audio Unit](https://developer.apple.com/documentation/audiounit) | Apple | Plugin format specification |
 | [CLAP](https://cleveraudio.org) | Clever Audio | Plugin format specification |
+| [DAWproject](https://github.com/bitwig/dawproject) | Bitwig | DAW project interchange format (bounded import + export) |
 | [LV2](https://lv2plug.in) | LV2 Community | Plugin format specification |
+| [Standard MIDI File](https://midi.org/standard-midi-files) | MIDI Association | SMF format 0/1 import and export against the tempo map |
 | [MIDI 2.0 UMP](https://www.midi.org/specifications) | MIDI Association | Universal MIDI Packet format |
 | [OSC 1.0](https://opensoundcontrol.stanford.edu) | CNMAT | Open Sound Control messaging |
 | [VST3](https://steinbergmedia.github.io/vst3_dev_portal/) | Steinberg | Plugin format specification |
@@ -253,6 +255,46 @@ Pulp implements or builds on these open standards:
 | [Web MIDI API](https://www.w3.org/TR/webmidi/) | W3C | Browser MIDI access |
 | [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
 | [WebGPU](https://www.w3.org/TR/webgpu/) | W3C | GPU rendering API |
+
+!!! note "DAWproject and SMF: specifications, not fetched code"
+
+    Listing a standard here does **not** by itself say whether Pulp uses a
+    vendor SDK for it — several do. VST3 ships against the Steinberg SDK, Audio
+    Unit against Apple's AudioUnitSDK, and CLAP is fetched via FetchContent;
+    those are covered under [Plugin Format SDKs](#plugin-format-sdks) and carry
+    their own attribution.
+
+    **DAWproject** and **Standard MIDI File** are different: both are
+    implemented **clean-room against the published specification**. Pulp fetches
+    no SDK, vendors no source, and bundles no schema for either, so neither
+    carries a `NOTICE.md` entry or a `DEPENDENCIES.md` row — there is nothing
+    third-party being redistributed. That is why they are not under [Optional
+    Fetched Third-Party
+    Integrations](#optional-fetched-third-party-integrations), where the
+    distinguishing fact is that Pulp *does* redistribute the dependency through
+    the build.
+
+    Pulp's DAWproject reader and writer are its own code over
+    [pugixml](https://github.com/zeux/pugixml) (MIT, already a core dependency
+    and attributed as one). Support is a deliberately **bounded, fail-closed
+    subset**, not full-format coverage:
+
+    - **Import** accepts flat, beats-timed note and audio tracks. Nested groups,
+      warps, seconds-timed lanes, and any construct outside the subset **fail the
+      import** rather than being silently dropped.
+    - **Export** emits flat tracks, beats-timed clips, inline notes, referenced
+      audio, and a single tempo and meter — plus an in-band loss manifest inside
+      the package. Everything outside that subset (markers, clip gain and fades,
+      embedded media, mixer state, automation, devices, take lanes, freeze) is
+      declared lost in the capability table and **refused unless the caller
+      accepts each concept by name**. There is no force flag.
+    - A **neutral channel** (unity volume, centre pan) is written so a receiving
+      DAW registers the track. That is not an export of authored mixer state,
+      which is still reported as dropped.
+
+    Concept-by-concept status is in the [interchange
+    matrix](interchange-matrix.md); the API is in the [Timeline
+    SDK](../guides/timeline-sdk.md#optional-dawproject-exporter).
 
 Pulp's JS/React UI layer also targets the web-platform standards below. These
 are implemented as a deliberate, tracked **subset** (Pulp is Flexbox + Grid only
