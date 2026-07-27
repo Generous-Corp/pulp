@@ -452,6 +452,10 @@ host-validation contract.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
 
+For synthesized percussion, including the complete voice API, recipes,
+provenance, and Forge bake-layer controls, see
+[Percussion synthesis](percussion-synthesis.md).
+
 ### Using a processor
 
 Every processor follows the same pattern: configure, set sample rate, process.

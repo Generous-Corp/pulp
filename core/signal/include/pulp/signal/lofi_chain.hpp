@@ -96,11 +96,31 @@ public:
 
     void set_seed(std::uint32_t seed) { seed_ = seed == 0 ? default_seed : seed; }
 
+    /// Mirror another reducer's parameter configuration without copying its
+    /// held sample, clock phase, filter history, or RNG position.
+    void sync_configuration_from(const SampleRateReducerT& other) {
+        if (sample_rate_ != other.sample_rate_)
+            set_sample_rate(other.sample_rate_);
+        if (hold_rate_ != other.hold_rate_)
+            set_hold_rate_hz(other.hold_rate_);
+        if (jitter_ != other.jitter_)
+            set_jitter(other.jitter_);
+        if (smoothing_ != other.smoothing_)
+            set_smoothing(other.smoothing_);
+        seed_ = other.seed_;
+    }
+
     void reset() {
         phase_ = 1.0;  // latch on the first sample rather than emitting a zero
         held_ = 0.0;
+        output_level_ = 0.0;
         smoother_.reset();
         rng_ = seed_;
+    }
+
+    bool has_tail() const noexcept {
+        return (!hold_bypassed_ && std::fabs(held_) > 1.0e-12) ||
+               (!bypass_smoothing_ && output_level_ > 1.0e-8);
     }
 
     SampleType process(SampleType input) {
@@ -113,8 +133,12 @@ public:
             held_ = static_cast<double>(input);
         }
         phase_ += step_ * (1.0 + jitter_ * next_jitter());
-        if (bypass_smoothing_) return static_cast<SampleType>(held_);
-        return smoother_.process_lowpass(static_cast<SampleType>(held_));
+        const SampleType output =
+            bypass_smoothing_
+                ? static_cast<SampleType>(held_)
+                : smoother_.process_lowpass(static_cast<SampleType>(held_));
+        output_level_ = std::fabs(static_cast<double>(output));
+        return output;
     }
 
 private:
@@ -128,6 +152,7 @@ private:
     void update() {
         const double rate = std::min(hold_rate_, sample_rate_);
         step_ = rate / sample_rate_;
+        hold_bypassed_ = rate >= sample_rate_;
         smoother_.prepare(static_cast<SampleType>(sample_rate_));
         bypass_smoothing_ = smoothing_ <= 0.0;
         if (!bypass_smoothing_) {
@@ -148,7 +173,9 @@ private:
     double step_ = 1.0;
     double phase_ = 1.0;
     double held_ = 0.0;
+    double output_level_ = 0.0;
     TptFilterT<SampleType> smoother_;
+    bool hold_bypassed_ = true;
     bool bypass_smoothing_ = true;
 
     std::uint32_t seed_ = default_seed;
@@ -191,7 +218,16 @@ public:
 
     void set_seed(std::uint32_t seed) { reducer_.set_seed(seed); }
 
+    /// Mirror parameter configuration while preserving this chain's
+    /// independent reducer/filter state.
+    void sync_configuration_from(const LofiChainT& other) {
+        bits_ = other.bits_;
+        dead_zone_ = other.dead_zone_;
+        reducer_.sync_configuration_from(other.reducer_);
+    }
+
     void reset() { reducer_.reset(); }
+    bool has_tail() const noexcept { return reducer_.has_tail(); }
 
     SampleType process(SampleType input) {
         double x = quantize_bits(static_cast<double>(input), bits_);

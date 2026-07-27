@@ -533,6 +533,17 @@ target_link_libraries(pulp-test-forge-analog-vcf-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-analog-vcf-catalog)
 
+# License-clean percussion engines at the Forge bake boundary: stable node and
+# parameter contracts, lowering, injection, determinism, and RT behavior.
+add_executable(pulp-test-forge-drum-catalog
+    test_forge_drum_catalog.cpp)
+target_sources(pulp-test-forge-drum-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-forge-drum-catalog
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-drum-catalog)
+
 # Analog-modelled VCF core + four measured voicings. The dedicated executable
 # keeps its render-heavy calibration/stability suite isolated from the smaller
 # Forge lo-fi catalog contract tests while sharing the production RT probe.

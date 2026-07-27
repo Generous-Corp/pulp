@@ -219,6 +219,11 @@ docs:
     kind: guide
     summary: Multirate FDN reverb usage, controls, lifecycle, architecture boundaries, finite-state recovery, and validation ownership
 
+  - slug: percussion-synthesis
+    path: reference/percussion-synthesis.md
+    kind: reference
+    summary: Synthesized drum voices — concepts, cookbook, exhaustive API, engine registry, and Forge bake-layer controls
+
   - slug: oscillators
     path: guides/oscillators.md
     kind: guide

@@ -26,6 +26,9 @@ namespace {
 using pulp::signal::NoiseColor;
 using pulp::signal::drum::KickBody;
 using pulp::signal::drum::KickVoice;
+using pulp::signal::drum::HitLifeMode;
+using pulp::signal::drum::OutputOversampling;
+using pulp::signal::drum::OutputStage;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
 
@@ -130,6 +133,17 @@ void init(KickVoice& voice, KickBody body) {
     voice.prepare(kFs);
 }
 
+std::vector<float> render_output_sine(OutputStage& output, double frequency,
+                                      double amplitude, int num_samples) {
+    std::vector<float> rendered(static_cast<std::size_t>(num_samples), 0.0f);
+    for (int i = 0; i < num_samples; ++i) {
+        const double phase = 2.0 * kPi * frequency * static_cast<double>(i) / kFs;
+        rendered[static_cast<std::size_t>(i)] =
+            output.process(static_cast<float>(amplitude * std::sin(phase)));
+    }
+    return rendered;
+}
+
 }  // namespace
 
 // -- Lifecycle rules ---------------------------------------------------------
@@ -222,6 +236,29 @@ TEST_CASE("Choking fades rather than cutting", "[signal][drum][voice]") {
     REQUIRE_FALSE(voice.is_active());
 }
 
+TEST_CASE("Voice state distinguishes idle ringing and choking lifecycle",
+          "[signal][drum][voice][state]") {
+    using pulp::signal::drum::VoiceState;
+
+    KickVoice voice;
+    init(voice, KickBody::oscillator);
+    voice.set_body_decay_ms(2000.0);
+    REQUIRE(voice.state() == VoiceState::idle);
+
+    voice.note_on(1.0f);
+    REQUIRE(voice.state() == VoiceState::ringing);
+    voice.choke(4.0f);
+    REQUIRE(voice.state() == VoiceState::choking);
+
+    render(voice, 4800);
+    REQUIRE(voice.state() == VoiceState::idle);
+
+    voice.note_on(1.0f);
+    REQUIRE(voice.state() == VoiceState::ringing);
+    voice.reset();
+    REQUIRE(voice.state() == VoiceState::idle);
+}
+
 TEST_CASE("Choking an idle voice is a no-op", "[signal][drum][voice]") {
     KickVoice voice;
     init(voice, KickBody::oscillator);
@@ -282,7 +319,9 @@ TEST_CASE("The same parameters and velocity render identical samples",
     const auto second = hit(b, 0.7f, 8192);
     REQUIRE(first == second);
 
-    // ...and the same voice hit twice must repeat too.
+    // An explicit reset separates independent renders; an overlapping
+    // retrigger deliberately preserves samples already inside the output FIR.
+    a.reset();
     const auto third = hit(a, 0.7f, 8192);
     REQUIRE(third == first);
 }
@@ -297,6 +336,7 @@ TEST_CASE("Velocity changes timbre, not only level",
     voice.set_click_level(0.6);
 
     auto soft = hit(voice, 0.25f, 8192);
+    voice.reset();
     auto loud = hit(voice, 1.0f, 8192);
 
     const double soft_peak = peak(soft);
@@ -327,6 +367,7 @@ TEST_CASE("A level-only velocity response produces a level-only difference",
     voice.set_click_level(0.6);
 
     auto soft = hit(voice, 0.3f, 8192);
+    voice.reset();
     auto loud = hit(voice, 1.0f, 8192);
     const double ratio = peak(loud) / peak(soft);
     for (auto& v : soft) v = static_cast<float>(v * ratio);
@@ -399,12 +440,17 @@ TEST_CASE("Sweep depth changes how high the body starts",
 
     const auto deep = render_sweep(4.0);
     const auto shallow = render_sweep(2.0);
-    REQUIRE(crossing_rate(deep, 0, 480) > crossing_rate(shallow, 0, 480) * 1.8);
+    OutputStage default_output;
+    default_output.prepare(kFs);
+    const auto output_latency =
+        static_cast<std::size_t>(default_output.latency_samples());
+    REQUIRE(crossing_rate(deep, output_latency, output_latency + 480) >
+            crossing_rate(shallow, output_latency, output_latency + 480) * 1.8);
 
     // With no sweep the body sits at its tuning from the first cycle. Measured
     // by period, because 50 Hz has half a cycle in a 10 ms window.
     const auto flat = render_sweep(0.0);
-    REQUIRE(std::fabs(period_frequency(flat, 0, 9600) - 50.0) < 2.0);
+    REQUIRE(std::fabs(period_frequency(flat, output_latency, 9600) - 50.0) < 2.0);
 }
 
 TEST_CASE("Body decay sets how long the kick rings", "[signal][drum][kick]") {
@@ -517,6 +563,29 @@ TEST_CASE("A second strike interferes with the ring rather than replacing it",
     REQUIRE(differs);
 }
 
+TEST_CASE("A resonant retrigger keeps the output-stage history",
+          "[signal][drum][kick][resonant][lifecycle]") {
+    KickVoice uninterrupted;
+    KickVoice retriggered;
+    for (KickVoice* voice : {&uninterrupted, &retriggered}) {
+        init(*voice, KickBody::resonant);
+        voice->set_tune_hz(70.0);
+        voice->set_body_decay_ms(1200.0);
+        voice->set_click_level(0.0);
+        voice->set_noise_level(0.0);
+        voice->note_on(1.0f);
+    }
+
+    (void)render(uninterrupted, 6000);
+    (void)render(retriggered, 6000);
+    retriggered.note_on(1.0f);
+
+    const auto control = render(uninterrupted, 32);
+    const auto after_retrigger = render(retriggered, 32);
+    REQUIRE(rms(control) > 1.0e-5);
+    REQUIRE(rms(after_retrigger) > rms(control) * 0.1);
+}
+
 // -- Circuit body ------------------------------------------------------------
 
 TEST_CASE("The circuit body produces a downward pitch drop with no pitch envelope",
@@ -572,10 +641,11 @@ TEST_CASE("The attack shunt lifts the opening pitch",
         voice.set_circuit_attack_ms(attack_ms);
         voice.set_click_level(0.0);
         const auto y = hit(voice, 1.0f, 24000);
+        const auto latency = static_cast<std::size_t>(voice.output().latency_samples());
         // Measured over the shunt's own 20 ms window. Averaging over any longer
         // span mixes the lifted opening with the settled note and understates
         // the effect -- over 50 ms the same lift reads as a few percent.
-        return crossing_rate(y, 0, 960);
+        return crossing_rate(y, latency, latency + 960);
     };
 
     // Shorting the collector resistor drops the network's shunt resistance by
@@ -637,7 +707,382 @@ TEST_CASE("The circuit body preserves its ring across a retrigger",
     REQUIRE(third == first);
 }
 
+TEST_CASE("A preserved circuit retrigger keeps the output-stage history",
+          "[signal][drum][kick][circuit][life]") {
+    KickVoice uninterrupted;
+    KickVoice retriggered;
+    for (KickVoice* voice : {&uninterrupted, &retriggered}) {
+        init(*voice, KickBody::circuit);
+        voice->set_circuit_feedback(0.98);
+        voice->set_click_level(0.0);
+        voice->set_noise_level(0.0);
+        voice->set_circuit_hit_life(
+            pulp::signal::drum::HitLifeMode::preserved_state);
+        voice->note_on(1.0f);
+    }
+
+    (void)render(uninterrupted, 6000);
+    (void)render(retriggered, 6000);
+    retriggered.note_on(1.0f);
+
+    const auto control = render(uninterrupted, 32);
+    const auto after_retrigger = render(retriggered, 32);
+    INFO("uninterrupted energy=" << rms(control)
+                                  << " retrigger energy="
+                                  << rms(after_retrigger));
+    REQUIRE(rms(control) > 1.0e-5);
+    REQUIRE(rms(after_retrigger) > rms(control) * 0.1);
+}
+
+TEST_CASE("The circuit anti-machine-gun policy is selectable",
+          "[signal][drum][kick][circuit][life]") {
+    KickVoice voice;
+    init(voice, KickBody::circuit);
+    voice.set_circuit_feedback(0.95);
+    voice.set_click_level(0.0);
+    voice.set_noise_level(0.0);
+    voice.set_circuit_hit_life(HitLifeMode::fixed_seed);
+
+    const auto first = hit(voice, 1.0f, 12000);
+    voice.reset();
+    const auto second = hit(voice, 1.0f, 12000);
+    REQUIRE(first == second);
+
+    voice.set_circuit_hit_life(HitLifeMode::preserved_state);
+    REQUIRE(voice.circuit_hit_life() == HitLifeMode::preserved_state);
+    const auto living = hit(voice, 1.0f, 12000);
+    REQUIRE_FALSE(living == first);
+}
+
+TEST_CASE("Advancing circuit hit-life varies the circuit excitation itself",
+          "[signal][drum][kick][circuit][life]") {
+    auto body = [](HitLifeMode life) {
+        KickVoice voice;
+        init(voice, KickBody::circuit);
+        voice.set_circuit_feedback(0.95);
+        voice.set_click_level(0.0);
+        voice.set_noise_level(0.0);
+        voice.set_circuit_hit_life(life);
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto fixed = body(HitLifeMode::fixed_seed);
+    const auto advancing = body(HitLifeMode::advancing_seed);
+    REQUIRE_FALSE(fixed == advancing);
+}
+
 // -- Output stage and realtime contract --------------------------------------
+
+TEST_CASE("The drum output stage defaults to the exact house x2 latency",
+          "[signal][drum][output][latency]") {
+    OutputStage output;
+    output.prepare(kFs);
+
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::bypass) == 0);
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::x2) == 32);
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::x4) == 48);
+    REQUIRE(output.oversampling() == OutputOversampling::x2);
+    REQUIRE(output.latency_samples() == 32);
+
+    std::vector<float> impulse(160, 0.0f);
+    for (std::size_t i = 0; i < impulse.size(); ++i) {
+        impulse[i] = output.process(i == 0 ? 1.0f : 0.0f);
+    }
+    const auto peak_at = static_cast<std::size_t>(std::distance(
+        impulse.begin(), std::max_element(
+                             impulse.begin(), impulse.end(),
+                             [](float a, float b) { return std::fabs(a) < std::fabs(b); })));
+    REQUIRE(peak_at == static_cast<std::size_t>(output.latency_samples()));
+    REQUIRE_FALSE(output.has_tail());
+
+    output.set_oversampling(OutputOversampling::x4);
+    REQUIRE(output.latency_samples() == 48);
+    output.set_oversampling(OutputOversampling::bypass);
+    REQUIRE(output.latency_samples() == 0);
+}
+
+TEST_CASE("Bypassed clean drum output is sample-exact and deterministic",
+          "[signal][drum][output][bypass]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+
+    std::vector<float> input(4096);
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        input[i] = 0.35f * std::sin(static_cast<float>(2.0 * kPi * 0.071 *
+                                                       static_cast<double>(i)));
+    }
+
+    std::vector<float> first(input.size());
+    std::vector<float> second(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) first[i] = output.process(input[i]);
+    output.reset();
+    for (std::size_t i = 0; i < input.size(); ++i) second[i] = output.process(input[i]);
+
+    REQUIRE(first == input);
+    REQUIRE(second == first);
+    REQUIRE_FALSE(output.has_tail());
+}
+
+TEST_CASE("Bypassed drum output drains its lo-fi held sample",
+          "[signal][drum][output][bypass][lofi][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+    output.lofi().set_hold_rate_hz(100.0);
+
+    REQUIRE(output.process(1.0f) == 1.0f);
+    REQUIRE(output.has_tail());
+    int drained = 0;
+    while (output.has_tail() && drained < 1000) {
+        (void)output.process(0.0f);
+        ++drained;
+    }
+    REQUIRE(drained > 1);
+    REQUIRE(drained < 1000);
+    REQUIRE_FALSE(output.has_tail());
+}
+
+TEST_CASE("The post-output AHD has exact attack, hold, and decay regions",
+          "[signal][drum][output][ahd]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+    output.set_ahd_ms(10.0, 5.0, 20.0);
+    output.trigger();
+
+    std::vector<float> y(1800);
+    for (auto& sample : y) sample = output.process(1.0f);
+
+    REQUIRE(y[0] == 0.0f);
+    REQUIRE(y[240] > 0.49f);
+    REQUIRE(y[240] < 0.51f);
+    REQUIRE(y[479] > 0.99f);
+    REQUIRE(y[480] == 1.0f);
+    REQUIRE(y[719] == 1.0f);
+    REQUIRE(y[900] < 0.1f);
+    REQUIRE(y[1680] == 0.0f);
+}
+
+TEST_CASE("A short output AHD survives the house FIR latency",
+          "[signal][drum][output][ahd][latency]") {
+    auto impulse_peak = [](OutputOversampling quality) {
+        OutputStage output;
+        output.prepare(kFs);
+        output.set_oversampling(quality);
+        output.set_ahd_ms(0.0, 0.0, 0.01);
+        output.trigger();
+
+        std::vector<float> y(160, 0.0f);
+        for (std::size_t i = 0; i < y.size(); ++i)
+            y[i] = output.process(i == 0 ? 1.0f : 0.0f);
+        return peak(y);
+    };
+
+    const double bypass = impulse_peak(OutputOversampling::bypass);
+    const double house = impulse_peak(OutputOversampling::x2);
+    INFO("bypass peak=" << bypass << " house peak=" << house);
+    REQUIRE(bypass > 0.5);
+    REQUIRE(house > 0.1);
+}
+
+TEST_CASE("A delayed AHD attack does not leak stale unity gain",
+          "[signal][drum][output][ahd][latency]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(10.0, 5.0, 20.0);
+    output.trigger();
+
+    for (int i = 0; i <= output.latency_samples(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(output.process(i == 0 ? 1.0f : 0.0f) == 0.0f);
+    }
+}
+
+TEST_CASE("Close AHD retriggers keep distinct pending contours",
+          "[signal][drum][output][ahd][latency][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(0.0, 0.0, 0.01);
+    output.trigger();
+
+    std::vector<float> y(96, 0.0f);
+    for (int i = 0; i < 16; ++i) {
+        y[static_cast<std::size_t>(i)] =
+            output.process(i == 0 ? 1.0f : 0.0f);
+    }
+    output.trigger();
+    for (std::size_t i = 16; i < y.size(); ++i) {
+        y[i] = output.process(i == 16 ? 1.0f : 0.0f);
+    }
+    auto window_peak = [&y](std::size_t begin, std::size_t end) {
+        double result = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            result = std::max(
+                result, std::fabs(static_cast<double>(y[i])));
+        }
+        return result;
+    };
+    REQUIRE(window_peak(30, 36) > 0.5);
+    REQUIRE(window_peak(46, 52) > 0.5);
+}
+
+TEST_CASE("A delayed AHD retrigger preserves the preceding output tail",
+          "[signal][drum][output][ahd][latency][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(0.0, 1000.0, 1.0);
+    output.trigger();
+
+    for (int i = 0; i < 128; ++i) (void)output.process(1.0f);
+    output.trigger();
+
+    for (int i = 0; i < output.latency_samples(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(output.process(1.0f) > 0.5f);
+    }
+}
+
+TEST_CASE("The AHD scales saturation output instead of its input",
+          "[signal][drum][output][ahd]") {
+    OutputStage saturated;
+    saturated.prepare(kFs);
+    saturated.set_oversampling(OutputOversampling::bypass);
+    saturated.set_drive(1.0);
+    const double saturated_sample = saturated.process(0.25f);
+
+    OutputStage enveloped;
+    enveloped.prepare(kFs);
+    enveloped.set_oversampling(OutputOversampling::bypass);
+    enveloped.set_drive(1.0);
+    enveloped.set_ahd_ms(10.0, 0.0, 100.0);
+    enveloped.trigger();
+
+    double halfway = 0.0;
+    for (int sample = 0; sample <= 240; ++sample) {
+        halfway = enveloped.process(0.25f);
+    }
+
+    // At 5 ms the linear attack gain is exactly one half. A pre-saturation
+    // envelope would instead change tanh's input and would not equal this.
+    REQUIRE(std::fabs(halfway - saturated_sample * 0.5) < 1e-6);
+}
+
+TEST_CASE("Clean x2 drum output is deterministic and transparent in band",
+          "[signal][drum][output][oversampling]") {
+    OutputStage first;
+    OutputStage second;
+    first.prepare(kFs);
+    second.prepare(kFs);
+
+    constexpr int frames = 8192;
+    std::vector<float> input(frames, 0.0f);
+    std::vector<float> a(frames, 0.0f);
+    std::vector<float> b(frames, 0.0f);
+    for (int i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / kFs;
+        input[static_cast<std::size_t>(i)] = static_cast<float>(
+            0.3 * std::sin(2.0 * kPi * 997.0 * t) +
+            0.15 * std::sin(2.0 * kPi * 5003.0 * t));
+        a[static_cast<std::size_t>(i)] =
+            first.process(input[static_cast<std::size_t>(i)]);
+        b[static_cast<std::size_t>(i)] =
+            second.process(input[static_cast<std::size_t>(i)]);
+    }
+
+    REQUIRE(a == b);
+    const auto latency = static_cast<std::size_t>(first.latency_samples());
+    double max_error = 0.0;
+    for (std::size_t i = 512; i < a.size(); ++i) {
+        max_error = std::max(
+            max_error,
+            std::fabs(static_cast<double>(a[i] - input[i - latency])));
+    }
+    INFO("clean x2 maximum in-band error=" << max_error);
+    REQUIRE(max_error < 1e-3);
+}
+
+TEST_CASE("Reapplying the active drum quality does not reset its FIR history",
+          "[signal][drum][output][latency]") {
+    OutputStage reference;
+    OutputStage reapplied;
+    reference.prepare(kFs);
+    reapplied.prepare(kFs);
+
+    std::vector<float> expected(160, 0.0f);
+    std::vector<float> actual(160, 0.0f);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const float input = i == 0 ? 1.0f : 0.0f;
+        expected[i] = reference.process(input);
+        if (i == 16) reapplied.set_oversampling(OutputOversampling::x2);
+        actual[i] = reapplied.process(input);
+    }
+
+    REQUIRE(actual == expected);
+}
+
+TEST_CASE("Restarting hit-scoped degradation preserves FIR history",
+          "[signal][drum][output][latency][lifecycle]") {
+    OutputStage reference;
+    OutputStage restarted;
+    reference.prepare(kFs);
+    restarted.prepare(kFs);
+
+    std::vector<float> expected(160, 0.0f);
+    std::vector<float> actual(160, 0.0f);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const float input = i == 0 ? 1.0f : 0.0f;
+        expected[i] = reference.process(input);
+        if (i == 16) restarted.reset_nonlinear_state();
+        actual[i] = restarted.process(input);
+    }
+
+    REQUIRE(actual == expected);
+}
+
+TEST_CASE("House oversampling rejects the shared drum drive alias",
+          "[signal][drum][output][aliasing]") {
+    // 10 kHz driven through tanh creates a 30 kHz third harmonic. At the host
+    // rate that folds to a discrete 18 kHz alias; at x2 it exists above the
+    // host Nyquist and the house decimator removes it. A clean x2 render is the
+    // negative control proving that the 18 kHz detector has a lower floor than
+    // the asserted driven result.
+    constexpr double fundamental_hz = 10000.0;
+    constexpr double alias_hz = 18000.0;
+    constexpr int frames = 32768;
+    constexpr std::size_t settled = 2048;
+
+    OutputStage host_rate;
+    host_rate.prepare(kFs);
+    host_rate.set_oversampling(OutputOversampling::bypass);
+    host_rate.set_drive(1.0);
+    auto aliased = render_output_sine(host_rate, fundamental_hz, 0.35, frames);
+
+    OutputStage house;
+    house.prepare(kFs);
+    house.set_drive(1.0);
+    auto filtered = render_output_sine(house, fundamental_hz, 0.35, frames);
+
+    OutputStage clean_control;
+    clean_control.prepare(kFs);
+    auto clean = render_output_sine(clean_control, fundamental_hz, 0.35, frames);
+
+    aliased.erase(aliased.begin(), aliased.begin() + static_cast<std::ptrdiff_t>(settled));
+    filtered.erase(filtered.begin(), filtered.begin() + static_cast<std::ptrdiff_t>(settled));
+    clean.erase(clean.begin(), clean.begin() + static_cast<std::ptrdiff_t>(settled));
+
+    const double host_alias = tone_amplitude(aliased, alias_hz);
+    const double house_alias = tone_amplitude(filtered, alias_hz);
+    const double detector_floor = tone_amplitude(clean, alias_hz);
+    INFO("host alias=" << host_alias << " house alias=" << house_alias
+                       << " detector floor=" << detector_floor);
+    REQUIRE(host_alias > 1e-3);
+    REQUIRE(house_alias < host_alias * 0.05);
+    REQUIRE(detector_floor < house_alias * 0.25);
+}
 
 TEST_CASE("Drive adds harmonics and bounds the output",
           "[signal][drum][kick]") {
@@ -708,6 +1153,7 @@ TEST_CASE("Rendering a kick allocates nothing on the audio thread",
         v->output().set_drive(0.5);
         v->output().lofi().set_bits(10.0);
         v->output().lofi().set_hold_rate_hz(24000.0);
+        v->output().set_ahd_ms(2.0, 5.0, 120.0);
     }
 
     std::vector<float> buffer(512, 0.0f);
