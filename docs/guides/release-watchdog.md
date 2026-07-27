@@ -168,6 +168,48 @@ catch), a missing secret (neither of the above might catch), a
 forgotten manual step, or a GitHub outage — the invariant fires because
 the *symptom* (missing release) appears.
 
+## Layer 4 — Release CLI watchdog (asset production)
+
+**File:** `.github/workflows/release-cli-watchdog.yml`
+
+Layers 1–3 all reason about **tagging**. They cannot see a release that
+was tagged correctly and then failed to produce anything.
+
+On 2026-07-27 that gap cost ~17 hours of silent no-release. A duplicated
+`.custom_latency_for` designator in `core/host/src/signal_graph.cpp`
+compiles under Clang (last initialiser wins) and is a hard error on
+GCC/MSVC, so `Release CLI` for `v0.752.0` passed `darwin-x64` and
+`darwin-arm64` and failed `linux-x64`, `linux-arm64`, `windows-x64` and
+`windows-arm64`. **The GitHub release object and its assets come from
+that matrix**, so the tag existed, `Sign and Release` was green, and
+nothing shipped. Every layer above was satisfied:
+
+- Layer 2 watches `auto-release.yml`, which **succeeded** — it created
+  the tag correctly. The failure was downstream of it.
+- Layer 3 looks for a VERSION bump lacking a tag. Both were fine.
+- `release-reconcile.yml` compares each recent tag against its published
+  release and re-dispatches the difference — but it reasons about
+  releases that **exist**. It has no way to represent "the release
+  object was never created because the build failed."
+
+Layer 4 triggers on `Release CLI` completion and maintains a single
+tracking issue, edited in place and auto-closed on the next green run
+(same shape as Layer 2).
+
+Its body reports **per-leg** results rather than "the run failed", and
+names the **all-Apple-green / all-others-red** split explicitly when it
+sees one. That split is the signature of a Clang-permissive construct
+reaching GCC or MSVC, and calling it out turns a multi-hour diagnosis
+into a glance. The detector is deliberately narrow — it does not fire
+when a darwin leg also failed, when every leg failed (infra rather than
+toolchain), or when the run is green.
+
+> Related prevention, not detection: the `linux` leg **already caught**
+> this at PR time and was ignored because Linux is advisory rather than
+> required. See `planning/2026-07-27-linux-advisory-vs-blocking-decision.md`
+> in the private planning repo. A watchdog shortens the window; making
+> the existing Linux verdict binding is what would close it.
+
 ## release-path PR gate (pre-tag prevention, issue #1962)
 
 **File:** `.github/workflows/release-path-pr-gate.yml`

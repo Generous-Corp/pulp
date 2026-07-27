@@ -1,0 +1,199 @@
+name: Release CLI watchdog
+
+# Alert when release-cli.yml fails, because a failed CLI matrix means the
+# GitHub release object and its assets are never produced — the tag exists,
+# `Sign and Release` is green, and nothing ships.
+#
+# Motivating incident: 2026-07-27. A duplicated `.custom_latency_for`
+# designator in core/host/src/signal_graph.cpp compiled under Clang
+# (last-initialiser-wins) but is a hard error on GCC/MSVC. `Release CLI`
+# for v0.752.0 succeeded on darwin-x64 and darwin-arm64 and failed on
+# linux-x64, linux-arm64, windows-x64 and windows-arm64. The release object
+# comes from that matrix, so v0.752.0 had a tag and a green Sign and Release
+# but NO published release — for ~17 hours, until a human noticed.
+#
+# Why the existing watchdogs could not see it:
+#   * auto-release-watchdog.yml watches auto-release.yml, which SUCCEEDED —
+#     it created the tag correctly. The failure was downstream.
+#   * release-reconcile.yml compares each recent tag against its published
+#     release and re-dispatches the difference — but it reasons about
+#     releases that EXIST. It has no way to represent "the release object
+#     was never created because the build failed."
+#   * release-cadence-check.yml looks for a VERSION bump lacking a tag. The
+#     bump and the tag were both fine.
+#
+# So the gap was specifically: nothing alarms when the CLI matrix fails.
+#
+# The body reports PER-LEG results, not just "the run failed". An
+# all-Apple-green / all-others-red split is the signature of a
+# Clang-permissive construct reaching GCC or MSVC, and naming that split in
+# the issue turns a multi-hour diagnosis into a glance.
+#
+# Mirrors auto-release-watchdog.yml: single tracking issue, edit-in-place,
+# auto-closed when release-cli.yml returns to green.
+
+on:
+  workflow_run:
+    workflows: ["Release CLI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: release-cli-watchdog
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    name: Alert on Release CLI failure
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TRACKING_TITLE: 'Release CLI failed — RELEASE ASSETS NOT PUBLISHED'
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_REF: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Classify run outcome
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          jobs_json=$(gh api "/repos/${repo}/actions/runs/${RUN_ID}/jobs?per_page=100")
+
+          # Per-leg breakdown. The Apple-vs-rest split is the tell.
+          printf '%s' "$jobs_json" > jobs.json
+          python3 - <<'PY' > legs.txt
+          import json
+          jobs = json.load(open("jobs.json")).get("jobs", [])
+          cli = [j for j in jobs if j.get("name", "").startswith("CLI ")]
+          for j in sorted(cli, key=lambda x: x.get("name", "")):
+              print(f"| `{j['name']}` | {j.get('conclusion') or j.get('status')} |")
+          PY
+
+          failed=$(python3 -c "
+          import json
+          jobs = json.load(open('jobs.json')).get('jobs', [])
+          print(sum(1 for j in jobs if j.get('conclusion') == 'failure'))")
+          total=$(python3 -c "
+          import json
+          print(len(json.load(open('jobs.json')).get('jobs', [])))")
+
+          # Did every failing leg run a non-Apple toolchain? That is the
+          # Clang-permissive-construct signature worth calling out by name.
+          split=$(python3 -c "
+          import json
+          jobs = json.load(open('jobs.json')).get('jobs', [])
+          cli = [j for j in jobs if j.get('name','').startswith('CLI ')]
+          bad = [j['name'] for j in cli if j.get('conclusion') == 'failure']
+          ok  = [j['name'] for j in cli if j.get('conclusion') == 'success']
+          apple_ok  = ok  and all('darwin' in n for n in ok)
+          none_apple_bad = bad and not any('darwin' in n for n in bad)
+          print('yes' if (bad and ok and apple_ok and none_apple_bad) else 'no')")
+
+          kind="none"
+          if [ "$RUN_CONCLUSION" = "failure" ] && [ "$total" -eq 0 ]; then
+              kind="workflow_file_error"
+          elif [ "$RUN_CONCLUSION" = "failure" ]; then
+              kind="job_failure"
+          elif [ "$RUN_CONCLUSION" = "success" ]; then
+              kind="success"
+          fi
+          {
+            echo "kind=$kind"
+            echo "failed=$failed"
+            echo "total=$total"
+            echo "split=$split"
+          } >> "$GITHUB_OUTPUT"
+          echo "Run ${RUN_ID} ref=${RUN_REF} conclusion=${RUN_CONCLUSION} failed=${failed}/${total} apple-split=${split} → ${kind}"
+
+      - name: Maintain tracking issue
+        shell: bash
+        env:
+          KIND: ${{ steps.classify.outputs.kind }}
+          FAILED: ${{ steps.classify.outputs.failed }}
+          TOTAL: ${{ steps.classify.outputs.total }}
+          SPLIT: ${{ steps.classify.outputs.split }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+          search_json=$(
+              gh api --method GET "/search/issues" \
+                  -f q="repo:${repo} is:issue in:title ${title}"
+          )
+          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$KIND" = "success" ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Release CLI recovered — closing tracker #${existing}."
+                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                      -f body="Release CLI returned to success on ${RUN_URL} (ref \`${RUN_REF}\`). Closing."
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" \
+                      -f state=closed -f state_reason=completed
+              else
+                  echo "Release CLI succeeded and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+          if [ "$KIND" = "none" ]; then
+              echo "Not a terminal failure (conclusion=${RUN_CONCLUSION}); nothing to alert on."
+              exit 0
+          fi
+
+          {
+            echo "_Auto-generated by \`.github/workflows/release-cli-watchdog.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            echo "**\`Release CLI\` failed for \`${RUN_REF}\`, so the release assets were never produced.**"
+            echo "A tag can exist and \`Sign and Release\` can be green while this is broken —"
+            echo "the GitHub release object and its assets come from this matrix."
+            echo
+            if [ "$KIND" = "workflow_file_error" ]; then
+                echo "GitHub dispatched **no jobs**, so the workflow file itself was rejected."
+                echo "Logs will be unavailable; lint the file locally with \`yamllint\` / \`actionlint\`."
+            else
+                echo "**${FAILED} of ${TOTAL} jobs failed.**"
+                echo
+                echo "| leg | result |"
+                echo "| --- | --- |"
+                cat legs.txt
+            fi
+            echo
+            if [ "$SPLIT" = "yes" ]; then
+                echo "> **Every Apple leg passed and every non-Apple leg failed.**"
+                echo "> That is the signature of a Clang-permissive construct reaching GCC or"
+                echo "> MSVC — e.g. a duplicated designated initialiser, or a warning that is"
+                echo "> an error elsewhere. Look for a recent change to shared C++ sources"
+                echo "> that only macOS built. See the 2026-07-27 v0.752.0 incident."
+            fi
+            echo
+            echo "**Run:** ${RUN_URL}"
+            echo "**Ref:** \`${RUN_REF}\`"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo
+            echo "_Release assets are NOT published until Release CLI returns to green._"
+            echo "_Note: \`release-reconcile.yml\` cannot recover this — it re-dispatches"
+            echo "releases that exist, and here the release object was never created._"
+            echo "_This tracker closes automatically on the next successful run._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": ["bug", "ci", "blocks-release"]}))' > issue.json
+              gh api -X POST "/repos/${repo}/issues" --input issue.json 2>&1 || {
+                  TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input issue.json
+              }
+          else
+              echo "Updating tracking issue #${existing}."
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@body.md
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
+          fi

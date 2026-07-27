@@ -821,6 +821,21 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exported with a library while its public headers are accidentally omitted
   from the install manifest. Keep `tools/validation/sdk-smoke` in sync so the
   same proof is runnable locally without GitHub Actions.
+- **A green `Sign and Release` does NOT mean anything shipped — the release
+  object comes from `release-cli.yml`'s matrix.** On 2026-07-27 `v0.752.0` had a
+  correct tag and a green `Sign and Release`, and published nothing for ~17
+  hours, because `Release CLI` passed `darwin-x64`/`darwin-arm64` and failed
+  `linux-x64`/`linux-arm64`/`windows-x64`/`windows-arm64`. When triaging "why is
+  there no release", check `release-cli.yml`'s **per-leg** results first; the
+  overall run conclusion and every tagging watchdog can be green while four of
+  six legs are red. **An all-Apple-green / all-others-red split is a
+  Clang-permissive construct reaching GCC or MSVC** (that incident was a
+  duplicated designated initialiser — Clang takes the last one, GCC hard-errors).
+  `release-cli-watchdog.yml` (Layer 4, see `docs/guides/release-watchdog.md`) now
+  opens a tracking issue naming the failing legs and that split. Note
+  `release-reconcile.yml` cannot recover this shape: it re-dispatches releases
+  that **exist**, and here the release object was never created.
+
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS
