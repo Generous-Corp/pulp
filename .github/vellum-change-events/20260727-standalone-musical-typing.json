@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260727-standalone-musical-typing",
+  "kind": "change",
+  "created_at": "2026-07-27T10:40:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "The standalone host gains an opt-in Musical Typing keyboard, reached from the macOS Window menu or Cmd+K. One transferred surface moves with it: WindowOptions grows a menu_commands list so a host can publish native application-menu entries, and WindowHost gains one query, is_gpu_backed(), appended at the tail of the vtable so an SDK subclass keeps its existing slot layout. The macOS hosts that install those menu entries live in macos-shell-deferred, which is not framework-authoritative-transferred, so it is not covered here. This is Pulp-specific standalone-host product work — playing a Pulp instrument without a DAW — and has no counterpart framework behaviour to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-standalone-musical-typing"
+  ],
+  "disposition": "pulp-only"
+}
