@@ -48,6 +48,10 @@ struct TransportRange {
     double host_tick_start = 0.0;
     double host_tick_end = 0.0;
     bool has_precise_host_ticks = false;
+    /// Zero-based loop pass within the transport's current playback epoch.
+    /// Transport producers own this state so newly attached renderers and
+    /// renderers that skip a callback observe the same pass.
+    std::uint64_t loop_pass_index = 0;
 };
 
 struct TransportSnapshot {
@@ -182,6 +186,7 @@ class MasterTransport {
     std::uint64_t applied_seek_generation_ = 0;
     std::uint64_t applied_scrub_generation_ = 0;
     std::uint64_t block_index_ = 0;
+    std::uint64_t loop_pass_index_ = 0;
     std::uint32_t scrub_window_remaining_ = 0;
     bool previous_scrubbing_ = false;
     bool previous_playing_ = false;

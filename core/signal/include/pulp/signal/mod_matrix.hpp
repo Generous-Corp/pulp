@@ -24,6 +24,8 @@
 /// +/-24 semitones.
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <span>
 
@@ -105,5 +107,84 @@ struct ModMatrixT {
 
 using ModMatrix = ModMatrixT<32, float>;
 using ModMatrix64 = ModMatrixT<32, double>;
+
+/// Dense Round-2 matrix facade. Unlike the slot-oriented `ModMatrixT`, this
+/// owns its source and destination arrays and reserves the complete N x M route
+/// cross-product. Keeping the two names distinct is necessary: their template
+/// signatures and reset/evaluation semantics are both public and cannot be
+/// represented by one C++ class template without making one call form invalid.
+template <std::size_t NumSources, std::size_t NumDestinations,
+          typename SampleType = float>
+class DenseModMatrixT {
+public:
+    static constexpr std::size_t kMaxRoutes = NumSources * NumDestinations;
+    static constexpr std::size_t num_sources = NumSources;
+    static constexpr std::size_t num_destinations = NumDestinations;
+
+    bool add_route(std::size_t source, std::size_t destination, SampleType depth) {
+        if (source >= NumSources || destination >= NumDestinations || count_ >= kMaxRoutes)
+            return false;
+        routes_[count_++] = Route{source, destination,
+                                  std::clamp(depth, SampleType{-1}, SampleType{1})};
+        return true;
+    }
+
+    void clear() { count_ = 0; }
+    std::size_t route_count() const { return count_; }
+
+    void set_source(std::size_t source, SampleType value) {
+        if (source < NumSources) sources_[source] = value;
+    }
+
+    SampleType source(std::size_t index) const {
+        return index < NumSources ? sources_[index] : SampleType{0};
+    }
+
+    void reset() {
+        sources_.fill(SampleType{0});
+        destinations_.fill(SampleType{0});
+    }
+
+    void process() {
+        destinations_.fill(SampleType{0});
+        for (std::size_t i = 0; i < count_; ++i) {
+            const Route& route = routes_[i];
+            destinations_[route.destination] += sources_[route.source] * route.depth;
+        }
+    }
+
+    SampleType get(std::size_t destination) const {
+        return destination < NumDestinations ? destinations_[destination] : SampleType{0};
+    }
+
+    SampleType worst_case_for(std::size_t destination) const {
+        SampleType sum{0};
+        for (std::size_t i = 0; i < count_; ++i)
+            if (routes_[i].destination == destination) sum += std::abs(routes_[i].depth);
+        return sum;
+    }
+
+private:
+    struct Route {
+        std::size_t source = 0;
+        std::size_t destination = 0;
+        SampleType depth = SampleType{0};
+    };
+
+    std::array<Route, kMaxRoutes> routes_{};
+    std::array<SampleType, NumSources> sources_{};
+    std::array<SampleType, NumDestinations> destinations_{};
+    std::size_t count_ = 0;
+};
+
+/// Migration namespace for the unshipped Round-2 spelling whose template
+/// arity conflicts with the established slot matrix. Code written against the
+/// Round-2 prompt can use `round2::ModMatrixT<Sources, Destinations, T>` while
+/// the shipped `pulp::signal::ModMatrixT<MaxSlots, T>` remains source-compatible.
+namespace round2 {
+template <std::size_t NumSources, std::size_t NumDestinations,
+          typename SampleType = float>
+using ModMatrixT = DenseModMatrixT<NumSources, NumDestinations, SampleType>;
+}  // namespace round2
 
 } // namespace pulp::signal

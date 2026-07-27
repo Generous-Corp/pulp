@@ -41,6 +41,10 @@ class HostTransportProjector {
     playback::MeterSignature previous_meter_{};
     playback::LoopRegion previous_loop_{};
     std::uint64_t block_index_ = 0;
+    std::uint64_t loop_pass_index_ = 0;
+    double previous_host_loop_start_beats_ = 0.0;
+    double previous_host_loop_end_beats_ = 0.0;
+    bool previous_has_precise_host_loop_ = false;
     bool has_expected_sample_ = false;
     bool first_block_ = true;
     bool previous_playing_ = false;

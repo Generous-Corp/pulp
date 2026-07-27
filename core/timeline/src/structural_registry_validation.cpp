@@ -182,6 +182,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"source_start", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField notes_fields[] = {
+        {"modifier_seed", SchemaValueKind::U64String},
+        {"modifiers", SchemaValueKind::Array},
         {"notes", SchemaValueKind::Array},
     };
     static constexpr ExpectedField sequence_ref_fields[] = {
@@ -215,7 +217,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
-        {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields},
+        {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields, 2, 1},
         {SchemaDomain::Content, "pulp.timeline.content.sequence_ref", sequence_ref_fields},
     };
     for (const auto& expected : required) {

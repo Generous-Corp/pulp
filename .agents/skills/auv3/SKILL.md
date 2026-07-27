@@ -1386,6 +1386,21 @@ trailing words as fresh headers. The AU v3 MIDIEventList word-cursor walk is ext
 of the ObjC render block so it is unit-testable (truncated-packet + multi-word-advance
 vectors) rather than only reachable through a live AU host.
 
+## `setFullState:` runs under the state-restore gate
+
+The property table at the top of `au_adapter.mm` marks `setFullState:` as
+main-thread with serdes. Hosts call it while the unit is rendering, and
+`Processor::deserialize_plugin_state()` is documented as running with the audio
+thread stopped, so the setter holds `AUBridge::state_restore_gate` across the
+deserialize and the render block takes the matching non-blocking render lock.
+
+The render lock is acquired BEFORE the MPE sidecar phase, because
+`bridge->mpe.run(*bridge->processor, …)` already reaches into the Processor. On
+contention the block passes its input through, clears the sidechain pointer and
+resets triggers, then returns `noErr` — deliberately NOT via `failClosed()`,
+which would additionally set `kAudioUnitRenderAction_OutputIsSilence` and turn a
+brief restore into a labelled dropout.
+
 ## AU has no note-name surface
 
 `Processor::note_names()` lets a plug-in label individual keys — a drum kit's

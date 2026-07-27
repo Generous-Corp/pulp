@@ -16,6 +16,20 @@
 #include <variant>
 
 namespace pulp::playback {
+namespace {
+
+// Where the `index`-th of `count` ratchet repeats begins within a note of
+// `duration` ticks. Distributing the remainder as `(remainder * index) / count`
+// keeps every boundary exact in integer ticks and the repeats within one tick of
+// equal length, so a ratcheted note never drifts off its own end.
+constexpr std::int64_t ratchet_boundary(std::int64_t duration, std::int64_t index,
+                                        std::int64_t count) noexcept {
+    const auto quotient = duration / count;
+    const auto remainder = duration % count;
+    return quotient * index + (remainder * index) / count;
+}
+
+} // namespace
 
 struct PlaybackProgramCompilerCore;
 
@@ -32,6 +46,7 @@ class ProgramCompilerTask final : public CompileTask {
         FlattenTrack,
         CompileTracks,
         SortTrackNotes,
+        SortTrackNoteModifiers,
         SortTrackAudioIds,
         ValidateTrackAudioIds,
         CompileTrackTakeComp,
@@ -45,6 +60,7 @@ class ProgramCompilerTask final : public CompileTask {
     CompileTaskStatus fail(CompileError error) noexcept;
     void begin_track_automation();
     void begin_track_audio_link();
+    void begin_track_note_modifier_sort();
 
     std::shared_ptr<PlaybackProgramCompilerCore> core_;
     std::unique_ptr<ProgramCompileRequest> request_;
@@ -67,6 +83,9 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<NoteProgramEvent> current_note_events_;
     std::vector<NoteProgramEvent> note_merge_buffer_;
     detail::BudgetedStableMergeState note_merge_;
+    std::vector<CompiledNoteModifier> current_note_modifiers_;
+    std::vector<CompiledNoteModifier> note_modifier_merge_buffer_;
+    detail::BudgetedStableMergeState note_modifier_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
     detail::AudioSampleRateConverterCache sample_rate_converters_;
     std::vector<timeline::ItemId> current_audio_ids_;
@@ -188,6 +207,20 @@ void ProgramCompilerTask::begin_track_automation() {
     }
     automation_compiler_started_ = false;
     stage_ = Stage::CompileTrackAutomation;
+}
+
+void ProgramCompilerTask::begin_track_note_modifier_sort() {
+    // The renderer looks a modifier up by note id, so the table it reads must be
+    // ordered by note id. The notes were emitted in start order across clips, so
+    // this is a real sort rather than a formality — budgeted like the note-event
+    // sort so one compile slice can never run unbounded.
+    if (current_note_modifiers_.size() > 1) {
+        note_modifier_merge_buffer_.reserve(current_note_modifiers_.size());
+        note_modifier_merge_.reset(note_modifier_merge_buffer_);
+        stage_ = Stage::SortTrackNoteModifiers;
+        return;
+    }
+    begin_track_audio_link();
 }
 
 void ProgramCompilerTask::begin_track_audio_link() {
@@ -316,6 +349,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                      AudioRendererErrorCode::CapacityExceeded});
                     total_audio_clips_ += count;
                 }
+                if ((*old)->arrangement_note_events().size() >
+                    request_->maximum_note_events_per_track)
+                    return fail({CompileErrorCode::NoteProgramCapacityExceeded, track.id(),
+                                 request_->document_revision});
                 tracks_.push_back(*old);
                 core_->track_completed();
                 ++track_index_;
@@ -454,18 +491,48 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             if (note.start.value < 0 || note_end > timebase::TickPosition{clip.duration().value})
                 return fail(
                     {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
-            const auto start_tick = clip.start() + timebase::TickDuration{note.start.value};
-            const auto end_tick = clip.start() + timebase::TickDuration{note_end.value};
-            const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
-            const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
-            if (end_sample <= start_sample)
-                return fail(
-                    {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
-            current_note_events_.push_back({start_sample, start_tick, clip.id(), note.id,
-                                            note.velocity, note.pitch, note.channel,
-                                            NoteProgramEventKind::On});
-            current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id, note.velocity,
-                                            note.pitch, note.channel, NoteProgramEventKind::Off});
+            const auto* modifier = notes->modifier_for(note.id);
+            // Ratcheting is authored, not drawn, so it is a pure function of the
+            // content and belongs at compile time. Probability and the pass
+            // condition depend on which loop pass is playing, so they stay in
+            // the renderer and are carried as a side table instead.
+            const std::int64_t repeats = modifier == nullptr ? 1 : modifier->ratchet_count;
+            const auto event_count = static_cast<std::size_t>(repeats) * 2u;
+            if (event_count > request_->maximum_note_events_per_track ||
+                current_note_events_.size() >
+                    request_->maximum_note_events_per_track - event_count)
+                return fail({CompileErrorCode::NoteProgramCapacityExceeded, note.id,
+                             request_->document_revision});
+            if (modifier != nullptr) {
+                const auto key = timeline::note_modifier_draw_key(notes->modifier_seed(), note.id);
+                current_note_modifiers_.push_back({key, *modifier});
+            }
+            for (std::int64_t repeat = 0; repeat < repeats; ++repeat) {
+                // The last subdivision lands on the note's own end so a ratchet
+                // never drifts away from the authored duration.
+                const auto span_start =
+                    note.start.value + ratchet_boundary(note.duration.value, repeat, repeats);
+                const auto span_end =
+                    repeat + 1 == repeats
+                        ? note_end.value
+                        : note.start.value +
+                              ratchet_boundary(note.duration.value, repeat + 1, repeats);
+                const auto start_tick = clip.start() + timebase::TickDuration{span_start};
+                const auto end_tick = clip.start() + timebase::TickDuration{span_end};
+                const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
+                const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
+                // A subdivision that collapses to nothing at this tempo cannot
+                // be rendered; refusing beats emitting a note-on with no off.
+                if (end_sample <= start_sample)
+                    return fail(
+                        {CompileErrorCode::InvalidStructure, note.id, request_->document_revision});
+                current_note_events_.push_back({start_sample, start_tick, clip.id(), note.id,
+                                                note.velocity, note.pitch, note.channel,
+                                                NoteProgramEventKind::On});
+                current_note_events_.push_back({end_sample, end_tick, clip.id(), note.id,
+                                                note.velocity, note.pitch, note.channel,
+                                                NoteProgramEventKind::Off});
+            }
             ++work;
             continue;
         }
@@ -500,7 +567,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     note_merge_.reset(note_merge_buffer_);
                     stage_ = Stage::SortTrackNotes;
                 } else {
-                    begin_track_audio_link();
+                    begin_track_note_modifier_sort();
                 }
                 continue;
             }
@@ -537,6 +604,17 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (stage_ == Stage::SortTrackNotes) {
             const auto step =
                 note_merge_.step(current_note_events_, note_merge_buffer_, note_program_event_less);
+            work += step.work_units;
+            if (step.complete)
+                begin_track_note_modifier_sort();
+            continue;
+        }
+        if (stage_ == Stage::SortTrackNoteModifiers) {
+            const auto step = note_modifier_merge_.step(
+                current_note_modifiers_, note_modifier_merge_buffer_,
+                [](const CompiledNoteModifier& lhs, const CompiledNoteModifier& rhs) {
+                    return lhs.modifier.note_id < rhs.modifier.note_id;
+                });
             work += step.work_units;
             if (step.complete)
                 begin_track_audio_link();
@@ -629,7 +707,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
-                std::move(current_note_events_), std::move(audio_program),
+                std::move(current_note_events_), std::move(current_note_modifiers_),
+                std::move(audio_program),
                 std::move(current_automation_.ordered_device_placement_ids),
                 std::move(current_automation_.program), sequence_bookkeeping_.expanded_clip_count(),
                 sequence_bookkeeping_.expanded_note_event_count(),
@@ -638,6 +717,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
+            current_note_modifiers_.clear();
             current_audio_clips_.clear();
             current_audio_ids_.clear();
             current_flattened_clips_.clear();
@@ -750,6 +830,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
         request.document_revision == 0 || !request.automation_limits.valid() ||
         request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
+        request.maximum_note_events_per_track == 0 ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

@@ -1112,9 +1112,14 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
 }
 
 int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
-    if (!live_slot_.live()) return 0;
-    auto it = live_slot_.live()->custom_latency_samples.find(id);
-    return it == live_slot_.live()->custom_latency_samples.end() ? 0 : it->second;
+    // Read-guarded rather than a bare live() deref: this one is read by the
+    // PDC/bake paths while a re-prepare can be publishing a new snapshot, and
+    // the guard keeps the map alive for the lookup.
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    if (cg == nullptr) return 0;
+    auto it = cg->custom_latency_samples.find(id);
+    return it == cg->custom_latency_samples.end() ? 0 : it->second;
 }
 
 const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
@@ -1376,6 +1381,9 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         auto mit = plugin_meta.find(id);
         if (mit != plugin_meta.end()) {
             added = std::max<int64_t>(0, mit->second.latency_samples);
+        } else if (auto cit = cg.custom_latency_samples.find(id);
+                   cit != cg.custom_latency_samples.end()) {
+            added = std::max<int64_t>(0, cit->second);
         }
         if (auto cit = cg.custom_latency_samples.find(id);
             cit != cg.custom_latency_samples.end()) {
@@ -1501,6 +1509,11 @@ bool SignalGraph::build_routing_snapshot_locked_(
                             ? &it->second.exact_parameter_input_mailbox->sequence_seen
                             : nullptr,
                 };
+            },
+        .custom_latency_for =
+            [&cg](NodeId id) -> int {
+                auto it = cg.custom_latency_samples.find(id);
+                return it == cg.custom_latency_samples.end() ? 0 : it->second;
             },
     };
     return build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
@@ -1694,8 +1707,13 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 // A registered type with no live callback is transparent on the
                 // live graph, so it must not add latency there. Baked-only
                 // callbacks capture their latency separately during lowering.
-                if (cg->custom_processors.contains(n.id)) {
-                    cg->custom_latency_samples[n.id] = type->latency_samples;
+                // Evaluated once here, off the audio thread, at the graph's own
+                // rate, and clamped into the declared range — the value is not
+                // knowable at registration, so this is where it gets checked.
+                if (cg->custom_processors.contains(n.id) && type->latency_samples) {
+                    cg->custom_latency_samples[n.id] =
+                        std::clamp(type->latency_samples(sample_rate), 0,
+                                   CustomNodeType::kMaxLatencySamples);
                 }
                 // Bake-layer param injection: if the type declared baked_params
                 // and a param-aware process, bind a closure that captures the

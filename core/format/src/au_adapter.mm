@@ -58,6 +58,7 @@
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/parameter_text.hpp>
@@ -107,6 +108,10 @@ struct AUBridge {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Keeps a host setFullState: off the processor while the render block is
+    // inside process(). Declared after processor so it outlives every render
+    // that consults it.
+    StateRestoreGate state_restore_gate;
     AudioWorkgroupClient* audio_workgroup_client = nullptr;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
@@ -1352,6 +1357,21 @@ struct ScopedAuV3HostWriting {
             pulp::format::ProcessBusBufferSet<float>{std::span(output_buses)},
         };
 
+        // Prove no setFullState: restore is installing underneath this block.
+        // Hosts set full state on the main thread while the unit is rendering,
+        // and Processor::deserialize_plugin_state() is documented as running
+        // with the audio thread stopped. Taken before the sidecar phase because
+        // that already reaches into the Processor. On contention pass the input
+        // through, matching the other adapters; an instrument has no input, so
+        // there this is silence.
+        auto renderLock = bridge->state_restore_gate.lock_for_render();
+        if (!renderLock) {
+            pulp::format::passthrough_block(output_view, input_view);
+            bridge->processor->set_sidechain(nullptr);
+            bridge->store.reset_triggers_rt();
+            return noErr;
+        }
+
         // MPE sidecar: run inbound MIDI through the voice tracker and attach the
         // resulting per-note expression buffer to the processor for the duration
         // of this process() call. Events are taken in host delivery order (like
@@ -1455,6 +1475,11 @@ struct ScopedAuV3HostWriting {
     NSData *nsData = fullState[@"pulpState"];
     if (nsData && _bridge.processor) {
         auto* bytes = static_cast<const uint8_t*>(nsData.bytes);
+        // Hosts set full state on the main thread while the unit is rendering,
+        // and Processor::deserialize_plugin_state() is documented as running
+        // with the audio thread stopped. Acquiring the gate proves no render
+        // block is inside process().
+        auto restore_lock = _bridge.state_restore_gate.lock_for_restore();
         if (!pulp::format::plugin_state_io::deserialize({bytes, nsData.length},
                                                         _bridge.store,
                                                         *_bridge.processor)) {

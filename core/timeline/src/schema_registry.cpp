@@ -2,6 +2,7 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "note_content_schema_migrations.hpp"
 #include "project_schema_migrations.hpp"
 #include "project_schema_policy.hpp"
 #include "sequence_schema_migrations.hpp"
@@ -418,8 +419,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"asset_id", SchemaValueKind::U64String},
                                {"frame_count", SchemaValueKind::U64String},
                                {"source_start", SchemaValueKind::I64String}}));
-    schemas.push_back(builtin("pulp.timeline.content.notes", SchemaDomain::Content,
-                              {{"notes", SchemaValueKind::Array}}));
+    auto notes = builtin("pulp.timeline.content.notes", SchemaDomain::Content,
+                         {{"modifier_seed", SchemaValueKind::U64String},
+                          {"modifiers", SchemaValueKind::Array},
+                          {"notes", SchemaValueKind::Array}},
+                         2);
+    notes.upgrades.push_back({1, 2, {}, detail::migrate_note_content_v1_to_v2});
+    notes.downgrades.push_back({2, 1, {}, detail::migrate_note_content_v2_to_v1});
+    schemas.push_back(std::move(notes));
     schemas.push_back(builtin("pulp.timeline.content.sequence_ref", SchemaDomain::Content,
                               {{"sequence_id", SchemaValueKind::U64String},
                                {"source_start", SchemaValueKind::I64String}}));

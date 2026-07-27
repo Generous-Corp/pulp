@@ -319,7 +319,17 @@ inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream
         if (read <= 0) break;
         data.insert(data.end(), buf, buf + read);
     }
-    const bool ok = plugin_state_io::deserialize(data, self->store, *self->processor);
+    // Hosts may call state.load while the plug-in is active and rendering.
+    // Acquiring the gate proves no audio callback is inside clap_process(),
+    // which is the condition Processor::deserialize_plugin_state() is
+    // documented to run under. Released before on_non_realtime_tick() so a
+    // processor that reconciles derived state there cannot stall the audio
+    // thread for the length of that work.
+    bool ok = false;
+    {
+        auto restore_lock = self->state_restore_gate.lock_for_restore();
+        ok = plugin_state_io::deserialize(data, self->store, *self->processor);
+    }
     // state.load is a main-thread call. A restored state can name a different
     // derived source than the live one (SuperConvolver: a different impulse
     // response), and a worker-less processor — every wasm build — has no thread

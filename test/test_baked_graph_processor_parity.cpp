@@ -512,6 +512,77 @@ TEST_CASE("Baked graph with a lowerable Custom node matches the live graph bit-e
     CHECK(peak > 0.1f);
 }
 
+TEST_CASE("baked processor reports final output latency and aligns parallel branches",
+          "[host][graph][bake][custom][latency][pdc]") {
+    constexpr int kDelay = 7;
+    struct DelayState {
+        std::vector<float> line;
+        std::size_t pos = 0;
+    };
+
+    SignalGraph g;
+    CustomNodeType t;
+    t.type_id = "bake-latency-delay";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.lowerable = true;
+    t.latency_samples = [](double) { return kDelay; };
+    t.create = []() -> void* { return new DelayState(); };
+    t.destroy = [](void* p) { delete static_cast<DelayState*>(p); };
+    t.prepare = [](void* p, double, int) {
+        auto* state = static_cast<DelayState*>(p);
+        state->line.assign(kDelay, 0.0f);
+        state->pos = 0;
+    };
+    t.reset = [](void* p) {
+        auto* state = static_cast<DelayState*>(p);
+        std::fill(state->line.begin(), state->line.end(), 0.0f);
+        state->pos = 0;
+    };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto* state = static_cast<DelayState*>(p);
+        for (int i = 0; i < n; ++i) {
+            const auto sample = static_cast<std::size_t>(i);
+            out.channel_ptr(0)[sample] = state->line[state->pos];
+            state->line[state->pos] = in.channel_ptr(0)[sample];
+            state->pos = (state->pos + 1) % state->line.size();
+        }
+    };
+    REQUIRE(g.register_custom_node_type(t));
+    const auto in = g.add_input_node(1, "In");
+    const auto delay = g.add_custom_node(t.type_id, t.version, "Delay");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, delay, 0));
+    REQUIRE(g.connect(delay, 0, out, 0));
+    REQUIRE(g.connect(in, 0, out, 0));
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+
+    auto baked = bake(g);
+    REQUIRE(baked.accepted);
+    REQUIRE(baked.processor);
+    CHECK(baked.processor->latency_samples() == 0);
+
+    baked.processor->prepare(make_prepare_ctx(1));
+    REQUIRE(baked.processor->latency_samples() == kDelay);
+    std::vector<std::vector<float>> impulse(
+        1, std::vector<float>(static_cast<std::size_t>(kFrames), 0.0f));
+    impulse[0][0] = 1.0f;
+    const auto rendered = run_baked(*baked.processor, kFrames, impulse, 1);
+    for (int i = 0; i < kDelay; ++i)
+        CHECK(rendered[0][static_cast<std::size_t>(i)] == 0.0f);
+    CHECK(rendered[0][kDelay] == 2.0f);
+
+    auto invalid = make_prepare_ctx(1);
+    invalid.max_buffer_size = 0;
+    baked.processor->prepare(invalid);
+    CHECK(baked.processor->latency_samples() == 0);
+    baked.processor->prepare(make_prepare_ctx(1));
+    CHECK(baked.processor->latency_samples() == kDelay);
+}
+
 TEST_CASE("bake refuses a non-lowerable or transport-sensitive Custom node",
           "[host][graph][bake][custom]") {
     SECTION("lowerable=false -> CustomNotLowerable") {

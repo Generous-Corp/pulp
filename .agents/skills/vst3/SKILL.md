@@ -1087,6 +1087,27 @@ The adapter calls `runtime::Tracing::attach()`/`detach()` over its lifetime
 dev build picks up `$PULP_TRACE_PATH`; the final `detach()` flushes the
 `.pftrace`.
 
+## `setState` can arrive mid-render — it runs under the state-restore gate
+
+`Processor::deserialize_plugin_state()` is documented as running "with the audio
+thread stopped". VST3 gives no such guarantee: hosts call `setState` on the main
+thread while the plug-in is active. The host-quirk catalog carries row R6
+(`reaper_n`) for a DAW that does exactly this.
+
+`PulpVst3Processor::setState` therefore holds `state_restore_gate_` across the
+deserialize, and `process()` takes the matching non-blocking render lock. On
+contention the block passes its input through and returns `kResultOk` rather
+than reading plug-in state a restore is halfway through rewriting.
+
+The render lock is acquired BEFORE `processor_->set_param_events(…)`, not just
+around the `process()` call — everything that reaches into the Processor must be
+inside it. If you add work to the render path that touches `processor_`, keep it
+below that acquisition.
+
+`reaper_n` remains `Speculative` because the daw-bench smoke never reopens a
+session, so the quirk is recorded as "Not Triggered" even though the exposure is
+real. Do not read that status as "this does not happen".
+
 ## Note names map onto `IKeyswitchController`
 
 VST3 has no general note-name API. Its nearest surface is

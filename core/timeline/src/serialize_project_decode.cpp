@@ -263,7 +263,72 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
                               static_cast<std::uint8_t>(decoded_channel.value())});
         }
         counts.notes += events.size();
-        auto created = NoteContent::create(std::move(events));
+        auto seed = required(*data.value(), "modifier_seed", path + "/data");
+        auto modifiers = required(*data.value(), "modifiers", path + "/data");
+        if (!seed || !modifiers)
+            return fail<ClipContent>(PersistenceErrorCode::MissingField, path + "/data");
+        if (modifiers.value()->kind != JsonValue::Kind::Array)
+            return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
+                                     path + "/data/modifiers");
+        auto decoded_seed =
+            parse_canonical_u64_string(*seed.value(), path + "/data/modifier_seed");
+        if (!decoded_seed)
+            return fail<ClipContent>(PersistenceErrorCode::InvalidNumber,
+                                     path + "/data/modifier_seed");
+        // A modifier names a note, so the array can never outgrow the notes it
+        // annotates; bounding it against the same budget keeps a hostile
+        // document from spending unbounded memory on annotations alone.
+        if (modifiers.value()->array.size() > events.size())
+            return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, path + "/data/modifiers",
+                                     modifiers.value()->begin, modifiers.value()->array.size(),
+                                     events.size());
+        std::vector<NoteModifier> decoded_modifiers;
+        decoded_modifiers.reserve(modifiers.value()->array.size());
+        for (std::size_t index = 0; index < modifiers.value()->array.size(); ++index) {
+            const auto modifier_path = path + "/data/modifiers/" + std::to_string(index);
+            const auto& entry = modifiers.value()->array[index];
+            auto condition = required(entry, "condition", modifier_path);
+            auto condition_offset = required(entry, "condition_offset", modifier_path);
+            auto condition_period = required(entry, "condition_period", modifier_path);
+            auto note_id = required(entry, "note_id", modifier_path);
+            auto probability = required(entry, "probability", modifier_path);
+            auto ratchet_count = required(entry, "ratchet_count", modifier_path);
+            if (!condition || !condition_offset || !condition_period || !note_id || !probability ||
+                !ratchet_count)
+                return fail<ClipContent>(PersistenceErrorCode::MissingField, modifier_path);
+            if (condition.value()->kind != JsonValue::Kind::String)
+                return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
+                                         modifier_path + "/condition");
+            NoteConditionKind decoded_condition{};
+            if (!parse_note_condition(condition.value()->scalar, decoded_condition))
+                return fail<ClipContent>(PersistenceErrorCode::InvalidSchema,
+                                         modifier_path + "/condition");
+            auto decoded_note_id =
+                parse_canonical_u64_string(*note_id.value(), modifier_path + "/note_id");
+            auto decoded_offset =
+                parse_u32_number(*condition_offset.value(), modifier_path + "/condition_offset");
+            auto decoded_period =
+                parse_u32_number(*condition_period.value(), modifier_path + "/condition_period");
+            auto decoded_probability =
+                parse_u32_number(*probability.value(), modifier_path + "/probability");
+            auto decoded_ratchet =
+                parse_u32_number(*ratchet_count.value(), modifier_path + "/ratchet_count");
+            if (!decoded_note_id || !decoded_offset || !decoded_period || !decoded_probability ||
+                !decoded_ratchet ||
+                decoded_offset.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_period.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_probability.value() > std::numeric_limits<std::uint16_t>::max() ||
+                decoded_ratchet.value() > std::numeric_limits<std::uint16_t>::max())
+                return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, modifier_path);
+            decoded_modifiers.push_back(
+                {ItemId{decoded_note_id.value()},
+                 static_cast<std::uint16_t>(decoded_probability.value()),
+                 static_cast<std::uint16_t>(decoded_period.value()),
+                 static_cast<std::uint16_t>(decoded_offset.value()),
+                 static_cast<std::uint16_t>(decoded_ratchet.value()), decoded_condition});
+        }
+        auto created = NoteContent::create(std::move(events), std::move(decoded_modifiers),
+                                           decoded_seed.value());
         if (!created)
             return model_fail<ClipContent>(created.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(

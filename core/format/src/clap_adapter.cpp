@@ -1596,7 +1596,15 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     auto all_params = self->store.all_params();
     clap_phase_snapshot_params(self, all_params);
 
-    clap_phase_prepare_sidecars(self, host_delivered_ump);
+    // Prove no state.load is installing underneath this block. state.load is a
+    // main-thread call that hosts may make while the plug-in is active, and
+    // Processor::deserialize_plugin_state() is documented as running with the
+    // audio thread stopped. Taken before the sidecar phase because that already
+    // reaches into the Processor. On contention this block passes its input
+    // through — the same degradation as bypass, which is likewise "the
+    // Processor did not run this block".
+    auto render_lock = self->state_restore_gate.lock_for_render();
+    if (render_lock) clap_phase_prepare_sidecars(self, host_delivered_ump);
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag
@@ -1609,7 +1617,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // behavior.
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
-    if (bypassed) {
+    if (bypassed || !render_lock) {
         clap_phase_bypass_passthrough(self, process, in_channels, out_channels,
                                       main_output_f64, original_num_samples);
     } else {

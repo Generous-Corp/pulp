@@ -207,10 +207,10 @@ TEST_CASE("event and envelope aliases start fresh and track their double forms",
           "[signal][mod][parity][zero-init]") {
     STATIC_REQUIRE(std::is_same_v<TriggerDetect64, TriggerDetectT<double>>);
     STATIC_REQUIRE(std::is_same_v<GateGen64, GateGenT<double>>);
-    STATIC_REQUIRE(std::is_same_v<ClockDivider64, ClockDividerT>);
+    STATIC_REQUIRE(std::is_same_v<ClockDivider64, ClockDividerT<double>>);
     STATIC_REQUIRE(std::is_same_v<ClockMult64, ClockMultT>);
     STATIC_REQUIRE(std::is_same_v<BurstGen64, BurstGenT<double>>);
-    STATIC_REQUIRE(std::is_same_v<TrigDelay64, TrigDelayT>);
+    STATIC_REQUIRE(std::is_same_v<TrigDelay64, TrigDelayT<double>>);
     STATIC_REQUIRE(std::is_same_v<Ar64, ArT<double>>);
     STATIC_REQUIRE(std::is_same_v<Ad64, AdT<double>>);
     STATIC_REQUIRE(std::is_same_v<Ahd64, AhdT<double>>);

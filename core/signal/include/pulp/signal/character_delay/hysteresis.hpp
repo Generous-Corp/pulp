@@ -37,6 +37,7 @@
 #include <pulp/signal/oversampling_fir.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 
@@ -287,112 +288,95 @@ private:
     std::size_t capped_ = 0;
 };
 
-/// 4× linear-phase half-band oversampling wrap around a per-sample callback.
+/// Fixed-depth linear-phase half-band oversampling around a per-sample callback.
 ///
-/// Two cascaded 2× half-band stages at the house 65-tap / Kaiser β ≈ 8 design.
-/// The pair's group delay is a fixed integer number of host samples, which is
+/// Each stage doubles the rate using the house 65-tap / Kaiser β ≈ 8 design.
+/// The cascade's group delay is a fixed integer number of host samples, which is
 /// exactly what lets the module keep latency_samples() == 0: the constant is
 /// subtracted from the delay line's read distance instead of being reported to
 /// the host, so echo timing stays right and the loop's total delay is unchanged.
-class HalfBandOversampler4x {
+template <std::size_t StageCount>
+class HysteresisHalfBandOversampler {
 public:
-    static constexpr int oversampling_factor() noexcept { return 4; }
+    static_assert(StageCount > 0);
+
+    static constexpr int oversampling_factor() noexcept {
+        return 1 << StageCount;
+    }
 
     void prepare() {
-        stage_a_.configure(kHouseHalfBandStageOnePassband,
-                           kHysteresisHalfBandStopbandDb,
-                           kHysteresisHalfBandTaps);
-        stage_b_.configure(kHouseHalfBandStageTwoPassband,
-                           kHysteresisHalfBandStopbandDb,
-                           kHysteresisHalfBandTaps);
+        // Each stage's passband is the house stage-one corner referred to its
+        // own input rate, so a deeper cascade preserves the same absolute
+        // 0.45 * host fs corner rather than re-stating a constant per depth.
+        // Halving is exact in binary floating point, so the derivation and the
+        // named stage-two constant cannot drift apart.
+        static_assert(kHouseHalfBandStageOnePassband / 2.0 ==
+                      kHouseHalfBandStageTwoPassband);
+        for (std::size_t stage = 0; stage < StageCount; ++stage) {
+            const double passband = kHouseHalfBandStageOnePassband /
+                                    static_cast<double>(1u << stage);
+            stages_[stage].configure(passband, kHysteresisHalfBandStopbandDb,
+                                     kHysteresisHalfBandTaps);
+        }
         reset();
     }
 
     void reset() noexcept {
-        stage_a_.reset();
-        stage_b_.reset();
+        for (auto& stage : stages_) stage.reset();
     }
 
-    /// Group delay of the up/down pair, in HOST samples. Rate-independent.
+    /// Group delay of the complete up/down cascade, in host samples.
     static int latency_samples() noexcept {
         const auto taps = static_cast<int>(kHysteresisHalfBandTaps);
-        return (taps - 1) / 2 + (taps - 1) / 4;
+        int latency = 0;
+        for (std::size_t stage = 0; stage < StageCount; ++stage)
+            latency += (taps - 1) / static_cast<int>(1u << (stage + 1u));
+        return latency;
     }
 
     template <typename Callback>
     double process(double x, Callback&& callback) {
-        double even = 0.0;
-        double odd = 0.0;
-        stage_a_.upsample(x, even, odd);
-        const double processed_even = inner(even, callback);
-        const double processed_odd = inner(odd, callback);
-        return stage_a_.downsample(processed_even, processed_odd);
+        return process_stage<0>(x, callback);
     }
 
 private:
-    template <typename Callback>
-    double inner(double x, Callback& callback) {
-        double even = 0.0;
-        double odd = 0.0;
-        stage_b_.upsample(x, even, odd);
-        // The callback owns time-dependent magnetic state. Function-argument
-        // evaluation order is not left-to-right, so evaluate the phases
-        // explicitly in chronological order before passing them onward.
-        const double processed_even = callback(even);
-        const double processed_odd = callback(odd);
-        return stage_b_.downsample(processed_even, processed_odd);
-    }
-
-    detail::LinearPhaseOversamplingStage2x<double> stage_a_;
-    detail::LinearPhaseOversamplingStage2x<double> stage_b_;
-};
-
-/// Eight-times wrapper used by the max-drive physical hysteresis stage.
-///
-/// Four times was the original modeling estimate, but the exact-bin 2947 Hz
-/// acceptance measurement found a folded high-order product at about -40 dBc.
-/// One additional house half-band stage moves the nonlinear solve to 8x and
-/// clears the -60 dBc contract without retuning the magnetic model's drive.
-/// Keeping the 4x wrapper as the outer stage also provides a direct regression
-/// control for the acceptance test.
-class HysteresisOversampler8x {
-public:
-    static constexpr int oversampling_factor() noexcept { return 8; }
-
-    void prepare() {
-        outer_.prepare();
-        inner_.configure(0.1125, kHysteresisHalfBandStopbandDb,
-                         kHysteresisHalfBandTaps);
-        reset();
-    }
-
-    void reset() noexcept {
-        outer_.reset();
-        inner_.reset();
-    }
-
-    /// Group delay of all three up/down stages, in host samples.
-    static int latency_samples() noexcept {
-        const auto taps = static_cast<int>(kHysteresisHalfBandTaps);
-        return HalfBandOversampler4x::latency_samples() + (taps - 1) / 8;
-    }
-
-    template <typename Callback>
-    double process(double x, Callback&& callback) {
-        return outer_.process(x, [this, &callback](double sample) {
+    template <std::size_t Stage, typename Callback>
+    double process_stage(double x, Callback& callback) {
+        if constexpr (Stage == StageCount) {
+            return callback(x);
+        } else {
             double even = 0.0;
             double odd = 0.0;
-            inner_.upsample(sample, even, odd);
-            const double processed_even = callback(even);
-            const double processed_odd = callback(odd);
-            return inner_.downsample(processed_even, processed_odd);
-        });
+            stages_[Stage].upsample(x, even, odd);
+            // The callback owns time-dependent magnetic state. Function-argument
+            // evaluation order is not left-to-right, so evaluate the phases
+            // explicitly in chronological order before passing them onward.
+            const double processed_even = process_stage<Stage + 1u>(even, callback);
+            const double processed_odd = process_stage<Stage + 1u>(odd, callback);
+            return stages_[Stage].downsample(processed_even, processed_odd);
+        }
     }
 
-private:
-    HalfBandOversampler4x outer_;
-    detail::LinearPhaseOversamplingStage2x<double> inner_;
+    std::array<detail::LinearPhaseOversamplingStage2x<double>, StageCount> stages_{};
 };
+
+/// The two depths the module has a measured reason to name.
+///
+/// 8x is a DELIBERATE deviation from the reference. Chowdhury (DAFx-19, §4.2)
+/// reports 2x acceptable at moderate drive, 4x good across the range, and >= 8x
+/// diminishing returns, and this module's spec adopted 4x on that basis. At MAX
+/// drive it does not hold: the exact-bin 2947 Hz acceptance measurement found a
+/// folded high-order product at about -40 dBc, against a -60 dBc contract. One
+/// more house half-band stage moves the nonlinear solve to 8x and clears that
+/// contract without retuning the magnetic model's drive, which is why the
+/// shipping depth is 8x and not the cited 4x. Do not "optimize" it back down.
+///
+/// 4x is retained because the acceptance test runs it as the direct regression
+/// control for that same measurement — it must stay bit-identical to the first
+/// two stages of the shipping cascade, which naming it as a depth of the one
+/// template guarantees.
+using HalfBandOversampler4x = HysteresisHalfBandOversampler<2>;
+using HysteresisOversampler8x = HysteresisHalfBandOversampler<3>;
 
 /// Production-owned composition of a fixed wrapper and magnetic solver.
 /// Keeping rate derivation, reset ordering, latency, and processing together

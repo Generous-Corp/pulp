@@ -50,6 +50,9 @@ public:
         has_cached_ = false;
     }
 
+    /// Compatibility spelling used by the Round 2 DSP blocks.
+    void set_seed(std::uint32_t s) { seed(s); }
+
     /// Rewind to the seeded stream position. `reset()` restores the seed the
     /// caller set, not the default one — a reset that silently discarded the
     /// seed would make every seeded object share one stream, which is the
@@ -70,6 +73,9 @@ public:
         return x;
     }
 
+    /// Compatibility spelling used by the Round 2 DSP blocks.
+    std::uint32_t next_uint() { return next_u32(); }
+
     /// Uniform in [0, 1). Built from the top 24 bits so every result is exactly
     /// representable in `float` and the spacing is uniform.
     float next_unipolar() {
@@ -78,6 +84,22 @@ public:
 
     /// Uniform in [-1, 1).
     float next_bipolar() { return next_unipolar() * 2.0f - 1.0f; }
+
+    template <typename T>
+    T next_bipolar() {
+        return static_cast<T>(static_cast<double>(next_u32()) *
+                                  (1.0 / 2147483648.0) -
+                              1.0);
+    }
+
+    /// Uniform in [0, 1), with the caller-selected result precision.
+    float next_unit() { return next_unipolar(); }
+
+    template <typename T>
+    T next_unit() {
+        return static_cast<T>(static_cast<double>(next_u32()) *
+                              (1.0 / 4294967296.0));
+    }
 
     /// Standard normal via the polar-free Box-Muller transform (Box & Muller,
     /// Ann. Math. Statist. 29(2), 1958). The transform produces two independent
@@ -124,6 +146,15 @@ constexpr std::uint64_t mix64(std::uint64_t z) {
     return z;
 }
 
+/// Purpose-keyed overload used when seed, index, and field are already
+/// separate values. It remains a pure stateless draw.
+constexpr std::uint64_t mix64(std::uint64_t seed,
+                              std::uint64_t index,
+                              std::uint64_t field = 0u) {
+    return mix64(seed + index * 0x9E3779B97F4A7C15ull +
+                 field * 0xBF58476D1CE4E5B9ull);
+}
+
 /// Stateless purpose-keyed draw in [0, 1).
 ///
 /// USE: per-voice / per-partial / per-tap detune and offsets. Deriving them
@@ -132,6 +163,17 @@ constexpr std::uint64_t mix64(std::uint64_t z) {
 /// reordering initialisation cannot shuffle every other value.
 inline float unit_from(std::uint64_t key) {
     return static_cast<float>(mix64(key) >> 40) * (1.0f / 16777216.0f);
+}
+
+template <typename T>
+inline T unit_from(std::uint64_t key) {
+    return static_cast<T>(static_cast<double>(mix64(key) >> 11) *
+                          (1.0 / 9007199254740992.0));
+}
+
+template <typename T = float>
+inline T bipolar_from(std::uint64_t key) {
+    return static_cast<T>(unit_from<double>(key) * 2.0 - 1.0);
 }
 
 /// The 64-bit golden-ratio odd constant that splitmix64 steps its state by.
@@ -148,15 +190,16 @@ constexpr std::uint64_t rng_key(std::uint64_t purpose, std::uint64_t index) {
 
 /// Ornstein-Uhlenbeck walk (Uhlenbeck & Ornstein, Phys. Rev. 36, 1930):
 ///
-///     y += (1 - e^(-theta * dt)) * (mu - y) + sigma * sqrt(dt) * g
+///     y[n+1] = mu + e^(-theta*dt) * (y[n] - mu)
+///              + sigma * sqrt(1 - e^(-2*theta*dt)) * g
 ///
-/// The drift term uses the exact per-step decay factor rather than the naive
-/// Euler-Maruyama `theta * dt`, which matches it for small products but goes
-/// unstable once `theta * dt` exceeds 1 — see the note in `next()`.
+/// This is the exact discrete transition, not Euler-Maruyama: both the decay
+/// and innovation scale are solved for the configured update interval.
 ///
 /// A random walk with a restoring force. Unlike filtered white noise it has a
 /// defined mean it returns to, and unlike an LFO it never repeats. The
-/// stationary standard deviation is `sigma / sqrt(2 * theta)`.
+/// stationary standard deviation is the caller-facing `sigma`, independent of
+/// update rate and theta.
 ///
 /// RT contract: `prepare()` recomputes `dt` and the noise scale; `next()`,
 /// `reset()`, and accessors allocate nothing.
@@ -174,6 +217,9 @@ public:
     /// delay lengths) do not. 1.5 sits far enough out that clipping is rare at
     /// sane settings but the bound still exists.
     static constexpr SampleType kClamp = SampleType{1.5};
+    static constexpr double kMinTheta = 1e-6;
+    static constexpr double kMaxTheta = 1.0;
+    static constexpr double kDefaultTheta = 0.05;
 
     /// @param update_rate_hz Rate at which `next()` will be called — the audio
     ///        sample rate for per-sample use, or the control rate for a
@@ -181,17 +227,32 @@ public:
     void prepare(double update_rate_hz) {
         rate_ = update_rate_hz > 0.0 ? update_rate_hz : 1.0;
         dt_ = 1.0 / rate_;
-        sqrt_dt_ = std::sqrt(dt_);
-        update_drift_coeff_();
+        update_coefficients_();
     }
 
     void set_theta(double theta_per_second) {
-        theta_ = std::max(0.0, theta_per_second);
-        update_drift_coeff_();
+        if (!std::isfinite(theta_per_second)) return;
+        theta_ = std::clamp(theta_per_second, kMinTheta, kMaxTheta);
+        update_coefficients_();
     }
-    void set_sigma(double sigma) { sigma_ = std::max(0.0, sigma); }
-    void set_mu(double mu) { mu_ = mu; }
+    void set_sigma(double sigma) {
+        if (!std::isfinite(sigma)) return;
+        sigma_ = std::max(0.0, sigma);
+        update_coefficients_();
+    }
+    void set_mu(double mu) {
+        if (std::isfinite(mu)) mu_ = mu;
+    }
     void seed(std::uint32_t s) { rng_.seed(s); }
+    void set_seed(std::uint32_t s) { seed(s); }
+
+    void set_correlation_time(double seconds, double sample_rate) {
+        if (!(std::isfinite(seconds) && seconds > 0.0 &&
+              std::isfinite(sample_rate) && sample_rate > 0.0))
+            return;
+        prepare(sample_rate);
+        set_theta(1.0 / seconds);
+    }
 
     void reset() {
         value_ = mu_;
@@ -202,42 +263,48 @@ public:
     void reset_value() { value_ = mu_; }
 
     SampleType next() {
-        // The drift uses the exact per-step decay factor `1 - e^(-theta*dt)`
-        // rather than the naive Euler `theta * dt`. The two agree when
-        // `theta * dt` is small, but Euler overshoots the mean once the
-        // product passes 1 and turns the walk into a clamp-to-clamp
-        // oscillator past 2 — reachable with a hard pull at a low update
-        // rate. The exact factor is a fraction in (0, 1] for every theta, so
-        // the pull is unconditionally stable.
-        const double drift = drift_coeff_ * (mu_ - value_);
-        const double diffusion = sigma_ * sqrt_dt_ * static_cast<double>(rng_.gaussian());
-        value_ = std::clamp(value_ + drift + diffusion,
+        // Exact transition: the decay is always in (0, 1), and the innovation
+        // scale preserves the requested stationary deviation at every rate.
+        const double diffusion = innovation_std_ * static_cast<double>(rng_.gaussian());
+        value_ = std::clamp(mu_ + decay_ * (value_ - mu_) + diffusion,
                             -static_cast<double>(kClamp),
                             static_cast<double>(kClamp));
         return static_cast<SampleType>(value_);
     }
 
     SampleType current() const { return static_cast<SampleType>(value_); }
+    SampleType value() const { return current(); }
+    double theta() const { return theta_; }
+    double sigma() const { return sigma_; }
 
     /// Closed-form stationary standard deviation, for tests and for callers
     /// sizing a modulation depth from a target excursion.
     double stationary_std() const {
-        return theta_ > 0.0 ? sigma_ / std::sqrt(2.0 * theta_) : 0.0;
+        return sigma_;
     }
 
 private:
-    void update_drift_coeff_() { drift_coeff_ = -std::expm1(-theta_ * dt_); }
+    void update_coefficients_() {
+        decay_ = std::exp(-theta_ * dt_);
+        // Exact discrete-time OU transition. `sigma_` is the requested
+        // stationary standard deviation, so changing update rate or theta does
+        // not silently change the modulation depth.
+        innovation_std_ = sigma_ * std::sqrt(std::max(0.0, 1.0 - decay_ * decay_));
+    }
 
     Xorshift32 rng_{};
     double value_ = 0.0;
     double mu_ = 0.0;
-    double theta_ = 1.0;
+    double theta_ = kDefaultTheta;
     double sigma_ = 0.1;
-    double rate_ = 48000.0;
-    double dt_ = 1.0 / 48000.0;
-    double sqrt_dt_ = 1.0 / 219.089023002066;
-    // Matches the default theta and dt; `prepare()` recomputes it exactly.
-    double drift_coeff_ = 1.0 / 48000.0;
+    // An unprepared walk advances in unit time. Audio/control-rate users call
+    // `prepare(rate)`, while the direct per-step Round 2 surface can state
+    // theta without inheriting an arbitrary hidden 48 kHz assumption.
+    double rate_ = 1.0;
+    double dt_ = 1.0;
+    double decay_ = std::exp(-kDefaultTheta);
+    double innovation_std_ =
+        0.1 * std::sqrt(1.0 - std::exp(-2.0 * kDefaultTheta));
 };
 
 using OuWalk = OuWalkT<float>;
@@ -268,12 +335,17 @@ public:
     /// Control-rate decimation. 32 samples is 0.67 ms at 48 kHz — two orders of
     /// magnitude faster than the fastest drift anyone wants.
     static constexpr int kDecimation = 32;
+    static constexpr double kDefaultDepthPercent = 0.1;
+    static constexpr double kDefaultCorrelationSeconds = 2.0;
 
     void prepare(double sample_rate) {
         const double sr = sample_rate > 0.0 ? sample_rate : 1.0;
         const double control_rate = sr / static_cast<double>(kDecimation);
         pitch_walk_.prepare(control_rate);
         fraction_walk_.prepare(control_rate);
+        multiplier_walk_.prepare(control_rate);
+        multiplier_walk_.set_theta(1.0 / correlation_s_);
+        multiplier_walk_.set_sigma(depth_percent_ * 0.01);
         reset();
     }
 
@@ -296,31 +368,54 @@ public:
     void seed(std::uint32_t s) {
         pitch_walk_.seed(static_cast<std::uint32_t>(mix64(s) & 0xFFFFFFFFu));
         fraction_walk_.seed(static_cast<std::uint32_t>(mix64(s ^ 0xA5A5A5A5u) >> 32));
+        multiplier_walk_.seed(static_cast<std::uint32_t>(mix64(s ^ 0xC6BC2796u) & 0xFFFFFFFFu));
+    }
+
+    void set_seed(std::uint32_t s) { seed(s); }
+
+    void set_depth_percent(double percent) {
+        if (!std::isfinite(percent)) return;
+        depth_percent_ = std::max(0.0, percent);
+        multiplier_walk_.set_sigma(depth_percent_ * 0.01);
+    }
+
+    void set_correlation_time(double seconds) {
+        if (!(std::isfinite(seconds) && seconds > 0.0)) return;
+        correlation_s_ = seconds;
+        multiplier_walk_.set_theta(1.0 / correlation_s_);
     }
 
     void reset() {
         pitch_walk_.reset();
         fraction_walk_.reset();
+        multiplier_walk_.reset();
         counter_ = 0;
         pitch_prev_ = pitch_next_ = pitch_walk_.current();
         fraction_prev_ = fraction_next_ = fraction_walk_.current();
+        multiplier_prev_ = multiplier_next_ = multiplier_walk_.current();
         pitch_now_ = pitch_prev_;
         fraction_now_ = fraction_prev_;
+        multiplier_now_ = multiplier_prev_;
     }
 
     /// Advance one audio sample. Call once per sample; read the outputs after.
-    void next() {
+    SampleType next() {
         if (counter_ == 0) {
             pitch_prev_ = pitch_next_;
             fraction_prev_ = fraction_next_;
             pitch_next_ = pitch_walk_.next();
             fraction_next_ = fraction_walk_.next();
+            multiplier_prev_ = multiplier_next_;
+            multiplier_next_ = multiplier_walk_.next();
         }
         const SampleType t = static_cast<SampleType>(counter_)
                              / static_cast<SampleType>(kDecimation);
         pitch_now_ = pitch_prev_ + (pitch_next_ - pitch_prev_) * t;
         fraction_now_ = fraction_prev_ + (fraction_next_ - fraction_prev_) * t;
+        multiplier_now_ = multiplier_prev_ + (multiplier_next_ - multiplier_prev_) * t;
         if (++counter_ >= kDecimation) counter_ = 0;
+        return static_cast<SampleType>(
+            std::max(kMinMultiplier, 1.0 + static_cast<double>(multiplier_now_)));
     }
 
     /// Multiplicative pitch ratio: `2 ^ (cents * x / 1200)`.
@@ -338,9 +433,13 @@ public:
     }
 
 private:
+    static constexpr double kMinMultiplier = 1e-3;
     OuWalkT<SampleType> pitch_walk_{};
     OuWalkT<SampleType> fraction_walk_{};
+    OuWalkT<SampleType> multiplier_walk_{};
     double cents_ = 5.0;
+    double depth_percent_ = kDefaultDepthPercent;
+    double correlation_s_ = kDefaultCorrelationSeconds;
     int counter_ = 0;
     SampleType pitch_prev_{};
     SampleType pitch_next_{};
@@ -348,6 +447,9 @@ private:
     SampleType fraction_next_{};
     SampleType pitch_now_{};
     SampleType fraction_now_{};
+    SampleType multiplier_prev_{};
+    SampleType multiplier_next_{};
+    SampleType multiplier_now_{};
 };
 
 using Drift = DriftT<float>;

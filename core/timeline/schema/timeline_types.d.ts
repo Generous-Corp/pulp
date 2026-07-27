@@ -309,8 +309,10 @@ export interface PulpTimelineContentMedia {
   source_start: number | string;
 }
 
-/** `pulp.timeline.content.notes` — domain Content, schema version 1. */
+/** `pulp.timeline.content.notes` — domain Content, schema version 2. */
 export interface PulpTimelineContentNotes {
+  modifier_seed: number | string;
+  modifiers: readonly unknown[];
   notes: readonly unknown[];
 }
 

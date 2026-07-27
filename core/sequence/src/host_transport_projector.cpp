@@ -182,8 +182,30 @@ HostTransportProjector::project(const format::ProcessContext& context,
         !first_block_ && use_host_beat_clock != previous_host_beat_mapping_;
     const bool inferred_jump =
         has_expected_sample_ && context.is_playing && host_start != expected_next_sample_;
-    const bool discontinuity = context.reset_requested || context.transport_jump || inferred_jump ||
-                               mapping_transition || pending_discontinuity_;
+    // Format adapters may report transport_jump for a normal loop wrap because
+    // the host sample position moved backwards. The projector already knows
+    // the exact sample expected after its previous wrap; matching that position
+    // is continuation, not a new playback epoch.
+    const bool unexpected_transport_jump =
+        context.transport_jump &&
+        (!has_expected_sample_ || host_start != expected_next_sample_);
+    const bool discontinuity = context.reset_requested || unexpected_transport_jump ||
+                               inferred_jump || mapping_transition ||
+                               pending_discontinuity_;
+    const bool has_precise_host_loop = loop.enabled && use_host_beat_clock;
+    const bool loop_identity_changed =
+        !first_block_ &&
+        (loop != previous_loop_ ||
+         has_precise_host_loop != previous_has_precise_host_loop_ ||
+         (has_precise_host_loop &&
+          (context.loop_start_beats != previous_host_loop_start_beats_ ||
+           context.loop_end_beats != previous_host_loop_end_beats_)));
+    const bool transport_started =
+        context.transport_started || (context.is_playing && (first_block_ || !previous_playing_));
+    if (!context.is_playing || !loop.enabled || context.reset_requested ||
+        unexpected_transport_jump || inferred_jump || mapping_transition ||
+        transport_started || loop_identity_changed)
+        loop_pass_index_ = 0;
     bool next_pending_discontinuity = false;
 
     snapshot = {};
@@ -193,16 +215,16 @@ HostTransportProjector::project(const format::ProcessContext& context,
     snapshot.frame_count = frames;
     snapshot.meter = meter;
     snapshot.loop = loop;
-    if (loop.enabled && use_host_beat_clock) {
+    if (has_precise_host_loop) {
         snapshot.host_loop_start_beats = context.loop_start_beats;
         snapshot.host_loop_end_beats = context.loop_end_beats;
         snapshot.has_precise_host_loop = true;
     }
     snapshot.is_playing = context.is_playing;
     snapshot.transport_changed = context.transport_changed;
-    snapshot.transport_started =
-        context.transport_started || (context.is_playing && (first_block_ || !previous_playing_));
-    snapshot.reset_requested = context.reset_requested || inferred_jump || mapping_transition;
+    snapshot.transport_started = transport_started;
+    snapshot.reset_requested = context.reset_requested || unexpected_transport_jump ||
+                               inferred_jump || mapping_transition || loop_identity_changed;
     snapshot.time_sig_changed =
         context.time_sig_changed || (!first_block_ && meter != previous_meter_);
 
@@ -253,6 +275,8 @@ HostTransportProjector::project(const format::ProcessContext& context,
                                          : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = range_discontinuity;
         range.host_beat_mapping = use_host_beat_clock;
+        range.loop_pass_index =
+            context.is_playing && loop.enabled ? loop_pass_index_ : 0;
         monotonic_ = range.monotonic_end;
     };
 
@@ -308,6 +332,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
             }
             if (remaining > 0) {
                 const bool completes_loop = remaining == loop_length;
+                ++loop_pass_index_;
                 make_range(snapshot.range_count, first_count, remaining, loop_start, true,
                            &loop.start, completes_loop ? &loop.end : nullptr,
                            context.loop_start_beats,
@@ -319,6 +344,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
                 next_pending_discontinuity = completes_loop;
             } else if (first_count > 0 && static_cast<std::uint64_t>(first_count) == until_wrap) {
                 expected_next_sample_ = loop_start;
+                ++loop_pass_index_;
                 next_pending_discontinuity = true;
             } else {
                 expected_next_sample_ = add_frames(host_start, first_count);
@@ -330,6 +356,11 @@ HostTransportProjector::project(const format::ProcessContext& context,
     has_expected_sample_ = true;
     previous_meter_ = meter;
     previous_loop_ = loop;
+    previous_has_precise_host_loop_ = has_precise_host_loop;
+    previous_host_loop_start_beats_ =
+        has_precise_host_loop ? context.loop_start_beats : 0.0;
+    previous_host_loop_end_beats_ =
+        has_precise_host_loop ? context.loop_end_beats : 0.0;
     previous_playing_ = context.is_playing;
     previous_host_beat_mapping_ = use_host_beat_clock;
     pending_discontinuity_ = next_pending_discontinuity;
@@ -345,6 +376,10 @@ void HostTransportProjector::reset() noexcept {
     previous_meter_ = {};
     previous_loop_ = {};
     block_index_ = 0;
+    loop_pass_index_ = 0;
+    previous_host_loop_start_beats_ = 0.0;
+    previous_host_loop_end_beats_ = 0.0;
+    previous_has_precise_host_loop_ = false;
     has_expected_sample_ = false;
     first_block_ = true;
     previous_playing_ = false;

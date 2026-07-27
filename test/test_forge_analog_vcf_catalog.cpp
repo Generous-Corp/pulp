@@ -138,7 +138,7 @@ TEST_CASE("Forge analog VCF baked render is deterministic across identical insta
     auto second_injector = second.processor().claim_param_injection(second.filter);
     REQUIRE(first_injector.valid());
     REQUIRE(second_injector.valid());
-    constexpr std::array controls{0.63f, -0.75f, 0.58f, 9.0f};
+    constexpr std::array controls{0.63f, -0.75f, 0.90f, 9.0f};
     inject_controls(first_injector, controls);
     inject_controls(second_injector, controls);
 
@@ -231,7 +231,9 @@ TEST_CASE("Forge analog VCF adapter executes through a baked graph with declared
     constexpr float drive_db = 6.0f;
     const auto type = lofi::make_analog_vcf_node(
         pulp::signal::AnalogVcf::Voicing::juno);
-    REQUIRE(type.latency_samples ==
+    REQUIRE(type.latency_samples);
+    const int type_latency = type.latency_samples(kSampleRate);
+    REQUIRE(type_latency ==
             pulp::signal::AnalogVcf::latency_samples_for_oversampling(2));
 
     pulp::host::SignalGraph graph;
@@ -245,12 +247,11 @@ TEST_CASE("Forge analog VCF adapter executes through a baked graph with declared
     REQUIRE(graph.connect(input, 0, dry, 0));
     REQUIRE(graph.connect(dry, 0, output, 0));
     REQUIRE(graph.prepare(48000.0, frames));
-    REQUIRE(graph.latency_samples() == type.latency_samples);
+    REQUIRE(graph.latency_samples() == type_latency);
 
     auto baked = pulp::host::bake(graph);
     REQUIRE(baked.accepted);
     REQUIRE(baked.processor);
-    REQUIRE(baked.processor->latency_samples() == type.latency_samples);
 
     pulp::format::PrepareContext prepare;
     prepare.sample_rate = 48000.0;
@@ -258,6 +259,11 @@ TEST_CASE("Forge analog VCF adapter executes through a baked graph with declared
     prepare.input_channels = 1;
     prepare.output_channels = 1;
     baked.processor->prepare(prepare);
+    // Queried AFTER prepare, deliberately: intrinsic latency is a function of
+    // the sample rate, so it does not exist until the processor has been given
+    // one. Before prepare() the reported value is 0, which is the honest answer
+    // to "how much latency at a rate I have not been told yet".
+    REQUIRE(baked.processor->latency_samples() == type_latency);
 
     auto& baked_graph =
         *static_cast<pulp::host::BakedGraphProcessor*>(baked.processor.get());
@@ -297,9 +303,9 @@ TEST_CASE("Forge analog VCF adapter executes through a baked graph with declared
         oracle.set_parameters(cutoff, cutoff_mod, resonance, drive_db);
         expected[static_cast<std::size_t>(i)] =
             oracle.process(source[static_cast<std::size_t>(i)]);
-        if (i >= type.latency_samples) {
+        if (i >= type_latency) {
             expected[static_cast<std::size_t>(i)] +=
-                source[static_cast<std::size_t>(i - type.latency_samples)];
+                source[static_cast<std::size_t>(i - type_latency)];
         }
         REQUIRE(std::isfinite(rendered[static_cast<std::size_t>(i)]));
         REQUIRE(rendered[static_cast<std::size_t>(i)] ==
@@ -313,6 +319,8 @@ TEST_CASE("Baked-only Custom latency is reported by the baked processor, not liv
         pulp::signal::AnalogVcf::Voicing::juno);
     type.type_id = "test.baked-only-analog-vcf";
     type.process_instance = {};  // transparent on the live graph by contract
+    REQUIRE(type.latency_samples);
+    const int type_latency = type.latency_samples(48000.0);
 
     pulp::host::SignalGraph graph;
     REQUIRE(graph.register_custom_node_type(type));
@@ -327,5 +335,12 @@ TEST_CASE("Baked-only Custom latency is reported by the baked processor, not liv
     auto baked = pulp::host::bake(graph);
     REQUIRE(baked.accepted);
     REQUIRE(baked.processor);
-    REQUIRE(baked.processor->latency_samples() == type.latency_samples);
+    // See the note above: rate-dependent latency is resolved by prepare().
+    pulp::format::PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 64;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    baked.processor->prepare(prepare);
+    REQUIRE(baked.processor->latency_samples() == type_latency);
 }

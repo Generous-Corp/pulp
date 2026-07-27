@@ -332,8 +332,30 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
                 });
             },
             [&](const NoteContent& note_content) {
-                return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
-                    if (!context.writer.append("{\"notes\":["))
+                return write_envelope(context, "pulp.timeline.content.notes", 2, [&] {
+                    if (!context.writer.append("{\"modifier_seed\":") ||
+                        !context.writer.u64(note_content.modifier_seed(), true) ||
+                        !context.writer.append(",\"modifiers\":["))
+                        return false;
+                    for (std::size_t index = 0; index < note_content.modifiers().size(); ++index) {
+                        const auto& modifier = note_content.modifiers()[index];
+                        if ((index != 0 && !context.writer.character(',')) ||
+                            !context.writer.append("{\"condition\":") ||
+                            !context.writer.quoted(note_condition_name(modifier.condition)) ||
+                            !context.writer.append(",\"condition_offset\":") ||
+                            !context.writer.u64(modifier.condition_offset) ||
+                            !context.writer.append(",\"condition_period\":") ||
+                            !context.writer.u64(modifier.condition_period) ||
+                            !context.writer.append(",\"note_id\":") ||
+                            !context.writer.u64(modifier.note_id.value, true) ||
+                            !context.writer.append(",\"probability\":") ||
+                            !context.writer.u64(modifier.probability) ||
+                            !context.writer.append(",\"ratchet_count\":") ||
+                            !context.writer.u64(modifier.ratchet_count) ||
+                            !context.writer.character('}'))
+                            return false;
+                    }
+                    if (!context.writer.append("],\"notes\":["))
                         return false;
                     for (std::size_t index = 0; index < note_content.notes().size(); ++index) {
                         const auto& note = note_content.notes()[index];

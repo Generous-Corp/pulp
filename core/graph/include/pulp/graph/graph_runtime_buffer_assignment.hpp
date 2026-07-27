@@ -68,9 +68,13 @@ struct GraphRuntimeBufferAssignment {
     // True if any connection needs a non-zero delay.
     bool has_delay = false;
     bool ok = false;
-    // Maximum latency arriving at any AudioOutput node. Derived in the same
-    // propagation pass as connection PDC, so host-visible latency and delay
-    // rings cannot drift. Appended for aggregate-initializer compatibility.
+    // Maximum latency arriving at any AudioOutput node after topology
+    // propagation. This is the graph's externally reported latency. Derived in
+    // the same propagation pass as connection PDC, so host-visible latency and
+    // delay rings cannot drift, and keeping it beside the per-connection delays
+    // makes this assignment the single owner of latency analysis instead of
+    // requiring each host path to repeat the graph walk. Appended for
+    // aggregate-initializer compatibility.
     std::uint32_t total_latency_samples = 0;
 };
 

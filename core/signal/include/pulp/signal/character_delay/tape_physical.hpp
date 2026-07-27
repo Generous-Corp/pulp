@@ -36,6 +36,29 @@
 
 namespace pulp::signal::chardelay {
 
+/// Apply the physical tier's measured whole-loop stability calibration.
+///
+/// Sub-unity feedback retains the measured margin at the selected tape age.
+/// The explicit 1.0–1.1 range releases that margin continuously so the maximum
+/// setting still reaches the physical model's bounded self-oscillation point.
+/// `requested_feedback` is clamped to that 0–1.1 character contract first: the
+/// release ramp is defined only across it, and extrapolating past 1.1 would
+/// hand the loop more than unity gain with no saturator margin left to bound it.
+inline double physical_tape_effective_feedback(double requested_feedback,
+                                               double age) noexcept {
+    const double feedback = std::clamp(requested_feedback, 0.0,
+                                       kSaturatedFeedbackMax);
+    double loop_gain = interpolate_knots(kTapeAxis,
+                                         kTapePhysicalFeedbackCompensation,
+                                         age);
+    if (feedback > 1.0) {
+        const double over_unity =
+            (feedback - 1.0) / (kSaturatedFeedbackMax - 1.0);
+        loop_gain += (1.0 - loop_gain) * over_unity;
+    }
+    return feedback * loop_gain;
+}
+
 /// Intermittent dropout. Two states with randomly drawn durations and
 /// raised-cosine transitions, so the artifact arrives and leaves the way a
 /// crease in the tape passes the head rather than switching on a sample edge.
@@ -146,6 +169,23 @@ public:
         crossfade_remaining_ = 0;
     }
 
+    /// Fresh-state recovery without clearing dynamically sized FIR storage.
+    void recover_audio_fault() noexcept {
+        record_eq_.reset();
+        playback_eq_.reset();
+        dc_blocker_.reset();
+        hiss_filter_.reset();
+        degrade_filter_.reset();
+        head_bump_.reset();
+        hysteresis_.reset();
+        chew_.reset();
+        active_.discard_history();
+        previous_.discard_history();
+        hiss_rng_.reset();
+        degrade_rng_.reset();
+        crossfade_remaining_ = 0;
+    }
+
     void set_seeds(std::uint32_t base) noexcept {
         hiss_rng_.reseed(base ^ 0x9E3779B9u);
         degrade_rng_.reseed(base ^ 0x85EBCA6Bu);
@@ -182,6 +222,7 @@ public:
 
     double speed_ips() const noexcept { return speed_ips_; }
     const std::vector<double>& gap_coefficients() const noexcept { return design_.gap_taps(); }
+    TapeLossIirParams loss_parameters() const noexcept { return active_.parameters(); }
 
     /// Control-rate update. In this tier `character_amount` IS the age axis.
     void update(double age) noexcept {

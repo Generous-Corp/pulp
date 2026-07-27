@@ -219,6 +219,36 @@ docs:
     kind: guide
     summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
 
+  - slug: dsp-dynamics
+    path: guides/dsp-dynamics.md
+    kind: guide
+    summary: Choosing and integrating feedforward, VCA, diode-bridge, and FET compressors
+
+  - slug: dsp-nonlinear-tone
+    path: guides/dsp-nonlinear-tone.md
+    kind: guide
+    summary: Saturation, circuit clippers, fuzz, tape, and speaker-model authoring guide
+
+  - slug: dsp-modulation-effects
+    path: guides/dsp-modulation-effects.md
+    kind: guide
+    summary: Phaser, vibrato, chorus, flanger, frequency-shifter, rotary, and scanner mechanisms
+
+  - slug: dsp-pitch-time-granular
+    path: guides/dsp-pitch-time-granular.md
+    kind: guide
+    summary: Pitch shifting and tracking, diatonic harmony, cyclic stretch, and deterministic granular processing
+
+  - slug: dsp-synthesis-sequencing
+    path: guides/dsp-synthesis-sequencing.md
+    kind: guide
+    summary: Additive synthesis, vocoding, and clocked modular sequencing composition
+
+  - slug: dsp-space-convolution
+    path: guides/dsp-space-convolution.md
+    kind: guide
+    summary: Designed nonlinear ambience and zero-latency multilevel convolution
+
   - slug: fdn-reverb
     path: guides/fdn-reverb.md
     kind: guide
@@ -371,6 +401,11 @@ docs:
     path: api-reference.md
     kind: reference
     summary: Stub page that redirects to the Doxygen-generated C++ API reference at /api/
+
+  - slug: advanced-dsp-api
+    path: reference/advanced-dsp-api.md
+    kind: reference
+    summary: Exhaustive public-method inventory for the advanced signal-processing families
 
   - slug: cli
     path: reference/cli.md

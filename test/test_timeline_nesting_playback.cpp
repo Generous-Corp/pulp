@@ -527,3 +527,95 @@ TEST_CASE("Nested audio trimming preserves fractional sample-rate conversion off
                                               direct_output.view()) == AudioRenderStatus::Rendered);
     REQUIRE(nested_output.storage == direct_output.storage);
 }
+
+namespace {
+
+// A child sequence whose single note clip carries modifiers and an authored
+// seed, referenced once from the root. `child_note_start`/`child_note_duration`
+// let a case place the note so that clipping keeps it, trims it, or removes it
+// entirely.
+Project modified_nested_project(std::vector<NoteModifier> modifiers, std::uint64_t seed,
+                                std::int64_t child_note_start = 120,
+                                std::int64_t child_note_duration = 240,
+                                std::int64_t reference_source_start = 0,
+                                std::int64_t reference_duration = 960) {
+    auto notes = take(NoteContent::create(
+        {NoteEvent{{13}, {child_note_start}, {child_note_duration}, 40'000, 64, 0},
+         NoteEvent{{15}, {600}, {120}, 40'000, 67, 0}},
+        std::move(modifiers), seed));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(notes)));
+    auto child = take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        {track(3, {nested_clip(4, 10, 480, reference_duration, reference_source_start)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "modified-nested";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+NoteModifier certain_ratchet(std::uint64_t note_id, std::uint16_t ratchets) {
+    NoteModifier modifier;
+    modifier.note_id = {note_id};
+    modifier.ratchet_count = ratchets;
+    return modifier;
+}
+
+} // namespace
+
+TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
+    // Ratchet is authored rather than drawn, so it is observable in the compiled
+    // event stream without depending on a probability draw: a note that ratchets
+    // three times emits three on/off pairs instead of one.
+    const auto project =
+        modified_nested_project({certain_ratchet(13, 3)}, 0xC0FFEEULL);
+    auto program = compile(shared(project));
+    const auto events = program->find_track({3})->arrangement_note_events();
+
+    // Note 13 ratcheted x3 plus note 15 unmodified = 4 note-ons.
+    std::size_t note_ons = 0;
+    for (const auto& event : events)
+        if (event.kind == NoteProgramEventKind::On)
+            ++note_ons;
+    REQUIRE(note_ons == 4);
+}
+
+TEST_CASE("A nested note clip drops modifiers whose notes were trimmed away") {
+    // The reference starts one tick after note 13 ends, so note 13 is entirely
+    // outside the audible window and is removed by clipping. Its modifier must
+    // be dropped with it: NoteContent::create refuses a modifier that names an
+    // absent note, so passing the companion array through unfiltered would turn
+    // this nested sequence into a compile error rather than a valid lowering.
+    const auto project = modified_nested_project(
+        {certain_ratchet(13, 3)}, 0xC0FFEEULL, 0, 240, /*reference_source_start=*/480);
+    auto program = compile(shared(project));
+    const auto track = program->find_track({3});
+    REQUIRE(track != nullptr);
+
+    // Note 15 survives at source tick 600; note 13 and its modifier are gone.
+    std::size_t note_ons = 0;
+    for (const auto& event : track->arrangement_note_events())
+        if (event.kind == NoteProgramEventKind::On)
+            ++note_ons;
+    REQUIRE(note_ons == 1);
+}
+
+TEST_CASE("A nested note clip carries its modifiers through a partial clip") {
+    // Note 13 spans the reference boundary, so clipping shortens it but keeps
+    // its identity — and therefore its modifier, because a clipped note retains
+    // its id.
+    const auto project = modified_nested_project({certain_ratchet(13, 2)}, 7,
+                                                 /*child_note_start=*/400,
+                                                 /*child_note_duration=*/400,
+                                                 /*reference_source_start=*/500);
+    auto program = compile(shared(project));
+    std::size_t note_ons = 0;
+    for (const auto& event : program->find_track({3})->arrangement_note_events())
+        if (event.kind == NoteProgramEventKind::On)
+            ++note_ons;
+    // Note 13 survives partially and still ratchets twice; note 15 survives once.
+    REQUIRE(note_ons == 3);
+}
