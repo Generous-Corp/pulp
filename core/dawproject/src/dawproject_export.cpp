@@ -210,6 +210,33 @@ interchange::ExportWriter writer(const timeline::Project& project, const ExportO
             track_node.append_attribute("id") = track_id.c_str();
             track_node.append_attribute("name") = track.name().c_str();
 
+            // A DAWproject track is a channel. A receiving DAW registers the
+            // track from this element, and a <Lanes track="..."> reference to a
+            // track that was never registered resolves to nothing -- Bitwig
+            // 6.0.11 fails such a file with EmptyStackException while adding the
+            // first clip, because its track-context stack is empty.
+            //
+            // This channel is deliberately NEUTRAL: unity volume, centre pan.
+            // That is not the document's authored mixer state, which this writer
+            // does not export -- the capability table says mixer.track-gain and
+            // mixer.track-pan are dropped, and they are. Emitting a default
+            // channel is what makes the file loadable, not a partial export of
+            // levels the manifest claims were dropped.
+            auto channel = track_node.append_child("Channel");
+            channel.append_attribute("id") = element_id("channel", track.id()).c_str();
+            channel.append_attribute("role") = "regular";
+            channel.append_attribute("audioChannels") = 2;
+            auto volume = channel.append_child("Volume");
+            volume.append_attribute("value") = "1.000000";
+            volume.append_attribute("unit") = "linear";
+            volume.append_attribute("min") = "0.000000";
+            volume.append_attribute("max") = "2.000000";
+            auto pan = channel.append_child("Pan");
+            pan.append_attribute("value") = "0.500000";
+            pan.append_attribute("unit") = "normalized";
+            pan.append_attribute("min") = "0.000000";
+            pan.append_attribute("max") = "1.000000";
+
             auto track_lanes = lanes.append_child("Lanes");
             track_lanes.append_attribute("track") = track_id.c_str();
             track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
