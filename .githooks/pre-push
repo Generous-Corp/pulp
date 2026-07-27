@@ -44,6 +44,20 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     exit 0
 fi
 
+# Agent/tool subprocesses can inherit nonblocking stdout/stderr pipes. Python's
+# text streams turn a transient EAGAIN on those pipes into BlockingIOError,
+# which used to make a healthy gate look like an internal failure. Capture each
+# gate to a regular file first, then replay its diagnostics best-effort. The
+# gate's exit status remains authoritative even if the caller stops draining
+# output temporarily.
+PREPUSH_GATE_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pulp-prepush-gates.XXXXXX")" || {
+    echo "[pre-push] failed to create gate log directory" >&2
+    exit 1
+}
+trap 'rm -rf -- "$PREPUSH_GATE_LOG_DIR"' EXIT
+# shellcheck source=.githooks/lib/gate-output.sh
+source "$ROOT/.githooks/lib/gate-output.sh"
+
 # ── PR-batching advice (advisory, never blocks) ────────────────────────────
 # A PR here costs ~an hour before it can merge (a ~25-minute local coverage
 # build, then a Shipyard validation that must run SERIALLY with any other), so
@@ -59,7 +73,7 @@ fi
 # only reaches an agent that chooses to read it; a push reaches everyone.
 PR_BATCH_ADVISOR="$ROOT/tools/scripts/pr_batch_advisor.py"
 if [ -f "$PR_BATCH_ADVISOR" ] && [ "${PULP_SKIP_PR_BATCH_ADVICE:-0}" != "1" ]; then
-    python3 "$PR_BATCH_ADVISOR" || true   # advisory: its failure must never block a push
+    run_gate_captured python3 "$PR_BATCH_ADVISOR" || true
 fi
 
 # ── Shipyard-drift detection (pulp #1406) ──────────────────────────────────
@@ -172,7 +186,7 @@ fi
 # bypass is fixing the file, not setting an env var.
 SOURCE_TREE_POLLUTION_PY="$ROOT/tools/scripts/source_tree_pollution_check.py"
 if [ -f "$SOURCE_TREE_POLLUTION_PY" ]; then
-    if ! "$PYTHON" "$SOURCE_TREE_POLLUTION_PY" --mode=push --base "$BASE"; then
+    if ! run_gate_captured "$PYTHON" "$SOURCE_TREE_POLLUTION_PY" --mode=push --base "$BASE"; then
         echo "[pre-push] source-tree pollution gate: BLOCKED. Fix the listed file(s) above and retry." >&2
         echo "[pre-push] (this gate has no env-var bypass — there is no legitimate reason to commit a Clock fixture.)" >&2
         exit 1
@@ -181,21 +195,21 @@ if [ -f "$SOURCE_TREE_POLLUTION_PY" ]; then
     # root paths not in ALLOWED_ROOT_PATHS (almost always a stray
     # fixture, mis-placed module, or an intentional addition whose
     # allowlist update was forgotten).
-    if ! "$PYTHON" "$SOURCE_TREE_POLLUTION_PY" --mode=root-allowlist --rev HEAD; then
+    if ! run_gate_captured "$PYTHON" "$SOURCE_TREE_POLLUTION_PY" --mode=root-allowlist --rev HEAD; then
         echo "[pre-push] root-allowlist gate: BLOCKED. Either move the file(s) under the correct subdirectory or add them to ALLOWED_ROOT_PATHS in tools/scripts/source_tree_pollution_check.py in the same commit." >&2
         exit 1
     fi
 fi
 
 # Skill-sync first — it fails fast and the output is the most actionable.
-"$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report
+run_gate_captured "$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report
 case $? in
     0) ;;
     1) fail=1 ;;
     *) echo "[pre-push] skill_sync_check: internal error" >&2 ;;
 esac
 
-"$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
+run_gate_captured "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
 case $? in
     0) ;;
     1) fail=1 ;;
@@ -207,7 +221,7 @@ esac
 # skill-sync gate above; PULP_DISABLE_PREPUSH_GATES=1 demotes it.
 SSCS="$ROOT/tools/scripts/screenshot_sync_check.py"
 if [ -f "$SSCS" ]; then
-    "$PYTHON" "$SSCS" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$SSCS" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -217,7 +231,7 @@ fi
 
 # Compat-sync.
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
-    "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce
+    run_gate_captured "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -230,7 +244,7 @@ fi
 # guide doc silently drifts the operator-facing description. Bypass on any
 # commit in the range with a `Config-Doc: skip reason="..."` trailer.
 if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
-    "$PYTHON" "$CDC" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$CDC" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -240,7 +254,7 @@ fi
 
 # Compat aggregate/part consistency.
 if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; then
-    "$PYTHON" "$COMPAT_AGG" check
+    run_gate_captured "$PYTHON" "$COMPAT_AGG" check
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -253,7 +267,7 @@ fi
 # and test tags (core/examples/tools/test/apple/inspect/ship), with ci/SKILL.md
 # and archival/report/policy/contract paths allowlisted by the script.
 if [ -f "$DNL" ]; then
-    "$PYTHON" "$DNL" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$DNL" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -264,7 +278,7 @@ fi
 # Node ABI virtual-order gate. Processor and PluginSlot are public
 # polymorphic surfaces; virtual methods may only be appended within ABI v1.
 if [ -f "$NAG" ]; then
-    "$PYTHON" "$NAG" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$NAG" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -275,7 +289,7 @@ fi
 # Hotspot size guard. Freezes known refactor hotspot LOC baselines and warns
 # on newly added large core/tools files before another monolith forms.
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
-    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
+    run_gate_captured "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
         --require-ceiling-reduction
     case $? in
         0) ;;
@@ -288,7 +302,7 @@ fi
 # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
 # deliberate re-pins pass with a `Planning-Bump:` trailer.
 if [ -f "$PGL" ]; then
-    "$PYTHON" "$PGL" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$PGL" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -303,7 +317,7 @@ fi
 # comparison against local git; a deliberate revert passes via a `Revert "..."`
 # subject or a `Silent-Revert: skip` trailer.
 if [ -f "$SRG" ]; then
-    "$PYTHON" "$SRG" --base "$BASE" --mode=report
+    run_gate_captured "$PYTHON" "$SRG" --base "$BASE" --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -315,7 +329,7 @@ fi
 # and `--strict` only fails warning/error findings; optional planning-submodule
 # paths remain informational so normal worktree checkouts can run it.
 if [ -f "$SCC" ]; then
-    "$PYTHON" "$SCC" --strict
+    run_gate_captured "$PYTHON" "$SCC" --strict
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -323,7 +337,7 @@ if [ -f "$SCC" ]; then
     esac
 fi
 if [ -f "$SCT" ]; then
-    "$PYTHON" "$SCT"
+    run_gate_captured "$PYTHON" "$SCT"
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -376,7 +390,7 @@ if [ -f "$TERMS_LINT" ]; then
     esac
 fi
 if [ -f "$SINGLE_BACKEND_GUARD" ]; then
-    "$PYTHON" "$SINGLE_BACKEND_GUARD"
+    run_gate_captured "$PYTHON" "$SINGLE_BACKEND_GUARD"
     case $? in
         0) ;;
         1) fail=1 ;;
@@ -387,7 +401,7 @@ fi
 # marker (a squash-merge whose stale side collided with an advanced line can
 # write one straight onto main). Whole-tree, sub-second, zero-false-positive.
 if [ -f "$CONFLICT_MARKER_GUARD" ]; then
-    "$PYTHON" "$CONFLICT_MARKER_GUARD"
+    run_gate_captured "$PYTHON" "$CONFLICT_MARKER_GUARD"
     case $? in
         0) ;;
         1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; fail=1 ;;
@@ -468,7 +482,7 @@ if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
                   echo "[pre-push] …diff-coverage build still running (${_hb_t}s elapsed) — this is a BUILD, not a network hang." >&2
               done ) &
             _hb_pid=$!
-            if ! bash "$DIFF_COVER_SH"; then
+            if ! run_gate_captured bash "$DIFF_COVER_SH"; then
                 diff_cover_failed=1
             fi
             kill "$_hb_pid" 2>/dev/null || true
