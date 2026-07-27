@@ -128,6 +128,12 @@ public:
     // octave window). Public so callers/tests can resolve a key's current pitch.
     int midi_for_element(int index) const;
 
+    // Index of the (first) element whose action tag == `tag`, or -1. Public for
+    // the same reason as midi_for_element: it is a pure query, and pairing it
+    // with element_value() is how a caller or test reads a control's lit state
+    // (e.g. whether the sustain pad is still held).
+    int element_for_action(const std::string& tag) const;
+
 protected:
     // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
     // (so a held key can't sound forever after the typing frame goes away) and
@@ -176,8 +182,6 @@ private:
     // Re-light the selected modulation button (mod_sel_) and clear the others;
     // call after a press auto-clears the momentary light on release.
     void refresh_mod_lights();
-    // Index of the (first) element whose action tag == `tag`, or -1.
-    int element_for_action(const std::string& tag) const;
     // Light (on) or clear (off) every momentary control with `tag` — the tap-flash
     // for octave/velocity/arrow buttons (mouse press or the z/x·c/v keys).
     void flash_action(const std::string& tag, bool on);

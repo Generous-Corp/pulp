@@ -24,6 +24,14 @@ class NativeViewHost;
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
+    struct MenuCommand {
+        std::string menu;
+        std::string title;
+        KeyCode key = KeyCode::unknown;
+        std::uint16_t modifiers = kModNone;
+        std::function<void()> action;
+    };
+
     std::string title = "Pulp";
     float width = 400;
     float height = 300;
@@ -60,6 +68,11 @@ struct WindowOptions {
     WindowType* window_type = nullptr;  ///< Optional type hint for platform styling
     void* parent_native_handle = nullptr; ///< Parent window handle (HWND, NSWindow*)
     void* shared_gpu_device = nullptr;  ///< Shared Dawn device for multi-window GPU
+
+    /// Commands exposed through the platform's native application menu bar.
+    /// Backends that do not provide a native menu may ignore this list; the
+    /// command's keyboard route remains the caller's responsibility.
+    std::vector<MenuCommand> menu_commands;
 };
 
 // Native window that hosts a View tree and renders it.
@@ -493,6 +506,11 @@ public:
         (void)enabled;
         note_unsupported_feature("set_mouse_relative_mode");
     }
+
+    // Keep new virtuals at the tail of the public vtable. WindowHost is an SDK
+    // extension surface (set_factory accepts downstream subclasses), so
+    // inserting a virtual among existing methods would shift every later slot.
+    virtual bool is_gpu_backed() const { return gpu_surface() != nullptr; }
 
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently

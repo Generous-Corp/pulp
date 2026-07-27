@@ -28,6 +28,10 @@ class CommandRegistry;
 
 namespace pulp::format {
 
+namespace detail {
+class StandaloneMusicalTyping;
+}
+
 struct StandaloneConfig {
     std::string audio_device_id;
     std::string midi_input_id;
@@ -124,6 +128,12 @@ struct StandaloneConfig {
     int time_sig_denominator = 4;
     bool transport_playing = true;  // default-on so MIDI/tempo plugins are immediately useful
     bool transport_recording = false;
+
+    // Adds Pulp's floating Musical Typing Keyboard to this standalone app.
+    // The keyboard is hidden until the user chooses Window > Musical Typing
+    // Keyboard or presses Cmd+K (Ctrl+K on non-Apple platforms). Notes enter
+    // through the standalone host's lock-free UI MIDI path.
+    bool enable_musical_typing_keyboard = false;
 };
 
 namespace detail {
@@ -270,6 +280,8 @@ private:
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;
     view::AudioBridge output_meter_bridge_;
+    std::unique_ptr<view::CommandRegistry> command_registry_;
+    std::unique_ptr<detail::StandaloneMusicalTyping> musical_typing_;
 #if PULP_ENABLE_AUDIO_PROBES
     // Realtime output-boundary probe. prepare()d in start() with the
     // device's channel/buffer/rate; analyze_output() is called from the audio
@@ -301,7 +313,6 @@ private:
     // window exists, behind a shared CommandRegistry routed by
     // `route_global_keys` (Cmd/Ctrl+Shift+A). Opened when PULP_AUDIO_INSPECTOR
     // is set in the environment.
-    std::unique_ptr<view::CommandRegistry> command_registry_;
     std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
 #endif
     // The MAXIMUM frames the audio callback may deliver in one block. This is

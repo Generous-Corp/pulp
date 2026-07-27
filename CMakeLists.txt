@@ -343,6 +343,7 @@ endif()
 
 add_library(pulp-standalone STATIC
     core/format/src/standalone.cpp
+    core/format/src/standalone_musical_typing.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp
 )
