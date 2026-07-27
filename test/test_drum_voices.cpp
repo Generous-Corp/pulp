@@ -968,6 +968,32 @@ TEST_CASE("The snare drains its shell resonance after the strike ends",
     REQUIRE_FALSE(voice.is_active());
 }
 
+TEST_CASE("The snare drains private lo-fi tails in output bypass mode",
+          "[signal][drum][snare][lofi][lifecycle]") {
+    for (int selected = 0; selected < 2; ++selected) {
+        SnareVoice voice;
+        voice.prepare(kFs);
+        voice.set_tone_level(selected == 0 ? 1.0 : 0.0);
+        voice.set_noise_level(selected == 1 ? 1.0 : 0.0);
+        voice.set_snap_level(0.0);
+        voice.set_tone_decay_ms(20.0);
+        voice.set_noise_decay_ms(20.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        if (selected == 0)
+            voice.tone_lofi().set_hold_rate_hz(1.0);
+        else
+            voice.noise_lofi().set_hold_rate_hz(1.0);
+
+        voice.note_on(1.0f);
+        (void)render(voice, 4800);
+        INFO("private lo-fi path " << selected);
+        REQUIRE(voice.is_active());
+        (void)render(voice, 48000);
+        REQUIRE_FALSE(voice.is_active());
+    }
+}
+
 // -- Tom ---------------------------------------------------------------------
 
 TEST_CASE("The tom's pitch dive finishes long before the note does",
