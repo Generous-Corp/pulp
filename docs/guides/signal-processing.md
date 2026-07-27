@@ -349,6 +349,15 @@ Uses `tanh()` saturation per stage for analog-style nonlinearity. The feedback p
 
 ---
 
+### Analog VCF
+
+For measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings—or for
+building a custom voicing directly on Pulp's nonlinear four-pole OTA cascade—
+see the [Analog VCF guide](analog-vcf.md). It documents control ranges,
+real-time use, oversampling latency, graph PDC, and both public APIs.
+
+---
+
 ### LinkwitzRiley
 
 4th-order Linkwitz-Riley crossover filter (-6 dB at crossover frequency). Provides lowpass and highpass outputs that sum flat. Built from two cascaded Biquad lowpass and two cascaded Biquad highpass filters.

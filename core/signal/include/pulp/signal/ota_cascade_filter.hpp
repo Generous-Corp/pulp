@@ -31,22 +31,45 @@
 
 namespace pulp::signal {
 
+/// Voicing-neutral four-pole nonlinear cascade with fixed-storage oversampling.
+///
+/// Configuration, reset, and processing are allocation-free and `noexcept`.
+/// An instance is suitable for an audio thread, but provides no synchronization;
+/// do not mutate it concurrently from another thread. `SampleType` selects the
+/// public sample type while internal state and coefficient calculations use
+/// `double` precision.
 template <typename SampleType = float>
 class OtaCascadeFilterT {
 public:
+    /// Output tap combination selected from the shared four-pole cascade.
     enum class Mode {
+        /// Four-pole low-pass response (nominal 24 dB/octave).
         lowpass24,
+        /// Two-pole low-pass response (nominal 12 dB/octave).
         lowpass12,
+        /// Four-pole high-pass response.
         highpass4,
+        /// Four-pole band-pass response.
         bandpass4,
     };
 
+    /// Constructs a 44.1 kHz, 2x, 24 dB/octave low-pass filter.
+    ///
+    /// Defaults are a 1 kHz pole, zero resonance, a 4.3 feedback ceiling,
+    /// unity drive/headroom/output gain, zero bias/compensation/cross-modulation/
+    /// drift, and zero smoothing time. Coefficients start snapped to those
+    /// targets. Construction allocates no memory.
     OtaCascadeFilterT() noexcept {
         update_smoothing_coefficient();
         update_g_target();
         snap_coefficients();
     }
 
+    /// Sets the base sample rate in Hz and resets all DSP history.
+    ///
+    /// Values below 64 Hz (including negative values) become 64 Hz so the
+    /// mandatory 20 Hz pole floor remains below the Nyquist-derived ceiling.
+    /// Recomputes the internal oversampled rate, smoothing, and pole target.
     void set_sample_rate(double sample_rate) noexcept {
         // Keep the mandated 20 Hz pole floor below the 0.45 * sample-rate
         // ceiling even for defensive/invalid host preparation values.
@@ -57,6 +80,11 @@ public:
         reset();
     }
 
+    /// Sets the oversampling factor to 1, 2, 4, 8, or 16.
+    ///
+    /// Any other value selects 2x. An effective factor change recomputes the
+    /// internal rate and pole target and resets filter, FIR, smoothing, and
+    /// drift state. Selecting the already-active effective factor is a no-op.
     void set_oversampling(int factor) noexcept {
         if (!valid_oversampling_factor(factor))
             factor = 2;
@@ -68,57 +96,107 @@ public:
         reset();
     }
 
+    /// Sets the one-pole corner frequency in Hz.
+    ///
+    /// The value is clamped to `[20, 0.45 * sample_rate()]` at the base rate.
+    /// Updates the smoothed coefficient target without clearing DSP history.
     void set_pole_frequency(double pole_hz) noexcept {
         pole_hz_ = std::clamp(pole_hz, 20.0, 0.45 * sample_rate_);
         update_g_target();
     }
 
+    /// Sets normalized resonance in `[0, 1]`.
+    ///
+    /// Values outside the range are clamped. The resulting feedback target is
+    /// `normalized * k_max`; changing it does not clear DSP history.
     void set_resonance(double normalized) noexcept {
         resonance_ = std::clamp(normalized, 0.0, 1.0);
         update_k_target();
     }
 
+    /// Sets the non-negative maximum feedback coefficient.
+    ///
+    /// Negative values become zero. The resonance target is recomputed as
+    /// `resonance * k_max` without clearing DSP history.
     void set_k_max(double k_max) noexcept {
         k_max_ = std::max(0.0, k_max);
         update_k_target();
     }
 
+    /// Sets input drive in decibels, clamped to `[-96, 72]` dB.
+    ///
+    /// The corresponding linear gain becomes a smoothed target.
     void set_drive_db(double drive_db) noexcept {
         drive_target_ = std::pow(10.0, std::clamp(drive_db, -96.0, 72.0) / 20.0);
     }
 
+    /// Sets nonlinear-junction headroom, clamped to `[0.25, 16]`.
+    ///
+    /// The value is dimensionless and becomes a smoothed target.
     void set_saturation_headroom(double headroom) noexcept {
         saturation_target_ = std::clamp(headroom, 0.25, 16.0);
     }
 
+    /// Sets dimensionless asymmetric saturation bias, clamped to `[-2, 2]`.
+    ///
+    /// The value becomes a smoothed target.
     void set_bias(double bias) noexcept {
         bias_target_ = std::clamp(bias, -2.0, 2.0);
     }
 
+    /// Sets resonance-dependent passband compensation in `[0, 1]`.
+    ///
+    /// Zero disables compensation and one applies the full feedback-dependent
+    /// gain. High-pass mode intentionally remains at unity compensation.
     void set_compensation(double amount) noexcept {
         compensation_ = std::clamp(amount, 0.0, 1.0);
         update_compensation_target();
     }
 
+    /// Sets a non-negative linear output-gain multiplier.
+    ///
+    /// Negative values become zero. The value becomes a smoothed target.
     void set_output_gain(double gain) noexcept {
         output_gain_target_ = std::max(0.0, gain);
     }
 
+    /// Sets nonlinear output cross-modulation.
+    ///
+    /// `depth` is clamped to `[-1, 1]`; `drive` is clamped to `[0.1, 16]`
+    /// and defaults to 2. Both are dimensionless smoothed targets. A zero
+    /// depth disables the effect.
     void set_cross_modulation(double depth, double drive = 2.0) noexcept {
         cross_mod_depth_target_ = std::clamp(depth, -1.0, 1.0);
         cross_mod_drive_target_ = std::clamp(drive, 0.1, 16.0);
     }
 
+    /// Selects the output tap combination without resetting cascade history.
+    ///
+    /// The compensation target is updated; high-pass mode forces unity
+    /// compensation while selected.
     void set_mode(Mode mode) noexcept {
         mode_ = mode;
         update_compensation_target();
     }
 
+    /// Sets the base-rate coefficient-smoothing time in milliseconds.
+    ///
+    /// Negative values become zero; zero snaps controls to their targets on
+    /// the next processed sample. This changes smoothing behavior without
+    /// immediately snapping coefficients or clearing DSP history.
     void set_smoothing_time_ms(double milliseconds) noexcept {
         smoothing_ms_ = std::max(0.0, milliseconds);
         update_smoothing_coefficient();
     }
 
+    /// Configures deterministic low-rate cutoff and resonance drift.
+    ///
+    /// `cutoff_cents` is clamped to `[0, 100]`; `resonance_fraction` to
+    /// `[0, 0.1]`; and `cutoff_rate_hz` to `[0.05, 20]` Hz. A positive
+    /// `resonance_rate_hz` is clamped to `[0.05, 40]` Hz, while zero or a
+    /// negative value makes resonance drift follow the cutoff rate. Both
+    /// depths at zero disable drift and restore unity drift multipliers.
+    /// Randomness is instance-local and reproducible after `reset()`.
     void set_drift(double cutoff_cents, double resonance_fraction, double cutoff_rate_hz = 1.5,
                    double resonance_rate_hz = 0.0) noexcept {
         drift_cutoff_cents_ = std::clamp(cutoff_cents, 0.0, 100.0);
@@ -132,6 +210,11 @@ public:
         }
     }
 
+    /// Processes one base-rate sample and returns one base-rate sample.
+    ///
+    /// Advances smoothing, deterministic drift, FIR oversampling, and cascade
+    /// state. The method is allocation-free and real-time safe for an instance
+    /// exclusively owned by the calling audio thread.
     SampleType process(SampleType input) noexcept {
         step_base_rate_controls();
 
@@ -167,6 +250,11 @@ public:
         return static_cast<SampleType>(values[0]);
     }
 
+    /// Processes `num_samples` base-rate samples in place.
+    ///
+    /// A null `buffer` or non-positive `num_samples` is a no-op. Otherwise this
+    /// is equivalent to calling the scalar `process()` for each sample and is
+    /// allocation-free.
     void process(SampleType* buffer, int num_samples) noexcept {
         if (buffer == nullptr || num_samples <= 0)
             return;
@@ -174,6 +262,11 @@ public:
             buffer[i] = process(buffer[i]);
     }
 
+    /// Clears cascade and oversampler history while preserving configuration.
+    ///
+    /// Restores the fixed drift seed and zero drift state, then snaps all
+    /// smoothed coefficients to their current targets. The next sample therefore
+    /// begins the same deterministic drift sequence for identical settings.
     void reset() noexcept {
         states_.fill(0.0);
         taps_.fill(0.0);
@@ -191,6 +284,10 @@ public:
         snap_coefficients();
     }
 
+    /// Returns round-trip FIR latency for an oversampling factor.
+    ///
+    /// The result is expressed in base-rate samples: 1x -> 0, 2x -> 32,
+    /// 4x -> 48, 8x -> 56, and 16x -> 60. Returns `-1` for any invalid factor.
     static constexpr int latency_samples_for_oversampling(int factor) noexcept {
         if (factor != 1 && factor != 2 && factor != 4 && factor != 8 &&
             factor != 16)
@@ -201,13 +298,17 @@ public:
         return latency;
     }
 
+    /// Returns the current round-trip oversampling latency in base-rate samples.
     int latency_samples() const noexcept {
         return latency_samples_for_oversampling(factor_);
     }
 
+    /// Returns the active oversampling factor: 1, 2, 4, 8, or 16.
     int oversampling() const noexcept {
         return factor_;
     }
+
+    /// Returns the active base sample rate in Hz, after the 64 Hz floor.
     double sample_rate() const noexcept {
         return sample_rate_;
     }
@@ -435,7 +536,9 @@ private:
     std::array<detail::FixedHalfBandFir65, 4> downsamplers_{};
 };
 
+/// Single-precision sample interface for `OtaCascadeFilterT<float>`.
 using OtaCascadeFilter = OtaCascadeFilterT<float>;
+/// Double-precision sample interface for `OtaCascadeFilterT<double>`.
 using OtaCascadeFilter64 = OtaCascadeFilterT<double>;
 
 }  // namespace pulp::signal
