@@ -1678,17 +1678,33 @@ real failure (521 orphaned records were reaped across the CI Macs on
 auto-merge as a server-side backstop:**
 
 ```bash
-ghapp pr merge <PR> --auto --merge      # merge commit, NOT --squash
+ghapp pr merge <PR> --auto              # NO strategy flag — the queue owns it
 ```
 
-GitHub then merges the moment required checks (`macos` + `Enforce version &
-skill sync`) go green, regardless of whether `shipyard pr`, cmux, or this
-session survive. Use `--merge` (merge commit), never `--squash`: a squash folds
-the `chore: bump versions` commit into the PR-title commit, which trips the
-auto-release watchdog into a false "merged without bump." It is safe alongside
-`shipyard pr` — whichever merges first wins; the other no-ops on already-merged.
-(The Shipyard repo has no branch protection, so GitHub auto-merge is
-unavailable there; the host-side queue janitor below covers it.)
+GitHub then merges the moment required checks go green, regardless of whether
+`shipyard pr`, cmux, or this session survive.
+
+**Pass no strategy flag.** `main` is merge-queue-governed, so the queue owns the
+merge method and GitHub refuses any strategy outright:
+
+```
+! The merge strategy for main is set by the merge queue
+```
+
+That applies to `--merge` and `--squash` alike (verified on PR #6736,
+2026-07-27), so the bare `--auto` above is the only form that arms. Historically
+this section required `--merge` to keep a squash from folding the
+`chore: bump versions` commit into the PR-title commit and tripping the
+auto-release watchdog into a false "merged without bump" — that hazard is now the
+queue's problem, not a flag you choose.
+
+Arming is safe alongside `shipyard pr` — whichever merges first wins; the other
+no-ops on already-merged.
+(GitHub auto-merge works on the Shipyard repo too — verified arming it on
+Shipyard PR #384 on 2026-07-27, which then merged on green. Use `--squash` there,
+matching that repo's own history; the no-squash rule above is a pulp
+auto-release-watchdog constraint, not a general one. The host-side queue janitor
+below is a second layer, not the only one.)
 
 **Host-side backstop (both repos + orphan reaping):** a launchd queue-tick on
 each CI Mac (`tartci` `scripts/shipyard_queue_tick.sh`) periodically drives
@@ -1698,6 +1714,80 @@ session. Reap a stale local pile by hand with `shipyard ship-state list` →
 `shipyard ship-state discard <pr>` for each merged/closed PR (never discard an
 OPEN one). Full design: pulp
 `planning/2026-06-30-ship-queue-resilience-design.md`.
+
+### Shipyard validated green but could NOT merge — the sanctioned fallback
+
+Shipyard can validate every target and still fail its own merge call: a
+malformed request (Shipyard ≤0.80.1 sent `autoMergeRequest{id}`, which GitHub's
+schema rejects), an App-token permission gap (`Resource not accessible by
+integration`), or a transient API failure. Its hand-back prints
+`gh pr merge <n> --squash --auto` as the remedy, which raises a fair question:
+does using `ghapp` here bypass the gates that `shipyard pr` owns?
+
+**No — and this is already standing policy, not an exception.** Arming
+GitHub-native auto-merge is a *request*, not a merge: GitHub still holds the PR
+until every required check passes, and on a queue-governed branch the merge queue
+still validates the merge result before landing. It bypasses nothing. The
+backstop section above already *requires* arming it on every pulp PR for exactly
+this reason. A handoff or prompt that says "do not use `ghapp`" is scoped to PR
+**creation** and to anything that skips a gate (`--admin`, an immediate merge, a
+hand-rolled `gh pr create`); read it that way, and if its wording is broader,
+fix the wording rather than inventing a silent exception.
+
+**Allowed** — arming auto-merge, nothing else:
+
+```bash
+ghapp pr merge <PR> --auto             # pulp main: no strategy flag
+```
+
+**Never** in this situation: `--admin`, an immediate (non-`--auto`) merge, a
+force-push to "refresh" checks, or editing branch protection.
+
+Ignore the strategy in Shipyard's hand-back. It suggests
+`gh pr merge <n> --squash --auto`, and on pulp `main` any strategy flag is
+rejected with `! The merge strategy for main is set by the merge queue` — the
+command simply does not arm. Drop the flag.
+
+**Before arming, prove the PR is actually green.** This is the step that was
+missed on 2026-07-27, and it is the whole reason this rule is written down.
+PR #6682 was reported as "genuinely green," and it was not: `Vellum freeze` and
+`Vellum trusted freeze` were both red, and both are **required**. The mistake
+came from checking rulesets, where nothing is required, instead of classic branch
+protection, where five contexts are. `main`'s only branch ruleset
+(`main-merge-queue`) carries a `merge_queue` rule and no `required_status_checks`
+rule at all, so ruleset evidence alone always reads as "nothing is required."
+Arming auto-merge on it was harmless (GitHub simply waited) but it did not merge
+anything, and reporting it as a green PR blocked only by a Shipyard bug was
+wrong. So:
+
+```bash
+ghapp api repos/Generous-Corp/pulp/branches/main/protection \
+  --jq '.required_status_checks.contexts'      # what actually gates
+ghapp pr checks <PR> --repo Generous-Corp/pulp # state of each
+```
+
+Every context in the first list must be `pass` in the second. If any is red,
+there is nothing for auto-merge to unblock — fix the check. "Shipyard validated
+its targets" is not the same claim as "every required check is green": Shipyard
+supervises its own lanes, not GitHub-hosted or App-posted ones.
+
+**Disclosure is mandatory.** In the report, state all four:
+
+1. the Shipyard failure, quoted verbatim,
+2. the exact command run,
+3. the required-check evidence above — not "checks were green",
+4. that gates were run by Shipyard and none were bypassed.
+
+**A tracking issue is required** when the cause is a Shipyard defect (schema
+error, malformed request, wrong exit code) — that is a bug that will recur for
+every user until fixed, and `danielraffel/Shipyard` is where it gets fixed. It is
+**not** required for a one-off transient API failure, or for a cause already
+covered by an open issue; link the existing one instead.
+
+Shipyard ≥0.80.2 also makes this classifiable without reading prose: the `--json`
+envelope carries `status` and `merge_error`, and a malformed-request failure exits
+`8` rather than masquerading as success. See the Shipyard `ci` skill's
+status/exit-code table.
 
 ### Stale-SHA merge race — DO NOT push onto a PR that's being shipped
 
@@ -1789,7 +1879,7 @@ is what makes the queue the real merge authority rather than theatre. Do not
 admin-merge past it. Enqueue instead:
 
 ```bash
-ghapp pr merge <n> --repo Generous-Corp/pulp --merge --auto
+ghapp pr merge <n> --repo Generous-Corp/pulp --auto
 ```
 
 The PR enters the queue once its required contexts are green. Note GitHub uses
@@ -2236,7 +2326,8 @@ read a GitHub-hosted sanitizer leg's log instead — a recurring culprit is
 `extract_keyboard_shortcuts does not catastrophically backtrack on large
 embedded data` (a ReDoS-guard timing test that overruns under ASan / runner
 load). Recovery, once confirmed flaky — **reach for the one-liner first**: arm
-`gh pr merge <pr> --squash --auto`, then **`shipyard rescue <pr> --rerun-failed`**.
+`ghapp pr merge <pr> --auto` (no strategy flag), then
+**`shipyard rescue <pr> --rerun-failed`**.
 `rescue` cancels stuck runs and, with `--rerun-failed`, re-dispatches completed
 failed/cancelled runs — "e.g. a flaky required leg" (its own help) — re-resolving
 the provider so the rerun lands local-first on the idle Studios; the armed
