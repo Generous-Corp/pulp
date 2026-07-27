@@ -18,3 +18,12 @@ target_sources(pulp-test-forge-modulation-catalog-contracts PRIVATE
 target_link_libraries(pulp-test-forge-modulation-catalog-contracts
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-modulation-catalog-contracts)
+# Canonical Forge-facing catalog-pack index. The test compiles the umbrella
+# header and scans the source include tree so both omitted new packs and stale
+# removed packs fail closed.
+add_executable(pulp-test-forge-catalog-index test_forge_catalog_index.cpp)
+target_compile_definitions(pulp-test-forge-catalog-index
+    PRIVATE PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(pulp-test-forge-catalog-index
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-catalog-index)

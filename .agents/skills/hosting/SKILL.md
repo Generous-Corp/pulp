@@ -1733,6 +1733,45 @@ Bake-layer DSP packs live as header-only `CustomNodeType` factories under
 `baked_params` (the injectable macro contract), and its port arity, and gets
 registered on a `SignalGraph` before `bake()`.
 
+Treat that consumer wiring as part of the DSP change, not a follow-up. A
+musician-facing audio, MIDI, instrument, drum, or timeline capability anywhere
+in Pulp must ship with one of these explicit outcomes:
+
+1. an effect or graph utility exposed through a Pulp
+   `forge_*_catalog.hpp` adapter plus the matching Forge lane registry,
+   generation vocabulary, canonical display/range metadata, and bidirectional
+   capability-contract coverage;
+2. an instrument/drum or MIDI-transform exposure through that lane's typed
+   catalog, rather than disguising it as an effect node; or
+3. an explicit internal-primitive classification naming the higher-level
+   catalog capability that composes it. An internal refactor behind that stable
+   adapter does not require registry churn, but behavior changes still require
+   adapter and contract-test review.
+
+Only advertise controls the capability intentionally exposes and can accept
+safely at runtime. Do not turn internal members, coefficient-design switches,
+allocation choices, port shape, latency, or topology into knobs merely because
+they exist. Audible timeline or arrangement controls route through the
+appropriate effect, instrument, or MIDI lane; structural timeline APIs and
+generation grammar are not baked parameters.
+
+The same rule runs backward for an exposed capability. Removing or renaming an
+advertised DSP realization or injectable parameter requires a coordinated sweep
+of the Pulp catalog header and the Forge registry, generation vocabulary,
+canonical display/range metadata, and bidirectional contract tests. Preserve
+published type IDs and node-local parameter IDs unless the change includes a
+tested migration; never leave a registry row pointing at deleted SDK code, and
+never leave stale Forge vocabulary teaching the generator an unavailable
+capability. Removing an internal primitive behind an unchanged catalog adapter
+does not remove that public identity.
+
+`<pulp/host/forge_catalog_index.hpp>` is the canonical Pulp-owned catalog-pack
+index and umbrella include. Every `forge_*_catalog.hpp` leaf must appear there.
+`pulp-test-forge-catalog-index` scans the source include directory and compares
+it with the index, so adding an unindexed pack or retaining an entry for a
+removed pack fails closed. Downstream consumers should derive their Pulp catalog
+header set from this index instead of maintaining another manual list.
+
 Two things bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every

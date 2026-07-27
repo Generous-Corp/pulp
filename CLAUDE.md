@@ -265,6 +265,16 @@ skill at the **start** of any DSP or audio-pipeline work — when you are choosi
 acceptance gates, not only when something already sounds wrong. Most of what a
 DSP task needs is already written; hand-rolling it is the default failure mode.
 
+### Forge reachability is part of the DSP lifecycle
+
+Landing or removing a musician-facing audio, MIDI, instrument, or timeline
+capability includes classifying and updating its Forge exposure in the same
+delivery slice. Internal implementation behind an unchanged higher-level
+catalog is exempt, but must name that owner. The detailed lane, safe-control,
+stable-ID, removal, and executable catalog-index contracts live in the
+[`hosting`](.agents/skills/hosting/SKILL.md) skill under "`CustomNodeType`
+pack" and bake-layer parameter injection.
+
 | Lane | What | Use for |
 |------|------|---------|
 | **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
