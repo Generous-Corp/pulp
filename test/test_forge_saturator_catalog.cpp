@@ -6,6 +6,7 @@
 
 #include <pulp/host/forge_saturator_catalog.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -58,6 +59,37 @@ TEST_CASE("Forge saturator: every realization bakes and runs",
         REQUIRE(peak(out) > 0.0f);
         for (float v : out) REQUIRE(std::isfinite(v));
     }
+}
+
+TEST_CASE("Forge saturator: every musical tone control is stable and injected",
+          "[host][baked][param-injection][forge][forge-saturator]") {
+    const auto type = sat::make_saturator_node(sat::Shape::tanh_soft);
+    REQUIRE(type.lowerable);
+    REQUIRE(type.baked_params.size() == 8);
+    const auto has = [&](pulp::state::ParamID id, float lo, float hi, float def) {
+        const auto it = std::find_if(type.baked_params.begin(), type.baked_params.end(),
+                                     [=](const auto& p) { return p.id == id; });
+        REQUIRE(it != type.baked_params.end());
+        REQUIRE(it->min_value == lo);
+        REQUIRE(it->max_value == hi);
+        REQUIRE(it->default_value == def);
+    };
+    has(sat::kToneTracking, 0.0f, 1.0f, 1.0f);
+    has(sat::kToneDeHz, 0.0f, 8000.0f, 3000.0f);
+    has(sat::kPreBoostDb, 0.0f, 18.0f, 9.0f);
+
+    auto fx = make_fixture(type);
+    auto inj = fx.claim_injector();
+    const auto t = sine(0.2f);
+    REQUIRE(inj.inject(immediate(sat::kDriveDb, 18.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(sat::kTonePreHz, 500.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(sat::kToneTracking, 1.0f)) == InjectStatus::Ok);
+    const auto tracked = settle(fx, t);
+    REQUIRE(inj.inject(immediate(sat::kToneTracking, 0.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(sat::kToneDeHz, 7000.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(sat::kPreBoostDb, 18.0f)) == InjectStatus::Ok);
+    const auto untracked = settle(fx, t);
+    REQUIRE(tracked != untracked);
 }
 
 TEST_CASE("Forge saturator: injecting drive changes harmonic content",

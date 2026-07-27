@@ -6,6 +6,8 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/fuzz_pair.hpp>
 
+#include <cstdint>
+
 namespace pulp::host::fuzz {
 
 using Device = signal::FuzzDevice;
@@ -14,6 +16,8 @@ inline constexpr state::ParamID kBiasStarve = 2;
 inline constexpr state::ParamID kSourceKohm = 3;
 inline constexpr state::ParamID kOutputDb = 4;
 inline constexpr state::ParamID kMix = 5;
+inline constexpr state::ParamID kDriftEnabled = 6;
+inline constexpr std::uint32_t kDeterministicDriftSeed = 0x46555a5au;
 
 struct Instance { signal::FuzzPair fuzz; };
 
@@ -56,6 +60,7 @@ inline CustomNodeType make_fuzz_node(Device device, bool oversampled = true) {
         auto& f = static_cast<Instance*>(p)->fuzz;
         f.set_device(device);
         f.set_oversampling_enabled(oversampled);
+        f.set_seed(kDeterministicDriftSeed);
         f.set_drift_enabled(false);
         f.prepare(sr);
     };
@@ -64,7 +69,8 @@ inline CustomNodeType make_fuzz_node(Device device, bool oversampled = true) {
                       {kBiasStarve, 0.0f, 1.0f, 0.0f},
                       {kSourceKohm, 0.1f, 1000.0f, 10.0f},
                       {kOutputDb, -24.0f, 24.0f, 0.0f},
-                      {kMix, 0.0f, 1.0f, 1.0f}};
+                      {kMix, 0.0f, 1.0f, 1.0f},
+                      {kDriftEnabled, 0.0f, 1.0f, 0.0f}};
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
                                         const BakedParamView& params) {
@@ -78,6 +84,7 @@ inline CustomNodeType make_fuzz_node(Device device, bool oversampled = true) {
             f.set_source_impedance_kohm(params.value_at(kSourceKohm, offset));
             f.set_output_level_db(params.value_at(kOutputDb, offset));
             f.set_mix(params.value_at(kMix, offset));
+            f.set_drift_enabled(params.value_at(kDriftEnabled, offset) >= 0.5f);
             output[static_cast<std::size_t>(i)] = f.process(input[static_cast<std::size_t>(i)]);
         }
     };

@@ -19,7 +19,7 @@ TEST_CASE("Forge fuzz: every realization bakes, runs, and declares the contract"
         for (bool oversampled : {false, true}) {
             auto type = fuzz::make_fuzz_node(device, oversampled);
             REQUIRE(type.lowerable);
-            REQUIRE(type.baked_params.size() == 5);
+            REQUIRE(type.baked_params.size() == 6);
             REQUIRE(type.type_id == fuzz::type_id(device, oversampled));
             Fixture fx(type, 48000.0, 128);
             const auto input = pulp::test::sine_block(128, 750.0, 48000.0, 0.4f);
@@ -33,6 +33,20 @@ TEST_CASE("Forge fuzz: every realization bakes, runs, and declares the contract"
             fuzz::latency_samples(false));
     REQUIRE(fuzz::make_fuzz_node(fuzz::Device::silicon, true).latency_samples(48000.0) ==
             fuzz::latency_samples(true));
+}
+
+TEST_CASE("Forge fuzz: seeded drift is injectable and deterministic",
+          "[host][baked][param-injection][forge][forge-fuzz][determinism]") {
+    const auto render = [] {
+        auto type = fuzz::make_fuzz_node(fuzz::Device::germanium, false);
+        Fixture fx(type, 48000.0, 128);
+        auto injector = fx.claim_injector();
+        REQUIRE(injector.inject(pulp::test::immediate(fuzz::kDriftEnabled, 1.0f)) ==
+                pulp::host::InjectStatus::Ok);
+        const auto input = pulp::test::sine_block(128, 750.0, 48000.0, 0.4f);
+        return fx.settle({input}, 64).front();
+    };
+    REQUIRE(render() == render());
 }
 
 TEST_CASE("Forge fuzz: injection changes the realized circuit and remains RT safe",

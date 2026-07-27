@@ -58,6 +58,9 @@ inline constexpr state::ParamID kBias = 2;         // −1..+1 normalized
 inline constexpr state::ParamID kTonePreHz = 3;    // Hz, 0 = off
 inline constexpr state::ParamID kMix = 4;          // 0..1
 inline constexpr state::ParamID kOutputTrimDb = 5; // dB
+inline constexpr state::ParamID kToneTracking = 6; // stepped 0/1
+inline constexpr state::ParamID kToneDeHz = 7;     // Hz, used when tracking is off
+inline constexpr state::ParamID kPreBoostDb = 8;   // dB
 
 struct SaturatorInstance {
     signal::Saturator saturator;
@@ -174,6 +177,11 @@ inline CustomNodeType make_saturator_node(Shape shape,
     t.baked_params.push_back({kMix, 0.0f, 1.0f, 1.0f});
     t.baked_params.push_back({kOutputTrimDb, -static_cast<float>(Sat::kOutputTrimDbMax),
                               static_cast<float>(Sat::kOutputTrimDbMax), 0.0f});
+    t.baked_params.push_back({kToneTracking, 0.0f, 1.0f, 1.0f});
+    t.baked_params.push_back({kToneDeHz, 0.0f, static_cast<float>(Sat::kTonePreHzMax),
+                              static_cast<float>(Sat::kTonePreHzDefault)});
+    t.baked_params.push_back({kPreBoostDb, 0.0f, static_cast<float>(Sat::kPreBoostDbMax),
+                              static_cast<float>(Sat::kPreBoostDbDefault)});
 
     t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
                                         const audio::BufferView<const float>& in, int n,
@@ -192,6 +200,9 @@ inline CustomNodeType make_saturator_node(Shape shape,
             s->saturator.set_drive_db(params.value_at(kDriveDb, offset));
             s->saturator.set_bias(params.value_at(kBias, offset));
             s->saturator.set_tone_pre_hz(params.value_at(kTonePreHz, offset));
+            s->saturator.set_tone_tracking(params.value_at(kToneTracking, offset) >= 0.5f);
+            s->saturator.set_tone_de_hz(params.value_at(kToneDeHz, offset));
+            s->saturator.set_pre_boost_db(params.value_at(kPreBoostDb, offset));
             s->saturator.set_mix(params.value_at(kMix, offset));
             s->saturator.set_output_trim_db(params.value_at(kOutputTrimDb, offset));
             output[static_cast<std::size_t>(k)] =

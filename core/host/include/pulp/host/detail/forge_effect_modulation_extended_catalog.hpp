@@ -37,7 +37,20 @@ enum : state::ParamID {
     kPolarity,
     kEngine,
     kBarberpoleHz,
+    kWave,
 };
+
+inline signal::LfoWave wave_from_param(float value) noexcept {
+    switch (static_cast<int>(std::lround(value))) {
+        case 1: return signal::LfoWave::triangle;
+        case 2: return signal::LfoWave::saw_up;
+        case 3: return signal::LfoWave::saw_down;
+        case 4: return signal::LfoWave::square;
+        case 5: return signal::LfoWave::sample_hold;
+        case 6: return signal::LfoWave::smooth_random;
+        default: return signal::LfoWave::sine;
+    }
+}
 
 struct Instance {
     Engine engine;
@@ -98,6 +111,7 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
         {kEngine, 0.0f, 1.0f, 0.0f},
         {kBarberpoleHz, static_cast<float>(-Engine::kBarberpoleShiftMaxHz),
          static_cast<float>(Engine::kBarberpoleShiftMaxHz), 3.0f},
+        {kWave, 0.0f, 6.0f, 0.0f},
     };
     t.process_instance_baked_param =
         [](void* p, audio::BufferView<float>& out,
@@ -119,6 +133,7 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
                                             ? signal::FlangerDelayEngine::bbd
                                             : signal::FlangerDelayEngine::clean);
                 engine.set_barberpole_shift_hz(params.value_at(kBarberpoleHz, offset));
+                engine.set_waveform(wave_from_param(params.value_at(kWave, offset)));
 
                 float left = in.channel_ptr(0)[i];
                 float right = in.channel_ptr(1)[i];

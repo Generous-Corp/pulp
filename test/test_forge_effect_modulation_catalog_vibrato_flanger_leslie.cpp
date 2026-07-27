@@ -279,7 +279,7 @@ TEST_CASE("Forge modulation: flanger, Leslie and scanner factories expose canoni
     auto leslie = mod::leslie::make_leslie_node();
     auto scanner = mod::leslie::make_scanner_vibrato_node();
     REQUIRE(flanger.type_id == mod::flanger::kTypeId);
-    REQUIRE(flanger.baked_params.size() == 9);
+    REQUIRE(flanger.baked_params.size() == 10);
     REQUIRE(flanger.num_input_ports == 2);
     REQUIRE(flanger.num_output_ports == 2);
     REQUIRE(leslie.type_id == mod::leslie::kTypeId);
@@ -309,6 +309,26 @@ TEST_CASE("Forge modulation: flanger, Leslie and scanner factories expose canoni
     pulp::test::BakedNodeFixture<1> scanner_fx(std::move(scanner), kSr, kFrames);
     const auto mono = scanner_fx.render({block});
     for (float x : mono[0]) REQUIRE(std::isfinite(x));
+}
+
+TEST_CASE("Forge modulation: every flanger control injects without allocation",
+          "[host][baked][param-injection][forge][forge-modulation][flanger][rt-safety]") {
+    auto fx = Fixture(mod::flanger::make_flanger_node(), kSr, kFrames);
+    auto inj = fx.claim_injector();
+    const std::pair<pulp::state::ParamID, float> values[] = {
+        {mod::flanger::kRate, 3.0f},       {mod::flanger::kDepth, 2.0f},
+        {mod::flanger::kCenter, 5.0f},     {mod::flanger::kFeedback, 0.7f},
+        {mod::flanger::kMix, 0.8f},        {mod::flanger::kSpreadDeg, 135.0f},
+        {mod::flanger::kPolarity, 1.0f},   {mod::flanger::kEngine, 1.0f},
+        {mod::flanger::kBarberpoleHz, 7.0f}, {mod::flanger::kWave, 2.0f},
+    };
+    for (const auto [id, value] : values)
+        REQUIRE(inj.inject(immediate(id, value)) == InjectStatus::Ok);
+    const auto t = tone();
+    pulp::test::ReusableRenderer<2> renderer(fx, {t, t});
+    pulp::test::RtAllocationProbe probe;
+    renderer.render();
+    REQUIRE(probe.allocation_count() == 0);
 }
 
 TEST_CASE("Forge modulation: flanger latency controls are frozen realizations",
