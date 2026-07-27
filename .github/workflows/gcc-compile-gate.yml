@@ -94,6 +94,10 @@ jobs:
           CC: gcc
           CXX: g++
         run: |
+          # Ask CMake for a codemodel reply so the build step can discover the
+          # core library targets instead of hard-coding a list that goes stale.
+          mkdir -p build-gcc/.cmake/api/v1/query
+          touch build-gcc/.cmake/api/v1/query/codemodel-v2
           cmake -S . -B build-gcc \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc \
@@ -104,10 +108,36 @@ jobs:
             -DPULP_ENABLE_DESIGN_IMPORT=OFF \
             -DPULP_ENABLE_INSPECTOR=OFF
 
+      # Build the core LIBRARIES, not the `all` target.
+      #
+      # `all` also links the repo's tools, and those drag in option
+      # combinations this lane deliberately turns off -- `pulp-import-design`
+      # is built unconditionally but its `pulp::view` design-IR sources are
+      # behind PULP_ENABLE_DESIGN_IMPORT, so `all` fails at LINK with
+      # undefined references that say nothing about GCC. That is a real
+      # pre-existing repo defect (tracked separately), not this lane's
+      # question. Compiling the libraries is the question.
+      #
+      # The target list is discovered from CMake's codemodel rather than
+      # hard-coded, so a new library under core/ is covered the day it lands.
+      # Two guards, because the dangerous failure here is a SILENT one: an
+      # empty --target list makes cmake build the default target, and a
+      # discovery bug that finds nothing would otherwise exit 0 and read as a
+      # pass. So the count is asserted and the list is printed.
+      - name: Discover core library targets
+        run: |
+          python3 tools/scripts/list_core_library_targets.py --self-test
+          python3 tools/scripts/list_core_library_targets.py build-gcc --minimum 20 > targets.txt
+          echo "building $(wc -l < targets.txt) core library target(s):"
+          cat targets.txt
+
       # An explicit job count, per the repo-wide rule that no build may fan out
       # unbounded on a shared machine.
       - name: Build core libraries
-        run: cmake --build build-gcc --parallel 4
+        run: |
+          # Word splitting is intended: one target name per line.
+          # shellcheck disable=SC2046
+          cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
 
       - name: Summarize
         if: always()
