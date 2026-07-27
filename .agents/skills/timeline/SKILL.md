@@ -318,7 +318,7 @@ visit and not a chain ending in `std::get<OpaqueContent>`.
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
-  `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
+  `ReplaceNoteContent`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
   `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
   `RemoveMarker`, `InsertRegion`, `RemoveRegion`, and `SetChordScaleLane` are the
@@ -328,6 +328,21 @@ visit and not a chain ending in `std::get<OpaqueContent>`.
   participate in the same transaction, journal, undo, and replay machinery.
   `reduce_transaction()` is pure: it returns a new snapshot, exact canonical
   dirty set, and reverse-ordered inverse commands.
+- `NoteTransformRegistry` is the control-thread apply-time extension point for
+  pure `(note span, canonical params JSON, seed) -> note array` functions.
+  `ApplyNoteTransform` is a typed preparation request, not a durable `Command`:
+  `preview()` invokes extension code once, assigns fresh IDs only to outputs
+  whose ID is invalid, and lowers the result to one `ReplaceNoteContent`
+  transaction. The returned snapshot is speculative and the authoritative
+  session is unchanged. Commit by submitting the exact returned transaction;
+  a changed revision rejects it as stale instead of rerunning the transform.
+  The journal therefore contains only canonical note data, never a callback,
+  and undo/redo use the ordinary expected/replacement inverse while preserving
+  note identity tombstones. A transform may retain an input ID, but a foreign
+  or duplicate output ID is refused. Parameters must be a JSON object, are
+  parsed under a 1 MiB bound, and are canonicalized before callback invocation.
+  The expected plus output arrays share the durable command's five-million-note
+  quota.
 - `CreateAsset`/`RemoveAsset` are the asset-table mirror pair (shaped like
   `InsertClip`/`RemoveClip`). `CreateAsset` carries the whole `MediaAsset` by
   value — the `ContentHash` is the sealed durable identity. The reducer plans

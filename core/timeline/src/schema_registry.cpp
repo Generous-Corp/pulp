@@ -450,6 +450,12 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement_velocity", SchemaValueKind::U32},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.replace_note_content", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Array},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_clip_playback_properties",
                               SchemaDomain::Command,
                               {{"clip_id", SchemaValueKind::U64String},

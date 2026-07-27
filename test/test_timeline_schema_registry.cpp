@@ -128,6 +128,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.remove_slot",
         "pulp.timeline.command.remove_take",
         "pulp.timeline.command.remove_take_lane",
+        "pulp.timeline.command.replace_note_content",
         "pulp.timeline.command.set_active_take_lane",
         "pulp.timeline.command.set_chord_scale_lane",
         "pulp.timeline.command.set_clip_playback_properties",
