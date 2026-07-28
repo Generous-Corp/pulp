@@ -71,12 +71,14 @@ public:
                       kDiffusionTankModDepth.back()) + 8.0);
         for (auto& line : delays_) line.prepare(capacity);
         for (auto& ap : allpasses_) ap.prepare(capacity);
+        for (auto& g : low_guard_) g.set_cutoff(kDiffusionTankLowGuardHz, fs);
     }
 
     void reset() {
         for (auto& line : delays_) line.reset();
         for (auto& ap : allpasses_) ap.reset();
         for (auto& d : damping_) d.reset();
+        for (auto& g : low_guard_) g.reset();
         feedback_ = {0.0, 0.0};
         mod_phase_ = {0.0, 0.0};
     }
@@ -92,20 +94,22 @@ public:
             interpolate_knots(kDiffusionTankAxis, kDiffusionTankDampHz, character_amount);
         for (auto& d : damping_) d.set_cutoff(damp_hz, sample_rate_);
 
-        // Normalize the tank to roughly unity before it is heard.
+        // Normalize the tank to roughly unity ENERGY before it is heard.
         //
-        // The figure of eight is a recirculating network: at steady state each
-        // branch settles at x/(1 - decay), which is 5x at the top of the decay
-        // range, and the scattered taps add their own multiple on top. This
-        // network sits INSIDE the delay's feedback loop, so that gain
-        // multiplies with the feedback parameter on every repeat — left raw it
-        // is not a reverb, it is an oscillator, and the character diverged
-        // instead of decaying. Dividing the settled gain back out makes the
-        // tank a unity-ish element the loop can recirculate safely; the
-        // headroom factor keeps a resonant mode from reaching unity where the
-        // flat DC estimate would not see it.
-        output_scale_ = kTankHeadroom * (1.0 - decay_) /
-                        (1.0 + kTapGain * static_cast<double>(kTapCount));
+        // Stability does not need this: the figure of eight recirculates
+        // through feedback_ unscaled, so decay_ < 1 already guarantees the
+        // tank converges, and output_scale_ affects level only — the tank is
+        // never in the delay's feedback path. Dividing by the settled DC gain
+        // (1 - decay) would assume steady state, but a repeat is a transient
+        // that never settles, and that estimate over-attenuated by the whole
+        // decay factor (a measured 17 dB loss at full character). A
+        // recirculating network with per-pass gain g carries impulse energy
+        // ~1/(1 - g^2), so the unity-energy scale is sqrt(1 - g^2); the tap
+        // sum adds its own energy on top, divided back out the same way.
+        output_scale_ = kTankHeadroom *
+                        std::sqrt(std::max(1.0 - decay_ * decay_, 1e-4)) /
+                        std::sqrt(1.0 + kTapGain * kTapGain *
+                                            static_cast<double>(kTapCount));
 
         const double to_samples = 0.001 * sample_rate_ * size;
         delay_len_[0] = kDiffusionTankDelayAMs[0] * to_samples;
@@ -148,9 +152,9 @@ public:
     }
 
 private:
-    static constexpr double kTapGain = 0.35;
+    static constexpr double kTapGain = 0.30;
     static constexpr std::size_t kTapCount = 4;   // two per branch
-    static constexpr double kTankHeadroom = 0.7;
+    static constexpr double kTankHeadroom = 1.0;
 
     /// One branch: allpass -> delay -> damp -> allpass -> delay, accumulating
     /// two offset taps from the first delay on the way through.
@@ -173,6 +177,9 @@ private:
         y = delays_[i0].read(len0);
 
         y = damping_[branch].lowpass(y);
+        // The other half of the damping: every pass sheds low end too, so no
+        // sub-100 Hz mode can recirculate at unity while the rest decays.
+        y = low_guard_[branch].highpass(y);
         y = allpasses_[i1].process(y, clamp_delay(ap_len_[i1], allpasses_[i1].max_delay()),
                                    kDiffusionTankApGain2);
         delays_[i1].push(y);
@@ -186,6 +193,7 @@ private:
     std::array<FractionalDelayLine, 4> delays_{};
     std::array<ModulatedAllpass, 4> allpasses_{};
     std::array<OnePole, 2> damping_{};
+    std::array<OnePole, 2> low_guard_{};
     std::array<double, 4> delay_len_ = {1.0, 1.0, 1.0, 1.0};
     std::array<double, 4> ap_len_ = {1.0, 1.0, 1.0, 1.0};
     std::array<double, 2> feedback_ = {0.0, 0.0};
@@ -235,8 +243,11 @@ public:
         tank_.update(character_amount);
     }
 
+    /// The bare allpass diffuser — the only part safe to RECIRCULATE. An
+    /// allpass is unity-gain by construction, so the delay's feedback loop can
+    /// pass repeats through it forever and the always-decays contract survives.
     /// `decorrelation` scales the modulation depth (1.0 left, kStereoDecorr right).
-    double process(double x, double decorrelation) noexcept {
+    double process_diffuser(double x, double decorrelation) noexcept {
         for (std::size_t i = 0; i < kStageCount; ++i) {
             double delay = delays_[i];
             if (i == 0 || i == 2) {
@@ -247,13 +258,29 @@ public:
             delay = std::clamp(delay, 1.0, stages_[i].max_delay());
             x = stages_[i].process(x, delay, gains_[i]);
         }
-        // The diffused signal feeds the tank, and the two are crossfaded rather
-        // than summed: at character_amount 0 the tank is bypassed entirely and
-        // this is the bare allpass diffuser.
+        return x;
+    }
+
+    /// The reverb tank, crossfaded in — OUTPUT ONLY, never in the loop.
+    ///
+    /// The first version recirculated this through the delay's feedback, and
+    /// that is a trap with no safe tuning: the tank rings for ~half a second,
+    /// longer than a typical loop period, so each repeat re-feeds a tank still
+    /// holding the last repeat's energy. Two resonators, each individually
+    /// decaying, composed into net growth — measured as a tail that took tens
+    /// of seconds to turn a 0.01 impulse into thousands. On the output the
+    /// tank is excited afresh by every repeat (the cloud still blooms per
+    /// repeat) but its energy never re-enters the line, so tank decay < 1 and
+    /// loop feedback < 1 each guarantee their own half of the contract.
+    double process_cloud(double x, double decorrelation) noexcept {
         if (!tank_.active()) return x;
         const double cloud = tank_.process(x, decorrelation);
-        const double mix = tank_.mix();
-        return x + mix * (cloud - x);
+        return x + tank_.mix() * (cloud - x);
+    }
+
+    /// One-pass smear for the cross-character output blend: diffuser + cloud.
+    double process(double x, double decorrelation) noexcept {
+        return process_cloud(process_diffuser(x, decorrelation), decorrelation);
     }
 
     /// Advance the two anti-metallic LFOs by one sample.

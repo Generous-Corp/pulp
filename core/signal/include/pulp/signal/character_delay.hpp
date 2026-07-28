@@ -405,7 +405,14 @@ public:
             // repeats don't recirculate through the network. One-pass smear.
             double out_l = channels_[0].wet * gain;
             double out_r = channels_[1].wet * gain;
-            if (diffusion_amount_value_ > 0.0 && character_type_ != Character::diffusion) {
+            if (character_type_ == Character::diffusion) {
+                // The character's cloud: every repeat leaving the loop excites
+                // the tank afresh, so the cloud still blooms per repeat, but
+                // its energy never re-enters the line. The in-loop path above
+                // already ran the diffuser and ticked the LFOs this sample.
+                out_l = channels_[0].diffusion.process_cloud(out_l, 1.0);
+                out_r = channels_[1].diffusion.process_cloud(out_r, chardelay::kStereoDecorr);
+            } else if (diffusion_amount_value_ > 0.0) {
                 out_l += diffusion_amount_value_ *
                          (channels_[0].diffusion.process(out_l, 1.0) - out_l);
                 channels_[0].diffusion.tick_modulation();
@@ -611,12 +618,19 @@ private:
                 break;
         }
 
-        // The diffusion network is now engaged for EVERY character (scaled by the
-        // cross-character diffusion amount in process_character), so its tank mix
-        // is updated here unconditionally rather than only in the diffusion case.
-        // Cheap, control-rate, idempotent.
+        // The diffusion network serves two masters, never both at once. When the
+        // diffusion CHARACTER is selected, its chain (and tank) are tuned by the
+        // character amount — the knob that has always shaped the cloud. For every
+        // other character the same chain is the cross-character output smear,
+        // tuned by the diffusion amount. Hoisting this update out of the
+        // diffusion-only case and sourcing it ONLY from diffusion_amount_ severed
+        // the diffusion character's amount control: a host that never calls
+        // set_diffusion_amount() ran the character at zero — minimum smear, tank
+        // silent — no matter where its knob sat.
         for (auto& channel : channels_)
-            channel.diffusion.update(diffusion_amount_.current());
+            channel.diffusion.update(character_type_ == Character::diffusion
+                                         ? amount
+                                         : diffusion_amount_.current());
     }
 
     void advance_modulation(double character_amount) noexcept {
@@ -663,7 +677,12 @@ private:
             }
             case Character::diffusion: {
                 y = read_line(channel, x, base_samples, base_samples, 0.0);
-                y = channel.diffusion.process(y, decorrelation);
+                // Diffuser ONLY in the loop: an allpass is unity-safe to
+                // recirculate, so the progressive per-repeat smear is kept.
+                // The tank is applied on the OUTPUT stage — a recirculating
+                // reverb inside a recirculating delay composes into growth
+                // even when both individually decay (see process_cloud).
+                y = channel.diffusion.process_diffuser(y, decorrelation);
                 channel.diffusion.tick_modulation();
                 y = channel.loop_highpass.highpass(y);
                 y = channel.loop_lowpass.lowpass(y);

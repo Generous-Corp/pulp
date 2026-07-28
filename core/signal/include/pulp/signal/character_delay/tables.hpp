@@ -295,7 +295,7 @@ inline constexpr std::array<double, 3> kDiffusionTankDecay = {0.0, 0.62, 0.80};
 /// How much of the character's output is the tank rather than the bare
 /// diffuser. At 0 the tank is silent AND unmixed, so the character is the
 /// published allpass diffuser and nothing else.
-inline constexpr std::array<double, 3> kDiffusionTankMix = {0.0, 0.55, 0.88};
+inline constexpr std::array<double, 3> kDiffusionTankMix = {0.0, 0.55, 0.85};
 
 /// In-tank damping. A reverb without it is a bright metallic ring; rolling the
 /// recirculation off is what makes successive passes sound like air.
@@ -310,6 +310,13 @@ inline constexpr std::array<double, 2> kDiffusionTankModRatesHz = {0.83, 1.27};
 /// Extra scattered taps read at their own modulated offsets, as a fraction of
 /// the branch delay. Density without another allpass in the loop.
 inline constexpr std::array<double, 2> kDiffusionTankTapFraction = {0.37, 0.71};
+
+/// In-tank low cut. The damping filter is a LOWPASS, so without this the low
+/// end recirculates undamped and the tank's worst resonant mode sits below
+/// 100 Hz, where a flat energy estimate never sees it — measured as a tail
+/// that GREW a thousandfold after the input stopped. Every recirculation must
+/// lose a little low end, exactly as it loses a little top. [design parameter]
+inline constexpr double kDiffusionTankLowGuardHz = 90.0;
 
 // ── Reverse ───────────────────────────────────────────────────────────────
 /// Raised-cosine splice fade at each end of a reversed segment, in samples.

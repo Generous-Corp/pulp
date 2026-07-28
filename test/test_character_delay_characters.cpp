@@ -598,9 +598,55 @@ TEST_CASE("diffusion at zero amount adds no tail of its own",
     CHECK(diffused < std::max(clean, 1e-12) * 50.0);
 }
 
-TEST_CASE("the diffuser is allpass in steady state", "[character-delay][diffusion]") {
+TEST_CASE("diffusion at maximum feedback blooms but never runs away",
+          "[character-delay][diffusion]") {
+    // The tank is a recirculating network INSIDE the delay's own feedback
+    // loop, and its output level sits on a cliff: the level that measured
+    // stable (release bloom well under 2x the driven level) turned into a
+    // 300x runaway with ~3 dB more tank gain, because a resonant mode crosses
+    // unity. This pins the stable side of that cliff at the worst corner —
+    // maximum feedback, maximum character amount, sustained drive, then
+    // release — so a retune that re-crosses it fails here instead of in a mix.
     Engine delay;
-    configure(delay, Character::diffusion, 20.0, 0.0, 0.5);
+    configure(delay, Character::diffusion, 100.0, 1.0, 1.0);
+    settle(delay, 0.3);
+
+    const int drive = static_cast<int>(kSr * 3.0);
+    const int release = static_cast<int>(kSr * 7.0);
+    auto buffers = make_stereo(drive + release);
+    for (int i = 0; i < drive; ++i) {
+        const auto v = static_cast<float>(
+            0.3 * std::sin(2.0 * cd::kPi * 1000.0 * i / kSr));
+        buffers.left[static_cast<std::size_t>(i)] = v;
+        buffers.right[static_cast<std::size_t>(i)] = v;
+    }
+    render(delay, buffers);
+
+    double driven = 0.0, bloom = 0.0;
+    for (int i = 0; i < drive; ++i)
+        driven = std::max(driven, std::abs(static_cast<double>(
+            buffers.left[static_cast<std::size_t>(i)])));
+    for (int i = drive; i < drive + release; ++i) {
+        const double v = buffers.left[static_cast<std::size_t>(i)];
+        CHECK(std::isfinite(v));
+        bloom = std::max(bloom, std::abs(v));
+    }
+    INFO("driven peak " << driven << " release peak " << bloom);
+    REQUIRE(driven > 1e-3);
+    // Dub-style bloom after release is legitimate; a runaway is not. The
+    // stable tuning measures ~2x, the first unstable one ~16x, the cliff 300x.
+    CHECK(bloom < driven * 8.0);
+}
+
+TEST_CASE("the diffuser is allpass in steady state", "[character-delay][diffusion]") {
+    // Measured at character amount ZERO, which is where the flatness contract
+    // lives: the tank is bypassed outright there and the character is the bare
+    // published Dattorro diffuser — the null-test baseline. Above zero the
+    // character now deliberately blooms into a damped cloud, and a damped
+    // recirculation is not magnitude-flat; asking for flatness at 0.5 would
+    // forbid the reverb the character exists to produce.
+    Engine delay;
+    configure(delay, Character::diffusion, 20.0, 0.0, 0.0);
     settle(delay, 0.3);
 
     // White noise in; the allpass chain must not change the magnitude response
