@@ -3930,6 +3930,41 @@ the PR head as a worktree that is read as data and never executed. Preserve all
 three properties when editing that workflow — running anything out of
 `$proposed_tree` would hand a fork PR the Vellum reader credentials.
 
+### `merge_group` belongs ONLY on workflows that produce a required context
+
+A queue entry re-runs every workflow that declares `merge_group:`, and with
+`max_entries_to_build: 1` the queue validates one batch at a time — so any
+workflow on `merge_group` whose contexts are **not** required sets the drain
+rate while being unable to affect the merge decision. Nine workflows once fired
+per entry when only five could gate; two of the extras (`Validate examples
+(macOS)`, `GPU audio proof (macOS, real WebGPU)`) claimed a self-hosted macOS
+runner each, competing with the required `macos` gate for the same three-Mac
+pool. Symptom: 87 queued runs against 9 in progress, studio runners idle, head
+entry's runs all stuck `queued`. Adding Macs cannot fix that.
+
+The invariant, in both directions:
+
+- **On `merge_group` ⇔ one of the workflow's job names is a required context.**
+  Adding it elsewhere throttles the queue for no gating value.
+- **Never remove `merge_group` from a workflow whose context IS required** — a
+  required check that never reports on a merge group leaves entries unresolvable
+  and wedges the queue permanently. That is strictly worse than slow.
+
+Check before editing a trigger, and trust neither the comments nor this list:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/branches/main/protection \
+  --jq '.required_status_checks.contexts[]'
+```
+
+Three workflows carried comments asserting they ran a "required" check on merge
+groups when none of their job names was required — that drift is what made the
+queue slow, so re-verify rather than believing the comment.
+
+Dropping `merge_group` costs no PR-time signal: those workflows keep
+`pull_request` and still run on every PR. They just stop re-running against a
+merged result they cannot gate.
+
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
 Pulp #2087 piggyback. Catches the class of bug where in-tree builds

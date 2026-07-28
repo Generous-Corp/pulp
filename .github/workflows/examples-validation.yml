@@ -19,7 +19,10 @@ name: Example validation
 
 on:
   pull_request:
-  merge_group:
+  # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
+  # full rationale. Neither `Validate examples (macOS)` nor `example-validation`
+  # is a required context, and the macOS leg claimed a self-hosted runner on
+  # every queue entry, starving the required `macos` gate.
   workflow_dispatch:
 
 concurrency:
