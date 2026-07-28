@@ -291,9 +291,12 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
 def lint(patch: dict, inv: dict) -> list[str]:
     """Reasons Rack would not load this patch as intended.
 
-    Rack drops a module it cannot resolve and says so only in its log, so a
-    patch naming a plugin the user does not have opens as a partially empty
-    rack rather than an error. Checking here is what turns that into a message.
+    Rack itself handles a missing module gracefully -- it names the absentees
+    in a dialog, offers to open the VCV Library at them, and keeps the module
+    and its cables as a placeholder so nothing is lost when the plugin later
+    arrives. So this is not a rescue from data loss. It is here to catch the
+    problem while the patch is being built, when it is still cheap to pick a
+    module the user already has, rather than after they have opened it.
     """
     errs: list[str] = []
     mods = patch.get("modules", [])
@@ -308,7 +311,7 @@ def lint(patch: dict, inv: dict) -> list[str]:
         plug = inv.get(m.get("plugin"))
         if plug is None:
             errs.append(f"plugin '{m.get('plugin')}' is not installed — "
-                        f"Rack will silently drop this module")
+                        f"the module will load as an empty placeholder")
             continue
         if m.get("model") not in plug["modules"]:
             errs.append(f"'{m['plugin']}' has no model '{m.get('model')}' "
@@ -837,7 +840,8 @@ def main(argv):
                           f"{o['name']}  ({o['brand']})")
                 print()
             print("  install one in Rack's Library, then ask again —")
-            print("  or pass --anyway to build with what you have.")
+            print("  or pass --anyway: Rack keeps missing modules as")
+            print("  placeholders and offers to fetch them when you open it.")
             return 3
         out = "/tmp/forge-patch.vcv"
         if "--out" in argv:
