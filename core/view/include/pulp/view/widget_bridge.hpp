@@ -466,6 +466,10 @@ private:
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
         Target target = Target::value;
         BindingTransform transform;
+        /// `{fromParam: true}`, not yet derived. Derivation needs the widget
+        /// type and a script may bind before creating the view, so it happens
+        /// on first apply — then clears. See derive_binding_transform.
+        bool derive_from_param = false;
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
@@ -490,6 +494,8 @@ private:
     // Parse the optional JS transform object (`{db,dbMin,dbMax,scale,offset,
     // min,max,clamp}`) into a BindingTransform. Null / non-object → identity.
     static BindingTransform parse_transform(const choc::value::Value* v);
+    /// `{fromParam: true}` with no explicit db/dbMin/dbMax overriding it.
+    static bool transform_requests_derivation(const choc::value::Value* v);
     // Resolve a param NAME to its id via the store. Returns false when the
     // store has no param with that name (the binding is then not registered).
     bool resolve_param_id(const std::string& name, state::ParamID& out) const;
@@ -522,6 +528,8 @@ private:
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
     bool apply_param_binding(ParamBinding& binding, View* w);
+    /// Fill a `{fromParam: true}` transform from the param's declared range.
+    void derive_binding_transform(ParamBinding& binding, View* w);
 
 public:
     /// Binding attempts in call order, bound or not (binding_diagnostics.hpp).
