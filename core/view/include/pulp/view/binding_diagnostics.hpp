@@ -30,6 +30,9 @@ enum class BindingOutcome : std::uint8_t {
     null_widget,          ///< the id maps to a null view
     incompatible_widget,  ///< the widget cannot accept this target (e.g. a meter on a Knob)
     unknown_param,        ///< the store declares no parameter with that name
+    /// A `value:<name>` source named no channel the processor declares — or the
+    /// processor declares none at all, e.g. a UI bound against the wrong build.
+    unknown_value_channel,
 };
 
 /// True for the three outcomes that produced a live binding.

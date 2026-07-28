@@ -26,6 +26,11 @@
 namespace pulp::view {
 class ScriptedUiSession;
 class View;
+// Forward-declared, never included: `pulp-wclap-dsp` compiles core/format
+// WITHOUT core/view on the include path (the wasm DSP build has no UI layer),
+// so pulling in value_channel_set.hpp here breaks that target. A pointer
+// return needs only the declaration.
+class ValueChannelSet;
 }
 
 namespace pulp::format {
@@ -827,6 +832,24 @@ public:
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
     virtual std::vector<NoteName> note_names() const { return {}; }
+
+    /// Named value channels this processor publishes for its UI — gain
+    /// reduction, an envelope follower, a spectrum — i.e. everything a meter
+    /// wants to show that is NOT a parameter. Returning `nullptr` (the default)
+    /// means the processor declares none, and nothing in the framework runs on
+    /// its behalf: the cost of not using this is structurally zero, not a
+    /// per-block branch.
+    ///
+    /// Own the set as a subclass member and declare its channels in your
+    /// constructor, before audio starts. The returned pointer must outlive
+    /// every view attached to this processor.
+    ///
+    /// Threading: `publish()` on a channel is audio-thread safe. Reads happen
+    /// on the FrameClock thread and nowhere else — the single-reader-thread
+    /// contract is load-bearing, see value_source.hpp.
+    ///
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual view::ValueChannelSet* value_channels() { return nullptr; }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;

@@ -44,6 +44,8 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
+class ValueChannelSet;
+class MeterSource;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -89,6 +91,15 @@ public:
 
     // Read-back accessor for diagnostics + tests.
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
+
+    /// Attach the hosting processor's named value channels, enabling
+    /// `bindMeter(id, "value:<name>")`. Non-owning; the set must outlive this
+    /// bridge. Set post-construction for the same reason as the GPU surface:
+    /// the bridge is built before the adapter has resolved the processor.
+    void set_value_channels(ValueChannelSet* channels) noexcept {
+        value_channels_ = channels;
+    }
+    ValueChannelSet* value_channels() const noexcept { return value_channels_; }
 
     // True iff a GpuSurface is attached AND its adapter reports
     // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
@@ -464,6 +475,9 @@ private:
         using Target = BindingTarget;
         std::string widget_id;
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
+        /// Non-null when bound to a `value:<name>` channel instead of a param;
+        /// owned by the processor's ValueChannelSet, resolved once at bind.
+        MeterSource* value_meter = nullptr;
         Target target = Target::value;
         BindingTransform transform;
         /// `{fromParam: true}`, not yet derived. Derivation needs the widget
@@ -473,6 +487,7 @@ private:
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
+    ValueChannelSet* value_channels_ = nullptr;  ///< non-owning; see set_value_channels
     std::vector<ParamSubscription> param_subscriptions_;
     std::uint32_t next_param_subscription_id_ = 1;  ///< monotonic; never reused
     // True while service_param_subscriptions() is dispatching into JS, so an

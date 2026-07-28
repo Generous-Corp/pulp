@@ -12,6 +12,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include "api_registry.hpp"
 #include "bridge_dispatch.hpp"
 
@@ -25,6 +26,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -182,6 +184,17 @@ WidgetBridge::BindingTransform WidgetBridge::parse_transform(const choc::value::
     return t;
 }
 
+namespace {
+/// Returns the channel name for a `value:<name>` source, or empty for a plain
+/// parameter name.
+std::string_view value_channel_name(std::string_view source) {
+    constexpr std::string_view kPrefix = "value:";
+    if (source.size() <= kPrefix.size() || source.substr(0, kPrefix.size()) != kPrefix)
+        return {};
+    return source.substr(kPrefix.size());
+}
+} // namespace
+
 bool WidgetBridge::resolve_param_id(const std::string& name, state::ParamID& out) const {
     for (std::size_t i = 0; i < store_.param_count(); ++i) {
         const auto* info = &store_.all_params()[i];
@@ -220,10 +233,13 @@ void WidgetBridge::derive_binding_transform(ParamBinding& b, View* w) {
 
 bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
     if (b.derive_from_param) derive_binding_transform(b, w);
-    // dB transforms operate on the raw param value; everything else on the
-    // store's already-normalized [0,1] value (the 1:1 common case).
-    const float src = b.transform.db ? store_.get_value(b.param_id)
-                                     : store_.get_normalized(b.param_id);
+    // A value channel already publishes in the domain the widget wants, so the
+    // transform applies to it directly — there is no normalized/real split to
+    // choose between as there is for a parameter.
+    const float src = b.value_meter != nullptr
+                          ? b.value_meter->read().rms[0]
+                          : (b.transform.db ? store_.get_value(b.param_id)
+                                            : store_.get_normalized(b.param_id));
     const float target = b.transform.apply(src);
     if (std::isnan(target)) return false;  // never churn on a NaN source
 
@@ -381,6 +397,8 @@ const char* describe(BindingOutcome o) noexcept {
             return "bound, replacing this widget's previous binding";
         case BindingOutcome::empty_widget_id: return "widget id was empty";
         case BindingOutcome::empty_param_name: return "parameter name was empty";
+        case BindingOutcome::unknown_value_channel:
+            return "no value channel with that name is declared";
         case BindingOutcome::null_widget: return "widget id maps to a null view";
         case BindingOutcome::incompatible_widget:
             return "widget type cannot accept this binding target";
@@ -452,12 +470,24 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         if (!supported) return fail(BindingOutcome::incompatible_widget);
     }
 
+    // A `value:<name>` source names one of the processor's declared value
+    // channels rather than a parameter. The prefix is mandatory and there is no
+    // fallback between the two namespaces on purpose: silently resolving a
+    // typo'd channel to a same-named param would bind a meter to the wrong
+    // thing and look like it worked.
+    MeterSource* value_meter = nullptr;
     state::ParamID id = 0;
-    if (!resolve_param_id(param_name, id)) return fail(BindingOutcome::unknown_param);
+    if (const auto channel = value_channel_name(param_name); !channel.empty()) {
+        value_meter = value_channels_ ? value_channels_->meter(channel) : nullptr;
+        if (value_meter == nullptr) return fail(BindingOutcome::unknown_value_channel);
+    } else if (!resolve_param_id(param_name, id)) {
+        return fail(BindingOutcome::unknown_param);
+    }
 
     ParamBinding binding;
     binding.widget_id = widget_id;
     binding.param_id = id;
+    binding.value_meter = value_meter;
     binding.target = target;
     binding.transform = parse_transform(transform);
     binding.derive_from_param = transform_requests_derivation(transform);
