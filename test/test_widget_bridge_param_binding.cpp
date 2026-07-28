@@ -844,3 +844,368 @@ TEST_CASE("format and parse round-trip through the bridge",
         "})()");
     CHECK(ok == "true");
 }
+
+// ── onParamChanged / offParamChanged ──────────────────────────────────
+//
+// Push notification of param movement, delivered async on the frame tick.
+// The contract these pin: subscribing is not itself a change, delivery is
+// coalesced to one callback per subscription per frame, it is origin-blind
+// (a host write and this UI's own setParam look identical), and a handler
+// that writes its own param terminates instead of recursing.
+
+namespace {
+
+// Drive one host frame. service_frame_callbacks is what the FrameClock calls,
+// so a test that pumps this is exercising the real delivery path rather than
+// reaching into service_param_subscriptions directly.
+void tick(WidgetBridge& bridge) { bridge.service_frame_callbacks(); }
+
+// Subscribe and record every payload into a global array the test reads back.
+constexpr const char* kRecorder = R"(
+    var seen = [];
+    var sub = onParamChanged('Cutoff', function (p) { seen.push(p); });
+)";
+
+} // namespace
+
+TEST_CASE("onParamChanged returns a handle, and 0 for an unknown param",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(eval_json(engine, "onParamChanged('Cutoff', function () {}) > 0") == "true");
+    CHECK(eval_json(engine, "onParamChanged('nope', function () {})") == "0");
+    CHECK(eval_json(engine, "onParamChanged('', function () {})") == "0");
+    // Only the real param produced a subscription.
+    CHECK(bridge.param_subscription_count() == 1);
+}
+
+TEST_CASE("subscribing does not itself fire a change",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // Several frames with no store write must stay silent — otherwise every
+    // subscriber would have to filter a synthetic change that never happened.
+    tick(bridge);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "0");
+}
+
+TEST_CASE("a store write is delivered on the next frame with the full payload",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    store.set_value(10, 5000.0f);
+    // Nothing is delivered until the frame tick — that is what keeps JS off
+    // the writer's thread.
+    CHECK(eval_json(engine, "seen.length") == "0");
+
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    const auto payload = eval_json(engine, "seen[0]");
+    INFO("payload: " << payload);
+    CHECK(payload.find("\"name\":\"Cutoff\"") != std::string::npos);
+    CHECK(payload.find("\"value\":5000") != std::string::npos);
+    // normalized and modulated ride along so JS never re-derives skew math.
+    CHECK(payload.find("\"normalized\":") != std::string::npos);
+    CHECK(payload.find("\"modulated\":") != std::string::npos);
+}
+
+TEST_CASE("many writes between frames coalesce into one callback",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // An automation sweep: 100 writes inside one frame. A push-per-write
+    // design would cross into JS 100 times.
+    for (int i = 1; i <= 100; ++i) store.set_value(10, 1000.0f + static_cast<float>(i));
+    tick(bridge);
+
+    CHECK(eval_json(engine, "seen.length") == "1");
+    // The one callback reports the value getParam would have returned.
+    CHECK(eval_json(engine, "seen[0].value") == "1100");
+
+    // A frame with no further write stays silent.
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}
+
+TEST_CASE("delivery is origin-blind: a JS setParam reports like a host write",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // The UI writes its own param. A design that suppressed self-writes would
+    // silently break a UI whose source of truth is the store.
+    engine.evaluate("setParam('Cutoff', 0.5)");
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    // ...and a native/host-side write is reported the same way.
+    store.set_value(10, 9000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "2");
+}
+
+TEST_CASE("offParamChanged stops delivery and reports whether it removed one",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    REQUIRE(eval_json(engine, "seen.length") == "1");
+
+    CHECK(eval_json(engine, "offParamChanged(sub)") == "true");
+    CHECK(bridge.param_subscription_count() == 0);
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");  // no new delivery
+
+    // Unsubscribing twice is not an error — a view tearing down should be able
+    // to call this unconditionally.
+    CHECK(eval_json(engine, "offParamChanged(sub)") == "false");
+    CHECK(eval_json(engine, "offParamChanged(0)") == "false");
+}
+
+TEST_CASE("subscription ids are never reused, so a stale off cannot cancel a live one",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var seen = [];
+        var first = onParamChanged('Cutoff', function () {});
+        offParamChanged(first);
+        var second = onParamChanged('Cutoff', function (p) { seen.push(p); });
+    )");
+
+    // If ids were slot indices, `second` would equal `first` and the stale
+    // handle below would cancel a live subscription.
+    CHECK(eval_json(engine, "second !== first") == "true");
+    CHECK(eval_json(engine, "offParamChanged(first)") == "false");
+    REQUIRE(bridge.param_subscription_count() == 1);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}
+
+TEST_CASE("a handler that writes its own param terminates instead of recursing",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // Clamping a param from its own change handler is a reasonable thing to
+    // write. The value is snapshotted once per frame, so the handler's own
+    // write surfaces as an ordinary change on the next frame — the loop
+    // settles instead of recursing.
+    bridge.load_script(R"(
+        var calls = 0;
+        onParamChanged('Cutoff', function (p) {
+            calls++;
+            if (p.value > 8000) setParam('Cutoff', 0.5);
+        });
+    )");
+
+    store.set_value(10, 12000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");
+
+    // Frame 2 observes the handler's own corrective write; frame 3 is quiet.
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "2");
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "2");
+}
+
+TEST_CASE("modulation movement is reported even when the base value is static",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // A CLAP host can move the modulated value while the base is untouched.
+    // A UI drawing the modulated position has to see that, so `modulated` is
+    // part of the change signal, not just part of the payload.
+    store.set_mod_offset(10, 0.25f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");  // static again
+}
+
+TEST_CASE("a throwing handler does not stop delivery to other subscriptions",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var good = 0;
+        onParamChanged('Cutoff', function () { throw new Error('boom'); });
+        onParamChanged('Cutoff', function () { good++; });
+    )");
+    REQUIRE(bridge.param_subscription_count() == 2);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    // __dispatch__ contains the exception, so one bad handler cannot silence
+    // its neighbour or unwind the frame loop.
+    CHECK(eval_json(engine, "good") == "1");
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "good") == "2");
+}
+
+TEST_CASE("a handler may unsubscribe itself mid-dispatch",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // "Fire once, then stop" — ordinary to write, and it mutates the very
+    // container the servicing loop is walking.
+    bridge.load_script(R"(
+        var calls = 0;
+        var once = onParamChanged('Cutoff', function () {
+            calls++;
+            offParamChanged(once);
+        });
+        var other = 0;
+        onParamChanged('Cutoff', function () { other++; });
+    )");
+    REQUIRE(bridge.param_subscription_count() == 2);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");
+    // The neighbour still gets this frame's change: cancelling one subscription
+    // must not truncate the pass.
+    CHECK(eval_json(engine, "other") == "1");
+    CHECK(bridge.param_subscription_count() == 1);
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");   // stayed unsubscribed
+    CHECK(eval_json(engine, "other") == "2");
+}
+
+TEST_CASE("a handler may subscribe from inside a dispatch",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // Growing the vector mid-pass can reallocate it, so this is the case that
+    // catches a servicing loop holding a reference across the dispatch.
+    bridge.load_script(R"(
+        var late = 0;
+        var added = false;
+        onParamChanged('Cutoff', function () {
+            if (added) return;
+            added = true;
+            for (var i = 0; i < 8; i++) onParamChanged('Cutoff', function () { late++; });
+        });
+    )");
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    // The new subscriptions exist but are seeded at the current value, so they
+    // do not retroactively fire for the change that created them.
+    CHECK(bridge.param_subscription_count() == 9);
+    CHECK(eval_json(engine, "late") == "0");
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "late") == "8");
+}
+
+TEST_CASE("a NaN param value does not dispatch every frame",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // NaN never compares equal to itself, so an unguarded change test would
+    // report a change on every single frame for as long as the value stays NaN.
+    store.set_value(10, std::numeric_limits<float>::quiet_NaN());
+    tick(bridge);
+    tick(bridge);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "0");
+
+    // Recovering to a real value reports normally.
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}

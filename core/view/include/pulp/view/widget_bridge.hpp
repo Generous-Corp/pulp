@@ -15,6 +15,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/binding_diagnostics.hpp>
+#include <pulp/view/param_subscription.hpp>
 #include <pulp/view/reload_capabilities.hpp>
 #include <pulp/state/store.hpp>
 
@@ -236,6 +237,14 @@ public:
 
     // Number of live param/meter bindings (diagnostics + tests).
     std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }
+
+    // Deliver `paramchange` to JS subscriptions whose param moved since the
+    // last frame. Polled, not pushed — see state_binding_api.cpp for why that
+    // is what makes delivery origin-blind, coalesced, and off the audio thread.
+    void service_param_subscriptions();
+
+    // Live paramchange subscriptions, excluding mid-dispatch tombstones.
+    std::size_t param_subscription_count() const noexcept;
 
     // ── Runtime design import ─────────────────────────────────────
     //
@@ -460,6 +469,11 @@ private:
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
+    std::vector<ParamSubscription> param_subscriptions_;
+    std::uint32_t next_param_subscription_id_ = 1;  ///< monotonic; never reused
+    // True while service_param_subscriptions() is dispatching into JS, so an
+    // unsubscribe from inside a handler tombstones instead of erasing.
+    bool in_param_dispatch_ = false;
     struct ParamGestureRoute {
         state::ParamID active_param_id = 0;
         bool active = false;

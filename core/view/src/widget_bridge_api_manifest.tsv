@@ -31,6 +31,8 @@ setMax	widget_value	function	core/view/src/widget_bridge/widget_value_controls_a
 setStep	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+__subscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+__unsubscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 getParamMetadata	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 formatParamValue	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 parseParamValue	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp

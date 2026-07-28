@@ -13,8 +13,11 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include "api_registry.hpp"
+#include "bridge_dispatch.hpp"
 
 #include <pulp/state/param_json.hpp>
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cmath>
@@ -222,6 +225,82 @@ void WidgetBridge::prune_dangling_bindings() {
         param_bindings_.end());
 }
 
+namespace {
+// Subscriptions are not widgets, but they reuse __callbacks__/__dispatch__ so
+// they inherit its handler-exception containment for free. The '__param__'
+// prefix cannot collide with a widget id: ids come from the author's markup,
+// and a leading double underscore is reserved by the preamble.
+std::string param_subscription_key(std::uint32_t id) {
+    return "__param__" + std::to_string(id);
+}
+} // namespace
+
+std::size_t WidgetBridge::param_subscription_count() const noexcept {
+    // Tombstoned entries (id == 0) are logically gone the moment a handler
+    // unsubscribes; they only survive until the pass compacts them.
+    return static_cast<std::size_t>(
+        std::count_if(param_subscriptions_.begin(), param_subscriptions_.end(),
+                      [](const ParamSubscription& s) { return s.id != 0; }));
+}
+
+void WidgetBridge::service_param_subscriptions() {
+    if (param_subscriptions_.empty()) return;
+
+    // A handler is free to subscribe or unsubscribe while it runs — "unsubscribe
+    // after the first change" is an ordinary thing to write. Both mutate
+    // param_subscriptions_, so this loop must survive the vector growing,
+    // reallocating, or having an element cancelled underneath it:
+    //   * index-based, bounded by the size at entry, so subscriptions added by
+    //     a handler are picked up next frame rather than during this pass;
+    //   * no reference to an element is held across the dispatch, because a
+    //     push_back can reallocate the buffer;
+    //   * cancellation during dispatch tombstones (id = 0) instead of erasing,
+    //     and the compaction below is the only place elements are removed.
+    const bool reentrant = in_param_dispatch_;
+    in_param_dispatch_ = true;
+    const std::size_t count = param_subscriptions_.size();
+    for (std::size_t i = 0; i < count && i < param_subscriptions_.size(); ++i) {
+        const auto id = param_subscriptions_[i].id;
+        if (id == 0) continue;  // cancelled by an earlier handler this pass
+        const auto param_id = param_subscriptions_[i].param_id;
+        const float value = store_.get_value(param_id);
+        const float modulated = store_.get_modulated(param_id);
+        // A NaN value never compares equal, so without this it would dispatch
+        // every frame forever. service_param_bindings() refuses NaN for the
+        // same reason.
+        if (std::isnan(value) || std::isnan(modulated)) continue;
+        // Modulation is part of the change signal, not just the payload: a CLAP
+        // host can move the modulated value while the base is static, and a UI
+        // drawing the modulated position has to see that.
+        if (value == param_subscriptions_[i].last_value &&
+            modulated == param_subscriptions_[i].last_modulated)
+            continue;
+
+        // The value is snapshotted once per frame and compared against the
+        // previous snapshot. That is what bounds a handler which writes its own
+        // param: its write is not re-read here, so it surfaces as an ordinary
+        // change on the next frame — one dispatch per frame, never recursion.
+        param_subscriptions_[i].last_value = value;
+        param_subscriptions_[i].last_modulated = modulated;
+
+        const auto* info = store_.info(param_id);
+        if (info == nullptr) continue;
+        // Same serializer as getParamMetadata and the inspector, so a
+        // subscriber and a poller cannot disagree about a param's shape.
+        const auto payload = choc::json::toString(state::param_snapshot_to_value(store_, *info));
+        safe_dispatch_eval(callback_alive_, &engine_,
+                           "__dispatch__(" + js_string_literal(param_subscription_key(id)) +
+                               ", 'paramchange', " + payload + ")",
+                           "param change subscription");
+        // param_subscriptions_[i] may have been reallocated or tombstoned by
+        // the handler — do not touch it again.
+    }
+    in_param_dispatch_ = reentrant;
+    if (!in_param_dispatch_) {
+        std::erase_if(param_subscriptions_, [](const auto& s) { return s.id == 0; });
+    }
+}
+
 void WidgetBridge::service_param_bindings() {
     if (param_bindings_.empty()) return;
     bool any_changed = false;
@@ -344,6 +423,26 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
 }
 
 void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
+    // onParamChanged/offParamChanged are the public API, but they take a JS
+    // function and CHOC's NativeFunction cannot carry a JSValue argument — the
+    // same constraint that makes setTimeout a JS shim over __scheduleTimer__.
+    // So the handler stays in JS (in __callbacks__, which gives it
+    // __dispatch__'s exception containment for free) and only the name/id
+    // crosses to native.
+    self.engine_.evaluate(
+        "function onParamChanged(name, fn) {"
+        "  if (typeof fn !== 'function') return 0;"
+        "  var id = __subscribeParam__(name);"
+        "  if (id > 0) __callbacks__['__param__' + id + ':paramchange'] = fn;"
+        "  return id;"
+        "}"
+        "function offParamChanged(id) {"
+        "  if (!__unsubscribeParam__(id)) return false;"
+        "  delete __callbacks__['__param__' + id + ':paramchange'];"
+        "  return true;"
+        "}"
+    );
+
     BridgeApiContext api{self.engine_};
 
     // getParam(name) -> get parameter value from store (normalized)
@@ -355,6 +454,57 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     // same code the inspector uses, so the two payloads cannot disagree.
     // Static only, so a caller can fetch once and cache; live value stays on
     // getParam.
+    // __subscribeParam__(name) -> subscription id, or 0 if the param is unknown.
+    // The public onParamChanged() shim above owns the callback half.
+    //
+    // Delivery is async on the frame tick and coalesced: a handler sees the
+    // value it would have read with getParam, never a burst of intermediate
+    // ones. It is deliberately origin-blind — a host automation move, a native
+    // gesture and this UI's own setParam all arrive the same way — so a UI
+    // written against it stays correct when the host is driving.
+    //
+    // Subscribing does NOT fire. The current value is already readable via
+    // getParam; firing on subscribe would make every subscriber handle a
+    // synthetic "change" that did not happen.
+    register_bridge_function(api, "__subscribeParam__", [&self](choc::javascript::ArgumentList args) {
+        const auto name = args.get<std::string>(0, "");
+        if (name.empty()) return choc::value::createInt64(0);
+        state::ParamID param_id = 0;
+        if (!self.resolve_param_id(name, param_id)) return choc::value::createInt64(0);
+
+        ParamSubscription sub;
+        sub.id = self.next_param_subscription_id_++;
+        sub.param_id = param_id;
+        sub.param_name = name;
+        // Seed from the store so the first frame is not reported as a change.
+        sub.last_value = self.store_.get_value(param_id);
+        sub.last_modulated = self.store_.get_modulated(param_id);
+        self.param_subscriptions_.push_back(std::move(sub));
+        return choc::value::createInt64(static_cast<std::int64_t>(
+            self.param_subscriptions_.back().id));
+    });
+
+    // __unsubscribeParam__(id) -> true if a subscription was removed.
+    //
+    // Unknown or already-removed ids return false rather than throwing: a view
+    // tearing down should be able to unsubscribe unconditionally.
+    register_bridge_function(api, "__unsubscribeParam__", [&self](choc::javascript::ArgumentList args) {
+        const auto id = static_cast<std::uint32_t>(args.get<int64_t>(0, 0));
+        if (id == 0) return choc::value::createBool(false);
+        auto& subs = self.param_subscriptions_;
+        const auto it = std::find_if(subs.begin(), subs.end(),
+                                     [id](const auto& s) { return s.id == id; });
+        if (it == subs.end()) return choc::value::createBool(false);
+        if (self.in_param_dispatch_) {
+            // Called from inside a handler: erasing now would invalidate the
+            // servicing loop's position. Tombstone; it compacts after the pass.
+            it->id = 0;
+        } else {
+            subs.erase(it);
+        }
+        return choc::value::createBool(true);
+    });
+
     register_bridge_function(api, "getParamMetadata", [&self](choc::javascript::ArgumentList args) {
         const auto name = args.get<std::string>(0, "");
         for (std::size_t i = 0; i < self.store_.param_count(); ++i) {
