@@ -427,6 +427,90 @@ def catalog(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS) -> 
     return json.load(open(CATALOG)).get("manifests", {})
 
 
+MODULE_INDEX = os.path.join(CACHE_DIR, "modules.json")
+LIBRARY_TARBALL = "https://codeload.github.com/VCVRack/library/tar.gz/refs/heads/v2"
+
+
+def module_index(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS) -> dict:
+    """Every module in the library by name, not just every plugin.
+
+    The public API returns plugin-level metadata only, which is why a bundled
+    module cannot be found by name: Fundamental's 39 modules are invisible
+    behind one plugin entry. VCV's library repository carries the full
+    per-plugin manifests -- 543 of them, 4,705 modules with names and tags --
+    as a single 350 KB download.
+
+    Fetched into the user's own cache rather than shipped with the product.
+    The repository states no licence, so redistributing the database would be
+    presumptuous; retrieving public metadata on a user's behalf, which is what
+    Rack itself does, is not.
+    """
+    import time
+    if os.path.exists(MODULE_INDEX) and not refresh:
+        if time.time() - os.path.getmtime(MODULE_INDEX) < max_age_days * 86400:
+            return json.load(open(MODULE_INDEX))
+
+    import io
+    import tarfile
+    import urllib.request
+    idx: dict = {}
+    try:
+        with urllib.request.urlopen(LIBRARY_TARBALL, timeout=120) as r:
+            blob = r.read()
+        with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
+            for member in tf.getmembers():
+                if "/manifests/" not in member.name or not member.name.endswith(".json"):
+                    continue
+                fh = tf.extractfile(member)
+                if not fh:
+                    continue
+                try:
+                    d = json.load(fh)
+                except Exception:
+                    continue
+                pslug = d.get("slug")
+                if not pslug:
+                    continue
+                for m in d.get("modules") or []:
+                    if not m.get("slug"):
+                        continue
+                    idx.setdefault(pslug, {})[m["slug"]] = {
+                        "name": m.get("name", m["slug"]),
+                        "tags": m.get("tags", []),
+                        "description": m.get("description", ""),
+                    }
+    except Exception as e:
+        if os.path.exists(MODULE_INDEX):
+            print(f"  (module index refresh failed, using cache: {e})", file=sys.stderr)
+            return json.load(open(MODULE_INDEX))
+        raise SystemExit(f"could not fetch the module index: {e}")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    json.dump(idx, open(MODULE_INDEX, "w"))
+    return idx
+
+
+def find_modules(term: str, midx: dict, cat: dict, inv: dict) -> list:
+    """Search 4,705 modules by name or slug, across every plugin."""
+    t = term.lstrip("@").strip().lower()
+    out = []
+    for pslug, mods in midx.items():
+        for mslug, m in mods.items():
+            hay = f"{mslug} {m['name']}".lower()
+            if t not in hay:
+                continue
+            p = cat.get(pslug, {})
+            out.append({
+                "plugin": pslug, "module": mslug, "name": m["name"],
+                "brand": p.get("brand", ""), "tags": m["tags"],
+                "premium": bool(p.get("premium")),
+                "installed": mslug in inv.get(pslug, {}).get("modules", {}),
+                # An exact name match should outrank a substring buried in a
+                # longer one, so "VCO" finds VCO before "Chord VCO".
+                "score": 100 if m["name"].lower() == t or mslug.lower() == t else 50,
+            })
+    return sorted(out, key=lambda h: (-h["score"], not h["installed"], h["plugin"]))
+
+
 def resolve_mention(term: str, cat: dict, inv: dict) -> dict:
     """Turn '@mutable instruments' or '@Vult' into concrete plugins.
 
@@ -579,7 +663,29 @@ def main(argv):
         # resolving a mention BEFORE generating is what stops a whole patch
         # being built around something the user cannot load.
         cat = catalog()
-        hits = resolve_mention(argv[2], cat, inv)
+        term = argv[2]
+        # Modules first: a person naming "Pamela's" or "Plaits" means a module,
+        # and only naming a maker means a brand.
+        mods = find_modules(term, module_index(), cat, inv)
+        if mods:
+            ready = sum(1 for m in mods if m["installed"])
+            print(f"'{term}' — {len(mods)} module(s), {ready} usable now\n")
+            for m in mods[:12]:
+                if m["installed"]:
+                    state = "✓ ready"
+                elif m["premium"]:
+                    state = "$ premium"
+                else:
+                    state = "↓ free"
+                tags = f"  [{', '.join(m['tags'][:3])}]" if m["tags"] else ""
+                print(f"  {state:11} {m['plugin']}/{m['module']:18} "
+                      f"{m['name']}{tags}")
+            if not ready:
+                print("\nNone installed, so a patch cannot use them yet.")
+                print("Generation would be wasted — install first, then ask again.")
+                return 2
+            return 0
+        hits = resolve_mention(term, cat, inv)
         if not hits:
             print(f"nothing in the library matches '{argv[2]}'")
             return 1
