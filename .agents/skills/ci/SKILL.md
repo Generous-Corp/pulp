@@ -5293,3 +5293,32 @@ The general lesson for this skill: when a change is Windows-affecting, a green
 retained REAPER VM (see the `hosting` skill and the consumer repo's
 `WINDOWS_REAPER_QEMU.md`) has Visual Studio Build Tools and answers over SSH,
 which is enough for a target build without any GUI.
+
+## A path-filtered check CANNOT be made required (it wedges every PR that misses the paths)
+
+A workflow with `on.pull_request.paths` does not merely skip on an unrelated PR
+— it never REPORTS its check at all. That is invisible while the check is
+advisory, and it wedges the repo the moment the check is added to branch
+protection: GitHub blocks the PR indefinitely waiting for a context that will
+never arrive. There is no failure to click into, so it presents as queue lag
+rather than as a misconfiguration, which is what makes it expensive to
+diagnose.
+
+`gcc-compile-gate.yml` was in exactly this shape while the decision to make the
+Linux verdict binding was already taken. Adding the context as-is would have
+permanently stalled every docs-only, test-only and tooling-only PR.
+
+**Before adding ANY check to branch protection, confirm it reports on a PR that
+touches none of its paths.** Observe it — the failure mode is silent, so
+reasoning about it is not enough.
+
+The fix is to move the filter inside the job: trigger on every PR, decide in a
+first step whether the diff is relevant, and guard the expensive steps on that
+output. Compare against the **merge base**, not the previous commit, or a PR
+that edits the covered paths and then pushes an unrelated fixup will skip the
+work it needs.
+
+Measuring the cost is worth doing before assuming a required lane is expensive:
+this gate's p90 (41 min) sits below the macOS lane's median (47 min), so it
+usually finishes inside the required lane's shadow and adds nothing to
+time-to-merge.
