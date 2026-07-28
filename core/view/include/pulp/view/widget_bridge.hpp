@@ -14,6 +14,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/binding_diagnostics.hpp>
 #include <pulp/view/reload_capabilities.hpp>
 #include <pulp/state/store.hpp>
 
@@ -451,7 +452,7 @@ private:
         float apply(float v) const;
     };
     struct ParamBinding {
-        enum class Target { value, meter };
+        using Target = BindingTarget;
         std::string widget_id;
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
         Target target = Target::value;
@@ -501,6 +502,21 @@ private:
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
     bool apply_param_binding(ParamBinding& binding, View* w);
+
+public:
+    /// Binding attempts in call order, bound or not (binding_diagnostics.hpp).
+    /// Reset per bridge, so this is the log for the loaded script.
+    const std::vector<BindingAttempt>& binding_attempts() const noexcept {
+        return binding_attempts_;
+    }
+    /// Declared parameters no attempt reached — the UI cannot change them.
+    /// Excludes Bypass/Reset designations and triggers, which the host surfaces.
+    std::vector<std::string> unbound_params() const;
+
+private:
+    std::vector<BindingAttempt> binding_attempts_;
+    bool record_binding_attempt(const std::string& widget_id, const std::string& param_name,
+                                BindingTarget target, BindingOutcome outcome);
 
     std::function<void()> repaint_callback_;
 
