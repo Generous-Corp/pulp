@@ -1,0 +1,9 @@
+{
+  "slug": "ForgeModular",
+  "name": "Forge Modular",
+  "brand": "Forge",
+  "version": "2.0.0",
+  "license": "MIT",
+  "author": "Forge",
+  "module_order": ["VCO", "VCF", "VCA", "ENV", "LFO", "EUCLID", "SEQ", "ATT", "MULT"]
+}

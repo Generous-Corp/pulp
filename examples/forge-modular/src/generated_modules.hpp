@@ -19,7 +19,7 @@ struct VCOLayout {
 
 inline void config_VCO(rack::engine::Module* m) {
     m->config(VCOLayout::PARAMS_LEN, VCOLayout::INPUTS_LEN, VCOLayout::OUTPUTS_LEN, VCOLayout::LIGHTS_LEN);
-    m->configParam(VCOLayout::FREQ_PARAM, -4.0f, 4.0f, 0.0f, "Frequency", " Hz", 2.0f, 261.6256f);
+    m->configParam(VCOLayout::FREQ_PARAM, -4.0f, 4.0f, 0.0f, "Frequency", " Hz", 2.0f, 261.626f);
     m->configParam(VCOLayout::FINE_PARAM, -1.0f, 1.0f, 0.0f, "Fine tune", " cents", 0.0f, 100.0f);
     m->configParam(VCOLayout::PW_PARAM, 0.05f, 0.95f, 0.5f, "Pulse width", "%", 0.0f, 100.0f);
     m->configParam(VCOLayout::FM_PARAM, -1.0f, 1.0f, 0.0f, "FM amount", "%", 0.0f, 100.0f);
@@ -48,6 +48,281 @@ inline void place_VCO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.840f, 102.000f)), m, VCOLayout::PULSE_OUTPUT));
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11.800f, 118.000f)), m, VCOLayout::TRI_OUTPUT));
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.840f, 118.000f)), m, VCOLayout::SINE_OUTPUT));
+}
+
+// ── VCF (8HP) ─────────────────────────────────────────
+struct VCFLayout {
+    static constexpr int kHp = 8;
+    enum ParamId { CUTOFF_PARAM, RES_PARAM, CVAMT_PARAM, PARAMS_LEN };
+    enum InputId { CV_INPUT, IN_INPUT, INPUTS_LEN };
+    enum OutputId { LP_OUTPUT, HP_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_VCF(rack::engine::Module* m) {
+    m->config(VCFLayout::PARAMS_LEN, VCFLayout::INPUTS_LEN, VCFLayout::OUTPUTS_LEN, VCFLayout::LIGHTS_LEN);
+    m->configParam(VCFLayout::CUTOFF_PARAM, -4.0f, 4.0f, 0.0f, "Cutoff", " Hz", 2.0f, 261.626f);
+    m->configParam(VCFLayout::RES_PARAM, 0.0f, 0.95f, 0.1f, "Resonance", "%", 0.0f, 100.0f);
+    m->configParam(VCFLayout::CVAMT_PARAM, -1.0f, 1.0f, 0.0f, "Cutoff CV amount", "%", 0.0f, 100.0f);
+    m->configInput(VCFLayout::CV_INPUT, "Cutoff CV (1V/oct)");
+    m->configInput(VCFLayout::IN_INPUT, "Audio");
+    m->configOutput(VCFLayout::LP_OUTPUT, "Low-pass");
+    m->configOutput(VCFLayout::HP_OUTPUT, "High-pass");
+}
+
+inline void place_VCF(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(20.320f, 30.000f)), m, VCFLayout::CUTOFF_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.786f, 56.000f)), m, VCFLayout::RES_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(28.854f, 56.000f)), m, VCFLayout::CVAMT_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.854f, 76.000f)), m, VCFLayout::CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.786f, 98.000f)), m, VCFLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.854f, 98.000f)), m, VCFLayout::LP_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.854f, 116.000f)), m, VCFLayout::HP_OUTPUT));
+}
+
+// ── VCA (3HP) ─────────────────────────────────────────
+struct VCALayout {
+    static constexpr int kHp = 3;
+    enum ParamId { LEVEL_PARAM, PARAMS_LEN };
+    enum InputId { CV_INPUT, IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_VCA(rack::engine::Module* m) {
+    m->config(VCALayout::PARAMS_LEN, VCALayout::INPUTS_LEN, VCALayout::OUTPUTS_LEN, VCALayout::LIGHTS_LEN);
+    m->configParam(VCALayout::LEVEL_PARAM, 0.0f, 1.0f, 0.5f, "Level", "%", 0.0f, 100.0f);
+    m->configInput(VCALayout::CV_INPUT, "Level CV");
+    m->configInput(VCALayout::IN_INPUT, "Audio");
+    m->configOutput(VCALayout::OUT_OUTPUT, "Audio");
+}
+
+inline void place_VCA(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 28.000f)), m, VCALayout::LEVEL_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 55.000f)), m, VCALayout::CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 80.000f)), m, VCALayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 108.000f)), m, VCALayout::OUT_OUTPUT));
+}
+
+// ── ENV (6HP) ─────────────────────────────────────────
+struct ENVLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { ATTACK_PARAM, DECAY_PARAM, SUSTAIN_PARAM, RELEASE_PARAM, PARAMS_LEN };
+    enum InputId { GATE_INPUT, INPUTS_LEN };
+    enum OutputId { ENV_OUTPUT, INV_OUTPUT, OUTPUTS_LEN };
+    enum LightId { ENV_LIGHT, LIGHTS_LEN };
+};
+
+inline void config_ENV(rack::engine::Module* m) {
+    m->config(ENVLayout::PARAMS_LEN, ENVLayout::INPUTS_LEN, ENVLayout::OUTPUTS_LEN, ENVLayout::LIGHTS_LEN);
+    m->configParam(ENVLayout::ATTACK_PARAM, 0.001f, 4.0f, 0.01f, "Attack", " s", 0.0f, 1.0f);
+    m->configParam(ENVLayout::DECAY_PARAM, 0.001f, 4.0f, 0.2f, "Decay", " s", 0.0f, 1.0f);
+    m->configParam(ENVLayout::SUSTAIN_PARAM, 0.0f, 1.0f, 0.7f, "Sustain", "%", 0.0f, 100.0f);
+    m->configParam(ENVLayout::RELEASE_PARAM, 0.001f, 4.0f, 0.4f, "Release", " s", 0.0f, 1.0f);
+    m->configInput(ENVLayout::GATE_INPUT, "Gate");
+    m->configOutput(ENVLayout::ENV_OUTPUT, "Envelope");
+    m->configOutput(ENVLayout::INV_OUTPUT, "Inverted envelope");
+    m->configLight(ENVLayout::ENV_LIGHT, "Envelope active");
+}
+
+inline void place_ENV(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 26.000f)), m, ENVLayout::ATTACK_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 45.000f)), m, ENVLayout::DECAY_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 64.000f)), m, ENVLayout::SUSTAIN_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 83.000f)), m, ENVLayout::RELEASE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.144f, 102.000f)), m, ENVLayout::GATE_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 102.000f)), m, ENVLayout::ENV_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 118.000f)), m, ENVLayout::INV_OUTPUT));
+    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(9.144f, 118.000f)), m, ENVLayout::ENV_LIGHT));
+}
+
+// ── LFO (6HP) ─────────────────────────────────────────
+struct LFOLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { RATE_PARAM, PARAMS_LEN };
+    enum InputId { RESET_INPUT, INPUTS_LEN };
+    enum OutputId { TRI_OUTPUT, SQR_OUTPUT, SIN_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_LFO(rack::engine::Module* m) {
+    m->config(LFOLayout::PARAMS_LEN, LFOLayout::INPUTS_LEN, LFOLayout::OUTPUTS_LEN, LFOLayout::LIGHTS_LEN);
+    m->configParam(LFOLayout::RATE_PARAM, -8.0f, 8.0f, 0.0f, "Rate", " Hz", 2.0f, 2.0f);
+    m->configInput(LFOLayout::RESET_INPUT, "Reset");
+    m->configOutput(LFOLayout::TRI_OUTPUT, "Triangle");
+    m->configOutput(LFOLayout::SQR_OUTPUT, "Square");
+    m->configOutput(LFOLayout::SIN_OUTPUT, "Sine");
+}
+
+inline void place_LFO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 30.000f)), m, LFOLayout::RATE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.240f, 66.000f)), m, LFOLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(9.144f, 95.000f)), m, LFOLayout::TRI_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 95.000f)), m, LFOLayout::SQR_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(15.240f, 117.000f)), m, LFOLayout::SIN_OUTPUT));
+}
+
+// ── EUCLID (6HP) ──────────────────────────────────────
+struct EUCLIDLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { LENGTH_PARAM, FILL_PARAM, ROTATE_PARAM, PARAMS_LEN };
+    enum InputId { CLOCK_INPUT, RESET_INPUT, INPUTS_LEN };
+    enum OutputId { GATE_OUTPUT, OUTPUTS_LEN };
+    enum LightId { STEP_LIGHT, LIGHTS_LEN };
+};
+
+inline void config_EUCLID(rack::engine::Module* m) {
+    m->config(EUCLIDLayout::PARAMS_LEN, EUCLIDLayout::INPUTS_LEN, EUCLIDLayout::OUTPUTS_LEN, EUCLIDLayout::LIGHTS_LEN);
+    m->configParam(EUCLIDLayout::LENGTH_PARAM, 1.0f, 32.0f, 16.0f, "Steps", "", 0.0f, 1.0f);
+    m->getParamQuantity(EUCLIDLayout::LENGTH_PARAM)->snapEnabled = true;
+    m->configParam(EUCLIDLayout::FILL_PARAM, 0.0f, 32.0f, 4.0f, "Pulses", "", 0.0f, 1.0f);
+    m->getParamQuantity(EUCLIDLayout::FILL_PARAM)->snapEnabled = true;
+    m->configParam(EUCLIDLayout::ROTATE_PARAM, 0.0f, 31.0f, 0.0f, "Rotation", "", 0.0f, 1.0f);
+    m->getParamQuantity(EUCLIDLayout::ROTATE_PARAM)->snapEnabled = true;
+    m->configInput(EUCLIDLayout::CLOCK_INPUT, "Clock");
+    m->configInput(EUCLIDLayout::RESET_INPUT, "Reset");
+    m->configOutput(EUCLIDLayout::GATE_OUTPUT, "Gate");
+    m->configLight(EUCLIDLayout::STEP_LIGHT, "Step");
+}
+
+inline void place_EUCLID(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.144f, 28.000f)), m, EUCLIDLayout::LENGTH_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.336f, 28.000f)), m, EUCLIDLayout::FILL_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 52.000f)), m, EUCLIDLayout::ROTATE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.144f, 78.000f)), m, EUCLIDLayout::CLOCK_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(21.336f, 78.000f)), m, EUCLIDLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(15.240f, 110.000f)), m, EUCLIDLayout::GATE_OUTPUT));
+    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(15.240f, 93.000f)), m, EUCLIDLayout::STEP_LIGHT));
+}
+
+// ── SEQ (12HP) ─────────────────────────────────────────
+struct SEQLayout {
+    static constexpr int kHp = 12;
+    enum ParamId { STEP1_PARAM, STEP2_PARAM, STEP3_PARAM, STEP4_PARAM, STEP5_PARAM, STEP6_PARAM, STEP7_PARAM, STEP8_PARAM, PARAMS_LEN };
+    enum InputId { CLOCK_INPUT, RESET_INPUT, INPUTS_LEN };
+    enum OutputId { CV_OUTPUT, GATE_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_SEQ(rack::engine::Module* m) {
+    m->config(SEQLayout::PARAMS_LEN, SEQLayout::INPUTS_LEN, SEQLayout::OUTPUTS_LEN, SEQLayout::LIGHTS_LEN);
+    m->configParam(SEQLayout::STEP1_PARAM, -2.0f, 2.0f, 0.0f, "Step 1", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP2_PARAM, -2.0f, 2.0f, 0.0f, "Step 2", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP3_PARAM, -2.0f, 2.0f, 0.0f, "Step 3", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP4_PARAM, -2.0f, 2.0f, 0.0f, "Step 4", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP5_PARAM, -2.0f, 2.0f, 0.0f, "Step 5", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP6_PARAM, -2.0f, 2.0f, 0.0f, "Step 6", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP7_PARAM, -2.0f, 2.0f, 0.0f, "Step 7", " V", 0.0f, 1.0f);
+    m->configParam(SEQLayout::STEP8_PARAM, -2.0f, 2.0f, 0.0f, "Step 8", " V", 0.0f, 1.0f);
+    m->configInput(SEQLayout::CLOCK_INPUT, "Clock");
+    m->configInput(SEQLayout::RESET_INPUT, "Reset");
+    m->configOutput(SEQLayout::CV_OUTPUT, "Pitch CV (1V/oct)");
+    m->configOutput(SEQLayout::GATE_OUTPUT, "Gate");
+}
+
+inline void place_SEQ(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 28.000f)), m, SEQLayout::STEP1_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 46.000f)), m, SEQLayout::STEP2_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 64.000f)), m, SEQLayout::STEP3_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 82.000f)), m, SEQLayout::STEP4_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 28.000f)), m, SEQLayout::STEP5_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 46.000f)), m, SEQLayout::STEP6_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 64.000f)), m, SEQLayout::STEP7_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 82.000f)), m, SEQLayout::STEP8_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.973f, 108.000f)), m, SEQLayout::CLOCK_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.774f, 108.000f)), m, SEQLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(37.186f, 108.000f)), m, SEQLayout::CV_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(49.987f, 108.000f)), m, SEQLayout::GATE_OUTPUT));
+}
+
+// ── ATT (3HP) ─────────────────────────────────────────
+struct ATTLayout {
+    static constexpr int kHp = 3;
+    enum ParamId { AMT_PARAM, OFFSET_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_ATT(rack::engine::Module* m) {
+    m->config(ATTLayout::PARAMS_LEN, ATTLayout::INPUTS_LEN, ATTLayout::OUTPUTS_LEN, ATTLayout::LIGHTS_LEN);
+    m->configParam(ATTLayout::AMT_PARAM, -1.0f, 1.0f, 1.0f, "Amount", "%", 0.0f, 100.0f);
+    m->configParam(ATTLayout::OFFSET_PARAM, -5.0f, 5.0f, 0.0f, "Offset", " V", 0.0f, 1.0f);
+    m->configInput(ATTLayout::IN_INPUT, "Signal");
+    m->configOutput(ATTLayout::OUT_OUTPUT, "Signal");
+}
+
+inline void place_ATT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 28.000f)), m, ATTLayout::AMT_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 55.000f)), m, ATTLayout::OFFSET_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, ATTLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 110.000f)), m, ATTLayout::OUT_OUTPUT));
+}
+
+// ── MULT (3HP) ────────────────────────────────────────
+struct MULTLayout {
+    static constexpr int kHp = 3;
+    enum ParamId { PARAMS_LEN };
+    enum InputId { IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT1_OUTPUT, OUT2_OUTPUT, OUT3_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LIGHTS_LEN };
+};
+
+inline void config_MULT(rack::engine::Module* m) {
+    m->config(MULTLayout::PARAMS_LEN, MULTLayout::INPUTS_LEN, MULTLayout::OUTPUTS_LEN, MULTLayout::LIGHTS_LEN);
+    m->configInput(MULTLayout::IN_INPUT, "Signal");
+    m->configOutput(MULTLayout::OUT1_OUTPUT, "Copy 1");
+    m->configOutput(MULTLayout::OUT2_OUTPUT, "Copy 2");
+    m->configOutput(MULTLayout::OUT3_OUTPUT, "Copy 3");
+}
+
+inline void place_MULT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 34.000f)), m, MULTLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 62.000f)), m, MULTLayout::OUT1_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, MULTLayout::OUT2_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
 }
 
 }  // namespace forge_modular

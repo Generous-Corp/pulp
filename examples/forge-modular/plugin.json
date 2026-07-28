@@ -14,6 +14,76 @@
         "Oscillator",
         "Polyphonic"
       ]
+    },
+    {
+      "slug": "VCF",
+      "name": "VCF",
+      "description": "Resonant state-variable filter with CV",
+      "tags": [
+        "Filter",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "VCA",
+      "name": "VCA",
+      "description": "Voltage-controlled amplifier",
+      "tags": [
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ]
+    },
+    {
+      "slug": "ENV",
+      "name": "ENV",
+      "description": "ADSR envelope generator",
+      "tags": [
+        "Envelope generator"
+      ]
+    },
+    {
+      "slug": "LFO",
+      "name": "LFO",
+      "description": "Low-frequency oscillator",
+      "tags": [
+        "Low-frequency oscillator"
+      ]
+    },
+    {
+      "slug": "EUCLID",
+      "name": "EUCL",
+      "description": "Euclidean gate generator",
+      "tags": [
+        "Clock modulator",
+        "Sequencer",
+        "Random"
+      ]
+    },
+    {
+      "slug": "SEQ",
+      "name": "SEQ",
+      "description": "8-step CV and gate sequencer",
+      "tags": [
+        "Sequencer"
+      ]
+    },
+    {
+      "slug": "ATT",
+      "name": "ATT",
+      "description": "Bipolar attenuverter with offset",
+      "tags": [
+        "Attenuator",
+        "Utility"
+      ]
+    },
+    {
+      "slug": "MULT",
+      "name": "MULT",
+      "description": "Passive 1-to-3 signal splitter",
+      "tags": [
+        "Multiple",
+        "Utility"
+      ]
     }
   ]
 }

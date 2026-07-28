@@ -18,6 +18,7 @@
 #include <pulp/host/forge_drum_catalog.hpp>
 #include <pulp/host/forge_dynamics_catalog.hpp>
 #include <pulp/host/forge_effect_modulation_catalog.hpp>
+#include <pulp/host/forge_eurorack_utility_catalog.hpp>
 #include <pulp/host/forge_fdn_reverb_catalog.hpp>
 #include <pulp/host/forge_fuzz_catalog.hpp>
 #include <pulp/host/forge_lofi_catalog.hpp>
@@ -34,13 +35,14 @@
 
 namespace pulp::host::forge_catalog {
 
-inline constexpr std::array<std::string_view, 16> kHeaderNames{{
+inline constexpr std::array<std::string_view, 17> kHeaderNames{{
     "forge_analog_vcf_catalog.hpp",
     "forge_character_delay_catalog.hpp",
     "forge_distortion_catalog.hpp",
     "forge_drum_catalog.hpp",
     "forge_dynamics_catalog.hpp",
     "forge_effect_modulation_catalog.hpp",
+    "forge_eurorack_utility_catalog.hpp",
     "forge_fdn_reverb_catalog.hpp",
     "forge_fuzz_catalog.hpp",
     "forge_lofi_catalog.hpp",

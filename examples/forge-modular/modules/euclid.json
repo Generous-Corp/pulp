@@ -1,0 +1,107 @@
+{
+  "modules": [
+    {
+      "slug": "EUCLID",
+      "name": "EUCL",
+      "description": "Euclidean gate generator",
+      "tags": [
+        "Clock modulator",
+        "Sequencer",
+        "Random"
+      ],
+      "hp": 6,
+      "params": [
+        {
+          "id": 0,
+          "ident": "LENGTH_PARAM",
+          "name": "Steps",
+          "label": "LEN",
+          "unit": "",
+          "min_value": 1,
+          "max_value": 32,
+          "default_value": 16,
+          "kind": "KnobSmall",
+          "x_mm": 9.144,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 1.0,
+          "snap": true
+        },
+        {
+          "id": 1,
+          "ident": "FILL_PARAM",
+          "name": "Pulses",
+          "label": "FILL",
+          "unit": "",
+          "min_value": 0,
+          "max_value": 32,
+          "default_value": 4,
+          "kind": "KnobSmall",
+          "x_mm": 21.336,
+          "y_mm": 28,
+          "display_base": 0.0,
+          "display_multiplier": 1.0,
+          "snap": true
+        },
+        {
+          "id": 2,
+          "ident": "ROTATE_PARAM",
+          "name": "Rotation",
+          "label": "ROT",
+          "unit": "",
+          "min_value": 0,
+          "max_value": 31,
+          "default_value": 0,
+          "kind": "KnobSmall",
+          "x_mm": 15.24,
+          "y_mm": 52,
+          "display_base": 0.0,
+          "display_multiplier": 1.0,
+          "snap": true,
+          "allow_endpoint_default": "zero rotation is the identity for a Euclidean pattern"
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "CLOCK_INPUT",
+          "name": "Clock",
+          "label": "CLK",
+          "role": "Clock",
+          "x_mm": 9.144,
+          "y_mm": 78
+        },
+        {
+          "id": 1,
+          "ident": "RESET_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 21.336,
+          "y_mm": 78
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "GATE_OUTPUT",
+          "name": "Gate",
+          "label": "GATE",
+          "role": "Gate",
+          "x_mm": 15.24,
+          "y_mm": 110
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "STEP_LIGHT",
+          "name": "Step",
+          "label": "",
+          "x_mm": 15.24,
+          "y_mm": 93
+        }
+      ]
+    }
+  ]
+}

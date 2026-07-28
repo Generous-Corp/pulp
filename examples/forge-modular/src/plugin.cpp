@@ -11,5 +11,14 @@ rack::plugin::Plugin* pluginInstance = nullptr;
 extern "C" __attribute__((visibility("default")))
 void init(rack::plugin::Plugin* p) {
     pluginInstance = p;
+    // Signal order, which is also how they appear in the Module Browser.
     p->addModel(modelVCO);
+    p->addModel(modelVCF);
+    p->addModel(modelVCA);
+    p->addModel(modelENV);
+    p->addModel(modelLFO);
+    p->addModel(modelEUCLID);
+    p->addModel(modelSEQ);
+    p->addModel(modelATT);
+    p->addModel(modelMULT);
 }

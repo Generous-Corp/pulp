@@ -13,3 +13,11 @@
 extern rack::plugin::Plugin* pluginInstance;
 
 extern rack::plugin::Model* modelVCO;
+extern rack::plugin::Model* modelENV;
+extern rack::plugin::Model* modelVCF;
+extern rack::plugin::Model* modelVCA;
+extern rack::plugin::Model* modelEUCLID;
+extern rack::plugin::Model* modelLFO;
+extern rack::plugin::Model* modelMULT;
+extern rack::plugin::Model* modelATT;
+extern rack::plugin::Model* modelSEQ;

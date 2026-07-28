@@ -346,11 +346,12 @@ def validate(mod: dict, svg: str | None = None) -> list[str]:
         if hi <= lo:
             errs.append(f"param {pspec['ident']}: max ({hi}) must exceed min ({lo})")
             continue
-        if lo < 0 < hi and abs(dv) > 1e-6:
+        waiver = pspec.get("allow_endpoint_default")
+        if lo < 0 < hi and abs(dv) > 1e-6 and not waiver:
             errs.append(f"param {pspec['ident']} is bipolar ({lo}..{hi}) but defaults to "
                         f"{dv}, so its knob does not start centred")
         frac = (dv - lo) / (hi - lo)
-        if pspec.get("kind") != "Toggle" and (frac < 1e-6 or frac > 1 - 1e-6):
+        if pspec.get("kind") != "Toggle" and not waiver and (frac < 1e-6 or frac > 1 - 1e-6):
             errs.append(f"param {pspec['ident']} defaults to an endpoint of its range "
                         f"({dv} in {lo}..{hi}); the knob will look stuck")
 
@@ -410,9 +411,12 @@ def emit_cpp(man: dict) -> str:
         for p in m.get("params", []):
             base = p.get("display_base", 0.0)
             mult = p.get("display_multiplier", 1.0)
-            L.append(f'    m->configParam({S}Layout::{p["ident"]}, {p["min_value"]}f, '
-                     f'{p["max_value"]}f, {p["default_value"]}f, "{p["name"]}", '
-                     f'"{p.get("unit","")}", {base}f, {mult}f);')
+            # JSON integers must still emit float literals: `1f` is not valid C++.
+            f = lambda v: f"{float(v):.6g}" + ("" if "." in f"{float(v):.6g}"
+                                               or "e" in f"{float(v):.6g}" else ".0")
+            L.append(f'    m->configParam({S}Layout::{p["ident"]}, {f(p["min_value"])}f, '
+                     f'{f(p["max_value"])}f, {f(p["default_value"])}f, "{p["name"]}", '
+                     f'"{p.get("unit","")}", {f(base)}f, {f(mult)}f);')
             if p.get("snap"):
                 L.append(f'    m->getParamQuantity({S}Layout::{p["ident"]})->snapEnabled = true;')
         for p in m.get("inputs", []):
@@ -454,15 +458,29 @@ def emit_cpp(man: dict) -> str:
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def load(paths):
-    man = None
+    """Merge one plugin-level file with N module files, in any glob order.
+
+    Plugin-level fields (slug, brand, version...) may live in any of the inputs;
+    taking them from whichever file happens to sort first silently produced a
+    manifest with no slug, which Rack rejects at load with "No plugin slug".
+    """
+    man, modules = {}, []
     for p in paths:
         with open(p) as f:
             d = json.load(f)
-        if man is None:
-            man = d
-            man.setdefault("modules", [])
-        else:
-            man["modules"].extend(d.get("modules", []))
+        modules.extend(d.get("modules", []))
+        for k, v in d.items():
+            if k != "modules":
+                man.setdefault(k, v)
+    if "slug" not in man:
+        raise SystemExit("forge_modular: no plugin-level manifest (missing 'slug') "
+                         "among the given files")
+    # Browser order is signal order, not the alphabetical order of filenames.
+    order = man.pop("module_order", None)
+    if order:
+        rank = {s: i for i, s in enumerate(order)}
+        modules.sort(key=lambda m: rank.get(m["slug"], len(rank)))
+    man["modules"] = modules
     return man
 
 

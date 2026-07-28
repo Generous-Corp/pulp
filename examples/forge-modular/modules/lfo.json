@@ -1,0 +1,71 @@
+{
+  "modules": [
+    {
+      "slug": "LFO",
+      "name": "LFO",
+      "description": "Low-frequency oscillator",
+      "tags": [
+        "Low-frequency oscillator"
+      ],
+      "hp": 6,
+      "params": [
+        {
+          "id": 0,
+          "ident": "RATE_PARAM",
+          "name": "Rate",
+          "label": "RATE",
+          "unit": " Hz",
+          "min_value": -8.0,
+          "max_value": 8.0,
+          "default_value": 0.0,
+          "kind": "Knob",
+          "x_mm": 15.24,
+          "y_mm": 30,
+          "display_base": 2.0,
+          "display_multiplier": 2.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "RESET_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 15.24,
+          "y_mm": 66
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "TRI_OUTPUT",
+          "name": "Triangle",
+          "label": "TRI",
+          "role": "Cv",
+          "x_mm": 9.144,
+          "y_mm": 95
+        },
+        {
+          "id": 1,
+          "ident": "SQR_OUTPUT",
+          "name": "Square",
+          "label": "SQR",
+          "role": "Cv",
+          "x_mm": 21.336,
+          "y_mm": 95
+        },
+        {
+          "id": 2,
+          "ident": "SIN_OUTPUT",
+          "name": "Sine",
+          "label": "SIN",
+          "role": "Cv",
+          "x_mm": 15.24,
+          "y_mm": 117
+        }
+      ],
+      "lights": []
+    }
+  ]
+}
