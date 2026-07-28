@@ -665,3 +665,121 @@ Revised recommendation for §7:
 
 The two compose cleanly: screenshots give a faithful picture, the cartographer
 gives faithful cable endpoints, and each degrades to something honest alone.
+
+---
+
+## 11. Capabilities — what is built and proven
+
+Everything below was measured on a real machine rather than designed. Dates
+aside, this is the state the app gets to build on.
+
+### Module generation — working, 8 of 8
+
+Prompt to installed module: manifest and C++ from one model call, geometry and
+tag validation, panel SVG emitted, compiled, driven for real, installed.
+Across eight prompts spanning 2 HP to 12 HP — attenuator, morphing LFO,
+four-pole filter, step sequencer, kick drum, sample and hold, wavefolder, dual
+envelope — all eight landed. Four first try, three on the second, one on the
+third. Two harder rolls (a chaos source, and the patches below) also landed.
+
+**Every one used Pulp's DSP** rather than hand-rolling: ten distinct headers
+including `analog_vcf`, `stage_sequencer`, `drum/kick` and `chaos`. That is the
+header-derived vocabulary working — the first module ever generated here used
+none of it.
+
+### The behavioural gate — catching real defects
+
+Drives the module's real `process()` outside Rack through its own
+`rack::plugin::Model`, and checks for inert controls, non-finite output, sane
+voltages, and silence from silence. Passes all 21 modules built so far;
+deliberately ignoring one knob fails that knob and no other.
+
+In the spread it rejected three modules that **compiled cleanly with dead
+knobs** — an LFO's shape-CV amount, a sample and hold's slew amount and mode
+switch. The retry loop fixed each automatically.
+
+### Patch generation — working, 3 of 3 on hard prompts
+
+Including "a slow krell patch" (it wired an envelope's end-of-cycle back to its
+own trigger — a self-playing patch with no clock) and "a bouncing-ball rhythm"
+(a comparator slicing a decaying envelope into accelerating gates). Both are
+correct technique, not plausible-looking wiring. Both came out stereo.
+
+### The things that make patches possible
+
+- **Inventory** — every installed module, from local manifests. Core is read
+  from the app bundle since it is compiled into Rack; a freshly installed
+  plugin is read out of its still-packed archive.
+- **Explanation** — computed from the patch file, so it costs nothing to
+  re-render and cannot describe a cable that is not there. Only the short
+  musical rationales come from a model.
+- **Lint** — 12 rules, each pinned to a patch that must pass and one that must
+  fail for that reason.
+- **Diff** — structural, ignoring the positions and reordering Rack rewrites on
+  every save.
+- **Preflight** — reads a request for capabilities and stops before spending
+  anything if nothing installed provides them, naming free options first.
+
+### The port map
+
+Nothing on disk describes a module's ports — not Core's manifest, not any
+vendor's. A module of ours walks the running rack and records them: **185 ports
+across 19 modules**, each with its index, the vendor's own name, and its exact
+jack centre. It settles something inference would have got wrong: **index order
+is not visual order** — Fundamental's VCO puts input 1 to the left of input 0.
+
+### The library
+
+**4,705 modules across 543 plugins**, indexed locally from VCV's library
+repository in one 350 KB fetch, refreshed weekly. Plugin-level premium and
+availability from the public API. Mentions resolve by module name, by brand
+(425 of them), and by the colloquial name a maker is known by.
+
+### Panel imagery
+
+Rack renders every installed module to PNG itself — 51 captured, at exact panel
+sizes. So the preview composites real artwork rather than parsing anyone's SVG.
+
+### What Rack does that we do not have to
+
+A patch naming modules the user lacks is **not** broken: Rack lists them,
+offers to open the VCV Library, and keeps the modules and cables so installing
+later completes the patch. Verified by round-trip. Our checks are a courtesy
+during building, not a rescue.
+
+### Constraints that are not going away
+
+- **A new module needs a Rack restart.** `plugin::init()` runs once; the plugin
+  API is read-only. A patch, by contrast, loads instantly.
+- **A patch can lint clean and still be silent.** Structure is checkable
+  offline; sound is not. Rack has a headless mode, so a behavioural gate for
+  patches is possible but unproven.
+- **Modules the user has never placed have no port data**, so their cables have
+  no jack to land on until they do.
+
+## 12. Agent settings — what carries over from Forge, and what does not
+
+Forge's AI settings should be inherited wholesale: the account menu, the
+provider grid, first-run gating until a provider is connected, reasoning
+effort, credential handling, and the chat quick-picker. None of that is
+DAW-specific and re-deciding it would only create drift.
+
+**The model roles are the one real difference.** Forge splits Engineering
+(writes the DSP) from UI designer (builds the interface), because in Forge the
+interface is JavaScript a model writes. Here it is not: a module's panel is
+emitted deterministically from its manifest by our own code, so there is no UI
+model to pick and nothing to run in parallel with the DSP.
+
+The honest split for this product is by **artifact**, not by layer:
+
+- **Module engineer** — one call returning the manifest and the DSP together.
+- **Patch designer** — a different task entirely: reading an inventory,
+  choosing modules, wiring them, and explaining why.
+
+Those are plausibly different models — patch building is more about musical
+judgement than C++ — which is exactly the argument Forge's own split makes,
+applied to what this product actually generates.
+
+Forge's Sequential/Parallel generation mode has no meaning here for modules,
+since there is only one call. It may earn its place later if a patch turn that
+needs a new module runs both roles at once.
