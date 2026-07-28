@@ -111,18 +111,38 @@ Three states, and they matter:
 - **↓ free** — free, but not installed; install from Rack's Library first
 - **$ premium** — costs money, or comes with a VCV+ subscription
 
-**Only "ready" can be used in a patch.** If someone @mentions a premium module
-they don't have, the app should say so *before generating anything* — building
-a patch around something that can't load is wasted time and money.
+Only "ready" can actually be *used*. If someone asks for something they don't
+have, we should say so before generating rather than after — but this is a
+courtesy, **not a wall**, and the distinction matters for the tone:
 
-One honest wrinkle for the copy: **we can't tell whether someone already owns
-a premium module they haven't installed.** So the message must never say "you
-need to buy this" — it should say something closer to "if you own this, sync
-it in Rack's Library; otherwise it's a purchase or VCV+." Getting this wrong
-means telling someone to buy what they already own.
+If a patch does reference a module they don't have, **Rack handles it well on
+its own.** It opens a dialog naming exactly what's missing, offers to show
+those modules on the VCV Library, and keeps the modules and their cables in
+place, so installing later makes the patch whole. Nothing is lost. So the copy
+should read as *"here's a better option while we're still building"*, never as
+*"you can't do that."* Design an offer, not a blocker.
 
-Design the mention picker, the three states, and how a blocked mention reads.
-Brands work too — `@befaco`, `@4ms`, `@mutable instruments` (425 brands).
+Two things the copy must get right:
+
+**Never say "you need to buy this."** We cannot tell whether someone already
+owns a premium module they haven't installed — owned-but-unsynced looks
+identical to never-purchased. Say something closer to "if you own this, sync
+it in Rack's Library; otherwise it's a purchase or VCV+."
+
+**The same applies to capability gaps**, which are more common than mentions.
+Ask for "a lush granular texture" with no granular module installed and we
+know that before spending anything, and can name what would fill it:
+
+```
+  no granular module is installed. These would do it:
+      free     AudibleInstruments/Clouds    Texture Synthesizer
+      free     Ambivalent-Instruments/Grainer   Grainer
+```
+
+Design the mention picker, the three states, this capability-gap moment, and
+how "build it anyway" sits alongside "install first" without feeling like a
+warning someone is clicking past. Brands work too — `@befaco`, `@4ms`,
+`@mutable instruments` (425 brands).
 
 ## The random button
 
