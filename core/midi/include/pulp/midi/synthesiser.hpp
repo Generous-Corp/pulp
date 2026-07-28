@@ -220,6 +220,7 @@ struct SynthesiserNoteOnPolicy {
     uint8_t voice_group = 0;
     bool choke_group = false;
     float choke_fade_ms = 0.0f;
+    int8_t priority = 0;          ///< Steal priority for `VoiceStealStrategy::Priority`
 };
 
 /// Polyphonic synth that routes plain-MIDI events into a pool of
@@ -354,22 +355,31 @@ public:
     /// buffer. Event offsets and all non-note messages retain normal behavior.
     void process(const MidiBuffer& events, float* out, int num_samples,
                  const SynthesiserNoteOnPolicy& note_on_policy) {
-        if (num_samples <= 0) return;
-        int sample_index = 0;
-        for (std::size_t i = 0; i < events.size(); ++i) {
-            const auto& e = events[i];
-            int target = static_cast<int>(e.sample_offset);
-            if (target < sample_index) target = sample_index;
-            if (target > num_samples) target = num_samples;
-            if (target > sample_index) {
-                render_active(out + sample_index, target - sample_index);
-                sample_index = target;
-            }
-            dispatch_event(e, note_on_policy);
-        }
-        if (sample_index < num_samples) {
-            render_active(out + sample_index, num_samples - sample_index);
-        }
+        auto constant = [&note_on_policy](uint8_t, uint8_t, uint8_t) {
+            return note_on_policy;
+        };
+        render_block(events, out, num_samples, constant);
+    }
+
+    /// Drive the synth resolving note-on metadata per note rather than once per
+    /// buffer. `policy_for_note(channel, note, velocity)` returns the policy for
+    /// that note-on.
+    ///
+    /// One instrument holding several sounds — a drum kit, where each note is a
+    /// different drum — needs policies that differ within a single block: a
+    /// closed hat chokes the open hat on trigger while the kick beside it in the
+    /// same block must not, and each pad retriggering itself is a distinct
+    /// group. A per-buffer policy cannot express that.
+    ///
+    /// The callback runs on the audio thread inside the event loop, so it must
+    /// not allocate, lock, or block. It is a template parameter rather than a
+    /// `std::function` precisely so the call inlines and never heap-allocates.
+    template <typename PolicyFn>
+        requires std::is_invocable_r_v<SynthesiserNoteOnPolicy, PolicyFn&,
+                                       uint8_t, uint8_t, uint8_t>
+    void process(const MidiBuffer& events, float* out, int num_samples,
+                 PolicyFn&& policy_for_note) {
+        render_block(events, out, num_samples, policy_for_note);
     }
 
     std::size_t polyphony() const { return voices_.size(); }
@@ -548,12 +558,41 @@ private:
         return chosen;
     }
 
-    void dispatch_event(const MidiEvent& e,
-                        const SynthesiserNoteOnPolicy& note_on_policy) {
+    /// Walk the buffer, rendering the sub-segments between events and
+    /// dispatching each event at its offset. Both `process` overloads share
+    /// this so constant and per-note policy can never drift apart.
+    template <typename PolicyFn>
+    void render_block(const MidiBuffer& events, float* out, int num_samples,
+                      PolicyFn& policy_for_note) {
+        if (num_samples <= 0) return;
+        int sample_index = 0;
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            const auto& e = events[i];
+            int target = static_cast<int>(e.sample_offset);
+            if (target < sample_index) target = sample_index;
+            if (target > num_samples) target = num_samples;
+            if (target > sample_index) {
+                render_active(out + sample_index, target - sample_index);
+                sample_index = target;
+            }
+            dispatch_event(e, policy_for_note);
+        }
+        if (sample_index < num_samples) {
+            render_active(out + sample_index, num_samples - sample_index);
+        }
+    }
+
+    template <typename PolicyFn>
+    void dispatch_event(const MidiEvent& e, PolicyFn& policy_for_note) {
         const uint8_t status_top = static_cast<uint8_t>(e.data()[0] & 0xF0);
         const uint8_t channel = e.channel();
         if (e.is_note_on() && e.velocity() > 0) {
-            note_on(channel, e.note(), e.velocity(), /*priority=*/0,
+            // Resolved here rather than per buffer so a kit can give each note
+            // its own choke group, and only for note-ons so a CC never pays for
+            // the lookup.
+            const SynthesiserNoteOnPolicy note_on_policy =
+                policy_for_note(channel, e.note(), e.velocity());
+            note_on(channel, e.note(), e.velocity(), note_on_policy.priority,
                     note_on_policy.voice_group, note_on_policy.choke_group,
                     note_on_policy.choke_fade_ms);
             return;
