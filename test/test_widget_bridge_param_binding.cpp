@@ -707,3 +707,140 @@ TEST_CASE("a fully bound UI reports nothing unreachable",
     }
     CHECK(bridge.unbound_params().empty());
 }
+
+// ── Parameter metadata reaches JavaScript ────────────────────────────────────
+//
+// Before these, a scripted UI got a normalized float and a name. Everything a
+// control actually needs — the real range, the unit, the curve, the default —
+// had to be retyped in JS, where it silently drifts from define_parameters().
+// These read the same pulp::state::param_json payload the inspector uses.
+
+namespace {
+
+// Evaluate `expr` in the bridge's engine and return it as JSON text, so a test
+// asserts on what a UI script would actually observe.
+std::string eval_json(ScriptEngine& engine, const std::string& expr) {
+    return engine.evaluate("JSON.stringify(" + expr + ")").toString();
+}
+
+void add_rich_params(StateStore& store) {
+    ParamInfo cutoff{};
+    cutoff.id = 10;
+    cutoff.name = "Cutoff";
+    cutoff.unit = "Hz";
+    cutoff.range = {.min = 20.0f, .max = 20000.0f, .default_value = 1000.0f};
+    store.add_parameter(cutoff);
+
+    ParamInfo mode{};
+    mode.id = 11;
+    mode.name = "Mode";
+    mode.kind = ParamKind::Enum;
+    mode.value_labels = {"Low", "Band", "High"};
+    mode.range = {.min = 0.0f, .max = 2.0f, .default_value = 0.0f, .step = 1.0f};
+    store.add_parameter(mode);
+}
+
+} // namespace
+
+TEST_CASE("getParamMetadata gives a script the real range, unit and default",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    const auto json = eval_json(engine, "getParamMetadata('Cutoff')");
+    INFO("payload: " << json);
+    CHECK(json.find("\"min\":20") != std::string::npos);
+    CHECK(json.find("\"max\":20000") != std::string::npos);
+    CHECK(json.find("\"default\":1000") != std::string::npos);
+    CHECK(json.find("\"unit\":\"Hz\"") != std::string::npos);
+
+    // An enum carries the author's labels, so a script can build a real picker
+    // instead of a numeric slider.
+    const auto mode = eval_json(engine, "getParamMetadata('Mode')");
+    INFO("payload: " << mode);
+    CHECK(mode.find("\"kind\":\"enum\"") != std::string::npos);
+    CHECK(mode.find("\"Band\"") != std::string::npos);
+
+    // An unknown name is undefined, not an empty object — a script must be able
+    // to tell "no such parameter" from "a parameter with nothing in it".
+    CHECK(eval_json(engine, "getParamMetadata('nope') === undefined") == "true");
+}
+
+TEST_CASE("formatParamValue matches what the host displays",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(engine.evaluate("formatParamValue('Cutoff', 440)").toString() == "440 Hz");
+    // The normalized flag denormalizes first, so a widget holding 0..1 can ask
+    // for display text without doing range maths in JS.
+    CHECK(engine.evaluate("formatParamValue('Cutoff', 0, true)").toString() == "20 Hz");
+    // An enum reads as its label, not its index.
+    CHECK(engine.evaluate("formatParamValue('Mode', 1)").toString() == "Band");
+    CHECK(eval_json(engine, "formatParamValue('nope', 1) === undefined") == "true");
+}
+
+TEST_CASE("parseParamValue reports failure instead of yielding a silent zero",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440').ok") == "true");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440').value") == "440");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440 Hz').value") == "440");
+
+    // THE point of the ok flag: a click-to-type field must not store 0 because
+    // the user typed nonsense.
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','banana').ok") == "false");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','').ok") == "false");
+
+    // A label round-trips for an enum.
+    CHECK(eval_json(engine, "parseParamValue('Mode','High').ok") == "true");
+    CHECK(eval_json(engine, "parseParamValue('Mode','High').value") == "2");
+
+    CHECK(eval_json(engine, "parseParamValue('nope','1') === undefined") == "true");
+}
+
+TEST_CASE("format and parse round-trip through the bridge",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    // The pair only earns its place if a UI can render a value, let the user
+    // edit the text, and read the same number back.
+    const auto ok = eval_json(engine,
+        "(function(){"
+        "  var vals=[20,440,1000,20000];"
+        "  for (var i=0;i<vals.length;i++){"
+        "    var t=formatParamValue('Cutoff', vals[i]);"
+        "    var r=parseParamValue('Cutoff', t);"
+        "    if(!r.ok || Math.abs(r.value-vals[i]) > Math.max(1, vals[i]*0.01)) return false;"
+        "  }"
+        "  return true;"
+        "})()");
+    CHECK(ok == "true");
+}

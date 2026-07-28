@@ -14,6 +14,8 @@
 #include <pulp/view/ui_components.hpp>
 #include "api_registry.hpp"
 
+#include <pulp/state/param_json.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -345,6 +347,63 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
     // getParam(name) -> get parameter value from store (normalized)
+    // getParamMetadata(name) -> the parameter's STATIC shape, or undefined.
+    //
+    // This is what a UI needs to build a correct control: real min/max, the
+    // unit, the default, the curve. Without it an author retypes all of that in
+    // JavaScript and the two drift. Serialized by pulp::state::param_json — the
+    // same code the inspector uses, so the two payloads cannot disagree.
+    // Static only, so a caller can fetch once and cache; live value stays on
+    // getParam.
+    register_bridge_function(api, "getParamMetadata", [&self](choc::javascript::ArgumentList args) {
+        const auto name = args.get<std::string>(0, "");
+        for (std::size_t i = 0; i < self.store_.param_count(); ++i) {
+            const auto* info = &self.store_.all_params()[i];
+            if (info && info->name == name) return state::param_metadata_to_value(*info);
+        }
+        return choc::value::Value();  // undefined in JS — an unknown name is not an empty object
+    });
+
+    // formatParamValue(name, value, isNormalized?) -> display string.
+    // Honours the author's to_string, then an enum label, then unit-suffixed
+    // numeric — the same order the host and the inspector use, so a UI never
+    // shows a different string than the DAW.
+    register_bridge_function(api, "formatParamValue", [&self](choc::javascript::ArgumentList args) {
+        const auto name = args.get<std::string>(0, "");
+        const auto raw = static_cast<float>(args.get<double>(1, 0.0));
+        const bool normalized = args.get<bool>(2, false);
+        for (std::size_t i = 0; i < self.store_.param_count(); ++i) {
+            const auto* info = &self.store_.all_params()[i];
+            if (!info || info->name != name) continue;
+            const float value = normalized ? info->range.denormalize(raw) : raw;
+            return choc::value::createString(state::param_display_text(*info, value));
+        }
+        return choc::value::Value();
+    });
+
+    // parseParamValue(name, text) -> {ok, value, normalized} or undefined.
+    //
+    // `ok` is the point: a caller must be able to tell "banana" from a genuine
+    // zero. Returning a bare number would let a click-to-type field store a
+    // value the user never entered.
+    register_bridge_function(api, "parseParamValue", [&self](choc::javascript::ArgumentList args) {
+        const auto name = args.get<std::string>(0, "");
+        const auto text = args.get<std::string>(1, "");
+        for (std::size_t i = 0; i < self.store_.param_count(); ++i) {
+            const auto* info = &self.store_.all_params()[i];
+            if (!info || info->name != name) continue;
+            float parsed = 0.0f;
+            const bool ok = state::param_parse_display_text(*info, text, parsed);
+            auto out = choc::value::createObject("");
+            out.addMember("ok", choc::value::createBool(ok));
+            out.addMember("value", choc::value::createFloat64(ok ? parsed : 0.0f));
+            out.addMember("normalized",
+                          choc::value::createFloat64(ok ? info->range.normalize(parsed) : 0.0f));
+            return out;
+        }
+        return choc::value::Value();
+    });
+
     register_bridge_function(api, "getParam", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
 
