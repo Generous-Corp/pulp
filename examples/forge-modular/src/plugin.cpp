@@ -22,4 +22,5 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelMIX);
     p->addModel(modelATT);
     p->addModel(modelMULT);
+    p->addModel(modelSANDH);
 }

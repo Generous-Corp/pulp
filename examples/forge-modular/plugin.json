@@ -97,6 +97,17 @@
         "Multiple",
         "Utility"
       ]
+    },
+    {
+      "slug": "SANDH",
+      "name": "S&H",
+      "description": "Sample and hold with an internal noise source normalled to the input, plus slew and level \u2014 random voltages with nothing patched.",
+      "tags": [
+        "Sample and hold",
+        "Random",
+        "Noise",
+        "Polyphonic"
+      ]
     }
   ]
 }

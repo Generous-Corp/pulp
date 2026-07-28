@@ -431,4 +431,42 @@ inline void place_MULT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
 }
 
+// ── SANDH (3HP) ───────────────────────────────────────
+struct SANDHLayout {
+    static constexpr int kHp = 3;
+    enum ParamId { SLEW_PARAM, LEVEL_PARAM, PARAMS_LEN };
+    enum InputId { TRIG_INPUT, IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { OUT_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_SANDH(rack::engine::Module* m) {
+    m->config(SANDHLayout::PARAMS_LEN, SANDHLayout::INPUTS_LEN, SANDHLayout::OUTPUTS_LEN, SANDHLayout::LIGHTS_LEN);
+    m->configParam(SANDHLayout::SLEW_PARAM, 0.0f, 1.0f, 0.1f, "Slew", " %", 0.0f, 100.0f);
+    m->configParam(SANDHLayout::LEVEL_PARAM, 0.0f, 1.0f, 0.8f, "Level", " %", 0.0f, 100.0f);
+    m->configInput(SANDHLayout::TRIG_INPUT, "Trigger");
+    m->configInput(SANDHLayout::IN_INPUT, "Signal in (internal noise when unpatched)");
+    m->configOutput(SANDHLayout::OUT_OUTPUT, "Sampled out");
+    m->configLight(SANDHLayout::OUT_LIGHT, "Output level");
+}
+
+/// Channel count for SANDH, from the manifest's declared source.
+inline int channels_SANDH(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[SANDHLayout::TRIG_INPUT].getChannels());
+}
+
+inline void place_SANDH(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(7.620f, 30.000f)), m, SANDHLayout::SLEW_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(7.620f, 50.000f)), m, SANDHLayout::LEVEL_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, SANDHLayout::TRIG_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 98.000f)), m, SANDHLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 112.000f)), m, SANDHLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(7.620f, 68.000f)), m, SANDHLayout::OUT_LIGHT));
+}
+
 }  // namespace forge_modular
