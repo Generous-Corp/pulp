@@ -35,7 +35,7 @@ DELIBERATELY NOT FLAGGED
   rename ship without breaking downstream code. Any line containing
   `[[deprecated` is skipped.
 * `EXEMPT_SUBSTRINGS` below — each entry has its reason recorded inline. The
-  three classes are: clean-room provenance (host-quirks), the importer's own
+  three classes are: provenance (host-quirks), the importer's own
   denylist (removing the strings would DISABLE the check that rejects vendored
   foreign code), and free-form user input echoed in a CLI fixture.
 * Out of scope entirely (not scanned): `docs/` — EXCEPT `docs/reports/`, see

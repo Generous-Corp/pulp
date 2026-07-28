@@ -84,6 +84,21 @@ What it does **not** cover is GCC *behavior* — nothing is executed, so a
 construct both compilers accept but implement differently is still only caught
 by the Clang test lanes.
 
+**It also guards one option combination, for free.** The lane configures with
+`PULP_ENABLE_DESIGN_IMPORT=OFF` — the option's own documented "release/ship"
+setting — and that configuration was once unlinkable: `tools/import-design` was
+added on `PROJECT_IS_TOP_LEVEL` alone while the `pulp::view` design-IR sources
+it links sit behind the option, so `all` died in a wall of undefined
+references. The discovery step now runs
+`list_core_library_targets.py --assert-absent pulp-import-design` against the
+codemodel the lane already produces, so a re-broken guard fails here instead of
+in someone's release build. Because the guard lives in the top-level
+`CMakeLists.txt`, that path is one of the lane's triggers alongside `core/**`.
+
+If you add a target that links option-gated sources, gate the `add_subdirectory`
+on the same option. A target whose implementation is compiled out still
+participates in `all`.
+
 ## Test lanes — what gates the required `macos` check
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required

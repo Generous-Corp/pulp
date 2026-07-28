@@ -523,3 +523,62 @@ pulp_add_wam_plugin(PulpGain
   belongs in a headless browser DSP module.
 - `choc` headers are located via `-DPULP_WAM_CHOC_INCLUDE=<dir containing choc/>`
   (or a populated sibling build tree).
+
+## pulp_stage_runtime_dependencies
+
+Stage every runtime file a plug-in or app module needs beside its binary.
+
+Defined in `PulpRuntimeStaging.cmake`, which is included by **both** Pulp's own
+source build (root `CMakeLists.txt`) and by `PulpConfig.cmake` for
+`find_package(Pulp)` consumers — so it is always available in either. Pulp's
+format helpers call it for every target they create, so a plug-in built with
+`pulp_add_plugin` / `pulp_add_app` needs nothing extra. Call it directly only
+when you create a loadable module yourself.
+
+It **delegates** the wgpu runtime copy to `target_copy_webgpu_binaries()` —
+upstream's wgpu FetchContent package supplies that in a source build, and
+`PulpWebGpuImportedTarget.cmake` supplies a fallback for consumers. Pulp never
+redefines or shadows the upstream function; it adds the parts upstream has no
+concept of.
+
+```cmake
+find_package(Pulp REQUIRED)
+add_library(MyCustomModule MODULE my_module.cpp)
+target_link_libraries(MyCustomModule PRIVATE Pulp::view)
+pulp_stage_runtime_dependencies(MyCustomModule)
+pulp_verify_runtime_dependencies_staged(MyCustomModule)   # optional but cheap
+```
+
+### What gets staged
+
+| File | When | Why it is not optional |
+|---|---|---|
+| wgpu-native runtime (`libwgpu_native.*` / `wgpu_native.dll`) | whenever the `webgpu` imported target exists | the module links against it |
+| `icudtl.dat` | Windows, Skia builds | SkParagraph's ICU-backed `SkUnicode` returns **null** without it and deliberately traps on its `fUnicode` check during the first label render — the host process dies on first paint, it does not fall back to simpler text |
+
+On Apple the helper also sets `BUILD_WITH_INSTALL_RPATH` and appends
+`@loader_path` to `INSTALL_RPATH`, so a signed Developer ID bundle resolves the
+staged runtime from inside itself rather than from the SDK prefix used at build
+time (library validation rejects the latter).
+
+### ICU data resolution
+
+One canonical Pulp-side variable, `PULP_SKIA_ICUDTL_FILE`, with `SKIA_ICUDTL_FILE`
+(what `FindSkia` sets) as the fallback. A Windows Skia build that resolves
+neither is a hard `FATAL_ERROR` rather than a silent omission — a module that
+configures cleanly and then kills its host on first render is the worse outcome.
+
+### Related functions
+
+| Function | Checks |
+|---|---|
+| `pulp_stage_runtime_dependencies(<target>)` | adds the staging commands |
+| `pulp_verify_runtime_dependencies_staged(<target>)` | POST_BUILD: the files really landed beside the built binary |
+| `pulp_assert_runtime_dependencies_staged(<target>)` | configure time: the staging call was made at all |
+| `target_copy_webgpu_binaries(<target>)` | upstream/SDK primitive — copies only the wgpu runtime; `pulp_stage_runtime_dependencies` calls it |
+
+Call `pulp_stage_runtime_dependencies` rather than `target_copy_webgpu_binaries`
+in new code. The latter is a real upstream function that does exactly what its
+name says — copy the wgpu runtime — and nothing else: no `@loader_path` rpath on
+Apple, no ICU data on Windows. Using it alone produces a module that builds
+clean, runs on the build machine, and fails once shared or once it renders text.

@@ -22,6 +22,11 @@ using namespace pulp::state;
 class StateInspector {
 public:
     explicit StateInspector(StateStore& store);
+
+    /// The store this inspector observes. Exposed so protocol serialization can
+    /// go through pulp::state::param_json rather than hand-rolling a second
+    /// parameter payload that would drift from the bridge's.
+    StateStore& store() const noexcept { return store_; }
     ~StateInspector();
 
     StateInspector(const StateInspector&) = delete;

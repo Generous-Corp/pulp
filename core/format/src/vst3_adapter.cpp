@@ -42,7 +42,7 @@ using namespace Steinberg::Vst;
 namespace {
 
 // Per-note expression types Pulp's VST3 adapter declares to the host when the
-// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a clean-room
+// plug-in opts into MPE. The mapping VST3 type -> MPE dimension is a independent
 // choice derived from the VST3 note-expression value ranges (ivstnoteexpression.h)
 // and the MPE spec's three per-note axes (pitch bend, pressure, timbre):
 //

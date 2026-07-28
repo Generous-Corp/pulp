@@ -1045,8 +1045,8 @@ format's theoretical limits.
 ## dawproject
 
 Reader and writer for the [DAWproject](https://github.com/bitwig/dawproject)
-interchange format, implemented clean-room against the published specification
-over pugixml. Ships as two libraries so a consumer can take only what it needs:
+interchange format, implemented directly from the published specification over
+pugixml. Ships as two libraries so a consumer can take only what it needs:
 `pulp::dawproject-import` and `pulp::dawproject-export`.
 
 Both sides cover the same **bounded linear subset** — flat tracks, beats-timed
@@ -1092,6 +1092,47 @@ rather than a silent approximation** — conversion is exact on dividing grids a
 any rounding is reported.
 
 **Depends on:** `pulp::timeline`, `pulp::runtime`
+
+
+## graph
+
+Graph runtime scaffolding shared by the host binding and the `sequence` adapter.
+
+**Link:** `pulp::graph` · **Include prefix:** `<pulp/graph/...>`
+
+Levelization orders nodes into dependency levels, buffer assignment allocates and
+reuses the minimum set of intermediate buffers, and the runtime queue drives
+execution. The plan is computed on the control thread and consumed as an
+immutable snapshot by the audio thread, so the render path performs no allocation
+or graph traversal decisions of its own.
+
+**Depends on:** `pulp::midi`, `pulp::runtime`
+
+## scene
+
+Optional 3D scene surface (Scene3D).
+
+**Link:** `pulp::scene` · **Include prefix:** `<pulp/scene/...>`
+
+Loads glTF 2.0 assets, resolves material keys, and emits render packets for the
+GPU path. Bake preflight validates a scene before it reaches the renderer. This
+module is independent of the 2D view/canvas stack.
+
+**Depends on:** `pulp::runtime`
+
+## sample_bank_manifest
+
+Sample-bank manifest parsing, split out so a consumer can link it without the
+whole audio module.
+
+**Link:** `pulp::sample-bank-manifest` · **Include prefix:** `<pulp/audio/...>`
+
+It has no sources of its own — it compiles `core/audio/src/sample_bank.cpp` and
+exposes the matching `core/audio/include` headers. `pulp-audio` PUBLIC-links it,
+so every consumer of the audio module already has it in their link closure; the
+separate target exists for consumers that want manifest handling alone.
+
+**Depends on:** `pulp::runtime`
 
 
 ## playback

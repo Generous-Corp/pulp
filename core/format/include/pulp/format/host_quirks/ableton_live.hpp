@@ -30,7 +30,7 @@
 /// exact build. The flag is gated on `HostVersion == {10, 1, 13}` so
 /// no other Live version pays the doubled-allocation cost.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.4
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.4
 /// docs=https://help.ableton.com/hc/en-us/articles/4419010492444-Working-with-VST-Plug-Ins
 
 #include <pulp/format/host_quirks.hpp>

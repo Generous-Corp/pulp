@@ -186,6 +186,19 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
+**The inspector server binds loopback and nothing else — do not "fix" this.**
+`InspectorServer::start` hands `InterprocessConnectionServer` an explicit
+`127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
+general-purpose class (a deliberate capability it tests, via
+`start_socket_server_on_any_interface`), which is the wrong one here: the
+inspector transport has no authentication and its protocol exposes
+`Runtime.evaluate`, so binding it where the network can reach it publishes
+arbitrary code execution in the host process. `pulp inspect --host` is the
+*client* side and stays — it is how you reach a remote machine's loopback
+through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
+this: loopback must connect (the control) and the host's real IPv4 must be
+refused.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
@@ -461,7 +474,7 @@ Gotchas / invariants when touching this surface:
 - **`cmd_import.cpp` is arg-parse + dispatch only.** The SPI-verb orchestration
   (`run_detect` / `run_inspect` / `run_emit` and their shared helpers —
   framework-index + importer resolution, the SPI request/response envelope
-  `run_verb`, the analyze/emit payload builders, the clean-room output gate,
+  `run_verb`, the analyze/emit payload builders, the independent output gate,
   and scaffold materialisation) lives in `import_run.{hpp,cpp}` under namespace
   `pulp::cli::import_run`. `cmd_import.cpp` only parses flags into
   `import_run::ImportOptions` and calls the three `run_*` entry points. Keep new
@@ -502,7 +515,7 @@ Gotchas / invariants when touching this surface:
   `detect`/`inspect`/`emit` are all real. `emit` runs `analyze` → ProjectIR
   then the SPI `emit` verb → an **EmissionManifest** (the importer PROPOSES
   files, never writes them). The SDK then: parses the manifest
-  (`import_emit::parse_manifest`), runs the clean-room **output denylist scan**
+  (`import_emit::parse_manifest`), runs the independent **output denylist scan**
   (`import_emit_scan::scan_manifest`) over every `generated`/`stub` file,
   computes a write-plan that rejects any path escaping `--output`
   (`compute_write_plan`), writes each file (inline `content`, or a verbatim
@@ -510,7 +523,7 @@ Gotchas / invariants when touching this surface:
   `migration_status.json` + `.pulp-import-provenance.json`. Parse / write-plan /
   scan are **pure functions over structs** so they unit-test without spawning;
   the spawn/IO is a thin shell in `cmd_import.cpp`.
-- **The output scan is data-driven, not hardcoded.** Keep the clean-room
+- **The output scan is data-driven, not hardcoded.** Keep the independent
   denylist vendor-free: `denylist_from_known_frameworks()` builds it from the
   known-frameworks index's `content_match` markers (the ONE place real tells
   live). Do NOT hardcode `juce`/`iplug`/… tokens in `import_emit_scan.cpp` — the
@@ -540,7 +553,7 @@ Gotchas / invariants when touching this surface:
   without a real TTY or clock.
 - **Provenance PR-check is `tools/scripts/check_import_provenance.py`** (neutral,
   vendor-free), the audit that a migrated project landing in a PR was produced
-  clean-room: marker present + well-formed, valid per-file `provenance` values,
+  independent: marker present + well-formed, valid per-file `provenance` values,
   and no framework-source marker in any file the marker labels `generated`/`stub`
   (`copied-user-file` is exempt). The content denylist is DATA from the
   known-frameworks index (`$PULP_KNOWN_FRAMEWORKS` or `tools/import/`); with no

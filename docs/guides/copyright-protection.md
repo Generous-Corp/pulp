@@ -151,7 +151,7 @@ license-details screen (name, email, product, activation type, expiry, seats), a
 store, and the HTTP transport over `cpp-httplib`. The UI is built from Pulp's
 `pulp::view::Theme` tokens, so it inherits your plugin's look rather than a
 Moonbase-branded palette — Moonbase supplies licensing behavior, not your
-editor's visual identity. Its activation UX is a clean-room reimplementation of
+editor's visual identity. Its activation UX is a independent reimplementation of
 Moonbase's own MIT JUCE reference designs (no JUCE, no copied code; see the
 example README's acknowledgements). Screenshots and a headless screenshot
 generator live under `examples/moonbase-activation/docs/`.

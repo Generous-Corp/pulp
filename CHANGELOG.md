@@ -2915,7 +2915,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 <a id="v03820"></a>
 ## [0.382.0] - 2026-06-08
 
-- feat(import): materialize pulp import emit into a buildable scaffold + clean-room output scan ([#3634](https://github.com/Generous-Corp/pulp/pull/3634))
+- feat(import): materialize pulp import emit into a buildable scaffold + framework-source output scan ([#3634](https://github.com/Generous-Corp/pulp/pull/3634))
 - refactor: split WidgetBridge storage style registrar ([#3653](https://github.com/Generous-Corp/pulp/pull/3653))
 - refactor: split WidgetBridge visibility style registrar ([#3652](https://github.com/Generous-Corp/pulp/pull/3652))
 - refactor: split WidgetBridge event registrar ([#3649](https://github.com/Generous-Corp/pulp/pull/3649))

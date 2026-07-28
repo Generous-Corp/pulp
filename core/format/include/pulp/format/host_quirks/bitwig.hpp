@@ -23,7 +23,7 @@
 /// as legacy — the conservative workaround stays on so a misdetected
 /// older Bitwig still survives.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.5
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.5
 /// docs=https://www.bitwig.com/userguide/latest/
 
 #include <pulp/format/host_quirks.hpp>

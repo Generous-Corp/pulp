@@ -100,18 +100,53 @@ add_test(NAME cmake-fetchcontent-base-dir
 set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
-# Installed-SDK Windows Skia runtime contract. The ICU data file is a required
-# module sidecar, not optional packaging metadata: omitting it makes the first
-# SkParagraph label render trap inside a host such as REAPER. This source-level
-# smoke stays runnable on every platform and guards both the fail-fast check and
-# the post-build copy rule used by downstream plug-ins/apps.
+# IMPLEMENTATION LINT ONLY — deliberately not the runtime proof.
+#
+# This reads the TEXT of PulpWebGpuImportedTarget.cmake and asserts the
+# fail-fast check and copy rule are still written there. It is cheap and it
+# catches an accidental deletion, but it cannot tell you whether an installed
+# SDK exposes icudtl.dat, whether the staging helper is invoked for any format
+# target, or whether anything reached a bundle. The behavioral proof of all
+# three is cmake-installed-sdk-runtime-staging below, which builds a real
+# consumer against a real installed SDK. Do not cite this test as evidence that
+# shipped bundles carry their sidecars.
 add_test(NAME cmake-windows-skia-runtime-sidecar
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_windows_skia_runtime_sidecar.cmake)
 set_tests_properties(cmake-windows-skia-runtime-sidecar PROPERTIES
-    LABELS "cmake;sdk;skia;windows;runtime"
+    LABELS "cmake;sdk;skia;windows;runtime;lint"
     TIMEOUT 30)
+
+# SOURCE LINT: every format helper that produces a loadable module/app calls
+# pulp_stage_runtime_dependencies(). Needed because the helper is
+# consumer-only — in a Pulp source build the `if(COMMAND ...)` guard around
+# every call site is false, so a format that forgets the call configures,
+# builds and tests clean here and only breaks in a downstream bundle.
+add_test(NAME cmake-runtime-staging-call-sites
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_runtime_staging_call_sites.cmake)
+set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
+    LABELS "cmake;sdk;runtime;lint"
+    TIMEOUT 30)
+
+# Installed-SDK runtime-sidecar proof (WAH-3). Installs this build as an SDK,
+# configures and BUILDS tools/validation/sdk-smoke against it with Standalone +
+# VST3 + CLAP, and lets the SDK's own pulp_verify_runtime_dependencies_staged()
+# POST_BUILD check assert the sidecars exist beside each produced module. On
+# Windows that includes Skia's icudtl.dat; elsewhere it is the wgpu-native
+# runtime — the invocation plumbing under test breaks platform-independently,
+# and a `_WIN32`-only test would never run on Pulp's required macOS gate.
+add_test(NAME cmake-installed-sdk-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_PARENT_BUILD_TYPE=$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_sdk_runtime_staging.cmake)
+set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;skia;windows;runtime;slow"
+    TIMEOUT 1800)
 # Install-layout regression: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call

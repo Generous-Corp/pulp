@@ -93,6 +93,10 @@ pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::events)
 
+# The one parameter payload (param_json) and the pin that keeps its wire field
+# set from drifting — the bridge and the inspector both serialize through it.
+pulp_add_test_suite(pulp-test-param-json LIBRARIES pulp::state)
+
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-external-binding LIBRARIES pulp::state)

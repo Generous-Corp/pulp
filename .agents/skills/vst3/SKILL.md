@@ -457,7 +457,7 @@ Load-bearing constraints:
   `mpe_tracker_` and clear `note_id_map_` so a stale noteId never routes to a
   voice that no longer exists.
 
-The VST3 type → MPE axis mapping is a **clean-room** choice derived from the SDK
+The VST3 type → MPE axis mapping is a **independent** choice derived from the SDK
 note-expression value ranges (`ivstnoteexpression.h`) and the MPE spec's three
 axes — not transcribed from any reference adapter.
 

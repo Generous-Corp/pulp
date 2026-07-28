@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 //
-// Clean-room OUTPUT denylist scan for `pulp import emit`.
+// Framework-source OUTPUT denylist scan for `pulp import emit`.
 //
 // The SDK writes the emission manifest's files; this scan is the safety net
 // that a misbehaving importer cannot smuggle framework SOURCE or vendor banners
-// into a `generated`/`stub` file. It is a real clean-room gate, not an
+// into a `generated`/`stub` file. It is a real independent gate, not an
 // exhaustive license scanner: it rejects the obvious framework-source tells
 // (framework umbrella includes, build-system macros, copied-wrapper markers).
 //

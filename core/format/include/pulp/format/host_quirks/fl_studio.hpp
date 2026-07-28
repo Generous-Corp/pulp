@@ -23,7 +23,7 @@
 /// of `HostVersion`. If a future FL release fixes either, add an
 /// `is_before(major)` guard at that point.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.7
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.7
 /// docs=https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/plugins/wrapper.htm
 
 #include <pulp/format/host_quirks.hpp>

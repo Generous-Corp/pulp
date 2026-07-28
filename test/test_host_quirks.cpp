@@ -1056,7 +1056,7 @@ TEST_CASE("detect_quirks respects PULP_HOST_QUIRKS_DEFAULT_POLICY compile-time p
 #endif
 }
 
-// ── 2026-05-26 iPlug2-audit batch — 4 additional clean-room lessons
+// ── 2026-05-26 iPlug2-audit batch — 4 additional independent-derivation lessons
 //    sourced from each host's public vendor documentation + a Pulp
 //    reproducer issue. Each row is wired through a dedicated per-host
 //    factory (or layered on top of an existing one) so its validation
