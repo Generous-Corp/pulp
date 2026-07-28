@@ -220,9 +220,37 @@ set, in the Forge design language, that reads correctly at Eurorack scale
    including the mode-aware random button.
 2. The patch explanation treatment — the heart of the product.
 3. The @mention picker with its three states.
-4. The two animations, as working CSS/JS.
+4. The two animations, as working CSS/JS **and** a `design.md` describing
+   them (see below).
 5. The Eurorack component set (knobs, jacks, switches, sliders).
 6. Any structural disagreement. In particular: I've assumed module building
    and patch building are two tabs in one window, but a module belongs to
    *every* patch while a patch is one document — if that tension suggests a
    different shape, say so.
+
+### `design.md` — please write this alongside the animations
+
+The animations get rebuilt natively (this is a real desktop app, not a web
+page), so the CSS/JS is a reference implementation rather than the shipping
+artifact. What survives the port is the *specification*, so I need that
+written down rather than inferred from the code.
+
+Please include, for each of the two animations:
+
+- **Choreography** — the sequence of beats, in order, with what enters and
+  leaves at each. Name the beats.
+- **Timing and easing** — duration per beat, the easing curve, overlap between
+  beats, total runtime. Actual numbers and curves, not "quick" or "smooth".
+- **What's driven by real progress vs. what's decorative.** Generation takes
+  30–90 seconds and is variable, so some of this has to stretch or loop while
+  waiting. Say which parts are on a real clock, which idle, and how it resolves
+  when the work finishes early or late.
+- **The tokens involved** — colours, sizes, opacities, blur radii, as named
+  values rather than literals scattered through the CSS.
+- **Reduced motion** — what it degrades to for someone who has that turned on.
+  Not "no animation" unless you mean it; a static end-state is usually better.
+- **What makes it feel like Forge** — the shared quality between these two and
+  the existing `fg-` animations, stated explicitly enough that a third one
+  could be made later without asking you.
+
+One `design.md` covering both animations is fine; a section each.
