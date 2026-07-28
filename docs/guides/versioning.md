@@ -43,6 +43,22 @@ Every layer calls into the same two Python scripts — `tools/scripts/version_bu
 
 ---
 
+## Platform-asymmetric gates
+
+Every enforcing gate above runs on macOS, so a break only another toolchain
+rejects passes all three layers. `version-skill-check.yml` therefore also runs
+the self-tests for the compiler-asymmetry lints:
+
+| Lint | Catches |
+|---|---|
+| `intel_canary_lint.py` | arm64-only code that drops the SSE/scalar fallback |
+| `designated_initializer_lint.py` | duplicate designators in one aggregate — legal to Clang, `C7560` on MSVC |
+
+`gates.sh` runs `designated_initializer_lint.py` diff-scoped before a push. Both
+are canaries, not substitutes for building on the target: they check what a
+regex can check without a compiler, which for designated initializers means
+duplicates but not declaration order.
+
 ## The scripts
 
 ### `version_bump_check.py`
