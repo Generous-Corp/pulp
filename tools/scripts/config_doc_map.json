@@ -1,5 +1,5 @@
 {
-  "$schema": "Declarative config→doc drift map. Each entry: when any file matching `paths` changes in a diff range, at least ONE file in `docs` must change too, or the gate fails with `why`. Consumed by tools/scripts/config_doc_check.py (mirrors skill_sync_check.py). Bypass on the tip commit with `Config-Doc: skip reason=\"...\"`.",
+  "$schema": "Declarative config\u2192doc drift map. Each entry: when any file matching `paths` changes in a diff range, at least ONE file in `docs` must change too, or the gate fails with `why`. Consumed by tools/scripts/config_doc_check.py (mirrors skill_sync_check.py). Bypass on the tip commit with `Config-Doc: skip reason=\"...\"`.",
   "trailers": {
     "config_doc": "Config-Doc"
   },
@@ -64,7 +64,7 @@
       "docs": [
         "docs/guides/local-ci.md"
       ],
-      "why": "The off-fleet queue-age watchdog's thresholds and its two-condition alarm rule (age AND lane-liveness) are documented in local-ci.md, including the measured queue-age baseline they are calibrated against. Retuning the guard without a doc edit drifts the operator-facing account of when CI pages a human — and a monitor whose documented behavior is wrong gets muted."
+      "why": "The off-fleet queue-age watchdog's thresholds and its two-condition alarm rule (age AND lane-liveness) are documented in local-ci.md, including the measured queue-age baseline they are calibrated against. Retuning the guard without a doc edit drifts the operator-facing account of when CI pages a human \u2014 and a monitor whose documented behavior is wrong gets muted."
     },
     {
       "paths": [
@@ -93,7 +93,16 @@
       "docs": [
         "docs/guides/version-at-land-cutover.md"
       ],
-      "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run→--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
+      "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run\u2192--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
+    },
+    {
+      "paths": [
+        ".github/workflows/gcc-compile-gate.yml"
+      ],
+      "docs": [
+        "docs/guides/local-ci.md"
+      ],
+      "why": "The GCC compile gate is the only GCC compilation of core/ in PR CI; its trigger paths and the options that keep it cheap (GPU/tests/examples off) are described in the local-CI guide so the coverage boundary is discoverable."
     }
   ]
 }

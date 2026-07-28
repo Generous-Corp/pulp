@@ -1207,6 +1207,43 @@ so a build that only works on the build machine never ships. Identities are the
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
 
+### Packaging a MULTI-plugin product, and packaging from OUTSIDE the Pulp tree
+
+Two facts that are easy to guess wrong, and both were verified by reading the
+recipe rather than assumed:
+
+**`--plugin` accumulates.** The parser is
+`--plugin) P_KIND+=("$2"); P_PATH+=("$3"); shift 3;;` — arrays, not scalars. So a
+product with several plugins passes one `--plugin` per artifact *per format*
+(e.g. 3 AU + 2 VST3 + 3 CLAP = eight flags) and gets one installer with a nested
+per-product Customize tree. Do NOT conclude the tool is single-plugin-only from
+the single-plugin example above, and do NOT build one installer per plugin.
+
+**The recipe is NOT installed into the SDK prefix.** An installed SDK carries
+`bin external include lib` only — no `tools/`. A consumer project (a separate
+repo building against the SDK, e.g. Forge) therefore cannot reach
+`build_combined_installer.sh` from the SDK and must point at a Pulp *source*
+checkout:
+
+```bash
+PULP_ROOT=/path/to/pulp ./package.sh   # package.sh resolves $PULP_ROOT/tools/scripts/...
+```
+
+`pulp ship` has the same limitation from the other direction — `cmd_ship.cpp`
+resolves a project root via `find_project_root()`, which requires `core/`, and
+`root` is then used ~45 times for Pulp-tree-internal assets
+(`root/tools/scripts/ensure_signing_ready.sh`,
+`root/ship/templates/entitlements.plist`, …), so swapping the resolver is not a
+one-liner. Tracked in **#6714**. Until it lands, a consumer project's
+`package.sh` is the supported path — keep it to *inputs only* and `exec` the
+shared recipe, so signing/notarizing logic never forks per product.
+
+Two things such a wrapper must do, because both failures are silent:
+- **Resolve identities by name → hash at runtime** (`security find-identity`)
+  rather than pinning a hash, or the script only works on one machine.
+- **Assert every expected artifact exists before invoking the recipe.** A
+  Customize pane that quietly lost a format still looks like a successful build.
+
 The script also accepts bundles from multiple products in one installer. Every
 component package and `pkg-ref` is keyed by the plugin's deterministic
 first-seen index plus format (`plugin-0-au`, `plugin-1-au`, ...), never by format

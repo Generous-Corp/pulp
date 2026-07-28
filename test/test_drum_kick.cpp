@@ -1177,3 +1177,51 @@ TEST_CASE("Rendering a kick allocates nothing on the audio thread",
 
     REQUIRE(allocations == 0);
 }
+
+TEST_CASE("The circuit kick's tune control retunes the network",
+          "[signal][drum][kick][circuit]") {
+    // The circuit body has no frequency control of its own: its pitch is a
+    // property of the bridged-T network. Refusing a tune control here was the
+    // easy answer and the wrong one -- a kick you cannot tune is not what
+    // anyone asking for an 808 kit means. Spend it the way the instrument is
+    // actually retuned, by substituting capacitors, and the control becomes
+    // real rather than declared-and-inert.
+    //
+    // Measured on the rendered audio rather than on the components, because
+    // "the setter changed a field" is exactly the kind of proof that let dead
+    // knobs survive here before.
+    auto rendered_hz = [](double tune) {
+        KickVoice voice;
+        voice.set_body(KickBody::circuit);
+        voice.set_tune_hz(tune);
+        voice.prepare(kFs);
+        voice.reset();
+        // Silence the layers so only the network's ring is measured.
+        voice.set_click_level(0.0);
+        voice.set_noise_level(0.0);
+        voice.set_sub_level(0.0);
+        const auto y = hit(voice, 1.0f, static_cast<int>(kFs * 0.5));
+
+        // Count zero crossings over the sustained part, past the attack shunt
+        // and the sigh, where the ring has settled toward its at-rest pitch.
+        const std::size_t from = static_cast<std::size_t>(kFs * 0.12);
+        const std::size_t to = static_cast<std::size_t>(kFs * 0.40);
+        int crossings = 0;
+        for (std::size_t i = from + 1; i < to && i < y.size(); ++i) {
+            if ((y[i - 1] <= 0.0f) != (y[i] <= 0.0f)) ++crossings;
+        }
+        const double seconds = static_cast<double>(to - from) / kFs;
+        return crossings / (2.0 * seconds);
+    };
+
+    const double low = rendered_hz(45.0);
+    const double high = rendered_hz(90.0);
+
+    INFO("45 Hz request rendered " << low << " Hz; 90 Hz request rendered " << high);
+    // Asking for a higher pitch produces a higher pitch. The absolute value is
+    // deliberately not asserted: the network's ring settles near, not exactly
+    // at, its at-rest centre frequency, and pinning a number here would be
+    // asserting the model's incidental behaviour rather than the control's.
+    REQUIRE(high > low * 1.4);
+    REQUIRE(low > 20.0);
+}

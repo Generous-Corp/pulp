@@ -153,6 +153,9 @@ pulp_add_test_suite(pulp-test-drum-fm
 # sources keep the independent trigger and matrix families navigable.
 pulp_add_test_suite(pulp-test-mod-utilities
     SOURCES test_mod_utilities.cpp
+            test_mod_utilities_lfo.cpp
+            test_mod_utilities_slew_envelope.cpp
+            test_mod_utilities_vca_vactrol_trigger.cpp
             test_mod_utilities_trigger.cpp
             test_mod_utilities_mod_matrix.cpp
             harness/rt_allocation_probe.cpp

@@ -19,9 +19,14 @@
 // compile time, so the audio thread only mixes the key with the pass index.
 namespace pulp::timeline {
 
-// SplitMix64's finalizer: a full-avalanche bijection on 64 bits. Deliberately
-// its own copy rather than a shared utility — a change to the launch mixer must
-// not silently re-roll every authored note in every existing document.
+/** @addtogroup timeline_model
+ * @{
+ */
+
+/// Mixes one 64-bit value with the stable note-modifier avalanche function.
+///
+/// This copy is deliberately independent of other randomization surfaces so
+/// changing another mixer cannot re-roll authored notes.
 constexpr std::uint64_t note_modifier_mix(std::uint64_t value) noexcept {
     value += 0x9E3779B97F4A7C15ULL;
     value ^= value >> 30;
@@ -32,20 +37,16 @@ constexpr std::uint64_t note_modifier_mix(std::uint64_t value) noexcept {
     return value;
 }
 
-// Probability is a 16-bit fraction of `note_probability_certain`. The endpoints
-// are exact: zero never sounds and `note_probability_certain` always sounds,
-// with no rounding band at either end.
+/// Denominator and exact "always sounds" value for authored note probability.
 inline constexpr std::uint16_t note_probability_certain = 0xffffu;
 
-// The largest authored retrigger count. A ratchet subdivides the note's own
-// span, so the bound is what keeps a subdivision from collapsing below one
-// tick for musically plausible note lengths; a document asking for more is
-// rejected at construction rather than silently clamped.
+/// Largest admitted authored retrigger count.
 inline constexpr std::uint16_t note_ratchet_maximum = 64u;
 
-// When a note sounds, relative to the loop pass it is being evaluated for.
-// `EveryNth` and `Fill` read `period` and `offset`; `Always` and `First` ignore
-// both. Pass indices count from zero at the transport's monotonic origin.
+/// Pass-relative condition controlling when a note may sound.
+///
+/// `EveryNth` and `Fill` read the modifier period; `EveryNth` also reads its
+/// offset. Pass indices count from zero at the transport's monotonic origin.
 enum class NoteConditionKind : std::uint8_t {
     // Sounds on every pass.
     Always,
@@ -57,8 +58,7 @@ enum class NoteConditionKind : std::uint8_t {
     Fill,
 };
 
-// Persisted spelling of a condition kind. The wire form is a name rather than
-// an ordinal so a future kind can be inserted without renumbering documents.
+/// Returns the canonical persisted spelling of `condition`.
 constexpr std::string_view note_condition_name(NoteConditionKind condition) noexcept {
     switch (condition) {
     case NoteConditionKind::Always:
@@ -73,9 +73,8 @@ constexpr std::string_view note_condition_name(NoteConditionKind condition) noex
     return "always";
 }
 
-// Inverse of note_condition_name. Returns false for an unknown spelling; a
-// reader that cannot name a condition must refuse the document rather than
-// guess a default that would silently change how it plays.
+/// Parses a canonical condition name into `out`.
+/// @return `false` for an unknown spelling, leaving `out` unchanged.
 constexpr bool parse_note_condition(std::string_view name, NoteConditionKind& out) noexcept {
     if (name == "always") {
         out = NoteConditionKind::Always;
@@ -96,9 +95,11 @@ constexpr bool parse_note_condition(std::string_view name, NoteConditionKind& ou
     return false;
 }
 
-// A modifier attached to one note. Notes without an entry play unconditionally
-// and once, which is why the companion array is sparse rather than parallel:
-// a document that authors no modifiers carries no modifier data at all.
+/// Sparse playback modifier attached to one note identity.
+///
+/// Notes without an entry play unconditionally and once. Probability is a
+/// fraction of `note_probability_certain`; ratchets subdivide the note's own
+/// duration and are deterministic.
 struct NoteModifier {
     ItemId note_id;
     // Chance the note sounds, out of `note_probability_certain`.
@@ -116,15 +117,13 @@ struct NoteModifier {
     constexpr auto operator<=>(const NoteModifier&) const = default;
 };
 
-// True when the modifier changes nothing about how the note plays. Such an
-// entry is redundant, so construction rejects it rather than admitting two
-// encodings of the same document.
+/// Returns whether `modifier` encodes unconditional, single-play behavior.
 constexpr bool note_modifier_is_neutral(const NoteModifier& modifier) noexcept {
     return modifier.probability == note_probability_certain &&
            modifier.condition == NoteConditionKind::Always && modifier.ratchet_count == 1;
 }
 
-// Structural validity, independent of whether the referenced note exists.
+/// Checks structural validity independently of whether the note identity exists.
 constexpr bool note_modifier_well_formed(const NoteModifier& modifier) noexcept {
     if (modifier.ratchet_count == 0 || modifier.ratchet_count > note_ratchet_maximum)
         return false;
@@ -144,29 +143,26 @@ constexpr bool note_modifier_well_formed(const NoteModifier& modifier) noexcept 
     return false;
 }
 
-// Folds the authored seed and the note identity into the key the audio thread
-// draws from. Computing it once at compile time keeps the per-event work on the
-// audio thread to a single mix.
+/// Derives the deterministic draw key for one authored seed and note identity.
 constexpr std::uint64_t note_modifier_draw_key(std::uint64_t seed, ItemId note_id) noexcept {
     return note_modifier_mix(note_modifier_mix(seed) ^ note_id.value);
 }
 
-// One probability draw: the note's key against the loop pass being evaluated.
-// The pair is unique per (note, pass) and stable across replays, which is what
-// makes a probabilistic note reproducible.
+/// One deterministic probability draw for a note key and loop pass.
 struct NoteModifierDraw {
     std::uint64_t key = 0;
     std::uint64_t pass_index = 0;
 
+    /// Returns the stable mixed value for this key/pass pair.
     constexpr std::uint64_t value() const noexcept {
         return note_modifier_mix(key ^ (pass_index + 0x9E3779B97F4A7C15ULL));
     }
 };
 
-// Exact at both endpoints: zero is silent for every draw, and
-// `note_probability_certain` sounds for every draw. The interior maps the draw
-// onto [0, note_probability_certain), so probability p sounds for exactly p of
-// the certain-many residues.
+/// Tests an authored probability against `draw`.
+///
+/// Zero is always silent and `note_probability_certain` always sounds. Interior
+/// values map exactly onto the same-size residue range.
 constexpr bool note_probability_sounds(std::uint16_t probability, NoteModifierDraw draw) noexcept {
     if (probability == 0)
         return false;
@@ -175,7 +171,9 @@ constexpr bool note_probability_sounds(std::uint16_t probability, NoteModifierDr
     return draw.value() % note_probability_certain < probability;
 }
 
-// Whether the pass-relative condition admits this pass.
+/// Returns whether a pass-relative condition admits `pass_index`.
+///
+/// Invalid zero periods return false for periodic conditions.
 constexpr bool note_condition_holds(NoteConditionKind condition, std::uint16_t period,
                                     std::uint16_t offset, std::uint64_t pass_index) noexcept {
     switch (condition) {
@@ -191,10 +189,10 @@ constexpr bool note_condition_holds(NoteConditionKind condition, std::uint16_t p
     return true;
 }
 
-// The complete gate: a note sounds when its condition admits the pass and its
-// probability draw succeeds. The condition is checked first so a passless note
-// consumes no draw reasoning at all — the draw is pure, so this is an ordering
-// of readability, not of results.
+/// Applies both the modifier's condition and deterministic probability gate.
+///
+/// `draw_key` normally comes from note_modifier_draw_key(). The function is
+/// pure and evaluation order cannot change its result.
 constexpr bool note_modifier_sounds(const NoteModifier& modifier, std::uint64_t draw_key,
                                     std::uint64_t pass_index) noexcept {
     if (!note_condition_holds(modifier.condition, modifier.condition_period,
@@ -202,5 +200,7 @@ constexpr bool note_modifier_sounds(const NoteModifier& modifier, std::uint64_t 
         return false;
     return note_probability_sounds(modifier.probability, NoteModifierDraw{draw_key, pass_index});
 }
+
+/// @}
 
 } // namespace pulp::timeline

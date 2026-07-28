@@ -853,6 +853,12 @@ history; inverse-command undo/redo append ordinary new transactions.
 
 **Link:** `pulp::timeline` · **Include prefix:** `<pulp/timeline/...>`
 
+For subsystem contracts and ownership, see the
+[Creative Timeline Engine SDK guide](../guides/timeline-sdk.md). For
+compile-backed project, transaction, persistence, playback, capture, launch,
+interchange, CLI, and MCP tasks, use the
+[Timeline cookbook](../guides/timeline-cookbook.md).
+
 ```cpp
 #include <pulp/timeline/model.hpp>
 
@@ -916,9 +922,9 @@ cursor programs, while host-graph parameter delivery remains outside Timeline.
 a Track-owned device chain. The chain preserves authored processing order
 through immutable clip edits, persistence, and ID remapping. A placement is
 identity/order-only: runtime instances, graph nodes, plugin formats, paths, and
-platform metadata stay outside Timeline. Durable device definition and
-configuration needed for project save/load will be future document-owned state
-keyed by placement identity.
+platform metadata stay outside Timeline. Project snapshots persist the
+placement identity and authored order, but do not persist a runtime device
+definition or configuration payload.
 
 `Take` and `TakeLane` keep recorded source identity and comp intent in the
 document. Takes reference sealed assets in absolute sample time; comp segments
@@ -1011,8 +1017,82 @@ programs before publication and fans child dirtiness out through every
 transitive placement; unsupported child processing state fails compilation
 closed.
 
-This surface intentionally excludes package I/O, playback delivery, launch
-slots, device implementation and routing, and UI.
+This surface intentionally excludes package I/O, playback delivery, runtime
+launch arbitration, device implementation and routing, and UI. Authored scenes
+and launch slots are durable document state. The compiler accepts Arrangement
+only; the embedding application owns runtime launcher interpretation and
+scene-to-track arbitration.
+
+## interchange
+
+Format-neutral interchange machinery shared by every exporter and importer.
+A **capability table** declares, per concept, what a given format can represent;
+`plan_export()` walks a `Project` against that table and returns an
+`ExportPlan` carrying a `LossManifest` of everything the format cannot hold.
+
+The seam is deliberately **consent-based and fail-closed**: `run_export()`
+refuses a plan whose losses the caller has not accepted **concept by concept**.
+There is no force flag, so an export cannot silently discard authored material.
+Writers plug in as an `ExportWriter` callable, which keeps the planning and
+loss accounting in one place rather than duplicated per format.
+
+A census pass records which concepts a project actually uses, so a document that
+never uses a lossy concept is reported lossless rather than being flagged on the
+format's theoretical limits.
+
+**Depends on:** `timeline`, `timebase`, `runtime`
+
+## dawproject
+
+Reader and writer for the [DAWproject](https://github.com/bitwig/dawproject)
+interchange format, implemented clean-room against the published specification
+over pugixml. Ships as two libraries so a consumer can take only what it needs:
+`pulp::dawproject-import` and `pulp::dawproject-export`.
+
+Both sides cover the same **bounded linear subset** — flat tracks, beats-timed
+clips, inline notes, referenced audio, one tempo and one meter — and both fail
+closed outside it. The importer refuses nested groups, warps, seconds-timed
+lanes, and unknown elements rather than dropping them. The exporter routes every
+unrepresentable concept through the `interchange` consent seam and writes an
+in-band loss manifest into the package alongside `project.xml`, so the losses
+travel with the file instead of scrolling past in a console.
+
+A track's `<Channel>` is admitted on import only when neutral, and refused by its
+own concept when it states a volume or pan. On export a neutral channel is
+written so a receiving DAW registers the track at all; that is a structural
+requirement of the format, not an export of authored mixer state, which the loss
+manifest still reports as dropped.
+
+Media identity is sealed by content hash, and package-relative asset paths are
+confined to the package at two layers — a lexical check in the model and a
+canonicalizing beneath-the-base check in the loader, which is what catches a
+symlink that points outside.
+
+**Depends on:** `interchange`, `timeline`, `audio`, `runtime`
+
+
+## smf
+
+Standard MIDI File import and export.
+
+**Link:** `pulp::smf-interop` · **Include prefix:** `<pulp/timeline/smf.hpp>`
+
+The library is separate so a consumer can leave SMF out, but its API lives with
+the timeline surface it operates on rather than under its own include prefix.
+
+Import accepts **format 0 and 1 with a metrical division**, note on/off, and the
+tempo, time-signature, track-name, and end-of-track meta events. SMPTE divisions,
+format 2, and any other event **fail the import** unless the caller explicitly
+opts into ignoring non-note events.
+
+Export covers note content plus the tempo and meter maps. Device chains,
+automation, takes, freezes, and media assets have no SMF representation. A tempo
+ramp, or a tick the requested division cannot represent exactly, is an **error
+rather than a silent approximation** — conversion is exact on dividing grids and
+any rounding is reported.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`
+
 
 ## playback
 

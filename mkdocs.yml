@@ -162,6 +162,7 @@ nav:
       - Plugin Interrogation: guides/plugin-interrogation.md
       - Sampler Playback Chooser: guides/sampler-playback.md
       - Creative Timeline Engine SDK: guides/timeline-sdk.md
+      - Timeline Cookbook: guides/timeline-cookbook.md
       - Sample Stream Service: guides/sample-stream-service.md
       - Streaming Sample Source: guides/streaming-sample-source.md
       - Web Plugins: guides/web-plugins.md

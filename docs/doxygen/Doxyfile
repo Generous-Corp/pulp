@@ -11,14 +11,20 @@ INPUT                  = ../../core/audio/include \
                          ../../core/canvas/include \
                          ../../core/events/include \
                          ../../core/format/include \
+                         ../../core/host/include \
+                         ../../core/interchange/include \
                          ../../core/midi/include \
                          ../../core/osc/include \
                          ../../core/host/include \
                          ../../core/platform/include \
+                         ../../core/playback/include \
                          ../../core/render/include \
                          ../../core/runtime/include \
+                         ../../core/sequence/include \
                          ../../core/signal/include \
                          ../../core/state/include \
+                         ../../core/timebase/include \
+                         ../../core/timeline/include \
                          ../../core/view/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h

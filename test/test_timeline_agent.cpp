@@ -114,6 +114,32 @@ std::string project_json(const std::filesystem::path& source, std::uint64_t fram
     return take(serialize_project(project, registry)).json;
 }
 
+// A project JSON carrying a locator hint the MODEL refuses to construct.
+//
+// Project::create rejects a rooted or parent-traversing package-relative hint
+// outright, so such a document cannot be built through the model API at all --
+// which is the point of that guard. A hostile project still has to be testable
+// though, and in reality it arrives as bytes on disk rather than through our
+// own constructors. So build a valid document around a benign placeholder and
+// substitute the hostile hint into the serialized text.
+std::string project_json_with_raw_hint(const std::filesystem::path& source,
+                                       std::string_view hostile_hint) {
+    constexpr std::string_view kPlaceholder = "pulp-test-placeholder-hint";
+    std::string json = project_json(source, 32, file_hash(source), true,
+                                    {{AssetLocatorKind::PackageRelative, std::string(kPlaceholder)}});
+    // JSON-escape backslashes; the hostile hints deliberately include them.
+    std::string escaped;
+    for (char c : hostile_hint) {
+        if (c == '\\' || c == '"')
+            escaped.push_back('\\');
+        escaped.push_back(c);
+    }
+    const auto at = json.find(kPlaceholder);
+    REQUIRE(at != std::string::npos);
+    json.replace(at, kPlaceholder.size(), escaped);
+    return json;
+}
+
 std::string empty_project_json(std::uint64_t frame_count = 32) {
     auto sequence = take(Sequence::create({2}, "root", std::nullopt,
                                           AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {}));
@@ -567,14 +593,17 @@ TEST_CASE("timeline agent rejects rooted package-relative media hints") {
     for (std::size_t index = 0; index < rooted_hints.size(); ++index) {
         const auto project_path = package / ("rooted-" + std::to_string(index) + ".json");
         write_text_file(project_path,
-                        project_json(source_path, 32, file_hash(source_path), true,
-                                     {{AssetLocatorKind::PackageRelative, rooted_hints[index]}}));
+                        project_json_with_raw_hint(source_path, rooted_hints[index]));
         const auto result = tools::timeline::render(
             project_path.string(),
             (temp.path() / ("output-" + std::to_string(index) + ".wav")).string());
         INFO(rooted_hints[index]);
         REQUIRE_FALSE(result);
-        REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+        // Refused at "open", not "render": a rooted package-relative hint is
+        // rejected while the document is being read, so it never reaches the
+        // renderer at all. That is stronger than the previous render-time
+        // refusal, and it is what the model-level guard buys.
+        REQUIRE(result.json.find(R"("stage":"open")") != std::string::npos);
     }
 }
 
@@ -594,15 +623,16 @@ TEST_CASE("timeline agent rejects parent traversal in either package path syntax
     const std::vector<std::string> traversal_hints{"../outside.wav", R"(..\outside.wav)"};
     for (std::size_t index = 0; index < traversal_hints.size(); ++index) {
         const auto project_path = package / ("traversal-" + std::to_string(index) + ".json");
-        write_text_file(project_path, project_json(outside_path, 32, file_hash(outside_path), true,
-                                                   {{AssetLocatorKind::PackageRelative,
-                                                     traversal_hints[index]}}));
+        write_text_file(project_path,
+                        project_json_with_raw_hint(outside_path, traversal_hints[index]));
         const auto result = tools::timeline::render(
             project_path.string(),
             (temp.path() / ("output-" + std::to_string(index) + ".wav")).string());
         INFO(traversal_hints[index]);
         REQUIRE_FALSE(result);
-        REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+        // Same as the rooted case: a parent-traversing hint is refused while the
+        // document is read, so it never reaches the renderer.
+        REQUIRE(result.json.find(R"("stage":"open")") != std::string::npos);
     }
 }
 

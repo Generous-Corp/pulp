@@ -2,6 +2,7 @@
 #include <pulp/runtime/log.hpp>
 #include <chrono>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 
 namespace pulp::view {
@@ -72,6 +73,18 @@ bool ScriptedUiSession::load(std::string* error) {
     }
 
     if (hot_reload_enabled_) {
+        // On a platform shipping the no-op stub the reloader accepts the flag and
+        // then ignores every save, so say so once rather than look broken. The
+        // branch compiles away entirely where a watcher exists.
+        if constexpr (!HotReloader::kWatchesFiles) {
+            static std::once_flag warned;
+            std::call_once(warned, [] {
+                runtime::log_info(
+                    "Scripted UI hot reload requested, but this platform has no file "
+                    "watcher — edits to the script will not reload. Editor rebuilds "
+                    "following a DSP hot-swap still apply.");
+            });
+        }
         reloader_ = std::make_unique<HotReloader>(script_path_, [this](const std::string& next_code) {
             std::string reload_error;
             if (!rebuild_from_code(next_code, true, &reload_error)) {

@@ -64,8 +64,20 @@ jobs:
               -f description="$2" \
               -f target_url="$STATUS_TARGET" >/dev/null
           }
+          # A permanently opaque red row teaches readers to ignore the whole
+          # check list, so carry the actual reason into the status description
+          # (GitHub truncates at 140 chars) instead of a fixed generic string.
+          # The validators all prefix their diagnostics with `<tool>:`, so the
+          # last such line is the failure that stopped the run.
+          log="$RUNNER_TEMP/vellum-trusted-validation.log"
+          : >"$log"
           failed() {
-            post_status failure 'Trusted Vellum authority validation failed'
+            reason=$(grep -oE '^[a-z0-9-]+: .*' "$log" | tail -n 1 | cut -c1-120)
+            if [ -n "$reason" ]; then
+              post_status failure "$reason"
+            else
+              post_status failure 'Trusted Vellum authority validation failed'
+            fi
           }
           trap failed EXIT
           post_status pending 'Validating with base-branch controls'
@@ -78,23 +90,30 @@ jobs:
           git cat-file -e "$PR_HEAD^{commit}"
           git worktree add --detach "$proposed_tree" "$PR_HEAD"
 
-          python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+          # `set -e` (the default shell) plus PIPESTATUS keeps a validator's
+          # failure fatal while still teeing its diagnostics to the log.
+          run_validator() {
+            "$@" 2>&1 | tee -a "$log"
+            return "${PIPESTATUS[0]}"
+          }
+
+          run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
             --repo "$proposed_tree" \
             --base "$PR_BASE" \
             --head "$PR_HEAD" \
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
-          python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
+          run_validator python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
             --root "$proposed_tree" \
             --map "$proposed_tree/docs/status/pulp-tooling-disposition.json"
-          python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
+          run_validator python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
             --repo "$proposed_tree" \
             --source-commit 2ccff748f0d59da34b01ce1fbceabcf19f452731 \
             --selection docs/contracts/vellum-initial-cut-paths.txt \
             --output docs/contracts/vellum-initial-cut-manifest.json \
             --verify
-          python3 "$trusted_root/tools/scripts/generate_vellum_ownership_projection.py" \
+          run_validator python3 "$trusted_root/tools/scripts/generate_vellum_ownership_projection.py" \
             --repo "$proposed_tree" \
             --manifest docs/contracts/vellum-initial-cut-manifest.json \
             --output .github/vellum-ownership.json \

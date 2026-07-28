@@ -21,25 +21,15 @@ namespace pulp::playback {
 
 using timeline::LaunchQuantize;
 
-namespace detail {
-
-// Saturating a + b over the signed 128-bit intermediate, clamped to int64.
-constexpr std::int64_t clamp_to_int64(__int128 value) noexcept {
-    constexpr __int128 hi = static_cast<__int128>(std::numeric_limits<std::int64_t>::max());
-    constexpr __int128 lo = static_cast<__int128>(std::numeric_limits<std::int64_t>::min());
-    if (value > hi)
-        return std::numeric_limits<std::int64_t>::max();
-    if (value < lo)
-        return std::numeric_limits<std::int64_t>::min();
-    return static_cast<std::int64_t>(value);
-}
-
-} // namespace detail
-
 // The first monotonic boundary at or after `from` for the given quantization.
 // Immediate quantization returns `from` unchanged. The boundary set is
 // { phase + k*grid : k in Z }; this returns the boundary for the smallest k with
-// phase + k*grid >= from (ceil). Overflow saturates into the int64 tick domain.
+// phase + k*grid >= from (ceil). Overflow saturates into the int64 tick domain,
+// per operation: the product rails first, then the sum. A wide intermediate
+// would instead clamp the exact value once, which differs only when a railed
+// product is pulled back into range by phase — a regime that needs ~1.3e13
+// quarter notes to reach, so both readings agree everywhere reachable. Stated
+// because it is a behavioural choice, not an accident of the arithmetic.
 constexpr timebase::MonotonicBeat next_launch_boundary(timebase::MonotonicBeat from,
                                                        LaunchQuantize quantize) noexcept {
     const std::int64_t grid = quantize.grid.value;
@@ -51,9 +41,8 @@ constexpr timebase::MonotonicBeat next_launch_boundary(timebase::MonotonicBeat f
     std::int64_t k = rel / grid;
     if (rel % grid != 0 && rel > 0)
         ++k;
-    const __int128 target = static_cast<__int128>(phase) + static_cast<__int128>(k) *
-                                                               static_cast<__int128>(grid);
-    return {{detail::clamp_to_int64(target)}};
+    return {{timebase::detail::saturating_add(
+        phase, timebase::detail::saturating_multiply(k, grid))}};
 }
 
 // Resolves the block-relative sample offset at which the monotonic clock reaches

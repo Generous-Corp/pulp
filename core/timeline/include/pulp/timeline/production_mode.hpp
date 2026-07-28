@@ -25,6 +25,10 @@
 
 namespace pulp::timeline {
 
+/** @addtogroup timeline_model
+ * @{
+ */
+
 /// Where content is produced relative to the audio callback that consumes it.
 enum class ProductionMode : std::uint8_t {
     /// Produced in band, inside the callback that consumes it. Cannot starve.
@@ -54,12 +58,14 @@ enum class ReproducibilityClass : std::uint8_t {
 
 /// Canonical wire name, stable across builds and safe to persist.
 std::string_view production_mode_name(ProductionMode mode) noexcept;
+/// Canonical persisted name for a reproducibility class.
 std::string_view reproducibility_class_name(ReproducibilityClass reproducibility) noexcept;
 
 /// Parse a canonical wire name. Fails closed: an unknown name is rejected rather
 /// than defaulted, so a document from a newer build never silently reads as the
 /// strongest claim.
 std::optional<ProductionMode> production_mode_from_name(std::string_view name) noexcept;
+/// Parses a canonical reproducibility-class name and rejects unknown names.
 std::optional<ReproducibilityClass>
 reproducibility_class_from_name(std::string_view name) noexcept;
 
@@ -87,6 +93,7 @@ struct ProductionDeclaration {
     std::uint64_t lookahead_ms = 0;
 };
 
+/// Validation result for a ProductionDeclaration.
 enum class ProductionDeclarationErrorCode : std::uint8_t {
     None,
     /// Synchronous content produces in band, so a lookahead is meaningless.
@@ -100,5 +107,7 @@ enum class ProductionDeclarationErrorCode : std::uint8_t {
 /// Validate a declaration. Returns `None` when the declaration is coherent.
 ProductionDeclarationErrorCode
 validate_production_declaration(const ProductionDeclaration& declaration) noexcept;
+
+/// @}
 
 } // namespace pulp::timeline

@@ -99,12 +99,15 @@ TEST_CASE("the DAWproject table declares the importer's documented subset", "[in
         }
     }
 
-    SECTION("format identity round-trips and no writer is registered yet") {
+    SECTION("format identity round-trips and a writer is registered") {
         Format resolved{};
         REQUIRE(format_from_id("dawproject", resolved));
         REQUIRE(resolved == Format::DawProject);
         REQUIRE_FALSE(format_from_id("aaf", resolved));
         REQUIRE(format_display_name(Format::DawProject) == "DAWproject");
-        REQUIRE_FALSE(format_has_writer(Format::DawProject));
+        // core/dawproject ships a bounded writer, so the table declares one.
+        // A format without writer code must still read false here — that flag
+        // is what makes run_export refuse rather than emit an empty artifact.
+        REQUIRE(format_has_writer(Format::DawProject));
     }
 }

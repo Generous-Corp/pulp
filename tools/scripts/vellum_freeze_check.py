@@ -605,6 +605,68 @@ def load_new_events(
     return loaded
 
 
+def _describe_coverage_gap(
+    change_counts: collections.Counter[str],
+    affected: dict[str, list[str]],
+) -> str:
+    """Render the exact slice-coverage gap, with the files that caused it.
+
+    The bare invariant ("coverage must exactly match") names neither the slices
+    nor the paths, so a reader cannot tell what to write. Without that, the only
+    available response is to ignore the check — which is how a real gate ends up
+    treated as noise. Report which slices are uncovered, which are claimed
+    without cause, which are claimed twice, and the changed paths behind each.
+    """
+    missing = sorted(set(affected) - set(change_counts))
+    unexpected = sorted(set(change_counts) - set(affected))
+    duplicated = sorted(
+        slice_id for slice_id, count in change_counts.items() if count > 1
+    )
+    lines: list[str] = []
+
+    if missing:
+        lines.append("")
+        lines.append(
+            "  These transferred slices were touched but no change event covers them:"
+        )
+        for slice_id in missing:
+            lines.append(f"    - {slice_id}")
+            for path in affected[slice_id]:
+                lines.append(f"        {path}")
+    if unexpected:
+        lines.append("")
+        lines.append(
+            "  These slices are claimed by a change event but no changed path "
+            "maps to them:"
+        )
+        lines.extend(f"    - {slice_id}" for slice_id in unexpected)
+    if duplicated:
+        lines.append("")
+        lines.append("  Each slice needs exactly one change event; these have more:")
+        lines.extend(
+            f"    - {slice_id} (claimed {change_counts[slice_id]} times)"
+            for slice_id in duplicated
+        )
+
+    if missing:
+        lines.append("")
+        lines.append(
+            f"  Fix: add one event per uncovered slice under {EVENT_PREFIX}, "
+            "naming that slice"
+        )
+        lines.append(
+            "  in its `slices` list, with a `disposition` of "
+            + ", ".join(f"`{value}`" for value in sorted(CHANGE_DISPOSITIONS))
+            + "."
+        )
+        lines.append(
+            "  See docs/contracts/vellum-extraction-freeze.md, and the existing "
+            f"events in {EVENT_PREFIX}"
+        )
+        lines.append("  for the shape and the level of rationale expected.")
+    return "\n".join(lines)
+
+
 def _validate_event_coverage(
     events: list[tuple[str, dict[str, Any]]],
     affected: dict[str, list[str]],
@@ -625,11 +687,18 @@ def _validate_event_coverage(
     ):
         raise FreezeError(
             "change-event slice coverage must exactly match affected transferred slices"
+            + _describe_coverage_gap(change_counts, affected)
         )
     if affected and not change_events:
-        raise FreezeError("a durable change event is required for transferred paths")
+        raise FreezeError(
+            "a durable change event is required for transferred paths"
+            + _describe_coverage_gap(change_counts, affected)
+        )
     if not affected and change_events:
-        raise FreezeError("change event does not correspond to a transferred-path change")
+        raise FreezeError(
+            "change event does not correspond to a transferred-path change"
+            + _describe_coverage_gap(change_counts, affected)
+        )
 
     transfer_counts = collections.Counter(
         slice_id for event in authority_events for slice_id in event["slices"]
@@ -637,7 +706,31 @@ def _validate_event_coverage(
     if set(transfer_counts) != transferred or any(
         count != 1 for count in transfer_counts.values()
     ):
-        raise FreezeError("authority-event slice coverage must exactly match new transfers")
+        missing_transfers = sorted(transferred - set(transfer_counts))
+        unexpected_transfers = sorted(set(transfer_counts) - transferred)
+        duplicated_transfers = sorted(
+            slice_id for slice_id, count in transfer_counts.items() if count > 1
+        )
+        detail: list[str] = []
+        if missing_transfers:
+            detail.append(
+                "  newly transferred without an authority event: "
+                + ", ".join(missing_transfers)
+            )
+        if unexpected_transfers:
+            detail.append(
+                "  claimed by an authority event but not newly transferred: "
+                + ", ".join(unexpected_transfers)
+            )
+        if duplicated_transfers:
+            detail.append(
+                "  claimed by more than one authority event: "
+                + ", ".join(duplicated_transfers)
+            )
+        raise FreezeError(
+            "authority-event slice coverage must exactly match new transfers"
+            + ("\n" + "\n".join(detail) if detail else "")
+        )
     if transferred:
         if len(authority_events) != 1:
             raise FreezeError("exactly one authority event is required for a transfer")

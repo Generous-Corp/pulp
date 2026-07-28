@@ -583,9 +583,11 @@ with a round-trip across all three adapters for parity regressions.
 `createView("editor")` returns a `PulpPlugView` (in
 `vst3_plug_view.cpp`) when the build defines `PULP_VST3_GUI` and the
 Processor `has_editor()`. The editor flows through
-`pulp::format::ViewBridge` — see the `view-bridge` skill for the
-lifecycle protocol. Editing `vst3_plug_view.cpp` triggers `view-bridge`,
-not this skill.
+`pulp::format::ViewBridge`, constructed from
+`ViewBridge::Options::hosted_editor()` — never a hand-assembled `Options`; a
+structural test enforces that every hosted adapter uses the factory. See the
+`view-bridge` skill for the lifecycle protocol and the rationale. Editing
+`vst3_plug_view.cpp` triggers `view-bridge`, not this skill.
 
 ## Gotchas
 

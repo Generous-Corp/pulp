@@ -4,6 +4,10 @@
 
 namespace pulp::timeline {
 
+/** @addtogroup timeline_model
+ * @{
+ */
+
 /// Returns whether a UTF-8 package-relative asset locator is lexically
 /// relative and contains no parent traversal component.
 inline bool package_relative_path_is_lexically_safe(std::string_view path) noexcept {
@@ -25,5 +29,7 @@ inline bool package_relative_path_is_lexically_safe(std::string_view path) noexc
     }
     return true;
 }
+
+/// @}
 
 } // namespace pulp::timeline

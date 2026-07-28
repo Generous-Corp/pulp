@@ -157,8 +157,10 @@ TEST_CASE("a lossless plan still needs a writer to produce bytes", "[interchange
     REQUIRE(plan.is_lossless());
 
     // No writer means no artifact, rather than an empty one reported as success.
-    // The capability data says the same thing about DAWproject today.
-    REQUIRE_FALSE(format_has_writer(Format::DawProject));
+    // DAWproject now declares a writer, but passing an EMPTY ExportWriter must
+    // still refuse — the callable is what produces bytes, and the capability
+    // flag does not stand in for one.
+    REQUIRE(format_has_writer(Format::DawProject));
     auto result = run_export(plan, ExportOptions{}, ExportWriter{});
     REQUIRE(result.is_err());
     REQUIRE(result.error().code == ExportErrorCode::NoWriterRegistered);

@@ -321,3 +321,87 @@ TEST_CASE("TextEditor::caret_rect single-line subtracts scroll_offset",
     REQUIRE(r.x >= 0.0f);
     REQUIRE(r.x <= editor.bounds().width);
 }
+
+// Soft wrap must break at word boundaries. Breaking at whatever cluster
+// overflows splits words mid-glyph — "…a chorus that opens u" / "p the harder
+// I press." — which reads as a rendering fault rather than as wrapping.
+//
+// RecordingCanvas measures 7px/char and the editor reserves 6px of padding per
+// side, so a 60px-wide editor fits 6 characters per visual row. "ab cdefg"
+// therefore discriminates the two policies exactly:
+//
+//   character wrap : "ab cde" / "fg"      <- splits "cdefg"
+//   word wrap      : "ab "    / "cdefg"   <- breaks at the space
+TEST_CASE("TextEditor soft-wrap breaks at a word boundary, not mid-word",
+          "[view][text_editor][multiline][wrap]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.set_bounds({0, 0, 60, 200});
+    editor.on_focus_changed(true);
+    editor.set_text("ab cdefg");
+
+    // Index 0 ('a') anchors row 0.
+    editor.set_caret_pos(0);
+    prime_layout(editor);
+    const auto first_row = editor.caret_rect();
+
+    // Index 4 ('d') sits inside the word. Under character wrap it lands on
+    // row 0 because "ab cde" filled that row; under word wrap the whole word
+    // moved down, so it must be on a LOWER row.
+    editor.set_caret_pos(4);
+    prime_layout(editor);
+    const auto inside_word = editor.caret_rect();
+    REQUIRE(inside_word.y > first_row.y);
+
+    // The word must not be split across rows: its first and last characters
+    // belong to the same visual row.
+    editor.set_caret_pos(3);  // 'c', first char of the word
+    prime_layout(editor);
+    const auto word_start = editor.caret_rect();
+    editor.set_caret_pos(7);  // 'g', last char of the word
+    prime_layout(editor);
+    const auto word_end = editor.caret_rect();
+    REQUIRE(word_start.y == word_end.y);
+    REQUIRE(word_start.y == inside_word.y);
+}
+
+TEST_CASE("TextEditor soft-wrap still breaks a word longer than the column",
+          "[view][text_editor][multiline][wrap]") {
+    // The word-boundary preference must not become "never split". A single
+    // word wider than the column has no break opportunity, and an editor that
+    // let it overflow would push text out of view with no way to reach it, so
+    // the cluster-level break remains the fallback.
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.set_bounds({0, 0, 60, 200});
+    editor.on_focus_changed(true);
+    editor.set_text("aaaaaaaaaaaaaaaa");  // 16 chars, no break opportunity
+
+    editor.set_caret_pos(0);
+    prime_layout(editor);
+    const auto first = editor.caret_rect();
+    editor.set_caret_pos(15);
+    prime_layout(editor);
+    const auto last = editor.caret_rect();
+    REQUIRE(last.y > first.y);
+}
+
+TEST_CASE("TextEditor soft-wrap keeps a trailing space on the row it ends",
+          "[view][text_editor][multiline][wrap]") {
+    // The break opportunity is recorded AFTER the space, so the space stays
+    // with the row it terminates instead of opening the next one with an
+    // orphaned leading blank.
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.set_bounds({0, 0, 60, 200});
+    editor.on_focus_changed(true);
+    editor.set_text("ab cdefg");
+
+    editor.set_caret_pos(0);
+    prime_layout(editor);
+    const auto row0 = editor.caret_rect();
+
+    editor.set_caret_pos(2);  // the space itself
+    prime_layout(editor);
+    REQUIRE(editor.caret_rect().y == row0.y);
+}

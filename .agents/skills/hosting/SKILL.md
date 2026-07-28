@@ -829,6 +829,52 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
+- **A duplicate designator in a binder initializer breaks the build — and BOTH
+  compilers told us, and it landed anyway.** The binders are designated-
+  initializer literals, so a merge that brings the same binder in from both
+  sides lists the member twice. That happened once with
+  `.custom_latency_for` in `signal_graph.cpp`.
+
+  Do NOT read this as "clang is permissive and only Linux catches it" — that is
+  the wrong lesson and it will send you looking for a diagnostic that was
+  already printed. What actually happened:
+
+  - **Clang WARNED, by default, twice.** Compiling the shape with no `-W`
+    flags at all yields `-Wreorder-init-list` ("field designators … in
+    declaration order") and `-Winitializer-overrides` ("initializer overrides
+    prior initialization of this subobject"). The root `CMakeLists.txt` already
+    adds `-Wall -Wextra -Wpedantic`, so the **required macOS gate printed both**
+    — and nobody reads a green job's log.
+  - **GCC ERRORED and the Linux job reported failure**
+    (`error: '.custom_latency_for' designator used multiple times in the same
+    initializer list`).
+  - It reached `main` regardless, because the Linux lane is **advisory**.
+
+  So this is a POLICY gap, not a coverage gap: a real compile failure was
+  detected, displayed, and merged past. Adding another GCC leg would be
+  building something that already exists. The durable fix is to make an
+  existing verdict binding — either promote those two clang warnings with
+  `-Werror=reorder-init-list -Werror=initializer-overrides` (free: clang
+  already emits them, so it can only fail on real defects), or make the Linux
+  COMPILE step blocking while leaving its tests advisory. Measure whether
+  Linux finishes inside the macOS leg's shadow before choosing; if it does,
+  blocking costs no latency.
+
+  There are **four** binder literals, not three — miss one and the grep is a
+  false all-clear:
+
+  ```bash
+  grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp                    # 1445
+  grep -c '\.custom_latency_for' core/host/src/signal_graph_executor_routing.cpp   # 427 and 689
+  grep -c '\.custom_latency_for' core/host/src/baked_graph_processor.cpp           # 623
+  ```
+
+  If the duplicated bodies are identical, deleting either is behaviour-
+  preserving — clang was already using the last one. If they DIFFER, clang has
+  been running the second and GCC has never compiled the file at all, so decide
+  which is correct before deleting. Prefer keeping the copy that sits in
+  declaration order.
+
 - **Custom-node intrinsic latency is a CALLBACK, not a count.**
   `CustomNodeType::latency_samples` is `std::function<int(double sample_rate)>`,
   returning a prepare-stable base-rate sample count regardless of internal
@@ -1872,3 +1918,113 @@ voice: reset, render a hit, reset, render the same hit, require the two buffers
 equal. Run it with the voice's *noisiest* path at full level — a path that is
 silent in the test cannot carry stale filter state into the output, which is how
 a partial reset passes a determinism test that looks thorough.
+
+## A repeated designated initializer compiles on macOS and breaks Linux
+
+`ExecutorSnapshotBinders` and the other binder structs are filled with designated
+initializers, which makes them pleasant to extend and makes one mistake invisible
+locally: naming the same field twice.
+
+Clang accepts a repeated designator as an extension and silently keeps the LAST
+one. GCC rejects it — `error: '.field' designator used multiple times in the same
+initializer list`. So the whole macOS lane, including the required gate, stays
+green while every Linux build in the repository fails. On a merge queue that
+groups on all-green, that blocks PRs which never touched the host.
+
+It arrives through merges rather than through typing: a hunk that adds a binder
+gets applied to both sides of a merge and lands twice. `git diff` on the merge
+looks unremarkable because each copy is individually correct.
+
+When a binder initializer grows, or after resolving a merge that touched one,
+count the designators:
+
+```bash
+grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp   # expect 1
+```
+
+If the duplicated bodies are identical, removing either is behaviour-preserving —
+clang was already using the last. If they differ, clang has been running the
+second and GCC has never compiled it at all, so decide which is correct before
+deleting.
+
+## A custom node declares its latency; it does not dodge it
+
+`CustomNodeType::latency_samples` is a `std::function<int(double sample_rate)>`,
+evaluated once off the audio thread at compile/lower time and fed into both the
+legacy and routed PDC plans. It is rate-taking rather than a fixed count because
+the two things that usually need it — a lookahead quoted in milliseconds, and an
+oversampler's half-band group delay — resolve differently per rate.
+
+Before it existed, a node with intrinsic delay had one option: remove the delay.
+The Forge drum catalog did exactly that, forcing every voice's output stage to
+`bypass` so it could keep the zero-latency contract. That workaround outlived
+its reason by several releases, because the comment explaining it was never
+revisited — it still claimed no latency surface existed.
+
+Worth knowing how that ended, because "the constraint is gone, so lift the
+workaround" turned out to be wrong: measured, the oversampled path was a net
+loss at the shipped defaults. Every nonlinear stage is inactive by default
+(drive 0, fold 0, quantiser at 24 bits), so the signal made a pure half-band
+round trip and paid the FIR's linear-phase pre-ringing for a stage doing
+nothing to it — about -0.1 dB above 8 kHz gained, against a material attack
+smear on the voices whose character is dense transients. The node still
+bypasses, but now it says so on evidence and derives its declared latency from
+that one choice, so flipping it cannot leave a stale number behind.
+
+The general lesson: removing a workaround is a behaviour change and wants the
+same measurement any other behaviour change would. `tools/audio/quality-lab`
+(`compare a.wav b.wav --profile transient-integrity --align latency`) is what
+caught it; `--align latency` matters, because the delay you just introduced
+will otherwise read as a difference all by itself.
+
+Two things to know when wiring it up:
+
+- **Where the value is captured depends on how the node runs.** The live compile
+  only records latency for a node that has a live callback
+  (`custom_processors.contains(id) && type->latency_samples`) — a node with no
+  live callback is transparent on the live graph and must not add delay there.
+  A **baked-only** node (`create` + `process_instance_baked_param`, no `process`)
+  therefore reports 0 from `SignalGraph::live_custom_latency_samples` and carries
+  its latency through lowering into `BakedGraphProcessor` instead. Asserting on
+  the wrong one of those two paths looks like the feature is broken.
+- **Derive the number, never restate it.** The latency the host compensates and
+  the latency the DSP introduces have to be the same value. If a node names its
+  quality/lookahead in one place and its latency in another, they drift the
+  moment either default moves, and nothing fails — the drum sits a few dozen
+  samples off every undelayed path beside it. Name the choice once
+  (`OutputStage::kDefaultOversampling`) and compute the latency from it.
+
+## Refusing a control is the last resort, not the first
+
+A catalog node that cannot honour a control has two honest options: make the
+control mean something, or do not declare it. Refusing a *declared* control is
+the worst of the three, and it is the one that looks most rigorous.
+
+The case that made this concrete: the bridged-T kick has no frequency
+parameter — its pitch is a property of the network — so a `tune_hz` macro on
+that body was refused with an accurate, actionable message. The message was
+correct and the behaviour was wrong. A kick that cannot be tuned is not what
+anyone asking for an 808 kit means, and "an 808 style kit" failed to build
+because of it: the model generated the natural graph, was refused, regenerated,
+and the attempt budget ran out. The refusal taught the user our implementation
+detail instead of serving the request.
+
+The control was implementable the whole time. The network retunes by
+substituting capacitors, exactly as the hardware does; scaling both arms moves
+the centre frequency and leaves Q invariant. The header had even said so —
+"scaling both arms therefore retunes the drum while leaving Q exactly
+invariant, which is the signature a tune control has to reproduce" — describing
+a control nobody had built.
+
+So when a node cannot honour a control, ask in this order:
+
+1. **Can the underlying model express it another way?** Physical models usually
+   can: a frequency is some function of the components, a time is some function
+   of a decay coefficient. Solve the inverse. That is a real control, and the
+   parameter-efficacy gate will then pass it honestly.
+2. **If genuinely impossible, do not declare it.** An emergent behaviour — the
+   circuit kick's pitch droop — is not a control, and declaring one would be a
+   dead knob.
+3. **Only refuse when the pairing is expressible but wrong**, and then teach the
+   refusal wherever the capability is advertised. An untaught refusal is a retry
+   loop that costs a generation budget, not a guardrail.

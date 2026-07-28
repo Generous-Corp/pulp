@@ -62,6 +62,37 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
     [NSApp setMainMenu:menu_bar];
 
     NSMenu* app_menu = [[[NSMenu alloc] init] autorelease];
+    [app_item setSubmenu:app_menu];
+
+    // Builds the item and wires its target. representedObject retains the
+    // target for exactly as long as the item, so no separate ownership.
+    auto add_item = [](NSMenu* menu, const WindowOptions::MenuCommand& command) {
+        PulpMenuCommandTarget* target = [[[PulpMenuCommandTarget alloc] init] autorelease];
+        target->action = command.action;
+        NSMenuItem* item =
+            [[[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:command.title.c_str()]
+                                        action:@selector(performMenuCommand:)
+                                 keyEquivalent:key_equivalent(command.key)] autorelease];
+        [item setKeyEquivalentModifierMask:modifier_mask(command.modifiers)];
+        [item setTarget:target];
+        [item setRepresentedObject:target];
+        [menu addItem:item];
+    };
+
+    // App-menu commands come first so they sit ABOVE Quit, which macOS expects
+    // to be the last item. A separator divides them from Quit, and is only
+    // added when something precedes it — a leading separator renders as a
+    // stray rule in an otherwise single-item menu.
+    bool app_menu_has_commands = false;
+    for (const auto& command : commands) {
+        if (!command.menu.empty() || command.title.empty() || !command.action)
+            continue;
+        add_item(app_menu, command);
+        app_menu_has_commands = true;
+    }
+    if (app_menu_has_commands)
+        [app_menu addItem:[NSMenuItem separatorItem]];
+
     PulpMenuCommandTarget* quit_target = [[[PulpMenuCommandTarget alloc] init] autorelease];
     quit_target->action = std::move(quit_action);
     NSMenuItem* quit_item = [[[NSMenuItem alloc] initWithTitle:@"Quit"
@@ -70,7 +101,6 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
     [quit_item setTarget:quit_target];
     [quit_item setRepresentedObject:quit_target];
     [app_menu addItem:quit_item];
-    [app_item setSubmenu:app_menu];
 
     std::vector<std::pair<std::string, NSMenu*>> menus;
     for (const auto& command : commands) {
@@ -95,17 +125,7 @@ void install_application_menu(const std::vector<WindowOptions::MenuCommand>& com
             menus.emplace_back(command.menu, menu);
         }
 
-        PulpMenuCommandTarget* target = [[[PulpMenuCommandTarget alloc] init] autorelease];
-        target->action = command.action;
-        NSMenuItem* item =
-            [[[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:command.title.c_str()]
-                                        action:@selector(performMenuCommand:)
-                                 keyEquivalent:key_equivalent(command.key)] autorelease];
-        [item setKeyEquivalentModifierMask:modifier_mask(command.modifiers)];
-        [item setTarget:target];
-        // representedObject retains the target for exactly as long as the item.
-        [item setRepresentedObject:target];
-        [menu addItem:item];
+        add_item(menu, command);
     }
 }
 

@@ -13,12 +13,13 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (25 items across 17 capabilities)
+### Known limitations (26 items across 18 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
 | `timeline_engine.cli_mcp` | The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented. | [link](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp) |
 | `timeline_engine.dawproject_import` | DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-importer) |
+| `timeline_engine.dawproject_export` | DAWproject export is a bounded writer, not Tier-1 support: it emits flat tracks, beats-timed clips, inline notes, referenced audio, and a single tempo and meter. Markers, clip gain and fades, embedded media, mixer state, automation, devices, take lanes, and freeze are declared lost in the capability table and refused unless the caller accepts each concept by name. A neutral channel is emitted so a receiving DAW can register the track; that is not an export of the document's authored mixer state, which is still reported as dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-exporter) |
 | `timeline_engine.smf_interop` | Standard MIDI File import accepts format 0/1 with a metrical division, note on/off, and the tempo, time-signature, track-name, and end-of-track meta events; SMPTE divisions, format 2, and any other event fail the import unless the caller opts into ignoring non-note events. | [link](../guides/timeline-sdk.md#optional-standard-midi-file-interop) |
 | `timeline_engine.smf_interop` | SMF export covers note content plus the tempo and meter maps; device chains, automation, takes, freezes, and media assets have no SMF representation, and a tempo ramp or a tick the requested division cannot represent exactly is an error rather than an approximation. | [link](../guides/timeline-sdk.md#optional-standard-midi-file-interop) |
 | `timeline_engine.capture` | Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities. | [link](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) |
@@ -475,6 +476,7 @@ device I/O, media publication, plugin instantiation, and UI ownership.
 | Takes, comp selection, and sealed track freeze | experimental | [timeline](modules.md#timeline) / [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
 | Bounded audio/MIDI capture and recording commit | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
 | DAWproject linear-subset import | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-importer) | [SDK consumer source](https://github.com/Generous-Corp/pulp/tree/main/examples/timeline-sdk-consumer) |
+| DAWproject bounded export (per-concept consent + loss manifest) | experimental | [dawproject](modules.md#dawproject) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-exporter) | [interchange matrix](interchange-matrix.md#dawproject) |
 | Standard MIDI File import/export against the tempo map | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-standard-midi-file-interop) | |
 | `pulp seq` validate/explain/apply and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
 | Five Timeline MCP operations + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |

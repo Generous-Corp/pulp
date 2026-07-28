@@ -41,8 +41,8 @@
     { "id": "meter.single", "detect": "model", "summary": "One time signature governing the whole document." },
     { "id": "meter.map", "detect": "model", "summary": "Time signature changing over the document at more than one point." },
 
-    { "id": "marker", "detect": "format", "summary": "A named point or range on the timeline." },
-    { "id": "timecode.origin", "detect": "format", "summary": "The wall-clock timecode the document's zero position represents." },
+    { "id": "marker", "detect": "model", "summary": "A named point or range on the timeline." },
+    { "id": "timecode.origin", "detect": "model", "summary": "The wall-clock timecode the document's zero position represents." },
     { "id": "media.provenance", "detect": "format", "summary": "Where a media asset came from: source timecode, reel or tape name, original locator." },
 
     { "id": "mixer.track-gain", "detect": "model", "summary": "Static per-track gain." },

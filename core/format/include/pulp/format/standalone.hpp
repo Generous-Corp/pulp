@@ -131,9 +131,21 @@ struct StandaloneConfig {
     bool transport_recording = false;
 
     // Adds Pulp's floating Musical Typing Keyboard to this standalone app.
-    // The keyboard is hidden until the user chooses Window > Musical Typing
-    // Keyboard or presses Cmd+K (Ctrl+K on non-Apple platforms). Notes enter
-    // through the standalone host's lock-free UI MIDI path.
+    //
+    // OPT-IN, AND OFF BY DEFAULT. This flag gates the ENTIRE feature, not just
+    // the keyboard's visibility: leave it false and the app registers no menu
+    // command and installs no key handler, so Cmd+K is inert and nothing
+    // appears in any menu. That combination is the tell — a broken shortcut
+    // would still leave the menu item behind, so a missing menu item means
+    // this flag, not a handler bug. Said plainly because reading it as
+    // "keyboard starts hidden" costs an afternoon debugging a key route that
+    // was never installed.
+    //
+    // Once enabled, the keyboard stays hidden until the user picks
+    // "Musical Typing Keyboard" from the application menu or presses Cmd+K
+    // (Ctrl+K off Apple). Notes enter through the standalone host's lock-free
+    // UI MIDI path, so they reach the processor only if it accepts MIDI input;
+    // on a processor that ignores MIDI the keys are silent by construction.
     bool enable_musical_typing_keyboard = false;
 };
 

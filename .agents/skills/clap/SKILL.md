@@ -383,7 +383,10 @@ starts at the song origin.
 Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared
 `pulp-format` adapter TU and the per-plugin entry TU must compile with
 the same value. Lifecycle flows through
-`pulp::format::ViewBridge`: `gui_create` → `bridge->open()`, the host
+`pulp::format::ViewBridge`, constructed from
+`ViewBridge::Options::hosted_editor()` (never a hand-assembled `Options` — see
+the `view-bridge` skill for why, and for the test that enforces it):
+`gui_create` → `bridge->open()`, the host
 then calls `gui_set_parent(window)` → `editor_host->attach_to_parent` +
 `bridge->notify_attached()`, `gui_destroy` → `bridge->close()`. See the
 `view-bridge` skill for the full contract — the CLAP adapter is the

@@ -195,6 +195,46 @@ def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Ass
     return plan_assignments(config, changed, base, head, repo)
 
 
+# Derived files that embed a version this bot writes, and so go stale the
+# instant it writes one. Each entry regenerates itself from the tree, so the
+# bot refreshes them rather than leaving a human to notice the breakage.
+_DERIVED_REGENERATORS: list[tuple[str, list[str]]] = [
+    # Embeds the plugin surface's version and catalog_version. Left stale, the
+    # Vellum freeze gate fails on the bump commit itself — so every bump PR
+    # stalled until a human ran this by hand, which meant releases stopped by
+    # default rather than on purpose.
+    (
+        "docs/status/pulp-tooling-disposition.json",
+        ["python3", "tools/scripts/pulp_tooling_disposition.py", "--write"],
+    ),
+]
+
+
+def _refresh_derived(repo: Path) -> list[str]:
+    """Regenerate files that embed a version, returning those that changed.
+
+    Best-effort by design: a regenerator that fails must not abort a bump that
+    is otherwise correct, because the bot is the single writer for versions and
+    a wedged bot stops all releases. A failure here leaves the derived file
+    stale, which is exactly the pre-existing behaviour and is caught downstream
+    by the same gate that caught it before."""
+    refreshed: list[str] = []
+    for path, command in _DERIVED_REGENERATORS:
+        try:
+            subprocess.run(command, cwd=repo, check=True, capture_output=True)
+        except (subprocess.CalledProcessError, OSError):
+            continue
+        # Only report it as edited when the content actually moved; these
+        # regenerators are idempotent, so an unchanged file is the norm.
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", path],
+            cwd=repo, capture_output=True, text=True,
+        )
+        if status.stdout.strip():
+            refreshed.append(path)
+    return refreshed
+
+
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:
     surfaces_by_name: dict[str, Surface] = {s.name: s for s in config.surfaces}
     edited: list[str] = []
@@ -202,6 +242,10 @@ def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]
         for vf in surfaces_by_name[a.surface].version_files:
             if write_version(repo, vf, a.assigned):
                 edited.append(vf.path)
+    # Only when a version actually moved — regenerating on a no-op plan would
+    # sweep unrelated drift into a bump commit.
+    if edited:
+        edited.extend(_refresh_derived(repo))
     return edited
 
 

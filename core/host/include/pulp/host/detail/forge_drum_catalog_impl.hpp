@@ -194,10 +194,13 @@ inline void add_voice_params(CustomNodeType& type, EngineId id) {
         // frequency; the bridged-T network produces its own pitch and decay
         // from its component values, which are declared below. Declaring a
         // control on a body that cannot consume it would ship a dead knob.
-        if (id != EngineId::kick_circuit) {
-            add(type, kTuneHz, 20, 400, 55);
+        // Every body takes a tune control. The circuit body has no frequency
+        // parameter of its own -- it retunes by substituting capacitors, the
+        // way the instrument does on the bench -- but that is an implementation
+        // detail, not a reason to withhold the control.
+        add(type, kTuneHz, 20, 400, 55);
+        if (id != EngineId::kick_circuit)
             add(type, kDecay, 10, 4000, 400);
-        }
         if (id == EngineId::kick_oscillator) {
             add(type, kPitchSweepOctaves, 0, 6, 2);
             add(type, kPitchSweepMs, 0.5f, 500, 30);
@@ -462,8 +465,15 @@ inline CustomNodeType make_drum_node_impl(EngineId id) {
     type.destroy = [](void* p) { delete static_cast<DrumInstance*>(p); };
     type.prepare = [](void* p, double sample_rate, int /*max_block*/) {
         auto& instance = *static_cast<DrumInstance*>(p);
-        instance.voice->set_output_oversampling(signal::drum::OutputOversampling::bypass);
+        instance.voice->set_output_oversampling(kDrumNodeOversampling);
         instance.voice->prepare(sample_rate);
+    };
+    // Declare the group delay this node's quality choice produces, derived
+    // from that one choice rather than restated. Today it resolves to zero;
+    // the point is that it stops being a promise and becomes a consequence, so
+    // flipping the quality above cannot leave a stale latency behind it.
+    type.latency_samples = [](double /*sample_rate*/) {
+        return signal::drum::OutputStage::latency_samples_for(kDrumNodeOversampling);
     };
     type.reset = [](void* p) {
         auto& instance = *static_cast<DrumInstance*>(p);
