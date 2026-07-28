@@ -1,155 +1,187 @@
 # Claude Design prompt — Forge Modular
 
-Paste everything below the line into Claude Design, attaching
-`Forge - AI Plugin Factory-2.html` as the reference. It is written to be read
-cold, so it restates what Forge is rather than assuming the conversation.
+Paste everything below the line, attaching `Forge - AI Plugin Factory-2.html`.
+This asks for a *refinement* of that design into a sibling product, not a new
+one from scratch.
 
 ---
 
-I'm designing **Forge Modular**, a sibling product to Forge (the attached
-`Forge - AI Plugin Factory-2.html` is Forge's design — please match its
-language, not copy its screens).
+Attached is **Forge**, my AI plugin factory: you describe an instrument or
+effect, an agent writes the DSP and the UI, and you get a real AU/VST3/CLAP
+plugin for your DAW.
 
-## What Forge is, and what Forge Modular is
+I'm building **Forge Modular**, a sibling product for **VCV Rack** — the
+open-source Eurorack modular synthesizer. Please refine the attached design
+into this second product. **Share everything that should be shared** — the
+home screen, the chrome, the design language, the generation-animation family
+— and diverge only where the subject genuinely differs. It should be obvious
+these are one family, and equally obvious which one you're in.
 
-**Forge** turns a text prompt into a finished audio plugin — AU/VST3/CLAP —
-for use in a DAW. You describe an instrument or effect, an agent writes the
-DSP and the UI, and you get a real plugin you can play.
+## What's different about it
 
-**Forge Modular** does the same for **VCV Rack**, the open-source Eurorack
-modular synthesizer. It is a separate app with two things it can build:
+Forge makes **one plugin** for a DAW. Forge Modular makes **two things**, and
+they're different enough to want different treatment:
 
-1. **Modules** — a single Eurorack module: a front panel with knobs and
-   patch jacks, and the DSP behind it. Structurally very close to Forge's
-   plugin building, so this flow should feel like a sibling of it.
-2. **Patches** — a whole rack of modules wired together with virtual cables.
-   This has **no equivalent in Forge** and needs its own design thinking. It
-   is as much a *teaching* surface as a building one: the app explains what
-   it connected and why, so the user learns modular synthesis by watching
-   their idea get patched.
+1. **Eurorack modules** — a single module: a tall narrow front panel with
+   knobs and patch jacks, and the DSP behind it. This is close enough to
+   Forge's plugin building that it should feel like the same flow.
+2. **Patches** — a whole rack of modules wired together with cables. Forge has
+   no equivalent. It's as much a *teaching* surface as a building one: the app
+   explains what it connected and why, so someone learns modular synthesis by
+   watching their idea get patched.
 
-Please don't retrofit patch building into the plugin-builder layout. Modules
-and patches are different activities and deserve to feel different, while
-still obviously being one family with Forge.
+Please don't force patch building into the plugin-builder layout.
 
-## Vocabulary you'll need
+## Vocabulary
 
-- **Eurorack** — a hardware modular standard. Modules are panels of fixed
-  height in a rack, widths measured in **HP** (1 HP ≈ 5 mm). A module is
-  typically 2–20 HP: tall, narrow, dense with knobs and jacks.
-- **Patch cables** — coloured cables physically connecting one module's
-  output jack to another's input jack. They hang in loops. Rack draws them
-  over the panels; a busy patch is a beautiful mess of colour.
-- **Signal roles** — three kinds of thing travel down cables: **audio**
-  (what you hear), **pitch/gate** (which note, and when), and **modulation**
-  (slow changes that make sounds move). Colour-coding by role is the single
-  most useful visual idea in this product.
-- **A voice** — the classic chain: oscillator → filter → amplifier, with an
-  envelope opening the amplifier. Most patches are variations on it.
+- **Eurorack** — modules are panels of fixed height, widths in **HP**
+  (1 HP ≈ 5 mm), typically 2–20 HP. Tall, narrow, dense with knobs and jacks.
+- **Patch cables** — coloured cables joining one module's output jack to
+  another's input. They hang in loops over the panels. A busy patch is a
+  beautiful mess of colour.
+- **Signal roles** — three kinds of thing travel down cables: **audio** (what
+  you hear), **pitch/gate** (which note, and when), **modulation** (slow
+  changes that make sounds move). Colour-coding by role is the most useful
+  visual idea in this product.
 
-## The two things to design
+## Module building
 
-### A. Module building
+Like Forge's flow. The preview should show **the actual Eurorack front panel**
+being built — tall, narrow, knobs and jacks on it.
 
-Close to Forge's plugin flow: prompt → generated → preview → use it. The
-preview should show **the actual Eurorack front panel** being built — tall,
-narrow, knobs and jacks laid out on it.
+One constraint that shapes the ending: **Rack can't load a new module without
+restarting.** So the flow ends in a state-dependent button — "Launch Rack with
+this module" when Rack isn't running, "Relaunch Rack" when it is. One click.
+Design it as deliberate, not as an apology.
 
-One honest constraint that shapes this flow: **VCV Rack cannot load a new
-module without restarting.** A newly built module can't appear in a running
-Rack. So the flow ends in a state-dependent button — "Launch Rack with this
-module" when Rack isn't running, "Relaunch Rack" when it is. Please design
-this as a confident single step rather than an apology; it's one click, but
-it should feel deliberate rather than like a failure.
+## Patch building
 
-### B. Patch building
+Left: chat. Right: the patch — real module panels side by side, cables between
+them.
 
-Left: chat. Right: the patch — real module panels side by side with cables
-drawn between them.
-
-The chat explains the wiring in a readable, grouped form. This is real
-output from the working prototype, for "an evolving ambient drone that plays
-by itself":
+The chat explains the wiring. This is **real output from the working
+prototype** for "an evolving ambient drone that plays by itself":
 
 ```
 AUDIO
   VCO SAW → VCF IN
   VCF LP → VCA IN
-  VCA OUT → Audio 2 IN 0
+  VCA OUT → Audio 2 To "device output 1"
 
 PITCH & GATE
   MULT 1 → SEQ CLK
   SEQ CV → VCO V/OCT
       the sequencer walks the drone's pitch so it never settles on one note
-  EUCL GATE → ENV GATE
-      euclidean rests against the 8-step loop keep the swells from lining up
 
 MODULATION
-  LFO SQR → MULT IN
-      a very slow clock, split two ways — the patch plays itself, no keyboard
   LFO TRI → VCF CV
       an unrelated slow LFO sweeps the cutoff — the timbre breathes
   ENV ENV → VCA CV
       long attack and release means notes swell in and fade, never strike
 ```
 
-Design how this should look. Ideas worth exploring, not prescriptions:
-- Each role group colour-keyed, with the **same colour used for that cable in
-  the patch diagram**, so reading the text highlights the picture.
-- Hovering a line in the chat highlights that cable in the diagram, and vice
-  versa. This is the core interaction of the whole mode.
-- The *why* clauses are the teaching. They should be visually secondary to
-  the connection lines but not buried.
-- A depth control (terse / standard / learning) — standard is the default.
+Worth exploring:
+- Each role group colour-keyed, with **the same colour on that cable in the
+  diagram**, so reading the text lights up the picture.
+- Hovering a line highlights its cable, and vice versa. This is the core
+  interaction of the mode.
+- The *why* clauses are the teaching — secondary to the connections, not buried.
+- A depth control (terse / standard / learning); standard is the default.
 
-### Patch-specific interactions to consider
+Also: asking a question that **doesn't** change the patch ("why did you wire
+the LFO there?") versus asking for a change ("add a reverb"). The user should
+be able to tell which will happen **before** they send.
 
-- Dragging an existing `.vcv` patch file onto the chat to have it explained,
-  or added to. (Explaining is free — it's computed from the file.)
-- Asking a question that does **not** change the patch ("why did you wire the
-  LFO to the filter?") versus asking for a change ("add a reverb"). The user
-  should be able to tell which will happen **before** they send.
-- The patch may be edited by the user inside Rack. On return the app shows
-  what changed structurally and never silently overwrites their work.
+## @mentions — a real feature, with real numbers
+
+There are **4,705 modules across 543 plugins** in the VCV library, and the app
+has them all indexed locally. Typing `@` searches every one:
+
+```
+'vco' — 51 modules, 2 usable now
+
+  ✓ ready     Fundamental/VCO         VCO              [VCO, Polyphonic]
+  ↓ free      Befaco/EvenVCO          Even VCO         [VCO, Hardware clone]
+  $ premium   ALM034/ALM034           Pamela's Pro Workout
+```
+
+Three states, and they matter:
+
+- **✓ ready** — installed, can be used right now
+- **↓ free** — free, but not installed; install from Rack's Library first
+- **$ premium** — costs money, or comes with a VCV+ subscription
+
+**Only "ready" can be used in a patch.** If someone @mentions a premium module
+they don't have, the app should say so *before generating anything* — building
+a patch around something that can't load is wasted time and money.
+
+One honest wrinkle for the copy: **we can't tell whether someone already owns
+a premium module they haven't installed.** So the message must never say "you
+need to buy this" — it should say something closer to "if you own this, sync
+it in Rack's Library; otherwise it's a purchase or VCV+." Getting this wrong
+means telling someone to buy what they already own.
+
+Design the mention picker, the three states, and how a blocked mention reads.
+Brands work too — `@befaco`, `@4ms`, `@mutable instruments` (425 brands).
+
+## Install
+
+The app compiles real modules, so it needs VCV's Rack SDK (~40 MB), which we
+aren't permitted to redistribute — it's fetched from vcvrack.com at install.
+
+**Keep this as close to invisible as possible.** It should download silently
+during install. There is exactly one thing the user must see: a licence
+acknowledgement, because it's legally required. One checkbox, plain language,
+in the installer — not a first-run wizard, not a multi-step flow. Design that
+one moment so it reads as honest rather than as a hurdle.
 
 ## Animations — the part I most want your eye on
 
-Forge has a generation animation (see `fg-materialize`, `fg-shimmer`,
-`fg-rise`, `fg-breathe` in the attached file). Forge Modular should have
-**two of its own**, clearly the same family, with a Eurorack accent:
+Forge has a generation animation (`fg-materialize`, `fg-shimmer`, `fg-rise`,
+`fg-breathe` in the attached file). Forge Modular should have **two of its
+own**, clearly the same family, with a Eurorack accent:
 
-1. **Module building** — something that evokes a front panel coming into
-   being: the panel blank, then knobs and jacks landing on it, silkscreen
-   labels appearing, the panel settling into the rack. Eurorack panels have a
-   specific look — brushed or matte, silkscreened text, screws at the
-   corners, jacks as dark circles with metal rings.
-2. **Patch building** — something that evokes **cables being patched**: cables
-   arcing from jack to jack, one at a time, settling into hanging loops. The
-   satisfying thing about modular is the physical act of patching, and this
-   animation is where that feeling lives. Consider revealing cables in the
-   same role order the explanation uses — audio path first, then pitch/gate,
-   then modulation — so the animation and the text tell the same story.
+1. **Module building** — a front panel coming into being: blank panel, then
+   knobs and jacks landing, silkscreen labels appearing, the panel settling
+   into the rack. Eurorack panels have a specific look — matte or brushed,
+   silkscreened text, screws at the corners, jacks as dark circles with metal
+   rings.
+2. **Patch building** — **cables being patched**: arcing from jack to jack,
+   one at a time, settling into hanging loops. The satisfying thing about
+   modular is the physical act of patching, and this is where that feeling
+   lives. Consider revealing cables in the same role order the explanation
+   uses — audio, then pitch/gate, then modulation — so animation and text tell
+   one story.
 
 Both should read as siblings of Forge's animation, not strangers.
 
-## Constraints to design within
+## A design opportunity worth taking
 
-- **Palette**: Forge's — `#16DAC2` (accent), `#F6B847`, `#5E78FF`, `#8B6CF5`,
-  `#46F0DB`, `#3FCF77`, on the dark `#161A21` / `#1E2530` surfaces.
-- **Type**: Jost for UI, JetBrains Mono for wiring text and module slugs.
-- **Rack's own cable colours** are `#f3374b #ffb437 #00b56e #3695ef #8b4ade`.
-  Where the diagram shows real cables it should probably use these, since
-  that's what the user sees in Rack.
-- Dark theme first.
-- Desktop app, resizable. Assume ~1280×800 as the design size.
+Generated panels currently use Rack's stock knobs and jacks. Those are
+licensed CC BY-NC, which constrains what someone can do with a module they
+built and sell. **If you design our own knobs, jacks, switches and sliders**,
+that constraint disappears *and* Forge Modular modules become recognisably
+ours on sight. I'd like these as part of the deliverable — a small component
+set, in the Forge design language, that reads correctly at Eurorack scale
+(a knob is ~12 mm across; a jack ~8 mm).
+
+## Constraints
+
+- **Palette**: Forge's — `#16DAC2` accent, `#F6B847`, `#5E78FF`, `#8B6CF5`,
+  `#46F0DB`, `#3FCF77`, on `#161A21` / `#1E2530`.
+- **Type**: Jost for UI, JetBrains Mono for wiring text and slugs.
+- Rack's own cable colours are `#f3374b #ffb437 #00b56e #3695ef #8b4ade`;
+  where the diagram shows real cables, those are what the user sees in Rack.
+- Dark theme first. Desktop, resizable, design at ~1280×800.
 
 ## What I'd like back
 
-1. Both tabs, at rest and mid-generation.
-2. The patch explanation treatment, in all three depths if you have the
-   appetite — this is the heart of the product.
-3. The two animations, as working CSS/JS in the deliverable.
-4. Any structural disagreement you have with the above. In particular: I've
-   assumed module building and patch building are two tabs in one window, but
-   a module belongs to *every* patch while a patch project is one document —
-   if that tension suggests a different shape to you, say so.
+1. The shared home screen, and both modes at rest and mid-generation.
+2. The patch explanation treatment — the heart of the product.
+3. The @mention picker with its three states.
+4. The two animations, as working CSS/JS.
+5. The Eurorack component set (knobs, jacks, switches, sliders).
+6. Any structural disagreement. In particular: I've assumed module building
+   and patch building are two tabs in one window, but a module belongs to
+   *every* patch while a patch is one document — if that tension suggests a
+   different shape, say so.
