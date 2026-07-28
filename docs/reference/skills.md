@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 55 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 56 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -29,6 +29,7 @@ for its complete, authoritative guidance.
 | `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
 | `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
+| `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
 | `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
 | `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |

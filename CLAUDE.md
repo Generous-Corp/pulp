@@ -1544,6 +1544,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
+| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
