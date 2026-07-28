@@ -24,4 +24,12 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelATT);
     p->addModel(modelMULT);
     p->addModel(modelDUALATN);
+    p->addModel(modelATTEN);
+    p->addModel(modelMORPHLFO);
+    p->addModel(modelFOURPOLE);
+    p->addModel(modelSTEPS);
+    p->addModel(modelKICK);
+    p->addModel(modelSANDH);
+    p->addModel(modelFOLD);
+    p->addModel(modelDUALAD);
 }

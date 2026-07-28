@@ -431,6 +431,45 @@ inline void place_MULT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
 }
 
+// ── ATTEN (2HP) ───────────────────────────────────────
+struct ATTENLayout {
+    static constexpr int kHp = 2;
+    enum ParamId { ATT_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LVL_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_ATTEN(rack::engine::Module* m) {
+    m->config(ATTENLayout::PARAMS_LEN, ATTENLayout::INPUTS_LEN, ATTENLayout::OUTPUTS_LEN, ATTENLayout::LIGHTS_LEN);
+    m->configParam(ATTENLayout::ATT_PARAM, 0.0f, 1.0f, 0.5f, "Amount", " %", 0.0f, 100.0f);
+    m->configInput(ATTENLayout::IN_INPUT, "Signal in (normalled to 10.0V)");
+    m->configOutput(ATTENLayout::OUT_OUTPUT, "Attenuated out");
+    m->configLight(ATTENLayout::LVL_LIGHT, "Level");
+}
+
+/// Channel count for ATTEN, from the manifest's declared source.
+inline int channels_ATTEN(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[ATTENLayout::IN_INPUT].getChannels());
+}
+
+/// IN_INPUT with its declared normal applied.
+inline float read_ATTEN_IN_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[ATTENLayout::IN_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+inline void place_ATTEN(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(5.080f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(5.080f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(5.080f, 30.000f)), m, ATTENLayout::ATT_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.080f, 60.000f)), m, ATTENLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(5.080f, 90.000f)), m, ATTENLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5.080f, 108.000f)), m, ATTENLayout::LVL_LIGHT));
+}
+
 // ── CARTOG (4HP) ──────────────────────────────────────
 struct CARTOGLayout {
     static constexpr int kHp = 4;
@@ -455,6 +494,78 @@ inline void place_CARTOG(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 126.153f))));
     w->addParam(createParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(10.160f, 40.000f)), m, CARTOGLayout::SCAN_PARAM));
     w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
+}
+
+// ── DUALAD (10HP) ──────────────────────────────────────
+struct DUALADLayout {
+    static constexpr int kHp = 10;
+    enum ParamId { A_ATK_PARAM, A_DEC_PARAM, A_CURVE_PARAM, A_LOOP_PARAM, B_ATK_PARAM, B_DEC_PARAM, B_CURVE_PARAM, B_LOOP_PARAM, PARAMS_LEN };
+    enum InputId { A_TRIG_INPUT, A_TIME_CV_INPUT, B_TRIG_INPUT, B_TIME_CV_INPUT, INPUTS_LEN };
+    enum OutputId { A_EOC_OUTPUT, A_ENV_OUTPUT, B_EOC_OUTPUT, B_ENV_OUTPUT, OUTPUTS_LEN };
+    enum LightId { A_LIGHT = 0, B_LIGHT = 1, LIGHTS_LEN = 2 };
+};
+
+inline void config_DUALAD(rack::engine::Module* m) {
+    m->config(DUALADLayout::PARAMS_LEN, DUALADLayout::INPUTS_LEN, DUALADLayout::OUTPUTS_LEN, DUALADLayout::LIGHTS_LEN);
+    m->configParam(DUALADLayout::A_ATK_PARAM, -10.0f, 1.0f, -6.0f, "Channel A attack time", " s", 2.0f, 1.0f);
+    m->configParam(DUALADLayout::A_DEC_PARAM, -9.0f, 3.0f, -3.0f, "Channel A decay time", " s", 2.0f, 1.0f);
+    m->configParam(DUALADLayout::A_CURVE_PARAM, 0.0f, 1.0f, 0.5f, "Channel A curve", "", 0.0f, 1.0f);
+    m->configSwitch(DUALADLayout::A_LOOP_PARAM, 0.0f, 1.0f, 0.0f, "Channel A loop", {"One-shot", "Loop"});
+    m->configParam(DUALADLayout::B_ATK_PARAM, -10.0f, 1.0f, -6.0f, "Channel B attack time", " s", 2.0f, 1.0f);
+    m->configParam(DUALADLayout::B_DEC_PARAM, -9.0f, 3.0f, -1.0f, "Channel B decay time", " s", 2.0f, 1.0f);
+    m->configParam(DUALADLayout::B_CURVE_PARAM, 0.0f, 1.0f, 0.5f, "Channel B curve", "", 0.0f, 1.0f);
+    m->configSwitch(DUALADLayout::B_LOOP_PARAM, 0.0f, 1.0f, 0.0f, "Channel B loop", {"One-shot", "Loop"});
+    m->configInput(DUALADLayout::A_TRIG_INPUT, "Channel A trigger");
+    m->configInput(DUALADLayout::A_TIME_CV_INPUT, "Channel A time CV (1V/oct)");
+    m->configInput(DUALADLayout::B_TRIG_INPUT, "Channel B trigger (normalled from A_TRIG_INPUT)");
+    m->configInput(DUALADLayout::B_TIME_CV_INPUT, "Channel B time CV (1V/oct) (normalled from A_TIME_CV_INPUT)");
+    m->configOutput(DUALADLayout::A_EOC_OUTPUT, "Channel A end of cycle");
+    m->configOutput(DUALADLayout::A_ENV_OUTPUT, "Channel A envelope");
+    m->configOutput(DUALADLayout::B_EOC_OUTPUT, "Channel B end of cycle");
+    m->configOutput(DUALADLayout::B_ENV_OUTPUT, "Channel B envelope");
+    m->configLight(DUALADLayout::A_LIGHT, "Channel A level");
+    m->configLight(DUALADLayout::B_LIGHT, "Channel B level");
+}
+
+/// B_TRIG_INPUT with its declared normal applied.
+inline float read_DUALAD_B_TRIG_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[DUALADLayout::B_TRIG_INPUT].isConnected()
+        ? m->inputs[DUALADLayout::B_TRIG_INPUT].getPolyVoltage(c)
+        : m->inputs[DUALADLayout::A_TRIG_INPUT].getPolyVoltage(c);
+}
+
+/// B_TIME_CV_INPUT with its declared normal applied.
+inline float read_DUALAD_B_TIME_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[DUALADLayout::B_TIME_CV_INPUT].isConnected()
+        ? m->inputs[DUALADLayout::B_TIME_CV_INPUT].getPolyVoltage(c)
+        : m->inputs[DUALADLayout::A_TIME_CV_INPUT].getPolyVoltage(c);
+}
+
+inline void place_DUALAD(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.900f, 30.000f)), m, DUALADLayout::A_ATK_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.900f, 50.000f)), m, DUALADLayout::A_DEC_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12.900f, 68.000f)), m, DUALADLayout::A_CURVE_PARAM));
+    w->addParam(createParamCentered<CKSS>(mm2px(Vec(12.900f, 83.000f)), m, DUALADLayout::A_LOOP_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(37.900f, 30.000f)), m, DUALADLayout::B_ATK_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(37.900f, 50.000f)), m, DUALADLayout::B_DEC_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(37.900f, 68.000f)), m, DUALADLayout::B_CURVE_PARAM));
+    w->addParam(createParamCentered<CKSS>(mm2px(Vec(37.900f, 83.000f)), m, DUALADLayout::B_LOOP_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.900f, 102.000f)), m, DUALADLayout::A_TRIG_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(18.900f, 102.000f)), m, DUALADLayout::A_TIME_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(31.900f, 102.000f)), m, DUALADLayout::B_TRIG_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(43.900f, 102.000f)), m, DUALADLayout::B_TIME_CV_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(6.900f, 116.000f)), m, DUALADLayout::A_EOC_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(18.900f, 116.000f)), m, DUALADLayout::A_ENV_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(31.900f, 116.000f)), m, DUALADLayout::B_EOC_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(43.900f, 116.000f)), m, DUALADLayout::B_ENV_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(12.900f, 91.000f)), m, DUALADLayout::A_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(37.900f, 91.000f)), m, DUALADLayout::B_LIGHT));
 }
 
 // ── DUALATN (6HP) ─────────────────────────────────────
@@ -507,6 +618,328 @@ inline void place_DUALATN(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 90.000f)), m, DUALATNLayout::B_OUT_OUTPUT));
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 58.000f)), m, DUALATNLayout::A_LIGHT));
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 102.000f)), m, DUALATNLayout::B_LIGHT));
+}
+
+// ── FOLD (8HP) ────────────────────────────────────────
+struct FOLDLayout {
+    static constexpr int kHp = 8;
+    enum ParamId { DRIVE_PARAM, SYM_PARAM, DRIVE_CV_PARAM, SYM_CV_PARAM, SHAPE_PARAM, LEVEL_PARAM, PARAMS_LEN };
+    enum InputId { DRIVE_CV_INPUT, SYM_CV_INPUT, IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { FOLD_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_FOLD(rack::engine::Module* m) {
+    m->config(FOLDLayout::PARAMS_LEN, FOLDLayout::INPUTS_LEN, FOLDLayout::OUTPUTS_LEN, FOLDLayout::LIGHTS_LEN);
+    m->configParam(FOLDLayout::DRIVE_PARAM, 0.0f, 1.0f, 0.25f, "Drive", " %", 0.0f, 100.0f);
+    m->configParam(FOLDLayout::SYM_PARAM, -1.0f, 1.0f, 0.0f, "Symmetry", " %", 0.0f, 100.0f);
+    m->configParam(FOLDLayout::DRIVE_CV_PARAM, -1.0f, 1.0f, 0.0f, "Drive CV amount", " %", 0.0f, 100.0f);
+    m->configParam(FOLDLayout::SYM_CV_PARAM, -1.0f, 1.0f, 0.0f, "Symmetry CV amount", " %", 0.0f, 100.0f);
+    m->configSwitch(FOLDLayout::SHAPE_PARAM, 0.0f, 2.0f, 0.0f, "Fold shape", {"Sine", "Triangle", "Wrap"});
+    m->configParam(FOLDLayout::LEVEL_PARAM, 0.0f, 1.0f, 0.8f, "Output level", " %", 0.0f, 100.0f);
+    m->configInput(FOLDLayout::DRIVE_CV_INPUT, "Drive CV");
+    m->configInput(FOLDLayout::SYM_CV_INPUT, "Symmetry CV (normalled from DRIVE_CV_INPUT)");
+    m->configInput(FOLDLayout::IN_INPUT, "Audio in");
+    m->configOutput(FOLDLayout::OUT_OUTPUT, "Folded out");
+    m->configLight(FOLDLayout::FOLD_LIGHT, "Fold depth");
+}
+
+/// Channel count for FOLD, from the manifest's declared source.
+inline int channels_FOLD(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[FOLDLayout::IN_INPUT].getChannels());
+}
+
+/// SYM_CV_INPUT with its declared normal applied.
+inline float read_FOLD_SYM_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[FOLDLayout::SYM_CV_INPUT].isConnected()
+        ? m->inputs[FOLDLayout::SYM_CV_INPUT].getPolyVoltage(c)
+        : m->inputs[FOLDLayout::DRIVE_CV_INPUT].getPolyVoltage(c);
+}
+
+inline void place_FOLD(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.800f, 30.000f)), m, FOLDLayout::DRIVE_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(28.800f, 30.000f)), m, FOLDLayout::SYM_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(11.800f, 52.000f)), m, FOLDLayout::DRIVE_CV_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(28.800f, 52.000f)), m, FOLDLayout::SYM_CV_PARAM));
+    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(11.800f, 86.000f)), m, FOLDLayout::SHAPE_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(28.800f, 86.000f)), m, FOLDLayout::LEVEL_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 68.000f)), m, FOLDLayout::DRIVE_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.800f, 68.000f)), m, FOLDLayout::SYM_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 104.000f)), m, FOLDLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.800f, 104.000f)), m, FOLDLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(20.320f, 104.000f)), m, FOLDLayout::FOLD_LIGHT));
+}
+
+// ── FOURPOLE (8HP) ────────────────────────────────────
+struct FOURPOLELayout {
+    static constexpr int kHp = 8;
+    enum ParamId { CUTOFF_PARAM, RES_PARAM, DRIVE_PARAM, FM_PARAM, VOICE_PARAM, PARAMS_LEN };
+    enum InputId { VOCT_INPUT, FM_INPUT, IN_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LVL_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_FOURPOLE(rack::engine::Module* m) {
+    m->config(FOURPOLELayout::PARAMS_LEN, FOURPOLELayout::INPUTS_LEN, FOURPOLELayout::OUTPUTS_LEN, FOURPOLELayout::LIGHTS_LEN);
+    m->configParam(FOURPOLELayout::CUTOFF_PARAM, 0.0f, 1.0f, 0.5f, "Cutoff", "", 0.0f, 10.0f);
+    m->configParam(FOURPOLELayout::RES_PARAM, 0.0f, 1.0f, 0.0f, "Resonance", " %", 0.0f, 100.0f);
+    m->configParam(FOURPOLELayout::DRIVE_PARAM, -6.0f, 24.0f, 0.0f, "Input drive", " dB", 0.0f, 1.0f);
+    m->configParam(FOURPOLELayout::FM_PARAM, -1.0f, 1.0f, 0.0f, "Cutoff FM amount", " %", 0.0f, 100.0f);
+    m->configSwitch(FOURPOLELayout::VOICE_PARAM, 0.0f, 2.0f, 0.0f, "Voicing", {"Juno", "Prophet", "Ladder"});
+    m->configInput(FOURPOLELayout::VOCT_INPUT, "Cutoff 1V/oct");
+    m->configInput(FOURPOLELayout::FM_INPUT, "Cutoff FM");
+    m->configInput(FOURPOLELayout::IN_INPUT, "Audio in");
+    m->configOutput(FOURPOLELayout::OUT_OUTPUT, "Low-pass out");
+    m->configLight(FOURPOLELayout::LVL_LIGHT, "Output level");
+}
+
+/// Channel count for FOURPOLE, from the manifest's declared source.
+inline int channels_FOURPOLE(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[FOURPOLELayout::IN_INPUT].getChannels());
+}
+
+inline void place_FOURPOLE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(20.320f, 32.000f)), m, FOURPOLELayout::CUTOFF_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.800f, 58.000f)), m, FOURPOLELayout::RES_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(28.800f, 58.000f)), m, FOURPOLELayout::DRIVE_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(11.800f, 77.000f)), m, FOURPOLELayout::FM_PARAM));
+    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(28.800f, 77.000f)), m, FOURPOLELayout::VOICE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 93.000f)), m, FOURPOLELayout::VOCT_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.800f, 93.000f)), m, FOURPOLELayout::FM_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 112.000f)), m, FOURPOLELayout::IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.800f, 112.000f)), m, FOURPOLELayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(28.800f, 120.500f)), m, FOURPOLELayout::LVL_LIGHT));
+}
+
+// ── KICK (6HP) ────────────────────────────────────────
+struct KICKLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { TUNE_PARAM, DECAY_PARAM, CLICK_PARAM, SWEEP_PARAM, TUNECV_PARAM, PARAMS_LEN };
+    enum InputId { TRIG_INPUT, TUNECV_INPUT, ACCENT_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { HIT_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_KICK(rack::engine::Module* m) {
+    m->config(KICKLayout::PARAMS_LEN, KICKLayout::INPUTS_LEN, KICKLayout::OUTPUTS_LEN, KICKLayout::LIGHTS_LEN);
+    m->configParam(KICKLayout::TUNE_PARAM, 30.0f, 120.0f, 52.0f, "Tune", " Hz", 0.0f, 1.0f);
+    m->configParam(KICKLayout::DECAY_PARAM, 30.0f, 1200.0f, 320.0f, "Decay", " ms", 0.0f, 1.0f);
+    m->configParam(KICKLayout::CLICK_PARAM, 0.0f, 1.0f, 0.35f, "Click", " %", 0.0f, 100.0f);
+    m->configParam(KICKLayout::SWEEP_PARAM, 0.0f, 4.0f, 2.0f, "Pitch sweep", " oct", 0.0f, 1.0f);
+    m->configParam(KICKLayout::TUNECV_PARAM, -1.0f, 1.0f, 0.0f, "Tune CV amount", " %", 0.0f, 100.0f);
+    m->configInput(KICKLayout::TRIG_INPUT, "Trigger");
+    m->configInput(KICKLayout::TUNECV_INPUT, "Tune CV");
+    m->configInput(KICKLayout::ACCENT_INPUT, "Accent (normalled to 10.0V)");
+    m->configOutput(KICKLayout::OUT_OUTPUT, "Kick out");
+    m->configLight(KICKLayout::HIT_LIGHT, "Hit");
+}
+
+/// ACCENT_INPUT with its declared normal applied.
+inline float read_KICK_ACCENT_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[KICKLayout::ACCENT_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+inline void place_KICK(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 27.000f)), m, KICKLayout::TUNE_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(8.500f, 47.000f)), m, KICKLayout::DECAY_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 47.000f)), m, KICKLayout::CLICK_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(8.500f, 65.000f)), m, KICKLayout::SWEEP_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(22.000f, 65.000f)), m, KICKLayout::TUNECV_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.500f, 83.000f)), m, KICKLayout::TRIG_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(22.000f, 83.000f)), m, KICKLayout::TUNECV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.500f, 101.000f)), m, KICKLayout::ACCENT_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22.000f, 101.000f)), m, KICKLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(15.240f, 113.000f)), m, KICKLayout::HIT_LIGHT));
+}
+
+// ── MORPHLFO (6HP) ────────────────────────────────────
+struct MORPHLFOLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { RATE_PARAM, SHAPE_PARAM, RATE_CV_PARAM, SHAPE_CV_PARAM, PARAMS_LEN };
+    enum InputId { RATE_CV_INPUT, SHAPE_CV_INPUT, RST_INPUT, INPUTS_LEN };
+    enum OutputId { UNI_OUTPUT, OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LFO_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_MORPHLFO(rack::engine::Module* m) {
+    m->config(MORPHLFOLayout::PARAMS_LEN, MORPHLFOLayout::INPUTS_LEN, MORPHLFOLayout::OUTPUTS_LEN, MORPHLFOLayout::LIGHTS_LEN);
+    m->configParam(MORPHLFOLayout::RATE_PARAM, -4.0f, 4.0f, 1.0f, "Rate", " Hz", 2.0f, 2.0f);
+    m->configParam(MORPHLFOLayout::SHAPE_PARAM, 0.0f, 1.0f, 0.5f, "Shape morph", "", 0.0f, 1.0f);
+    m->configParam(MORPHLFOLayout::RATE_CV_PARAM, -1.0f, 1.0f, 0.0f, "Rate CV amount", "", 0.0f, 1.0f);
+    m->configParam(MORPHLFOLayout::SHAPE_CV_PARAM, -1.0f, 1.0f, 0.0f, "Shape CV amount", "", 0.0f, 1.0f);
+    m->configInput(MORPHLFOLayout::RATE_CV_INPUT, "Rate CV (normalled to 5.0V)");
+    m->configInput(MORPHLFOLayout::SHAPE_CV_INPUT, "Shape CV (normalled to 5.0V)");
+    m->configInput(MORPHLFOLayout::RST_INPUT, "Reset");
+    m->configOutput(MORPHLFOLayout::UNI_OUTPUT, "Unipolar out");
+    m->configOutput(MORPHLFOLayout::OUT_OUTPUT, "Bipolar out");
+    m->configLight(MORPHLFOLayout::LFO_LIGHT, "Level");
+}
+
+/// RATE_CV_INPUT with its declared normal applied.
+inline float read_MORPHLFO_RATE_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MORPHLFOLayout::RATE_CV_INPUT].getNormalPolyVoltage(5.0f, c);
+}
+
+/// SHAPE_CV_INPUT with its declared normal applied.
+inline float read_MORPHLFO_SHAPE_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MORPHLFOLayout::SHAPE_CV_INPUT].getNormalPolyVoltage(5.0f, c);
+}
+
+inline void place_MORPHLFO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 30.000f)), m, MORPHLFOLayout::RATE_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 50.000f)), m, MORPHLFOLayout::SHAPE_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(9.000f, 68.000f)), m, MORPHLFOLayout::RATE_CV_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(21.500f, 68.000f)), m, MORPHLFOLayout::SHAPE_CV_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 84.000f)), m, MORPHLFOLayout::RATE_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(21.500f, 84.000f)), m, MORPHLFOLayout::SHAPE_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 100.000f)), m, MORPHLFOLayout::RST_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 100.000f)), m, MORPHLFOLayout::UNI_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 116.000f)), m, MORPHLFOLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.000f, 116.000f)), m, MORPHLFOLayout::LFO_LIGHT));
+}
+
+// ── SANDH (4HP) ───────────────────────────────────────
+struct SANDHLayout {
+    static constexpr int kHp = 4;
+    enum ParamId { SLEW_PARAM, SLEWCV_PARAM, CURVE_PARAM, PARAMS_LEN };
+    enum InputId { CLK_INPUT, IN_INPUT, SCV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, NOISE_OUTPUT, OUTPUTS_LEN };
+    enum LightId { HOLD_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_SANDH(rack::engine::Module* m) {
+    m->config(SANDHLayout::PARAMS_LEN, SANDHLayout::INPUTS_LEN, SANDHLayout::OUTPUTS_LEN, SANDHLayout::LIGHTS_LEN);
+    m->configParam(SANDHLayout::SLEW_PARAM, 0.0f, 1.0f, 0.15f, "Slew", " %", 0.0f, 100.0f);
+    m->configParam(SANDHLayout::SLEWCV_PARAM, -1.0f, 1.0f, 0.0f, "Slew CV amount", " %", 0.0f, 100.0f);
+    m->configSwitch(SANDHLayout::CURVE_PARAM, 0.0f, 1.0f, 0.0f, "Slew curve", {"Linear", "Expo"});
+    m->configInput(SANDHLayout::CLK_INPUT, "Clock");
+    m->configInput(SANDHLayout::IN_INPUT, "Signal in (normalled to internal noise)");
+    m->configInput(SANDHLayout::SCV_INPUT, "Slew CV");
+    m->configOutput(SANDHLayout::OUT_OUTPUT, "Held out");
+    m->configOutput(SANDHLayout::NOISE_OUTPUT, "Noise out");
+    m->configLight(SANDHLayout::HOLD_LIGHT, "Held level");
+}
+
+inline void place_SANDH(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(10.160f, 30.000f)), m, SANDHLayout::SLEW_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(5.600f, 50.000f)), m, SANDHLayout::SLEWCV_PARAM));
+    w->addParam(createParamCentered<CKSS>(mm2px(Vec(14.720f, 50.000f)), m, SANDHLayout::CURVE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.600f, 70.000f)), m, SANDHLayout::CLK_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(14.720f, 70.000f)), m, SANDHLayout::IN_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.160f, 88.000f)), m, SANDHLayout::SCV_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(5.600f, 106.000f)), m, SANDHLayout::OUT_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(14.720f, 106.000f)), m, SANDHLayout::NOISE_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(10.160f, 118.000f)), m, SANDHLayout::HOLD_LIGHT));
+}
+
+// ── STEPS (12HP) ───────────────────────────────────────
+struct STEPSLayout {
+    static constexpr int kHp = 12;
+    enum ParamId { STEP1_PARAM, STEP2_PARAM, STEP3_PARAM, STEP4_PARAM, STEP5_PARAM, STEP6_PARAM, STEP7_PARAM, STEP8_PARAM, LENGTH_PARAM, GATE_PARAM, DIR_PARAM, PARAMS_LEN };
+    enum InputId { CLK_INPUT, RST_INPUT, LEN_INPUT, INPUTS_LEN };
+    enum OutputId { CV_OUTPUT, GATE_OUTPUT, EOC_OUTPUT, OUTPUTS_LEN };
+    enum LightId { STEP1_LIGHT = 0, STEP2_LIGHT = 1, STEP3_LIGHT = 2, STEP4_LIGHT = 3, STEP5_LIGHT = 4, STEP6_LIGHT = 5, STEP7_LIGHT = 6, STEP8_LIGHT = 7, LIGHTS_LEN = 8 };
+};
+
+inline void config_STEPS(rack::engine::Module* m) {
+    m->config(STEPSLayout::PARAMS_LEN, STEPSLayout::INPUTS_LEN, STEPSLayout::OUTPUTS_LEN, STEPSLayout::LIGHTS_LEN);
+    m->configParam(STEPSLayout::STEP1_PARAM, -5.0f, 5.0f, 0.0f, "Step 1", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP2_PARAM, -5.0f, 5.0f, 0.0f, "Step 2", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP3_PARAM, -5.0f, 5.0f, 0.0f, "Step 3", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP4_PARAM, -5.0f, 5.0f, 0.0f, "Step 4", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP5_PARAM, -5.0f, 5.0f, 0.0f, "Step 5", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP6_PARAM, -5.0f, 5.0f, 0.0f, "Step 6", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP7_PARAM, -5.0f, 5.0f, 0.0f, "Step 7", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::STEP8_PARAM, -5.0f, 5.0f, 0.0f, "Step 8", " V", 0.0f, 1.0f);
+    m->configParam(STEPSLayout::LENGTH_PARAM, 1.0f, 8.0f, 8.0f, "Pattern length", " steps", 0.0f, 1.0f);
+    m->getParamQuantity(STEPSLayout::LENGTH_PARAM)->snapEnabled = true;
+    m->configParam(STEPSLayout::GATE_PARAM, 0.05f, 0.95f, 0.5f, "Gate width", "%", 0.0f, 100.0f);
+    m->configSwitch(STEPSLayout::DIR_PARAM, 0.0f, 2.0f, 0.0f, "Direction", {"Forward", "Reverse", "Pendulum"});
+    m->configInput(STEPSLayout::CLK_INPUT, "Clock");
+    m->configInput(STEPSLayout::RST_INPUT, "Reset");
+    m->configInput(STEPSLayout::LEN_INPUT, "Length CV (1V per step) (normalled to 0.0V)");
+    m->configOutput(STEPSLayout::CV_OUTPUT, "Step CV");
+    m->configOutput(STEPSLayout::GATE_OUTPUT, "Gate");
+    m->configOutput(STEPSLayout::EOC_OUTPUT, "End of cycle");
+    m->configLight(STEPSLayout::STEP1_LIGHT, "Step 1 active");
+    m->configLight(STEPSLayout::STEP2_LIGHT, "Step 2 active");
+    m->configLight(STEPSLayout::STEP3_LIGHT, "Step 3 active");
+    m->configLight(STEPSLayout::STEP4_LIGHT, "Step 4 active");
+    m->configLight(STEPSLayout::STEP5_LIGHT, "Step 5 active");
+    m->configLight(STEPSLayout::STEP6_LIGHT, "Step 6 active");
+    m->configLight(STEPSLayout::STEP7_LIGHT, "Step 7 active");
+    m->configLight(STEPSLayout::STEP8_LIGHT, "Step 8 active");
+}
+
+/// LEN_INPUT with its declared normal applied.
+inline float read_STEPS_LEN_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[STEPSLayout::LEN_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+inline void place_STEPS(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(9.600f, 34.000f)), m, STEPSLayout::STEP1_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(23.200f, 34.000f)), m, STEPSLayout::STEP2_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(36.800f, 34.000f)), m, STEPSLayout::STEP3_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(50.400f, 34.000f)), m, STEPSLayout::STEP4_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(9.600f, 56.000f)), m, STEPSLayout::STEP5_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(23.200f, 56.000f)), m, STEPSLayout::STEP6_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(36.800f, 56.000f)), m, STEPSLayout::STEP7_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(50.400f, 56.000f)), m, STEPSLayout::STEP8_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.000f, 84.000f)), m, STEPSLayout::LENGTH_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(30.480f, 84.000f)), m, STEPSLayout::GATE_PARAM));
+    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(48.500f, 84.000f)), m, STEPSLayout::DIR_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.600f, 110.000f)), m, STEPSLayout::CLK_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.400f, 110.000f)), m, STEPSLayout::RST_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(25.200f, 110.000f)), m, STEPSLayout::LEN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(35.000f, 110.000f)), m, STEPSLayout::CV_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(44.800f, 110.000f)), m, STEPSLayout::GATE_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(54.600f, 110.000f)), m, STEPSLayout::EOC_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.600f, 42.000f)), m, STEPSLayout::STEP1_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(23.200f, 42.000f)), m, STEPSLayout::STEP2_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(36.800f, 42.000f)), m, STEPSLayout::STEP3_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(50.400f, 42.000f)), m, STEPSLayout::STEP4_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.600f, 64.000f)), m, STEPSLayout::STEP5_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(23.200f, 64.000f)), m, STEPSLayout::STEP6_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(36.800f, 64.000f)), m, STEPSLayout::STEP7_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(50.400f, 64.000f)), m, STEPSLayout::STEP8_LIGHT));
 }
 
 }  // namespace forge_modular
