@@ -1209,3 +1209,179 @@ TEST_CASE("a NaN param value does not dispatch every frame",
     tick(bridge);
     CHECK(eval_json(engine, "seen.length") == "1");
 }
+
+// ── {fromParam: true} — metadata-derived transforms ───────────────────
+//
+// Opt-in. The two gaps it closes: a RangeSlider maps the store's normalized
+// value linearly onto its own range, which is wrong whenever the param is
+// skewed; and a dB meter has to hand-copy ParamRange.min/max that the param
+// already declares.
+
+namespace {
+
+// A skewed 20 Hz..20 kHz range whose normalized midpoint sits at 1 kHz — the
+// classic filter-cutoff shape, and the case where normalized and real-linear
+// disagree most visibly.
+void add_skewed_cutoff(StateStore& store) {
+    ParamInfo p{};
+    p.id = 20;
+    p.name = "Cutoff";
+    p.unit = "Hz";
+    p.range = ParamRange::with_center(20.0f, 20000.0f, 1000.0f);
+    p.range.default_value = 1000.0f;
+    store.add_parameter(p);
+}
+
+} // namespace
+
+TEST_CASE("fromParam makes a RangeSlider skew-correct in real units",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createRangeSlider('plain');
+        createRangeSlider('derived');
+        bindWidgetToParam('plain', 'Cutoff');
+        bindWidgetToParam('derived', 'Cutoff', { fromParam: true });
+    )");
+    auto* plain = dynamic_cast<RangeSlider*>(bridge.widget("plain"));
+    auto* derived = dynamic_cast<RangeSlider*>(bridge.widget("derived"));
+    REQUIRE(plain != nullptr);
+    REQUIRE(derived != nullptr);
+    plain->set_min(20.0f);
+    plain->set_max(20000.0f);
+    derived->set_min(20.0f);
+    derived->set_max(20000.0f);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+
+    // The derived slider reads back the real value it is bound to.
+    REQUIRE_THAT(derived->value(), WithinAbs(1000.0f, 1.0f));
+    // The plain binding puts a 1 kHz cutoff near the middle of the travel,
+    // because the normalized value is curved — this is the bug being fixed,
+    // pinned so a future change to the default path is visible.
+    REQUIRE_THAT(plain->value(), WithinAbs(20.0f + 0.5f * (20000.0f - 20.0f), 200.0f));
+    CHECK(plain->value() > derived->value() * 5.0f);
+}
+
+TEST_CASE("fromParam derives a meter's range instead of hand-copied dbMin/dbMax",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    store.add_parameter({.id = 21, .name = "Level", .unit = "dB",
+                         .range = {.min = -60.0f, .max = 0.0f}});
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createMeter('hand');
+        createMeter('derived');
+        bindMeter('hand', 'Level', { db: true, dbMin: -60, dbMax: 0 });
+        bindMeter('derived', 'Level', { fromParam: true });
+    )");
+    auto* hand = dynamic_cast<Meter*>(bridge.widget("hand"));
+    auto* derived = dynamic_cast<Meter*>(bridge.widget("derived"));
+    REQUIRE(hand != nullptr);
+    REQUIRE(derived != nullptr);
+
+    store.set_value(21, -30.0f);
+    bridge.service_param_bindings();
+    // Derivation reproduces the hand-written transform exactly — that
+    // equivalence is the whole point, minus the duplicated constants.
+    REQUIRE_THAT(derived->display_rms(), WithinAbs(hand->display_rms(), 1e-5f));
+    REQUIRE_THAT(derived->display_rms(), WithinAbs(0.5f, 1e-3f));
+}
+
+TEST_CASE("the bare two-arg bind is untouched by the fromParam work",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // A knob is a normalized surface: its position should track the host's
+    // automation curve, so the bare call must keep pushing get_normalized and
+    // fromParam must deliberately NOT re-map it.
+    bridge.load_script(R"(
+        createKnob('bare');
+        createKnob('asked');
+        bindWidgetToParam('bare', 'Cutoff');
+        bindWidgetToParam('asked', 'Cutoff', { fromParam: true });
+    )");
+    auto* bare = dynamic_cast<Knob*>(bridge.widget("bare"));
+    auto* asked = dynamic_cast<Knob*>(bridge.widget("asked"));
+    REQUIRE(bare != nullptr);
+    REQUIRE(asked != nullptr);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+    // with_center puts 1 kHz at the normalized midpoint.
+    REQUIRE_THAT(bare->value(), WithinAbs(0.5f, 1e-3f));
+    REQUIRE_THAT(asked->value(), WithinAbs(bare->value(), 1e-6f));
+}
+
+TEST_CASE("an explicit db range still wins over fromParam",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    store.add_parameter({.id = 21, .name = "Level", .unit = "dB",
+                         .range = {.min = -60.0f, .max = 0.0f}});
+    WidgetBridge bridge(engine, root, store);
+
+    // Passing a full explicit db transform alongside fromParam is the author
+    // overriding the derivation on purpose; silently replacing what they wrote
+    // would be the wrong call. (dbMin/dbMax without `db: true` is inert in this
+    // API — the mapping is off — so a real override names all three.)
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'Level', { fromParam: true, db: true, dbMin: -30, dbMax: 0 });
+    )");
+    auto* m = dynamic_cast<Meter*>(bridge.widget("m"));
+    REQUIRE(m != nullptr);
+
+    store.set_value(21, -15.0f);
+    bridge.service_param_bindings();
+    // Halfway up the EXPLICIT -30..0 window, not the param's -60..0.
+    REQUIRE_THAT(m->display_rms(), WithinAbs(0.5f, 1e-3f));
+}
+
+TEST_CASE("fromParam still derives when the widget is created after the bind",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // Binding before the view exists is explicitly supported, so derivation
+    // cannot happen at bind time — it has to wait for the widget.
+    bridge.load_script(R"(
+        bindWidgetToParam('later', 'Cutoff', { fromParam: true });
+        createRangeSlider('later');
+    )");
+    auto* later = dynamic_cast<RangeSlider*>(bridge.widget("later"));
+    REQUIRE(later != nullptr);
+    later->set_min(20.0f);
+    later->set_max(20000.0f);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+    REQUIRE_THAT(later->value(), WithinAbs(1000.0f, 1.0f));
+}

@@ -134,12 +134,27 @@ float WidgetBridge::BindingTransform::apply(float v) const {
     return out;
 }
 
+bool WidgetBridge::transform_requests_derivation(const choc::value::Value* v) {
+    if (!v || !v->isObject()) return false;
+    const auto& o = *v;
+    if (!o["fromParam"].getWithDefault<bool>(false)) return false;
+    // `fromParam` and an explicit db-family key are mutually exclusive: naming
+    // any of db/dbMin/dbMax means the author is describing the mapping
+    // themselves, and silently replacing what they wrote would be worse than
+    // ignoring the flag. (dbMin/dbMax without `db: true` is inert in this API —
+    // the mapping stays off — which is pre-existing behaviour, not a new trap.)
+    return !(o.hasObjectMember("db") || o.hasObjectMember("dbMin") ||
+             o.hasObjectMember("dbMax"));
+}
+
 // Parse the optional `{db, dbMin, dbMax, scale, offset, min, max, clamp}`
 // transform object handed to bindWidgetToParam / bindMeter. Absent OR `{}`
 // both yield the default: identity scale/offset with a [0,1] clamp (the value
 // domain every binding target shares — Knob/Fader/Meter are normalized and a
 // RangeSlider treats the result as a fraction of its own range). Provide `min`
 // / `max` to widen or narrow the clamp, or `clamp:false` to disable it.
+// `{fromParam: true}` fills db/dbMin/dbMax from the parameter instead — see
+// transform_requests_derivation above and derive_binding_transform below.
 WidgetBridge::BindingTransform WidgetBridge::parse_transform(const choc::value::Value* v) {
     BindingTransform t;
     if (!v || !v->isObject()) return t;
@@ -166,7 +181,33 @@ bool WidgetBridge::resolve_param_id(const std::string& name, state::ParamID& out
     return false;
 }
 
+void WidgetBridge::derive_binding_transform(ParamBinding& b, View* w) {
+    b.derive_from_param = false;  // one shot, whatever we conclude below
+    const auto* info = store_.info(b.param_id);
+    if (info == nullptr) return;
+
+    // Only widgets that present the param in REAL units need a derived
+    // transform. A Knob/Fader/Toggle/ProgressBar is a [0,1] surface, and the
+    // store's normalized value is already the right thing to show there — it is
+    // the position the host's automation lane shows. Deriving for those would
+    // move the control off the host's curve, so `fromParam` deliberately
+    // leaves them alone.
+    const bool real_units = b.target == ParamBinding::Target::meter ||
+                            dynamic_cast<RangeSlider*>(w) != nullptr;
+    if (!real_units) return;
+
+    // Map the real value linearly across the param's own range. For a
+    // RangeSlider this is the fix for skew: the normalized value is curved, so
+    // treating it as a fraction of the slider's range put a 1 kHz cutoff at
+    // ~10 kHz on a 20 Hz..20 kHz range. For a dB meter it replaces hand-copied
+    // dbMin/dbMax with the range the parameter already declares.
+    b.transform.db = true;
+    b.transform.db_min = info->range.min;
+    b.transform.db_max = info->range.max;
+}
+
 bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
+    if (b.derive_from_param) derive_binding_transform(b, w);
     // dB transforms operate on the raw param value; everything else on the
     // store's already-normalized [0,1] value (the 1:1 common case).
     const float src = b.transform.db ? store_.get_value(b.param_id)
@@ -407,6 +448,7 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     binding.param_id = id;
     binding.target = target;
     binding.transform = parse_transform(transform);
+    binding.derive_from_param = transform_requests_derivation(transform);
 
     // Re-binding a widget replaces the prior binding (a widget has one source).
     for (auto& existing : param_bindings_) {
