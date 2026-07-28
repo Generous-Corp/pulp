@@ -1074,12 +1074,33 @@ ubuntu-latest, and runs `shipyard release-bot hook run`, which reads
 So there are TWO Shipyard versions that matter, and they drift independently: the
 one on each fleet Mac (`tools/shipyard.toml` + `install-shipyard.sh`), and the one
 THIS workflow installs. If the workflow's pin is older than a config key it must
-honour, it silently ignores the key. Concretely: `push_mode = "pr"` needs
-v0.78.0; a stale `post-tag-sync.yml` pin at 0.70.0 reverted to a direct push to
-`main` that the merge-queue ruleset refuses — defeating the config change and the
-fleet upgrade both. Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml`
-pin whenever a post-tag-hook feature depends on it. (Durable fix is for
-`hook install` to pin from `tools/shipyard.toml` — a Shipyard-side change.)
+honour, it silently ignores the key. A stale pin at 0.70.0 reverted to a direct
+push to `main` that the merge-queue ruleset refuses — defeating the config change
+and the fleet upgrade both.
+
+**The `push_mode = "pr"` floor is v0.79.0, NOT v0.78.0.** This distinction is
+subtle and it cost nine unmergeable PRs. 0.78.0 honours `push_mode` far enough to
+*open* the PR, so the pin looks correct and the branch appears — but the commit is
+still stamped `docs: regenerate changelog for <tag> [skip ci]`. That marker is
+right for the direct-push path it was written for and **fatal on the PR path**:
+Actions skips every workflow, so the PR never obtains the required checks branch
+protection demands, so it can never merge, and the next release opens another one.
+They stacked from v0.751.0 to v0.759.0 and blocked the release pipeline, surfacing
+as a run of `release: stuck — fix/feat merged without bump` issues rather than as
+anything pointing at the changelog PRs. Shipyard split the two subjects in 0.79.0
+(`release_bot_commit_subject`: `pr` omits the marker, direct keeps it).
+
+Diagnosing this class: a PR whose required checks read **`MISSING`** (not
+pending, not failing — absent) is almost always a workflow that never dispatched.
+Check the tip commit for `[skip ci]` first, then whether the PR was opened by an
+App token — GitHub does not dispatch `pull_request` workflows for App-token
+actions, and neither `workflow_dispatch` (its runs do not attach to the PR as
+checks) nor close/reopen from an App token will fix that. A commit pushed from a
+**user** identity does.
+
+Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml` pin whenever a
+post-tag-hook feature depends on it. (Durable fix is for `hook install` to pin
+from `tools/shipyard.toml` — a Shipyard-side change.)
 
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
