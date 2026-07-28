@@ -93,13 +93,18 @@ def parse_blocks(text: str):
 # ── Build ────────────────────────────────────────────────────────────────────
 
 def sources():
-    return sorted(f for f in os.listdir(os.path.join(PACK, "src")) if f.endswith(".cpp"))
+    return sorted(f for f in os.listdir(os.path.join(PACK, "src"))
+                  if f.endswith(".cpp") and not f.startswith("_"))
+
+
+def _includes():
+    return ([f"-I{SDK}/include", f"-I{SDK}/dep/include", f"-I{PACK}/src"] +
+            [f"-I{os.path.join(ROOT, d, 'include')}" for d in INCLUDES])
 
 
 def compile_all(tmp):
-    """Compile every module source. Returns (ok, combined_error_text)."""
-    inc = [f"-I{SDK}/include", f"-I{SDK}/dep/include", f"-I{PACK}/src"]
-    inc += [f"-I{os.path.join(ROOT, d, 'include')}" for d in INCLUDES]
+    """Compile every module source. Returns (ok, lib-or-error, objects)."""
+    inc = _includes()
     objs, errs = [], []
     for src in sources():
         obj = os.path.join(tmp, src.replace(".cpp", ".o"))
@@ -112,18 +117,90 @@ def compile_all(tmp):
         else:
             objs.append(obj)
     if errs:
-        return False, "\n".join(errs)
+        return False, "\n".join(errs), []
     lib = os.path.join(tmp, "plugin.dylib")
     r = subprocess.run(["clang++", "-shared", "-o", lib, *objs,
                         "-undefined", "dynamic_lookup"], capture_output=True, text=True)
     if r.returncode != 0:
-        return False, r.stderr
+        return False, r.stderr, []
     # The entry point must be exported, or Rack's dlsym returns null and the
     # plugin fails to load with no diagnostic at all.
     nm = subprocess.run(["nm", "-gU", lib], capture_output=True, text=True).stdout
     if " T _init" not in nm:
-        return False, "plugin.dylib does not export _init — Rack cannot load it"
-    return True, lib
+        return False, "plugin.dylib does not export _init — Rack cannot load it", []
+    return True, lib, objs
+
+
+# Modules that are supposed to emit with nothing patched. Anything else that
+# makes sound from silence is reported, since for an effect that is a bug.
+GENERATOR_TAGS = {
+    "Oscillator", "Low-frequency oscillator", "Noise", "Clock generator",
+    "Random", "Sequencer", "Envelope generator", "Function generator",
+    "Drum", "Synth voice", "Arpeggiator", "Speech", "Sampler", "Granular",
+}
+
+
+def run_behaviour_gate(tmp, slug, mod, objs):
+    """Drive the module's real process() and measure it. Returns (ok, output).
+
+    Compiling only proves the C++ parses. It says nothing about whether a knob
+    reaches the audio, whether an output is finite, or whether the voltages are
+    Eurorack-shaped -- and every one of those has already shipped here at least
+    once. The module is instantiated through its own rack::plugin::Model, so
+    this needs no knowledge of the concrete type; Model::createModule() is just
+    `new TModule`, which is why a module can run outside Rack at all.
+    """
+    is_gen = bool(set(mod.get("tags", [])) & GENERATOR_TAGS)
+    ins = mod.get("inputs", [])
+    roles = ", ".join('"%s"' % i.get("role", "Cv") for i in ins) or '"Cv"'
+    nroles = len(ins)
+    # The shim must live beside the pack's own plugin.hpp. A quoted include is
+    # resolved relative to the including file first, and the Rack SDK ships its
+    # own include/plugin.hpp -- from anywhere else, that one wins and the build
+    # fails on an unrelated incomplete type. sources() skips leading-underscore
+    # files so this never lands in the shipped plugin.
+    shim = os.path.join(PACK, "src", "_gate_shim.cpp")
+    with open(shim, "w") as f:
+        f.write(f'''#include "plugin.hpp"
+
+// Generated per module. The Model global is the only handle needed -- the
+// module type itself lives in an anonymous namespace in {slug}.cpp.
+rack::engine::Module* forge_make_module() {{ return model{slug}->createModule(); }}
+const char* forge_module_slug() {{ return "{slug}"; }}
+bool forge_module_is_generator() {{ return {"true" if is_gen else "false"}; }}
+
+// Roles come from the manifest so the gate can drive a clock as a clock and a
+// gate as a gate, instead of one square into every jack.
+static const char* kRoles[] = {{{roles}}};
+const char* forge_input_role(int i) {{
+    return (i >= 0 && i < {nroles}) ? kRoles[i] : "Cv";
+}}
+''')
+
+    exe = os.path.join(tmp, "gate")
+    r = subprocess.run(
+        ["clang++", "-std=c++20", "-O1", "-o", exe,
+         os.path.join(HERE, "behaviour_gate.cpp"), shim, *objs,
+         *_includes(), "-DARCH_MAC",
+         os.path.join(SDK, "libRack.dylib")],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        os.remove(shim)
+        return False, "the behavioural gate could not be built:\n" + r.stderr
+
+    try:
+        # libRack.dylib's install name is a bare filename, not @rpath-relative,
+        # so a link-time rpath cannot resolve it -- the loader needs the search
+        # path at run time.
+        env = dict(os.environ, DYLD_LIBRARY_PATH=SDK)
+        r = subprocess.run([exe], capture_output=True, text=True,
+                           timeout=120, env=env)
+        return r.returncode == 0, r.stdout + r.stderr
+    except subprocess.TimeoutExpired:
+        return False, ("the module hung: process() did not return within 120 s, "
+                       "which usually means an unbounded loop in the audio path")
+    finally:
+        os.remove(shim)
 
 
 def run_emitter(*extra):
@@ -234,7 +311,7 @@ def main(argv):
         log("manifest + panel validated")
 
         with tempfile.TemporaryDirectory() as tmp:
-            ok, res = compile_all(tmp)
+            ok, res, objs = compile_all(tmp)
             if not ok:
                 log("compile failed:")
                 for line in [l for l in res.split("\n") if "error:" in l][:5]:
@@ -244,6 +321,23 @@ def main(argv):
                     restore()
                 continue
             log("compiled")
+
+            ok, gate_out = run_behaviour_gate(tmp, slug, mod, objs)
+            if not ok:
+                log("behavioural gate failed:")
+                for line in gate_out.strip().split("\n"):
+                    if "FAIL" in line or "could not be built" in line:
+                        log("    " + line.strip()[:150])
+                ctx = ("The module compiled, but driving its process() showed "
+                       "it does not behave correctly:\n" + gate_out)
+                if not a.keep_on_fail:
+                    restore()
+                continue
+            log("behaviour verified")
+            for line in gate_out.splitlines():
+                if "warn" in line:
+                    log("   " + line.strip())
+
             check_uses_pulp_dsp(slug)
             pkg = install(res)
 

@@ -33,26 +33,49 @@
 #include <string>
 #include <vector>
 
+const char* forge_input_role(int i);
+
 namespace {
 
 constexpr float kSr = 48000.f;
 constexpr int kWarm = 256;      // let filters and envelopes settle
-constexpr int kRun = 4096;
+// A full second. Envelope times run to seconds, so a short window leaves an
+// ADSR still decaying when the gate falls -- which makes SUSTAIN measure as
+// inert on an envelope that works. The run is cheap; the false failure is not.
+constexpr int kRun = 48000;
 
-struct Stats {
+/// One output's recorded trace, plus the summary the range checks need.
+///
+/// The full trace matters for the inert-knob test. Summary statistics are
+/// blind to any change that preserves them: a sine at 100 Hz and one at 8 kHz
+/// have the same mean-absolute value and the same peak-to-peak span, so a
+/// VCO's frequency knob measures as having no effect. Comparing the samples
+/// themselves catches a change of shape, of phase, or of timing.
+struct Trace {
+    std::vector<float> v;
     double min = 1e30, max = -1e30, sum_abs = 0;
     bool finite = true;
-    int n = 0;
-    void add(float v) {
-        if (!std::isfinite(v)) { finite = false; return; }
-        min = std::min<double>(min, v);
-        max = std::max<double>(max, v);
-        sum_abs += std::fabs(v);
-        ++n;
+    void add(float x) {
+        v.push_back(x);
+        if (!std::isfinite(x)) { finite = false; return; }
+        min = std::min<double>(min, x);
+        max = std::max<double>(max, x);
+        sum_abs += std::fabs(x);
     }
-    double mean_abs() const { return n ? sum_abs / n : 0.0; }
-    double span() const { return n ? max - min : 0.0; }
+    double mean_abs() const { return v.empty() ? 0.0 : sum_abs / v.size(); }
 };
+
+/// RMS difference between two traces — how much moving a knob changed things.
+double rms_diff(const Trace& a, const Trace& b) {
+    const size_t n = std::min(a.v.size(), b.v.size());
+    if (!n) return 0.0;
+    double acc = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const double d = double(a.v[i]) - double(b.v[i]);
+        if (std::isfinite(d)) acc += d * d;
+    }
+    return std::sqrt(acc / n);
+}
 
 int failures = 0;
 int warnings = 0;
@@ -61,24 +84,63 @@ void fail(const std::string& m) { std::printf("  FAIL  %s\n", m.c_str()); ++fail
 void warn(const std::string& m) { std::printf("  warn  %s\n", m.c_str()); ++warnings; }
 void pass(const std::string& m) { std::printf("  ok    %s\n", m.c_str()); }
 
-/// Drive the module for a while, feeding `in_v` to every input, and measure
-/// every output.
-std::vector<Stats> run(rack::engine::Module& m, float in_v, bool clock_inputs) {
+/// The stimulus for one input, chosen from the role the manifest declared.
+///
+/// Feeding one identical square into every jack does not exercise a stateful
+/// module. A sequencer whose reset shares the clock's waveform never leaves
+/// its first step, and an envelope gated for 5 ms never reaches sustain, so
+/// both report knobs as inert that work perfectly in Rack. Driving each jack
+/// as what it actually is costs nothing and removes that whole class of false
+/// failure.
+float stimulus(const char* role, int i, float quiet_v) {
+    const std::string r = role ? role : "Cv";
+    if (r == "Clock")
+        // Fast enough that a sequencer visits every step several times over.
+        return ((i / 64) % 2) ? 10.f : 0.f;
+    if (r == "Gate")
+        // ~0.34 s halves, long enough for a default attack and decay to finish
+        // so the envelope actually sits at its sustain level for a while.
+        return ((i / 16384) % 2) ? 10.f : 0.f;
+    if (r == "Trigger")
+        // A ~1 ms pulse, rare relative to the clock -- a reset that fires as
+        // often as the clock would pin a sequencer to its first step.
+        return (i % 16384) < 48 ? 10.f : 0.f;
+    if (r == "Audio")
+        return 5.f * std::sin(2.0 * M_PI * 110.0 * i / kSr);
+    if (r == "Pitch")
+        return 0.f;                    // C4
+    return quiet_v;                    // Cv and anything unrecognised
+}
+
+/// Drive the module for a while and record every output.
+std::vector<Trace> run(rack::engine::Module& m, float in_v, bool clock_inputs) {
     rack::engine::Module::ProcessArgs args;
     args.sampleRate = kSr;
     args.sampleTime = 1.f / kSr;
     args.frame = 0;
 
-    std::vector<Stats> st(m.getNumOutputs());
+    std::vector<Trace> st(m.getNumOutputs());
     for (int i = 0; i < kWarm + kRun; ++i) {
         for (int p = 0; p < m.getNumInputs(); ++p) {
-            // A steady level tells us nothing about a clock-driven module, so
-            // inputs double as a slow square wave when asked.
-            float v = in_v;
-            if (clock_inputs) v = ((i / 240) % 2) ? 10.f : 0.f;
-            m.inputs[p].setChannels(1);
+            const float v = clock_inputs
+                          ? stimulus(forge_input_role(p), i, in_v) : in_v;
+            // Assign `channels` directly. Port::setChannels() returns early
+            // when channels == 0, because a disconnected port must stay
+            // disconnected -- only the engine marks a port live when a cable
+            // lands. Going through the setter here leaves every input reading
+            // 0 V, which makes every input-driven module look like it has
+            // inert knobs.
+            m.inputs[p].channels = 1;
             m.inputs[p].setVoltage(v);
         }
+        // Outputs must look patched too. A well-written module skips work for
+        // an unconnected output -- the module contract explicitly asks for
+        // that -- so leaving them disconnected means the module writes nothing
+        // and every one of its knobs measures as inert. Assigned directly for
+        // the same reason as the inputs: the setter refuses to promote a port
+        // out of the disconnected state.
+        for (int o = 0; o < m.getNumOutputs(); ++o)
+            m.outputs[o].channels = 1;
         m.process(args);
         args.frame++;
         if (i >= kWarm)
@@ -125,11 +187,11 @@ int main() {
             probe->params[p].setValue((std::fabs(hi - dv) > std::fabs(dv - lo)) ? hi : lo);
             auto moved = run(*probe, 2.5f, clocky);
 
+            // Sample-wise, so a change of frequency, phase or timing counts
+            // as an effect just as much as a change of level.
             double delta = 0;
-            for (size_t o = 0; o < moved.size() && o < base.size(); ++o) {
-                delta = std::max(delta, std::fabs(moved[o].mean_abs() - base[o].mean_abs()));
-                delta = std::max(delta, std::fabs(moved[o].span() - base[o].span()));
-            }
+            for (size_t o = 0; o < moved.size() && o < base.size(); ++o)
+                delta = std::max(delta, rms_diff(moved[o], base[o]));
             if (delta < 1e-6)
                 fail("param '" + nm + "' changes no output across its full range — inert knob");
             else
