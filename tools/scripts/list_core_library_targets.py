@@ -36,6 +36,21 @@ def is_core_source(source: str) -> bool:
     return source == "core" or source.startswith("core/")
 
 
+def all_target_names(reply_dir: Path) -> set[str]:
+    """Every configured target, regardless of type or directory."""
+    index_files = sorted(reply_dir.glob("index-*.json"))
+    if not index_files:
+        raise FileNotFoundError(f"no CMake file-API index in {reply_dir}")
+    index = json.loads(index_files[-1].read_text())
+    entry = next(o for o in index["objects"] if o["kind"] == "codemodel")
+    codemodel = json.loads((reply_dir / entry["jsonFile"]).read_text())
+    return {
+        target["name"]
+        for configuration in codemodel.get("configurations", [])
+        for target in configuration.get("targets", [])
+    }
+
+
 def core_library_targets(reply_dir: Path) -> list[str]:
     index_files = sorted(reply_dir.glob("index-*.json"))
     if not index_files:
@@ -97,6 +112,13 @@ def self_test() -> int:
         )
 
         selected = core_library_targets(reply)
+        configured = all_target_names(reply)
+
+    # The absence check must see targets of ANY type, including the executables
+    # the library filter deliberately drops -- otherwise it could never catch
+    # `pulp-import-design`, which is exactly what it exists to catch.
+    absent_ok = "pulp-import-design" in configured and "not-configured-at-all" not in configured
+    print(f"  [{'ok' if absent_ok else 'FAIL'}] absence check sees executables and only real targets")
 
     expected = sorted(name for name, _, _, wanted in fixtures if wanted)
     for name, kind, source, wanted in fixtures:
@@ -104,7 +126,7 @@ def self_test() -> int:
         status = "ok" if present == wanted else "FAIL"
         verb = "selected" if wanted else "excluded"
         print(f"  [{status}] {name} ({kind}, {source}) must be {verb}")
-    if selected != expected:
+    if selected != expected or not absent_ok:
         print(f"core library target filter self-test FAILED: {selected} != {expected}")
         return 1
     print(f"core library target filter self-test passed ({len(fixtures)} cases)")
@@ -121,6 +143,13 @@ def main() -> int:
         default=0,
         help="fail unless at least this many targets are found (guards a silent empty result)",
     )
+    parser.add_argument(
+        "--assert-absent",
+        action="append",
+        default=[],
+        metavar="TARGET",
+        help="fail if this target is configured at all (any type, any directory)",
+    )
     args = parser.parse_args()
 
     if args.self_test:
@@ -128,7 +157,21 @@ def main() -> int:
     if args.build_dir is None:
         parser.error("build_dir is required unless --self-test is given")
 
-    targets = core_library_targets(args.build_dir / ".cmake" / "api" / "v1" / "reply")
+    reply = args.build_dir / ".cmake" / "api" / "v1" / "reply"
+
+    if args.assert_absent:
+        configured = all_target_names(reply)
+        present = sorted(t for t in args.assert_absent if t in configured)
+        if present:
+            print(
+                f"error: {', '.join(present)} is configured in a build that should not "
+                f"contain it. A target whose implementation is compiled out by an option "
+                f"leaves the `all` target unlinkable.",
+                file=sys.stderr,
+            )
+            return 1
+
+    targets = core_library_targets(reply)
     if len(targets) < args.minimum:
         print(
             f"error: found {len(targets)} core library target(s), expected at least "

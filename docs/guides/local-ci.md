@@ -2642,6 +2642,17 @@ a construct both compilers accept but implement differently is still only caught
 by the Clang test lanes. Widening this to run tests under GCC is a separate
 decision with a real time cost.
 
+**It also guards one option combination.** The lane configures with
+`PULP_ENABLE_DESIGN_IMPORT=OFF`, which is the option's own documented
+"release/ship OFF" setting — and that configuration was once unlinkable, because
+`tools/import-design` was added unconditionally while the `pulp::view` design-IR
+sources it links sit behind that option. The discovery step now runs
+`--assert-absent pulp-import-design` against the codemodel the lane already
+produces, so a re-broken guard fails here immediately instead of surfacing as an
+undefined-reference wall in someone's release build. It costs no extra configure
+time. Because the guard lives in the top-level `CMakeLists.txt`, that file is
+one of the lane's path triggers alongside `core/**`.
+
 ## For contributors
 
 You don't need the same VM setup as the original developer. Options:

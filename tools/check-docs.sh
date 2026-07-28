@@ -95,7 +95,14 @@ while IFS= read -r line; do
             # pulp-native-components -> "native"), so exclude both the full
             # module name AND that first segment to avoid a module flagging its
             # own target as a dependency.
-            cmake_deps=$(grep -oE 'pulp-[a-z]+' "$cmake_file" 2>/dev/null | sed "s/pulp-//" | grep -v "^$mod_name$" | grep -v "^${mod_name%%-*}$" | sort -u)
+            #
+            # A module directory may use underscores while its target uses
+            # hyphens (core/sample_bank_manifest -> pulp-sample-bank-manifest).
+            # Stripping at a hyphen does nothing to an underscore name, so the
+            # hyphenated form is excluded too — otherwise such a module always
+            # flags its own target ("CMake links pulp-sample").
+            mod_hyphen=$(echo "$mod_name" | tr '_' '-')
+            cmake_deps=$(grep -oE 'pulp-[a-z]+' "$cmake_file" 2>/dev/null | sed "s/pulp-//" | grep -v "^$mod_name$" | grep -v "^${mod_name%%-*}$" | grep -v "^${mod_hyphen%%-*}$" | sort -u)
 
             # Compare: warn if CMake has deps not in manifest
             for dep in $cmake_deps; do
