@@ -81,4 +81,4 @@ entry plus a diagnostic — never a silent drop or a guess. Key choices:
       with no importer installed; prints the install-hint path).
 - [ ] tool-registry importer fields (`category:importer`, `frameworks[]`,
       `spi_min/max`, `sdk_min/max`, `capabilities`, `health_check`, `sha256`).
-- [ ] SDK materializer / report writer / clean-room-output check.
+- [ ] SDK materializer / report writer / framework-source-output check.

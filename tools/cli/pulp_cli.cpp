@@ -160,7 +160,7 @@ static void print_usage() {
         std::cout << "  " << std::left << std::setw(14) << binary_commands[i].name
                   << " " << binary_commands[i].summary << "\n";
     }
-    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and clean-room audit\n";
+    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and provenance audit\n";
     std::cout << "  " << std::left << std::setw(14) << "add" << " Add a component to the project\n";
     std::cout << "  " << std::left << std::setw(14) << "remove" << " Remove a previously added package\n";
     std::cout << "  " << std::left << std::setw(14) << "list" << " Show installed packages\n";

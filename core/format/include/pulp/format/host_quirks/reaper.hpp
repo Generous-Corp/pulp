@@ -84,7 +84,7 @@
 /// AU v3 in-process sizing rows remain `LessonOnly` because they are
 /// carried as catalog lessons without in-tree bench evidence.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.8
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.8
 /// docs=https://www.reaper.fm/sdk/vst/vst_ext.php
 
 #include <pulp/format/host_quirks.hpp>

@@ -345,7 +345,7 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
 fi
 
 # ── 10. import-provenance (opt-in) ─────────────────────────────────────────
-# Audits that any emitted/migrated project carries a well-formed clean-room
+# Audits that any emitted/migrated project carries a well-formed independent
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands
 # a migrated project to enforce it here.

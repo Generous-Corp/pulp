@@ -103,7 +103,7 @@ JUCE reference implementations — the `moonbase_licensing` native module and th
 [DRIFT](https://github.com/Moonbase-sh/moonbase-cpp) / HALO reference plugins
 (headless controller as the source of truth, an audio-thread-safe licensed flag,
 a license-details screen, browser activation with polling, and a click-free
-gate). This is a **clean-room reimplementation against Pulp's own APIs**: it
+gate). This is a **independent reimplementation against Pulp's own APIs**: it
 contains **no JUCE and no code copied from those projects** — Pulp's view/canvas
 stack for the UI, `cpp-httplib`/mbedTLS for HTTP, and the MIT `moonbase-cpp` SDK
 for licensing. Thanks to the Moonbase team for the SDK and the reference designs.

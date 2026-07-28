@@ -10,7 +10,7 @@
 /// Nuendo / Reaper accept the call from any thread; Studio One does
 /// not.
 ///
-/// The clean-room fix marshals `restartComponent` calls to the UI
+/// The independent fix marshals `restartComponent` calls to the UI
 /// thread when the host is detected as Studio One. The dispatch lives
 /// here; the VST3 adapter consults the flag to decide whether to
 /// post the notification through `core/events::EventLoop` rather than
@@ -39,7 +39,7 @@
 /// per-symptom isolation tests ship; promote to `Validated` after
 /// Studio One bench evidence lands.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=#3045
+/// **Reference-Lineage**: independent reproducer=#3045
 /// docs=https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Workflow+Diagrams/Edit+Controller+Call+Sequence.html
 
 #include <pulp/format/host_quirks.hpp>

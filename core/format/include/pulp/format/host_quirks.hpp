@@ -16,7 +16,7 @@
 ///
 /// **License-hygiene contract**: every fix that flips a host-gated flag
 /// must cite a host vendor doc + a reproducer Pulp issue. The commit
-/// trailer `Reference-Lineage: cleanroom reproducer=#NNNN docs=<url>`
+/// trailer `Reference-Lineage: independent reproducer=#NNNN docs=<url>`
 /// is required (advisory pre-push warning hint will catch missing
 /// trailers on commits touching `core/format/host_quirks/`).
 ///

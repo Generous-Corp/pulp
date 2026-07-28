@@ -4,9 +4,9 @@
 `pulp import emit` materialises a Pulp migration scaffold and stamps it
 with a `.pulp-import-provenance.json` marker (written by the SDK, not the
 importer). This script is the audit that a migrated project landing in a
-PR was produced clean-room: it verifies the marker is present and
+PR was produced independently: it verifies the marker is present and
 well-formed, that its provenance values are valid, and that the
-clean-room contract is honoured — no framework-source markers leak into
+provenance contract is honoured — no framework-source markers leak into
 any file the marker labels `generated`.
 
 Neutral by design: this script names NO framework and NO vendor. The
@@ -147,7 +147,7 @@ def check_project(project_dir: Path, denylist: list[str],
         elif prov in SCANNED_PROVENANCE and isinstance(rel, str):
             scanned_rel.append(rel)
 
-    # Clean-room contract: no framework-source marker may appear in any file the
+    # Provenance contract: no framework-source marker may appear in any file the
     # marker labels generated/stub. copied-user-file is exempt (the user's own
     # code). The denylist is DATA; with no index the scan is skipped (reported).
     if scan_enabled and denylist:
@@ -163,7 +163,7 @@ def check_project(project_dir: Path, denylist: list[str],
                 if token in content:
                     failures.append(
                         f"{fpath}: generated file contains framework-source "
-                        f"marker '{token}' — violates the clean-room contract.")
+                        f"marker '{token}' — violates the provenance contract.")
 
     return failures
 
@@ -174,7 +174,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("project_dirs", nargs="+", help="emitted/migrated project dirs")
     ap.add_argument("--index", help="known-frameworks.json for the content denylist")
     ap.add_argument("--no-scan", action="store_true",
-                    help="skip the clean-room content scan (structural checks only)")
+                    help="skip the framework-source content scan (structural checks only)")
     args = ap.parse_args(argv)
 
     index_path = Path(args.index) if args.index else find_default_index()

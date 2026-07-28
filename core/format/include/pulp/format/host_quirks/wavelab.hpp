@@ -34,7 +34,7 @@
 /// divergence predates the 11.x window and remains in the latest
 /// release as of the macOS plan, so we fire it unconditionally.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.6
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.6
 /// docs=https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Bus+Arrangement+Setup.html
 
 #include <pulp/format/host_quirks.hpp>
