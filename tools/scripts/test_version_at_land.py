@@ -660,3 +660,83 @@ class PrRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefreshDerivedTest(unittest.TestCase):
+    """`_write_plan` must refresh files that embed a version it writes.
+
+    A derived inventory left stale by the bump the bot itself produced fails
+    the freeze gate on the bump commit, so the bump cannot merge and releases
+    stop by default rather than on purpose.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name).resolve()
+        self._cwd = os.getcwd()
+        self.r = RangeRepo(self.repo)
+        os.chdir(self.repo)
+        self.derived = self.repo / "docs/status/pulp-tooling-disposition.json"
+        self.derived.parent.mkdir(parents=True, exist_ok=True)
+        self.derived.write_text('{"version": "STALE"}\n')
+        self.r.commit("seed derived inventory")
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def _install_regenerator(self, body: str) -> None:
+        """Stand in for pulp_tooling_disposition.py, so the test pins the
+        contract (`_write_plan` runs it and reports what moved) rather than the
+        real inventory's content."""
+        script = self.repo / "tools/scripts/pulp_tooling_disposition.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(body)
+        self.r.commit("install stub regenerator")
+
+    def test_refreshes_derived_file_when_a_version_moves(self):
+        self._install_regenerator(
+            "import pathlib\n"
+            "p = pathlib.Path('docs/status/pulp-tooling-disposition.json')\n"
+            "p.write_text('{\"version\": \"REGENERATED\"}\\n')\n"
+        )
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertIn("docs/status/pulp-tooling-disposition.json", edited,
+                      "a regenerated derived file must be reported as edited, "
+                      "or the bump commit will not include it")
+        self.assertIn("REGENERATED", self.derived.read_text())
+
+    def test_no_version_moved_means_no_regeneration(self):
+        # Regenerating on a no-op plan would sweep unrelated working-tree drift
+        # into a bump commit.
+        self._install_regenerator(
+            "import pathlib\n"
+            "pathlib.Path('docs/status/pulp-tooling-disposition.json')"
+            ".write_text('{\"version\": \"SHOULD-NOT-RUN\"}\\n')\n"
+        )
+        edited = val._write_plan(self.repo, CONFIG, [])
+        self.assertEqual(edited, [])
+        self.assertNotIn("SHOULD-NOT-RUN", self.derived.read_text())
+
+    def test_unchanged_derived_file_is_not_reported_as_edited(self):
+        # The real regenerator is idempotent, so an unchanged file is the norm
+        # and must not show up as an edit.
+        self._install_regenerator("pass\n")
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertNotIn("docs/status/pulp-tooling-disposition.json", edited)
+
+    def test_a_failing_regenerator_does_not_abort_the_bump(self):
+        # The bot is the single writer for versions; a wedged bot stops every
+        # release. A broken regenerator must degrade to the old stale-file
+        # behaviour, not take the bump down with it.
+        self._install_regenerator("import sys\nsys.exit(3)\n")
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertIn(".claude-plugin/plugin.json", edited,
+                      "the version write itself must still be reported")
+        self.assertNotIn("docs/status/pulp-tooling-disposition.json", edited)

@@ -3725,6 +3725,71 @@ a PR, and let the drift-check workflow confirm the plan. Then mirror the
 change in the GitHub ruleset UI (or reapply via `gh api PUT`). Never edit
 the live ruleset in isolation — the next scheduled drift run will fail.
 
+### Required checks live in TWO places — check both before calling one advisory
+
+`main`'s merge contract is enforced by **classic branch protection**, not only
+by rulesets. Reading `gh api repos/{owner}/{repo}/rulesets` alone is how you
+reach the wrong conclusion that a red check is harmless: the only branch ruleset
+is `main-merge-queue`, which carries a `merge_queue` rule and **no**
+`required_status_checks` rule at all. The actual required contexts come from:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/branches/main/protection \
+  --jq '.required_status_checks.contexts'
+```
+
+which today returns `macos`, `Enforce version & skill sync`, `Build + prove +
+(owner-gated) deploy`, `Vellum trusted freeze`, and `Vellum freeze`. Never
+describe a check as non-blocking, or propose deleting it, on ruleset evidence
+alone.
+
+Two consequences worth knowing. `.github/rulesets/main-protection.json`
+declares a ruleset named `main-protection` that **does not exist live**, so the
+scheduled `ruleset-drift-check.yml` has been failing — the checked-in intent is
+currently aspiration, and the file's two required contexts are a subset of the
+five that classic protection really enforces. And a PR whose only red checks are
+Vellum ones is genuinely **not mergeable**, even though nothing in the ruleset
+says so; arming auto-merge on it is safe but will simply wait.
+
+### The three red Vellum rows are one failure, not three broken checks
+
+`Vellum freeze`, `Trusted base executor`, and `Vellum trusted freeze` appearing
+red together is the normal shape of a *single* freeze-check failure:
+
+| Row | Source | Required? |
+|---|---|---|
+| `Vellum freeze` | job in `vellum-freeze-check.yml`, on `pull_request` | **yes** |
+| `Trusted base executor` | job in `vellum-trusted-gate.yml`, on `pull_request_target` — re-runs the same check from the trusted base | no |
+| `Vellum trusted freeze` | the commit status `Trusted base executor` posts, *and* the `merge_group` job name | **yes** |
+
+So `Vellum trusted freeze` legitimately shows up twice in `gh pr checks` — once
+as the posted status, once as the `merge_group` job skipped on a `pull_request`
+event. Fix the underlying freeze-check failure and all three clear together.
+
+The usual cause is a change to a `framework-authoritative-transferred` slice
+with no matching change event under `.github/vellum-change-events/`. The
+diagnostic names each uncovered slice, the changed paths behind it, and the
+`disposition` values available; reproduce it locally rather than reading CI logs:
+
+```sh
+python3 tools/scripts/vellum_freeze_check.py \
+  --base origin/main --head HEAD --source-head HEAD \
+  --output /tmp/vellum-outbox.json
+```
+
+This boundary is deliberate infrastructure, not ceremony — it keeps Pulp changes
+to extracted components ingestible by `Generous-Corp/vellum`. Do not "green it
+up" by weakening the check or by writing a `pulp-only` disposition you cannot
+justify; the rationale field is the artifact that makes a later ingest decision
+possible. `docs/contracts/vellum-extraction-freeze.md` is the contract.
+
+The `pull_request_target` + `statuses: write` shape on the trusted gate is
+intentional and safe as written: it checks out `base.sha` with
+`persist-credentials: false`, executes **only** base-checkout scripts, and adds
+the PR head as a worktree that is read as data and never executed. Preserve all
+three properties when editing that workflow — running anything out of
+`$proposed_tree` would hand a fork PR the Vellum reader credentials.
+
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
 Pulp #2087 piggyback. Catches the class of bug where in-tree builds

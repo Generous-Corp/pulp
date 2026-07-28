@@ -122,6 +122,41 @@ inline double bridged_t_center_frequency(double r_eff,
 /// the capacitor values. Scaling both arms therefore retunes the drum while
 /// leaving Q exactly invariant, which is the signature a tune control has to
 /// reproduce.
+/// Scale both capacitive arms so the network's at-rest centre frequency lands
+/// on `target_hz`, returning the retuned components.
+///
+/// This is how the instrument is retuned on the bench: substituting a
+/// capacitor moves the pitch. With the two arms kept equal the centre
+/// frequency goes as 1/C while Q is independent of them, so scaling both by
+/// the ratio of current to target frequency moves the pitch and leaves the
+/// ring's character exactly where it was -- which is what a tune control has
+/// to do, and why this is a retune rather than a pitch-shift bolted on top.
+///
+/// The at-rest branch resistance (`r165 + r166`, the state the network settles
+/// into between hits) is what the solve targets. During a hit the attack shunt
+/// and the leakage sigh move `R_eff` deliberately, and those are the drum's
+/// signature rather than error to be corrected.
+///
+/// Capacitance is clamped to the same physical range the components carry
+/// elsewhere, so an extreme request lands at the end of the range rather than
+/// silently reporting a pitch the network cannot reach.
+inline BridgedTComponents bridged_t_retuned_to(const BridgedTComponents& c,
+                                               double target_hz) noexcept {
+    constexpr double kMinFarads = 1.0e-10;
+    constexpr double kMaxFarads = 1.0e-6;
+    if (!(target_hz > 0.0)) return c;
+    const double r_rest = c.r165 + c.r166;
+    const double current =
+        bridged_t_center_frequency(bridged_t_shunt_resistance(r_rest, c), c);
+    if (!(current > 0.0)) return c;
+
+    BridgedTComponents out = c;
+    const double scale = current / target_hz;
+    out.c41 = std::clamp(c.c41 * scale, kMinFarads, kMaxFarads);
+    out.c42 = std::clamp(c.c42 * scale, kMinFarads, kMaxFarads);
+    return out;
+}
+
 inline double bridged_t_q(double r_eff, const BridgedTComponents& c) noexcept {
     const double alpha2 = r_eff * c.r167 * c.c41 * c.c42;
     const double alpha1 = r_eff * (c.c41 + c.c42);

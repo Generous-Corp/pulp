@@ -75,6 +75,14 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
     endif()
 
+    # An Info.plist template reachable by a format helper but absent from the
+    # SDK install list does not error — PulpPluginFormats selects with
+    # `elseif(EXISTS ...)`, so the helper falls through and consumer builds get
+    # bundles with an empty CFBundleIdentifier. Pure text comparison, so it runs
+    # everywhere rather than only on Apple.
+    add_test(NAME sdk-plist-templates-installed COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_sdk_plist_templates_installed.py")
+
     # TART_HOME resolution: the Tart VM store is a per-host value, so the VM
     # tooling must read it from the host (env, else the tartci profile) and hard
     # error otherwise. A repo-side default is wrong on some host and wrong
