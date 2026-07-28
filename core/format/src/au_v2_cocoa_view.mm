@@ -172,9 +172,7 @@ static const char kOwnershipKey = 0;
 
     auto bridge = std::make_unique<format::ViewBridge>(
         *ctx.processor, *ctx.store, ctx.owner_alive,
-        format::ViewBridge::Options{
-            .enable_hot_reload = format::dev_editor_hot_reload_enabled(),
-            .role = format::ViewRole::Editor});
+        format::ViewBridge::Options::hosted_editor());
     std::string editor_error;
     if (!bridge->open(&editor_error)) {
         runtime::log_error("AU v2 editor: ViewBridge::open failed ({})", editor_error);

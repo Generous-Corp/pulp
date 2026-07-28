@@ -7,8 +7,11 @@ pulp_add_test_suite(pulp-test-widget-animation LIBRARIES pulp::view)
 # Auto UI tests
 pulp_add_test_suite(pulp-test-auto-ui LIBRARIES pulp::view)
 
-# ViewBridge lifecycle tests
+# ViewBridge lifecycle tests. PULP_REPO_ROOT lets the hosted-adapter structural
+# guard read the format adapter sources and assert each one builds its editor
+# from ViewBridge::Options::hosted_editor().
 pulp_add_test_suite(pulp-test-view-bridge LIBRARIES pulp::format)
+target_compile_definitions(pulp-test-view-bridge PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-view-bridge
     TEST_SPEC "[lifecycle]"
     TEST_PREFIX "lifecycle::"

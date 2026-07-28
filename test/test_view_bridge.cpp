@@ -16,11 +16,18 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+
+#ifndef PULP_REPO_ROOT
+#define PULP_REPO_ROOT "."
+#endif
 
 using namespace pulp;
 
@@ -708,6 +715,85 @@ TEST_CASE("dev_editor_hot_reload_enabled honors PULP_DEV_HOT_RELOAD", "[format][
         hot_reload.set(off);
         CHECK_FALSE(format::dev_editor_hot_reload_enabled());
     }
+}
+
+// Every host-embedded editor derives its Options from this one factory, so the
+// developer opt-in reaches all of them and a new option lands in one place.
+TEST_CASE("ViewBridge::Options::hosted_editor tracks the developer opt-in",
+          "[format][view-bridge][hot-reload]") {
+    ScopedEnvVar hot_reload("PULP_DEV_HOT_RELOAD");
+
+    hot_reload.unset();
+    CHECK_FALSE(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+
+    hot_reload.set("1");
+    CHECK(format::ViewBridge::Options::hosted_editor().enable_hot_reload);
+
+    // The role is what makes this the *primary editor* factory; an auxiliary
+    // panel must not silently pick it up.
+    CHECK(format::ViewBridge::Options::hosted_editor().role == format::ViewRole::Editor);
+}
+
+// Structural guard. VST3 and CLAP shipped without scripted-UI hot reload because
+// they built their ViewBridge from the no-Options constructor, so a sweep over
+// call sites that named `enable_hot_reload` never reached them. Grepping for a
+// field name cannot find a call site that omits it — so assert the positive
+// instead: every format adapter that embeds an editor in a host constructs its
+// bridge from Options::hosted_editor().
+//
+// The standalone host is the one deliberate exception: it forces hot reload on
+// unconditionally because it is itself the dev tool.
+TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
+          "[format][view-bridge][hot-reload]") {
+    namespace fs = std::filesystem;
+    const fs::path repo_root{PULP_REPO_ROOT};
+
+    struct AdapterSource {
+        const char* path;
+        const char* why;
+    };
+    // Each of these constructs a ViewBridge for an editor embedded in a host.
+    // Adding a new format adapter with an editor means adding it here.
+    const AdapterSource hosted[] = {
+        {"core/format/include/pulp/format/clap_entry.hpp", "CLAP gui_create"},
+        {"core/format/src/vst3_plug_view.cpp", "VST3 IPlugView"},
+        {"core/format/src/au_view_controller_mac.mm", "AU v3 macOS"},
+        {"core/format/src/au_view_controller_ios.mm", "AU v3 iOS"},
+        {"core/format/src/au_v2_cocoa_view.mm", "AU v2 Cocoa"},
+        {"core/format/src/aax_effect_gui.cpp", "AAX effect GUI"},
+    };
+
+    for (const auto& adapter : hosted) {
+        const auto path = repo_root / adapter.path;
+        INFO("hosted adapter: " << adapter.why << " (" << adapter.path << ")");
+        REQUIRE(fs::exists(path));
+
+        std::ifstream in(path);
+        REQUIRE(in.good());
+        const std::string source{std::istreambuf_iterator<char>(in),
+                                 std::istreambuf_iterator<char>()};
+
+        // Positive: it uses the shared factory.
+        INFO("does not construct its ViewBridge from Options::hosted_editor()");
+        CHECK(source.find("Options::hosted_editor()") != std::string::npos);
+
+        // Negative: it does not hand-assemble the flag, which is how the two
+        // adapters drifted in the first place.
+        INFO("hand-assembles enable_hot_reload instead of using the factory");
+        CHECK(source.find("enable_hot_reload") == std::string::npos);
+    }
+
+    // Negative control: prove the scan can actually observe the thing it
+    // asserts. The standalone host genuinely does hand-assemble the flag, so a
+    // scan that reports "clean" for it is a scan that is not reading anything.
+    const auto standalone = repo_root / "core/format/src/standalone.cpp";
+    REQUIRE(fs::exists(standalone));
+    std::ifstream standalone_in(standalone);
+    REQUIRE(standalone_in.good());
+    const std::string standalone_source{std::istreambuf_iterator<char>(standalone_in),
+                                        std::istreambuf_iterator<char>()};
+    INFO("standalone no longer hand-assembles Options — the scan above proves nothing");
+    CHECK(standalone_source.find("enable_hot_reload") != std::string::npos);
 }
 
 // ── Live editor reload (live-swap 1.9) ───────────────────────────────────────

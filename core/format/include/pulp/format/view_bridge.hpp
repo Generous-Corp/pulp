@@ -65,6 +65,23 @@ public:
     struct Options {
         bool enable_hot_reload = false;  ///< Poll scripted UI + theme.json for changes
         ViewRole role = ViewRole::Editor;
+
+        /// Options for a primary editor embedded in a host: hot reload follows
+        /// the developer's `PULP_DEV_HOT_RELOAD` opt-in, role is Editor.
+        ///
+        /// Every format adapter builds its editor from this rather than
+        /// assembling the struct itself. Hand-assembly is what let VST3 and CLAP
+        /// diverge: they used the no-Options constructor, so a sweep over call
+        /// sites that named the field did not reach them and their editors never
+        /// honoured the flag. One definition means a new adapter cannot silently
+        /// omit an option, and a new option lands in exactly one place.
+        ///
+        /// The standalone host deliberately does NOT use this — it forces hot
+        /// reload on unconditionally because it is itself the dev tool.
+        static Options hosted_editor() {
+            return Options{.enable_hot_reload = dev_editor_hot_reload_enabled(),
+                           .role = ViewRole::Editor};
+        }
     };
 
     ViewBridge(Processor& processor, state::StateStore& store);

@@ -163,9 +163,7 @@
         _bridge = std::make_unique<pulp::format::ViewBridge>(
             *processor, *store,
             [(PulpAudioUnit *)self.audioUnit pulpOwnerAlive],
-            pulp::format::ViewBridge::Options{
-                .enable_hot_reload = pulp::format::dev_editor_hot_reload_enabled(),
-                .role = pulp::format::ViewRole::Editor});
+            pulp::format::ViewBridge::Options::hosted_editor());
         std::string err;
         if (!_bridge->open(&err)) {
             pulp::runtime::log_error("AU iOS: ViewBridge::open failed ({})", err);
