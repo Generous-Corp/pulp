@@ -1,0 +1,279 @@
+name: Webhook endpoint watchdog
+
+# Outcome-based invariant: "every ACTIVE repository webhook has delivered
+# successfully recently." Fires on the symptom (nobody is receiving events),
+# not on a cause — a renamed Tailscale node today, an unloaded daemon
+# tomorrow, a daemon registered for the wrong repo next month.
+#
+# Why this lives in GitHub Actions and not on the hosts: a host-local check
+# cannot report that its own host is unreachable. The receivers here are
+# self-hosted Macs behind Tailscale Funnel, so the only vantage point that can
+# see "GitHub cannot reach this endpoint" is GitHub itself.
+#
+# The failure this was written for (2026-07-28): pulp's macbook webhook pointed
+# at `daniels-macbook-pro.taile2001.ts.net` while the live node had become
+# `daniels-macbook-pro-1` — the original had been OFFLINE FOR 41 DAYS. Every
+# delivery returned 502 and nothing noticed, because a dead receiver is
+# indistinguishable from a quiet one unless you look at delivery history.
+#
+# Sibling watchdogs (docs/guides/release-watchdog.md): auto-release-watchdog
+# (a workflow failed), release-cadence-check (a bump landed untagged),
+# THIS (nobody is receiving events).
+#
+# Cadence: every 30 minutes. Opens/updates one tracking issue; closes it when
+# every active hook is healthy again.
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      grace_minutes:
+        description: 'Minutes an endpoint may fail before it is flagged'
+        required: false
+        default: '60'
+      sample:
+        description: 'Deliveries to inspect per hook'
+        required: false
+        default: '20'
+      dry_run:
+        description: 'Log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: webhook-endpoint-watchdog
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    # Only the canonical repo should page anyone.
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    name: Sweep webhook delivery health
+
+    env:
+      # Reading webhooks/deliveries is an ADMIN-scoped API. The default
+      # GITHUB_TOKEN generally cannot, so prefer the existing release PAT and
+      # fall back — an unreadable result is reported loudly, never as healthy.
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      TRACKING_TITLE: 'Webhook endpoints: deliveries failing'
+      GRACE_MINUTES: ${{ github.event.inputs.grace_minutes || '60' }}
+      SAMPLE: ${{ github.event.inputs.sample || '20' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+
+    steps:
+      - name: Sweep hooks
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+
+          # Fail LOUD on an unreadable API. "I could not check" must never be
+          # rendered as "everything is fine" — the same rule the ruleset-drift
+          # check follows for an unreadable protection surface.
+          if ! hooks=$(gh api "repos/${repo}/hooks" 2>hook_err.txt); then
+              {
+                echo "## Webhook health could not be verified"
+                echo
+                echo "\`GET /repos/${repo}/hooks\` failed. Reading webhooks is an"
+                echo "admin-scoped API: set \`RELEASE_BOT_TOKEN\` (or a PAT with"
+                echo "\`admin:repo_hook\`) so this watchdog can see delivery history."
+                echo
+                echo '```'
+                head -20 hook_err.txt
+                echo '```'
+              } > body.md
+              echo "count=1" >> "$GITHUB_OUTPUT"
+              echo "unreadable=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+
+          echo "$hooks" > hooks.json
+          echo "unreadable=false" >> "$GITHUB_OUTPUT"
+
+          # Per active hook, pull a delivery sample and record the newest 2xx.
+          : > deliveries.jsonl
+          while read -r id; do
+              [ -n "$id" ] || continue
+              gh api "repos/${repo}/hooks/${id}/deliveries?per_page=${SAMPLE}" \
+                  > "deliv-${id}.json" 2>/dev/null || echo '[]' > "deliv-${id}.json"
+              python3 - "$id" "deliv-${id}.json" >> deliveries.jsonl <<'PY'
+          import json, sys
+          hook_id, path = sys.argv[1], sys.argv[2]
+          try:
+              rows = json.load(open(path))
+          except Exception:
+              rows = []
+          if not isinstance(rows, list):
+              rows = []
+          print(json.dumps({"id": int(hook_id), "deliveries": rows}))
+          PY
+          done < <(python3 -c "
+          import json
+          for h in json.load(open('hooks.json')):
+              if h.get('active'):
+                  print(h.get('id'))
+          ")
+
+          python3 - <<'PY' > body.md
+          import datetime as dt
+          import json
+          import os
+          import pathlib
+          import urllib.parse
+
+          grace = int(os.environ["GRACE_MINUTES"])
+          now = dt.datetime.now(dt.timezone.utc)
+          hooks = {h["id"]: h for h in json.load(open("hooks.json"))}
+          samples = {}
+          p = pathlib.Path("deliveries.jsonl")
+          if p.exists():
+              for line in p.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  rec = json.loads(line)
+                  samples[rec["id"]] = rec["deliveries"]
+
+          def ts(value):
+              if not value:
+                  return None
+              try:
+                  return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+              except ValueError:
+                  return None
+
+          findings, healthy = [], []
+          for hook_id, hook in hooks.items():
+              if not hook.get("active"):
+                  continue
+              url = (hook.get("config") or {}).get("url") or "(none)"
+              host = urllib.parse.urlparse(url).hostname or url
+              rows = samples.get(hook_id) or []
+              ok = [r for r in rows if isinstance(r.get("status_code"), int)
+                    and 200 <= r["status_code"] < 300]
+              bad = [r for r in rows if isinstance(r.get("status_code"), int)
+                     and not (200 <= r["status_code"] < 300)]
+              last_ok = max((t for t in (ts(r.get("delivered_at")) for r in ok) if t),
+                            default=None)
+
+              if not rows:
+                  findings.append((host, hook_id, "no deliveries in sample",
+                                   "-", len(bad), len(rows)))
+                  continue
+              if ok:
+                  # Any recent success means the endpoint is alive. Partial
+                  # failures (e.g. one event type 400ing) are surfaced but are
+                  # NOT a stale endpoint — different bug, different fix.
+                  age = (now - last_ok).total_seconds() / 60 if last_ok else None
+                  if age is not None and age > grace:
+                      findings.append((host, hook_id, "no success within grace",
+                                       f"{age:.0f}m ago", len(bad), len(rows)))
+                  else:
+                      healthy.append((host, hook_id, len(bad), len(rows)))
+                  continue
+              codes = sorted({r["status_code"] for r in bad
+                              if isinstance(r.get("status_code"), int)})
+              findings.append((host, hook_id,
+                               "every delivery failed (" +
+                               ",".join(str(c) for c in codes) + ")",
+                               "never", len(bad), len(rows)))
+
+          out = []
+          if findings:
+              out.append("## Webhook endpoints are not receiving events")
+              out.append("")
+              out.append("GitHub cannot deliver to the endpoints below, so anything")
+              out.append("that depends on live events (queue arming, closeout,")
+              out.append("progress signals) is degraded or silent.")
+              out.append("")
+              out.append("| endpoint host | hook | problem | last success | failed/sampled |")
+              out.append("|---|---|---|---|---|")
+              for host, hid, why, last, nbad, ntot in findings:
+                  out.append(f"| `{host}` | {hid} | {why} | {last} | {nbad}/{ntot} |")
+              out.append("")
+              out.append("### Most likely causes, cheapest first")
+              out.append("")
+              out.append("1. **The receiver's hostname changed.** Compare the hook URL")
+              out.append("   against what the daemon actually serves:")
+              out.append("   `shipyard daemon status` prints its live tunnel URL. A")
+              out.append("   Tailscale node that re-registers gains a `-1` suffix and the")
+              out.append("   original goes offline — the old name then 502s forever.")
+              out.append("   Confirm with `tailscale status | grep <host>`; an entry")
+              out.append("   reading `offline, last seen …` is a dead target.")
+              out.append("2. **The daemon serves a different repo.** `shipyard daemon")
+              out.append("   status` reports `repos=…`; if this repo is absent the")
+              out.append("   endpoint answers but ignores these events.")
+              out.append("3. **The daemon is down** on that host.")
+              out.append("")
+              out.append("A `400` on only *some* event types is a payload-decode bug in")
+              out.append("the receiver, not a stale endpoint — file it separately.")
+          if healthy:
+              out.append("")
+              out.append("<details><summary>Healthy endpoints</summary>")
+              out.append("")
+              out.append("| endpoint host | hook | failed/sampled |")
+              out.append("|---|---|---|")
+              for host, hid, nbad, ntot in healthy:
+                  out.append(f"| `{host}` | {hid} | {nbad}/{ntot} |")
+              out.append("")
+              out.append("</details>")
+          out.append("")
+          out.append(f"_Swept {now:%Y-%m-%d %H:%M} UTC · grace {grace}m · "
+                     f"sample {os.environ['SAMPLE']}._")
+          print("\n".join(out))
+
+          pathlib.Path("count.txt").write_text(str(len(findings)))
+          PY
+
+          echo "count=$(cat count.txt)" >> "$GITHUB_OUTPUT"
+          cat body.md
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          COUNT: ${{ steps.scan.outputs.count }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "${COUNT}" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Sweep on $(date -u +%Y-%m-%d\ %H:%M) found every active webhook delivering. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label ci 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Fail the run so a broken endpoint is visible on main
+        if: steps.scan.outputs.count != '0'
+        run: |
+          echo "::error::${{ steps.scan.outputs.count }} webhook endpoint(s) not delivering — see the tracking issue."
+          exit 1

@@ -2903,6 +2903,58 @@ If you see the "Nightly full build is broken" tracker, a refactor broke
 a test target PR CI never compiles. Download the `nightly-full-build-logs`
 artifact for the full failure list.
 
+## Webhook endpoint watchdog (`webhook-endpoint-watchdog.yml`)
+
+Shipyard's daemons receive GitHub events over Tailscale Funnel on the
+self-hosted Macs. A dead receiver is **indistinguishable from a quiet one**
+unless somebody reads delivery history, which is why pulp's macbook webhook
+sat returning `502` for **41 days** unnoticed: the Tailscale node had
+re-registered as `…-pro-1` while the hook still pointed at `…-pro`, whose node
+had gone offline. Every event-driven behaviour on that host was silently dead
+the whole time.
+
+This watchdog closes that hole on the same find-or-create / reopen / close
+tracker pattern as the two above. It runs on a 30-minute schedule **in GitHub
+Actions, deliberately not on the hosts** — a host-local check cannot report
+that its own host is unreachable, so GitHub is the only vantage point that can
+observe "I cannot reach this endpoint."
+
+It flags an active hook when every sampled delivery failed, when no success
+falls inside the grace window, or when there are no deliveries at all. It does
+**not** flag a hook that fails only *some* event types: that endpoint is alive
+and the cause is a payload-decode bug in the receiver — a different fix. Today
+`workflow_job` and `check_suite` return `200` while `workflow_run` and
+`check_run` return `400` across both repos, which is exactly that separate bug.
+
+Reading webhooks is admin-scoped, so it prefers `RELEASE_BOT_TOKEN` and falls
+back to `GITHUB_TOKEN`; an unreadable API opens the tracker saying so rather
+than reporting healthy.
+
+**Do not hand-edit a hook URL to fix a stale endpoint.** Shipyard's registrar
+owns hook lifecycle (`src/registrar.rs`) and patches or re-creates hooks for the
+repos the daemon is started with, recording them in
+`daemon/registrations.json`. The durable repair is:
+
+```sh
+shipyard daemon refresh --repo <owner>/<repo> --repo <owner>/<other-repo>
+```
+
+Two things that bite:
+
+- **Registration needs a verified tunnel.** `refresh` restarts the tunnel, so
+  status immediately afterwards reports `tunnel=inactive · repos=—`. That is
+  normal; give it a minute. Re-running `refresh` to "fix" it restarts the tunnel
+  again and resets the clock — wait instead of retrying.
+- **The registrar only manages hooks it created.** A hook it does not track (an
+  older registration, or one from a renamed node) is left behind as an orphan
+  pointing at a dead host — the 502 source, and the thing this watchdog reports.
+  After a repair, list `repos/<repo>/hooks` and delete any URL that is not a
+  daemon's current tunnel URL.
+
+Check what a daemon actually serves with `shipyard daemon status` (it prints the
+live tunnel URL plus `repos=…`). A daemon registered for a *different* repo
+answers the request and ignores the events, which looks healthy from the outside.
+
 ### Linting workflow files locally
 
 `actionlint` is **slow on Pulp's large workflows** — it shells out to
