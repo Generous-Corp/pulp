@@ -128,7 +128,8 @@ public:
         channels_[0].tape_physical.set_seeds(chardelay::kPrngSeed);
         channels_[1].tape_physical.set_seeds(chardelay::kPrngSeed ^ 0x2545F491u);
 
-        for (auto* smoother : {&feedback_, &crossfeed_, &duck_, &freeze_, &character_})
+        for (auto* smoother : {&feedback_, &crossfeed_, &duck_, &freeze_, &character_,
+                               &diffusion_amount_})
             smoother->configure(chardelay::kParamGlideS, sample_rate_);
 
         duck_follower_.configure(chardelay::kDuckAttackS, chardelay::kDuckReleaseS,
@@ -205,6 +206,14 @@ public:
     void set_character_amount(SampleType amount) {
         character_target_ =
             std::clamp(finite_or(static_cast<double>(amount), character_target_), 0.0, 1.0);
+    }
+
+    // Cross-character diffusion: smears ANY character's repeats through the
+    // diffusion network by this 0..1 amount, in-loop (same placement the
+    // diffusion character uses). 0 leaves the selected character untouched.
+    void set_diffusion_amount(SampleType amount) {
+        diffusion_amount_target_ =
+            std::clamp(finite_or(static_cast<double>(amount), diffusion_amount_target_), 0.0, 1.0);
     }
 
     void set_mod(SampleType rate01, SampleType depth01) {
@@ -306,6 +315,7 @@ public:
         crossfeed_.snap(crossfeed_target_);
         duck_.snap(duck_target_);
         character_.snap(character_target_);
+        diffusion_amount_.snap(diffusion_amount_target_);
         freeze_.snap(freeze_on_ ? 1.0 : 0.0);
 
         duck_follower_.reset(0.0);
@@ -331,6 +341,7 @@ public:
             }
 
             const double character_amount = character_.process(character_target_);
+            diffusion_amount_value_ = diffusion_amount_.process(diffusion_amount_target_);
             const double freeze = freeze_.process(freeze_on_ ? 1.0 : 0.0);
             duck_.process(duck_target_);
 
@@ -561,7 +572,6 @@ private:
                 for (auto& channel : channels_) {
                     channel.loop_highpass.set_cutoff(chardelay::kDiffusionLoopHpHz, sample_rate_);
                     channel.loop_lowpass.set_cutoff(chardelay::kDiffusionLoopLpHz, sample_rate_);
-                    channel.diffusion.update(amount);
                 }
                 break;
             case Character::tape:
@@ -586,6 +596,13 @@ private:
                 for (auto& channel : channels_) channel.vintage.update(amount);
                 break;
         }
+
+        // The diffusion network is now engaged for EVERY character (scaled by the
+        // cross-character diffusion amount in process_character), so its tank mix
+        // is updated here unconditionally rather than only in the diffusion case.
+        // Cheap, control-rate, idempotent.
+        for (auto& channel : channels_)
+            channel.diffusion.update(diffusion_amount_.current());
     }
 
     void advance_modulation(double character_amount) noexcept {
@@ -622,19 +639,21 @@ private:
     double process_character(ChannelState& channel, double x, double time_ms,
                              double character_amount, double decorrelation) noexcept {
         const double base_samples = time_ms * 0.001 * sample_rate_;
+        double y = 0.0;
         switch (character_type_) {
             case Character::clean: {
-                double y = read_line(channel, x, base_samples, base_samples, 0.0);
+                y = read_line(channel, x, base_samples, base_samples, 0.0);
                 y = channel.loop_highpass.highpass(y);
                 if (!clean_lowpass_bypassed_) y = channel.loop_lowpass.lowpass(y);
-                return y;
+                break;
             }
             case Character::diffusion: {
-                double y = read_line(channel, x, base_samples, base_samples, 0.0);
+                y = read_line(channel, x, base_samples, base_samples, 0.0);
                 y = channel.diffusion.process(y, decorrelation);
                 channel.diffusion.tick_modulation();
                 y = channel.loop_highpass.highpass(y);
-                return channel.loop_lowpass.lowpass(y);
+                y = channel.loop_lowpass.lowpass(y);
+                break;
             }
             case Character::tape: {
                 channel.instability.tick();
@@ -657,12 +676,14 @@ private:
                     const double pre = channel.tape_physical.pre_process(x);
                     const double delayed =
                         read_line(channel, pre, folded + offset_samples, folded, offset_samples);
-                    return channel.tape_physical.post_process(delayed);
+                    y = channel.tape_physical.post_process(delayed);
+                } else {
+                    const double pre = channel.tape.pre_process(x);
+                    const double delayed = read_line(channel, pre, base_samples + offset_samples,
+                                                     base_samples, offset_samples);
+                    y = channel.tape.post_process(delayed);
                 }
-                const double pre = channel.tape.pre_process(x);
-                const double delayed = read_line(channel, pre, base_samples + offset_samples,
-                                                 base_samples, offset_samples);
-                return channel.tape.post_process(delayed);
+                break;
             }
             case Character::bbd: {
                 // Clock-domain characters own their own line, so reverse runs
@@ -674,7 +695,8 @@ private:
                 const double v = reverse_on_
                                      ? channel.reverse.process(x, base_samples, 0.0)
                                      : x;
-                return channel.bbd.process(v);
+                y = channel.bbd.process(v);
+                break;
             }
             case Character::vintage_digital: {
                 const double v = reverse_on_
@@ -682,10 +704,23 @@ private:
                                      : x;
                 const double line_ms =
                     reverse_on_ ? chardelay::kReverseLineMs : time_ms;
-                return channel.vintage.process(v, line_ms * 0.001);
+                y = channel.vintage.process(v, line_ms * 0.001);
+                break;
             }
         }
-        return 0.0;
+
+        // Cross-character diffusion: smear ANY character's repeat through the
+        // diffusion network by the smoothed amount, in-loop (post-line,
+        // pre-saturator) — the same placement the diffusion character uses, so
+        // repeats melt into a cloud as they recirculate. Dry/wet crossfade so 0
+        // is the character untouched. Skipped for the diffusion character, which
+        // already runs the network in its own branch above (avoids a double pass).
+        if (diffusion_amount_value_ > 0.0 && character_type_ != Character::diffusion) {
+            const double d = channel.diffusion.process(y, decorrelation);
+            channel.diffusion.tick_modulation();
+            y = y + diffusion_amount_value_ * (d - y);
+        }
+        return y;
     }
 
     /// Forward read from the shared line, or a reversed segment when reverse is
@@ -712,6 +747,7 @@ private:
     chardelay::Smoother duck_;
     chardelay::Smoother freeze_;
     chardelay::Smoother character_;
+    chardelay::Smoother diffusion_amount_;
     chardelay::EnvelopeFollower duck_follower_;
 
     Character character_type_ = Character::clean;
@@ -725,6 +761,8 @@ private:
     double feedback_target_ = 0.35;
     double crossfeed_target_ = 0.0;
     double character_target_ = 0.5;
+    double diffusion_amount_target_ = 0.0;
+    double diffusion_amount_value_ = 0.0;   // smoothed once per sample in process()
     double duck_target_ = 0.0;
     double mod_rate_hz_ = 0.5;
     double mod_depth_ = 0.0;
