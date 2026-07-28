@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Derive the DSP vocabulary for the module-generation prompt from the headers.
+"""Derive what `pulp::signal` actually exposes, straight from the headers.
 
-Hand-writing the list of available DSP into the prompt has two failure modes,
-and the first one already bit us: a class listed with a plausible-but-wrong
-signature is worse than not listing it, because the model quietly avoids it and
-hand-rolls the DSP instead -- which is how a module ends up using none of Pulp
-at all. The second is staleness: DSP added to Pulp never reaches the prompt.
+This lives in Pulp's tools/ rather than beside any one consumer, because more
+than one thing needs it and none of them should own it:
 
-So the vocabulary is extracted from `core/signal/include/pulp/signal/*.hpp`:
-real class names, real public methods, real signatures. If a class is not in
-the headers it cannot appear in the prompt, and if someone adds one it appears
-automatically.
+  * the Rack module generator feeds it to a model, so the model is told what
+    Pulp really provides instead of guessing;
+  * Forge's graph -> C++ exporter validates its emitter table against it.
 
-    dsp_vocabulary.py            # markdown for the prompt
-    dsp_vocabulary.py --json     # machine-readable
+Both previously hand-maintained their own idea of the API, and both got it
+wrong in the same way: a plausible-but-invented signature that only a compiler
+caught. A single derived source removes that whole class of drift, and means a
+new class in core/signal reaches every consumer without anyone editing a list.
+
+Output: markdown for prompting, or `--json` for machine consumers.
+
+    dsp_vocabulary.py            # markdown, for a prompt
+    dsp_vocabulary.py --json     # {header: [{class, methods}]}, for a validator
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SIGNAL = os.path.normpath(os.path.join(HERE, "..", "..", "core", "signal",
+SIGNAL = os.path.normpath(os.path.join(HERE, "..", "core", "signal",
                                        "include", "pulp", "signal"))
 
 # Grouped so the prompt reads as "here is what you reach for", not a flat dump.

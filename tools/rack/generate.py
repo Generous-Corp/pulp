@@ -56,7 +56,7 @@ def dsp_vocabulary() -> str:
     model quietly avoid the class and hand-roll the DSP instead, which is how a
     generated module ends up using none of Pulp at all.
     """
-    r = subprocess.run([sys.executable, os.path.join(HERE, "dsp_vocabulary.py")],
+    r = subprocess.run([sys.executable, os.path.join(HERE, "..", "dsp_vocabulary.py")],
                        capture_output=True, text=True)
     return r.stdout
 
