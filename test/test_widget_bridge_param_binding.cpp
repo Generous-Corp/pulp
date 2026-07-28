@@ -484,3 +484,226 @@ TEST_CASE("a custom-drawn canvas knob drives its param through a drag",
     canvas->on_drag({40, 0});
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.8333f, 1e-3f));
 }
+
+// ── Binding-attempt diagnostics ──────────────────────────────────────────────
+//
+// bindWidgetToParam / bindMeter return a bool that no generated UI script
+// checks, so every failure below used to render a control that looks correct
+// and does nothing. The bridge records why each attempt did or did not bind.
+
+namespace {
+
+using Outcome = BindingOutcome;
+
+// Outcome of the single attempt a script made, for tests that make exactly one.
+Outcome only_outcome(const WidgetBridge& bridge) {
+    REQUIRE(bridge.binding_attempts().size() == 1);
+    return bridge.binding_attempts().front().outcome;
+}
+
+} // namespace
+
+TEST_CASE("a successful binding is recorded as bound",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindWidgetToParam('gain-knob', 'gain');
+    )");
+
+    // POSITIVE CONTROL. Every failure case below is only meaningful if the
+    // recorder can report success — a recorder that reported "broken" for
+    // everything would pass them all.
+    REQUIRE(only_outcome(bridge) == Outcome::ok);
+    CHECK(is_bound(Outcome::ok));
+    CHECK(bridge.binding_attempts().front().widget_id == "gain-knob");
+    CHECK(bridge.binding_attempts().front().param_name == "gain");
+    CHECK(bridge.param_binding_count() == 1);
+}
+
+TEST_CASE("binding to an undeclared param is recorded, not silently dropped",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // 'gian' is a typo for 'gain'. Today the knob renders and does nothing.
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindWidgetToParam('gain-knob', 'gian');
+    )");
+
+    CHECK(only_outcome(bridge) == Outcome::unknown_param);
+    CHECK_FALSE(is_bound(Outcome::unknown_param));
+    CHECK(bridge.param_binding_count() == 0);
+}
+
+TEST_CASE("binding a target the widget cannot accept is recorded",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // bindMeter needs a Meter; a Knob has no level surface for the frame
+    // service to write, so the push would silently no-op.
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindMeter('gain-knob', 'gain');
+    )");
+
+    CHECK(only_outcome(bridge) == Outcome::incompatible_widget);
+    CHECK(bridge.param_binding_count() == 0);
+}
+
+TEST_CASE("empty widget id and empty param name are distinguished",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindWidgetToParam('', 'gain');
+        bindWidgetToParam('gain-knob', '');
+    )");
+
+    REQUIRE(bridge.binding_attempts().size() == 2);
+    CHECK(bridge.binding_attempts()[0].outcome == Outcome::empty_widget_id);
+    CHECK(bridge.binding_attempts()[1].outcome == Outcome::empty_param_name);
+    CHECK(bridge.param_binding_count() == 0);
+}
+
+TEST_CASE("binding before the widget exists is a success, not a failure",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // Scripts may deliberately bind before creating the view; a diagnostic that
+    // called this broken would cry wolf on correct code.
+    bridge.load_script("bindWidgetToParam('later', 'gain');");
+
+    CHECK(only_outcome(bridge) == Outcome::deferred_widget_missing);
+    CHECK(is_bound(Outcome::deferred_widget_missing));
+    CHECK(bridge.param_binding_count() == 1);
+}
+
+TEST_CASE("rebinding a widget records that it displaced the prior binding",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // A widget has one source; the second bind wins silently today.
+    bridge.load_script(R"(
+        createKnob('k');
+        bindWidgetToParam('k', 'gain');
+        bindWidgetToParam('k', 'level');
+    )");
+
+    REQUIRE(bridge.binding_attempts().size() == 2);
+    CHECK(bridge.binding_attempts()[0].outcome == Outcome::ok);
+    CHECK(bridge.binding_attempts()[1].outcome == Outcome::replaced_prior_binding);
+    CHECK(bridge.param_binding_count() == 1);
+}
+
+TEST_CASE("unbound_params names declared params the UI cannot reach",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindWidgetToParam('gain-knob', 'gain');
+    )");
+
+    // 'gain' is reachable; 'level' is declared and has no control.
+    const auto unbound = bridge.unbound_params();
+    REQUIRE(unbound.size() == 1);
+    CHECK(unbound.front() == "level");
+}
+
+TEST_CASE("unbound_params ignores host-owned parameters",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    store.add_parameter({.id = 1, .name = "gain", .unit = "", .range = {.min = 0.0f, .max = 1.0f}});
+    store.add_parameter({.id = 2, .name = "Bypass", .unit = "",
+                         .range = {.min = 0.0f, .max = 1.0f},
+                         .designation = ParamDesignation::Bypass});
+    store.add_parameter({.id = 3, .name = "Panic", .unit = "",
+                         .range = {.min = 0.0f, .max = 1.0f},
+                         .is_trigger = true});
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        bindWidgetToParam('gain-knob', 'gain');
+    )");
+
+    // The host surfaces bypass and triggers itself, so a plugin that omits them
+    // from its own UI is not incomplete.
+    CHECK(bridge.unbound_params().empty());
+}
+
+TEST_CASE("a fully bound UI reports nothing unreachable",
+          "[view][bridge][state-binding][diagnostics]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // NEGATIVE CONTROL for unbound_params: a correct UI must come back clean,
+    // or the check is noise a developer learns to ignore.
+    bridge.load_script(R"(
+        createKnob('gain-knob');
+        createFader('level-fader', 'vertical');
+        bindWidgetToParam('gain-knob', 'gain');
+        bindWidgetToParam('level-fader', 'level');
+    )");
+
+    for (const auto& attempt : bridge.binding_attempts()) {
+        INFO(attempt.widget_id << " -> " << attempt.param_name << ": "
+                               << describe(attempt.outcome));
+        CHECK(is_bound(attempt.outcome));
+    }
+    CHECK(bridge.unbound_params().empty());
+}

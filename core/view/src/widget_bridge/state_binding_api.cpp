@@ -20,7 +20,9 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace pulp::view {
 
@@ -236,14 +238,67 @@ void WidgetBridge::service_param_bindings() {
     if (any_changed) request_repaint();
 }
 
+const char* describe(BindingOutcome o) noexcept {
+    switch (o) {
+        case BindingOutcome::ok: return "bound";
+        case BindingOutcome::deferred_widget_missing:
+            return "bound; widget not created yet";
+        case BindingOutcome::replaced_prior_binding:
+            return "bound, replacing this widget's previous binding";
+        case BindingOutcome::empty_widget_id: return "widget id was empty";
+        case BindingOutcome::empty_param_name: return "parameter name was empty";
+        case BindingOutcome::null_widget: return "widget id maps to a null view";
+        case BindingOutcome::incompatible_widget:
+            return "widget type cannot accept this binding target";
+        case BindingOutcome::unknown_param:
+            return "no parameter with that name is declared";
+    }
+    return "unknown outcome";
+}
+
+bool WidgetBridge::record_binding_attempt(const std::string& widget_id,
+                                          const std::string& param_name,
+                                          BindingTarget target,
+                                          BindingOutcome outcome) {
+    binding_attempts_.push_back(BindingAttempt{widget_id, param_name, target, outcome});
+    return is_bound(outcome);
+}
+
+std::vector<std::string> WidgetBridge::unbound_params() const {
+    std::unordered_set<std::string> reached;
+    for (const auto& attempt : binding_attempts_) {
+        if (is_bound(attempt.outcome)) reached.insert(attempt.param_name);
+    }
+
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < store_.param_count(); ++i) {
+        const auto* info = &store_.all_params()[i];
+        if (!info) continue;
+        // The host surfaces these itself; omitting them from a plugin's own UI
+        // is a choice, not a hole.
+        if (info->designation != state::ParamDesignation::None) continue;
+        if (info->is_trigger) continue;
+        if (reached.count(info->name) == 0) out.push_back(info->name);
+    }
+    return out;
+}
+
 bool WidgetBridge::add_param_binding(const std::string& widget_id,
                                      const std::string& param_name,
                                      ParamBinding::Target target,
                                      const choc::value::Value* transform) {
-    if (widget_id.empty() || param_name.empty()) return false;
+    // Every early return below records why, because the bool these functions
+    // return is dropped on the floor by every generated UI script.
+    const auto fail = [&](BindingOutcome o) {
+        return record_binding_attempt(widget_id, param_name, target, o);
+    };
+
+    if (widget_id.empty()) return fail(BindingOutcome::empty_widget_id);
+    if (param_name.empty()) return fail(BindingOutcome::empty_param_name);
     const auto widget = widgets_.find(widget_id);
-    if (widget != widgets_.end()) {
-        if (widget->second == nullptr) return false;
+    const bool widget_present = widget != widgets_.end();
+    if (widget_present) {
+        if (widget->second == nullptr) return fail(BindingOutcome::null_widget);
 
         // Record only bindings the native per-frame service can actually
         // apply. A custom Canvas may still use getParam/setParam from its own
@@ -260,11 +315,11 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
                       dynamic_cast<RangeSlider*>(view) != nullptr ||
                       dynamic_cast<Toggle*>(view) != nullptr ||
                       dynamic_cast<ProgressBar*>(view) != nullptr;
-        if (!supported) return false;
+        if (!supported) return fail(BindingOutcome::incompatible_widget);
     }
 
     state::ParamID id = 0;
-    if (!resolve_param_id(param_name, id)) return false;
+    if (!resolve_param_id(param_name, id)) return fail(BindingOutcome::unknown_param);
 
     ParamBinding binding;
     binding.widget_id = widget_id;
@@ -276,11 +331,14 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     for (auto& existing : param_bindings_) {
         if (existing.widget_id == widget_id) {
             existing = std::move(binding);
-            return true;
+            return record_binding_attempt(widget_id, param_name, target,
+                                          BindingOutcome::replaced_prior_binding);
         }
     }
     param_bindings_.push_back(std::move(binding));
-    return true;
+    return record_binding_attempt(
+        widget_id, param_name, target,
+        widget_present ? BindingOutcome::ok : BindingOutcome::deferred_widget_missing);
 }
 
 void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
