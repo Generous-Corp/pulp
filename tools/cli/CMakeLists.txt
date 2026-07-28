@@ -53,6 +53,7 @@ add_executable(pulp-cli
     cmd_build.cpp
     cmd_config.cpp
     cmd_coverage.cpp
+    cmd_dsp.cpp
     cmd_create.cpp
     cmd_minos.cpp
     cmd_macos.cpp
@@ -488,6 +489,45 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-coverage-diff-skip PROPERTIES
         ENVIRONMENT "PULP_SKIP_DIFF_COVER=1"
         PASS_REGULAR_EXPRESSION "skipped via PULP_SKIP_DIFF_COVER=1")
+
+    # Exercise the `pulp dsp` dispatch (cmd_dsp.cpp) and, through it, the
+    # capability registry itself. `--check` is the load-bearing one: it is the
+    # gate that fails when a catalog gains a capability without the snapshot
+    # being regenerated, so a test that only proved the help banner would not
+    # prove the thing worth proving.
+    add_test(NAME cli-dsp-help
+        COMMAND pulp-cli dsp
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-dsp-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "pulp dsp")
+
+    add_test(NAME cli-dsp-help-flag
+        COMMAND pulp-cli dsp --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-dsp-help-flag PROPERTIES
+        PASS_REGULAR_EXPRESSION "capabilities")
+
+    add_test(NAME cli-dsp-unknown-subcommand
+        COMMAND pulp-cli dsp bogus-subcommand
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-dsp-unknown-subcommand PROPERTIES
+        WILL_FAIL TRUE)
+
+    # The registry must agree with the catalog headers as committed. This is
+    # the freshness gate; it fails if a baked param is added without
+    # `pulp dsp capabilities --write`.
+    add_test(NAME cli-dsp-capabilities-check
+        COMMAND pulp-cli dsp capabilities --check
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-dsp-capabilities-check PROPERTIES
+        PASS_REGULAR_EXPRESSION "no collisions")
+
+    # The emitted registry is well-formed JSON carrying a non-empty surface.
+    add_test(NAME cli-dsp-capabilities-json
+        COMMAND pulp-cli dsp capabilities --json
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-dsp-capabilities-json PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"baked_params\"")
 
     # Exercise the `pulp minos` dispatch (cmd_minos.cpp): usage banner,
     # help alias, unknown-subcommand error, the measure->script handoff

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.752.0
+    VERSION 0.757.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -240,6 +240,31 @@ else()
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wextra>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wpedantic>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>")
+
+    # Two designated-initializer diagnostics promoted to ERRORS, because the
+    # class of defect they catch is one GCC rejects outright while clang only
+    # warns — and Pulp's REQUIRED gate is macOS/clang.
+    #
+    # This is not hypothetical. A duplicate `.custom_latency_for` designator in
+    # `signal_graph.cpp` reached main: clang emitted BOTH of these warnings on
+    # the required gate and nobody reads a green job's log, while the Linux job
+    # (the only GCC lane, and advisory) failed and was merged past. The defect
+    # was detected twice, displayed twice, and shipped anyway.
+    #
+    # Promoting them costs nothing — clang already emits them by default, so
+    # this cannot fail on anything that was not already a real defect — and it
+    # moves the catch onto the gate that actually blocks, at compile time,
+    # instead of relying on someone reading a warning or on an advisory lane's
+    # verdict being honoured.
+    #
+    # clang-only: GCC spells the override diagnostic `-Woverride-init` and
+    # rejects duplicate designators as a hard error regardless, so it needs no
+    # help here.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(
+            "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=reorder-init-list>"
+            "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=initializer-overrides>")
+    endif()
 endif()
 
 # ── Windows runtime library ────────────────────────────────────────────────

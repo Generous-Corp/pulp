@@ -553,6 +553,11 @@ main thread, behind the `logic_au_v2_container_resize` host quirk. Do not enable
 that hierarchy mutation for GarageBand or an unverified AU host merely because
 it also embeds the returned NSView.
 
+The Cocoa view builds its `ViewBridge` from
+`ViewBridge::Options::hosted_editor()` — never a hand-assembled `Options`; a
+structural test enforces that every hosted adapter uses the factory. See the
+`view-bridge` skill.
+
 The transaction publishes the proposed `ViewBridge` preferred size before the
 native resize because Logic may synchronously query the Audio Unit during the
 frame change. It commits the design viewport only when both the returned editor

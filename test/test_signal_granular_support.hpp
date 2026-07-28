@@ -117,7 +117,23 @@ std::vector<double> welch_power(const std::vector<double>& x, int nfft = kSpectr
             0.5 * (1.0 - std::cos(kTwoPi * static_cast<double>(i) / static_cast<double>(nfft)));
     }
     std::vector<double> segment(static_cast<std::size_t>(nfft));
-    std::vector<std::complex<double>> spectrum(static_cast<std::size_t>(nfft / 2 + 1));
+    // `FftT::forward_real` writes the FULL spectrum — `nfft` complex bins,
+    // conjugate-symmetric — not the `nfft/2 + 1` half-spectrum. Both backends
+    // do: the fallback fills all `nfft` before transforming in place, and the
+    // vDSP path writes `output[size_ - i]` for the mirrored half. The shipped
+    // callers size for that (`stft.hpp` resizes to `fft_size`,
+    // `onset_detector.cpp` assigns `frame_size`); this helper did not, and
+    // overran its buffer by nearly half a spectrum on every call.
+    //
+    // It survived on macOS because that allocator tolerated the overrun. On
+    // Linux glibc aborted the process ("double free or corruption"), and ASan
+    // reports it on either platform as a heap-buffer-overflow in
+    // `forward_real_fallback`.
+    //
+    // Only the first `nfft/2 + 1` bins are read below — the mirrored half is
+    // redundant — but the buffer must still be large enough for what the FFT
+    // writes.
+    std::vector<std::complex<double>> spectrum(static_cast<std::size_t>(nfft));
     std::vector<double> power(static_cast<std::size_t>(nfft / 2 + 1), 0.0);
 
     for (int offset = 0; offset + nfft <= static_cast<int>(x.size()); offset += nfft / 2) {

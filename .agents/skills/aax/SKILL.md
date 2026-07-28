@@ -31,7 +31,10 @@ want to build and validate AAX plugins locally.
 `core/format/src/aax_effect_gui.cpp` embeds a Pulp editor in the Pro Tools
 plugin window through the shared, format-agnostic `view::PluginViewHost` — the
 same seam VST3 / AU v2 / AU v3 / CLAP use, so there is no AAX-specific render
-path to maintain.
+path to maintain. Its `ViewBridge` is built from
+`ViewBridge::Options::hosted_editor()` like every other hosted adapter — never a
+hand-assembled `Options`, and a structural test enforces that. See the
+`view-bridge` skill.
 
 **The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
 `PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'

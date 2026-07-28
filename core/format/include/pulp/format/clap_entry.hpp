@@ -551,7 +551,8 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
     std::string editor_error;
     p->bridge = std::make_unique<ViewBridge>(
-        *p->processor, p->store, p->owner_alive.capture());
+        *p->processor, p->store, p->owner_alive.capture(),
+        ViewBridge::Options::hosted_editor());
     if (!p->bridge->open(&editor_error)) {
         runtime::log_error("CLAP editor: bridge->open failed ({})", editor_error);
         p->bridge.reset();

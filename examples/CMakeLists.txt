@@ -92,6 +92,11 @@ if(NOT IOS)
     add_subdirectory(timeline-phase1)
 endif()
 
+# Phase-3 non-linear proofs: the clip-launching session and the full DAW-style
+# project. Unlike timeline-phase1 these are engine-only (no pulp::host), so they
+# build everywhere the document model does.
+add_subdirectory(timeline-session)
+
 # Host-slaved embedded timeline sequence. This is a real format plugin over
 # pulp::sequence (no pulp::host dependency) and is the REAPER loop/seek proof
 # target for the Creative Timeline Engine.

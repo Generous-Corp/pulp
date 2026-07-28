@@ -1548,17 +1548,39 @@ changes so every accepted note-on can still receive its note-off.
 
 ## In-DAW scripted-UI hot reload is opt-in (dev only)
 
-The DAW editor paths (`au_view_controller_mac.mm`, `au_v2_cocoa_view.mm`,
-`au_view_controller_ios.mm`) build the `ViewBridge` with
-`.enable_hot_reload = pulp::format::dev_editor_hot_reload_enabled()` — a
+**Every host-embedded editor builds its `ViewBridge` from
+`ViewBridge::Options::hosted_editor()`. Never assemble the struct by hand.**
+That factory sets `enable_hot_reload` from `dev_editor_hot_reload_enabled()` — a
 header-inline helper in `view_bridge.hpp` that returns true only when the host's
-environment sets `PULP_DEV_HOT_RELOAD=1` (or `t`/`T`/`y`/`Y`). Default is OFF: a
-shipping plugin must never watch + reload scripted UI / `theme.json` from disk
-inside a host. The standalone app (`standalone.cpp`) always enables it — it is
-the dev tool. Editor polling runs every tick regardless; the flag only decides
-whether the watcher acts. To use the in-DAW edit→see-it loop, export
-`PULP_DEV_HOT_RELOAD=1` in the DAW's environment before launching it. (Live-swap
-plan item 1.3.)
+environment sets `PULP_DEV_HOT_RELOAD=1` (or `t`/`T`/`y`/`Y`) — and sets the role
+to `Editor`. Default is OFF: a shipping plugin must never watch and reload
+scripted UI / `theme.json` from disk inside a host. To use the in-DAW
+edit→see-it loop, export `PULP_DEV_HOT_RELOAD=1` in the DAW's environment before
+launching it.
+
+The standalone app (`standalone.cpp`) is the one deliberate exception — it
+hand-assembles `.enable_hot_reload = true` unconditionally because it *is* the
+dev tool.
+
+**Why the factory, and why a test guards it.** VST3 and CLAP shipped without
+scripted-UI hot reload because they constructed their bridge from the
+no-Options constructor. A sweep over call sites that named `enable_hot_reload`
+therefore could not reach them — grepping for a field cannot find the call sites
+that omit it. `test_view_bridge.cpp` now asserts the positive invariant instead:
+every hosted adapter contains `Options::hosted_editor()` and none contains
+`enable_hot_reload`, with a negative control on `standalone.cpp` (which *does*
+contain it) proving the scan reads files at all. **Adding a new format adapter
+with an editor means adding it to that test's `hosted[]` list.**
+
+Editor polling runs every tick regardless; the flag only decides whether the
+watcher acts. Two reload mechanisms exist and only one is gated by it — the
+DSP-swap-driven editor rebuild (`ViewBridge::poll_editor_reload()`) runs in every
+adapter through the shared idle pump, independent of `enable_hot_reload`.
+
+On platforms shipping the no-op watcher stub (iOS — `HotReloader::kWatchesFiles`
+is false, because choc's watcher needs macOS `FSEventStream*`), the flag is
+accepted and file-watch reload is inert. `ScriptedUiSession` logs once in that
+case so the degradation is visible rather than mysterious.
 
 ## Scripted UI joins a unified live-swap transaction (SwapUnit)
 

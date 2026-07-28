@@ -440,6 +440,29 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
     REQUIRE(project.value().assets()[0].content_hash == content_hash('b'));
     REQUIRE(project.value().assets()[0].representations[0].role == "proxy");
 
+    auto safe_package_locators = valid_asset;
+    safe_package_locators.locators = {
+        {AssetLocatorKind::PackageRelative, "media/audio/source.wav"}};
+    auto safe_package_project = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {safe_package_locators}, {sequence}});
+    REQUIRE(safe_package_project);
+
+    const auto require_invalid_package_hint = [&](std::string hint, bool representation) {
+        auto candidate = valid_asset;
+        auto& locator = representation ? candidate.representations[0].locators[0]
+                                       : candidate.locators.emplace_back();
+        locator = {AssetLocatorKind::PackageRelative, std::move(hint)};
+        auto rejected =
+            Project::create(ProjectInput{{1}, "project", 4, {3}, {candidate}, {sequence}});
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ModelErrorCode::InvalidAssetLocator);
+    };
+    for (const auto hint : {"../outside.wav", "/rooted.wav", R"(\rooted.wav)",
+                            "C:/drive-qualified.wav"}) {
+        require_invalid_package_hint(hint, false);
+        require_invalid_package_hint(hint, true);
+    }
+
     asset.locators[0].hint.clear();
     auto bad_locator = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
     REQUIRE_FALSE(bad_locator.has_value());

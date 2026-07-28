@@ -293,9 +293,10 @@ is the AU scan hook ARA-aware hosts inspect.
 
 AUv3 on iOS is a UIKit **app extension**. The view controller
 (`PulpAUViewController` in `au_view_controller_ios.mm`) is
-`AUViewController`-derived and builds a `ViewBridge` against the
-extension's loaded `AUAudioUnit` once KVO fires on
-`self.audioUnit`. Extension principal class registration is via
+`AUViewController`-derived and builds a `ViewBridge` — from
+`ViewBridge::Options::hosted_editor()`, never a hand-assembled `Options`; a
+structural test enforces that every hosted adapter uses the factory — against
+the extension's loaded `AUAudioUnit` once KVO fires on `self.audioUnit`. Extension principal class registration is via
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 

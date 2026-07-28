@@ -26,6 +26,10 @@ enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
     struct MenuCommand {
+        /// Top-level menu to place this command under. Leave EMPTY to place it
+        /// in the application menu — the one titled after the app itself,
+        /// where it appears above Quit. Any other value names (and creates on
+        /// first use) a menu-bar submenu such as "Window" or "View".
         std::string menu;
         std::string title;
         KeyCode key = KeyCode::unknown;

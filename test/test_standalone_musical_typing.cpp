@@ -106,7 +106,8 @@ TEST_CASE("standalone musical typing exposes one discoverable toggle command",
 
     REQUIRE(options.menu_commands.size() == 1);
     const auto& menu = options.menu_commands.front();
-    CHECK(menu.menu == "Window");
+    // Empty menu name = the application menu, where it sits above Quit.
+    CHECK(menu.menu.empty());
     CHECK(menu.title == "Musical Typing Keyboard");
     CHECK(menu.key == view::KeyCode::k);
     CHECK(view::is_main_modifier(menu.modifiers));

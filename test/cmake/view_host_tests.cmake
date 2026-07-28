@@ -35,6 +35,15 @@ pulp_add_test_suite(pulp-test-virtual-grid LIBRARIES pulp::view)
 # Text-accessibility scaffold
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
 # macOS NSAccessibility backend for TextAccessibilityNode
+# macOS menu-bar assembly: app-menu placement, Quit ordering, separator rules.
+# The menu is written once via [NSApp setMainMenu:] and never read back by
+# other code, so nothing else can catch a regression here.
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-app-menu-macos test_app_menu_mac.mm)
+    target_link_libraries(pulp-test-app-menu-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-app-menu-macos)
+endif()
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
     target_link_libraries(pulp-test-text-accessibility-macos

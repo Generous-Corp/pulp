@@ -15,48 +15,55 @@
 #include <string>
 #include <vector>
 
-// Authored, non-linear launch model. Where the linear model (model.hpp) places
-// clips at absolute timeline positions, a launch surface exposes clips that are
-// triggered on demand and quantized to a musical boundary. These are lightweight
-// value types describing WHAT is launchable and HOW it quantizes; the sample-
-// accurate resolution of a trigger to a boundary lives in the playback engine
-// (pulp/playback/clip_launch.hpp). Sequence scenes persist these authored values;
-// transport launch progress remains runtime state.
+/// @file clip_launch.hpp
+/// Immutable authored scene, slot, quantization, and follow-action model.
+///
+/// Where the linear model places clips at absolute timeline positions, this
+/// surface describes what is launchable and how it quantizes. Playback resolves
+/// triggers sample-accurately and owns transport launch progress.
 namespace pulp::timeline {
+
+/** @addtogroup timeline_model
+ * @{
+ */
 
 namespace detail {
 class SlotListStore;
 class SlotListAccess;
 } // namespace detail
 
-// How a launch snaps to a musical boundary. The boundary set is
-// { phase + k * grid : k in Z } measured on the transport's monotonic clock.
-// A non-positive grid means "immediate": launch at the current position with no
-// quantization. `phase` lets a slot align to an offset other than the monotonic
-// origin (for example, a launch grid anchored to a section start).
+/// Musical-boundary quantization for one launch.
+///
+/// The boundary set is `{ phase + k * grid : k in Z }` on the transport's
+/// monotonic clock. A non-positive grid means immediate launch. `phase` aligns
+/// the grid to an offset such as a section start.
 struct LaunchQuantize {
     timebase::TickDuration grid{0};
     timebase::TickPosition phase{0};
 
+    /// Returns whether launch occurs without boundary quantization.
     constexpr bool immediate() const noexcept {
         return grid.value <= 0;
     }
     constexpr auto operator<=>(const LaunchQuantize&) const = default;
 };
 
-// Launch immediately, without quantization.
+/// Returns an immediate, phase-zero launch policy.
 constexpr LaunchQuantize launch_immediate() noexcept {
     return {timebase::TickDuration{0}, timebase::TickPosition{0}};
 }
 
-// Quantize to a whole number of quarter notes.
+/// Returns a phase-zero grid spanning `count` quarter notes.
+///
+/// A non-positive count produces immediate launch semantics.
 constexpr LaunchQuantize launch_every_quarters(std::int64_t count) noexcept {
     return {timebase::TickDuration{count * timebase::kTicksPerQuarter}, timebase::TickPosition{0}};
 }
 
-// Quantize to a whole number of bars under the supplied meter. A bar spans
-// numerator * (4 / denominator) quarter notes; the arithmetic stays in exact
-// canonical ticks (kTicksPerQuarter is divisible by every supported denominator).
+/// Returns a phase-zero grid spanning `count` bars under `meter`.
+///
+/// A bar spans `numerator * (4 / denominator)` quarter notes; the arithmetic
+/// remains in exact canonical ticks for every supported denominator.
 constexpr LaunchQuantize launch_every_bars(std::int64_t count,
                                            timebase::MeterSignature meter) noexcept {
     const std::int64_t ticks_per_bar =
@@ -64,7 +71,7 @@ constexpr LaunchQuantize launch_every_bars(std::int64_t count,
     return {timebase::TickDuration{count * ticks_per_bar}, timebase::TickPosition{0}};
 }
 
-// What a slot does when its follow-action timer elapses.
+/// Action applied when a slot's follow timer elapses.
 enum class FollowActionKind : std::uint8_t {
     None,     // keep sounding; the slot is left alone
     Stop,     // stop this slot
@@ -78,9 +85,10 @@ enum class FollowActionKind : std::uint8_t {
     Jump,     // launch the slot named by `target`
 };
 
-// One candidate action. `target` is read only by Jump. `weight` is the relative
-// probability of this candidate being drawn from the set that holds it; a zero
-// weight makes a candidate unreachable without removing it.
+/// One weighted follow-action candidate.
+///
+/// `target` is read only by Jump. `weight` is the relative probability within
+/// its set; zero makes the candidate unreachable without removing it.
 struct FollowAction {
     FollowActionKind kind = FollowActionKind::None;
     ItemId target{};
@@ -89,15 +97,11 @@ struct FollowAction {
     constexpr auto operator<=>(const FollowAction&) const = default;
 };
 
-// The follow behaviour attached to a slot: up to `kMaxChoices` weighted
-// candidates, the period the action fires on, and how many periods elapse
-// first. A `grid` of two bars with `repetitions` of 3 fires six bars after the
-// slot started; a non-positive grid disables the timer outright, since a
-// zero-length period would re-fire without advancing the clock.
-//
-// The period is a bare duration rather than a LaunchQuantize because a follow
-// action is measured FROM the launch, not snapped to a shared grid — there is
-// no phase to author. `launch_every_quarters(2).grid` supplies a musical value.
+/// Bounded weighted follow behavior attached to a slot.
+///
+/// Stores up to `kMaxChoices` candidates, their period, and the number of
+/// periods before firing. A non-positive grid disables the timer. The duration
+/// is measured from launch and therefore has no shared-grid phase.
 struct FollowActionSet {
     static constexpr std::size_t kMaxChoices = 4;
 
@@ -106,14 +110,15 @@ struct FollowActionSet {
     std::uint32_t repetitions = 1;
     timebase::TickDuration grid{0};
 
-    // The populated prefix of `choices`. An out-of-range choice_count is clamped
-    // rather than trusted, so a malformed set degrades to an inert one.
+    /// Returns the populated prefix of `choices`.
+    ///
+    /// An out-of-range `choice_count` is clamped rather than trusted.
     constexpr std::span<const FollowAction> active() const noexcept {
         const std::size_t count = choice_count < kMaxChoices ? choice_count : kMaxChoices;
         return {choices.data(), count};
     }
 
-    // A set with no candidates, no period, or no repetition never fires.
+    /// Returns whether this set has candidates, a positive period, and repetitions.
     constexpr bool enabled() const noexcept {
         return !active().empty() && grid.value > 0 && repetitions > 0;
     }
@@ -121,7 +126,7 @@ struct FollowActionSet {
     constexpr bool operator==(const FollowActionSet&) const = default;
 };
 
-// A follow-action set built from a single unweighted action.
+/// Builds a one-candidate follow set with unit weight.
 constexpr FollowActionSet follow_action(FollowActionKind kind, timebase::TickDuration grid,
                                         std::uint32_t repetitions = 1) noexcept {
     FollowActionSet set;
@@ -132,29 +137,32 @@ constexpr FollowActionSet follow_action(FollowActionKind kind, timebase::TickDur
     return set;
 }
 
-// A single launchable clip in a track lane. `clip_id` references a clip stored in
-// the linear model (or a launch-owned clip pool in a later slice); a null id is
-// an empty slot. Foundation slices carry identity, quantization, and the follow
-// behaviour that chooses what plays next. Persistent sequences own slots through
-// scenes; a null clip_id remains the explicit empty-slot representation.
+/// One authored launch slot.
+///
+/// `clip_id` references a Project-owned clip; an invalid `clip_id` is the
+/// explicit empty-slot representation. Sequences persist slots through scenes,
+/// while playback owns runtime trigger and progress state.
 struct Slot {
     ItemId id;
     ItemId clip_id;
     LaunchQuantize launch_quantize{};
     FollowActionSet follow{};
 
+    /// Returns whether this slot references no launchable clip.
     constexpr bool empty() const noexcept {
         return !clip_id.valid();
     }
     constexpr bool operator==(const Slot&) const = default;
 };
 
-// Immutable authored slot order. Fresh Scene values may be assembled from a
-// vector, while a Scene owned by a Sequence uses a persistent AVL-backed store:
-// inserting or removing one slot path-copies only the affected index paths and
-// shares every untouched node with prior snapshots.
+/// Immutable authored slot order with persistent structural sharing.
+///
+/// Fresh Scene values may be assembled from a vector. A Sequence-owned Scene
+/// uses a persistent AVL-backed store, so edits path-copy affected index paths
+/// and share untouched nodes with prior snapshots.
 class SlotList {
   public:
+    /// Forward iterator that retains raw or persistent slot storage.
     class Iterator {
       public:
         using value_type = Slot;
@@ -163,14 +171,19 @@ class SlotList {
         using reference = const Slot&;
         using iterator_category = std::forward_iterator_tag;
 
+        /// Borrows the current slot; the iterator's retained storage keeps it alive.
         const Slot& operator*() const noexcept;
+        /// Returns the address of the current borrowed slot.
         const Slot* operator->() const noexcept;
+        /// Advances in authored order.
         Iterator& operator++() noexcept;
+        /// Advances in authored order and returns the prior iterator value.
         Iterator operator++(int) noexcept {
             auto copy = *this;
             ++*this;
             return copy;
         }
+        /// Compares iterator position and retained storage identity.
         bool operator==(const Iterator&) const noexcept = default;
 
       private:
@@ -186,25 +199,38 @@ class SlotList {
         ItemId current_;
     };
 
+    /// Constructs an empty list.
     SlotList();
+    /// Takes ownership of slots in authored order.
     SlotList(std::vector<Slot> slots);
+    /// Copies slots in authored order.
     SlotList(std::initializer_list<Slot> slots);
 
+    /// Returns the number of authored slots.
     std::size_t size() const noexcept;
+    /// Returns whether the list contains no slots.
     bool empty() const noexcept {
         return size() == 0;
     }
+    /// Borrows the slot at `index`; `index` must be less than `size()`.
     const Slot& operator[](std::size_t index) const noexcept;
+    /// Borrows the first slot; the list must be nonempty.
     const Slot& front() const noexcept {
         return (*this)[0];
     }
+    /// Borrows the last slot; the list must be nonempty.
     const Slot& back() const noexcept {
         return (*this)[size() - 1];
     }
+    /// Finds a slot by identity, or returns null.
     const Slot* find(ItemId id) const noexcept;
+    /// Returns the first iterator in authored order.
     Iterator begin() const noexcept;
+    /// Returns the end sentinel.
     Iterator end() const noexcept;
+    /// Reports whether both snapshots share their complete backing store.
     bool shares_storage_with(const SlotList& other) const noexcept;
+    /// Compares authored slot values in order.
     bool operator==(const SlotList& other) const noexcept;
 
   private:
@@ -215,9 +241,9 @@ class SlotList {
     std::shared_ptr<const detail::SlotListStore> store_;
 };
 
-// A column of slots launched as a unit. The linear model reserves "scene" for no
-// other concept, so the name is safe here. Track-to-slot arbitration when a whole
-// scene is launched is a later slice; a Scene is just the grouping at this stage.
+/// Authored grouping of slots presented as one launchable column.
+///
+/// This value does not define runtime scene-to-track arbitration.
 struct Scene {
     ItemId id;
     std::string name;
@@ -235,7 +261,7 @@ struct Scene {
 // two slots deciding in the same block cannot perturb each other's draw, and
 // evaluation order is therefore irrelevant to the result.
 
-// SplitMix64's finalizer: a full-avalanche bijection on 64 bits.
+/// Applies the deterministic SplitMix64 finalizer used by follow draws.
 constexpr std::uint64_t follow_action_mix(std::uint64_t value) noexcept {
     value += 0x9E3779B97F4A7C15ULL;
     value ^= value >> 30;
@@ -246,25 +272,26 @@ constexpr std::uint64_t follow_action_mix(std::uint64_t value) noexcept {
     return value;
 }
 
-// Identifies one follow-action decision. `seed` is the session's launch seed,
-// `slot` the deciding slot, and `draw_index` how many follow actions that slot
-// has already resolved. The triple is unique per decision and stable across
-// replays, which is what makes a random follow action reproducible.
+/// Stable identity of one reproducible follow-action decision.
+///
+/// `seed` is the session's launch seed, `slot` is the deciding slot, and
+/// `draw_index` counts decisions already resolved by that slot.
 struct FollowDraw {
     std::uint64_t seed = 0;
     ItemId slot{};
     std::uint64_t draw_index = 0;
 
+    /// Returns the deterministic 64-bit draw for this decision identity.
     constexpr std::uint64_t value() const noexcept {
         return follow_action_mix(follow_action_mix(seed ^ slot.value) ^
                                  (draw_index + 0x9E3779B97F4A7C15ULL));
     }
 };
 
-// Picks one candidate by relative weight. Candidate i owns the half-open
-// interval [sum(w[0..i)), sum(w[0..i])) of the draw, so the mapping is a pure
-// function of the weights and the draw. Returns kMaxChoices when the set is
-// empty or every weight is zero.
+/// Selects one active candidate by relative weight.
+///
+/// Each candidate owns a half-open interval proportional to its weight.
+/// Returns `kMaxChoices` when the set is empty or every weight is zero.
 constexpr std::size_t select_follow_action(const FollowActionSet& set, FollowDraw draw) noexcept {
     const auto candidates = set.active();
     std::uint64_t total = 0;
@@ -282,13 +309,14 @@ constexpr std::size_t select_follow_action(const FollowActionSet& set, FollowDra
     return FollowActionSet::kMaxChoices; // unreachable: pick < total
 }
 
-// What a resolved follow action asks the caller to do.
+/// Runtime request produced by resolving an authored follow action.
 enum class FollowOutcome : std::uint8_t {
     None, // leave the acting slot sounding
     Stop, // stop the acting slot
     Play, // launch `slot_index` (which may be the acting slot: "again")
 };
 
+/// Deterministic outcome and optional target slot of follow resolution.
 struct FollowResolution {
     static constexpr std::size_t kNoSlot = static_cast<std::size_t>(-1);
 
@@ -346,10 +374,11 @@ constexpr FollowResolution play(std::span<const Slot> lane, std::size_t index) n
 
 } // namespace follow_detail
 
-// Resolves the successor of `self_index` in `lane` under that slot's follow-
-// action set. A candidate that cannot be satisfied (a jump to an id the lane
-// does not hold, a "next" in a lane with no non-empty slot) resolves to None
-// rather than silently stopping the slot, so an unsatisfiable action is inert.
+/// Resolves the successor of `self_index` under that slot's follow-action set.
+///
+/// Resolution is allocation-free and depends only on `lane`, `self_index`, and
+/// `draw`. An unsatisfied candidate, such as a missing jump target, resolves to
+/// None rather than silently stopping the slot.
 constexpr FollowResolution resolve_follow_action(std::span<const Slot> lane, std::size_t self_index,
                                                  FollowDraw draw) noexcept {
     if (self_index >= lane.size())
@@ -421,5 +450,7 @@ constexpr FollowResolution resolve_follow_action(std::span<const Slot> lane, std
     }
     return {};
 }
+
+/// @}
 
 } // namespace pulp::timeline

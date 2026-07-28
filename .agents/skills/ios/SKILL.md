@@ -246,7 +246,12 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   do on macOS. Gate with `PULP_HAS_COREAUDIO_DEVICE`.
 - **No FSEvents** — `choc_FileWatcher.h` pulls `FSEventStreamRef` which does not
   exist on iOS. `hot_reload.hpp` is gated so the iOS path gets a no-op
-  `HotReloader`; keep file-watched hot reload off for AUv3 / HostApp builds.
+  `HotReloader`. The iOS editor still builds its bridge from
+  `ViewBridge::Options::hosted_editor()` like every other adapter, so the flag
+  is accepted and file-watch reload is simply inert;
+  `HotReloader::kWatchesFiles` is false there and `ScriptedUiSession` logs once
+  so the degradation is visible. DSP-swap-driven editor rebuilds
+  (`ViewBridge::poll_editor_reload()`) are watcher-free and DO work on device.
 
 ### Frame timing (CADisplayLink)
 

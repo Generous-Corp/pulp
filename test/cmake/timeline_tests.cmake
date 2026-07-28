@@ -268,6 +268,26 @@ pulp_add_test_suite(pulp-test-timeline-multitrack-pdc
     LIBRARIES pulp::format pulp::host pulp::playback pulp::timeline
         pulp::timebase pulp::native-components ${CMAKE_DL_LIBS})
 
+# Worked example (d): the clip-launching session. Engine-only (no pulp::host),
+# so it exercises launch quantization, per-track provider arbitration, and the
+# capture flatten on every platform the document model builds on.
+pulp_add_test_suite(pulp-test-timeline-launch-session
+    SOURCES
+        ${CMAKE_SOURCE_DIR}/examples/timeline-session/timeline_launch_session.cpp
+        ${CMAKE_SOURCE_DIR}/examples/timeline-session/test_timeline_launch_session.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
+    LIBRARIES pulp::playback pulp::timeline pulp::timebase)
+
+# Worked example (e): the full DAW-style project. Hybrid per-track arbitration,
+# nested SequenceRef with one diverged copy, take lanes with a comp, an agent
+# batch, and journal-backed autosave — all on one document.
+pulp_add_test_suite(pulp-test-timeline-daw-project
+    SOURCES
+        ${CMAKE_SOURCE_DIR}/examples/timeline-session/timeline_daw_project.cpp
+        ${CMAKE_SOURCE_DIR}/examples/timeline-session/test_timeline_daw_project.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
+    LIBRARIES pulp::playback pulp::timeline pulp::timebase)
+
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not
     # include or link back upward. The selftest proves every forbidden layer is
@@ -386,3 +406,16 @@ target_include_directories(pulp-test-timeline-phase1-examples PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
     ${CMAKE_SOURCE_DIR}/test)
 catch_discover_tests(pulp-test-timeline-phase1-examples)
+
+# The Timeline API-contract checker only ever runs inside build-api-docs.sh,
+# which needs Doxygen and therefore runs in the docs lanes rather than the test
+# suite. That left the checker's own logic — the exemptions for internal
+# namespaces, destructors, defaulted and deleted members, and the public-header
+# path filter — with nothing asserting it still discriminates. An exemption that
+# widens by accident turns the gate silent while every lane stays green.
+#
+# The self-test needs no Doxygen: it drives check() over synthetic compounddef
+# XML and asserts both directions, so it belongs in the normal suite.
+add_test(NAME timeline-api-docs-check-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_api_docs_check.py --self-test)

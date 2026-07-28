@@ -4,26 +4,24 @@ The Creative Timeline Engine is usable as three layered C++ libraries from an
 installed Pulp SDK. It does not require Pulp's UI, GPU renderer, plugin-format
 adapters, SignalGraph, standalone shell, or plugin host.
 
+For task-focused integration recipes, start with the
+[Timeline cookbook](timeline-cookbook.md). The
+[C++ API reference](../api-reference.md) documents individual public methods,
+the [module reference](../reference/modules.md#timebase) describes subsystem
+boundaries, the [example gallery](../examples/index.md#validation) points to
+runnable Timeline examples, and the
+[interchange matrix](../reference/interchange-matrix.md) states format
+capabilities and losses.
+
 ## Configure an external project
 
-```cmake
-cmake_minimum_required(VERSION 3.24)
-project(MyTimelineApp LANGUAGES CXX)
-
-find_package(Pulp REQUIRED COMPONENTS timebase timeline playback)
-
-add_executable(my_timeline_app main.cpp)
-target_link_libraries(my_timeline_app PRIVATE
-    Pulp::timebase
-    Pulp::timeline
-    Pulp::playback
-)
-```
-
-The lowercase aliases `pulp::timebase`, `pulp::timeline`, and
-`pulp::playback` are also available. Components validate that the installed SDK
-contains each requested target; the package still defines its complete set of
-installed targets.
+Use the cookbook's
+[library-selection recipe](timeline-cookbook.md#choose-libraries-for-an-external-consumer)
+for the minimal `find_package()` and `target_link_libraries()` setup. The
+lowercase aliases `pulp::timebase`, `pulp::timeline`, and `pulp::playback` are
+also available. Components validate that the installed SDK contains each
+requested target; the package still defines its complete set of installed
+targets.
 
 ## Dependency boundary
 
@@ -227,36 +225,11 @@ Timeline applications move immutable values through a small set of owners:
    one pinned playback-program block and that transport snapshot without
    allocating.
 
-The editing portion of that flow is intentionally explicit:
-
-```cpp
-auto registry = pulp::timeline::make_builtin_timeline_registry();
-auto decoded = pulp::timeline::deserialize_project(project_json, registry.value());
-auto session = pulp::timeline::DocumentSession::create(std::move(decoded).value());
-auto writer = session.value()->register_writer();
-
-pulp::timeline::Transaction edit;
-edit.id = writer.value().allocate_transaction_id();
-edit.expected_revision = session.value()->revision();
-edit.commands.push_back({
-    writer.value().allocate_command_id(),
-    pulp::timeline::SetRecordArm{{2}, {3}, false, true},
-});
-
-auto committed = session.value()->submit(writer.value(), std::move(edit));
-if (committed) {
-    auto snapshot = committed.value().snapshot;
-    auto revision = committed.value().revision;
-    auto dirty = committed.value().dirty;
-    // Send these immutable values to the background playback compiler.
-}
-```
-
-For native crash-consistent storage, call `FileJournal::open()` first. Use
-`DocumentSession::restore()` when it recovered an existing file, or
-`DocumentSession::create()` with its sink for a new file. Do not write the
-project beside the session independently; the journal sink is the durability
-boundary.
+The cookbook provides the compile-backed
+[transaction](timeline-cookbook.md#submit-an-optimistic-transaction-and-undo-it),
+[journal recovery](timeline-cookbook.md#open-or-restore-a-durable-session), and
+[compile/publish/render](timeline-cookbook.md#compile-publish-and-render)
+recipes for that ownership flow.
 
 ### Reusing and diverging sequences
 
@@ -385,51 +358,11 @@ The rules that matter when wiring a UI to it:
 
 ## One typed edit through CLI and MCP
 
-Start by asking the installed CLI for the generated schema, then validate the
-source before editing:
-
-```bash
-pulp seq schema > timeline-schema.json
-pulp seq validate song.pulpseq.json
-```
-
-Commands are versioned envelopes. For example, this `commands.json` arms track
-`6` in sequence `5` only if it is currently unarmed:
-
-```json
-[
-  {
-    "data": {
-      "expected": false,
-      "replacement": true,
-      "sequence_id": "5",
-      "track_id": "6"
-    },
-    "type_name": "pulp.timeline.command.set_record_arm",
-    "version": 1
-  }
-]
-```
-
-Apply the complete batch transactionally, then inspect and render the result:
-
-```bash
-pulp seq apply song.pulpseq.json commands.json --out armed.pulpseq.json
-pulp seq validate armed.pulpseq.json
-pulp seq explain armed.pulpseq.json --sample-rate 48000
-pulp render armed.pulpseq.json --out armed.wav --sample-rate 48000
-```
-
-The equivalent agent flow calls `pulp_timeline_project_open`, passes the same
-envelope array to `pulp_timeline_command_apply`, then calls
-`pulp_timeline_validate`, `pulp_timeline_explain`, and optionally
-`pulp_timeline_render`. MCP accepts the project as a path or inline canonical
-JSON; its `commands` argument is the JSON array itself, not a filename. The
-generated schema is the source of truth for document and command shapes.
-
-These headless surfaces edit existing canonical projects. Realtime device I/O,
-capture-buffer ownership, plugin instantiation, and durable `FileJournal`
-sessions are embedding APIs, not hidden CLI or MCP operations.
+CLI and MCP consume the same generated schema and versioned command envelopes.
+They edit canonical snapshots rather than owning realtime device I/O,
+capture buffers, plugin instances, or a durable `FileJournal` session. Use the
+cookbook's [CLI/MCP recipe](timeline-cookbook.md#apply-the-same-edit-through-cli-or-mcp)
+for the exact commands and operation names.
 
 ## Takes, comps, freeze, and capture
 
@@ -457,26 +390,14 @@ chain with a nontransparent mixer, set `post_device_audio_source` and
 transactionally replaces the direct device-to-bus edge and restores it when the
 route is removed. Adoption fails closed when that post-device route is absent.
 
-The realtime recorder is `<pulp/playback/capture_engine.hpp>`:
-
-1. Build a `CaptureEngineConfig` with explicit track, block, take-frame,
-   take-slot, MIDI-event, and total preallocation limits, then call `prepare()`
-   away from the callback.
-2. Enqueue `Start`, `Stop`, `Cancel`, and `ReleaseTake` commands from the
-   control side. The callback calls `process()` with the same
-   `TransportSnapshot` used for playback.
-3. Drain `CaptureEvent`s away from the callback. A completed
-   `CaptureTakeHandle` remains immutable until `ReleaseTake`; copy its audio or
-   MIDI before releasing it. Queue drops and capacity failures are observable
-   in `CaptureEngineStats`.
-4. Use `<pulp/playback/recording_commit.hpp>` to
-   `seal_recording_take()` (or `seal_retrospective_take()`) into WAV bytes, a
-   content-hashed asset, a take, and ordered `CreateAsset`/take commands. Use
-   `<pulp/playback/midi_capture_materializer.hpp>` to
-   `materialize_midi_capture()` against the exact capture-rate tempo map.
-5. Publish those ordinary commands through `DocumentSession`, then publish the
-   media bytes through application-owned storage. Capture never mutates the
-   project or journal directly.
+The realtime recorder is `<pulp/playback/capture_engine.hpp>`. It owns bounded,
+preallocated callback-time capture slots; completed handles remain immutable
+until explicit release. `recording_commit.hpp` seals audio into ordinary asset
+and take commands, while `midi_capture_materializer.hpp` maps captured MIDI
+through the exact capture-rate tempo map. Capture never mutates the project or
+journal directly. Follow the cookbook's
+[capture-to-take recipe](timeline-cookbook.md#capture-audio-into-a-take) for the
+required ordering and failure checks.
 
 The application owns device I/O, media-file publication, and plugin/device
 instantiation. The timeline owns editing intent and durable identity; playback
@@ -485,11 +406,13 @@ owns immutable compiled artifacts; capture owns bounded callback-time buffers.
 ## Durable journals
 
 Include `<pulp/timeline/file_journal.hpp>` for native crash-consistent sessions.
-`FileJournal::open()` returns the sink, recovered checkpoint, nonzero revision,
-and whether it repaired a torn trailing frame. Restore that exact
-checkpoint/revision with `DocumentSession::restore()`, or create a new session
-with the sink. A transaction is not published until the sink reports its whole
-frame durable.
+`FileJournal::open()` returns the sink, exact checkpoint and revision, whether
+existing state was recovered, and whether it repaired a torn trailing frame.
+The revision is zero for a new journal and nonzero after recovered commits.
+Restore the recovered checkpoint/revision with `DocumentSession::restore()`, or
+create a new session with the fallback checkpoint and sink. The session retains
+shared ownership of the sink. A transaction is not published until the sink
+reports its whole frame durable.
 
 Checkpoint only a revision the application has durably acknowledged. A sink
 error is ambiguous—it may have reached storage—so the session rejects later
@@ -497,6 +420,10 @@ durable writes instead of guessing. Recovery discards only a torn final frame
 and fails on earlier corruption. Symlink aliases share one lock identity, while
 multiply linked journal files are rejected because atomic replacement cannot
 preserve their identity.
+
+See the cookbook's
+[open-or-restore recipe](timeline-cookbook.md#open-or-restore-a-durable-session)
+for the capability branch and checkpoint call-site rules.
 
 ## Sample-rate conversion
 

@@ -137,10 +137,9 @@ inline void apply_voice(DrumInstance& instance, const BakedParamView& p, std::in
     case EngineId::kick_resonant:
     case EngineId::kick_circuit: {
         auto& v = static_cast<KickVoice&>(*instance.voice);
-        if (instance.id != EngineId::kick_circuit) {
-            v.set_tune_hz(p.value_at(kTuneHz, s));
+        v.set_tune_hz(p.value_at(kTuneHz, s));
+        if (instance.id != EngineId::kick_circuit)
             v.set_body_decay_ms(p.value_at(kDecay, s));
-        }
         if (instance.id == EngineId::kick_oscillator) {
             v.set_pitch_sweep_octaves(p.value_at(kPitchSweepOctaves, s));
             v.set_pitch_sweep_ms(p.value_at(kPitchSweepMs, s));

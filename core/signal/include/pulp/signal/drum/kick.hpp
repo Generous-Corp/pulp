@@ -76,11 +76,17 @@ public:
 
     // -- Shared controls -----------------------------------------------------
 
-    void set_body(KickBody body) { body_mode_ = body; }
+    void set_body(KickBody body) {
+        body_mode_ = body;
+        apply_circuit_tuning();
+    }
     KickBody body() const { return body_mode_; }
 
     /// Fundamental of the body, in Hz.
-    void set_tune_hz(double hz) { tune_hz_ = std::clamp(hz, 20.0, 400.0); }
+    void set_tune_hz(double hz) {
+        tune_hz_ = std::clamp(hz, 20.0, 400.0);
+        apply_circuit_tuning();
+    }
 
     /// How long the body rings, as a T60 in milliseconds.
     void set_body_decay_ms(double ms) { body_decay_ms_ = std::clamp(ms, 10.0, 4000.0); }
@@ -146,7 +152,8 @@ public:
     /// Component values of the bridged-T network. Substituting a capacitor
     /// retunes the drum the way it does on the bench.
     void set_circuit_components(const BridgedTComponents& c) {
-        circuit_.set_components(c);
+        authored_components_ = c;
+        apply_circuit_tuning();
     }
 
     /// Regeneration around the network, 0 to 1. This is the 808's decay
@@ -348,6 +355,19 @@ protected:
     }
 
 private:
+    // The circuit body has no frequency control of its own -- its pitch is a
+    // property of the network. Rather than refuse a tune control on this body,
+    // spend it the way the instrument is actually retuned: substitute
+    // capacitors. Scaling both arms moves the centre frequency and leaves Q
+    // untouched, so the drum keeps its character and changes its pitch.
+    //
+    // Only the circuit body needs this; the other two read tune_hz_ directly.
+    void apply_circuit_tuning() {
+        circuit_.set_components(body_mode_ == KickBody::circuit
+                                    ? bridged_t_retuned_to(authored_components_, tune_hz_)
+                                    : authored_components_);
+    }
+
     void reset_circuit_memory() {
         circuit_.reset();
         circuit_.set_attack_shunt(false);
@@ -473,6 +493,9 @@ private:
     KickBody body_mode_ = KickBody::oscillator;
 
     double tune_hz_ = 55.0;
+    // What the caller asked for, before the tune control retunes the arms, so
+    // a later tune_hz does not compound onto an already-scaled set.
+    BridgedTComponents authored_components_{};
     double body_decay_ms_ = 400.0;
     double pitch_sweep_oct_ = 2.0;
     double pitch_sweep_ms_ = 30.0;

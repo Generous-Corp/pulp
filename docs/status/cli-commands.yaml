@@ -789,6 +789,24 @@ commands:
             description: Optional test targets to build for a faster targeted run (e.g., pulp-test-state)
     docs: reference/cli.md#coverage
 
+  - name: dsp
+    status: experimental
+    summary: "DSP capability registry. Emits the canonical machine-readable surface of the Forge bake catalogs, and fails on a duplicate type id, a duplicate baked-param id within a node, or a snapshot that no longer matches the headers. A STATIC extraction, so construction-time values — notably a node's intrinsic latency, which is a callback evaluated at the graph's sample rate — are deliberately absent. Wraps `tools/scripts/dsp_capability_registry.py`; snapshot lives at `docs/status/dsp-capabilities.json`."
+    subcommands:
+      - name: capabilities
+        summary: "Summarise the DSP capability surface; emit, validate, or regenerate the registry."
+        args:
+          - name: --json
+            kind: flag
+            description: "Emit the canonical registry JSON to stdout"
+          - name: --check
+            kind: flag
+            description: "Validate collisions and snapshot freshness; non-zero on failure"
+          - name: --write
+            kind: flag
+            description: "Regenerate docs/status/dsp-capabilities.json"
+    docs: reference/cli.md#dsp
+
   - name: minos
     status: experimental
     summary: Minimum-OS tooling. Reports the lowest OS a build needs, derived from the artifact itself (the MAX minimum among everything linked in). `measure` reads one binary; `sweep` rebuilds every downstream consumer against one installed SDK and compares each project's floor to the SDK floor; `update` bumps every consumer's SDK pin; `publish-runbook` prints the republish steps. Wraps `tools/scripts/measure_min_os.py`, `tools/scripts/sdk_consumer_sweep.py`, and `tools/scripts/sdk_consumer_update.py`.
