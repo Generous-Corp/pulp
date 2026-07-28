@@ -20,6 +20,8 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelEUCLID);
     p->addModel(modelSEQ);
     p->addModel(modelMIX);
+    p->addModel(modelCARTOG);
     p->addModel(modelATT);
     p->addModel(modelMULT);
+    p->addModel(modelDUALATN);
 }

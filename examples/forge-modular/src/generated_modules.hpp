@@ -431,42 +431,82 @@ inline void place_MULT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
 }
 
-// ── SANDH (3HP) ───────────────────────────────────────
-struct SANDHLayout {
-    static constexpr int kHp = 3;
-    enum ParamId { SLEW_PARAM, LEVEL_PARAM, PARAMS_LEN };
-    enum InputId { TRIG_INPUT, IN_INPUT, INPUTS_LEN };
-    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
-    enum LightId { OUT_LIGHT = 0, LIGHTS_LEN = 1 };
+// ── CARTOG (4HP) ──────────────────────────────────────
+struct CARTOGLayout {
+    static constexpr int kHp = 4;
+    enum ParamId { SCAN_PARAM, PARAMS_LEN };
+    enum InputId { INPUTS_LEN };
+    enum OutputId { OUTPUTS_LEN };
+    enum LightId { DONE_LIGHT = 0, LIGHTS_LEN = 1 };
 };
 
-inline void config_SANDH(rack::engine::Module* m) {
-    m->config(SANDHLayout::PARAMS_LEN, SANDHLayout::INPUTS_LEN, SANDHLayout::OUTPUTS_LEN, SANDHLayout::LIGHTS_LEN);
-    m->configParam(SANDHLayout::SLEW_PARAM, 0.0f, 1.0f, 0.1f, "Slew", " %", 0.0f, 100.0f);
-    m->configParam(SANDHLayout::LEVEL_PARAM, 0.0f, 1.0f, 0.8f, "Level", " %", 0.0f, 100.0f);
-    m->configInput(SANDHLayout::TRIG_INPUT, "Trigger");
-    m->configInput(SANDHLayout::IN_INPUT, "Signal in (internal noise when unpatched)");
-    m->configOutput(SANDHLayout::OUT_OUTPUT, "Sampled out");
-    m->configLight(SANDHLayout::OUT_LIGHT, "Output level");
+inline void config_CARTOG(rack::engine::Module* m) {
+    m->config(CARTOGLayout::PARAMS_LEN, CARTOGLayout::INPUTS_LEN, CARTOGLayout::OUTPUTS_LEN, CARTOGLayout::LIGHTS_LEN);
+    m->configParam(CARTOGLayout::SCAN_PARAM, 0.0f, 1.0f, 0.0f, "Scan the rack", "", 0.0f, 1.0f);
+    m->configLight(CARTOGLayout::DONE_LIGHT, "Scanned");
 }
 
-/// Channel count for SANDH, from the manifest's declared source.
-inline int channels_SANDH(const rack::engine::Module* m) {
-    return std::max(1, const_cast<rack::engine::Module*>(m)
-        ->inputs[SANDHLayout::TRIG_INPUT].getChannels());
-}
-
-inline void place_SANDH(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+inline void place_CARTOG(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
     w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
     w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(7.620f, 30.000f)), m, SANDHLayout::SLEW_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(7.620f, 50.000f)), m, SANDHLayout::LEVEL_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, SANDHLayout::TRIG_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 98.000f)), m, SANDHLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 112.000f)), m, SANDHLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(7.620f, 68.000f)), m, SANDHLayout::OUT_LIGHT));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(10.160f, 40.000f)), m, CARTOGLayout::SCAN_PARAM));
+    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
+}
+
+// ── DUALATN (6HP) ─────────────────────────────────────
+struct DUALATNLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { A_ATT_PARAM, A_OFF_PARAM, B_ATT_PARAM, B_OFF_PARAM, PARAMS_LEN };
+    enum InputId { A_IN_INPUT, B_IN_INPUT, INPUTS_LEN };
+    enum OutputId { A_OUT_OUTPUT, B_OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { A_LIGHT = 0, B_LIGHT = 1, LIGHTS_LEN = 2 };
+};
+
+inline void config_DUALATN(rack::engine::Module* m) {
+    m->config(DUALATNLayout::PARAMS_LEN, DUALATNLayout::INPUTS_LEN, DUALATNLayout::OUTPUTS_LEN, DUALATNLayout::LIGHTS_LEN);
+    m->configParam(DUALATNLayout::A_ATT_PARAM, -1.0f, 1.0f, 0.0f, "Channel A attenuversion", "", 0.0f, 1.0f);
+    m->configParam(DUALATNLayout::A_OFF_PARAM, -5.0f, 5.0f, 0.0f, "Channel A offset", " V", 0.0f, 1.0f);
+    m->configParam(DUALATNLayout::B_ATT_PARAM, -1.0f, 1.0f, 0.0f, "Channel B attenuversion", "", 0.0f, 1.0f);
+    m->configParam(DUALATNLayout::B_OFF_PARAM, -5.0f, 5.0f, 0.0f, "Channel B offset", " V", 0.0f, 1.0f);
+    m->configInput(DUALATNLayout::A_IN_INPUT, "Channel A input (normalled to 0.0V)");
+    m->configInput(DUALATNLayout::B_IN_INPUT, "Channel B input (normalled to 0.0V)");
+    m->configOutput(DUALATNLayout::A_OUT_OUTPUT, "Channel A output");
+    m->configOutput(DUALATNLayout::B_OUT_OUTPUT, "Channel B output");
+    m->configLight(DUALATNLayout::A_LIGHT, "Channel A activity");
+    m->configLight(DUALATNLayout::B_LIGHT, "Channel B activity");
+}
+
+/// A_IN_INPUT with its declared normal applied.
+inline float read_DUALATN_A_IN_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[DUALATNLayout::A_IN_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+/// B_IN_INPUT with its declared normal applied.
+inline float read_DUALATN_B_IN_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[DUALATNLayout::B_IN_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+inline void place_DUALATN(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.000f, 30.000f)), m, DUALATNLayout::A_ATT_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.500f, 30.000f)), m, DUALATNLayout::A_OFF_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.000f, 74.000f)), m, DUALATNLayout::B_ATT_PARAM));
+    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.500f, 74.000f)), m, DUALATNLayout::B_OFF_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 46.000f)), m, DUALATNLayout::A_IN_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 90.000f)), m, DUALATNLayout::B_IN_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 46.000f)), m, DUALATNLayout::A_OUT_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 90.000f)), m, DUALATNLayout::B_OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 58.000f)), m, DUALATNLayout::A_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 102.000f)), m, DUALATNLayout::B_LIGHT));
 }
 
 }  // namespace forge_modular

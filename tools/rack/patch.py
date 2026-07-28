@@ -341,6 +341,87 @@ def diff(old: dict, new: dict, inv: dict) -> list[str]:
     return out
 
 
+# ── Library catalog (cached) ─────────────────────────────────────────────────
+
+CACHE_DIR = os.path.expanduser("~/.cache/forge-modular")
+CATALOG = os.path.join(CACHE_DIR, "library.json")
+CATALOG_URL = "https://api.vcvrack.com/library/manifests?version=2"
+CATALOG_MAX_AGE_DAYS = 7
+
+
+def catalog(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS) -> dict:
+    """The whole Rack 2 library, cached on disk.
+
+    One request returns every plugin, so there is no reason to ask more than
+    once a week: the catalog is a few hundred KB and changes slowly. Keeping
+    it local means name matching and brand filtering are instant and work
+    offline, which matters when it is feeding a prompt.
+
+    Note what this does *not* contain: modules. The endpoint carries
+    plugin-level metadata only, so it can tell you a brand exists and whether
+    it costs money, but not what its modules are called.
+    """
+    import time
+    fresh = False
+    if os.path.exists(CATALOG) and not refresh:
+        age = time.time() - os.path.getmtime(CATALOG)
+        fresh = age < max_age_days * 86400
+    if not fresh:
+        import urllib.request
+        try:
+            with urllib.request.urlopen(CATALOG_URL, timeout=30) as r:
+                data = json.loads(r.read().decode())
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            json.dump(data, open(CATALOG, "w"))
+        except Exception as e:
+            if not os.path.exists(CATALOG):
+                raise SystemExit(f"could not fetch the library catalog: {e}")
+            print(f"  (catalog refresh failed, using cache: {e})", file=sys.stderr)
+    return json.load(open(CATALOG)).get("manifests", {})
+
+
+def resolve_mention(term: str, cat: dict, inv: dict) -> dict:
+    """Turn '@mutable instruments' or '@Vult' into concrete plugins.
+
+    Brands are the level the catalog actually supports, and they are what a
+    person says out loud -- "Mutable Instruments modules only" means a maker,
+    not a plugin slug. The official Mutable port is published as Audible
+    Instruments, so matching has to cover brand, plugin name and slug.
+    """
+    t = term.lstrip("@").strip().lower()
+    if not t:
+        return {}
+    # Weighted by field, because the same word means different things in
+    # different places. "Vult" as a brand is what someone asking for Vult
+    # means; "Vult-DSP" as the author of a Synthesizers.com port is a true but
+    # unwanted match. And the colloquial name for a maker often lives only in
+    # the description -- the official Mutable Instruments port is published as
+    # "Audible Instruments" and says so only there.
+    WEIGHTS = (("brand", 100), ("name", 90), ("slug", 70),
+               ("author", 30), ("description", 20))
+    hits = {}
+    for slug, p in cat.items():
+        best = 0
+        for field, w in WEIGHTS:
+            v = str(p.get(field, "")).lower()
+            if not v or t not in v:
+                continue
+            # An exact field match outranks the same word buried in a longer
+            # string, so "Vult" finds Vult before Vultiverse.
+            best = max(best, w + (25 if v == t else 0))
+        if best:
+            hits[slug] = {
+                "name": p.get("name", slug),
+                "brand": p.get("brand", ""),
+                "premium": bool(p.get("premium")),
+                "installed": slug in inv,
+                "url": p.get("pluginUrl") or p.get("manualUrl") or "",
+                "score": best,
+                "why": p.get("description", "") if best <= 20 else "",
+            }
+    return dict(sorted(hits.items(), key=lambda kv: -kv[1]["score"]))
+
+
 # ── Generation ───────────────────────────────────────────────────────────────
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -445,6 +526,28 @@ def main(argv):
             print(f"  {e}")
         print(f"{'FAIL' if errs else 'ok'}: {len(errs)} problem(s)")
         return 1 if errs else 0
+
+    if cmd == "catalog":
+        cat = catalog(refresh="--refresh" in argv)
+        term = next((a for a in argv[2:] if not a.startswith("--")), None)
+        if term:
+            hits = resolve_mention(term, cat, inv)
+            print(f"'{term}' matches {len(hits)} plugin(s):\n")
+            for slug, h in hits.items():   # already ranked by match quality
+                mark = "installed" if h["installed"] else \
+                       ("PREMIUM" if h["premium"] else "free, not installed")
+                note = f"  — {h['why'][:60]}" if h.get("why") else ""
+                print(f"  {slug:26} {h['brand'] or h['name']:24} {mark}{note}")
+            return 0
+        prem = sum(1 for p in cat.values() if p.get("premium"))
+        have = sum(1 for s in cat if s in inv)
+        import time
+        age = (time.time() - os.path.getmtime(CATALOG)) / 3600
+        print(f"{len(cat)} plugins in the library · {prem} premium · "
+              f"{have} installed here")
+        print(f"cache {CATALOG} ({age:.1f}h old, refreshed every "
+              f"{CATALOG_MAX_AGE_DAYS} days)")
+        return 0
 
     if cmd == "build" and len(argv) > 2:
         # --prefer-ours biases toward the user's own generated modules; without

@@ -1,0 +1,40 @@
+{
+  "modules": [
+    {
+      "slug": "CARTOG",
+      "name": "MAP",
+      "description": "Records the port layout of every module in your rack, so patches can be drawn and wired accurately.",
+      "tags": ["Utility"],
+      "hp": 4,
+      "params": [
+        {
+          "id": 0,
+          "ident": "SCAN_PARAM",
+          "name": "Scan the rack",
+          "label": "SCAN",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "LightButton",
+          "x_mm": 10.16,
+          "y_mm": 40.0
+        }
+      ],
+      "inputs": [],
+      "outputs": [],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "DONE_LIGHT",
+          "name": "Scanned",
+          "label": "",
+          "x_mm": 10.16,
+          "y_mm": 60.0,
+          "color": "green",
+          "size": "medium"
+        }
+      ]
+    }
+  ]
+}

@@ -99,12 +99,21 @@
       ]
     },
     {
-      "slug": "LADDR",
-      "name": "LADDR",
-      "description": "Resonant four-pole low-pass filter with cutoff CV attenuverter and input drive",
+      "slug": "CARTOG",
+      "name": "MAP",
+      "description": "Records the port layout of every module in your rack, so patches can be drawn and wired accurately.",
       "tags": [
-        "Filter",
-        "Distortion"
+        "Utility"
+      ]
+    },
+    {
+      "slug": "DUALATN",
+      "name": "DUAL ATT",
+      "description": "Dual attenuverter with DC offset; an unpatched channel outputs its offset voltage.",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Dual"
       ]
     }
   ]
