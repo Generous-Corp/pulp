@@ -2621,8 +2621,8 @@ by the release-path gate firing on an unrelated PR. The binder list is long and
 sits where merges collide, so the duplicate keeps coming back; what was missing
 was a PR-time lane that says so immediately.
 
-`gcc-compile-gate.yml` closes that hole. It triggers on `core/**` and compiles
-the core libraries with `g++` and nothing else:
+`gcc-compile-gate.yml` closes that hole. It runs on every PR and compiles the
+core libraries with `g++` and nothing else:
 
 | Option | Value | Why |
 |---|---|---|
