@@ -160,28 +160,17 @@ struct SLUGWidget : rack::app::ModuleWidget {
 rack::plugin::Model* modelSLUG = rack::createModel<SLUGModule, SLUGWidget>("SLUG");
 ```
 
-### Available DSP (include the header, use the class)
+### Available DSP
 
-All are templates on the sample type — use `<float>`. All are **per-sample**.
+**You MUST build the module from these where one fits.** They are tested, they are shared with
+the DAW products, and hand-rolling something that already exists here is a defect, not a
+shortcut. Write DSP inline ONLY when nothing below covers it — and if you do, say so in a
+one-line comment explaining what was missing.
 
-| Header | Class | Use |
-|---|---|---|
-| `pulp/signal/oscillator.hpp` | `OscillatorT<float>` | `.set_sample_rate(sr) .set_frequency(hz) .set_waveform(W::sine\|saw\|square\|triangle) .next() .reset()` — band-limited, returns ±1 |
-| `pulp/signal/adsr.hpp` | `AdsrT<float>` | `.set_sample_rate(sr) .set_params({a,d,s,r}) .note_on() .note_off() .next() .reset()` — returns 0…1 |
-| `pulp/signal/svf.hpp` | `SvfT<float>` | `.set_sample_rate(sr) .set_frequency(hz) .set_resonance(q) .set_mode(M::lowpass\|highpass\|bandpass\|notch) .process(x)` |
-| `pulp/signal/ladder_filter.hpp` | `LadderFilterT<float>` | Moog-style ladder |
-| `pulp/signal/delay_line.hpp` | `DelayLineT<float>` | delay / echo / comb |
-| `pulp/signal/noise_source.hpp` | white / pink noise |
-| `pulp/signal/mod_tools.hpp` | `SampleHoldT` `AttenuverterT` `ComparatorT` `RectifierT` `QuantizerT` `SlewLimiterT` | CV utilities |
-| `pulp/signal/trigger.hpp` | `TriggerDetectT` `GateGenT` `ClockDividerT` `ClockMultT` `BurstGenT` | clock/gate plumbing |
-| `pulp/signal/scale_quantizer.hpp` | `QuantizeScaleT` | pitch quantizing to a scale |
-| `pulp/signal/waveshaper.hpp` | waveshaping / folding |
-| `pulp/signal/chaos.hpp` | `LogisticMapT` | chaotic CV |
+Rack's own `rack::dsp::PulseGenerator` and `rack::dsp::SchmittTrigger` are fine for gate/trigger
+plumbing, but **not** as substitutes for the signal processing below.
 
-Rack's own helpers are available too: `rack::dsp::PulseGenerator` (for trigger outputs),
-`rack::dsp::SchmittTrigger`, `rack::simd`.
-
-If nothing above fits, write the DSP inline — plain C++ is fine, keep it allocation-free.
+<!--DSP_VOCABULARY-->
 
 ### Idioms you must follow
 
@@ -218,6 +207,10 @@ lights[L::ACT_LIGHT].setBrightnessSmooth(x, args.sampleTime);
 - **Never allocate** in `process()` — no `new`, no `std::vector` resize, no locks.
 - Outputs that are expensive should check `.isConnected()` first.
 - Reset state in `onSampleRateChange`.
+- **Never touch `APP` in a constructor.** Assume 48 kHz there; Rack calls
+  `onSampleRateChange` when the module is added, which is where the real rate arrives. A
+  constructor that reads `APP->engine->getSampleRate()` cannot be instantiated outside Rack,
+  and every generated module is driven headlessly by the behavioural gate before it ships.
 - Clamp anything that could blow up: filter cutoff to `[20, sampleRate*0.45]`, gains to sane ranges.
 
 ## 5. Tags — use ONLY these, spelled exactly

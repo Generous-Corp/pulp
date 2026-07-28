@@ -49,9 +49,22 @@ def log(msg):
 
 # ── Model ────────────────────────────────────────────────────────────────────
 
+def dsp_vocabulary() -> str:
+    """The available DSP, extracted from the headers at call time.
+
+    Derived rather than hand-written: a wrong signature in the prompt makes the
+    model quietly avoid the class and hand-roll the DSP instead, which is how a
+    generated module ends up using none of Pulp at all.
+    """
+    r = subprocess.run([sys.executable, os.path.join(HERE, "dsp_vocabulary.py")],
+                       capture_output=True, text=True)
+    return r.stdout
+
+
 def ask_model(prompt: str, retry_context: str | None = None) -> str:
     with open(CONTRACT) as f:
         contract = f.read()
+    contract = contract.replace("<!--DSP_VOCABULARY-->", dsp_vocabulary())
     parts = [contract, "\n---\n\n## Your task\n\nGenerate this module:\n\n> " + prompt]
     if retry_context:
         # Feed the compiler back verbatim. The build is the gate, so the error
@@ -212,7 +225,9 @@ def main(argv):
 
         ok, out = run_emitter()
         if not ok:
-            log("panel/manifest validation failed")
+            log("panel/manifest validation failed:")
+            for line in out.strip().split("\n")[:6]:
+                log("    " + line.strip())
             ctx = "The layout manifest was rejected:\n" + out
             restore()
             continue
@@ -221,12 +236,15 @@ def main(argv):
         with tempfile.TemporaryDirectory() as tmp:
             ok, res = compile_all(tmp)
             if not ok:
-                log("compile failed")
+                log("compile failed:")
+                for line in [l for l in res.split("\n") if "error:" in l][:5]:
+                    log("    " + line.strip()[:150])
                 ctx = "The DSP did not compile:\n" + res
                 if not a.keep_on_fail:
                     restore()
                 continue
             log("compiled")
+            check_uses_pulp_dsp(slug)
             pkg = install(res)
 
         log(f"installed → {pkg}")
@@ -267,6 +285,26 @@ def _wire_entry(slug):
     if i < 0:
         raise SystemExit("plugin.cpp has no closing brace to insert before")
     open(cpp, "w").write(s[:i] + add + "\n" + s[i:])
+
+
+def check_uses_pulp_dsp(slug):
+    """Warn if a generated module reaches for no Pulp DSP at all.
+
+    The whole reason to build on Pulp is its DSP catalog. A module that
+    hand-rolls everything is a signal that the vocabulary in the prompt is
+    wrong, stale, or too hard to use -- which is exactly what happened on the
+    first generated module, which used none of it. Advisory rather than fatal:
+    some modules legitimately have no DSP (a mult, a blank), and failing those
+    would be worse than the warning.
+    """
+    src = open(os.path.join(PACK, "src", f"{slug}.cpp")).read()
+    used = sorted(set(re.findall(r"#include <pulp/signal/([\w/]+\.hpp)>", src)))
+    if used:
+        log(f"uses Pulp DSP: {', '.join(used)}")
+        return True
+    log("WARNING: uses no pulp/signal DSP — everything was hand-rolled. "
+        "Check the vocabulary in the prompt covers this kind of module.")
+    return False
 
 
 def _assert_no_duplicate_models():

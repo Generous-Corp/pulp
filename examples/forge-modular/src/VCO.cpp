@@ -62,7 +62,7 @@ struct VCOModule : rack::engine::Module {
     VCOModule() {
         forge_modular::config_VCO(this);
         configBypass(L::VOCT_INPUT, L::SAW_OUTPUT);
-        on_sample_rate(static_cast<float>(APP->engine->getSampleRate()));
+        on_sample_rate(48000.f);   // Rack calls onSampleRateChange on add
         for (int c = 0; c < kMaxCh; ++c) {
             saw_[c].set_waveform(Osc::Waveform::saw);
             tri_[c].set_waveform(Osc::Waveform::triangle);

@@ -586,13 +586,30 @@ def validate(mod: dict, svg: str | None = None) -> list[str]:
             errs.append(f"param {pspec['ident']}: max ({hi}) must exceed min ({lo})")
             continue
         waiver = pspec.get("allow_endpoint_default")
-        if lo < 0 < hi and abs(dv) > 1e-6 and not waiver:
+        # A SYMMETRIC range (min == -max) is a genuinely bipolar control -- an
+        # attenuverter, an offset, a pan -- and those must start centred. An
+        # asymmetric range that merely crosses zero is usually a frequency or
+        # pitch control in volts, where centring is meaningless: a cutoff of
+        # -5..6 V defaulting to 2.0 is correct, and rejecting it was a false
+        # positive that blocked generation entirely.
+        # An exponential display (display_base != 0) means the value is a
+        # FREQUENCY or pitch in volts, not a bipolar amount. Those legitimately
+        # sit anywhere in their range, symmetric or not -- a cutoff spanning
+        # -5.5..5.5 V defaulting to 1.0 is a correct design, and the centring
+        # rule must not fire on it.
+        is_frequency = abs(pspec.get("display_base", 0.0)) > 1e-9
+        symmetric = lo < 0 < hi and abs(lo + hi) < 1e-6
+        if symmetric and not is_frequency and abs(dv) > 1e-6 and not waiver:
             errs.append(f"param {pspec['ident']} is bipolar ({lo}..{hi}) but defaults to "
                         f"{dv}, so its knob does not start centred")
         frac = (dv - lo) / (hi - lo)
-        if pspec.get("kind") != "Toggle" and not waiver and (frac < 1e-6 or frac > 1 - 1e-6):
-            errs.append(f"param {pspec['ident']} defaults to an endpoint of its range "
-                        f"({dv} in {lo}..{hi}); the knob will look stuck")
+        # Defaulting to the MINIMUM is conventional and correct -- drive, feedback
+        # and send controls are meant to start off. Only a MAXIMUM default reads
+        # as stuck, because there is nowhere left to turn.
+        if pspec.get("kind") != "Toggle" and not waiver and not is_frequency \
+                and frac > 1 - 1e-6:
+            errs.append(f"param {pspec['ident']} defaults to the TOP of its range "
+                        f"({dv} in {lo}..{hi}); the knob has nowhere left to turn")
 
     # Rack drops unrecognised tags silently, so an invalid tag is invisible until a user
     # cannot find the module. (This check previously claimed the C++ side did it. It did not.)

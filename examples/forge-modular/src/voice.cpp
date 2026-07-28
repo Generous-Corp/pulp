@@ -45,7 +45,7 @@ struct ENVModule : rack::engine::Module {
 
     ENVModule() {
         forge_modular::config_ENV(this);
-        setRate(static_cast<float>(APP->engine->getSampleRate()));
+        setRate(48000.f);          // Rack calls onSampleRateChange on add
     }
     void setRate(float sr) { for (auto& e : env_) e.set_sample_rate(sr); }
     void onSampleRateChange(const SampleRateChangeEvent& e) override { setRate(e.sampleRate); }
@@ -87,7 +87,7 @@ struct VCFModule : rack::engine::Module {
     VCFModule() {
         forge_modular::config_VCF(this);
         configBypass(L::IN_INPUT, L::LP_OUTPUT);
-        setRate(static_cast<float>(APP->engine->getSampleRate()));
+        setRate(48000.f);          // Rack calls onSampleRateChange on add
         for (int c = 0; c < kCh; ++c) {
             lp_[c].set_mode(pulp::signal::SvfT<float>::Mode::lowpass);
             hp_[c].set_mode(pulp::signal::SvfT<float>::Mode::highpass);
@@ -198,7 +198,7 @@ struct LFOModule : rack::engine::Module {
         tri_.set_waveform(Osc::Waveform::triangle);
         sqr_.set_waveform(Osc::Waveform::square);
         sin_.set_waveform(Osc::Waveform::sine);
-        setRate(static_cast<float>(APP->engine->getSampleRate()));
+        setRate(48000.f);          // Rack calls onSampleRateChange on add
     }
     void setRate(float sr) { tri_.set_sample_rate(sr); sqr_.set_sample_rate(sr); sin_.set_sample_rate(sr); }
     void onSampleRateChange(const SampleRateChangeEvent& e) override { setRate(e.sampleRate); }
