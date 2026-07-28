@@ -4,7 +4,9 @@
       "slug": "CARTOG",
       "name": "MAP",
       "description": "Records the port layout of every module in your rack, so patches can be drawn and wired accurately.",
-      "tags": ["Utility"],
+      "tags": [
+        "Utility"
+      ],
       "hp": 4,
       "params": [
         {
@@ -34,7 +36,8 @@
           "color": "green",
           "size": "medium"
         }
-      ]
+      ],
+      "width_waiver": "a scanner with one button and no signal path; 4HP is the narrowest that fits the name"
     }
   ]
 }

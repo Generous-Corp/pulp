@@ -475,11 +475,39 @@ FORBIDDEN = ["<text", "<filter", "<mask", "<clipPath", "<image", "<style",
              "mix-blend", "filter=", "clip-path=", "<linearGradient", "<radialGradient"]
 
 
+def _content_per_hp(mod: dict) -> float:
+    """Controls and jacks per HP.
+
+    Width is not free in Eurorack -- HP is rack space someone paid for, and a
+    module spread over twice the panel it needs reads as unfinished. Measured
+    against real modules, which run about 1.0-1.5: Fundamental's VCF fits three
+    knobs and six jacks into 7 HP, its VCO four knobs and eight jacks into 9.
+
+    Area and horizontal span were both tried first and neither works: a narrow
+    module legitimately uses little of its width, and a sparse wide one can
+    still score well on area by using large knobs. Counting what is on the
+    panel is blunter and actually separates the cases.
+    """
+    m = _prepare(dict(mod))
+    n = len(m.get("params", [])) + len(m.get("inputs", [])) + len(m.get("outputs", []))
+    return n / max(1, int(m["hp"]))
+
+
 def validate(mod: dict, svg: str | None = None) -> list[str]:
     """Return a list of violations. Empty means the module is shippable."""
     errs = []
     hp = int(mod["hp"])
     w = hp * HP_MM
+
+    # A module twice as wide as its contents need looks unfinished, and costs
+    # the user rack space. Waivable, because a utility whose whole job is one
+    # button is legitimately sparse.
+    dens = _content_per_hp(mod)
+    if dens < 0.7 and not mod.get("width_waiver"):
+        errs.append(f"{hp}HP is wider than {len(_prepare(dict(mod)).get('params', []))} "
+                    f"control(s) and {len(_prepare(dict(mod)).get('inputs', [])) + len(_prepare(dict(mod)).get('outputs', []))} "
+                    f"jack(s) need ({dens:.2f} per HP; real modules run ~1.0-1.5). "
+                    f"Narrow it, add what it is missing, or set width_waiver with a reason.")
 
     if svg is not None:
         for f in FORBIDDEN:
