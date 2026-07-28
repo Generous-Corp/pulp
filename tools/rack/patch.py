@@ -106,7 +106,54 @@ def inventory() -> dict:
                 if d:
                     _record(inv, d, entry.split("-")[0])
     _add_port_names(inv)
+    _add_portmap(inv)
     return inv
+
+
+PORTMAP = os.path.join(RACK_USER, "forge-portmap.json")
+
+
+def _add_portmap(inv: dict) -> None:
+    """Fold in real port names and positions recorded from inside Rack.
+
+    Written by the CARTOG module, which is the only thing that can see them:
+    a port's index, name and jack position exist solely in compiled widget
+    code. This is what lets a patch be wired to a named port on someone
+    else's module instead of to index 0 and a hope.
+
+    It also settles a thing no amount of inference would have: index order is
+    not visual order. Fundamental's VCO puts input 1 (frequency modulation) to
+    the LEFT of input 0 (1V/octave), so guessing indices from panel layout --
+    or labelling badges left-to-right by index -- produces confident nonsense.
+    """
+    if not os.path.exists(PORTMAP):
+        return
+    try:
+        doc = json.load(open(PORTMAP))
+    except Exception:
+        return
+    for entry in doc.get("modules", []):
+        plug = inv.get(entry.get("plugin"))
+        if not plug:
+            continue
+        mod = plug["modules"].get(entry.get("model"))
+        if mod is None:
+            continue
+        for kind, key in (("inputs", "inputs"), ("outputs", "outputs")):
+            ports = entry.get(kind) or []
+            if not ports:
+                continue
+            width = max(p["index"] for p in ports) + 1
+            names = [None] * width
+            coords = [None] * width
+            for p in ports:
+                names[p["index"]] = p.get("name") or None
+                coords[p["index"]] = (p.get("x"), p.get("y"))
+            # The map is authoritative: it was read from the running module,
+            # whereas anything already here was derived from a manifest.
+            mod[key] = names
+            mod[key + "_xy"] = coords
+        mod["panel"] = entry.get("size")
 
 
 def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
@@ -526,6 +573,39 @@ def main(argv):
             print(f"  {e}")
         print(f"{'FAIL' if errs else 'ok'}: {len(errs)} problem(s)")
         return 1 if errs else 0
+
+    if cmd == "mention" and len(argv) > 2:
+        # Selection-time gating. Anything not installed cannot be wired, so
+        # resolving a mention BEFORE generating is what stops a whole patch
+        # being built around something the user cannot load.
+        cat = catalog()
+        hits = resolve_mention(argv[2], cat, inv)
+        if not hits:
+            print(f"nothing in the library matches '{argv[2]}'")
+            return 1
+        usable = [s for s, h in hits.items() if h["installed"]]
+        print(f"'{argv[2]}' — {len(hits)} match(es), {len(usable)} usable now\n")
+        for slug, h in hits.items():
+            if h["installed"]:
+                state, hint = "✓ ready", ""
+            elif h["premium"]:
+                # Deliberately not "you need to buy this". A premium plugin the
+                # user already owns but has not synced to this machine looks
+                # identical from here -- there is no readable signal for
+                # ownership -- and telling someone to buy what they own is a
+                # worse error than telling them to check.
+                state = "$ premium"
+                hint = "  → owned? sync it in Rack's Library. Otherwise buy it, or VCV+"
+            else:
+                state, hint = "↓ free", "  → install from Rack's Library, then rescan"
+            print(f"  {state:11} {slug:22} {h['brand'] or h['name']}")
+            if hint:
+                print(f"{'':13}{hint}")
+        if not usable:
+            print("\nNone of these are installed, so a patch cannot use them yet.")
+            print("Generation would be wasted — install first, then ask again.")
+            return 2
+        return 0
 
     if cmd == "catalog":
         cat = catalog(refresh="--refresh" in argv)

@@ -139,9 +139,26 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         }
     }
 
+    int last_count = -1;
+
     void step() override {
         rack::app::ModuleWidget::step();
         if (!mod) return;
+
+        // Rescan whenever the rack's contents change, rather than only when
+        // asked. Requiring a click would mean the map silently goes stale the
+        // moment someone adds a module, and a stale map is worse than none --
+        // it draws cables into jacks that have moved. The button stays for a
+        // forced refresh after a plugin update, where the count is unchanged
+        // but the layout may not be.
+        if (APP && APP->scene && APP->scene->rack) {
+            const int n = static_cast<int>(APP->scene->rack->getModules().size());
+            if (n != last_count) {
+                last_count = n;
+                scan();
+            }
+        }
+
         const bool down = mod->params[CARTOGModule::L::SCAN_PARAM].getValue() > 0.5f;
         if (down && !held) scan();      // on the press, not every frame held
         held = down;
