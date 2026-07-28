@@ -186,6 +186,19 @@ commands), but a new MCP sub-tool still needs its baseline `mcp_only` entry. Dis
 gate-oriented `pulp audio validate compare` (null/spectral diff, nonzero exit): `pulp audio
 compare` is an advisory *judgment*, never a gate.
 
+**The inspector server binds loopback and nothing else — do not "fix" this.**
+`InspectorServer::start` hands `InterprocessConnectionServer` an explicit
+`127.0.0.1:<port>` endpoint. A bare port string means *all interfaces* to that
+general-purpose class (a deliberate capability it tests, via
+`start_socket_server_on_any_interface`), which is the wrong one here: the
+inspector transport has no authentication and its protocol exposes
+`Runtime.evaluate`, so binding it where the network can reach it publishes
+arbitrary code execution in the host process. `pulp inspect --host` is the
+*client* side and stays — it is how you reach a remote machine's loopback
+through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
+this: loopback must connect (the control) and the host's real IPv4 must be
+refused.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s

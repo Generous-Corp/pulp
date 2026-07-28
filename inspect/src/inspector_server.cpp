@@ -147,7 +147,14 @@ bool InspectorServer::start(int port) {
 
     port_ = port;
 
-    if (!impl_->server.start(std::to_string(port), events::IpcTransport::Socket)) {
+    // Loopback ONLY, and not negotiable. A bare port string means "all
+    // interfaces" to InterprocessConnectionServer — a deliberate capability of
+    // that general-purpose class, but the wrong one here: this transport has no
+    // authentication and its protocol exposes Runtime.evaluate, so binding it
+    // where the network can reach it publishes arbitrary code execution in the
+    // host process. Debug a remote machine over an SSH tunnel instead.
+    const std::string endpoint = "127.0.0.1:" + std::to_string(port);
+    if (!impl_->server.start(endpoint, events::IpcTransport::Socket)) {
         return false;
     }
 

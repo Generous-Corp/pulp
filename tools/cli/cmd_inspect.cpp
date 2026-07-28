@@ -166,7 +166,6 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "  pulp inspect --command Runtime.getCapabilities  # Debug-console capabilities\n";
             std::cout << "  pulp inspect --command Runtime.evaluate --params '{\"code\":\"1+1\"}'  # Evaluate in the live UI\n";
             std::cout << "  pulp inspect --command Console.getMessages --params '{\"sinceSeq\":0}'  # Tail device logs\n";
-            std::cout << "  pulp inspect --host 192.168.1.42          # Remote debugging\n";
             std::cout << "\n";
             std::cout << "Note: Runtime.evaluate / Runtime.interrupt reach the live scripted UI only\n";
             std::cout << "when the host wired the runtime inspector AND opted into eval (off by\n";
