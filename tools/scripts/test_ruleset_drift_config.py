@@ -22,9 +22,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ruleset-drift-check.yml"
 RULESET = REPO_ROOT / ".github" / "rulesets" / "main-protection.json"
 
+# Mirrors LIVE enforcement, read from branches/main/protection — not from
+# /rulesets, which reports no required_status_checks rule at all on this repo.
 EXPECTED_REQUIRED_CONTEXTS = {
     "macos",
     "Enforce version & skill sync",
+    "Build + prove + (owner-gated) deploy",
+    "Vellum freeze",
+    "Vellum trusted freeze",
 }
 
 EXPECTED_ADVISORY_CONTEXTS = {

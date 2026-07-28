@@ -3784,9 +3784,25 @@ by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf
 **Fast lane — required (blocks merge):**
 
 - `macos` — macOS build+test leg of `.github/workflows/build.yml`
-- `linux` — Linux (x64) build+test leg of `.github/workflows/build.yml`
-- `windows` — Windows (x64) build+test leg of `.github/workflows/build.yml`
 - `Enforce version & skill sync` — `.github/workflows/version-skill-check.yml`
+- `Build + prove + (owner-gated) deploy`
+- `Vellum freeze` — `.github/workflows/vellum-freeze-check.yml`
+- `Vellum trusted freeze` — status posted by `.github/workflows/vellum-trusted-gate.yml`
+
+**`linux` and `windows` are NOT required** — they are advisory GitHub-hosted
+lanes. Verify the live list rather than trusting any doc, and read the right
+surface:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/branches/main/protection \
+  --jq '.required_status_checks.contexts'
+```
+
+Enforcement lives in **classic branch protection**, not in a ruleset: the only
+branch ruleset (`main-merge-queue`) carries a `merge_queue` rule and no
+`required_status_checks` rule, so `gh api …/rulesets` reads as "nothing is
+required" and has already caused a required check to be written off as
+advisory. GitHub honours both surfaces; `ruleset-drift-check.yml` unions them.
 
 The three platform names are intentionally declared as **stable aliases**
 so the merge contract survives runner-provider swaps (github-hosted ↔
@@ -3806,10 +3822,17 @@ only and are tracked in the checked-in JSON under `advisory_status_checks`
 for visibility/drift, never inside `rules[].required_status_checks`.
 
 **Drift enforcement:** `.github/workflows/ruleset-drift-check.yml` runs
-on PR (when `.github/rulesets/**` changes) and weekly on cron. It fetches
-the live ruleset via `gh api /repos/{owner}/{repo}/rulesets` and diffs
-against the checked-in JSON. PR runs post/update a single comment; the
-cron job fails loudly on drift so it shows up as a red check on `main`.
+on PR (when `.github/rulesets/**` changes) and weekly on cron. It reads **both**
+live surfaces — the named ruleset and classic branch protection — and diffs
+their union against the checked-in JSON. PR runs post/update a single comment;
+the cron job fails loudly on drift so it shows up as a red check on `main`.
+
+A missing ruleset is **not** drift by itself: the contract may live entirely in
+classic branch protection, which is the case here. An unreadable surface (403 —
+the token lacks `administration: read`) **is** drift, deliberately, so a scope
+problem can never be mistaken for "nothing is required". Reading only
+`/rulesets` is what kept this check red on cron from 2026-07-14 onward while the
+real contract was intact.
 
 **Making a change to required checks:** always edit the JSON first, open
 a PR, and let the drift-check workflow confirm the plan. Then mirror the
