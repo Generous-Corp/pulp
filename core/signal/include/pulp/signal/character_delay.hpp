@@ -399,8 +399,22 @@ public:
             duck_gain_ = std::clamp(duck_gain_ + duck_gain_step_, 0.0, 1.0);
             const double gain = duck_gain_;
 
-            left[i] = static_cast<SampleType>(channels_[0].wet * gain);
-            right[i] = static_cast<SampleType>(channels_[1].wet * gain);
+            // Cross-character diffusion on the OUTPUT only (post-loop, post-duck):
+            // applied to out_* rather than channels_[c].wet, so the feedback tap
+            // — which reads channels_[c].wet next sample — stays clean and the
+            // repeats don't recirculate through the network. One-pass smear.
+            double out_l = channels_[0].wet * gain;
+            double out_r = channels_[1].wet * gain;
+            if (diffusion_amount_value_ > 0.0 && character_type_ != Character::diffusion) {
+                out_l += diffusion_amount_value_ *
+                         (channels_[0].diffusion.process(out_l, 1.0) - out_l);
+                channels_[0].diffusion.tick_modulation();
+                out_r += diffusion_amount_value_ *
+                         (channels_[1].diffusion.process(out_r, chardelay::kStereoDecorr) - out_r);
+                channels_[1].diffusion.tick_modulation();
+            }
+            left[i] = static_cast<SampleType>(out_l);
+            right[i] = static_cast<SampleType>(out_r);
         }
     }
 
@@ -695,7 +709,13 @@ private:
                 const double v = reverse_on_
                                      ? channel.reverse.process(x, base_samples, 0.0)
                                      : x;
-                y = channel.bbd.process(v);
+                // The Mod LFO drives the bucket clock directly — a varying clock
+                // is how a BBD choruses (delay + pitch wobble together). The
+                // modulated time_ms is not used here because the bucket chain
+                // owns its clock, set at control rate in update().
+                const double clock_mod =
+                    mod_depth_ * decorrelation * std::sin(2.0 * chardelay::kPi * lfo_phase_);
+                y = channel.bbd.process(v, clock_mod);
                 break;
             }
             case Character::vintage_digital: {
@@ -709,17 +729,11 @@ private:
             }
         }
 
-        // Cross-character diffusion: smear ANY character's repeat through the
-        // diffusion network by the smoothed amount, in-loop (post-line,
-        // pre-saturator) — the same placement the diffusion character uses, so
-        // repeats melt into a cloud as they recirculate. Dry/wet crossfade so 0
-        // is the character untouched. Skipped for the diffusion character, which
-        // already runs the network in its own branch above (avoids a double pass).
-        if (diffusion_amount_value_ > 0.0 && character_type_ != Character::diffusion) {
-            const double d = channel.diffusion.process(y, decorrelation);
-            channel.diffusion.tick_modulation();
-            y = y + diffusion_amount_value_ * (d - y);
-        }
+        // Cross-character diffusion is applied to the wet OUTPUT in process(),
+        // NOT here: this value is the feedback tap, so smearing it in-loop would
+        // recirculate through the diffusion network every repeat and dissipate
+        // the echo train. The diffusion *character* (above) keeps its in-loop
+        // cloud; the diffusion *amount* colors the output only.
         return y;
     }
 
