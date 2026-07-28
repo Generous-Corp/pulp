@@ -31,6 +31,8 @@ setMax	widget_value	function	core/view/src/widget_bridge/widget_value_controls_a
 setStep	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setOrientation	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
 setAccentColor	widget_value	function	core/view/src/widget_bridge/widget_value_controls_api.cpp
+onParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
+offParamChanged	state_binding	preamble_function	core/view/src/widget_bridge/state_binding_api.cpp	internal
 __subscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 __unsubscribeParam__	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 getParamMetadata	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
@@ -50,6 +52,7 @@ setVisible	css_style	function	core/view/src/widget_bridge/style_visibility_api.c
 setAccessibilityLabel	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityRole	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
 setAccessibilityState	accessibility	function	core/view/src/widget_bridge/accessibility_api.cpp
+on	events	preamble_function	core/view/src/widget_bridge.cpp	event:names
 registerHover	events	function	core/view/src/widget_bridge/event_api.cpp
 createGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp
