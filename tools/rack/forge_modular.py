@@ -72,6 +72,90 @@ LABEL_GAP = 2.6             # mm between a widget's edge and its label baseline
 SCREW_INSET = 7.62          # Rack's own screw coordinates
 SCREW_Y_TOP, SCREW_Y_BOT = 2.54, 126.153
 
+# Rack's fixed tag vocabulary, transcribed from its src/tag.cpp (57 canonical
+# tags, 77 accepted spellings including aliases). plugin.json tags MUST come from
+# this list -- Rack silently drops anything else, and an unlisted tag means the module is
+# undiscoverable in the Module Browser. Maps accepted spelling -> canonical form.
+RACK_TAGS = {
+    "amplifier": "Voltage-controlled amplifier",
+    "arpeggiator": "Arpeggiator",
+    "attenuator": "Attenuator",
+    "blank": "Blank",
+    "chorus": "Chorus",
+    "clock": "Clock generator",
+    "clock generator": "Clock generator",
+    "clock modulator": "Clock modulator",
+    "compressor": "Compressor",
+    "controller": "Controller",
+    "delay": "Delay",
+    "digital": "Digital",
+    "distortion": "Distortion",
+    "drum": "Drum",
+    "drums": "Drum",
+    "dual": "Dual",
+    "dynamics": "Dynamics",
+    "effect": "Effect",
+    "envelope follower": "Envelope follower",
+    "envelope generator": "Envelope generator",
+    "eq": "Equalizer",
+    "equalizer": "Equalizer",
+    "expander": "Expander",
+    "external": "External",
+    "filter": "Filter",
+    "flanger": "Flanger",
+    "function generator": "Function generator",
+    "granular": "Granular",
+    "hardware": "Hardware clone",
+    "hardware clone": "Hardware clone",
+    "lfo": "Low-frequency oscillator",
+    "limiter": "Limiter",
+    "logic": "Logic",
+    "low frequency oscillator": "Low-frequency oscillator",
+    "low pass gate": "Low-pass gate",
+    "low-frequency oscillator": "Low-frequency oscillator",
+    "low-pass gate": "Low-pass gate",
+    "lowpass gate": "Low-pass gate",
+    "midi": "MIDI",
+    "mixer": "Mixer",
+    "multiple": "Multiple",
+    "noise": "Noise",
+    "oscillator": "Oscillator",
+    "pan": "Panning",
+    "panning": "Panning",
+    "percussion": "Drum",
+    "phaser": "Phaser",
+    "physical modeling": "Physical modeling",
+    "poly": "Polyphonic",
+    "polyphonic": "Polyphonic",
+    "quad": "Quad",
+    "quantizer": "Quantizer",
+    "random": "Random",
+    "recording": "Recording",
+    "reverb": "Reverb",
+    "ring modulator": "Ring modulator",
+    "s&h": "Sample and hold",
+    "sample & hold": "Sample and hold",
+    "sample and hold": "Sample and hold",
+    "sampler": "Sampler",
+    "sequencer": "Sequencer",
+    "slew limiter": "Slew limiter",
+    "speech": "Speech",
+    "switch": "Switch",
+    "synth voice": "Synth voice",
+    "tuner": "Tuner",
+    "utility": "Utility",
+    "vca": "Voltage-controlled amplifier",
+    "vcf": "Filter",
+    "vco": "Oscillator",
+    "visual": "Visual",
+    "vocoder": "Vocoder",
+    "voltage controlled amplifier": "Voltage-controlled amplifier",
+    "voltage controlled filter": "Filter",
+    "voltage controlled oscillator": "Oscillator",
+    "voltage-controlled amplifier": "Voltage-controlled amplifier",
+    "waveshaper": "Waveshaper",
+}
+
 _glyphs = None
 _ink_cache: dict = {}
 _shape_cache: dict = {}
@@ -355,8 +439,14 @@ def validate(mod: dict, svg: str | None = None) -> list[str]:
             errs.append(f"param {pspec['ident']} defaults to an endpoint of its range "
                         f"({dv} in {lo}..{hi}); the knob will look stuck")
 
+    # Rack drops unrecognised tags silently, so an invalid tag is invisible until a user
+    # cannot find the module. (This check previously claimed the C++ side did it. It did not.)
     for tag in mod.get("tags", []):
-        pass  # tag vocabulary is checked against Rack's list by the C++ side
+        if tag.lower() not in RACK_TAGS:
+            errs.append(f"tag {tag!r} is not in Rack's vocabulary; Rack will drop it silently")
+        elif RACK_TAGS[tag.lower()] != tag:
+            errs.append(f"tag {tag!r} is an alias; use the canonical spelling "
+                        f"{RACK_TAGS[tag.lower()]!r}")
     if not mod.get("tags"):
         errs.append("no tags: the module will be undiscoverable in the Module Browser")
     return errs
