@@ -18,6 +18,7 @@ namespace pulp::view {
 enum class BindingTarget : std::uint8_t {
     value,  ///< the widget's primary value (Knob, Fader, RangeSlider, Toggle, ProgressBar)
     meter,  ///< a Meter's level
+    scope,  ///< a block of samples for a SpectrumView / WaveformView
 };
 
 /// The outcome of one `bindWidgetToParam` / `bindMeter` call.

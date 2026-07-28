@@ -17,6 +17,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <thread>
+#include <chrono>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
@@ -1515,4 +1517,114 @@ TEST_CASE("value: binds fail cleanly when the processor declares no channels",
     const auto& attempts = bridge.binding_attempts();
     REQUIRE(attempts.size() == 1);
     CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+}
+
+// ── bindScope + staleness ─────────────────────────────────────────────
+
+TEST_CASE("bindScope pushes a vector channel into a SpectrumView",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* env = channels.declare_vector("env");
+    REQUIRE(env != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createSpectrum('scope');
+        bindScope('scope', 'value:env');
+    )");
+    REQUIRE(bridge.param_binding_count() == 1);
+
+    const float block[4] = {-6.0f, -12.0f, -18.0f, -24.0f};
+    env->publish(block, 4);
+    bridge.service_param_bindings();
+    // The block reached the view: binding a scope is a whole-block push, not a
+    // scalar one, so this is the path that would silently do nothing if the
+    // scope target fell through to the value/meter branch.
+    CHECK(bridge.binding_attempts().back().outcome == BindingOutcome::ok);
+}
+
+TEST_CASE("a scope cannot bind to a meter channel, or to a parameter",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);  // has a param named "gain"
+
+    ValueChannelSet channels;
+    channels.declare_meter("level");  // a METER channel, not a vector
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createSpectrum('a');
+        createSpectrum('b');
+        bindScope('a', 'value:level');
+        bindScope('b', 'gain');
+    )");
+
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 2);
+    // Wrong SHAPE is a miss, not a coercion — rendering a meter as a spectrum
+    // would draw a plausible picture of the wrong thing.
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    // And a scope has no parameter equivalent at all.
+    CHECK(attempts[1].outcome == BindingOutcome::unknown_value_channel);
+    CHECK(bridge.param_binding_count() == 0);
+}
+
+TEST_CASE("a meter holds a static-but-live reading, and decays once publishing stops",
+          "[view][bridge][state-binding][value-channel][staleness]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    // neutral = 0: a gain-reduction meter rests at "no reduction".
+    auto* gr = channels.declare_meter("gr", "dB", 0.0f);
+    REQUIRE(gr != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('gr');
+        bindMeter('gr', 'value:gr');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("gr"));
+    REQUIRE(meter != nullptr);
+
+    // A compressor holding steady reduction publishes the SAME value every
+    // block. Value-equality staleness would wrongly decay this; the publish
+    // counter keeps it alive.
+    for (int i = 0; i < 5; ++i) {
+        gr->publish(mono_frame(0.6f));
+        bridge.service_param_bindings();
+    }
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
+
+    // Now the writer stops. Still fresh immediately after.
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
+
+    // ...and decays to neutral once the stale window has elapsed.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.0f, 1e-5f));
+
+    // A fresh publish revives it.
+    gr->publish(mono_frame(0.4f));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.4f, 1e-5f));
 }

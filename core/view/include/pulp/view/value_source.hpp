@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <atomic>
 
 /// @file value_source.hpp
 /// Paint-safe host→view value channels. A plugin's audio/host thread publishes
@@ -30,14 +32,37 @@ struct MeterFrame {
     int channels = 0;
 };
 
+/// Monotonic publish counter, shared by every value source.
+///
+/// Staleness is "the writer stopped publishing", NOT "the value stopped
+/// changing" — and the two are genuinely different. A compressor holding a
+/// steady -6 dB of gain reduction publishes the same number every block and
+/// must keep reading -6; a processor whose audio stopped publishes nothing and
+/// must decay to its neutral. Comparing values cannot tell those apart, so a
+/// reader watches this counter instead.
+class PublishCounter {
+public:
+    /// Writer (audio/host) thread, from publish(). Relaxed: the counter orders
+    /// no other memory, it only has to be monotonic and eventually visible.
+    void note_publish() noexcept { publish_seq_.fetch_add(1, std::memory_order_relaxed); }
+
+    /// Reader (UI) thread. Changes iff the writer published since the last read.
+    std::uint32_t publish_seq() const noexcept {
+        return publish_seq_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<std::uint32_t> publish_seq_{0};
+};
+
 /// Lock-free meter channel: the host publishes a `MeterFrame` from the
 /// audio/host thread; the view reads the latest frame paint-safe. Exactly one
 /// writer and one reader thread (the `TripleBuffer` contract).
-class MeterSource {
+class MeterSource : public PublishCounter {
 public:
     /// Publish the latest reading. Call from the writer (audio/host) thread.
     /// Alloc-free and non-blocking — a fixed-size copy into the back buffer.
-    void publish(const MeterFrame& frame) { buffer_.write(frame); }
+    void publish(const MeterFrame& frame) { buffer_.write(frame); note_publish(); }
 
     /// Read the latest published reading. Call from the reader (UI) thread.
     /// Returns by value so the caller never holds a reference into the buffer.
@@ -72,7 +97,7 @@ struct VectorFrame {
 /// Latest-wins, like every channel here: a block the reader never got to is
 /// silently replaced. That is correct for a visualization — a scope shows the
 /// current state of the signal, not a lossless history of it.
-class VectorSource {
+class VectorSource : public PublishCounter {
 public:
     /// Publish a block from the writer (audio/host) thread. Alloc-free and
     /// non-blocking: a bounded copy into the back buffer. More than
@@ -87,6 +112,7 @@ public:
             std::copy_n(samples, static_cast<std::size_t>(frame.count), frame.samples.begin());
         }
         buffer_.write(frame);
+        note_publish();
     }
 
     /// Read the latest published block from the reader (UI) thread.
@@ -99,10 +125,10 @@ private:
 /// Lock-free scalar channel: a single paint-safe cached number (a readout value,
 /// a modulation ring's base→modulated position). Same one-writer/one-reader
 /// contract as `MeterSource`.
-class ScalarSource {
+class ScalarSource : public PublishCounter {
 public:
     /// Publish the latest value from the writer (audio/host) thread.
-    void publish(float value) { buffer_.write(value); }
+    void publish(float value) { buffer_.write(value); note_publish(); }
 
     /// Read the latest value from the reader (UI) thread.
     float read() { return buffer_.read(); }

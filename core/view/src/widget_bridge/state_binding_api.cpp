@@ -21,6 +21,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -231,8 +232,56 @@ void WidgetBridge::derive_binding_transform(ParamBinding& b, View* w) {
     b.transform.db_max = info->range.max;
 }
 
+
+/// How long a value channel may go without a publish before a bound view falls
+/// back to its neutral. Pulp meters already carry UI-side ballistics, so this
+/// only has to outlast a normal render gap, not smooth anything.
+constexpr auto kValueChannelStaleAfter = std::chrono::milliseconds(250);
+
+bool WidgetBridge::value_channel_is_stale(ParamBinding& b, std::uint32_t seq) {
+    const auto now = std::chrono::steady_clock::now();
+    if (seq != b.last_publish_seq) {
+        b.last_publish_seq = seq;
+        b.last_publish_at = now;
+        return false;
+    }
+    return now - b.last_publish_at > kValueChannelStaleAfter;
+}
+
+bool WidgetBridge::apply_scope_binding(ParamBinding& b, View* w) {
+    if (b.value_vector == nullptr) return false;
+    const bool stale = value_channel_is_stale(b, b.value_vector->publish_seq());
+    const auto frame = b.value_vector->read();
+    const int count = stale ? 0 : frame.count;
+    // A stale scope renders empty rather than holding the last block on screen,
+    // which would read as a frozen display of live audio.
+    if (auto* spectrum = dynamic_cast<SpectrumView*>(w)) {
+        spectrum->set_spectrum(frame.samples.data(), static_cast<size_t>(count));
+        return true;
+    }
+    if (auto* wave = dynamic_cast<WaveformView*>(w)) {
+        wave->set_data(frame.samples.data(), static_cast<size_t>(count));
+        return true;
+    }
+    return false;
+}
+
 bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
     if (b.derive_from_param) derive_binding_transform(b, w);
+
+    // A scope pushes a whole block, so it shares none of the scalar path below.
+    if (b.target == ParamBinding::Target::scope) return apply_scope_binding(b, w);
+
+    // Staleness: a value channel that has stopped PUBLISHING decays to its
+    // declared neutral, so a meter drops to rest when audio stops instead of
+    // freezing on its last reading. Watching the publish sequence rather than
+    // the value is what lets a genuinely static-but-live signal keep reading.
+    if (b.value_meter != nullptr && value_channel_is_stale(b, b.value_meter->publish_seq())) {
+        if (b.last_applied == b.neutral) return false;
+        b.last_applied = b.neutral;
+        if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(b.neutral, b.neutral);
+        return true;
+    }
     // A value channel already publishes in the domain the widget wants, so the
     // transform applies to it directly — there is no normalized/real split to
     // choose between as there is for a parameter.
@@ -311,6 +360,7 @@ std::size_t WidgetBridge::param_subscription_count() const noexcept {
         std::count_if(param_subscriptions_.begin(), param_subscriptions_.end(),
                       [](const ParamSubscription& s) { return s.id != 0; }));
 }
+
 
 void WidgetBridge::service_param_subscriptions() {
     if (param_subscriptions_.empty()) return;
@@ -460,7 +510,10 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         // scripts may intentionally register bindings before creating views.
         View* const view = widget->second;
         const bool supported =
-            target == ParamBinding::Target::meter
+            target == ParamBinding::Target::scope
+                ? (dynamic_cast<SpectrumView*>(view) != nullptr ||
+                   dynamic_cast<WaveformView*>(view) != nullptr)
+            : target == ParamBinding::Target::meter
                 ? dynamic_cast<Meter*>(view) != nullptr
                 : dynamic_cast<Knob*>(view) != nullptr ||
                       dynamic_cast<Fader*>(view) != nullptr ||
@@ -476,10 +529,29 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     // typo'd channel to a same-named param would bind a meter to the wrong
     // thing and look like it worked.
     MeterSource* value_meter = nullptr;
+    VectorSource* value_vector = nullptr;
+    float neutral = 0.0f;
     state::ParamID id = 0;
     if (const auto channel = value_channel_name(param_name); !channel.empty()) {
-        value_meter = value_channels_ ? value_channels_->meter(channel) : nullptr;
-        if (value_meter == nullptr) return fail(BindingOutcome::unknown_value_channel);
+        // Shape follows the target: a scope wants a vector channel, everything
+        // else a meter channel. A shape mismatch is a MISS, not a coercion —
+        // binding a scope to a meter would otherwise render a plausible wrong
+        // picture instead of reporting that the channel is the wrong kind.
+        if (value_channels_ != nullptr) {
+            if (target == ParamBinding::Target::scope)
+                value_vector = value_channels_->vector(channel);
+            else
+                value_meter = value_channels_->meter(channel);
+            for (const auto& info : value_channels_->infos()) {
+                if (info.name == channel) { neutral = info.neutral; break; }
+            }
+        }
+        if (value_meter == nullptr && value_vector == nullptr)
+            return fail(BindingOutcome::unknown_value_channel);
+    } else if (target == ParamBinding::Target::scope) {
+        // A scope has no parameter equivalent — there is no store shape that
+        // carries a block of samples.
+        return fail(BindingOutcome::unknown_value_channel);
     } else if (!resolve_param_id(param_name, id)) {
         return fail(BindingOutcome::unknown_param);
     }
@@ -488,6 +560,11 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     binding.widget_id = widget_id;
     binding.param_id = id;
     binding.value_meter = value_meter;
+    binding.value_vector = value_vector;
+    binding.neutral = neutral;
+    if (value_meter) binding.last_publish_seq = value_meter->publish_seq();
+    if (value_vector) binding.last_publish_seq = value_vector->publish_seq();
+    binding.last_publish_at = std::chrono::steady_clock::now();
     binding.target = target;
     binding.transform = parse_transform(transform);
     binding.derive_from_param = transform_requests_derivation(transform);
@@ -687,6 +764,17 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
             self.add_param_binding(args.get<std::string>(0, ""),
                               args.get<std::string>(1, ""),
                               WidgetBridge::ParamBinding::Target::meter,
+                              args.numArgs > 2 ? args[2] : nullptr));
+    });
+
+    // bindScope(widgetId, "value:<name>") -> bind a SpectrumView / WaveformView
+    // to a vector value channel. Scope sources are value channels only: there is
+    // no parameter shape that carries a block of samples.
+    register_bridge_function(api, "bindScope", [&self](choc::javascript::ArgumentList args) {
+        return choc::value::createBool(
+            self.add_param_binding(args.get<std::string>(0, ""),
+                              args.get<std::string>(1, ""),
+                              WidgetBridge::ParamBinding::Target::scope,
                               args.numArgs > 2 ? args[2] : nullptr));
     });
 
