@@ -88,7 +88,31 @@ jobs:
             "$PR_BASE" \
             "refs/pull/$PR_NUMBER/head"
           git cat-file -e "$PR_HEAD^{commit}"
-          git worktree add --detach "$proposed_tree" "$PR_HEAD"
+
+          # Evaluate the MERGE RESULT, not the raw branch head.
+          #
+          # `$PR_BASE` is the base-branch tip, which advances as other PRs land.
+          # Diffing it against the raw head reports every file that reached main
+          # after this branch forked as *deleted by this PR*, so an outbox event
+          # somebody else added trips the append-only rule and the author is told
+          # they deleted a file they never touched. The PR-side `Vellum freeze`
+          # job lacks this bug because it evaluates `$GITHUB_SHA`, the merge
+          # commit — so the two jobs disagree on identical code, which is exactly
+          # what a trusted re-run exists to rule out.
+          #
+          # Mirror the PR-side contract: head = merge result, source-head = the
+          # real PR commit (event provenance is validated against that).
+          if git fetch --no-tags origin \
+               "refs/pull/$PR_NUMBER/merge:refs/vellum/pr-merge" 2>/dev/null; then
+            proposed_head=$(git rev-parse refs/vellum/pr-merge)
+          else
+            # GitHub publishes the merge ref only for a mergeable PR. Absent it,
+            # say so: a conflicted PR must not be reported as a freeze violation.
+            echo "vellum-trusted-gate: refs/pull/$PR_NUMBER/merge is unavailable;" \
+                 "the PR likely has merge conflicts. Resolve them and re-run." >&2
+            exit 1
+          fi
+          git worktree add --detach "$proposed_tree" "$proposed_head"
 
           # `set -e` (the default shell) plus PIPESTATUS keeps a validator's
           # failure fatal while still teeing its diagnostics to the log.
@@ -100,7 +124,7 @@ jobs:
           run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
             --repo "$proposed_tree" \
             --base "$PR_BASE" \
-            --head "$PR_HEAD" \
+            --head "$proposed_head" \
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
