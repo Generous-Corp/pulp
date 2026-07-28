@@ -1,6 +1,8 @@
 // domain_handler.cpp — Protocol request dispatch to inspector data sources
 
 #include <pulp/inspect/domain_handler.hpp>
+
+#include <pulp/state/param_json.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/source_jump.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
@@ -695,23 +697,14 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
     if (!state_) return make_error(req.id, "No StateStore attached");
 
     if (req.method == methods::kStateGetParameters) {
-        auto params = state_->all_params();
+        // Serialized by pulp::state::param_json, the same code the scripted-UI
+        // bridge uses. One implementation is what keeps the two payloads
+        // identical; a second hand-rolled object here would drift the day
+        // either side gained a field.
+        auto& store = state_->store();
         auto arr = choc::value::createEmptyArray();
-        for (auto& p : params) {
-            auto obj = choc::value::createObject("");
-            obj.addMember("id", choc::value::createInt32(static_cast<int32_t>(p.id)));
-            obj.addMember("name", choc::value::createString(p.name));
-            obj.addMember("unit", choc::value::createString(p.unit));
-            obj.addMember("value", choc::value::createFloat64(p.value));
-            obj.addMember("normalized", choc::value::createFloat64(p.normalized));
-            obj.addMember("modulated", choc::value::createFloat64(p.modulated));
-            obj.addMember("default", choc::value::createFloat64(p.default_value));
-            obj.addMember("min", choc::value::createFloat64(p.min));
-            obj.addMember("max", choc::value::createFloat64(p.max));
-            if (!p.display_value.empty())
-                obj.addMember("display", choc::value::createString(p.display_value));
-            arr.addArrayElement(obj);
-        }
+        for (std::size_t i = 0; i < store.param_count(); ++i)
+            arr.addArrayElement(state::param_snapshot_to_value(store, store.all_params()[i]));
         return make_response(req.id, choc::json::toString(arr, false));
     }
     if (req.method == methods::kStateSetParameter) {
