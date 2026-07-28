@@ -19,7 +19,14 @@ struct TickScale {
     bool exact = true;
 
     static TickScale create(std::int64_t division) noexcept {
-        return TickScale{division, timebase::kTicksPerQuarter % division == 0};
+        // Guard the modulo. Callers construct a TickScale in their member-init
+        // list and only validate the division inside run(), so an out-of-range
+        // division reaches this before anyone has rejected it — and `% 0` is
+        // undefined behaviour, not a value. On arm64 it neither traps nor
+        // reports, so the only signal is a sanitizer. A zero division is never
+        // exact by definition, which is what the validation downstream then
+        // rejects as UnsupportedDivision.
+        return TickScale{division, division != 0 && timebase::kTicksPerQuarter % division == 0};
     }
 };
 
