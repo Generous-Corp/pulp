@@ -109,9 +109,7 @@ private:
 
         bridge_ = std::make_unique<ViewBridge>(
             *processor, *store,
-            ViewBridge::Options{
-                .enable_hot_reload = dev_editor_hot_reload_enabled(),
-                .role = ViewRole::Editor});
+            ViewBridge::Options::hosted_editor());
 
         std::string editor_error;
         if (!bridge_->open(&editor_error)) {

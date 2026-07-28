@@ -4,12 +4,18 @@
 
 // iOS skip: choc::file::Watcher is implemented on top of macOS's
 // `FSEventStream*` APIs, which are unavailable on iOS. Hot reload is a
-// dev-time-only feature; the iOS AUv3 / HostApp path always passes
-// `enable_hot_reload = false` (see au_view_controller_ios.mm), so the
-// real implementation never runs there anyway. To keep the
-// `HotReloader` symbol available to `scripted_ui.cpp` and any other
-// caller, ship a no-op stub class on iOS that satisfies the same
-// interface but never instantiates a `choc::file::Watcher`.
+// dev-time-only feature. Every desktop editor path (AU v2/v3, VST3,
+// CLAP, AAX, standalone) honours `enable_hot_reload`; the iOS AUv3 /
+// HostApp path passes the same flag, but there is no watcher to serve
+// it, so file-watch reload is inert there. To keep the `HotReloader`
+// symbol available to `scripted_ui.cpp` and any other caller, ship a
+// no-op stub class on iOS that satisfies the same interface but never
+// instantiates a `choc::file::Watcher`. `ScriptedUiSession` logs once
+// when the flag is requested on such a platform so a developer is never
+// left wondering why saving a file changes nothing. On-device editor
+// rebuilds still work through the watcher-free
+// `ViewBridge::poll_editor_reload()` path, which follows a DSP hot-swap
+// rather than a file change.
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -42,6 +48,11 @@ using ReloadCallback = std::function<void(const std::string& code)>;
 // is stored for the UI thread to pick up via poll_reload()
 class HotReloader {
 public:
+    // False on platforms that ship the no-op stub (no file watcher available),
+    // so callers can report the degradation instead of silently doing nothing.
+    // Prefer this over re-testing TARGET_OS_IPHONE at the call site.
+    static constexpr bool kWatchesFiles = !TARGET_OS_IPHONE;
+
     // Watch a specific JS file
     HotReloader(const std::filesystem::path& js_file, ReloadCallback on_reload);
 

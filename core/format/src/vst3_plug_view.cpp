@@ -23,7 +23,8 @@ PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store,
     : CPluginView(nullptr)
     , processor_(processor)
     , store_(store)
-    , bridge_(processor, store, std::move(owner_alive))
+    , bridge_(processor, store, std::move(owner_alive),
+              ViewBridge::Options::hosted_editor())
 {
     const auto& hints = bridge_.size_hints();
     ViewRect r(0, 0, static_cast<int32>(hints.preferred_width),
