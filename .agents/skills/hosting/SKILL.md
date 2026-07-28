@@ -2028,3 +2028,20 @@ So when a node cannot honour a control, ask in this order:
 3. **Only refuse when the pairing is expressible but wrong**, and then teach the
    refusal wherever the capability is advertised. An untaught refusal is a retry
    loop that costs a generation budget, not a guardrail.
+
+## `ExecutorSnapshotBinders` is a designated-initializer aggregate
+
+`build_executor_snapshot()` takes its collaborators as an
+`ExecutorSnapshotBinders` aggregate, filled in `SignalGraph` with designated
+initializers. Two rules bind when you add or move a binder:
+
+* **Designators must stay in member-declaration order**, and no member may be
+  named twice. Clang accepts violations of both; **MSVC rejects them** with
+  `C7560`, so the mistake is invisible on the required macOS gate and takes out
+  `pulp-host` — and therefore every Windows plug-in — instead.
+* A duplicated binder is what a merge conflict resolution produces here, because
+  the blocks are long lambdas that diff poorly. `main` carried a byte-identical
+  duplicate of `.custom_latency_for` for exactly that reason.
+
+`tools/scripts/designated_initializer_lint.py` guards the duplicate case; adding
+a binder out of order is still only caught by an MSVC build.
