@@ -48,6 +48,48 @@ REQUIRED_PIN_WORKFLOWS: tuple[str, ...] = (
     "post-tag-sync.yml",
 )
 
+SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
+
+# Minimum Shipyard version required by a config key we actually USE.
+# Equality between shipyard.toml and the workflows is not sufficient: both
+# can agree on a version that is too old for a feature the config enables,
+# and the failure is silent. `push_mode = "pr"` is honoured from 0.78.0, but
+# until 0.79.0 the changelog commit was still stamped `[skip ci]` — which
+# makes Actions skip the required checks, which makes the changelog PR
+# permanently unmergeable. Nine stacked up and stalled the release pipeline.
+#
+# Each entry: (regex matching the enabling config, floor, why it matters).
+FEATURE_FLOORS: tuple[tuple[str, str, str], ...] = (
+    (
+        r'^\s*push_mode\s*=\s*"pr"\s*$',
+        "0.79.0",
+        'post_tag_hook push_mode = "pr" — below 0.79.0 the changelog commit '
+        "is stamped [skip ci], so its required checks never run and the PR "
+        "can never merge",
+    ),
+)
+
+
+def _as_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split(".") if part.isdigit())
+
+
+def check_feature_floors(pinned: str) -> list[str]:
+    """Violations where the pin is below a floor the config demands."""
+    if not SHIPYARD_CONFIG.exists():
+        return []
+    text = SHIPYARD_CONFIG.read_text(errors="replace")
+    problems: list[str] = []
+    for pattern, floor, why in FEATURE_FLOORS:
+        if not re.search(pattern, text, re.MULTILINE):
+            continue
+        if _as_tuple(pinned) < _as_tuple(floor):
+            problems.append(
+                f"pin {pinned} is below the {floor} floor required by "
+                f".shipyard/config.toml: {why}"
+            )
+    return problems
+
 # `version = "v0.56.2"` in shipyard.toml. The leading `v` is part of the
 # release tag; workflows historically store the unprefixed semver.
 PIN_VERSION_RE = re.compile(r'^\s*version\s*=\s*"v?([\d.]+)"\s*$', re.MULTILINE)
@@ -142,6 +184,22 @@ def main() -> int:
             file=sys.stderr,
         )
         return 0
+
+    floor_problems = check_feature_floors(pinned)
+    if floor_problems:
+        print(
+            "Shipyard pin is version-consistent but TOO OLD for the config:",
+            file=sys.stderr,
+        )
+        for problem in floor_problems:
+            print(f"  ✗ {problem}", file=sys.stderr)
+        print(
+            "\nFix: raise the pin in tools/shipyard.toml (and every workflow's\n"
+            "SHIPYARD_VERSION, which this check also enforces), or stop using the\n"
+            "config key that demands the floor.",
+            file=sys.stderr,
+        )
+        return 1
 
     print(
         f"Shipyard pin OK: {len(workflow_versions)} workflow(s) match "
