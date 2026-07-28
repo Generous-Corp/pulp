@@ -5,6 +5,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -51,9 +52,15 @@ inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
     return roots;
 }
 
+/// `value_channels` are the hosting processor's named value channels
+/// (Processor::value_channels()), forwarded so a scripted UI can bind
+/// `value:<name>` sources. Non-owning and defaulted to null, so a caller
+/// with no processor in hand — the CLI validator, a headless test — is
+/// unaffected.
 inline EditorUiInstance build_editor_ui(state::StateStore& store,
                                         bool enable_hot_reload,
-                                        std::string* error = nullptr) {
+                                        std::string* error = nullptr,
+                                        view::ValueChannelSet* value_channels = nullptr) {
     if (auto script_path = configured_ui_script_path()) {
         auto root = std::make_unique<view::View>();
         root->set_theme(view::Theme::dark());
@@ -73,6 +80,7 @@ inline EditorUiInstance build_editor_ui(state::StateStore& store,
         options.asset_roots = configured_ui_asset_roots();
         options.enable_hot_reload = enable_hot_reload;
         options.enable_theme_reload = enable_hot_reload || has_configured_theme;
+        options.value_channels = value_channels;
         auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
 
         std::string load_error;

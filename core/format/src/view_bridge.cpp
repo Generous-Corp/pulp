@@ -97,7 +97,8 @@ bool ViewBridge::open(std::string* error) {
         }
     } else {
         // Fall back to the scripted-UI or AutoUi default.
-        auto instance = build_editor_ui(store_, options_.enable_hot_reload, &last_error_);
+        auto instance = build_editor_ui(store_, options_.enable_hot_reload, &last_error_,
+                                        processor_.value_channels());
         if (!instance.root) {
             if (error) *error = last_error_.empty() ? "ViewBridge: failed to build editor UI" : last_error_;
             return false;

@@ -17,6 +17,7 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -1384,4 +1385,134 @@ TEST_CASE("fromParam still derives when the widget is created after the bind",
     store.set_value(20, 1000.0f);
     bridge.service_param_bindings();
     REQUIRE_THAT(later->value(), WithinAbs(1000.0f, 1.0f));
+}
+
+// ── value: channel bindings ───────────────────────────────────────────
+//
+// `bindMeter(id, "value:<name>")` binds a widget to a value the processor
+// PUBLISHES rather than a parameter. Before this, a meter could only show a
+// level if the processor wrote it into a parameter — so gain reduction and
+// envelope displays had to be hand-rolled per plugin.
+
+namespace {
+
+MeterFrame mono_frame(float rms) {
+    MeterFrame f{};
+    f.channels = 1;
+    f.rms[0] = rms;
+    f.peak[0] = rms;
+    return f;
+}
+
+} // namespace
+
+TEST_CASE("a meter binds to a published value channel, not a parameter",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* gr = channels.declare_meter("gr_db");
+    REQUIRE(gr != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('gr');
+        bindMeter('gr', 'value:gr_db');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("gr"));
+    REQUIRE(meter != nullptr);
+
+    // The publish side is what an audio thread would do.
+    gr->publish(mono_frame(0.25f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.25f, 1e-5f));
+
+    gr->publish(mono_frame(0.75f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.75f, 1e-5f));
+}
+
+TEST_CASE("an undeclared value channel fails loudly rather than silently",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    channels.declare_meter("gr_db");
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'value:nope');
+    )");
+
+    REQUIRE(bridge.param_binding_count() == 0);
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 1);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    CHECK_FALSE(is_bound(attempts[0].outcome));
+}
+
+TEST_CASE("value: and parameter names are separate namespaces",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);  // declares a param called "gain"
+
+    ValueChannelSet channels;  // declares NO channel called "gain"
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('a');
+        createMeter('b');
+        bindMeter('a', 'value:gain');
+        bindMeter('b', 'gain');
+    )");
+
+    // `value:gain` must NOT fall back to the same-named parameter — resolving
+    // across namespaces would bind a meter to the wrong source and look fine.
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 2);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    // The bare name still resolves as a parameter, unchanged.
+    CHECK(is_bound(attempts[1].outcome));
+    CHECK(bridge.param_binding_count() == 1);
+}
+
+TEST_CASE("value: binds fail cleanly when the processor declares no channels",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    // No set attached at all — the default for every processor that does not
+    // override value_channels(). This must not crash or bind.
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'value:anything');
+    )");
+
+    CHECK(bridge.param_binding_count() == 0);
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 1);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
 }
