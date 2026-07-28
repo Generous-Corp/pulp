@@ -599,17 +599,17 @@ int run_emit(const ImportOptions& o) {
         return 1;
     }
 
-    // Clean-room OUTPUT gate: reject framework SOURCE / vendor banners in any
+    // Independent OUTPUT gate: reject framework SOURCE / vendor banners in any
     // generated file before writing it. copied-user-file is the user's own DSP
     // and is exempt. The denylist is DATA from the known-frameworks index.
     auto denylist = ies::denylist_from_known_frameworks(kf);
     auto scan = ies::scan_manifest(manifest, denylist);
     if (!scan.clean) {
-        std::cerr << "pulp import emit: clean-room output scan FAILED — the "
+        std::cerr << "pulp import emit: framework-source output scan FAILED — the "
                      "importer proposed framework source in generated files:\n";
         for (const auto& hit : scan.hits)
             std::cerr << "  - " << hit.path << ": contains \"" << hit.token << "\"\n";
-        std::cerr << "Refusing to materialise. This is a clean-room safety net: "
+        std::cerr << "Refusing to materialise. This is a provenance safety net: "
                      "generated output must not embed framework source.\n";
         return 1;
     }
@@ -670,7 +670,7 @@ int run_emit(const ImportOptions& o) {
               << "\n";
     std::cout << "  files written:  " << written << " generated, " << copied
               << " copied verbatim\n";
-    std::cout << "  clean-room scan: passed (" << scan.scanned_files
+    std::cout << "  framework-source scan: passed (" << scan.scanned_files
               << " generated files, " << scan.exempt_files << " user-file copies "
                  "exempt)\n";
     auto join = [](const std::vector<std::string>& v) {

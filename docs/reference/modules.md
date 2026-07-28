@@ -1045,8 +1045,8 @@ format's theoretical limits.
 ## dawproject
 
 Reader and writer for the [DAWproject](https://github.com/bitwig/dawproject)
-interchange format, implemented clean-room against the published specification
-over pugixml. Ships as two libraries so a consumer can take only what it needs:
+interchange format, implemented directly from the published specification over
+pugixml. Ships as two libraries so a consumer can take only what it needs:
 `pulp::dawproject-import` and `pulp::dawproject-export`.
 
 Both sides cover the same **bounded linear subset** — flat tracks, beats-timed

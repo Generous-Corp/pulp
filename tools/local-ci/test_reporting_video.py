@@ -115,7 +115,7 @@ class ReportingVideoTests(unittest.TestCase):
                     {"label": "Tap", "detail": "tap bypass"},
                     "ignored",
                 ],
-                "notes": ["clean room"],
+                "notes": ["independent"],
             }
         }
         storyboard = self.mod._proof_storyboard_from_metadata(metadata)

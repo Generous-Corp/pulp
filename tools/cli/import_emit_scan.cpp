@@ -38,7 +38,7 @@ ScanResult scan_manifest(const import_emit::Manifest& manifest,
                          const std::vector<std::string>& denylist) {
     ScanResult result;
     for (const auto& f : manifest.files) {
-        // The user's own DSP, copied verbatim — never a clean-room concern.
+        // The user's own DSP, copied verbatim — never a independent concern.
         if (f.provenance == import_emit::Provenance::CopiedUserFile) {
             ++result.exempt_files;
             continue;

@@ -238,7 +238,7 @@ pub const BINARY_COMMANDS: &[Entry] = &[
 pub const PACKAGE_EXTRAS: &[Entry] = &[
     Entry {
         name: "audit",
-        summary: "License and clean-room audit",
+        summary: "License and provenance audit",
     },
     Entry {
         name: "add",

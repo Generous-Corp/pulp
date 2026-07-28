@@ -18,7 +18,7 @@
 /// less than inlining.
 ///
 /// Design intent: this is the Pulp-native shape for the audio-data
-/// converter surface — clean-room, no name or class mirroring of any
+/// converter surface — independent, no name or class mirroring of any
 /// reference framework. Callers needing PCM I/O at format boundaries
 /// should reach here before rolling per-format helpers.
 

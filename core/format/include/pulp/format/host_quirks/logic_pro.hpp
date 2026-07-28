@@ -24,7 +24,7 @@
 /// the dispatch table (`make_quirks_for` maps `HostType::GarageBand`
 /// here) — same AU host stack, same accommodations.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.10
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.10
 /// docs=https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/AudioUnitProgrammingGuide/Introduction/Introduction.html
 
 #include <pulp/format/host_quirks.hpp>
