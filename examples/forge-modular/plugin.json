@@ -68,6 +68,16 @@
       ]
     },
     {
+      "slug": "MIX",
+      "name": "MIX",
+      "description": "Four-channel mixer with sliders, per-channel CV and chained normalling",
+      "tags": [
+        "Mixer",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ]
+    },
+    {
       "slug": "ATT",
       "name": "ATT",
       "description": "Bipolar attenuverter with offset",

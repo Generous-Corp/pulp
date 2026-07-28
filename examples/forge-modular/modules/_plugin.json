@@ -5,5 +5,16 @@
   "version": "2.0.0",
   "license": "MIT",
   "author": "Forge",
-  "module_order": ["VCO", "VCF", "VCA", "ENV", "LFO", "EUCLID", "SEQ", "ATT", "MULT"]
+  "module_order": [
+    "VCO",
+    "VCF",
+    "VCA",
+    "ENV",
+    "LFO",
+    "EUCLID",
+    "SEQ",
+    "MIX",
+    "ATT",
+    "MULT"
+  ]
 }

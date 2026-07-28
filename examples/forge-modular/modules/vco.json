@@ -126,7 +126,8 @@
           "y_mm": 118.0
         }
       ],
-      "lights": []
+      "lights": [],
+      "poly_follows": "VOCT_INPUT"
     }
   ]
 }

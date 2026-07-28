@@ -57,7 +57,8 @@
           "y_mm": 108
         }
       ],
-      "lights": []
+      "lights": [],
+      "poly_follows": "IN_INPUT"
     }
   ]
 }

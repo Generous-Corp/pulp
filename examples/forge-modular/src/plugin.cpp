@@ -19,6 +19,7 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelLFO);
     p->addModel(modelEUCLID);
     p->addModel(modelSEQ);
+    p->addModel(modelMIX);
     p->addModel(modelATT);
     p->addModel(modelMULT);
 }

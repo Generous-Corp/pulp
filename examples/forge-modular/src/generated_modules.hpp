@@ -6,6 +6,8 @@
 
 #include <rack.hpp>
 
+#include <algorithm>
+
 namespace forge_modular {
 
 // ── VCO (8HP) ─────────────────────────────────────────
@@ -29,6 +31,12 @@ inline void config_VCO(rack::engine::Module* m) {
     m->configOutput(VCOLayout::PULSE_OUTPUT, "Pulse");
     m->configOutput(VCOLayout::TRI_OUTPUT, "Triangle");
     m->configOutput(VCOLayout::SINE_OUTPUT, "Sine");
+}
+
+/// Channel count for VCO, from the manifest's declared source.
+inline int channels_VCO(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[VCOLayout::VOCT_INPUT].getChannels());
 }
 
 inline void place_VCO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
@@ -70,6 +78,12 @@ inline void config_VCF(rack::engine::Module* m) {
     m->configOutput(VCFLayout::HP_OUTPUT, "High-pass");
 }
 
+/// Channel count for VCF, from the manifest's declared source.
+inline int channels_VCF(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[VCFLayout::IN_INPUT].getChannels());
+}
+
 inline void place_VCF(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
@@ -103,6 +117,12 @@ inline void config_VCA(rack::engine::Module* m) {
     m->configOutput(VCALayout::OUT_OUTPUT, "Audio");
 }
 
+/// Channel count for VCA, from the manifest's declared source.
+inline int channels_VCA(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[VCALayout::IN_INPUT].getChannels());
+}
+
 inline void place_VCA(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
@@ -120,7 +140,7 @@ struct ENVLayout {
     enum ParamId { ATTACK_PARAM, DECAY_PARAM, SUSTAIN_PARAM, RELEASE_PARAM, PARAMS_LEN };
     enum InputId { GATE_INPUT, INPUTS_LEN };
     enum OutputId { ENV_OUTPUT, INV_OUTPUT, OUTPUTS_LEN };
-    enum LightId { ENV_LIGHT, LIGHTS_LEN };
+    enum LightId { ENV_LIGHT = 0, LIGHTS_LEN = 1 };
 };
 
 inline void config_ENV(rack::engine::Module* m) {
@@ -190,7 +210,7 @@ struct EUCLIDLayout {
     enum ParamId { LENGTH_PARAM, FILL_PARAM, ROTATE_PARAM, PARAMS_LEN };
     enum InputId { CLOCK_INPUT, RESET_INPUT, INPUTS_LEN };
     enum OutputId { GATE_OUTPUT, OUTPUTS_LEN };
-    enum LightId { STEP_LIGHT, LIGHTS_LEN };
+    enum LightId { STEP_LIGHT = 0, LIGHTS_LEN = 1 };
 };
 
 inline void config_EUCLID(rack::engine::Module* m) {
@@ -267,6 +287,92 @@ inline void place_SEQ(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.774f, 108.000f)), m, SEQLayout::RESET_INPUT));
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(37.186f, 108.000f)), m, SEQLayout::CV_OUTPUT));
     w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(49.987f, 108.000f)), m, SEQLayout::GATE_OUTPUT));
+}
+
+// ── MIX (12HP) ─────────────────────────────────────────
+struct MIXLayout {
+    static constexpr int kHp = 12;
+    enum ParamId { LVL1_PARAM, LVL2_PARAM, LVL3_PARAM, LVL4_PARAM, MASTER_PARAM, MODE_PARAM, PARAMS_LEN };
+    enum InputId { IN1_INPUT, IN2_INPUT, IN3_INPUT, IN4_INPUT, CV1_INPUT, CV2_INPUT, CV3_INPUT, CV4_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LVL1_LIGHT = 0, LVL2_LIGHT = 2, LVL3_LIGHT = 4, LVL4_LIGHT = 6, LIGHTS_LEN = 8 };
+};
+
+inline void config_MIX(rack::engine::Module* m) {
+    m->config(MIXLayout::PARAMS_LEN, MIXLayout::INPUTS_LEN, MIXLayout::OUTPUTS_LEN, MIXLayout::LIGHTS_LEN);
+    m->configParam(MIXLayout::LVL1_PARAM, 0.0f, 1.0f, 0.6f, "Channel 1 level", "%", 0.0f, 100.0f);
+    m->configParam(MIXLayout::LVL2_PARAM, 0.0f, 1.0f, 0.6f, "Channel 2 level", "%", 0.0f, 100.0f);
+    m->configParam(MIXLayout::LVL3_PARAM, 0.0f, 1.0f, 0.6f, "Channel 3 level", "%", 0.0f, 100.0f);
+    m->configParam(MIXLayout::LVL4_PARAM, 0.0f, 1.0f, 0.6f, "Channel 4 level", "%", 0.0f, 100.0f);
+    m->configParam(MIXLayout::MASTER_PARAM, 0.0f, 1.0f, 0.8f, "Master level", "%", 0.0f, 100.0f);
+    m->configSwitch(MIXLayout::MODE_PARAM, 0.0f, 2.0f, 1.0f, "Response", {"Linear", "Exponential", "Soft clip"});
+    m->configInput(MIXLayout::IN1_INPUT, "Channel 1 audio");
+    m->configInput(MIXLayout::IN2_INPUT, "Channel 2 audio");
+    m->configInput(MIXLayout::IN3_INPUT, "Channel 3 audio");
+    m->configInput(MIXLayout::IN4_INPUT, "Channel 4 audio");
+    m->configInput(MIXLayout::CV1_INPUT, "Channel 1 level CV (normalled to 10.0V)");
+    m->configInput(MIXLayout::CV2_INPUT, "Channel 2 level CV (normalled to 10.0V)");
+    m->configInput(MIXLayout::CV3_INPUT, "Channel 3 level CV (normalled to 10.0V)");
+    m->configInput(MIXLayout::CV4_INPUT, "Channel 4 level CV (normalled to 10.0V)");
+    m->configOutput(MIXLayout::OUT_OUTPUT, "Mix");
+    m->configLight(MIXLayout::LVL1_LIGHT, "Channel 1 activity");
+    m->configLight(MIXLayout::LVL2_LIGHT, "Channel 2 activity");
+    m->configLight(MIXLayout::LVL3_LIGHT, "Channel 3 activity");
+    m->configLight(MIXLayout::LVL4_LIGHT, "Channel 4 activity");
+}
+
+/// Channel count for MIX, from the manifest's declared source.
+inline int channels_MIX(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[MIXLayout::IN1_INPUT].getChannels());
+}
+
+/// CV1_INPUT with its declared normal applied.
+inline float read_MIX_CV1_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MIXLayout::CV1_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+/// CV2_INPUT with its declared normal applied.
+inline float read_MIX_CV2_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MIXLayout::CV2_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+/// CV3_INPUT with its declared normal applied.
+inline float read_MIX_CV3_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MIXLayout::CV3_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+/// CV4_INPUT with its declared normal applied.
+inline float read_MIX_CV4_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[MIXLayout::CV4_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+inline void place_MIX(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(9.600f, 42.000f)), m, MIXLayout::LVL1_PARAM));
+    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(23.200f, 42.000f)), m, MIXLayout::LVL2_PARAM));
+    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(36.800f, 42.000f)), m, MIXLayout::LVL3_PARAM));
+    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(50.400f, 42.000f)), m, MIXLayout::LVL4_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(13.000f, 108.000f)), m, MIXLayout::MASTER_PARAM));
+    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(30.500f, 108.000f)), m, MIXLayout::MODE_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.600f, 72.000f)), m, MIXLayout::IN1_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.200f, 72.000f)), m, MIXLayout::IN2_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(36.800f, 72.000f)), m, MIXLayout::IN3_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(50.400f, 72.000f)), m, MIXLayout::IN4_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.600f, 84.000f)), m, MIXLayout::CV1_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.200f, 84.000f)), m, MIXLayout::CV2_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(36.800f, 84.000f)), m, MIXLayout::CV3_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(50.400f, 84.000f)), m, MIXLayout::CV4_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(48.000f, 108.000f)), m, MIXLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(9.600f, 60.000f)), m, MIXLayout::LVL1_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(23.200f, 60.000f)), m, MIXLayout::LVL2_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(36.800f, 60.000f)), m, MIXLayout::LVL3_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(50.400f, 60.000f)), m, MIXLayout::LVL4_LIGHT));
 }
 
 // ── ATT (3HP) ─────────────────────────────────────────

@@ -53,13 +53,43 @@ THEME = {
 
 # Drawn widget footprint radii in mm -- what Rack actually paints. Label
 # clearance is derived from these, never from the authoring placeholder.
+# Drawn footprint radius in mm per control kind -- what Rack actually paints, which
+# is what label clearance and overlap must be computed against.
 CONTROL_R = {"KnobLarge": 9.15, "Knob": 6.10, "KnobSmall": 4.32,
-             "Trimpot": 2.88, "Toggle": 3.49, "Button": 3.05}
+             "Trimpot": 2.88, "Toggle": 3.49, "Button": 3.05,
+             # A slider's footprint is its travel, not its thumb: it is tall and
+             # narrow, so the radius here is the HALF-HEIGHT and horizontal
+             # clearance is handled by `half_extent()` below.
+             "Slider": 14.0, "SwitchThree": 4.20, "LightButton": 3.05}
 WIDGET_CLASS = {"KnobLarge": "RoundBigBlackKnob", "Knob": "RoundBlackKnob",
                 "KnobSmall": "RoundSmallBlackKnob", "Trimpot": "Trimpot",
-                "Toggle": "CKSS", "Button": "VCVButton"}
+                "Toggle": "CKSS", "Button": "VCVButton",
+                "Slider": "VCVLightSlider<WhiteLight>", "SwitchThree": "CKSSThree",
+                "LightButton": "VCVLightLatch<MediumSimpleLight<WhiteLight>>"}
+# Non-circular controls: (half-width, half-height) in mm. Everything else is round.
+CONTROL_EXTENT = {"Slider": (3.0, 14.0), "Toggle": (1.7, 3.49), "SwitchThree": (1.7, 4.20)}
+
+# Light colours the corpus actually uses. GreenRed is how bipolar CV is shown --
+# green for positive, red for negative -- which no single-colour light can express.
+LIGHT_CLASS = {"green": "GreenLight", "red": "RedLight", "blue": "BlueLight",
+               "yellow": "YellowLight", "white": "WhiteLight",
+               "green_red": "GreenRedLight", "rgb": "RedGreenBlueLight"}
+LIGHT_SIZE = {"tiny": "TinyLight", "small": "SmallLight",
+              "medium": "MediumLight", "large": "LargeLight"}
+# A GreenRed light consumes TWO consecutive light ids, RGB consumes THREE --
+# get this wrong and the module reads uninitialised light slots.
+LIGHT_SLOTS = {"green_red": 2, "rgb": 3}
+
 JACK_R = 4.11
 LIGHT_R = 1.39
+
+
+def half_extent(kind: str):
+    """(half-width, half-height) in mm for a control kind."""
+    if kind in CONTROL_EXTENT:
+        return CONTROL_EXTENT[kind]
+    r = CONTROL_R.get(kind, 6.10)
+    return (r, r)
 
 # Layout constants matching the designed panels (dir-b "Score").
 HEADER_BASELINE = 10.2      # module-name baseline
@@ -275,6 +305,41 @@ def _xform_path(d: str, tx: float, ty: float, sc: float) -> str:
 
 # ── Emission ─────────────────────────────────────────────────────────────────
 
+def expand_arrays(mod: dict) -> dict:
+    """Expand `*_array` shorthand into concrete entries, in place.
+
+    A sequencer's 8 or 16 near-identical steps are the case where hand-written
+    coordinates go wrong: seq.json carries values like 17.068800000000003, and a
+    generator emitting sixteen of those will misalign some. Declaring the grid
+    once makes misalignment unrepresentable, which is the same reason the
+    manifest exists at all.
+    """
+    for group, key in (("params", "param_array"), ("inputs", "input_array"),
+                       ("outputs", "output_array"), ("lights", "light_array")):
+        for spec in mod.pop(key, []) or []:
+            g = spec["grid"]
+            cols = int(g.get("cols", 1))
+            count = int(spec["count"])
+            base_id = spec.get("id_start")
+            if base_id is None:
+                base_id = max([e["id"] for e in mod.get(group, [])], default=-1) + 1
+            out = []
+            for i in range(count):
+                e = dict(spec.get("template", {}))
+                r, c = divmod(i, cols)
+                e["id"] = base_id + i
+                e["ident"] = spec["ident_fmt"] % (i + 1)
+                e["x_mm"] = round(g["x0_mm"] + c * g.get("dx_mm", 0.0), 4)
+                e["y_mm"] = round(g["y0_mm"] + r * g.get("dy_mm", 0.0), 4)
+                if spec.get("label_fmt"):
+                    e["label"] = spec["label_fmt"] % (i + 1)
+                if spec.get("name_fmt"):
+                    e["name"] = spec["name_fmt"] % (i + 1)
+                out.append(e)
+            mod.setdefault(group, []).extend(out)
+    return mod
+
+
 def emit_panel(mod: dict, theme: str) -> str:
     t = THEME[theme]
     hp = int(mod["hp"])
@@ -304,15 +369,31 @@ def emit_panel(mod: dict, theme: str) -> str:
         o.append(f'<rect x="{p["x_mm"]-s/2:.3f}" y="{p["y_mm"]-s/2:.3f}" width="{s}" height="{s}" '
                  f'rx="1.6" fill="{t["out_fill"]}"/>')
 
+    # Section dividers -- what stops a 12-20HP panel reading as a soup of controls.
+    field_top = None
+    if jacks:
+        field_top = max(min(j["y_mm"] for j in jacks) - JACK_R - LABEL_CAP - LABEL_GAP - 1.5,
+                        ACCENT_Y + ACCENT_H + 2.0)
+    for sec in mod.get("sections", []):
+        y = sec["y_mm"]
+        # The knockout behind a section label has to match whatever is actually
+        # behind it, or the label sits in a visibly wrong-coloured box.
+        knock = t["raised"] if (field_top is not None and y >= field_top) else t["plate"]
+        o.append(f'<rect x="3.0" y="{y:.3f}" width="{w-6.0:.4f}" height="0.25" fill="{t["border"]}"/>')
+        if sec.get("label"):
+            d, sw = text_path(sec["label"], LABEL_CAP * 0.85, w / 2.0, y - 1.4)
+            o.append(f'<rect x="{(w-sw)/2-1.6:.3f}" y="{y-1.4-LABEL_CAP:.3f}" '
+                     f'width="{sw+3.2:.3f}" height="{LABEL_CAP+1.8:.3f}" fill="{knock}"/>')
+            o.append(_paint(d, t["ink3"], LABEL_CAP * 0.85))
+
     # Module name
     d, _ = text_path(mod["name"], NAME_CAP, w / 2.0, HEADER_BASELINE)
     o.append(_paint(d, t["ink"], NAME_CAP))
 
     # Control + jack labels
-    for it, r in _labelled(mod):
+    for it, by in _labelled(mod):
         if not it.get("label"):
             continue
-        by = it["y_mm"] - r - LABEL_GAP
         d, _ = text_path(it["label"], LABEL_CAP, it["x_mm"], by)
         o.append(_paint(d, t["ink2"], LABEL_CAP))
 
@@ -350,14 +431,42 @@ def _paint(d: str, colour: str, cap: float) -> str:
     return f'<path d="{d}" fill="{colour}"/>'
 
 
-def _labelled(mod):
-    """Every labelled item with the radius of its DRAWN widget."""
+ROW_TOL_MM = 1.5   # items within this vertical distance count as one row
+
+
+def _row_baselines(mod):
+    """Map y_mm -> shared label baseline, computed from the tallest item in the row."""
+    items = [(it["y_mm"], h) for it, h in _labelled_raw(mod)]
+    rows, ys = {}, sorted({y for y, _ in items})
+    groups = []
+    for y in ys:
+        if groups and abs(y - groups[-1][-1]) <= ROW_TOL_MM:
+            groups[-1].append(y)
+        else:
+            groups.append([y])
+    for g in groups:
+        tallest = max(h for y, h in items if y in g)
+        base = min(g) - tallest - LABEL_GAP
+        for y in g:
+            rows[y] = base
+    return rows
+
+
+def _labelled_raw(mod):
+    """Every item with the half-height of its DRAWN widget."""
     for p in mod.get("params", []):
-        yield p, CONTROL_R[p.get("kind", "Knob")]
+        yield p, half_extent(p.get("kind", "Knob"))[1]
     for p in mod.get("inputs", []) + mod.get("outputs", []):
         yield p, JACK_R
     for p in mod.get("lights", []):
         yield p, LIGHT_R
+
+
+def _labelled(mod):
+    """Every labelled item paired with its SHARED row baseline."""
+    rows = _row_baselines(mod)
+    for it, _ in _labelled_raw(mod):
+        yield it, rows[it["y_mm"]]
 
 
 # ── Validation ───────────────────────────────────────────────────────────────
@@ -389,19 +498,21 @@ def validate(mod: dict, svg: str | None = None) -> list[str]:
         errs.append(str(e))
 
     items = list(_labelled(mod))
-    # THE check an SVG-only validator cannot make: a label baseline inside its
-    # own widget's drawn footprint is invisible, because the widget is painted
-    # on top of the panel and is absent from the SVG.
-    for it, r in items:
+    raw = {id(it): h for it, h in _labelled_raw(mod)}
+    # THE check an SVG-only validator cannot make: a label baseline inside a
+    # widget's drawn footprint is invisible, because widgets are painted on top
+    # of the panel and are absent from the SVG.
+    for it, by in items:
         if not it.get("label"):
             continue
-        by = it["y_mm"] - r - LABEL_GAP
-        if by > it["y_mm"] - r:
+        if by > it["y_mm"] - raw[id(it)]:
             errs.append(f"label {it['label']!r} baseline is inside its own widget footprint")
         if by - LABEL_CAP < 0:
             errs.append(f"label {it['label']!r} runs off the top of the plate")
-        # ...and a label must clear every OTHER widget too.
-        for other, orad in items:
+        for other, _ in items:
+            orad = raw[id(other)]
+            if other is it:
+                continue
             if other is it:
                 continue
             dx = abs(other["x_mm"] - it["x_mm"])
@@ -411,16 +522,60 @@ def validate(mod: dict, svg: str | None = None) -> list[str]:
                             f"{other.get('ident', '?')}")
 
     # Widgets must not overlap each other, and must stay on the plate.
-    sites = [(p["x_mm"], p["y_mm"], CONTROL_R[p.get("kind", "Knob")], p["ident"])
+    sites = [(p["x_mm"], p["y_mm"], *half_extent(p.get("kind", "Knob")), p["ident"])
              for p in mod.get("params", [])]
-    sites += [(p["x_mm"], p["y_mm"], JACK_R, p["ident"])
+    sites += [(p["x_mm"], p["y_mm"], JACK_R, JACK_R, p["ident"])
               for p in mod.get("inputs", []) + mod.get("outputs", [])]
-    for i, (x1, y1, r1, id1) in enumerate(sites):
-        if x1 - r1 < 0 or x1 + r1 > w or y1 - r1 < 0 or y1 + r1 > PANEL_H_MM:
+    for i, (x1, y1, hw1, hh1, id1) in enumerate(sites):
+        if x1 - hw1 < 0 or x1 + hw1 > w or y1 - hh1 < 0 or y1 + hh1 > PANEL_H_MM:
             errs.append(f"widget {id1} extends past the plate edge")
-        for x2, y2, r2, id2 in sites[i + 1:]:
-            if math.hypot(x2 - x1, y2 - y1) < r1 + r2 + 0.5:
+        # Axis-aligned overlap: a slider is tall and narrow, so a circle test
+        # both misses real collisions and invents false ones.
+        for x2, y2, hw2, hh2, id2 in sites[i + 1:]:
+            if abs(x2 - x1) < hw1 + hw2 + 0.5 and abs(y2 - y1) < hh1 + hh2 + 0.5:
                 errs.append(f"widgets {id1} and {id2} overlap")
+
+    # Ids must be contiguous from 0: they are array indices in Rack, and a gap
+    # means the module reads an uninitialised slot.
+    for g in ("params", "inputs", "outputs"):
+        ids = [e["id"] for e in mod.get(g, [])]
+        if ids and ids != list(range(len(ids))):
+            errs.append(f"{g} ids are not contiguous from 0: {ids}")
+        if len(set(ids)) != len(ids):
+            errs.append(f"{g} has duplicate ids: {ids}")
+
+    idents = {e["ident"] for g in ("params", "inputs", "outputs", "lights")
+              for e in mod.get(g, [])}
+    for pt in mod.get("inputs", []):
+        # A normalled input must point at something real, or the generated DSP
+        # silently reads a port that does not exist.
+        tgt = pt.get("normal_to")
+        if tgt and tgt not in idents:
+            errs.append(f"input {pt['ident']} is normalled to unknown ident {tgt!r}")
+        if tgt and "normal_volts" in pt:
+            errs.append(f"input {pt['ident']} declares both normal_to and normal_volts")
+    pf = mod.get("poly_follows")
+    if pf and pf not in {p["ident"] for p in mod.get("inputs", [])}:
+        errs.append(f"poly_follows {pf!r} is not an input of this module")
+    # A module tagged Polyphonic must say where its channel count comes from,
+    # or the tag is an unverifiable claim. vco/vca/vcf all claimed it unchecked.
+    if "Polyphonic" in mod.get("tags", []) and not pf:
+        errs.append("tagged 'Polyphonic' but no poly_follows declared, so the "
+                    "channel count has no declared source")
+    for lt in mod.get("lights", []):
+        c = lt.get("color", "green")
+        if c not in LIGHT_CLASS:
+            errs.append(f"light {lt['ident']}: unknown color {c!r}")
+        if lt.get("size", "medium") not in LIGHT_SIZE:
+            errs.append(f"light {lt['ident']}: unknown size {lt.get('size')!r}")
+    for pspec in mod.get("params", []):
+        k = pspec.get("kind", "Knob")
+        if k not in CONTROL_R:
+            errs.append(f"param {pspec['ident']}: unknown kind {k!r}")
+        if k == "SwitchThree" and len(pspec.get("labels", [])) != 3:
+            errs.append(f"param {pspec['ident']}: SwitchThree needs exactly 3 labels")
+        if k == "Toggle" and pspec.get("labels") and len(pspec["labels"]) != 2:
+            errs.append(f"param {pspec['ident']}: Toggle needs exactly 2 labels")
 
     # Knob travel: a control whose default sits at an extreme reads as broken
     # ("stuck at max") and gives the user no headroom in one direction. A
@@ -479,7 +634,8 @@ def emit_cpp(man: dict) -> str:
          "// GENERATED by tools/rack/forge_modular.py -- do not edit.",
          "// Panel coordinates here are the SAME numbers the panel SVG was drawn",
          "// from, which is what keeps a widget and its label from disagreeing.",
-         "", "#include <rack.hpp>", "", "namespace forge_modular {", ""]
+         "", "#include <rack.hpp>", "", "#include <algorithm>", "",
+         "namespace forge_modular {", ""]
     for m in man["modules"]:
         S = m["slug"]
         L.append(f"// ── {S} ({m['hp']}HP) {'─'*max(0, 44-len(S))}")
@@ -487,12 +643,20 @@ def emit_cpp(man: dict) -> str:
         L.append(f"    static constexpr int kHp = {m['hp']};")
         for grp, arr in (("Param", m.get("params", [])), ("Input", m.get("inputs", [])),
                          ("Output", m.get("outputs", [])), ("Light", m.get("lights", []))):
-            if arr:
-                L.append(f"    enum {grp}Id {{ " +
-                         ", ".join(a["ident"] for a in arr) +
-                         f", {grp.upper()}S_LEN }};")
-            else:
+            if not arr:
                 L.append(f"    enum {grp}Id {{ {grp.upper()}S_LEN }};")
+                continue
+            if grp == "Light":
+                names, nxt = [], 0
+                for a in arr:
+                    slots = LIGHT_SLOTS.get(a.get("color", "green"), 1)
+                    names.append(f"{a['ident']} = {nxt}")
+                    nxt += slots
+                L.append(f"    enum LightId {{ " + ", ".join(names) +
+                         f", LIGHTS_LEN = {nxt} }};")
+            else:
+                L.append(f"    enum {grp}Id {{ " + ", ".join(a["ident"] for a in arr) +
+                         f", {grp.upper()}S_LEN }};")
         L.append("};")
         L.append("")
         L.append(f"inline void config_{S}(rack::engine::Module* m) {{")
@@ -504,19 +668,53 @@ def emit_cpp(man: dict) -> str:
             # JSON integers must still emit float literals: `1f` is not valid C++.
             f = lambda v: f"{float(v):.6g}" + ("" if "." in f"{float(v):.6g}"
                                                or "e" in f"{float(v):.6g}" else ".0")
-            L.append(f'    m->configParam({S}Layout::{p["ident"]}, {f(p["min_value"])}f, '
-                     f'{f(p["max_value"])}f, {f(p["default_value"])}f, "{p["name"]}", '
-                     f'"{p.get("unit","")}", {f(base)}f, {f(mult)}f);')
+            if p.get("labels"):
+                # A switch with named positions must use configSwitch, or its
+                # tooltip reads "0.000" instead of "Triangle".
+                labs = ", ".join(f'"{x}"' for x in p["labels"])
+                L.append(f'    m->configSwitch({S}Layout::{p["ident"]}, {f(p["min_value"])}f, '
+                         f'{f(p["max_value"])}f, {f(p["default_value"])}f, "{p["name"]}", '
+                         f'{{{labs}}});')
+            else:
+                L.append(f'    m->configParam({S}Layout::{p["ident"]}, {f(p["min_value"])}f, '
+                         f'{f(p["max_value"])}f, {f(p["default_value"])}f, "{p["name"]}", '
+                         f'"{p.get("unit","")}", {f(base)}f, {f(mult)}f);')
             if p.get("snap"):
                 L.append(f'    m->getParamQuantity({S}Layout::{p["ident"]})->snapEnabled = true;')
         for p in m.get("inputs", []):
-            L.append(f'    m->configInput({S}Layout::{p["ident"]}, "{p["name"]}");')
+            note = ""
+            if "normal_volts" in p:
+                note = f' (normalled to {p["normal_volts"]}V)'
+            elif p.get("normal_to"):
+                note = f' (normalled from {p["normal_to"]})'
+            L.append(f'    m->configInput({S}Layout::{p["ident"]}, "{p["name"]}{note}");')
         for p in m.get("outputs", []):
             L.append(f'    m->configOutput({S}Layout::{p["ident"]}, "{p["name"]}");')
         for p in m.get("lights", []):
             L.append(f'    m->configLight({S}Layout::{p["ident"]}, "{p["name"]}");')
         L.append("}")
         L.append("")
+        if m.get("poly_follows"):
+            L.append(f"/// Channel count for {S}, from the manifest's declared source.")
+            L.append(f"inline int channels_{S}(const rack::engine::Module* m) {{")
+            L.append(f"    return std::max(1, const_cast<rack::engine::Module*>(m)")
+            L.append(f"        ->inputs[{S}Layout::{m['poly_follows']}].getChannels());")
+            L.append("}")
+            L.append("")
+        for p in m.get("inputs", []):
+            if "normal_volts" not in p and not p.get("normal_to"):
+                continue
+            L.append(f"/// {p['ident']} with its declared normal applied.")
+            L.append(f"inline float read_{S}_{p['ident']}(rack::engine::Module* m, int c) {{")
+            if "normal_volts" in p:
+                L.append(f"    return m->inputs[{S}Layout::{p['ident']}]"
+                         f".getNormalPolyVoltage({p['normal_volts']}f, c);")
+            else:
+                L.append(f"    return m->inputs[{S}Layout::{p['ident']}].isConnected()")
+                L.append(f"        ? m->inputs[{S}Layout::{p['ident']}].getPolyVoltage(c)")
+                L.append(f"        : m->inputs[{S}Layout::{p['normal_to']}].getPolyVoltage(c);")
+            L.append("}")
+            L.append("")
         L.append(f"inline void place_{S}(rack::app::ModuleWidget* w, rack::engine::Module* m) {{")
         L.append("    using namespace rack;")
         L.append("    using namespace rack::componentlibrary;")
@@ -537,7 +735,8 @@ def emit_cpp(man: dict) -> str:
             L.append(f'    w->addOutput(createOutputCentered<PJ301MPort>('
                      f'mm2px(Vec({p["x_mm"]:.3f}f, {p["y_mm"]:.3f}f)), m, {S}Layout::{p["ident"]}));')
         for p in m.get("lights", []):
-            L.append(f'    w->addChild(createLightCentered<MediumLight<GreenLight>>('
+            cls = f'{LIGHT_SIZE[p.get("size","medium")]}<{LIGHT_CLASS[p.get("color","green")]}>'
+            L.append(f'    w->addChild(createLightCentered<{cls}>('
                      f'mm2px(Vec({p["x_mm"]:.3f}f, {p["y_mm"]:.3f}f)), m, {S}Layout::{p["ident"]}));')
         L.append("}")
         L.append("")
@@ -546,6 +745,20 @@ def emit_cpp(man: dict) -> str:
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
+def _prepare(mod: dict) -> dict:
+    """Everything that must happen before a module is emitted or validated."""
+    mod = expand_arrays(mod)
+    # Emission order MUST follow declared ids, not authoring order. The C++ enum
+    # assigns values positionally, so an array appended after hand-written
+    # entries would give MASTER_PARAM the value 0 while the manifest calls it 4 --
+    # and Rack serialises params by index, so every saved patch would reload the
+    # wrong values with no error. Sorting here makes that unrepresentable.
+    for g in ("params", "inputs", "outputs", "lights"):
+        if mod.get(g):
+            mod[g] = sorted(mod[g], key=lambda e: e["id"])
+    return mod
+
 
 def load(paths):
     """Merge one plugin-level file with N module files, in any glob order.
@@ -570,7 +783,7 @@ def load(paths):
     if order:
         rank = {s: i for i, s in enumerate(order)}
         modules.sort(key=lambda m: rank.get(m["slug"], len(rank)))
-    man["modules"] = modules
+    man["modules"] = [_prepare(m) for m in modules]
     return man
 
 

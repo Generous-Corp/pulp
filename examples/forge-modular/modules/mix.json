@@ -1,0 +1,148 @@
+{
+  "modules": [
+    {
+      "slug": "MIX",
+      "name": "MIX",
+      "description": "Four-channel mixer with sliders, per-channel CV and chained normalling",
+      "tags": [
+        "Mixer",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
+      ],
+      "hp": 12,
+      "poly_follows": "IN1_INPUT",
+      "sections": [
+        {
+          "label": "CHANNELS",
+          "y_mm": 19.0
+        },
+        {
+          "label": "MASTER",
+          "y_mm": 92.0
+        }
+      ],
+      "param_array": [
+        {
+          "ident_fmt": "LVL%d_PARAM",
+          "label_fmt": "%d",
+          "name_fmt": "Channel %d level",
+          "count": 4,
+          "id_start": 0,
+          "grid": {
+            "cols": 4,
+            "x0_mm": 9.6,
+            "y0_mm": 42.0,
+            "dx_mm": 13.6
+          },
+          "template": {
+            "min_value": 0.0,
+            "max_value": 1.0,
+            "default_value": 0.6,
+            "kind": "Slider",
+            "unit": "%",
+            "display_multiplier": 100.0
+          }
+        }
+      ],
+      "params": [
+        {
+          "id": 4,
+          "ident": "MASTER_PARAM",
+          "name": "Master level",
+          "label": "LVL",
+          "unit": "%",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.8,
+          "kind": "Knob",
+          "x_mm": 13.0,
+          "y_mm": 108.0,
+          "display_multiplier": 100.0
+        },
+        {
+          "id": 5,
+          "ident": "MODE_PARAM",
+          "name": "Response",
+          "label": "MODE",
+          "min_value": 0.0,
+          "max_value": 2.0,
+          "default_value": 1.0,
+          "kind": "SwitchThree",
+          "x_mm": 30.5,
+          "y_mm": 108.0,
+          "labels": [
+            "Linear",
+            "Exponential",
+            "Soft clip"
+          ]
+        }
+      ],
+      "input_array": [
+        {
+          "ident_fmt": "IN%d_INPUT",
+          "name_fmt": "Channel %d audio",
+          "count": 4,
+          "id_start": 0,
+          "grid": {
+            "cols": 4,
+            "x0_mm": 9.6,
+            "y0_mm": 72.0,
+            "dx_mm": 13.6
+          },
+          "template": {
+            "role": "Audio",
+            "label": ""
+          }
+        },
+        {
+          "ident_fmt": "CV%d_INPUT",
+          "name_fmt": "Channel %d level CV",
+          "count": 4,
+          "id_start": 4,
+          "grid": {
+            "cols": 4,
+            "x0_mm": 9.6,
+            "y0_mm": 84.0,
+            "dx_mm": 13.6
+          },
+          "template": {
+            "role": "Cv",
+            "label": "",
+            "normal_volts": 10.0
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "OUT_OUTPUT",
+          "name": "Mix",
+          "label": "OUT",
+          "role": "Audio",
+          "x_mm": 48.0,
+          "y_mm": 108.0
+        }
+      ],
+      "light_array": [
+        {
+          "ident_fmt": "LVL%d_LIGHT",
+          "name_fmt": "Channel %d activity",
+          "count": 4,
+          "id_start": 0,
+          "grid": {
+            "cols": 4,
+            "x0_mm": 9.6,
+            "y0_mm": 60.0,
+            "dx_mm": 13.6
+          },
+          "template": {
+            "label": "",
+            "color": "green_red",
+            "size": "small"
+          }
+        }
+      ],
+      "lights": []
+    }
+  ]
+}

@@ -21,3 +21,4 @@ extern rack::plugin::Model* modelLFO;
 extern rack::plugin::Model* modelMULT;
 extern rack::plugin::Model* modelATT;
 extern rack::plugin::Model* modelSEQ;
+extern rack::plugin::Model* modelMIX;
