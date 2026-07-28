@@ -204,6 +204,8 @@ option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (d
 # different sizeof(StandaloneApp) (ODR).
 option(PULP_ENABLE_AUDIO_PROBES "Wire the RT output-boundary probe into the standalone host (dev/examples ON, release-ship OFF)" ON)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
+option(PULP_ENABLE_RACK "Enable optional VCV Rack module support with a developer-supplied SDK" OFF)
+set(PULP_RACK_SDK_DIR "" CACHE PATH "Path to a developer-supplied VCV Rack SDK (kept outside the source tree)")
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
@@ -275,6 +277,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
 pulp_configure_aax_sdk()
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRack.cmake)
+pulp_configure_rack_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.

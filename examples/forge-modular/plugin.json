@@ -1,0 +1,19 @@
+{
+  "slug": "ForgeModular",
+  "name": "Forge Modular",
+  "version": "2.0.0",
+  "license": "MIT",
+  "author": "Forge",
+  "brand": "Forge",
+  "modules": [
+    {
+      "slug": "VCO",
+      "name": "VCO",
+      "description": "Analog-voiced oscillator with 1V/oct tracking and four simultaneous waveform outputs",
+      "tags": [
+        "Oscillator",
+        "Polyphonic"
+      ]
+    }
+  ]
+}
