@@ -101,6 +101,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpSdkGuards.cmake")
 
 # `webgpu` IMPORTED target + target_copy_webgpu_binaries() helper.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpWebGpuImportedTarget.cmake")
+# After the webgpu module, which supplies target_copy_webgpu_binaries() for
+# consumers that do not have the upstream FetchContent package in scope.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpRuntimeStaging.cmake")
 
 # pulp_make_bundle_relocatable() / pulp_validate_bundle_relocatable() — a GPU
 # plugin built against the installed SDK bakes an @loader_path rpath and guards

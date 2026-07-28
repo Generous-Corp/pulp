@@ -135,9 +135,13 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
         INSTALL_NAME_DIR "@rpath"
     )
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${fw_target})
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${fw_target})
+    pulp_assert_runtime_dependencies_staged(${fw_target})
     _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
 endfunction()
 
@@ -445,9 +449,13 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         PULP_AUV3_BUNDLE_ID         "${bundle_id}"
     )
 
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_AUv3)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_AUv3)
+    pulp_assert_runtime_dependencies_staged(${target}_AUv3)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AUv3)
 
     # Embed three.iife.js + web-compat-three-shim.js into the .appex
