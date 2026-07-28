@@ -334,6 +334,34 @@ echo "== git_checkout_matches_cache: an unknowable tree is never called drifted"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== the three.js seed and the CMake registration agree on a cache directory"
+(
+    load_setup_lib
+    repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+
+    # three.js is the largest FetchContent source. Its ref lives in setup.sh (to
+    # seed the shared cache) and in PulpDependencies.cmake (to register the
+    # override). If those drift, nothing fails loudly — the cache is populated
+    # under one directory name, CMake looks for another, and every build dir
+    # silently re-clones ~2.2 GB forever. Pin the agreement.
+    cmake_ref="$(sed -n 's/.*pulp_register_fetchcontent_source(threejs REF \([0-9a-f]*\)).*/\1/p' \
+        "$repo_root/tools/cmake/PulpDependencies.cmake" | head -1)"
+    setup_ref="$(grep -A2 'mrdoob/three\.js\.git' "$repo_root/setup.sh" \
+        | grep -oE '[0-9a-f]{40}' | head -1)"
+
+    check "$(test -n "$cmake_ref" && echo found || echo missing)" "found" \
+        "PulpDependencies.cmake registers a threejs ref"
+    check "$(test -n "$setup_ref" && echo found || echo missing)" "found" \
+        "setup.sh seeds a three.js source"
+    check "$setup_ref" "$cmake_ref" "setup.sh and PulpDependencies.cmake pin the same three.js ref"
+
+    # And the directory name setup.sh writes must be the one CMake reads.
+    check "$(fetchcontent_cache_dir_name "threejs" "$setup_ref")" "threejs-$cmake_ref" \
+        "the seeded cache directory is the one the CMake override resolves to"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failing group(s))"
