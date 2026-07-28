@@ -44,11 +44,165 @@ private:
     FractionalDelayLine line_;
 };
 
+/// Dattorro's figure-of-eight reverb tank, one per channel.
+///
+/// The input diffuser above cannot make a reverb on its own: it has no
+/// recirculation, so it smears a transient and then falls silent until the
+/// delay's next repeat. This is the part that holds energy. Two branches, each
+/// a modulated allpass, a delay, a damping lowpass, a second allpass and a
+/// second delay, cross-coupled so each branch feeds the other through `decay`.
+///
+/// Two departures from the textbook tank, both in service of a GRANULAR
+/// texture rather than a smooth hall:
+///   * the first allpass in each branch is swept far harder than an
+///     anti-metallic wobble (tens of samples, ~1 Hz), which scatters the
+///     recirculating energy in time so the tail shimmers instead of sustaining;
+///   * each branch delay is read at two extra offset taps as well as its end,
+///     which multiplies echo density per pass without another allpass in the
+///     loop.
+class ReverbTank {
+public:
+    void prepare(double fs) {
+        sample_rate_ = fs;
+        const double longest = std::max({kDiffusionTankDelayAMs[1], kDiffusionTankDelayBMs[1],
+                                         kDiffusionTankApAMs[1], kDiffusionTankApBMs[1]});
+        const auto capacity = static_cast<std::size_t>(
+            std::ceil(longest * kDiffusionTankSizeScale.back() * 0.001 * fs +
+                      kDiffusionTankModDepth.back()) + 8.0);
+        for (auto& line : delays_) line.prepare(capacity);
+        for (auto& ap : allpasses_) ap.prepare(capacity);
+    }
+
+    void reset() {
+        for (auto& line : delays_) line.reset();
+        for (auto& ap : allpasses_) ap.reset();
+        for (auto& d : damping_) d.reset();
+        feedback_ = {0.0, 0.0};
+        mod_phase_ = {0.0, 0.0};
+    }
+
+    void update(double character_amount) noexcept {
+        const double size =
+            interpolate_knots(kDiffusionTankAxis, kDiffusionTankSizeScale, character_amount);
+        decay_ = interpolate_knots(kDiffusionTankAxis, kDiffusionTankDecay, character_amount);
+        mix_ = interpolate_knots(kDiffusionTankAxis, kDiffusionTankMix, character_amount);
+        mod_depth_ =
+            interpolate_knots(kDiffusionTankAxis, kDiffusionTankModDepth, character_amount);
+        const double damp_hz =
+            interpolate_knots(kDiffusionTankAxis, kDiffusionTankDampHz, character_amount);
+        for (auto& d : damping_) d.set_cutoff(damp_hz, sample_rate_);
+
+        // Normalize the tank to roughly unity before it is heard.
+        //
+        // The figure of eight is a recirculating network: at steady state each
+        // branch settles at x/(1 - decay), which is 5x at the top of the decay
+        // range, and the scattered taps add their own multiple on top. This
+        // network sits INSIDE the delay's feedback loop, so that gain
+        // multiplies with the feedback parameter on every repeat — left raw it
+        // is not a reverb, it is an oscillator, and the character diverged
+        // instead of decaying. Dividing the settled gain back out makes the
+        // tank a unity-ish element the loop can recirculate safely; the
+        // headroom factor keeps a resonant mode from reaching unity where the
+        // flat DC estimate would not see it.
+        output_scale_ = kTankHeadroom * (1.0 - decay_) /
+                        (1.0 + kTapGain * static_cast<double>(kTapCount));
+
+        const double to_samples = 0.001 * sample_rate_ * size;
+        delay_len_[0] = kDiffusionTankDelayAMs[0] * to_samples;
+        delay_len_[1] = kDiffusionTankDelayAMs[1] * to_samples;
+        delay_len_[2] = kDiffusionTankDelayBMs[0] * to_samples;
+        delay_len_[3] = kDiffusionTankDelayBMs[1] * to_samples;
+        ap_len_[0] = kDiffusionTankApAMs[0] * to_samples;
+        ap_len_[1] = kDiffusionTankApAMs[1] * to_samples;
+        ap_len_[2] = kDiffusionTankApBMs[0] * to_samples;
+        ap_len_[3] = kDiffusionTankApBMs[1] * to_samples;
+    }
+
+    /// Zero mix means the tank contributes nothing at all — the character is
+    /// then the bare allpass diffuser, which is the magnitude-flat baseline the
+    /// diffusion character is specified against.
+    bool active() const noexcept { return mix_ > 0.0; }
+    double mix() const noexcept { return mix_; }
+
+    double process(double x, double decorrelation) noexcept {
+        // Both branches read the OTHER branch's previous output, which is what
+        // closes the figure of eight without a zero-delay loop.
+        const double in_a = x + feedback_[1] * decay_;
+        const double in_b = x + feedback_[0] * decay_;
+
+        double taps = 0.0;
+        const double a = run_branch(0, in_a, decorrelation, taps);
+        const double b = run_branch(1, in_b, decorrelation, taps);
+        feedback_[0] = a;
+        feedback_[1] = b;
+
+        // The branch ends carry the tail; the scattered taps carry the density.
+        return output_scale_ * (0.5 * (a + b) + kTapGain * taps);
+    }
+
+    void tick_modulation() noexcept {
+        for (std::size_t m = 0; m < mod_phase_.size(); ++m) {
+            mod_phase_[m] += kDiffusionTankModRatesHz[m] / sample_rate_;
+            if (mod_phase_[m] >= 1.0) mod_phase_[m] -= 1.0;
+        }
+    }
+
+private:
+    static constexpr double kTapGain = 0.35;
+    static constexpr std::size_t kTapCount = 4;   // two per branch
+    static constexpr double kTankHeadroom = 0.7;
+
+    /// One branch: allpass -> delay -> damp -> allpass -> delay, accumulating
+    /// two offset taps from the first delay on the way through.
+    double run_branch(std::size_t branch, double x, double decorrelation,
+                      double& taps) noexcept {
+        const std::size_t i0 = branch * 2u;
+        const std::size_t i1 = i0 + 1u;
+
+        const double sweep = mod_depth_ * decorrelation *
+                             std::sin(2.0 * kPi * mod_phase_[branch]);
+        double y = allpasses_[i0].process(
+            x, clamp_delay(ap_len_[i0] + sweep, allpasses_[i0].max_delay()),
+            kDiffusionTankApGain1);
+
+        delays_[i0].push(y);
+        const double len0 = clamp_delay(delay_len_[i0], delays_[i0].max_delay());
+        for (std::size_t t = 0; t < kDiffusionTankTapFraction.size(); ++t)
+            taps += delays_[i0].read(clamp_delay(len0 * kDiffusionTankTapFraction[t],
+                                                 delays_[i0].max_delay()));
+        y = delays_[i0].read(len0);
+
+        y = damping_[branch].lowpass(y);
+        y = allpasses_[i1].process(y, clamp_delay(ap_len_[i1], allpasses_[i1].max_delay()),
+                                   kDiffusionTankApGain2);
+        delays_[i1].push(y);
+        return delays_[i1].read(clamp_delay(delay_len_[i1], delays_[i1].max_delay()));
+    }
+
+    static double clamp_delay(double d, double max_delay) noexcept {
+        return std::clamp(d, 1.0, max_delay);
+    }
+
+    std::array<FractionalDelayLine, 4> delays_{};
+    std::array<ModulatedAllpass, 4> allpasses_{};
+    std::array<OnePole, 2> damping_{};
+    std::array<double, 4> delay_len_ = {1.0, 1.0, 1.0, 1.0};
+    std::array<double, 4> ap_len_ = {1.0, 1.0, 1.0, 1.0};
+    std::array<double, 2> feedback_ = {0.0, 0.0};
+    std::array<double, 2> mod_phase_ = {0.0, 0.0};
+    double sample_rate_ = 48000.0;
+    double decay_ = 0.0;
+    double mix_ = 0.0;
+    double output_scale_ = 0.0;
+    double mod_depth_ = 0.0;
+};
+
 /// The four-stage chain for one channel.
 class DiffusionChain {
 public:
     void prepare(double fs) {
         sample_rate_ = fs;
+        tank_.prepare(fs);
         for (std::size_t i = 0; i < kStageCount; ++i) {
             // Sized for the largest sizeScale knot plus the modulation swing
             // and the Lagrange kernel's reach.
@@ -61,6 +215,7 @@ public:
 
     void reset() {
         for (auto& s : stages_) s.reset();
+        tank_.reset();
         mod_phase_ = {0.0, 0.0};
     }
 
@@ -77,6 +232,7 @@ public:
             delays_[i] = round_to_odd(samples);
             gains_[i] = std::min(kDiffusionStageGain[i] * gain_scale, kDiffusionGainMax);
         }
+        tank_.update(character_amount);
     }
 
     /// `decorrelation` scales the modulation depth (1.0 left, kStereoDecorr right).
@@ -91,11 +247,18 @@ public:
             delay = std::clamp(delay, 1.0, stages_[i].max_delay());
             x = stages_[i].process(x, delay, gains_[i]);
         }
-        return x;
+        // The diffused signal feeds the tank, and the two are crossfaded rather
+        // than summed: at character_amount 0 the tank is bypassed entirely and
+        // this is the bare allpass diffuser.
+        if (!tank_.active()) return x;
+        const double cloud = tank_.process(x, decorrelation);
+        const double mix = tank_.mix();
+        return x + mix * (cloud - x);
     }
 
     /// Advance the two anti-metallic LFOs by one sample.
     void tick_modulation() noexcept {
+        tank_.tick_modulation();
         for (std::size_t m = 0; m < mod_phase_.size(); ++m) {
             mod_phase_[m] += kDiffusionModRatesHz[m] / sample_rate_;
             if (mod_phase_[m] >= 1.0) mod_phase_[m] -= 1.0;
@@ -112,6 +275,7 @@ private:
         return static_cast<double>(n);
     }
 
+    ReverbTank tank_{};
     std::array<ModulatedAllpass, kStageCount> stages_{};
     std::array<double, kStageCount> delays_ = {1.0, 1.0, 1.0, 1.0};
     std::array<double, kStageCount> gains_ = {0.0, 0.0, 0.0, 0.0};

@@ -89,18 +89,33 @@ public:
     double process(double x, double delay_seconds) noexcept {
         const double band_limited = pre_emphasis_.process(anti_alias_.process(x));
 
-        // "ADC": hold the host-rate signal onto the internal grid, quantize
-        // what lands on a tick, and read the line at the fractional grid
-        // position the (slewed) delay time asks for.
+        // "ADC": clock the host-rate signal onto the internal grid and quantize
+        // whatever lands on a tick. This is where the character actually lives
+        // — reduced bandwidth and word length.
         phase_ += internal_rate_ / sample_rate_;
         while (phase_ >= 1.0) {
             phase_ -= 1.0;
             line_.push(quantize(band_limited));
-            held_ = line_.read_linear(delay_seconds * internal_rate_);
         }
 
-        // "DAC": the held value through the inverse emphasis and the matching
-        // reconstruction filter.
+        // "DAC": read at the fractional grid position that corresponds to NOW.
+        //
+        // `phase_` is how far the host clock has advanced past the last internal
+        // tick, so subtracting it holds the delay CONSTANT in host time. Taking
+        // the read inside the tick loop instead — a plain zero-order hold —
+        // snaps the effective delay to the internal grid, and because the two
+        // clocks are not locked that snap walks between 0 and one internal
+        // sample. It is heard as a warble with the modulation depth at zero,
+        // and the feedback loop compounds it on every repeat.
+        // Lagrange, not linear. A 2-point interpolator's gain depends on the
+        // fractional read position, so as `phase_` walks between ticks the
+        // output amplitude ripples — 0.5% at the 32 kHz internal rate and far
+        // worse at 8 kHz, where the band edge sits at 0.45x the internal rate
+        // and linear interpolation is nowhere near flat. That ripple is heard
+        // as modulation with the depth control at zero.
+        held_ = line_.read(std::max(1.0, delay_seconds * internal_rate_ - phase_));
+
+        // ...then the inverse emphasis and the matching reconstruction filter.
         return reconstruction_.process(de_emphasis_.process(held_));
     }
 

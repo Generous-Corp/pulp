@@ -498,6 +498,106 @@ TEST_CASE("diffusion smears a repeat into a cluster", "[character-delay][diffusi
     CHECK(diffused >= 8 * std::max(clean, 1));
 }
 
+TEST_CASE("diffusion blooms into a reverb tail as the character opens",
+          "[character-delay][diffusion]") {
+    // An allpass diffuser alone cannot make a reverb: it has no recirculation,
+    // so it smears a transient over tens of milliseconds and is then finished.
+    // The tank gives the character its own short-time-constant recirculation,
+    // so energy keeps arriving long after the smear has passed.
+    //
+    // The measurement has to be a LATE window for that reason. Comparing total
+    // tail energy at amount 0 against amount 1 proves nothing about the tank —
+    // the input diffuser's own size and gain scaling already moves that by
+    // orders of magnitude. A second after the transient is somewhere only a
+    // recirculating network can put energy.
+    //
+    // Delay feedback is ZERO throughout, so nothing here is the delay's tail.
+    auto windows = [](double amount) {
+        Engine delay;
+        configure(delay, Character::diffusion, 100.0, 0.0, amount);
+        settle(delay, 0.3);
+        auto buffers = impulse_left(static_cast<int>(kSr * 2.5));
+        render(delay, buffers);
+
+        auto energy = [&](double from_s, double to_s) {
+            double e = 0.0;
+            const auto from = static_cast<std::size_t>(from_s * kSr);
+            const auto to = std::min(static_cast<std::size_t>(to_s * kSr), buffers.left.size());
+            for (std::size_t i = from; i < to; ++i)
+                e += static_cast<double>(buffers.left[i]) * buffers.left[i];
+            return e;
+        };
+        return std::pair{energy(0.25, 0.5), energy(0.8, 2.0)};
+    };
+
+    const auto [early_open, late_open] = windows(1.0);
+    INFO("open: early " << early_open << " late " << late_open);
+    REQUIRE(early_open > 0.0);
+    // A second later the cloud still holds a substantial share of the energy it
+    // had half a second in. The bare diffuser misses this by seven orders of
+    // magnitude, so the threshold is not delicately placed.
+    CHECK(late_open > early_open * 0.05);
+
+    // At amount 0 the tank is bypassed outright, which is what keeps the bare
+    // published diffuser available as the magnitude-flat baseline.
+    const auto [early_closed, late_closed] = windows(0.0);
+    INFO("closed: early " << early_closed << " late " << late_closed);
+    CHECK(late_closed < early_closed * 1e-3);
+}
+
+TEST_CASE("diffusion holds its cloud together without the delay's feedback",
+          "[character-delay][diffusion]") {
+    // The tank recirculates on its own, so the character must still decay to
+    // silence on its own — a reverb, not an oscillator. It sits inside the
+    // delay's feedback loop, where any net gain above unity would compound on
+    // every repeat, so this is the property that keeps it usable.
+    Engine delay;
+    configure(delay, Character::diffusion, 100.0, 0.0, 1.0);
+    settle(delay, 0.3);
+
+    auto buffers = impulse_left(static_cast<int>(kSr * 8.0));
+    render(delay, buffers);
+
+    for (float v : buffers.left) CHECK(std::isfinite(v));
+
+    // Energy must fall monotonically-ish across the tail, not sustain or grow.
+    auto window_energy = [&](double from_s, double to_s) {
+        double e = 0.0;
+        const auto from = static_cast<std::size_t>(from_s * kSr);
+        const auto to = std::min(static_cast<std::size_t>(to_s * kSr), buffers.left.size());
+        for (std::size_t i = from; i < to; ++i) e += static_cast<double>(buffers.left[i]) *
+                                                    buffers.left[i];
+        return e;
+    };
+    const double early = window_energy(0.3, 1.0);
+    const double late = window_energy(5.0, 6.0);
+    INFO("early " << early << " late " << late);
+    CHECK(early > 0.0);
+    CHECK(late < early * 0.1);
+}
+
+TEST_CASE("diffusion at zero amount adds no tail of its own",
+          "[character-delay][diffusion]") {
+    // The tank is bypassed entirely at amount 0, which is what keeps the bare
+    // published diffuser available as the magnitude-flat baseline.
+    auto tail_energy = [](Character character) {
+        Engine delay;
+        configure(delay, character, 100.0, 0.0, 0.0);
+        settle(delay, 0.3);
+        auto buffers = impulse_left(static_cast<int>(kSr * 2.0));
+        render(delay, buffers);
+        double e = 0.0;
+        for (std::size_t i = static_cast<std::size_t>(0.5 * kSr); i < buffers.left.size(); ++i)
+            e += static_cast<double>(buffers.left[i]) * buffers.left[i];
+        return e;
+    };
+    // With no tank and no feedback, diffusion must ring out much like clean.
+    const double clean = tail_energy(Character::clean);
+    const double diffused = tail_energy(Character::diffusion);
+    INFO("clean " << clean << " diffusion " << diffused);
+    CHECK(diffused < std::max(clean, 1e-12) * 50.0);
+}
+
 TEST_CASE("the diffuser is allpass in steady state", "[character-delay][diffusion]") {
     Engine delay;
     configure(delay, Character::diffusion, 20.0, 0.0, 0.5);

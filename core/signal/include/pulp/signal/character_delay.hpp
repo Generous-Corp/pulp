@@ -70,6 +70,7 @@
 #include <pulp/signal/character_delay/tape.hpp>
 #include <pulp/signal/character_delay/tape_physical.hpp>
 #include <pulp/signal/character_delay/vintage.hpp>
+#include <pulp/signal/svf.hpp>
 
 #include <algorithm>
 #include <array>
@@ -134,6 +135,7 @@ public:
                                  sample_rate_ / static_cast<double>(chardelay::kControlInterval));
         configure_time_slew();
         apply_tape_speed();
+        update_loop_tone();
         reset();
     }
 
@@ -158,10 +160,35 @@ public:
                               chardelay::kMaxDelayMs);
     }
 
+    /// Right-channel time as a MULTIPLE of the left. Selects ratio mode; the
+    /// right channel tracks the left, which is what a stereo-spread delay
+    /// wants.
     void set_time_offset(SampleType multiplier) {
         time_offset_ = std::clamp(finite_or(static_cast<double>(multiplier), time_offset_),
                                   chardelay::kTimeOffsetMin,
                                   chardelay::kTimeOffsetMax);
+        right_time_absolute_ = false;
+    }
+
+    /// Right-channel time in MILLISECONDS, independent of the left. Selects
+    /// absolute mode, which is what a dual-mono setup (two unrelated delay
+    /// times) and a millisecond offset both need — neither can be expressed as
+    /// a ratio, because a fixed ratio is a different millisecond spread at
+    /// every delay time and a fixed spread is a different ratio.
+    ///
+    /// Ratio mode is restored by calling set_time_offset().
+    void set_right_time_ms(SampleType right_ms) {
+        right_time_ms_ = std::clamp(finite_or(static_cast<double>(right_ms), right_time_ms_), 1.0,
+                                    chardelay::kMaxAddressableDelayMs);
+        right_time_absolute_ = true;
+    }
+
+    /// True while the right channel is following set_right_time_ms().
+    bool right_time_is_absolute() const noexcept { return right_time_absolute_; }
+
+    /// The right channel's target time in ms, whichever mode is selected.
+    double right_time_ms() const noexcept {
+        return right_time_absolute_ ? right_time_ms_ : time_ms_ * time_offset_;
     }
 
     void set_feedback(SampleType feedback) {
@@ -200,6 +227,53 @@ public:
     void set_freeze(bool on) { freeze_on_ = on; }
     void set_reverse(bool on) { reverse_on_ = on; }
 
+    // ── In-loop tone (audio thread) ───────────────────────────────────────
+    //
+    // A resonant 12 dB/oct high-pass (low cut) and low-pass (high cut) in the
+    // RECIRCULATION path, so each repeat is filtered again and the tail evolves
+    // — the behavior a tone control after the delay cannot produce. Orthogonal
+    // to the character's own loop bandwidth: this is the player's control, that
+    // is the realization's model.
+    //
+    // Bypassed bit-exactly while low cut is at its minimum and high cut at its
+    // maximum, so an untouched delay is unchanged. Also bypassed under freeze,
+    // which needs a unity loop to hold its content; the filters keep running so
+    // their state stays coherent when freeze releases.
+    void set_loop_low_cut_hz(SampleType hz) {
+        const double next = std::clamp(finite_or(static_cast<double>(hz), loop_low_cut_hz_),
+                                      chardelay::kLoopToneHpMinHz, chardelay::kLoopToneHpMaxHz);
+        if (next == loop_low_cut_hz_) return;   // per-block pushes are free
+        loop_low_cut_hz_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_low_cut_resonance(SampleType q) {
+        const double next = std::clamp(finite_or(static_cast<double>(q), loop_low_cut_q_),
+                                     chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
+        if (next == loop_low_cut_q_) return;   // per-block pushes are free
+        loop_low_cut_q_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_high_cut_hz(SampleType hz) {
+        const double next = std::clamp(finite_or(static_cast<double>(hz), loop_high_cut_hz_),
+                                       chardelay::kLoopToneLpMinHz, chardelay::kLoopToneLpMaxHz);
+        if (next == loop_high_cut_hz_) return;   // per-block pushes are free
+        loop_high_cut_hz_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_high_cut_resonance(SampleType q) {
+        const double next = std::clamp(finite_or(static_cast<double>(q), loop_high_cut_q_),
+                                      chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
+        if (next == loop_high_cut_q_) return;   // per-block pushes are free
+        loop_high_cut_q_ = next;
+        update_loop_tone();
+    }
+
+    /// True when the in-loop tone stage is doing anything at all.
+    bool loop_tone_active() const noexcept { return loop_tone_active_; }
+
     // ── Runtime ───────────────────────────────────────────────────────────
 
     /// Always 0. See the header note: the physical tier's in-loop oversampler
@@ -224,6 +298,8 @@ public:
             channel.instability.reset();
             channel.loop_highpass.reset();
             channel.loop_lowpass.reset();
+            channel.tone_high_pass.reset();
+            channel.tone_low_pass.reset();
             channel.wet = 0.0;
         }
         feedback_.snap(feedback_target_);
@@ -241,7 +317,7 @@ public:
         control_counter_ = 0;
 
         time_slew_[0].snap(time_ms_);
-        time_slew_[1].snap(time_ms_ * time_offset_);
+        time_slew_[1].snap(right_time_ms());
         update_control_rate();
     }
 
@@ -296,6 +372,16 @@ public:
             channels_[1].wet = process_character(channels_[1], line_in_right, time_right,
                                                  character_amount, chardelay::kStereoDecorr);
 
+            // The player's tone stage sits on the delay's OUTPUT, which is also
+            // what the feedback tap reads. So the very first repeat is filtered
+            // once — a high cut at its minimum really does mute the character —
+            // and every recirculation is filtered again on top, which is what
+            // makes the tail keep darkening. Filtering only the feedback path
+            // would leave that first repeat unfiltered and let the character
+            // through no matter where the cut sits.
+            channels_[0].wet = apply_loop_tone(channels_[0], channels_[0].wet, freeze);
+            channels_[1].wet = apply_loop_tone(channels_[1], channels_[1].wet, freeze);
+
             // Ducking is applied to the WET output only, sidechained from the
             // dry input before the loop — so repeats bloom in the gaps rather
             // than being pushed down along with the source.
@@ -342,8 +428,43 @@ private:
         chardelay::TapeInstability instability;
         chardelay::OnePole loop_highpass;
         chardelay::OnePole loop_lowpass;
+        // Player-facing in-loop tone (see set_loop_low_cut_hz). Separate from
+        // loop_highpass/loop_lowpass above, which the character owns.
+        Svf64 tone_high_pass;
+        Svf64 tone_low_pass;
         double wet = 0.0;
     };
+
+    /// Retune both loop-tone filters and latch whether the stage does anything.
+    /// Fully-open controls bypass it so an untouched delay stays bit-exact.
+    void update_loop_tone() noexcept {
+        loop_tone_active_ = loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz ||
+                            loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz;
+        for (auto& channel : channels_) {
+            channel.tone_high_pass.set_mode(Svf64::Mode::highpass);
+            channel.tone_high_pass.set_sample_rate(sample_rate_);
+            channel.tone_high_pass.set_frequency(loop_low_cut_hz_);
+            channel.tone_high_pass.set_resonance(loop_low_cut_q_);
+            channel.tone_low_pass.set_mode(Svf64::Mode::lowpass);
+            channel.tone_low_pass.set_sample_rate(sample_rate_);
+            channel.tone_low_pass.set_frequency(loop_high_cut_hz_);
+            channel.tone_low_pass.set_resonance(loop_high_cut_q_);
+        }
+    }
+
+    /// One pass of the player's tone stage over the recirculating signal.
+    /// @p freeze crossfades back to the unfiltered signal so a frozen loop
+    /// keeps the exactly-unity gain it needs to hold, while the filter states
+    /// stay warm for the moment freeze releases.
+    double apply_loop_tone(ChannelState& channel, double x, double freeze) noexcept {
+        if (!loop_tone_active_) return x;
+        double y = x;
+        if (loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz)
+            y = channel.tone_high_pass.process(y);
+        if (loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz)
+            y = channel.tone_low_pass.process(y);
+        return freeze >= 1.0 ? x : y + freeze * (x - y);
+    }
 
     bool physical_tape() const noexcept {
         return character_type_ == Character::tape && tape_tier_ == TapeTier::physical;
@@ -483,7 +604,7 @@ private:
     /// motion: it has to pass through the same transport inertia the time knob
     /// does.
     double modulated_time_ms(std::size_t channel, double character_amount) noexcept {
-        double target = (channel == 0) ? time_ms_ : time_ms_ * time_offset_;
+        double target = (channel == 0) ? time_ms_ : right_time_ms();
         const double decorrelation = (channel == 0) ? 1.0 : chardelay::kStereoDecorr;
 
         if (character_type_ == Character::bbd) {
@@ -599,6 +720,8 @@ private:
     double sample_rate_ = 48000.0;
     double time_ms_ = 350.0;
     double time_offset_ = 1.0;
+    double right_time_ms_ = 350.0;
+    bool right_time_absolute_ = false;
     double feedback_target_ = 0.35;
     double crossfeed_target_ = 0.0;
     double character_target_ = 0.5;
@@ -608,6 +731,13 @@ private:
     double tape_speed_ips_ = 7.5;
     bool freeze_on_ = false;
     bool reverse_on_ = false;
+
+    // Player-facing in-loop tone. Defaults are fully open, which bypasses.
+    double loop_low_cut_hz_ = chardelay::kLoopToneHpMinHz;
+    double loop_low_cut_q_ = 0.707;
+    double loop_high_cut_hz_ = chardelay::kLoopToneLpMaxHz;
+    double loop_high_cut_q_ = 0.707;
+    bool loop_tone_active_ = false;
     bool clean_lowpass_bypassed_ = true;
 
     double lfo_phase_ = 0.0;
