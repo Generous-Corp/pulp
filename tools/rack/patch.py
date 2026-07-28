@@ -585,6 +585,91 @@ def render_inventory(inv: dict, prefer: str | None = None) -> str:
     return "\n".join(out)
 
 
+# Words people use, mapped to the tag the library files them under. Only the
+# cases where the two differ -- a tag whose own name is the word someone says
+# ("reverb", "sequencer") needs no entry.
+TAG_WORDS = {
+    "granular": "Granular", "grain": "Granular",
+    "reverb": "Reverb", "verb": "Reverb", "delay": "Delay", "echo": "Delay",
+    "sequencer": "Sequencer", "sequence": "Sequencer",
+    "quantizer": "Quantizer", "quantize": "Quantizer",
+    "vocoder": "Vocoder", "compressor": "Compressor", "compress": "Compressor",
+    "distortion": "Distortion", "distort": "Distortion", "drive": "Distortion",
+    "wavefolder": "Waveshaper", "fold": "Waveshaper", "waveshaper": "Waveshaper",
+    "chorus": "Chorus", "phaser": "Phaser", "flanger": "Flanger",
+    "sampler": "Sampler", "sample player": "Sampler",
+    "drum": "Drum", "kick": "Drum", "snare": "Drum", "hat": "Drum",
+    "physical model": "Physical modeling", "pluck": "Physical modeling",
+    "speech": "Speech", "vocal": "Speech", "formant": "Speech",
+    "ring mod": "Ring modulator", "ringmod": "Ring modulator",
+    "low-pass gate": "Low-pass gate", "lpg": "Low-pass gate",
+    "slew": "Slew limiter", "portamento": "Slew limiter", "glide": "Slew limiter",
+    "sample and hold": "Sample and hold", "s&h": "Sample and hold",
+    "arpeggiator": "Arpeggiator", "arp": "Arpeggiator",
+    "polyphonic": "Polyphonic", "poly": "Polyphonic",
+    "eq": "Equalizer", "equalizer": "Equalizer", "filter": "Filter",
+    "oscillator": "Oscillator", "envelope": "Envelope generator",
+    "lfo": "Low-frequency oscillator", "noise": "Noise", "random": "Random",
+    "mixer": "Mixer", "logic": "Logic", "tuner": "Tuner",
+}
+
+
+def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
+    """Before spending anything, decide whether this request is buildable.
+
+    The generator is already structurally safe -- its prompt is assembled from
+    the installed inventory alone, so a module the user does not have cannot
+    appear in a patch even if they ask for it by name. What that safety does
+    NOT do is tell anyone. Ask for a granular texture with no granular module
+    installed and you get a patch built from something else, with no hint that
+    the thing you actually wanted is one free download away.
+
+    So this reads the request for capabilities, checks them against what is
+    installed, and names what is missing along with what would provide it.
+    Pure tag matching against local data: no model call, nothing spent.
+    """
+    import re
+    low = prompt.lower()
+    # Whole words only. A plain substring test reads "hat" out of "that" and
+    # decides an ambient drone needs a drum module, which stops a request that
+    # was perfectly buildable.
+    wanted = {tag for word, tag in TAG_WORDS.items()
+              if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", low)}
+    if not wanted:
+        return {"ok": True, "missing": {}}
+
+    have = set()
+    for p in inv.values():
+        for m in p["modules"].values():
+            have.update(m.get("tags", []))
+    # Tag spelling drifts across vendors ("VCO" vs "Oscillator", casing).
+    have_lc = {t.lower() for t in have}
+    ALIASES = {"Oscillator": {"vco"}, "Filter": {"vcf"},
+               "Envelope generator": {"adsr", "envelope"},
+               "Low-frequency oscillator": {"lfo"},
+               "Voltage-controlled amplifier": {"vca"}}
+    missing = {t for t in wanted
+               if t.lower() not in have_lc and not (ALIASES.get(t, set()) & have_lc)}
+    if not missing:
+        return {"ok": True, "missing": {}}
+
+    # What would provide each gap, cheapest first: a free plugin the user can
+    # install right now beats a premium one they may not own.
+    options: dict = {}
+    for tag in sorted(missing):
+        cands = []
+        for pslug, mods in midx.items():
+            p = cat.get(pslug, {})
+            for mslug, m in mods.items():
+                if tag in (m.get("tags") or []):
+                    cands.append({"plugin": pslug, "module": mslug,
+                                  "name": m["name"], "brand": p.get("brand", ""),
+                                  "premium": bool(p.get("premium"))})
+        cands.sort(key=lambda c: (c["premium"], c["plugin"]))
+        options[tag] = cands[:4]
+    return {"ok": False, "missing": options}
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     """Prompt -> a patch that lints clean. Returns (patch, why) or raises."""
     import re
@@ -740,6 +825,20 @@ def main(argv):
         # it the whole installed library competes on equal footing, which is
         # usually what you want when a vendor module simply fits better.
         prefer = "ForgeModular" if "--prefer-ours" in argv else None
+        # Stop before the model call, not after it.
+        pf = preflight(argv[2], inv, module_index(), catalog())
+        if not pf["ok"] and "--anyway" not in argv:
+            print("  hold on — this asks for something you don't have installed:\n")
+            for tag, opts in pf["missing"].items():
+                print(f"  no {tag.lower()} module is installed. These would do it:")
+                for o in opts:
+                    mark = "PREMIUM" if o["premium"] else "free"
+                    print(f"      {mark:8} {o['plugin']}/{o['module']:16} "
+                          f"{o['name']}  ({o['brand']})")
+                print()
+            print("  install one in Rack's Library, then ask again —")
+            print("  or pass --anyway to build with what you have.")
+            return 3
         out = "/tmp/forge-patch.vcv"
         if "--out" in argv:
             out = argv[argv.index("--out") + 1]
