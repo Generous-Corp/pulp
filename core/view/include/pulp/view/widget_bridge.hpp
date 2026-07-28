@@ -501,6 +501,12 @@ private:
     // The route retains the parameter that began an active gesture so rebinding
     // mid-drag still ends the original parameter exactly once.
     void wire_parameter_gestures(const std::string& widget_id, View* widget);
+    /// Open / close the host parameter gesture for a widget wired by
+    /// wire_parameter_gestures(). Drag controls drive these from their own
+    /// begin/end callbacks; a click control (Toggle) has no drag lifecycle and
+    /// brackets its instantaneous edit with them instead.
+    void begin_param_gesture(const std::string& widget_id);
+    void end_param_gesture(const std::string& widget_id);
     void finish_param_gesture_route(
         const std::shared_ptr<ParamGestureRoute>& route);
     void release_param_gesture_route(const std::string& widget_id) noexcept;

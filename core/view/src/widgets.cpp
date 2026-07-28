@@ -1117,14 +1117,27 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
 
+// Vertical space the caption occupies: its 10px font sits on a baseline 6px off
+// the bottom edge, so the glyphs need roughly the ascent plus that offset. The
+// switch is centred in what remains rather than in the whole widget.
+constexpr float kToggleCaptionStrip = 14.0f;
+
 void Toggle::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
     float switch_w = std::min(b.width, 40.0f);
-    float switch_h = std::min(b.height * 0.6f, 20.0f);
+    // Size AND centre the switch within the space above the caption, not within
+    // the whole widget. The caption sits on a baseline 6px off the bottom, so a
+    // switch measured against the full height grows down into the text and the
+    // label ends up printed across the thumb on a short toggle. Deriving the
+    // height from the remaining area keeps them apart at every size; an
+    // unlabelled toggle reserves nothing and is unchanged.
+    const float caption_strip = label_.empty() ? 0.0f : kToggleCaptionStrip;
+    const float switch_area = std::max(1.0f, b.height - caption_strip);
+    float switch_h = std::min(switch_area * 0.6f, 20.0f);
     float sx = (b.width - switch_w) * 0.5f;
-    float sy = (b.height - switch_h) * 0.5f;
+    float sy = (switch_area - switch_h) * 0.5f;
 
     if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, on_ ? 1.0f : 0.0f, *this);

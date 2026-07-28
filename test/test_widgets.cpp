@@ -2885,3 +2885,62 @@ TEST_CASE("Draw-time shader failure paints the default widget body, logging once
     REQUIRE(knob.shader_draw_failure_logged());
 }
 #endif  // PULP_HAS_SKIA
+
+TEST_CASE("a labelled Toggle never paints its switch over its caption",
+          "[view][widget][layout]") {
+    // The reported symptom: on a short toggle the caption was drawn across the
+    // thumb. Assert the painted geometry -- the track rect and the text
+    // baseline -- rather than any layout constant, so this fails if the switch
+    // ever grows or slides back into the text regardless of how it got there.
+    const float font_px = 10.0f;  // Toggle draws its caption at 10px
+
+    for (float h : {24.0f, 30.0f, 40.0f, 60.0f}) {
+        Toggle toggle;
+        toggle.set_bounds({0, 0, 50, h});
+        toggle.set_label("Bypass");
+        toggle.set_on(true);
+
+        RecordingCanvas canvas;
+        toggle.paint(canvas);
+
+        const DrawCommand* track = nullptr;
+        const DrawCommand* caption = nullptr;
+        for (const auto& c : canvas.commands()) {
+            if (c.type == DrawCommand::Type::fill_rounded_rect && track == nullptr)
+                track = &c;
+            if (c.type == DrawCommand::Type::fill_text && caption == nullptr)
+                caption = &c;
+        }
+        REQUIRE(track != nullptr);
+        REQUIRE(caption != nullptr);
+
+        const float track_bottom = track->f[1] + track->f[3];
+        // The caption's glyphs rise about one font-size above their baseline.
+        const float caption_top = caption->f[1] - font_px;
+
+        INFO("height " << h << ": track bottom " << track_bottom
+                       << " vs caption top " << caption_top);
+        CHECK(track_bottom <= caption_top);
+    }
+}
+
+TEST_CASE("an unlabelled Toggle still centres its switch in the full height",
+          "[view][widget][layout]") {
+    // Guard the other direction: reserving caption space must not shrink or
+    // shift a toggle that has no caption to make room for.
+    Toggle toggle;
+    toggle.set_bounds({0, 0, 50, 30});
+    toggle.set_on(true);
+
+    RecordingCanvas canvas;
+    toggle.paint(canvas);
+
+    const DrawCommand* track = nullptr;
+    for (const auto& c : canvas.commands())
+        if (c.type == DrawCommand::Type::fill_rounded_rect) { track = &c; break; }
+    REQUIRE(track != nullptr);
+
+    const float top_gap = track->f[1];
+    const float bottom_gap = 30.0f - (track->f[1] + track->f[3]);
+    CHECK(std::abs(top_gap - bottom_gap) < 0.01f);
+}

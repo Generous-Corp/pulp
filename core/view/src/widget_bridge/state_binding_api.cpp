@@ -31,42 +31,54 @@
 
 namespace pulp::view {
 
+void WidgetBridge::begin_param_gesture(const std::string& widget_id) {
+    auto it = param_gesture_routes_.find(widget_id);
+    if (it == param_gesture_routes_.end()) return;
+    auto& route = it->second;
+    if (!route || route->active) return;
+    const auto binding = std::find_if(
+        param_bindings_.begin(), param_bindings_.end(),
+        [&](const ParamBinding& candidate) {
+            return candidate.widget_id == widget_id &&
+                   candidate.target == ParamBinding::Target::value;
+        });
+    if (binding == param_bindings_.end()) return;
+    route->active_param_id = binding->param_id;
+    route->active = true;
+    try {
+        store_.acquire_gesture(route->active_param_id);
+    } catch (...) {
+        // StateStore records the lease and open gesture before invoking its
+        // host callback. Preserve the route so release still balances it,
+        // but never unwind through the widget's input dispatch.
+    }
+}
+
+void WidgetBridge::end_param_gesture(const std::string& widget_id) {
+    auto it = param_gesture_routes_.find(widget_id);
+    if (it == param_gesture_routes_.end()) return;
+    try {
+        finish_param_gesture_route(it->second);
+    } catch (...) {
+        // StateStore removes the open gesture before invoking its host
+        // callback. Keep input dispatch noexcept after that external call.
+    }
+}
+
 void WidgetBridge::wire_parameter_gestures(const std::string& widget_id,
                                            View* widget) {
     if (!widget) return;
 
     release_param_gesture_route(widget_id);
-    auto route = std::make_shared<ParamGestureRoute>();
-    param_gesture_routes_[widget_id] = route;
+    param_gesture_routes_[widget_id] = std::make_shared<ParamGestureRoute>();
     auto alive = callback_alive_;
-    auto begin = [this, alive, route, widget_id] {
-        if (!alive || !alive->load(std::memory_order_acquire) || route->active)
-            return;
-        const auto binding = std::find_if(
-            param_bindings_.begin(), param_bindings_.end(),
-            [&](const ParamBinding& candidate) {
-                return candidate.widget_id == widget_id &&
-                       candidate.target == ParamBinding::Target::value;
-            });
-        if (binding == param_bindings_.end()) return;
-        route->active_param_id = binding->param_id;
-        route->active = true;
-        try {
-            store_.acquire_gesture(route->active_param_id);
-        } catch (...) {
-            // StateStore records the lease and open gesture before invoking its
-            // host callback. Preserve the route so release still balances it,
-            // but never unwind through the widget's input dispatch.
-        }
-    };
-    auto end = [this, alive, route] {
+    auto begin = [this, alive, widget_id] {
         if (!alive || !alive->load(std::memory_order_acquire)) return;
-        try {
-            finish_param_gesture_route(route);
-        } catch (...) {
-            // StateStore removes the open gesture before invoking its host
-            // callback. Keep input dispatch noexcept after that external call.
-        }
+        begin_param_gesture(widget_id);
+    };
+    auto end = [this, alive, widget_id] {
+        if (!alive || !alive->load(std::memory_order_acquire)) return;
+        end_param_gesture(widget_id);
     };
     if (auto* knob = dynamic_cast<Knob*>(widget)) {
         knob->on_gesture_begin = begin;
