@@ -167,6 +167,23 @@ if ! "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report \
     fail=1
 fi
 
+# ── 2b. shipyard-pin lockstep ──────────────────────────────────────────────
+# `tools/shipyard.toml` and every workflow's inline `SHIPYARD_VERSION` must
+# agree. The checker for this already existed but was wired into nothing, so
+# the two drifted to 0.78.0 vs 0.70.0 unnoticed — and a post-tag-sync pin
+# below 0.79.0 stamps the changelog commit `[skip ci]`, which makes Actions
+# skip the required checks, which makes the changelog PR unmergeable. Nine
+# stacked up that way and stalled the release pipeline. Cheap and offline,
+# so it runs unconditionally.
+PIN_CHECK="$ROOT/tools/scripts/check_shipyard_pin.py"
+if [ -f "$PIN_CHECK" ]; then
+    echo "" >&2
+    echo "▸ shipyard-pin lockstep check" >&2
+    if ! "$PYTHON" "$PIN_CHECK"; then
+        fail=1
+    fi
+fi
+
 # ── 3. compat-sync (optional — only if both files exist) ───────────────────
 COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then

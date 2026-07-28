@@ -27,7 +27,14 @@ env:
   # it, and reverts to a direct push to main that the main-merge-queue
   # ruleset refuses — so the changelog sync fails even though the local
   # fleet CLI is current. Keep this in lockstep with tools/shipyard.toml.
-  SHIPYARD_VERSION: "0.78.0"
+  # Floor is 0.79.0, NOT 0.78.0. `push_mode = "pr"` was honoured from 0.78.0
+  # onward, but until 0.79.0 the changelog commit was still stamped
+  # `[skip ci]` — correct for the direct-push path, fatal on the PR path,
+  # because Actions then skips every workflow and the PR can never obtain
+  # the required checks it needs to merge. Nine changelog PRs accumulated
+  # unmergeable that way (v0.751.0 → v0.759.0) and blocked the release
+  # pipeline behind them. Keep in lockstep with tools/shipyard.toml.
+  SHIPYARD_VERSION: "0.80.2"
 
 jobs:
   sync:
