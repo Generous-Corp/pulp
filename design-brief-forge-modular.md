@@ -124,6 +124,26 @@ means telling someone to buy what they already own.
 Design the mention picker, the three states, and how a blocked mention reads.
 Brands work too — `@befaco`, `@4ms`, `@mutable instruments` (425 brands).
 
+## The random button
+
+Forge has a random button next to the prompt — press it and you get something
+without having to think of it first. Keep it, and make it **follow the mode
+you're in**:
+
+- **Module tab** → a random module. This is the default mode.
+- **Patch tab** → a random patch.
+
+Those produce very different things, so the button shouldn't feel like one
+generic shuffle. A random module is a single idea — "a 6 HP wavefolder with
+drive and symmetry". A random patch is a whole rack that has to make sense as
+a piece of music, and it can only use modules the person actually has
+installed, which varies enormously between users.
+
+Worth thinking about: whether the button says what it's about to make before
+it commits, or just makes it. Forge's version can be reckless because a plugin
+is one thing; a random patch is a bigger swing, and a user with 12 modules
+installed gets a very different result from one with 400.
+
 ## Install
 
 The app compiles real modules, so it needs VCV's Rack SDK (~40 MB), which we
@@ -176,7 +196,8 @@ set, in the Forge design language, that reads correctly at Eurorack scale
 
 ## What I'd like back
 
-1. The shared home screen, and both modes at rest and mid-generation.
+1. The shared home screen, and both modes at rest and mid-generation —
+   including the mode-aware random button.
 2. The patch explanation treatment — the heart of the product.
 3. The @mention picker with its three states.
 4. The two animations, as working CSS/JS.
