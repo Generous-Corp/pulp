@@ -15,6 +15,8 @@
       "trigger_paths": [
         "core/**/include/**/*.hpp",
         "core/**/include/**/*.h",
+        "core/**/src/**/*.hpp",
+        "core/**/src/**/*.h",
         "core/**/src/**/*.cpp",
         "core/**/src/**/*.mm",
         "core/**/src/**/*.c",
