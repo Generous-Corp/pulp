@@ -4,7 +4,7 @@
   "brand": "Forge",
   "version": "2.0.0",
   "license": "MIT",
-  "author": "Forge",
+  "author": "Generous Corp",
   "module_order": [
     "VCO",
     "VCF",
@@ -16,5 +16,8 @@
     "MIX",
     "ATT",
     "MULT"
-  ]
+  ],
+  "plugin_url": "https://github.com/Generous-Corp/forge",
+  "manual_url": "https://github.com/Generous-Corp/forge/blob/main/docs/modular.md",
+  "source_url": "https://github.com/Generous-Corp/forge"
 }

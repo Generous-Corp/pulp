@@ -31,9 +31,11 @@ pulp_add_rack_plugin(forge-modular
     VERSION "2.0.0"
     MANIFEST "${_fm_dir}/plugin.json"
     RES_DIR "${_fm_dir}/res"
+    LICENSES "${_fm_dir}/LICENSE.md" "${_fm_dir}/LICENSE-MIT.txt"
     SOURCES
         "${_fm_dir}/src/plugin.cpp"
-        "${_fm_dir}/src/VCO.cpp")
+        "${_fm_dir}/src/VCO.cpp"
+        "${_fm_dir}/src/MIX.cpp")
 
 add_dependencies(forge-modular forge-modular-codegen)
 

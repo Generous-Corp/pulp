@@ -96,7 +96,7 @@ endfunction()
 # same shape as pulp_add_plugin_bundle, so this function is deliberately its
 # sibling rather than a new model.
 function(pulp_add_rack_plugin target)
-    cmake_parse_arguments(RACK "" "SLUG;VERSION;RES_DIR;MANIFEST" "SOURCES" ${ARGN})
+    cmake_parse_arguments(RACK "" "SLUG;VERSION;RES_DIR;MANIFEST" "SOURCES;LICENSES" ${ARGN})
 
     if(NOT PULP_HAS_RACK)
         message(FATAL_ERROR
@@ -173,6 +173,16 @@ function(pulp_add_rack_plugin target)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${RACK_RES_DIR}" "${_stage}/res")
     endif()
+
+    # Licence and attribution ride inside the package. A Rack plugin links the
+    # GPLv3 SDK under its non-commercial exception, so the terms a user inherits
+    # -- and the fact that SELLING one needs a licence from VCV -- must travel
+    # with the artifact, not live only in a repo.
+    foreach(_lic ${RACK_LICENSES})
+        get_filename_component(_lic_name "${_lic}" NAME)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_lic}" "${_stage}/${_lic_name}")
+    endforeach()
 
     # A .vcvplugin is a zstd-compressed tar of the plugin directory.
     find_program(PULP_ZSTD_EXE zstd)

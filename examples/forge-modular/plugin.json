@@ -3,8 +3,11 @@
   "name": "Forge Modular",
   "version": "2.0.0",
   "license": "MIT",
-  "author": "Forge",
+  "author": "Generous Corp",
   "brand": "Forge",
+  "pluginUrl": "https://github.com/Generous-Corp/forge",
+  "manualUrl": "https://github.com/Generous-Corp/forge/blob/main/docs/modular.md",
+  "sourceUrl": "https://github.com/Generous-Corp/forge",
   "modules": [
     {
       "slug": "VCO",
