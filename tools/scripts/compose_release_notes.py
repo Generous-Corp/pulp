@@ -20,7 +20,15 @@ SKIP_SUBJECT_PATTERNS = (
     re.compile(r"^chore: bump .*version", re.IGNORECASE),
     re.compile(r"^chore\(release\): ", re.IGNORECASE),
     re.compile(r"^bump .*to v?\d+\.\d+\.\d+$", re.IGNORECASE),
-    re.compile(r"^docs: regenerate changelog for v\d+\.\d+\.\d+ \[skip ci\]$", re.IGNORECASE),
+    # The `[skip ci]` suffix is OPTIONAL: Shipyard stamps it only on the
+    # direct-push path. From 0.79.0 the PR path omits it (the marker made the
+    # changelog PR unmergeable, since Actions then skipped the required
+    # checks), so a suffix-mandatory pattern would stop matching and leak
+    # changelog-regeneration commits into release notes as real changes.
+    re.compile(
+        r"^docs: regenerate changelog for v\d+\.\d+\.\d+( \[skip ci\])?$",
+        re.IGNORECASE,
+    ),
 )
 
 SECTION_ORDER = (
