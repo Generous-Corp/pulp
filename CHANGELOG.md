@@ -8,6 +8,253 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07590"></a>
+## [0.759.0] - 2026-07-28
+
+- release/version bump ([#6772](https://github.com/Generous-Corp/pulp/pull/6772))
+- ci/webhook endpoint watchdog ([#6769](https://github.com/Generous-Corp/pulp/pull/6769))
+- fix/smf tick scale div zero ([#6767](https://github.com/Generous-Corp/pulp/pull/6767))
+- perf/merge queue only required workflows ([#6765](https://github.com/Generous-Corp/pulp/pull/6765))
+- fix/vellum trusted gate merge ref ([#6761](https://github.com/Generous-Corp/pulp/pull/6761))
+- fix/threejs shared source cache ([#6747](https://github.com/Generous-Corp/pulp/pull/6747))
+
+<a id="v07580"></a>
+## [0.758.0] - 2026-07-28
+
+- release/version bump ([#6759](https://github.com/Generous-Corp/pulp/pull/6759))
+- feature/synth per note noteon policy ([#6749](https://github.com/Generous-Corp/pulp/pull/6749))
+- fix/ruleset drift reads branch protection ([#6753](https://github.com/Generous-Corp/pulp/pull/6753))
+- fix/msvc duplicate designator 20260727 ([#6703](https://github.com/Generous-Corp/pulp/pull/6703))
+- fix/design import off link ([#6756](https://github.com/Generous-Corp/pulp/pull/6756))
+- fix/windows arch tranche3 20260726 ([#6755](https://github.com/Generous-Corp/pulp/pull/6755))
+- feature/param metadata bridge ([#6751](https://github.com/Generous-Corp/pulp/pull/6751))
+- docs/drop cleanroom language ([#6754](https://github.com/Generous-Corp/pulp/pull/6754))
+- feature/named value channels ([#6748](https://github.com/Generous-Corp/pulp/pull/6748))
+- fix/inspector loopback bind ([#6745](https://github.com/Generous-Corp/pulp/pull/6745))
+- feature/binding failure recorder ([#6743](https://github.com/Generous-Corp/pulp/pull/6743))
+
+<a id="v07570"></a>
+## [0.757.0] - 2026-07-28
+
+- release/version bump ([#6752](https://github.com/Generous-Corp/pulp/pull/6752))
+
+<a id="v07560"></a>
+## [0.756.0] - 2026-07-28
+
+- release/version bump ([#6741](https://github.com/Generous-Corp/pulp/pull/6741))
+- feature/vst3 clap ui hot reload ([#6740](https://github.com/Generous-Corp/pulp/pull/6740))
+- docs/ci ghapp merge fallback policy 20260727 ([#6737](https://github.com/Generous-Corp/pulp/pull/6737))
+
+<a id="v07550"></a>
+## [0.755.0] - 2026-07-28
+
+- release/version bump ([#6732](https://github.com/Generous-Corp/pulp/pull/6732))
+- fix/vellum freeze slice coverage 20260727 ([#6736](https://github.com/Generous-Corp/pulp/pull/6736))
+- feature/circuit kick tune control ([#6735](https://github.com/Generous-Corp/pulp/pull/6735))
+- fix/editor soft wrap word boundary 20260727 ([#6734](https://github.com/Generous-Corp/pulp/pull/6734))
+- fix/sdk ships clap plist template 20260727 ([#6731](https://github.com/Generous-Corp/pulp/pull/6731))
+- feature/round2 followups ([#6730](https://github.com/Generous-Corp/pulp/pull/6730))
+- docs/dawproject support clarity ([#6725](https://github.com/Generous-Corp/pulp/pull/6725))
+- fix/version at land refresh derived 20260727 ([#6723](https://github.com/Generous-Corp/pulp/pull/6723))
+
+<a id="v07540"></a>
+## [0.754.0] - 2026-07-27
+
+- release/version bump ([#6711](https://github.com/Generous-Corp/pulp/pull/6711))
+- ci/promote designator warnings ([#6719](https://github.com/Generous-Corp/pulp/pull/6719))
+- feat/musical typing app menu 20260727 ([#6717](https://github.com/Generous-Corp/pulp/pull/6717))
+- explore/chardelay eartune 20260727 ([#6718](https://github.com/Generous-Corp/pulp/pull/6718))
+- feature/custom node latency reporting ([#6701](https://github.com/Generous-Corp/pulp/pull/6701))
+- fix/msvc int128 clip launch 20260727 ([#6716](https://github.com/Generous-Corp/pulp/pull/6716))
+- docs/consumer project packaging 20260727 ([#6715](https://github.com/Generous-Corp/pulp/pull/6715))
+- docs/timeline api surface ([#6692](https://github.com/Generous-Corp/pulp/pull/6692))
+- ci/gcc compile gate ([#6704](https://github.com/Generous-Corp/pulp/pull/6704))
+- feature/dsp capabilities sdk install ([#6708](https://github.com/Generous-Corp/pulp/pull/6708))
+
+<a id="v07530"></a>
+## [0.753.0] - 2026-07-27
+
+- release/version bump ([#6691](https://github.com/Generous-Corp/pulp/pull/6691))
+- explore/chardelay eartune 20260727 ([#6702](https://github.com/Generous-Corp/pulp/pull/6702))
+- feature/dsp capability registry ([#6690](https://github.com/Generous-Corp/pulp/pull/6690))
+- feature/timeline examples session ([#6686](https://github.com/Generous-Corp/pulp/pull/6686))
+- fix/duplicate custom latency designator ([#6693](https://github.com/Generous-Corp/pulp/pull/6693))
+- feature/dawproject export ([#6688](https://github.com/Generous-Corp/pulp/pull/6688))
+- fix/clap bundle plist 20260727 ([#6685](https://github.com/Generous-Corp/pulp/pull/6685))
+- feature/tom per path lofi ([#6687](https://github.com/Generous-Corp/pulp/pull/6687))
+- feature/mix ramp note names ([#6669](https://github.com/Generous-Corp/pulp/pull/6669))
+- feature/forge dev sdk profile 20260726 ([#6673](https://github.com/Generous-Corp/pulp/pull/6673))
+
+<a id="v07520"></a>
+## [0.752.0] - 2026-07-27
+
+- chore/reanchor version at land 20260727 ([#6675](https://github.com/Generous-Corp/pulp/pull/6675))
+- feature/standalone musical typing 20260726 ([#6670](https://github.com/Generous-Corp/pulp/pull/6670))
+- docs/dsp forge exposure contract 20260726 ([#6680](https://github.com/Generous-Corp/pulp/pull/6680))
+- feature/timeline track mixer ([#6576](https://github.com/Generous-Corp/pulp/pull/6576))
+- feature/state restore gate ([#6667](https://github.com/Generous-Corp/pulp/pull/6667))
+- fix/analog vcf tail proof 20260727 ([#6663](https://github.com/Generous-Corp/pulp/pull/6663))
+- feature/timeline note modifiers ([#6574](https://github.com/Generous-Corp/pulp/pull/6574))
+- refactor/character delay code health 20260727 ([#6671](https://github.com/Generous-Corp/pulp/pull/6671))
+- fix/local diff cover fast suite 20260726 ([#6668](https://github.com/Generous-Corp/pulp/pull/6668))
+- feature/dsp series round2 ship ([#6591](https://github.com/Generous-Corp/pulp/pull/6591))
+- feature/timeline production mode ([#6567](https://github.com/Generous-Corp/pulp/pull/6567))
+- feature/drum catalog contract fixes ([#6664](https://github.com/Generous-Corp/pulp/pull/6664))
+- feature/timeline sequence ref ([#6615](https://github.com/Generous-Corp/pulp/pull/6615))
+- fix/posttooluse root resolution 20260726 ([#6657](https://github.com/Generous-Corp/pulp/pull/6657))
+- fix/custom node latency 20260726 ([#6648](https://github.com/Generous-Corp/pulp/pull/6648))
+- feature/drum membrane layers ([#6655](https://github.com/Generous-Corp/pulp/pull/6655))
+- feature/forge modulation runtime controls ([#6653](https://github.com/Generous-Corp/pulp/pull/6653))
+- feature/timeline note transform ([#6619](https://github.com/Generous-Corp/pulp/pull/6619))
+- fix/character delay final hardening 20260726 ([#6642](https://github.com/Generous-Corp/pulp/pull/6642))
+- fix/timeline sdk consumer closure dedupe 20260726 ([#6650](https://github.com/Generous-Corp/pulp/pull/6650))
+- test/fdn forge catalog contracts 20260726 ([#6652](https://github.com/Generous-Corp/pulp/pull/6652))
+- docs/midi fx guide 20260726 ([#6649](https://github.com/Generous-Corp/pulp/pull/6649))
+- docs/mod utils api ([#6647](https://github.com/Generous-Corp/pulp/pull/6647))
+- docs/fdn reverb architecture 20260726 ([#6646](https://github.com/Generous-Corp/pulp/pull/6646))
+- feature/mod toolkit architectural hardening 20260726 ([#6641](https://github.com/Generous-Corp/pulp/pull/6641))
+- fix/windows editor input surface ([#6637](https://github.com/Generous-Corp/pulp/pull/6637))
+- fix/fdn reverb proof hardening 20260726 ([#6640](https://github.com/Generous-Corp/pulp/pull/6640))
+- feature/timeline session persistence ([#6636](https://github.com/Generous-Corp/pulp/pull/6636))
+- fix/sampler benchmark evidence 20260726 ([#6625](https://github.com/Generous-Corp/pulp/pull/6625))
+- fix/analog vcf readout 20260726 ([#6624](https://github.com/Generous-Corp/pulp/pull/6624))
+- test/character delay gap closure corrected 20260726 ([#6628](https://github.com/Generous-Corp/pulp/pull/6628))
+- feature/synth voice choke ([#6605](https://github.com/Generous-Corp/pulp/pull/6605))
+- fix/mod toolkit cutoff telemetry reset 20260726 ([#6630](https://github.com/Generous-Corp/pulp/pull/6630))
+- verify/pointer midi ci postmerge 20260726 ([#6626](https://github.com/Generous-Corp/pulp/pull/6626))
+- fix/decisions hook python ([#6620](https://github.com/Generous-Corp/pulp/pull/6620))
+- fix/clap gesture boundaries ([#6587](https://github.com/Generous-Corp/pulp/pull/6587))
+- fix/ci advisory runner isolation 20260726 ([#6618](https://github.com/Generous-Corp/pulp/pull/6618))
+- feature/timeline groove ([#6582](https://github.com/Generous-Corp/pulp/pull/6582))
+- fix/retained layer cache clean ([#6559](https://github.com/Generous-Corp/pulp/pull/6559))
+- fix/canvas pointer input rebased ([#6555](https://github.com/Generous-Corp/pulp/pull/6555))
+
+<a id="v07510"></a>
+## [0.751.0] - 2026-07-26
+
+- release/version bump ([#6521](https://github.com/Generous-Corp/pulp/pull/6521))
+- feature/mod toolkit gap closure 20260725 ([#6590](https://github.com/Generous-Corp/pulp/pull/6590))
+- fix/ubsan slow test scope ([#6601](https://github.com/Generous-Corp/pulp/pull/6601))
+- fix/parameter display names ([#6592](https://github.com/Generous-Corp/pulp/pull/6592))
+- fix/designir audio widget two way binding ([#6595](https://github.com/Generous-Corp/pulp/pull/6595))
+- fix/ci aggregate stable cwd ([#6603](https://github.com/Generous-Corp/pulp/pull/6603))
+- fix/cli create symlink containment ([#6569](https://github.com/Generous-Corp/pulp/pull/6569))
+- fix/sampler rt trap paint scope ([#6565](https://github.com/Generous-Corp/pulp/pull/6565))
+- fix/fdn reverb prompt gap closure ([#6594](https://github.com/Generous-Corp/pulp/pull/6594))
+- feature/analog vcf catalog ([#6533](https://github.com/Generous-Corp/pulp/pull/6533))
+- fix/reject unsupported declarative bindings ([#6593](https://github.com/Generous-Corp/pulp/pull/6593))
+- fix/text editor selection line height ([#6589](https://github.com/Generous-Corp/pulp/pull/6589))
+- fix/physical tape loop calibration 20260725 ([#6585](https://github.com/Generous-Corp/pulp/pull/6585))
+- fix/standalone host gesture claim gating ([#6583](https://github.com/Generous-Corp/pulp/pull/6583))
+- feature/timeline context lane ([#6577](https://github.com/Generous-Corp/pulp/pull/6577))
+- fix/windows editor vsync ([#6563](https://github.com/Generous-Corp/pulp/pull/6563))
+- feature/timeline osc surface ([#6545](https://github.com/Generous-Corp/pulp/pull/6545))
+- feature/timeline smf ([#6546](https://github.com/Generous-Corp/pulp/pull/6546))
+- feature/drum string ([#6554](https://github.com/Generous-Corp/pulp/pull/6554))
+- fix/linux runner host label ([#6580](https://github.com/Generous-Corp/pulp/pull/6580))
+- fix/installer mcp timeout ([#6579](https://github.com/Generous-Corp/pulp/pull/6579))
+- fix/designer js label escape ([#6573](https://github.com/Generous-Corp/pulp/pull/6573))
+- feature/timeline follow actions ([#6550](https://github.com/Generous-Corp/pulp/pull/6550))
+- refactor/shared dsp primitives ([#6551](https://github.com/Generous-Corp/pulp/pull/6551))
+- fix/simulate drag pointer parity ([#6571](https://github.com/Generous-Corp/pulp/pull/6571))
+- feature/timeline markers regions ([#6552](https://github.com/Generous-Corp/pulp/pull/6552))
+- fix/web compat audio widget lowering ([#6562](https://github.com/Generous-Corp/pulp/pull/6562))
+- fix/timeline sdk closure sample bank ([#6556](https://github.com/Generous-Corp/pulp/pull/6556))
+- refactor/automation target exhaustive ([#6560](https://github.com/Generous-Corp/pulp/pull/6560))
+- fix/linux choc memcmp include ([#6541](https://github.com/Generous-Corp/pulp/pull/6541))
+- fix/text editor caret line height ([#6557](https://github.com/Generous-Corp/pulp/pull/6557))
+- fix/sampler interpolation evidence ([#6564](https://github.com/Generous-Corp/pulp/pull/6564))
+- refactor/clip content exhaustive ([#6566](https://github.com/Generous-Corp/pulp/pull/6566))
+- fix/modal bank overflow ([#6542](https://github.com/Generous-Corp/pulp/pull/6542))
+- feature/signal mod toolkit ([#6553](https://github.com/Generous-Corp/pulp/pull/6553))
+- fix/plugin scanner malformed json ([#6531](https://github.com/Generous-Corp/pulp/pull/6531))
+- feature/timeline scrubbing ([#6548](https://github.com/Generous-Corp/pulp/pull/6548))
+- feature/interchange core ([#6549](https://github.com/Generous-Corp/pulp/pull/6549))
+- feature/fdn reverb ([#6527](https://github.com/Generous-Corp/pulp/pull/6527))
+- fix/sampler typed bus activity overrun ([#6536](https://github.com/Generous-Corp/pulp/pull/6536))
+- feature/sample bank runtime ([#6535](https://github.com/Generous-Corp/pulp/pull/6535))
+- feature/drum synthesis ([#6534](https://github.com/Generous-Corp/pulp/pull/6534))
+- feature/timeline pdc render continuity ([#6530](https://github.com/Generous-Corp/pulp/pull/6530))
+- feature/designir web audio binding 20260724 current ([#6526](https://github.com/Generous-Corp/pulp/pull/6526))
+- feature/character delay ([#6524](https://github.com/Generous-Corp/pulp/pull/6524))
+- feature/stateful bake disk roundtrip ([#6496](https://github.com/Generous-Corp/pulp/pull/6496))
+- fix/timeline plugin installer hardening ([#6525](https://github.com/Generous-Corp/pulp/pull/6525))
+- feature/figma slot correlation ([#6498](https://github.com/Generous-Corp/pulp/pull/6498))
+- resume/editor resize logic final ([#6513](https://github.com/Generous-Corp/pulp/pull/6513))
+- feature/figma token provenance ([#6497](https://github.com/Generous-Corp/pulp/pull/6497))
+- feature/timeline sdk src hardening ([#6520](https://github.com/Generous-Corp/pulp/pull/6520))
+- fix/forge build compat 20260724 ([#6519](https://github.com/Generous-Corp/pulp/pull/6519))
+- phase/vellum authority activation attempt 2 ([#6516](https://github.com/Generous-Corp/pulp/pull/6516))
+- fix/vellum reader installation identity 20260724 ([#6518](https://github.com/Generous-Corp/pulp/pull/6518))
+- fix/vellum private api diagnostics 20260724 ([#6517](https://github.com/Generous-Corp/pulp/pull/6517))
+- phase/vellum prepared projection 20260724 ([#6515](https://github.com/Generous-Corp/pulp/pull/6515))
+- phase/vellum authority activation 20260724 ([#6514](https://github.com/Generous-Corp/pulp/pull/6514))
+- phase/vellum authority activation ([#6510](https://github.com/Generous-Corp/pulp/pull/6510))
+- phase/vellum trusted bootstrap ([#6511](https://github.com/Generous-Corp/pulp/pull/6511))
+- fix/worker pool progress wait ([#6512](https://github.com/Generous-Corp/pulp/pull/6512))
+
+<a id="v07500"></a>
+## [0.750.0] - 2026-07-23
+
+- release/version bump ([#6507](https://github.com/Generous-Corp/pulp/pull/6507))
+
+<a id="v07490"></a>
+## [0.749.0] - 2026-07-23
+
+- release/version bump ([#6454](https://github.com/Generous-Corp/pulp/pull/6454))
+- fix/6451 timeline ci portability lifetime ([#6487](https://github.com/Generous-Corp/pulp/pull/6487))
+- feature/runtime http streaming ([#6492](https://github.com/Generous-Corp/pulp/pull/6492))
+- fix/mac editor first responder sync ([#6491](https://github.com/Generous-Corp/pulp/pull/6491))
+- fix/import decoder tail ([#6420](https://github.com/Generous-Corp/pulp/pull/6420))
+- fix/svg stroke survival ([#6419](https://github.com/Generous-Corp/pulp/pull/6419))
+- fix/svg fill rule ([#6416](https://github.com/Generous-Corp/pulp/pull/6416))
+- fix/knob ring offcenter ([#6402](https://github.com/Generous-Corp/pulp/pull/6402))
+- fix/ctest multilabel properties ([#6488](https://github.com/Generous-Corp/pulp/pull/6488))
+- fix/threejs jsc smoke timeout ([#6495](https://github.com/Generous-Corp/pulp/pull/6495))
+- fix/env chip placement ([#6417](https://github.com/Generous-Corp/pulp/pull/6417))
+- fix/shader effect layer crop ([#6440](https://github.com/Generous-Corp/pulp/pull/6440))
+- feature/timeline automation host delivery pr4 ([#6482](https://github.com/Generous-Corp/pulp/pull/6482))
+- chore/org residual pulp sweep ([#6468](https://github.com/Generous-Corp/pulp/pull/6468))
+- fix/heritage perf gate labels ([#6472](https://github.com/Generous-Corp/pulp/pull/6472))
+- feature/timeline codegen ts ([#6478](https://github.com/Generous-Corp/pulp/pull/6478))
+- feature/au midi effect adapter ([#6438](https://github.com/Generous-Corp/pulp/pull/6438))
+- feature/timeline take comp model ([#6473](https://github.com/Generous-Corp/pulp/pull/6473))
+- phase/vellum extraction seed ([#6471](https://github.com/Generous-Corp/pulp/pull/6471))
+- feature/timeline stuck note proof ([#6475](https://github.com/Generous-Corp/pulp/pull/6475))
+- feature/g5 host inject ([#6474](https://github.com/Generous-Corp/pulp/pull/6474))
+- feature/timeline registry codegen ([#6462](https://github.com/Generous-Corp/pulp/pull/6462))
+- feature/timeline dawproject import ([#6467](https://github.com/Generous-Corp/pulp/pull/6467))
+- fix/vst3 hosted editor null ([#6444](https://github.com/Generous-Corp/pulp/pull/6444))
+- chore/demo source links generous corp ([#6466](https://github.com/Generous-Corp/pulp/pull/6466))
+- feature/timeline clip launch ([#6463](https://github.com/Generous-Corp/pulp/pull/6463))
+- fix/alias jobs off hosted pool ([#6446](https://github.com/Generous-Corp/pulp/pull/6446))
+- feature/g5 portable render ([#6461](https://github.com/Generous-Corp/pulp/pull/6461))
+- feature/timeline midi param map ([#6460](https://github.com/Generous-Corp/pulp/pull/6460))
+- fix/post tag sync shipyard pin ([#6458](https://github.com/Generous-Corp/pulp/pull/6458))
+- fix/gpu tests resource lock ([#6445](https://github.com/Generous-Corp/pulp/pull/6445))
+- fix/no deploy from merge group ([#6457](https://github.com/Generous-Corp/pulp/pull/6457))
+- feature/timeline createasset command ([#6456](https://github.com/Generous-Corp/pulp/pull/6456))
+- feature/timeline stuck note stress ([#6453](https://github.com/Generous-Corp/pulp/pull/6453))
+- feature/g5 portable compile ([#6452](https://github.com/Generous-Corp/pulp/pull/6452))
+- chore/bump shipyard pin to v0.78.0 ([#6450](https://github.com/Generous-Corp/pulp/pull/6450))
+
+<a id="v07480"></a>
+## [0.748.0] - 2026-07-22
+
+- release/version bump ([#6449](https://github.com/Generous-Corp/pulp/pull/6449))
+- chore/org ref sweep ([#6447](https://github.com/Generous-Corp/pulp/pull/6447))
+- feature/forge f2a bakelayer param injection ([#6405](https://github.com/Generous-Corp/pulp/pull/6405))
+- feature/enable silent revert guard ([#6157](https://github.com/Generous-Corp/pulp/pull/6157))
+- release/version bump ([#6434](https://github.com/Generous-Corp/pulp/pull/6434))
+- fix/sampler param contract ([#6441](https://github.com/Generous-Corp/pulp/pull/6441))
+- feature/timeline automation persistence ([#6435](https://github.com/Generous-Corp/pulp/pull/6435))
+- feature/merge queue stabilize ([#6437](https://github.com/Generous-Corp/pulp/pull/6437))
+- fix/import design scratch test isolation ([#6439](https://github.com/Generous-Corp/pulp/pull/6439))
+- fix/fidelity lens hygiene ([#6414](https://github.com/Generous-Corp/pulp/pull/6414))
+- fix/au oop present ([#6436](https://github.com/Generous-Corp/pulp/pull/6436))
+- fix/perf tests off required pr gate ([#6433](https://github.com/Generous-Corp/pulp/pull/6433))
+- feat(timeline): add automation lane commands with unified reduction ([#6430](https://github.com/Generous-Corp/pulp/pull/6430))
+
 <a id="v07470"></a>
 ## [0.747.0] - 2026-07-21
 
@@ -2915,7 +3162,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 <a id="v03820"></a>
 ## [0.382.0] - 2026-06-08
 
-- feat(import): materialize pulp import emit into a buildable scaffold + framework-source output scan ([#3634](https://github.com/Generous-Corp/pulp/pull/3634))
+- feat(import): materialize pulp import emit into a buildable scaffold + clean-room output scan ([#3634](https://github.com/Generous-Corp/pulp/pull/3634))
 - refactor: split WidgetBridge storage style registrar ([#3653](https://github.com/Generous-Corp/pulp/pull/3653))
 - refactor: split WidgetBridge visibility style registrar ([#3652](https://github.com/Generous-Corp/pulp/pull/3652))
 - refactor: split WidgetBridge event registrar ([#3649](https://github.com/Generous-Corp/pulp/pull/3649))
@@ -6836,6 +7083,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.759.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.759.0
+[0.758.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.758.0
+[0.757.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.757.0
+[0.756.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.756.0
+[0.755.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.755.0
+[0.754.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.754.0
+[0.753.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.753.0
+[0.752.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.752.0
+[0.751.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.751.0
+[0.750.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.750.0
+[0.749.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.749.0
+[0.748.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.748.0
 [0.747.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.747.0
 [0.746.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.746.0
 [0.745.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.745.0
