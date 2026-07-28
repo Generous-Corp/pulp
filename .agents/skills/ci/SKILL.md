@@ -3874,6 +3874,17 @@ up" by weakening the check or by writing a `pulp-only` disposition you cannot
 justify; the rationale field is the artifact that makes a later ingest decision
 possible. `docs/contracts/vellum-extraction-freeze.md` is the contract.
 
+**If `Vellum freeze` passes but `Trusted base executor` fails, the PR is just
+behind `main`.** The two jobs run the same check, so disagreement is a base-
+resolution artifact, never a content problem. The trusted gate evaluates the
+**merge result** (`refs/pull/N/merge`) for this reason: `base.sha` is the
+base-branch *tip*, so diffing it against the raw branch head reports every file
+that landed on `main` after you forked as *deleted by your PR* — and an outbox
+event someone else added then trips `Vellum outbox events are append-only;
+modify/delete/rename is forbidden` against an author who deleted nothing. Merge
+`main` into the branch and it clears. A genuinely conflicted PR has no merge ref
+and is reported as such, rather than as a freeze violation.
+
 The `pull_request_target` + `statuses: write` shape on the trusted gate is
 intentional and safe as written: it checks out `base.sha` with
 `persist-credentials: false`, executes **only** base-checkout scripts, and adds
