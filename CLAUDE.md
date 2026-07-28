@@ -880,6 +880,40 @@ What "CI green is enough" cost us on 2026-04-16: a UMP-cursor-advance P1 bug (`#
 
 **The only acceptable "no test in this PR" justification** is: pre-existing historical coverage gap in a subsystem you are not modifying. In that case, file a follow-up issue linked to `#290` and reference it in the commit trailer. Anything else — ship the test.
 
+### Confirm the failure — a green test proves nothing on its own
+
+A test that passes may be asserting the same thing the code assumes, or never
+reaching the code at all. Before believing a new test covers its fix, **break the
+fix and watch that test fail.** This has repeatedly caught tests that could not
+fail: a guard that skips its check when the thing it needs is absent, an
+assertion that restates the code's own assumption, a probe whose inputs never
+reach the changed path.
+
+Run that loop with **`tools/scripts/confirm_failure.sh`** rather than by hand:
+
+```bash
+tools/scripts/confirm_failure.sh \
+  --file core/midi/include/pulp/midi/synthesiser.hpp \
+  --break "perl -0pi -e 's/policy\.priority/0/'" \
+  --build-dir build --target pulp-test-synthesiser \
+  --test ./build/test/pulp-test-synthesiser
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+```
+
+**Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
+source and rebuilding within the same filesystem second leaves make comparing
+equal mtimes, so the object is judged current and the binary keeps the OLD code —
+`touch` does not reliably fix this, because the touch lands in the same second.
+Both directions give a wrong answer, and the quiet one is worse: a stale object
+during the *break* step makes the control falsely pass, which reads as "my test
+does not cover this" and sends you off to rewrite a test that was already fine.
+The script restores through git, deletes the objects, and refuses to report a
+verdict unless it observed the recompile in the build log. `"Built target"` is
+not evidence; a compile line for your file is.
+
+Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
+`confirm-failure-harness` ctest so it is executed rather than merely present.
+
 **Test hygiene:**
 
 - Catch2 tag names cannot contain `#` (reserved). Use `[issue-NNN]` not `[#NNN]`.
