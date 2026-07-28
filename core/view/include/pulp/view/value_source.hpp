@@ -8,7 +8,9 @@
 /// reader polled on the frame clock), and the subscription that lets a live
 /// meter keep an editor's frames alive (see needs_continuous_frames).
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 
 #include <pulp/runtime/triple_buffer.hpp>
 
@@ -43,6 +45,55 @@ public:
 
 private:
     runtime::TripleBuffer<MeterFrame> buffer_;
+};
+
+/// A block of samples for a scope-style display — an envelope curve, a
+/// detector's output, a window of the signal a processor is actually working on.
+///
+/// Fixed capacity with a runtime valid count, the same shape as `MeterFrame`
+/// and `AudioProbeSnapshot`. That is what keeps it trivially copyable, which is
+/// what lets it ride a `TripleBuffer` with no allocation on the publish path and
+/// no new lock-free code to get wrong. The cost is a flat 3 × 16 KB per vector
+/// channel whether or not the publisher fills it; a channel is opt-in, so a
+/// plugin that declares none pays nothing.
+struct VectorFrame {
+    static constexpr int kMaxSamples = 4096;
+    std::array<float, kMaxSamples> samples{};
+    /// Valid samples in `samples`. Consumers must still bound their index by
+    /// `min(count, kMaxSamples)` — `publish()` clamps, but a frame read back
+    /// from anywhere else is not guaranteed to have.
+    int count = 0;
+};
+
+/// Lock-free vector channel: the writer publishes a block of samples, the view
+/// reads the latest block paint-safe. Same one-writer/one-reader contract as
+/// `MeterSource`.
+///
+/// Latest-wins, like every channel here: a block the reader never got to is
+/// silently replaced. That is correct for a visualization — a scope shows the
+/// current state of the signal, not a lossless history of it.
+class VectorSource {
+public:
+    /// Publish a block from the writer (audio/host) thread. Alloc-free and
+    /// non-blocking: a bounded copy into the back buffer. More than
+    /// `VectorFrame::kMaxSamples` is truncated rather than rejected, so an
+    /// oversized block still renders its leading window instead of vanishing.
+    void publish(const float* samples, int count) {
+        VectorFrame frame;
+        frame.count = count < 0 ? 0 : (count > VectorFrame::kMaxSamples
+                                           ? VectorFrame::kMaxSamples
+                                           : count);
+        if (samples != nullptr && frame.count > 0) {
+            std::copy_n(samples, static_cast<std::size_t>(frame.count), frame.samples.begin());
+        }
+        buffer_.write(frame);
+    }
+
+    /// Read the latest published block from the reader (UI) thread.
+    VectorFrame read() { return buffer_.read(); }
+
+private:
+    runtime::TripleBuffer<VectorFrame> buffer_;
 };
 
 /// Lock-free scalar channel: a single paint-safe cached number (a readout value,
