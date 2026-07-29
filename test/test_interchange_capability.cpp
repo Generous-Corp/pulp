@@ -43,7 +43,7 @@ TEST_CASE("concept vocabulary is a closed, self-describing set", "[interchange]"
     }
 }
 
-TEST_CASE("the SMF table declares its bounded codec policy", "[interchange][smf]") {
+TEST_CASE("the SMF table declares its bounded reader and writer", "[interchange][smf]") {
     STATIC_REQUIRE(static_cast<std::uint8_t>(Format::DawProject) == 0);
     STATIC_REQUIRE(static_cast<std::uint8_t>(Format::Smf) == 1);
     STATIC_REQUIRE(kFormatCount == 2);
@@ -52,7 +52,7 @@ TEST_CASE("the SMF table declares its bounded codec policy", "[interchange][smf]
     REQUIRE(format_from_id("smf", resolved));
     REQUIRE(resolved == Format::Smf);
     REQUIRE(format_display_name(Format::Smf) == "Standard MIDI File");
-    REQUIRE_FALSE(format_has_writer(Format::Smf));
+    REQUIRE(format_has_writer(Format::Smf));
 
     for (Concept concept_value : {Concept::TrackFlat, Concept::ClipNote})
         REQUIRE(import_capability(Format::Smf, concept_value).level == ImportLevel::Full);

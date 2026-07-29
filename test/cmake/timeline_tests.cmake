@@ -28,6 +28,10 @@ target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
 pulp_add_test_suite(pulp-test-timeline-smf
     SOURCES test_timeline_smf.cpp
     LIBRARIES pulp::smf-interop pulp::midi)
+pulp_add_test_suite(pulp-test-smf-interchange
+    SOURCES test_smf_interchange.cpp
+    LIBRARIES pulp::smf-interchange pulp::smf-interop pulp::interchange
+    INCLUDE_DIRS ${choc_SOURCE_DIR})
 pulp_add_test_suite(pulp-test-timeline-production-mode
     SOURCES test_timeline_production_mode.cpp
     LIBRARIES pulp::timeline)

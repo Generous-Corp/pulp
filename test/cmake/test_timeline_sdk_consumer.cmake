@@ -107,6 +107,28 @@ if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
 endif()
 
+set(_smf_executable
+    "${_consumer_build}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_smf_executable}")
+    set(_smf_executable
+        "${_consumer_build}/${_producer_config}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_smf_executable}" RESULT_VARIABLE _smf_run_result)
+if(NOT _smf_run_result EQUAL 0)
+    message(FATAL_ERROR "SMF interchange SDK consumer exited ${_smf_run_result}")
+endif()
+
+set(_daw_export_executable
+    "${_consumer_build}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_daw_export_executable}")
+    set(_daw_export_executable
+        "${_consumer_build}/${_producer_config}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_daw_export_executable}" RESULT_VARIABLE _daw_export_run_result)
+if(NOT _daw_export_run_result EQUAL 0)
+    message(FATAL_ERROR "DAWproject exporter SDK consumer exited ${_daw_export_run_result}")
+endif()
+
 # The cookbook walks the authoring surface end to end -- transaction commit,
 # undo/redo, scene insert, compile+publish, capture prepare -- and returns a
 # distinct code per step. Building it only proves the headers and the installed

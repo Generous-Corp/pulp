@@ -89,8 +89,13 @@ concept by name:
 const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
 interchange::ExportOptions options;
 options.accepted_losses = plan.required_consent();   // review these, do not paste blindly
-auto artifacts = interchange::run_export(plan, options, dawproject::writer(project));
+auto artifacts = interchange::run_export(plan, options, dawproject::writer());
 ```
+
+The former `dawproject::writer(project, options)` overload remains temporarily
+available for source compatibility but is deprecated. Its `project` argument
+is deliberately ignored: the writer serializes the snapshot owned by the
+`ExportPlan`, so callers should migrate to `dawproject::writer(options)`.
 
 There is deliberately no force flag: a pipeline pins the exact losses it
 reviewed, so a loss kind introduced later stops that pipeline instead of riding
@@ -101,6 +106,18 @@ every concept that was dropped. The manifest travels inside the package rather
 than scrolling past in a console, because an export whose losses are invisible
 to whoever opens the file next is the failure this contract exists to prevent.
 Packing those entries plus media into a `.dawproject` zip is the caller's step.
+
+`pulp-loss-manifest.json` schema version 1 is shared by every interchange
+adapter. Its root contains numeric `schema_version`, string `format`, boolean
+`lossless`, and a `losses` array. Each loss contains string `concept`, `level`,
+`class`, `count`, and `detail`, plus an `owners` array of decimal strings;
+`degraded_to` is present only for a degradation. Counts and owner IDs are
+decimal strings so 64-bit values survive JSON consumers without precision loss.
+`owners` is a bounded diagnostic sample controlled by `CensusLimits`, while
+`count` is the complete occurrence count. The filename is reserved to
+`run_export()` and adapters cannot replace it. Changing this schema requires a
+new `schema_version`; version 1 replaces the older unversioned DAWproject
+manifest shape.
 
 Each exported track carries a neutral `<Channel>` — unity volume, centre pan.
 A receiving DAW registers the track from that element, and a file without one
@@ -148,6 +165,27 @@ target_link_libraries(my_timeline_app PRIVATE Pulp::smf-interop)
 `Pulp::smf-interop` exposes `pulp::timeline::import_smf` and
 `pulp::timeline::export_smf` from `<pulp/timeline/smf.hpp>`.
 
+For the same plan/consent contract as DAWproject export, request the separate
+adapter and include `<pulp/smf/interchange.hpp>`:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS smf-interchange)
+target_link_libraries(my_timeline_app PRIVATE Pulp::smf-interchange)
+```
+
+```cpp
+const auto plan = interchange::plan_export(project, interchange::Format::Smf);
+interchange::ExportOptions options;
+options.accepted_losses = plan.required_consent();   // review these, do not paste blindly
+auto artifacts = interchange::run_export(plan, options, smf::writer());
+```
+
+The format-bound writer can only be invoked by `run_export`, and the plan owns
+the project snapshot it measured. On success, `project.mid` and the centrally
+generated `pulp-loss-manifest.json` are returned. The adapter may omit only the
+concepts named by consent, strips consented note modifiers, and represents a
+consented continuous tempo ramp as Set Tempo steps at authored tempo points.
+
 Conversion runs entirely in the musical domain. An SMF carries its own timebase
 — a header division in ticks per quarter note plus Set Tempo and Time Signature
 meta-events — so import scales those ticks onto the canonical
@@ -172,11 +210,13 @@ so a tempo change mid-file survives the round trip as a tempo point.
 - `SmfImportLimits` bounds file bytes, tracks, events, notes, simultaneously
   sounding notes, tempo and meter points, meta payload bytes, track-name bytes,
   and the absolute tick ceiling before the corresponding state grows.
-- Export writes a format-1 file whose track 0 is a conductor track carrying the
+- Raw `export_smf` writes a format-1 file whose track 0 is a conductor track carrying the
   tempo and meter maps. Note velocity is scaled to the 7-bit MIDI domain; a
   velocity that would scale to zero is rejected rather than rewritten, because
   a zero-velocity Note On reads as a Note Off. A tempo ramp, a sample-anchored
-  clip, and a clip holding non-note content are errors, not approximations.
+  clip, and registered, opaque, nested-sequence, or media content are errors,
+  not approximations. Empty clips are silently absent from the raw event codec;
+  use the census-backed adapter when that loss must require consent.
 - Round trips through a dividing division preserve note start, duration, pitch,
   channel, and 7-bit-representable velocity exactly. Tempo returns within the
   Set Tempo event's whole-microsecond resolution.

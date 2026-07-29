@@ -68,7 +68,7 @@ struct FormatRecord {
 
 inline constexpr FormatRecord kFormatRecords[kFormatCount] = {
     {"dawproject", "DAWproject", true},
-    {"smf", "Standard MIDI File", false},
+    {"smf", "Standard MIDI File", true},
 };
 
 inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {

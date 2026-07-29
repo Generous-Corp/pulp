@@ -180,7 +180,7 @@ Format id `dawproject`. Writer registered: yes.
 
 ## Standard MIDI File
 
-Format id `smf`. Writer registered: no -- `run_export` refuses.
+Format id `smf`. Writer registered: yes.
 
 ### Import
 
