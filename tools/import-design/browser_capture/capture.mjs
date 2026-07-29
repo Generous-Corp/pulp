@@ -24,6 +24,7 @@ import {
   serveDenyProxy,
 } from "./security.mjs";
 import {
+  captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
   MAX_LOGICAL_CAPTURE_DIMENSION,
@@ -718,23 +719,12 @@ async function runCapture(options) {
     const tokenReport = await evaluateDesignTokens(cdp);
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
-    let previousScreenshot;
-    let screenshotBytes;
     // Compositor-backed pages can need several post-freeze presentation
     // boundaries even after DOM/timer motion is paused. Keep the proof strict
     // (two byte-identical frames) while allowing a bounded tail for that
     // pipeline to drain.
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const screenshot =
-        await cdp.call("Page.captureScreenshot", screenshotOptions);
-      const current = Buffer.from(screenshot.data, "base64");
-      if (previousScreenshot &&
-          sha256(previousScreenshot) === sha256(current)) {
-        screenshotBytes = current;
-        break;
-      }
-      previousScreenshot = current;
-    }
+    const screenshotBytes =
+      await captureStableScreenshot(cdp, screenshotOptions);
     if (!screenshotBytes) {
       const error = new Error(
         "the visual frame did not stabilize while capture evidence was collected");

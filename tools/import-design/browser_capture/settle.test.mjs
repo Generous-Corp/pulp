@@ -3,10 +3,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  captureStableScreenshot,
   freezeAndMeasureDocumentExtent,
   freezeDynamicTime,
   validateCaptureDimensions,
 } from "./settle.mjs";
+
+test("stable screenshot capture allows a bounded compositor drain", async () => {
+  const frames = ["one", "two", "three", "three"];
+  let calls = 0;
+  const cdp = {
+    async call(method) {
+      assert.equal(method, "Page.captureScreenshot");
+      const frame = frames[calls++] ?? "four";
+      return { data: Buffer.from(frame).toString("base64") };
+    },
+  };
+
+  const screenshot = await captureStableScreenshot(cdp, {}, 6, 0);
+
+  assert.equal(screenshot.toString(), "three");
+  assert.equal(calls, 4);
+});
+
+test("stable screenshot capture rejects a changing compositor", async () => {
+  let calls = 0;
+  const cdp = {
+    async call(method) {
+      assert.equal(method, "Page.captureScreenshot");
+      return { data: Buffer.from(`frame-${calls++}`).toString("base64") };
+    },
+  };
+
+  const screenshot = await captureStableScreenshot(cdp, {}, 4, 0);
+
+  assert.equal(screenshot, undefined);
+  assert.equal(calls, 4);
+});
 
 test("final capture extent rejects content wider or taller than the axis budget",
   () => {

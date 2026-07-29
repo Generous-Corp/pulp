@@ -157,6 +157,20 @@ export async function freezeDynamicTime(cdp) {
   });
 }
 
+export async function captureStableScreenshot(
+  cdp, screenshotOptions, maximumAttempts = 12, intervalMs = 16) {
+  let previous;
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    const screenshot =
+      await cdp.call("Page.captureScreenshot", screenshotOptions);
+    const current = Buffer.from(screenshot.data, "base64");
+    if (previous?.equals(current)) return current;
+    previous = current;
+    if (attempt + 1 < maximumAttempts) await delay(intervalMs);
+  }
+  return undefined;
+}
+
 export async function waitForStable(cdp, options = {}) {
   const stableRoundsRequired = options.stableRounds ?? 3;
   const maximumRounds = options.maximumRounds ?? 50;
