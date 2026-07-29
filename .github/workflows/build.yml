@@ -661,36 +661,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: |
-          # chrome/m144 Skia exposes fontconfig symbols
-          # (`FcInitLoadConfigAndFonts` et al.) that earlier Skia releases
-          # hid. Without the dev package,
-          # `pkg_check_modules(FONTCONFIG fontconfig)` in
-          # core/canvas/CMakeLists.txt comes up empty and the Linux link
-          # step fails. Mirrors the matching fix in release-cli.yml.
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libdbus-1-dev \
-            libdrm-dev \
-            libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libjack-jackd2-dev \
-            libx11-dev \
-            libxext-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libxrandr-dev \
-            libxrender-dev \
-            libxss-dev \
-            libxtst-dev \
-            libwayland-dev \
-            wayland-protocols \
-            ccache
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,

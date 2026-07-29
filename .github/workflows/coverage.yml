@@ -415,14 +415,9 @@ jobs:
 
       - name: Install Linux dependencies + Clang tooling
         if: matrix.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang llvm lld \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: clang llvm lld
 
       - name: Verify Clang tooling (macOS)
         # macOS runners ship Apple Clang with llvm-cov / llvm-profdata
@@ -701,6 +696,7 @@ jobs:
           if-no-files-found: error
 
       - name: Verify Cobertura XML exists
+        id: native_cobertura
         # Skipped when the suite was interrupted at the internal budget
         # (steps.coverage-suite.outputs.budget_hit): the report was dropped on
         # purpose, so hard-failing here would redden main on macOS/linux — the
@@ -735,6 +731,7 @@ jobs:
             --hint "llvm-cov / lcov_cobertura filtered out every source file — check scripts/run_coverage.sh's COVERAGE_IGNORE_REGEX and -object list against the actual profraw source paths."
 
       - name: Verify Python Cobertura XML exists
+        id: python_cobertura
         # coverage.py emits Cobertura XML too. Keep the same
         # file-non-empty + lines-valid assertions we use for the native
         # report so a broken Python lane doesn't silently upload nothing.
@@ -753,6 +750,7 @@ jobs:
             --hint "coverage.py did not record any executable tools/scripts lines."
 
       - name: Verify Apple LCOV exists
+        id: apple_lcov
         # Swift coverage is exported to repo-relative LCOV so Codecov
         # can attribute apple/Sources/** files against the git tree
         # instead of discarding LLVM JSON with absolute runner paths.
@@ -823,14 +821,14 @@ jobs:
 
       - name: Compute Codecov upload file list
         id: codecov_files
-        if: always()
+        if: steps.native_cobertura.outcome == 'success'
         shell: bash
         run: |
           files="build-coverage/coverage.cobertura.xml"
-          if [ "${{ matrix.os }}" = "linux" ] && [ -f build-coverage/python/coverage.python.xml ]; then
+          if [ "${{ steps.python_cobertura.outcome }}" = "success" ]; then
             files="${files},build-coverage/python/coverage.python.xml"
           fi
-          if [ "${{ matrix.os }}" = "macos" ] && [ -f build-coverage/apple/coverage.apple.lcov ]; then
+          if [ "${{ steps.apple_lcov.outcome }}" = "success" ]; then
             files="${files},build-coverage/apple/coverage.apple.lcov"
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
@@ -850,21 +848,16 @@ jobs:
         # upload."). A single per-OS flag per upload is the
         # supported shape.
         #
-        # fail_ci_if_error: false keeps upload outages from failing
-        # this artifact job. Per-PR enforcement happens in the
-        # coverage-diff gate below.
-        if: always()
-        uses: codecov/codecov-action@v5
+        # Local report failures remain hard errors. Transport failures are
+        # visible inside the shared action but do not replace the in-repo
+        # diff gate with Codecov availability as the merge boundary.
+        if: steps.native_cobertura.outcome == 'success' && github.event.pull_request.head.repo.fork != true
+        uses: ./.github/actions/upload-codecov-report
         with:
           files: ${{ steps.codecov_files.outputs.files }}
           flags: ${{ matrix.flag }}
-          disable_search: true
-          # Token makes upload more reliable (avoids tokenless rate limits);
-          # action silently falls back to tokenless if the secret is unset
-          # (e.g. in forked-PR context where secrets aren't exposed).
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
+          receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}
 
   # ── Queued-leg watchdog ────────────────────────────────────────────────
   # `timeout-minutes` on the `coverage` matrix job ONLY bounds execution
@@ -1177,14 +1170,11 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Android Kotlin coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v5
+        uses: ./.github/actions/upload-codecov-report
         with:
           files: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
-          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
+          receipt-name: codecov-upload-android-kotlin-${{ github.sha }}
 
   pulp-react-coverage:
     # Keep @pulp/react's main-branch Codecov upload in the canonical
@@ -1248,15 +1238,12 @@ jobs:
           if-no-files-found: error
 
       - name: Upload pulp-react coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v5
+        uses: ./.github/actions/upload-codecov-report
         with:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
-          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
+          receipt-name: codecov-upload-pulp-react-${{ github.sha }}
 
   coverage-diff-gate:
     # Per-PR diff-coverage gate. REQUIRED — sub-threshold diff coverage

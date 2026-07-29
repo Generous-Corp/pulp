@@ -11,10 +11,10 @@ name: Coverage upload watchdog
 #   - the instrumented suite hitting coverage.yml's internal time budget on a
 #     real OS leg, which now drops its report and skips upload NON-FATALLY (so
 #     the run concludes `success` with no C++ upload). A conclusion==success
-#     proxy alone would be blinded by this, so this watchdog requires PROOF OF
-#     UPLOAD: it only counts a run as fresh coverage if it produced a
-#     `coverage-cobertura-*` artifact (checked via the actions API, no Codecov
-#     token). This closes the proxy hole documented in coverage-staleness-check.yml.
+#     proxy alone would be blinded by this, so this watchdog requires the
+#     Linux and macOS receipt artifacts emitted only after the shared Codecov
+#     action completes successfully. The check uses the actions API and needs
+#     no Codecov token.
 #   - codecov.yml component/flag drift (a subsystem matching no component),
 #   - llvm-cov -object-set regressions (a libpulp-*.a dropping out, so whole
 #     subsystems vanish while lines-valid stays > 0 — the recurring class the
@@ -77,31 +77,28 @@ jobs:
             -f branch=main -f per_page=20 \
             --jq '[.workflow_runs[] | {id, status, conclusion, created_at, updated_at, html_url}]')"
 
-          # A run can conclude `success` while its C++ Cobertura upload was
-          # SKIPPED — coverage.yml drops the report and skips the verify/upload
-          # steps when the instrumented suite hits its internal time budget
-          # (a non-fatal budget hit, so main stays green). Counting such a run
-          # as "fresh coverage" would reopen the exact silent-degradation hole
-          # this watchdog exists to catch: coverage quietly stops while CI is
-          # green. So require PROOF OF UPLOAD — a `coverage-cobertura-*`
-          # artifact — before treating a successful run as fresh. This needs
-          # only `actions: read` (no Codecov token). Probe successful runs
-          # newest-first and take the first that actually uploaded a report.
+          # The shared upload action emits a receipt only after the Codecov
+          # action completes successfully. Main coverage is complete enough to
+          # count as fresh only when both required native dashboard axes,
+          # Linux and macOS, produced receipts. Windows and side-language
+          # uploads remain advisory and may arrive independently.
           succ_ids="$(printf '%s' "$runs_json" \
             | jq -r '[.[] | select(.conclusion=="success")] | sort_by(.updated_at) | reverse | .[].id')"
           last_success_at=""
           for rid in ${succ_ids}; do
-            has_cov="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
+            receipts="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
               -f per_page=100 \
-              --jq '[.artifacts[] | select(.name | startswith("coverage-cobertura-"))] | length' \
-              2>/dev/null || echo 0)"
-            if [ "${has_cov:-0}" -gt 0 ]; then
+              --jq '[.artifacts[].name | select(startswith("codecov-upload-"))]' \
+              2>/dev/null || echo '[]')"
+            has_linux="$(printf '%s' "${receipts}" | jq '[.[] | select(startswith("codecov-upload-linux-"))] | length')"
+            has_macos="$(printf '%s' "${receipts}" | jq '[.[] | select(startswith("codecov-upload-macos-"))] | length')"
+            if [ "${has_linux}" -gt 0 ] && [ "${has_macos}" -gt 0 ]; then
               last_success_at="$(printf '%s' "$runs_json" \
                 | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .updated_at')"
-              echo "Newest successful run WITH a Cobertura upload: ${rid} (${last_success_at})"
+              echo "Newest successful run with Linux + macOS Codecov receipts: ${rid} (${last_success_at})"
               break
             fi
-            echo "Run ${rid} concluded success but uploaded no Cobertura artifact (budget-skip or dropped upload) — not counting it as fresh coverage."
+            echo "Run ${rid} lacks complete native Codecov receipts (linux=${has_linux}, macos=${has_macos}) — not counting it as fresh coverage."
           done
           recent_summary="$(printf '%s' "$runs_json" \
             | jq -r 'sort_by(.created_at) | reverse | .[0:6][] | "  - \(.created_at)  \(.status)/\(.conclusion // "-")  \(.html_url)"')"
@@ -121,7 +118,7 @@ jobs:
             --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .number // empty" || true)"
 
           if [ "${age_h}" -ge "${MAX_AGE_HOURS}" ]; then
-            body="$(printf '%s\n\n**main has had no Coverage run that actually UPLOADED a Cobertura report in ~%sh** (threshold %sh). A run may be concluding success while its C++ upload was skipped, so Codecov gets no fresh complete upload and the dashboard total lines/files silently degrades.\n\nLast successful run WITH a Cobertura upload: %s\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. The instrumented suite is hitting the coverage.yml internal time budget on a real OS leg (macOS/linux), so the leg drops its report and skips upload non-fatally. Check the Run coverage suite step for a Terminated: 15 / budget-hit warning; speed it up (ctest parallelism and per-test timeout in scripts/run_coverage.sh) or raise the budget.\n2. CI dispatch throttle, so runs queue past the stale-run-reaper cutoff and get cancelled before upload.\n3. codecov.yml component/flag drift (run tools/scripts/test_codecov_components.py).\n4. llvm-cov object-set regression (a libpulp library dropped, so a whole subsystem vanishes while lines-valid stays above 0).\n5. Codecov after_n_builds waiting on a missing per-OS leg.\n\nAuto-closes when a fresh Coverage run that uploaded a Cobertura report lands on main.' \
+            body="$(printf '%s\n\n**main has had no Coverage run with successful Linux + macOS Codecov receipts in ~%sh** (threshold %sh). A run may conclude success while a report or transport upload was skipped, so the dashboard can silently degrade.\n\nLast complete native upload: %s\n\nMost recent Coverage runs on main:\n%s\n\nLikely causes (check in order):\n1. A Linux or macOS native build/report verification failed before upload.\n2. The instrumented suite hit its internal time budget and intentionally dropped the report.\n3. Codecov transport failed after local report verification.\n4. CI dispatch throttling cancelled the run before both native uploads.\n5. codecov.yml component/flag drift or an llvm-cov object-set regression removed a subsystem.\n\nAuto-closes when a fresh Coverage run produces both native upload receipts.' \
               "${MARKER}" "${age_h}" "${MAX_AGE_HOURS}" "${last_success_at:-<none>}" "${recent_summary}")"
             if [ "${DRY_RUN}" = "true" ]; then
               echo "::warning::[dry-run] would open/update coverage-upload watchdog issue"

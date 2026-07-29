@@ -268,23 +268,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # libfontconfig1-dev added in #1970: chrome/m144 Skia exposes
-        # fontconfig symbols (FcInitLoadConfigAndFonts, FcConfigGetSysRoot,
-        # FcPatternGetString, etc.) that earlier Skia releases hid. Without
-        # the dev package, `pkg_check_modules(FONTCONFIG fontconfig)` in
-        # core/canvas/CMakeLists.txt comes up empty and the link step
-        # fails on undefined references. Symptom on the v0.97.0 backfill
-        # (run 25874113981, 4 of 5 matrix legs green, only linux-x64
-        # failing in Build) is what motivated this addition.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native-webview
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
