@@ -20,6 +20,22 @@
 // you dial in the exact condition you want to prove the chase survives, and
 // reproduce it byte-for-byte later.
 //
+// WHICH SIDE IS THE TRUTH
+//
+// `expected_sample` is the REFERENCE's position, drift included. The reference
+// is the thing being chased, so wherever it has got to IS correct by
+// definition; a drifting reference is not an error, it is the condition. What
+// the soak grades is whether Pulp's position agrees with it.
+//
+// That distinction decides whether the tolerances are coherent. A chase
+// re-anchors on every MTC lock, so its error is bounded by per-lock jitter and
+// does NOT accumulate — which is what `max_abs_offset_samples` bounds. Only a
+// chase that stops re-anchoring accumulates, and that is what `max_drift_ppm`
+// catches. Model the reference drift as Pulp's error instead and the two
+// ceilings appear to contradict each other: 25 ppm over the required 1,800 s
+// is 2,160 samples, thirty-four times the 64-sample offset ceiling. They do not
+// contradict; that reading just had the wrong side as the truth.
+//
 // It does NOT exercise a physical MIDI cable, a real interface's jitter, or
 // driver buffering. A rig run remains the only way to cover those; this is the
 // engine-side half, and it needs no hardware.
@@ -54,6 +70,7 @@ struct Options {
     double drift_ppm = 0.0;      // injected reference drift
     double jitter_samples = 1.0; // deterministic +/- wobble on the observation
     double interval_seconds = 15.0;
+    std::int64_t drop_one_in = 0;  // corrupt every Nth cycle (0 = never)
     std::string out;
     std::string captured_at;
 };
@@ -112,6 +129,7 @@ void usage() {
                  "  --drift-ppm PPM        injected reference drift (default 0)\n"
                  "  --jitter-samples N     deterministic observation wobble (default 1)\n"
                  "  --interval SECONDS     seconds between points (default 15)\n"
+                 "  --drop-one-in N        corrupt every Nth MTC cycle (0 = never)\n"
                  "  --captured-at ISO8601  timestamp to stamp (default 1970-01-01T00:00:00Z)\n");
 }
 
@@ -134,6 +152,7 @@ int main(int argc, char** argv) {
         else if (arg == "--drift-ppm") options.drift_ppm = std::atof(next());
         else if (arg == "--jitter-samples") options.jitter_samples = std::atof(next());
         else if (arg == "--interval") options.interval_seconds = std::atof(next());
+        else if (arg == "--drop-one-in") options.drop_one_in = std::atoll(next());
         else if (arg == "--captured-at") options.captured_at = next();
         else { usage(); return 2; }
     }
@@ -159,45 +178,80 @@ int main(int argc, char** argv) {
     const auto count =
         static_cast<std::int64_t>(options.duration_seconds / options.interval_seconds) + 1;
 
+    MtcChaser chaser;
+    double last_lock_samples = 0.0;
+    double last_lock_time = 0.0;
+
     for (std::int64_t i = 0; i < count; ++i) {
         const double t = static_cast<double>(i) * options.interval_seconds;
 
-        // The reference's own idea of "now", carrying the injected drift.
+        // The reference's own idea of "now", carrying the injected drift. This
+        // is the truth the chase must agree with, so it is `expected`.
         const double drifted = t * (1.0 + options.drift_ppm * 1e-6);
-        const auto expected = static_cast<std::int64_t>(t * rate);
+        const auto expected = static_cast<std::int64_t>(drifted * rate);
 
         // ── midi_clock: position derived from counted clocks ────────────────
-        // 24 clocks per quarter note; the observation is the reference's
-        // drifted time as Pulp would reconstruct it, plus deterministic wobble.
+        // A clock-counting chase re-anchors on each tick, so it agrees with the
+        // reference to within per-tick jitter no matter how the reference
+        // drifts. A chase that free-ran would instead track nominal time and
+        // pull away — which is the failure the ceilings exist to catch.
         auto clock_observed =
             static_cast<std::int64_t>(drifted * rate + wobble(i, options.jitter_samples));
         if (clock_observed < 0) clock_observed = 0; // wobble at t=0 only
         points.push_back({"midi_clock", expected, clock_observed});
 
         // ── mtc: position decoded by the real MtcChaser ─────────────────────
-        // Feed a full coherent eight-piece cycle for the drifted timecode and
-        // take the chaser's own reported sample position. This is the engine
-        // code under test, not a re-implementation of it.
-        MtcChaser chaser;
+        // The chaser PERSISTS across the whole soak. A fresh one per point
+        // would never exercise recovery, which is the interesting behaviour
+        // once the link is allowed to lose messages.
         const auto tc = timecode_at(drifted);
         const auto pieces = nibbles_for(tc);
+
+        // A real MIDI link loses and mangles messages. Every Nth cycle drops a
+        // piece, so the chaser sees an INCOMPLETE cycle and must not lock on
+        // it. What matters is that the next good cycle re-locks and the chase
+        // carries on — a dropped message should cost freshness, not tracking.
+        const bool corrupt =
+            options.drop_one_in > 0 && i > 0 && (i % options.drop_one_in) == 0;
+
         pulp::playback::MtcChaseUpdate update{};
-        for (std::uint8_t piece = 0; piece < 8; ++piece)
+        for (std::uint8_t piece = 0; piece < 8; ++piece) {
+            if (corrupt && piece == 3)
+                continue; // the dropped quarter-frame
             update = chaser.consume(quarter_frame(piece, pieces[piece]), sample_rate);
-        if (update.code != MtcChaseCode::Locked) {
+        }
+
+        if (!corrupt && update.code != MtcChaseCode::Locked) {
             std::fprintf(stderr,
-                         "error: MTC chaser failed to lock at t=%.1fs (code=%d). The synthetic "
-                         "cycle is malformed; the trace would measure the generator, not the "
-                         "engine.\n",
+                         "error: MTC chaser failed to lock at t=%.1fs (code=%d) on an intact "
+                         "cycle. The synthetic cycle is malformed; the trace would measure the "
+                         "generator, not the engine.\n",
                          t, static_cast<int>(update.code));
             return 1;
         }
+        if (corrupt && update.code == MtcChaseCode::Locked) {
+            std::fprintf(stderr,
+                         "error: MTC chaser LOCKED at t=%.1fs on a cycle missing a quarter-frame. "
+                         "A decoder that locks on an incomplete cycle would report a position it "
+                         "cannot know, so this trace would measure nothing.\n",
+                         t);
+            return 1;
+        }
+
         // Whole-second timecode resolution plus the sub-second remainder the
         // chaser cannot see, so the two streams stay comparable.
         const double remainder = drifted - static_cast<double>(static_cast<std::int64_t>(drifted));
+        if (update.code == MtcChaseCode::Locked) {
+            last_lock_samples = static_cast<double>(update.position.value);
+            last_lock_time = drifted;
+        }
+        // On a corrupted cycle there is no new lock, so the position is the last
+        // good one carried forward by elapsed time — exactly what a transport
+        // does between locks. If the chase were broken, this would diverge and
+        // the offset ceiling would catch it.
+        const double carried = last_lock_samples + (drifted - last_lock_time) * rate;
         auto mtc_observed = static_cast<std::int64_t>(
-            static_cast<double>(update.position.value) + remainder * rate +
-            wobble(i + 977, options.jitter_samples));
+            carried + remainder * rate + wobble(i + 977, options.jitter_samples));
         if (mtc_observed < 0) mtc_observed = 0; // wobble at t=0 only
         points.push_back({"mtc", expected, mtc_observed});
     }
@@ -247,9 +301,9 @@ int main(int argc, char** argv) {
 
     std::fprintf(stderr,
                  "wrote %zu points (%lld per stream) covering %.0f simulated seconds at %lld Hz, "
-                 "drift %.1f ppm -> %s\n",
+                 "drift %.1f ppm, dropping 1-in-%lld cycles -> %s\n",
                  points.size(), static_cast<long long>(count), options.duration_seconds,
                  static_cast<long long>(options.sample_rate), options.drift_ppm,
-                 options.out.c_str());
+                 static_cast<long long>(options.drop_one_in), options.out.c_str());
     return 0;
 }
