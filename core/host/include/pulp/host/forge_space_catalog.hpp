@@ -111,6 +111,7 @@
 // a reverb for and not a thing they ask a compressor for — so both nodes carry
 // it and both bounds include the dry sum.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/nonlin_ambience.hpp>
@@ -322,6 +323,24 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
         s->engine.process(in_ptrs, out_ptrs, n);
     };
     return t;
+}
+
+/// Construct the metadata/audit realization without making the central
+/// registry know how to synthesize this asset-backed family's required input.
+inline CustomNodeType make_catalog_probe_node() {
+    return make_convolution_reverb_node({{{1.0f}}, 48000.0});
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"convolution_reverb", "Convolution Reverb", "Applies a supplied impulse response with stereo wet-path shaping.",
+            {}, {{"default", kTypeId}},
+            {{"ir_gain_db", kIrGainDb, "IR Gain", "dB", "Trims the convolved return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"wet_percent", kWetPercent, "Wet", "%", "Sets the convolved signal level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"dry_percent", kDryPercent, "Dry", "%", "Sets the direct signal level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"width_percent", kWidthPercent, "Width", "%", "Shapes stereo width on the wet return.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"lowcut_hz", kLowcutHz, "Low Cut", "Hz", "High-passes the reverb send.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"highcut_hz", kHighcutHz, "High Cut", "Hz", "Low-passes the reverb send.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic}}};
 }
 
 }  // namespace convolution
@@ -563,6 +582,26 @@ inline CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefau
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"nonlin_ambience", "Nonlinear Ambience", "A designed stereo ambience with gated, reverse, and nonlinear envelope programs.",
+            {}, {{"default", kTypeId}},
+            {{"program", kProgram, "Program", "", "Selects the ambience envelope program.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"nonlinear_one", "Nonlinear One", 0}, {"gated", "Gated", 1}, {"reverse", "Reverse", 2}, {"nonlinear_two", "Nonlinear Two", 3}}},
+             {"length_ms", kLengthMs, "Length", "ms", "Sets the ambience duration.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"predelay_ms", kPredelayMs, "Predelay", "ms", "Delays the wet response.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"density_pct", kDensityPct, "Density", "%", "Sets the initial reflection density.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"density_growth", kDensityGrowth, "Density Growth", "", "Shapes density across the response.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"gate_hold_pct", kGateHoldPct, "Gate Hold", "%", "Sets the hold portion of the gated program.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"attack_pct", kAttackPct, "Attack", "%", "Sets the rise portion of reverse and nonlinear programs.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"diffusion", kDiffusion, "Diffusion", "", "Smears reflection detail.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"tone", kTone, "Tone", "", "Moves the response from dark to bright.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"hf_damp_hz", kHfDampHz, "HF Damping", "Hz", "Sets high-frequency damping.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"width_pct", kWidthPct, "Width", "%", "Sets stereo width.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"converter_amount", kConverterAmount, "Converter", "%", "Adds converter coloration.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"output_gain_db", kOutputGainDb, "Output Gain", "dB", "Trims the processed output.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mix_pct", kMixPct, "Mix", "%", "Blends dry and ambience signals.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
 }  // namespace nonlin_ambience
 
 namespace cabinet {
@@ -683,6 +722,30 @@ inline CustomNodeType make_speaker_cabinet_node() {
 /// Both names return the same stable node type and parameter surface.
 inline CustomNodeType make_speaker_emulation_node() {
     return make_speaker_cabinet_node();
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"speaker_cabinet", "Speaker Cabinet", "Models a driven loudspeaker, enclosure, microphone, and diffraction path.",
+            {}, {{"default", kTypeId}},
+            {{"driver", kDriver, "Driver", "", "Selects the loudspeaker driver archetype.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"brit_twelve_ceramic", "British Twelve Ceramic", 0},
+               {"amer_twelve_ceramic", "American Twelve Ceramic", 1},
+               {"alnico_twelve", "Alnico Twelve", 2},
+               {"brit_ten", "British Ten", 3},
+               {"bass_fifteen", "Bass Fifteen", 4}}},
+             {"box", kBox, "Box", "", "Selects a sealed or open-back enclosure.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"sealed", "Sealed", 0}, {"open_back", "Open Back", 1}}},
+             {"volume_l", kVolumeL, "Box Volume", "L", "Sets enclosure volume.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"resonance_trim_st", kResonanceTrimSt, "Resonance Trim", "st", "Retunes the enclosure resonance.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"q", kQ, "Resonance Q", "", "Sets resonance emphasis.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"breakup_pct", kBreakupPct, "Cone Breakup", "%", "Adds cone-breakup coloration.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"treble_hz", kTrebleHz, "Treble Rolloff", "Hz", "Sets the high-frequency rolloff.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"drive_db", kDriveDb, "Drive", "dB", "Drives the speaker nonlinearity.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"compression_pct", kCompressionPct, "Compression", "%", "Adds power compression.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mic_distance_cm", kMicDistanceCm, "Mic Distance", "cm", "Sets microphone distance.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"mic_position_pct", kMicPositionPct, "Mic Position", "%", "Moves the microphone from center toward edge.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mic_axis_deg", kMicAxisDeg, "Mic Axis", "deg", "Turns the microphone off axis.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"diffraction_pct", kDiffractionPct, "Diffraction", "%", "Adds cabinet-edge diffraction.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"output_trim_db", kOutputTrimDb, "Output Trim", "dB", "Trims the modeled output.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 
 } // namespace cabinet

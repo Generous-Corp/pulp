@@ -15,6 +15,7 @@
 #include <pulp/state/parameter.hpp>
 
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulp::host {
@@ -26,10 +27,31 @@ enum class ForgeParamKind { continuous, stepped };
 /// linear feels dead across most of its range.
 enum class ForgeParamCurve { linear, logarithmic };
 
-/// One named state of a stepped parameter, or one setting of a realization
-/// axis. `token` is the stable machine key and must never change; `label` is
-/// presentation and may.
+/// One named state of a stepped parameter. `token` is the stable machine key
+/// and must never change; `label` is presentation and may.
 struct ForgeParamChoice {
+    std::string_view token;
+    std::string_view label;
+    float value = 0.0f;
+    /// Empty means the choice is valid wherever its parameter is valid.
+    /// Otherwise it is offered only by these realization modes.
+    std::vector<std::string_view> realization_modes;
+
+    ForgeParamChoice() = default;
+    ForgeParamChoice(std::string_view token_in, std::string_view label_in,
+                     float value_in,
+                     std::vector<std::string_view> modes_in = {})
+        : token(token_in),
+          label(label_in),
+          value(value_in),
+          realization_modes(std::move(modes_in)) {}
+};
+
+/// One value of a compile-time realization axis.
+///
+/// This intentionally does not carry `realization_modes`: an axis value helps
+/// define those modes, so scoping it back to a mode would be circular.
+struct ForgeAxisValue {
     std::string_view token;
     std::string_view label;
     float value = 0.0f;
@@ -56,6 +78,23 @@ struct ForgeParamDescriptor {
     /// standard), and an inert control presented as live is a worse answer
     /// than an absent one.
     std::vector<std::string_view> realization_modes;
+
+    ForgeParamDescriptor() = default;
+    ForgeParamDescriptor(std::string_view key_in, state::ParamID id_in,
+                         std::string_view label_in, std::string_view unit_in,
+                         std::string_view description_in, ForgeParamKind kind_in,
+                         ForgeParamCurve curve_in,
+                         std::vector<ForgeParamChoice> choices_in = {},
+                         std::vector<std::string_view> modes_in = {})
+        : key(key_in),
+          id(id_in),
+          label(label_in),
+          unit(unit_in),
+          description(description_in),
+          kind(kind_in),
+          curve(curve_in),
+          choices(std::move(choices_in)),
+          realization_modes(std::move(modes_in)) {}
 };
 
 /// A compile-time construction axis — a choice made when the node is built
@@ -65,7 +104,17 @@ struct ForgeRealizationAxis {
     std::string_view key;
     std::string_view label;
     std::string_view description;
-    std::vector<ForgeParamChoice> values;
+    std::vector<ForgeAxisValue> values;
+};
+
+/// One axis/value selection used to construct a concrete realization.
+///
+/// Both fields name stable tokens declared by the containing descriptor. The
+/// explicit pair keeps consumers from having to reverse-engineer an opaque
+/// `mode` string such as "silicon_x4".
+struct ForgeRealizationSetting {
+    std::string_view axis;
+    std::string_view value;
 };
 
 /// One concrete realization: the exact `type_id` a graph names, plus the axis
@@ -75,6 +124,15 @@ struct ForgeRealization {
     std::string_view mode;
     /// The node type id registered with the graph.
     std::string_view type_id;
+    /// Exactly one selection for each declared realization axis.
+    std::vector<ForgeRealizationSetting> settings;
+
+    ForgeRealization() = default;
+    ForgeRealization(std::string_view mode_in, std::string_view type_id_in,
+                     std::vector<ForgeRealizationSetting> settings_in = {})
+        : mode(mode_in),
+          type_id(type_id_in),
+          settings(std::move(settings_in)) {}
 };
 
 struct ForgeNodeDescriptor {
@@ -104,6 +162,14 @@ inline bool param_applies(const ForgeParamDescriptor& param,
                           std::string_view mode) noexcept {
     if (param.realization_modes.empty()) return true;
     for (const auto& allowed : param.realization_modes)
+        if (allowed == mode) return true;
+    return false;
+}
+
+inline bool choice_applies(const ForgeParamChoice& choice,
+                           std::string_view mode) noexcept {
+    if (choice.realization_modes.empty()) return true;
+    for (const auto& allowed : choice.realization_modes)
         if (allowed == mode) return true;
     return false;
 }

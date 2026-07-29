@@ -115,10 +115,14 @@ inline ForgeNodeDescriptor descriptor() {
          {{"x1", "Off", 0.0f}, {"x4", "4x", 1.0f}}},
     };
     d.realizations = {
-        {"silicon_x1", type_id(Device::silicon, false)},
-        {"silicon_x4", type_id(Device::silicon, true)},
-        {"germanium_x1", type_id(Device::germanium, false)},
-        {"germanium_x4", type_id(Device::germanium, true)},
+        {"silicon_x1", type_id(Device::silicon, false),
+         {{"device", "silicon"}, {"oversampling", "x1"}}},
+        {"silicon_x4", type_id(Device::silicon, true),
+         {{"device", "silicon"}, {"oversampling", "x4"}}},
+        {"germanium_x1", type_id(Device::germanium, false),
+         {{"device", "germanium"}, {"oversampling", "x1"}}},
+        {"germanium_x4", type_id(Device::germanium, true),
+         {{"device", "germanium"}, {"oversampling", "x4"}}},
     };
     d.params = {
         {"fuzz", kFuzz, "Fuzz", "",

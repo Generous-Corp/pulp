@@ -263,7 +263,7 @@ if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
     echo "▸ forge-descriptor coverage (indexed packs carry semantic descriptors)" >&2
     if ! "$PYTHON" "$ROOT/tools/scripts/forge_descriptor_coverage.py" --root "$ROOT" >/dev/null 2>&1; then
-        echo "  forge-descriptor-coverage: a Forge-indexed catalog pack has no semantic descriptors — run \`python3 tools/scripts/forge_descriptor_coverage.py\` for details." >&2
+        echo "  forge-descriptor-coverage: the 74-family semantic manifest, descriptor sources, or export registry drifted — run \`python3 tools/scripts/forge_descriptor_coverage.py\` for details." >&2
         fail=1
     else
         echo "  forge-descriptor-coverage: ok" >&2

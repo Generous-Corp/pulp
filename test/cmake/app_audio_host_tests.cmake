@@ -769,3 +769,5 @@ pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)
 # they annotate, in both directions. Carries the negative controls that prove
 # the audit fails closed on a grown, shrunk, or mislabelled catalog node.
 pulp_add_test_suite(pulp-test-forge-descriptor-audit LIBRARIES pulp::host)
+target_compile_definitions(pulp-test-forge-descriptor-audit PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

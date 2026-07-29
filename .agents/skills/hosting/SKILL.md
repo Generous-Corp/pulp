@@ -2077,10 +2077,30 @@ Two rules that are easy to get wrong:
   `realization_modes`, not by dropping it.** Some families deliberately omit a
   control that would be inert (an Ampex deck has no selectable EQ standard), and
   an inert control presented as live is a worse answer than an absent one.
+- **A named choice that exists only on some realizations carries its own
+  `realization_modes`.** Tape EQ is the worked example: Studer exposes NAB/CCIR
+  while cassette exposes Type I/II. A single unscoped four-choice list lies
+  about both baked ranges.
+- **Each concrete realization explicitly selects every finite axis.** Do not
+  make a consumer parse an opaque mode like `silicon_x4`; its `settings` pairs
+  machine keys (`device=silicon`, `oversampling=x4`) with the exact `type_id`.
 
 `audit_forge_descriptor()` joins descriptors against the node in both
 directions, so a node that gains a control with no descriptor fails as loudly
 as a descriptor for a control that was removed — the two ways a catalog goes
 quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
-half: every indexed pack either carries descriptors or sits in a `PENDING` list
-that may only shrink, so a newly indexed pack cannot land undescribed.
+half: its independent 74-key semantic manifest must agree with the 16-pack
+index, descriptor sources, expected-node inventory, and explicit export
+registrations. There is no `PENDING` escape hatch, so a newly indexed pack
+cannot land undescribed.
+
+`forge_catalog_export_nodes()` is the runtime projection used by
+`pulp forge catalog export`. It constructs each registered semantic node and
+copies `baked_params` beside its descriptor; JSON serialization joins by
+`ParamID` and realization, so each `min`/`max`/`default` always comes from that
+concrete DSP declaration rather than one representative preset.
+`audit_forge_catalog_export()` checks both descriptor parity and an independent
+expected-node inventory. Keep the missing-node negative control: removing a
+registry entry must fail instead of emitting a shorter, superficially valid
+document. SDK installs carry the checked projection at
+`share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
