@@ -338,7 +338,13 @@ def main(argv):
                 if "warn" in line:
                     log("   " + line.strip())
 
-            check_uses_pulp_dsp(slug)
+            ok, msg = check_uses_pulp_dsp(slug, mod)
+            log(msg)
+            if not ok:
+                ctx = "The module was rejected:\n" + msg
+                if not a.keep_on_fail:
+                    restore()
+                continue
             pkg = install(res)
 
         log(f"installed → {pkg}")
@@ -381,24 +387,45 @@ def _wire_entry(slug):
     open(cpp, "w").write(s[:i] + add + "\n" + s[i:])
 
 
-def check_uses_pulp_dsp(slug):
-    """Warn if a generated module reaches for no Pulp DSP at all.
+def check_uses_pulp_dsp(slug, mod):
+    """Fail a module that reaches for none of Pulp's DSP. Returns (ok, message).
 
-    The whole reason to build on Pulp is its DSP catalog. A module that
-    hand-rolls everything is a signal that the vocabulary in the prompt is
-    wrong, stale, or too hard to use -- which is exactly what happened on the
-    first generated module, which used none of it. Advisory rather than fatal:
-    some modules legitimately have no DSP (a mult, a blank), and failing those
-    would be worse than the warning.
+    The reason to build a Rack module on Pulp is its DSP catalog. A module
+    that hand-rolls everything is usually not a stylistic choice but a signal
+    that the vocabulary in the prompt is wrong, stale or too awkward to use --
+    which is exactly what produced the first module generated here, which used
+    none of it and nobody noticed until the source was read.
+
+    Some modules legitimately need no DSP: a mult splits a voltage, a scanner
+    reads the rack, a blank does nothing. Those declare a waiver, and the
+    waiver must name the specific blocker rather than gesture at one. "Nothing
+    in pulp::signal generates Bjorklund patterns" can be checked and can go
+    stale usefully; "not supported yet" tells a later reader nothing and never
+    stops being true.
     """
     src = open(os.path.join(PACK, "src", f"{slug}.cpp")).read()
     used = sorted(set(re.findall(r"#include <pulp/signal/([\w/]+\.hpp)>", src)))
     if used:
-        log(f"uses Pulp DSP: {', '.join(used)}")
-        return True
-    log("WARNING: uses no pulp/signal DSP — everything was hand-rolled. "
-        "Check the vocabulary in the prompt covers this kind of module.")
-    return False
+        return True, f"uses Pulp DSP: {', '.join(used)}"
+
+    waiver = mod.get("dsp_waiver")
+    if isinstance(waiver, dict):
+        kind, reason = waiver.get("type", ""), waiver.get("reason", "")
+        if not kind or not reason:
+            return False, ("dsp_waiver needs both a type and a reason; "
+                           f"got {waiver!r}")
+        if len(reason) < 25:
+            return False, (f"the dsp_waiver reason is too thin to be useful "
+                           f"later: {reason!r}. Name what is actually missing "
+                           f"from pulp::signal.")
+        return True, f"no Pulp DSP, waived ({kind}): {reason}"
+
+    return False, ("this module uses none of pulp::signal — everything was "
+                   "hand-rolled. Either build it from the DSP listed in the "
+                   "prompt, or, if nothing there genuinely fits, declare "
+                   "\"dsp_waiver\": {\"type\": \"<short-slug>\", \"reason\": "
+                   "\"<what is actually missing from pulp::signal>\"} in the "
+                   "manifest.")
 
 
 def _assert_no_duplicate_models():

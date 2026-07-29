@@ -37,7 +37,11 @@
           "size": "medium"
         }
       ],
-      "width_waiver": "a scanner with one button and no signal path; 4HP is the narrowest that fits the name"
+      "width_waiver": "a scanner with one button and no signal path; 4HP is the narrowest that fits the name",
+      "dsp_waiver": {
+        "type": "no_signal_path",
+        "reason": "a scanner that walks the running rack and writes a port map; it has no inputs, no outputs and no audio path, so nothing in pulp::signal applies"
+      }
     }
   ]
 }
