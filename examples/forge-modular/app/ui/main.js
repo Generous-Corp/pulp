@@ -425,4 +425,107 @@ function setRackStatus(running) {
     setTextColor("rack-status", running ? C.leaf : C.faint);
 }
 
+
+// ── the working screen ───────────────────────────────────────────────────────
+//
+// A second screen, not a panel on the home screen. Collapsing the two is what
+// made an earlier attempt line up with neither the design nor Forge: the home
+// screen is a composer, and this is the transcript of a build beside the thing
+// being built.
+//
+// The chat is not a log. Wiring is grouped by the role a module plays, and
+// every line carries why the cable is there -- a patch you cannot read is a
+// patch you cannot change.
+
+const work = createRow("work", "main");
+setFlex("work", "flex_grow", 1);
+setVisible("work", false);
+
+const chat = createCol("chat", "work");
+setBackground("chat", C.surface);
+setFlex("chat", "width", 460);
+setFlex("chat", "flex_shrink", 0);
+setFlex("chat", "flex_direction", "column");
+setFlex("chat", "padding", 22);
+
+createLabel("chat-title", "Building", "chat");
+setFontFamily("chat-title", FONT);
+setFontSize("chat-title", 20);
+setFontWeight("chat-title", 700);
+setTextColor("chat-title", C.textStrong);
+
+createLabel("chat-prompt", "", "chat");
+setFontFamily("chat-prompt", FONT);
+setFontSize("chat-prompt", 14);
+setTextColor("chat-prompt", C.muted);
+setFlex("chat-prompt", "margin_top", 6);
+
+const chatBody = createCol("chat-body", "chat");
+setFlex("chat-body", "flex_grow", 1);
+setFlex("chat-body", "flex_direction", "column");
+setFlex("chat-body", "margin_top", 18);
+
+/// One role heading -- Voice, Modulation, Output -- above the cables that serve
+/// it. Grouping by role is what makes a rack legible; grouping by cable order
+/// is just the order they happened to be made in.
+function roleGroup(id, role) {
+    const g = createCol(id, "chat-body");
+    setFlex(id, "flex_direction", "column");
+    setFlex(id, "margin_bottom", 14);
+    createLabel(id + "-role", role.toUpperCase(), id);
+    setFontFamily(id + "-role", MONO);
+    setFontSize(id + "-role", 10);
+    setLetterSpacing(id + "-role", 0.16);
+    setTextColor(id + "-role", C.accent);
+    return g;
+}
+
+/// A wiring line: what was connected, then why. The why is the point -- it is
+/// the difference between a patch somebody can edit and one they can only run.
+function wireLine(id, parent, text, why) {
+    const l = createCol(id, parent);
+    setFlex(id, "flex_direction", "column");
+    setFlex(id, "margin_top", 8);
+    createLabel(id + "-what", text, id);
+    setFontFamily(id + "-what", FONT);
+    setFontSize(id + "-what", 13);
+    setTextColor(id + "-what", C.text);
+    createLabel(id + "-why", why, id);
+    setFontFamily(id + "-why", FONT);
+    setFontSize(id + "-why", 12);
+    setTextColor(id + "-why", C.faint);
+    setFlex(id + "-why", "margin_top", 2);
+    return l;
+}
+
+const preview = createCol("preview", "work");
+setBackground("preview", C.appBg);
+setFlex("preview", "flex_grow", 1);
+setFlex("preview", "flex_direction", "column");
+setFlex("preview", "align_items", "center");
+setFlex("preview", "justify_content", "center");
+
+createLabel("preview-empty", "The rack appears here as it is wired.", "preview");
+setFontFamily("preview-empty", FONT);
+setFontSize("preview-empty", 14);
+setTextColor("preview-empty", C.faint);
+
+/// Move between the composer and the build. setFlex(id,"display","none") is a
+/// no-op in this bridge; setVisible is what hides.
+function showScreen(name) {
+    const working = name === "work";
+    setVisible("hero", !working);
+    setVisible("shelf", !working);
+    setVisible("work", working);
+}
+
+/// Called as the build reports progress. The prompt is echoed so the screen
+/// says what it is building without the user having to remember.
+function beginBuild(promptText) {
+    setText("chat-prompt", promptText);
+    setText("chat-title", mode === "patch" ? "Wiring" : "Building");
+    showScreen("work");
+}
+
 setMode(mode);
+showScreen("home");
