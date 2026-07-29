@@ -156,6 +156,8 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-dynamics-catalog
                               test_forge_dynamics_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-distortion-catalog
                               test_forge_distortion_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-spectral-dynamics-catalogs
+                              test_forge_spectral_dynamics_catalogs.cpp)
 
 # Smoke test for the shared bake-layer fixture. Small on purpose: its job is to
 # keep the fixture compiling against both a mono and a stereo catalog node, so a
