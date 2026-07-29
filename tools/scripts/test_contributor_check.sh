@@ -59,6 +59,17 @@ check() {
 echo ""
 echo "contributor_check.sh self-tests"
 
+# `${#arr[@]:-0}` is a bad substitution in bash 5 but silently tolerated by the
+# bash 3.2 macOS ships, so this suite passes locally and fails on Linux. Grep for
+# it directly — the behavior itself is unreachable from here.
+if grep -n '\[@\]:-' "$SCRIPT"; then
+    echo "  FAIL  \${#arr[@]:-N} is a bash-5 bad substitution; arrays are initialized, so use \${#arr[@]}"
+    fail=$((fail + 1))
+else
+    printf '  ok    no bash-5-invalid array substitutions\n'
+    pass=$((pass + 1))
+fi
+
 # 1. A version bump must be rejected — version-at-land assigns these post-merge,
 #    so a contributor-side bump only produces a conflict.
 r="$(make_repo)"
