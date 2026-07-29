@@ -294,6 +294,52 @@ TEST_CASE("Timeline clip schema migration defaults none and refuses authored con
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
 
+TEST_CASE("Timeline clip schema migration preserves noncanonical layout and ignores nested decoys") {
+    const auto registry = builtins();
+    const std::string reordered_v1 = R"({
+  "version" : 1,
+  "data" : {
+    "time_range" : { "duration_ticks" : "100", "kind" : "musical", "start_ticks" : "0" },
+    "content" : { "data" : { "time_conform" : "nested-decoy" }, "type_name" : "pulp.timeline.content.empty", "version" : 1 },
+    "id" : "4"
+  },
+  "type_name" : "pulp.timeline.clip"
+})";
+    const auto upgraded =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 1, 2, reordered_v1));
+    REQUIRE(upgraded.find("\"version\" : 2") != std::string::npos);
+    REQUIRE(upgraded.find("\"time_conform\" : \"nested-decoy\"") != std::string::npos);
+    REQUIRE(upgraded.find("\"id\" : \"4\",\"time_conform\":\"none\"\n  }") !=
+            std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 1,
+                                  upgraded)) == reordered_v1);
+
+    const std::string reordered_v2 = R"({
+  "type_name" : "pulp.timeline.clip",
+  "data" : {
+    "time_conform" : "none" ,
+    "id" : "4",
+    "content" : { "version" : 1, "data" : { "time_conform" : "nested-decoy" }, "type_name" : "pulp.timeline.content.empty" },
+    "time_range" : { "start_ticks" : "0", "duration_ticks" : "100", "kind" : "musical" }
+  },
+  "version" : 2
+})";
+    const std::string expected_v1 = R"({
+  "type_name" : "pulp.timeline.clip",
+  "data" : {
+    "id" : "4",
+    "content" : { "version" : 1, "data" : { "time_conform" : "nested-decoy" }, "type_name" : "pulp.timeline.content.empty" },
+    "time_range" : { "start_ticks" : "0", "duration_ticks" : "100", "kind" : "musical" }
+  },
+  "version" : 1
+})";
+    const auto downgraded =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 1, reordered_v2));
+    REQUIRE(downgraded == expected_v1);
+    REQUIRE(downgraded.find("\"time_conform\" : \"nested-decoy\"") != std::string::npos);
+    REQUIRE(downgraded.find("\"time_conform\" : \"none\"") == std::string::npos);
+}
+
 TEST_CASE("Timeline version-one fixture remains readable and canonical") {
     std::ifstream stream(std::string(PULP_TIMELINE_FIXTURE_DIR) + "/v1/minimal.json",
                          std::ios::binary);
