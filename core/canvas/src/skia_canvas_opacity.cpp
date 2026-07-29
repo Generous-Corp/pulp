@@ -456,8 +456,13 @@ void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
     }
 
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    // Crop the blur to the node's own rect. Without it the filter samples and
+    // writes outside those bounds — a frosted deck at the bottom of a panel
+    // smeared the title at the top, and the reach grew with the radius, which
+    // is what identified it. `backdrop-filter` must affect what is behind THIS
+    // element and nothing else.
     auto backdrop = SkImageFilters::Blur(blur_radius, blur_radius,
-                                         SkTileMode::kClamp, nullptr);
+                                         SkTileMode::kClamp, nullptr, &bounds);
 
     SkCanvas::SaveLayerRec rec(&bounds, /*paint=*/nullptr, backdrop.get(), 0);
     canvas_->saveLayer(rec);
