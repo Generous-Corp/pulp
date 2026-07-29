@@ -29,6 +29,11 @@ public:
     /// all, which is a real failure -- unlike merely not running yet.
     virtual bool ensure_running() = 0;
     virtual void submit(const std::string& prompt, bool patch_mode) = 0;
+
+    /// Why the last submit did nothing, empty when it started. The UI shows
+    /// this: a Build that silently does nothing is the worst possible outcome,
+    /// and it is what shipped.
+    virtual std::string last_error() const { return {}; }
 };
 
 class Shell : public pulp::format::Processor {

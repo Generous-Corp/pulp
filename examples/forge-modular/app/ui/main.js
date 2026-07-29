@@ -36,6 +36,7 @@ const FONT = "Jost";
 const MONO = "JetBrains Mono";
 
 let mode = "module";      // "module" | "patch"
+let lastRandom = "";      // so Random never offers the same prompt twice running
 
 // Suggestions the Random button offers. Deliberately concrete: "a filter" is
 // not a prompt anybody can judge, and the whole point of showing it before
@@ -43,10 +44,24 @@ let mode = "module";      // "module" | "patch"
 const RANDOM_MODULE = [
     "a 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
     "an 8 HP slew limiter with separate rise and fall, and an end-of-rise gate",
+    "a 4 HP dual attenuverter with a shared offset",
+    "a 6 HP sample and hold with an internal noise source and a track mode",
+    "an 8 HP three-band mid/side EQ with a mono-below-frequency control",
+    "a 10 HP chaotic modulation source with rate, character and two decorrelated outputs",
+    "a 6 HP clock multiplier with swing and a reset input",
+    "an 8 HP resonant lowpass gate with a vactrol-style decay",
+    "a 4 HP precision adder for 1V/oct with a semitone quantiser",
+    "a 12 HP granular delay with jitter, pitch spread and a freeze gate",
 ];
 const RANDOM_PATCH = [
     "an ambient generative drone that never repeats",
     "a bouncing-ball rhythm that slows down as it settles",
+    "a krell patch where each note chooses the next one's length",
+    "a two-voice canon with one voice a fifth up and slightly behind",
+    "an acid line with accent and slide from a single sequencer",
+    "a rainstorm that thickens and thins over several minutes",
+    "a kick and hat pattern where the hats swing against the kick",
+    "a drone that a slow filter sweep turns from dark to bright and back",
 ];
 
 // ── root: rail on the left, everything else to its right ─────────────────────
@@ -749,7 +764,15 @@ on("rail-settings", "toggle", function (v) { if (v) selectRail("rail-settings");
 // you cannot read before committing to it is a dice roll, not a prompt.
 on("btn-random", "toggle", function (v) {
     if (!v) return;
-    setText("prompt", mode === "patch" ? RANDOM_PATCH[0] : RANDOM_MODULE[0]);
+    // A hard-coded [0] was not random -- it was the same suggestion every time.
+    // Avoiding an immediate repeat matters more than uniformity here: drawing
+    // the prompt you just dismissed reads as the button being broken.
+    const pool = mode === "patch" ? RANDOM_PATCH : RANDOM_MODULE;
+    let pick = pool[Math.floor(Math.random() * pool.length)];
+    for (let tries = 0; pick === lastRandom && tries < 8; ++tries)
+        pick = pool[Math.floor(Math.random() * pool.length)];
+    lastRandom = pick;
+    setText("prompt", pick);
 });
 
 // Not visible, but not a hack either -- it is the documented channel the host

@@ -86,7 +86,7 @@ public:
             auto* v = bridge->widget(id);
             auto* btn = dynamic_cast<pulp::view::ToggleButton*>(v);
             if (!btn) return false;
-            btn->on_toggle = [engine, prompt_text, patch_mode_now, mutating](bool) {
+            btn->on_toggle = [engine, bridge, prompt_text, patch_mode_now, mutating](bool) {
                 const std::string prompt = prompt_text();
                 if (prompt.empty()) return;
                 if (!engine->ensure_running()) return;
@@ -94,6 +94,14 @@ public:
                 // than inferred: an Ask turn must not be able to rewrite the
                 // patch even if the intent were misread.
                 engine->submit(prompt, mutating && patch_mode_now());
+                // Say when nothing started. A Build that silently does nothing
+                // is the worst outcome available, and it is what shipped.
+                if (auto* status = dynamic_cast<pulp::view::Label*>(
+                        bridge->widget("rack-status"))) {
+                    const auto err = engine->last_error();
+                    status->set_text(err.empty() ? "\xE2\x97\x8F BUILDING\xE2\x80\xA6"
+                                                 : "\xE2\x97\x8F " + err);
+                }
             };
             return true;
         };

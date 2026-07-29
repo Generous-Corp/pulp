@@ -125,7 +125,12 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
                 COMMAND "${CMAKE_COMMAND}" -E copy_directory
                         "${_fm_app}/ui"
                         "$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/ui"
-                COMMENT "Copying Forge Modular UI into ${_fm_tgt}")
+                # The generator has to travel too. Without it an installed app
+                # could not build anything, and said nothing about why.
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                        "${CMAKE_SOURCE_DIR}/tools/rack"
+                        "$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/tools"
+                COMMENT "Copying Forge Modular UI and tools into ${_fm_tgt}")
         endif()
     endforeach()
 

@@ -50,7 +50,19 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
         auto id = args.get<std::string>(0, "");
         auto corner = args.get<std::string>(1, "");
         auto r = static_cast<float>(args.get<double>(2, 0));
+        // setCornerRadius(id, radius) -- the two-argument form -- put the radius
+        // in the slot read as a corner name, matched no branch, and did nothing
+        // at all. Every rounded corner written that way came out square. Treat a
+        // numeric second argument as "All", which is what it plainly means.
+        if (corner.empty() || (corner[0] >= '0' && corner[0] <= '9')) {
+            corner = "All";
+            r = static_cast<float>(args.get<double>(1, 0));
+        }
         auto* v = id.empty() ? &self.root_ : self.widget(id);
+        // A ToggleButton paints its own rounded rect from its own radius and
+        // ignores the View's, defaulting to 6px -- so buttons and tabs stayed
+        // stubbornly square whatever the View was told.
+        if (auto* t = dynamic_cast<ToggleButton*>(v)) t->set_corner_radius(r);
         if (v) {
             if (corner == "All") v->set_border_radius(r);
             else if (corner == "TopLeft") v->set_corner_radius_tl(r);

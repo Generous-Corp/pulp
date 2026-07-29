@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <thread>
 
 #include <unistd.h>
@@ -43,12 +44,15 @@ struct RecordingEngine final : forge_modular::EngineClient {
     std::vector<Call> calls;
     bool startable = true;
     int ensure_calls = 0;
+    std::string error;
 
     bool available() const override { return startable; }
     bool ensure_running() override { ++ensure_calls; return startable; }
     void submit(const std::string& prompt, bool patch_mode) override {
+        if (!error.empty()) return;      // a failed submit records no call
         calls.push_back({prompt, patch_mode});
     }
+    std::string last_error() const override { return error; }
 };
 
 View* find_by_id(View& root, const std::string& id) {
@@ -412,4 +416,36 @@ TEST_CASE("driven: a click generates a real module",
     }
     INFO("modules before " << before << ", after " << count());
     REQUIRE(grew);
+}
+
+TEST_CASE("Random offers a different prompt each time, and never builds",
+          "[forge-modular][shell][interaction]") {
+    // It was hard-coded to element [0] -- the same suggestion forever, which is
+    // what a user reported. Ten draws from a pool of ten must not all match.
+    Harness h;
+    auto* ed = dynamic_cast<pulp::view::TextEditor*>(h.control("prompt"));
+    REQUIRE(ed != nullptr);
+
+    std::set<std::string> seen;
+    for (int i = 0; i < 10; ++i) {
+        h.click("btn-random");
+        REQUIRE_FALSE(ed->text().empty());
+        seen.insert(ed->text());
+    }
+    CHECK(seen.size() > 1);              // not one value forever
+    CHECK(h.engine.calls.empty());       // a suggestion is not a build
+}
+
+TEST_CASE("a Build that cannot start says so",
+          "[forge-modular][shell][interaction]") {
+    // The failure that shipped: on a machine without the generator, Build did
+    // nothing at all -- no log, no message. Silence is the worst outcome.
+    Harness h;
+    h.engine.error = "the generator is not installed (/nope/generate.py)";
+    h.type("a 4 hp clock divider");
+    h.click("btn-build");
+
+    const auto status = h.label("rack-status");
+    INFO("status line: " << status);
+    CHECK(status.find("not installed") != std::string::npos);
 }

@@ -15,6 +15,11 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #include <string>
 
 namespace forge_modular {
@@ -55,6 +60,8 @@ public:
         return false;
     }
 
+    std::string last_error() const override { return last_error_; }
+
     void submit(const std::string& prompt, bool patch_mode) override {
         const std::filesystem::path script =
             tools_ / (patch_mode ? "patch.py" : "generate.py");
@@ -64,13 +71,29 @@ public:
         cmd += "python3 " + shell_quote(script.string()) + " ";
         if (patch_mode) cmd += "build ";
         cmd += shell_quote(prompt);
-        // Detached, with output kept: a generation outlives the click by a
-        // minute or more, and its log is the only account of what happened.
-        cmd += " > " + shell_quote(log) + " 2>&1 &";
+
+        if (!std::filesystem::exists(script)) {
+            // The failure that shipped: no generator, and nothing said so.
+            last_error_ = "the generator is not installed (" + script.string() + ")";
+            pulp::runtime::log_info("Forge Modular: cannot build — {}", last_error_);
+            return;
+        }
+
+        // A header written before the spawn, so an empty log is impossible and
+        // "nothing happened" can always be told apart from "it started".
+        {
+            std::ofstream head(log, std::ios::trunc);
+            head << "forge-modular: " << (patch_mode ? "patch" : "module")
+                 << "\ntools: " << tools_.string()
+                 << "\nprompt: " << prompt << "\n---\n";
+        }
+        cmd += " >> " + shell_quote(log) + " 2>&1 &";
 
         pulp::runtime::log_info("Forge Modular: building a {} — output to {}",
                                 patch_mode ? "patch" : "module", log);
-        std::system(cmd.c_str());
+        last_error_.clear();
+        if (std::system(cmd.c_str()) != 0)
+            last_error_ = "the generator could not be started";
     }
 
     std::filesystem::path log_dir() const {
@@ -83,15 +106,39 @@ public:
 
 private:
     std::filesystem::path tools_;
+    std::string last_error_;
 };
 
+/// The tools directory that actually exists on this machine.
+///
+/// FORGE_MODULAR_TOOLS_DIR is an absolute path into the source tree. On the
+/// machine that built the app that is right and convenient; anywhere else it
+/// does not exist, so `available()` was false, `ensure_running()` refused, and
+/// Build did nothing whatsoever -- no log, no message, no clue. The bundled copy
+/// is what makes an installed app able to generate at all.
+std::filesystem::path resolve_tools_dir() {
+    std::error_code ec;
+    if (const char* env = std::getenv("FORGE_MODULAR_TOOLS")) return env;
+
+    const std::filesystem::path source{FORGE_MODULAR_TOOLS_DIR};
+    if (std::filesystem::exists(source / "generate.py", ec)) return source;
+
+#if defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buf(size, '\0');
+    if (size > 0 && _NSGetExecutablePath(buf.data(), &size) == 0) {
+        const std::filesystem::path exe(buf.c_str());
+        const auto bundled =
+            exe.parent_path().parent_path() / "Resources" / "tools";
+        if (std::filesystem::exists(bundled / "generate.py", ec)) return bundled;
+    }
+#endif
+    return source;   // report the path we wanted, so the failure names it
+}
+
 std::unique_ptr<EngineClient> make_engine() {
-    // An override first, so a packaged build can point at wherever it put the
-    // scripts without recompiling.
-    if (const char* env = std::getenv("FORGE_MODULAR_TOOLS"))
-        return std::make_unique<SubprocessEngine>(std::filesystem::path(env));
-    return std::make_unique<SubprocessEngine>(
-        std::filesystem::path(FORGE_MODULAR_TOOLS_DIR));
+    return std::make_unique<SubprocessEngine>(resolve_tools_dir());
 }
 
 }  // namespace forge_modular
