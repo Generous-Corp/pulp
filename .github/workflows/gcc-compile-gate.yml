@@ -190,10 +190,6 @@ jobs:
           cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
 
       - name: Summarize
-        # Both conditions, not two keys: YAML keeps the last duplicate, so the
-        # scope guard was silently discarded and this posted "GCC compiled the
-        # core libraries" on runs where it had compiled nothing. always() is
-        # still wanted so the note survives a real compile failure.
         if: always() && steps.scope.outputs.relevant == 'true'
         run: |
           {

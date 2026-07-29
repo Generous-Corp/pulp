@@ -422,6 +422,16 @@ inline float vocoder_worst_case_gain(double sample_rate = 48000.0) {
     return static_cast<float>((bank + highpass_l1) * trim);
 }
 
+/// Sample-rate-independent ceiling for registries whose metadata cannot vary
+/// with the host rate. The high-pass L1 term approaches (but never exceeds) 2
+/// as the sample rate rises, so this is the supremum of
+/// `vocoder_worst_case_gain(sample_rate)` over every positive sample rate.
+inline float vocoder_all_sample_rates_worst_case_gain() {
+    const double bank = Voc::kOutputHeadroomTrim * Voc::kWorstCaseGain;
+    const double trim = std::pow(10.0, Voc::kOutputTrimMaxDb / 20.0);
+    return static_cast<float>((bank + 2.0) * trim);
+}
+
 /// Two inputs, one output. See this file's header for why the ports are plain
 /// audio ports rather than a sidechain, and why the modulator is port 0.
 inline CustomNodeType make_vocoder_node() {
