@@ -18,6 +18,11 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <system_error>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace forge_modular {
 namespace {
@@ -136,10 +141,33 @@ void Shell::process(pulp::audio::BufferView<float>& out,
     }
 }
 
+/// Where the interface script lives.
+///
+/// FORGE_MODULAR_UI_DIR is an absolute path into the source tree, which is
+/// right while developing and wrong the moment the app is installed anywhere
+/// else: the path does not exist, the script does not load, and the window
+/// comes up blank with no error a user would see. So the bundled copy wins
+/// when it is there, and the source tree is the fallback.
+std::filesystem::path resolve_ui_dir() {
+    std::error_code ec;
+#if defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buf(size, '\0');
+    if (size > 0 && _NSGetExecutablePath(buf.data(), &size) == 0) {
+        // <bundle>.app/Contents/MacOS/<binary> -> <bundle>.app/Contents/Resources/ui
+        const std::filesystem::path exe(buf.c_str());
+        const auto bundled =
+            exe.parent_path().parent_path() / "Resources" / "ui";
+        if (std::filesystem::exists(bundled / "main.js", ec)) return bundled;
+    }
+#endif
+    return std::filesystem::path(FORGE_MODULAR_UI_DIR);
+}
+
 std::unique_ptr<pulp::view::View> Shell::create_view() {
     if (!store_) return nullptr;
-    auto root = std::make_unique<ShellRoot>(
-        *store_, std::filesystem::path(FORGE_MODULAR_UI_DIR));
+    auto root = std::make_unique<ShellRoot>(*store_, resolve_ui_dir());
     root->wire(engine_);
     return root;
 }

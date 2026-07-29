@@ -105,12 +105,29 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
             pulp::host pulp::signal
             pulp::view pulp::view-script pulp::canvas pulp::render)
         # The UI is read from disk so it can be edited and reloaded without a
-        # rebuild; the packaged build embeds it and turns hot reload off.
+        # rebuild. This path is into the SOURCE TREE, so it is only correct on
+        # the machine that built the binary -- every bundle also carries its own
+        # copy below, and shell.cpp prefers that. Without it an installed app
+        # comes up blank, which is what it did on a second machine.
         target_compile_definitions(ForgeModularApp_Core PUBLIC
             FORGE_MODULAR_UI_DIR="${_fm_app}/ui"
             FORGE_MODULAR_TOOLS_DIR="${CMAKE_SOURCE_DIR}/tools/rack"
             FORGE_MODULAR_UI_HOT_RELOAD=$<IF:$<CONFIG:Debug>,true,false>)
     endif()
+
+    # Copy the interface into each bundle so it travels with the binary.
+    # resolve_ui_dir() prefers this copy and falls back to the source tree, so a
+    # developer still gets hot reload while an installed app gets a UI at all.
+    foreach(_fm_tgt ForgeModularApp_Standalone ForgeModularApp_AU
+                    ForgeModularApp_VST3 ForgeModularApp_CLAP)
+        if(TARGET ${_fm_tgt})
+            add_custom_command(TARGET ${_fm_tgt} POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                        "${_fm_app}/ui"
+                        "$<TARGET_BUNDLE_CONTENT_DIR:${_fm_tgt}>/Resources/ui"
+                COMMENT "Copying Forge Modular UI into ${_fm_tgt}")
+        endif()
+    endforeach()
 
     # A bundle that only runs on the machine that built it is worse than one
     # that fails to build, because the failure surfaces at someone else's desk.
