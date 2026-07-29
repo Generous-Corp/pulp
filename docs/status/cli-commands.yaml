@@ -2044,6 +2044,9 @@ commands:
           - name: --accept-loss
             kind: option
             description: Repeat once for each exact loss concept reported by export planning
+          - name: --plan
+            kind: flag
+            description: Return the canonical loss manifest and required consent without writing artifacts
       - name: import
         summary: Import an SMF file or unpacked DAWproject project.xml into a new canonical project directory
         args:

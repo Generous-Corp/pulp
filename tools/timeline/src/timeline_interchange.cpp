@@ -223,6 +223,60 @@ std::string output_json(std::string_view format, const fs::path& output,
     return result;
 }
 
+std::string concept_array_json(std::span<const Concept> concepts) {
+    std::string result = "[";
+    bool first = true;
+    for (const auto concept_value : concepts) {
+        if (!first)
+            result += ',';
+        first = false;
+        result += pulp::timeline::quote_json_string(
+            pulp::interchange::concept_id(concept_value));
+    }
+    result += ']';
+    return result;
+}
+
+std::string export_result_json(std::string_view format, const fs::path& output,
+                               const pulp::interchange::ExportPlan& plan, bool plan_only,
+                               std::span<const Concept> required_consent = {}) {
+    std::string result =
+        "{\"format\":" + pulp::timeline::quote_json_string(format) +
+        ",\"lossless\":" + (plan.is_lossless() ? std::string("true") : std::string("false")) +
+        ",\"manifest\":" + pulp::interchange::loss_manifest_json(plan) + ",\"ok\":true";
+    result += ",\"output\":";
+    result += pulp::timeline::quote_json_string(filesystem_path_to_utf8(output));
+    result += ",\"plan_only\":";
+    result += plan_only ? "true" : "false";
+    result += ",\"required_consent\":";
+    result += concept_array_json(required_consent);
+    result += '}';
+    return result;
+}
+
+OperationResult export_error_result(std::string_view format,
+                                    const pulp::interchange::ExportPlan& plan,
+                                    std::string_view stage, std::string_view message,
+                                    std::string_view path = {},
+                                    std::span<const Concept> required_consent = {}) {
+    std::string result = "{\"error\":{\"message\":";
+    result += pulp::timeline::quote_json_string(message);
+    if (!path.empty()) {
+        result += ",\"path\":";
+        result += pulp::timeline::quote_json_string(path);
+    }
+    result += ",\"stage\":";
+    result += pulp::timeline::quote_json_string(stage);
+    result += "},\"format\":";
+    result += pulp::timeline::quote_json_string(format);
+    result += ",\"manifest\":";
+    result += pulp::interchange::loss_manifest_json(plan);
+    result += ",\"ok\":false,\"required_consent\":";
+    result += concept_array_json(required_consent);
+    result += '}';
+    return {1, std::move(result)};
+}
+
 std::optional<std::vector<std::uint8_t>> read_package_file(const fs::path& canonical_base,
                                                            std::string_view relative,
                                                            std::uint64_t max_bytes) {
@@ -301,7 +355,8 @@ bool add_dawproject_media(const LoadedProject& loaded,
 
 OperationResult export_project(const ProjectSource& project, std::string_view format_text,
                                const fs::path& output_directory,
-                               const std::vector<std::string>& accepted_loss_names) {
+                               const std::vector<std::string>& accepted_loss_names,
+                               ExportDisposition disposition) {
     const auto format = parse_format(format_text);
     if (!format || output_directory.empty())
         return detail::failure("arguments", "format (smf or dawproject) and output are required",
@@ -325,31 +380,38 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
         return detail::failure("open", detail::persistence_message(loaded.error()),
                                loaded.error().path);
     const auto plan = pulp::interchange::plan_export(loaded.value().value, *format);
+    if (disposition == ExportDisposition::PlanOnly) {
+        const auto required = plan.required_consent();
+        return {0, export_result_json(format_text, output_directory, plan, true, required)};
+    }
     auto exported = pulp::interchange::run_export(
         plan, options, *format == Format::Smf ? pulp::smf::writer() : pulp::dawproject::writer());
-    if (!exported)
-        return detail::failure(
-            "export", exported.error().message,
-            exported.error().concepts.empty()
-                ? std::string_view{}
-                : pulp::interchange::concept_id(exported.error().concepts.front()));
+    if (!exported) {
+        const auto path = exported.error().concepts.empty()
+                              ? std::string_view{}
+                              : pulp::interchange::concept_id(exported.error().concepts.front());
+        return export_error_result(format_text, plan, "export", exported.error().message, path,
+                                   exported.error().concepts);
+    }
     if (*format == Format::DawProject &&
         !detail::add_dawproject_media(loaded.value(), exported.value()))
-        return detail::failure("export", "could not materialize referenced DAWproject media");
+        return export_error_result(format_text, plan, "export",
+                                   "could not materialize referenced DAWproject media");
 
     auto publisher = DirectoryPublisher::create(output_directory);
     if (!publisher)
-        return detail::failure("publish",
-                               "output directory must not exist and its parent must exist",
-                               filesystem_path_to_utf8(output_directory));
+        return export_error_result(format_text, plan, "publish",
+                                   "output directory must not exist and its parent must exist",
+                                   filesystem_path_to_utf8(output_directory));
     for (const auto& artifact : exported.value().artifacts)
         if (!publisher->write(artifact.name, artifact.bytes))
-            return detail::failure("publish", "could not stage export artifact", artifact.name);
+            return export_error_result(format_text, plan, "publish",
+                                       "could not stage export artifact", artifact.name);
     if (!publisher->commit())
-        return detail::failure("publish", "output directory appeared before atomic publication",
-                               filesystem_path_to_utf8(output_directory));
-    return {0, output_json(format_text, output_directory,
-                           std::string("\"lossless\":") + (plan.is_lossless() ? "true" : "false"))};
+        return export_error_result(format_text, plan, "publish",
+                                   "output directory appeared before atomic publication",
+                                   filesystem_path_to_utf8(output_directory));
+    return {0, export_result_json(format_text, output_directory, plan, false)};
 }
 
 OperationResult import_project(const fs::path& input, std::string_view format_text,

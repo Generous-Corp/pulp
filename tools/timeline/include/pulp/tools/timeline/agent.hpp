@@ -65,6 +65,11 @@ OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate 
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
                        std::uint32_t sample_rate = 48'000);
 
+enum class ExportDisposition : std::uint8_t {
+    Publish,
+    PlanOnly,
+};
+
 /// Export a canonical project through the consent-gated interchange planner.
 ///
 /// `format` is `smf` or `dawproject`. `output_directory` must not exist. Every
@@ -73,7 +78,8 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
 /// atomically publishes the whole artifact directory.
 OperationResult export_project(const ProjectSource& project, std::string_view format,
                                const std::filesystem::path& output_directory,
-                               const std::vector<std::string>& accepted_losses = {});
+                               const std::vector<std::string>& accepted_losses = {},
+                               ExportDisposition disposition = ExportDisposition::Publish);
 
 /// Import a foreign timeline file into a new canonical project directory.
 ///

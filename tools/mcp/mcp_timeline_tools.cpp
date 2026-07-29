@@ -27,7 +27,8 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* sample_rate = nullptr;
     const pulp::timeline::JsonValue* input = nullptr;
     const pulp::timeline::JsonValue* format = nullptr;
-    const pulp::timeline::JsonValue* accepted_losses = nullptr;
+    const pulp::timeline::JsonValue* accept_losses = nullptr;
+    const pulp::timeline::JsonValue* plan_only = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -46,7 +47,8 @@ parse_timeline_arguments(const std::string& params_json) {
     result.sample_rate = root.find("sample_rate");
     result.input = root.find("input");
     result.format = root.find("format");
-    result.accepted_losses = root.find("accepted_losses");
+    result.accept_losses = root.find("accept_losses");
+    result.plan_only = root.find("plan_only");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -172,20 +174,28 @@ std::string handle_timeline_export(const std::string& params_json) {
     if (project == nullptr || format == nullptr || output == nullptr)
         return timeline_argument_error("Error: project, format, and output are required");
     std::vector<std::string> accepted_losses;
-    if (const auto* losses = arguments.value().accepted_losses) {
+    if (const auto* losses = arguments.value().accept_losses) {
         if (losses->kind != pulp::timeline::JsonValue::Kind::Array)
-            return timeline_argument_error("Error: accepted_losses must be an array");
+            return timeline_argument_error("Error: accept_losses must be an array");
         accepted_losses.reserve(losses->array.size());
         for (const auto& loss : losses->array) {
             if (loss.kind != pulp::timeline::JsonValue::Kind::String || loss.scalar.empty())
                 return timeline_argument_error(
-                    "Error: every accepted_losses entry must be a concept id");
+                    "Error: every accept_losses entry must be a concept id");
             accepted_losses.push_back(loss.scalar);
         }
     }
+    bool plan_only = false;
+    if (const auto* value = arguments.value().plan_only) {
+        if (value->kind != pulp::timeline::JsonValue::Kind::Boolean)
+            return timeline_argument_error("Error: plan_only must be a boolean");
+        plan_only = value->boolean;
+    }
     return timeline_result(pulp::tools::timeline::export_project(
         timeline_project_source(*project), *format,
-        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses));
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses,
+        plan_only ? pulp::tools::timeline::ExportDisposition::PlanOnly
+                  : pulp::tools::timeline::ExportDisposition::Publish));
 }
 
 std::string handle_timeline_import(const std::string& params_json) {

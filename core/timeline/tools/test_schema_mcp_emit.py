@@ -203,14 +203,25 @@ def main() -> int:
     check(
         "export loss consent enum is derived from the committed concept authority",
         export_tool["x-pulp-loss-concepts"] == expected_loss_concepts
-        and export_tool["inputSchema"]["properties"]["accepted_losses"]["items"]["enum"]
+        and export_tool["inputSchema"]["properties"]["accept_losses"]["items"]["enum"]
         == expected_loss_concepts
         and "unknown" not in expected_loss_concepts,
     )
     check(
         "export consent is per-concept and has no blanket flag",
-        export_tool["inputSchema"]["properties"]["accepted_losses"]["uniqueItems"] is True
+        export_tool["inputSchema"]["properties"]["accept_losses"]["uniqueItems"] is True
         and "force" not in export_tool["inputSchema"]["properties"],
+    )
+    check(
+        "export plan-only is an optional strict boolean",
+        export_tool["inputSchema"]["properties"]["plan_only"] == {
+            "type": "boolean",
+            "description": (
+                "Return the canonical loss manifest and required consent without "
+                "writing or publishing artifacts."
+            ),
+        }
+        and "plan_only" not in export_tool["inputSchema"]["required"],
     )
     check(
         "import documents the unpacked DAWproject boundary",

@@ -64,6 +64,7 @@ examples rather than the full source-tree inventory.
 | `/create <name>` | Scaffold a new plugin or app project |
 | `/status` | Show project status, build state, configuration |
 | `/validate` | Run plugin format validators and validation reports |
+| `/seq` | Inspect, validate, edit, explain, import, or consent-gated export of a timeline project |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
 | `/import-design` | Import from Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX |
@@ -152,8 +153,10 @@ application accepts only the generated typed command envelopes. Use
 before/after renders to `pulp_audio_compare` for an advisory judgment. Export
 requires explicit consent for every reported lossy concept; its accepted-loss
 enum is generated from the committed interchange concept authority and offers
-no force or accept-all escape hatch. Import/export publish new directories
-only. SMF interchange uses a MIDI file, while the current DAWproject boundary
+no force or accept-all escape hatch. Call it first with `plan_only: true` to
+receive the canonical manifest and `required_consent` without writing; refusal
+and successful export return the same manifest shape. Import/export publish new
+directories only. SMF interchange uses a MIDI file, while the current DAWproject boundary
 is an unpacked `project.xml` with confined sibling media rather than a packaged
 `.dawproject` container.
 

@@ -512,7 +512,20 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
             pulp::tools::timeline::filesystem_path_to_utf8(exported)) +
         ",\"project\":" + pulp::timeline::quote_json_string(project) + "}";
 
-    require_contains(handle_timeline_export(export_args), R"JSON("ok":true)JSON");
+    auto plan_args = export_args;
+    plan_args.pop_back();
+    plan_args += ",\"plan_only\":true}";
+    const auto plan_result = handle_timeline_export(plan_args);
+    REQUIRE(pulp::timeline::parse_json(plan_result));
+    require_contains(plan_result, R"JSON("plan_only":true)JSON");
+    require_contains(plan_result, R"JSON("manifest":{"schema_version":1)JSON");
+    require_contains(plan_result, R"JSON("required_consent":[])JSON");
+    REQUIRE_FALSE(std::filesystem::exists(exported));
+
+    const auto export_result = handle_timeline_export(export_args);
+    REQUIRE(pulp::timeline::parse_json(export_result));
+    require_contains(export_result, R"JSON("ok":true)JSON");
+    require_contains(export_result, R"JSON("manifest":{"schema_version":1)JSON");
     REQUIRE(std::filesystem::is_regular_file(exported / "project.mid"));
     REQUIRE(std::filesystem::is_regular_file(exported / "pulp-loss-manifest.json"));
 
@@ -521,12 +534,16 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
         REQUIRE(sentinel);
         sentinel << "preserve";
     }
-    require_contains(handle_timeline_export(export_args), R"JSON("isError":true)JSON");
+    const auto publish_refusal = handle_timeline_export(export_args);
+    REQUIRE(pulp::timeline::parse_json(publish_refusal));
+    require_contains(publish_refusal, R"JSON("isError":true)JSON");
+    require_contains(publish_refusal, R"JSON("manifest":{"schema_version":1)JSON");
+    require_contains(publish_refusal, R"JSON("stage":"publish")JSON");
     REQUIRE(std::filesystem::is_regular_file(exported / "sentinel.txt"));
 
     auto unknown_args = export_args;
     unknown_args.pop_back();
-    unknown_args += ",\"accepted_losses\":[\"clip.telepathy\"]}";
+    unknown_args += ",\"accept_losses\":[\"clip.telepathy\"]}";
     require_contains(handle_timeline_export(unknown_args), "unknown loss concept");
 
     const auto imported = temp.path / "smf-import";
@@ -589,7 +606,7 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
 
     const auto daw_exported = temp.path / "daw-exported";
     const auto daw_export_args =
-        "{\"accepted_losses\":[\"media.provenance\",\"media.provenance\"],"
+        "{\"accept_losses\":[\"media.provenance\",\"media.provenance\"],"
         "\"format\":\"dawproject\",\"output\":" +
         pulp::timeline::quote_json_string(
             pulp::tools::timeline::filesystem_path_to_utf8(daw_exported)) +
@@ -614,14 +631,17 @@ TEST_CASE("timeline MCP interchange rejects malformed boundaries without publish
     require_contains(handle_timeline_export("{"), "arguments must be valid JSON");
     require_contains(handle_timeline_import("{"), "arguments must be valid JSON");
     require_contains(handle_timeline_export(
-                         R"json({"accepted_losses":{},"format":"smf","output":"unused","project":"{}"})json"),
-                     "accepted_losses must be an array");
+                         R"json({"accept_losses":{},"format":"smf","output":"unused","project":"{}"})json"),
+                     "accept_losses must be an array");
     require_contains(handle_timeline_export(
-                         R"json({"accepted_losses":[7],"format":"smf","output":"unused","project":"{}"})json"),
-                     "every accepted_losses entry must be a concept id");
+                         R"json({"accept_losses":[7],"format":"smf","output":"unused","project":"{}"})json"),
+                     "every accept_losses entry must be a concept id");
     require_contains(handle_timeline_export(
-                         R"json({"accepted_losses":[""],"format":"smf","output":"unused","project":"{}"})json"),
-                     "every accepted_losses entry must be a concept id");
+                         R"json({"accept_losses":[""],"format":"smf","output":"unused","project":"{}"})json"),
+                     "every accept_losses entry must be a concept id");
+    require_contains(handle_timeline_export(
+                         R"json({"format":"smf","output":"unused","plan_only":"yes","project":"{}"})json"),
+                     "plan_only must be a boolean");
 
     const auto invalid_export = pulp::tools::timeline::export_project(
         pulp::tools::timeline::ProjectSource::inline_json("{}"), "unknown",

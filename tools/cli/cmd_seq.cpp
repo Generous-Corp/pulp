@@ -32,7 +32,7 @@ void print_seq_usage() {
                  "  explain <project.json> [--sample-rate <hz>]\n"
                  "  apply <project.json> <commands.json> [--out <project.json>]\n"
                  "  export <project.json> --format <smf|dawproject> --out <new-directory>\n"
-                 "         [--accept-loss <concept>]...\n"
+                 "         [--plan] [--accept-loss <concept>]...\n"
                  "  import <input> --format <smf|dawproject> --out <new-directory>\n";
 }
 
@@ -271,6 +271,7 @@ int cmd_seq(const std::vector<std::string>& args) {
         fs::path output;
         std::string format;
         std::vector<std::string> accepted_losses;
+        bool plan_only = false;
         for (std::size_t index = 2; index < args.size(); ++index) {
             if (args[index] == "--out") {
                 if (++index == args.size())
@@ -284,6 +285,8 @@ int cmd_seq(const std::vector<std::string>& args) {
                 if (++index == args.size())
                     return bad_seq_usage("--accept-loss requires one concept id");
                 accepted_losses.push_back(args[index]);
+            } else if (args[index] == "--plan" && subcommand == "export") {
+                plan_only = true;
             } else {
                 return bad_seq_usage("unknown " + subcommand + " option: " + args[index]);
             }
@@ -293,7 +296,9 @@ int cmd_seq(const std::vector<std::string>& args) {
         const auto input = pulp::tools::timeline::filesystem_path_from_utf8(args[1]);
         if (subcommand == "export")
             return emit(pulp::tools::timeline::export_project(
-                ProjectSource::file(input), format, output, accepted_losses));
+                ProjectSource::file(input), format, output, accepted_losses,
+                plan_only ? pulp::tools::timeline::ExportDisposition::PlanOnly
+                          : pulp::tools::timeline::ExportDisposition::Publish));
         return emit(pulp::tools::timeline::import_project(input, format, output));
     }
 

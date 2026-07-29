@@ -316,12 +316,35 @@ TEST_CASE("timeline CLI interchange requires exact consent and publishes new dir
     const auto exported = temp.path() / "exported";
     const auto export_command =
         cli + " seq export " + quote(project) + " --format smf --out " + quote(exported);
-    REQUIRE(run_cli(export_command + " > /dev/null") == 0);
+    const auto planned = temp.path() / "planned-but-unwritten";
+    const auto plan_result = temp.path() / "plan-result.json";
+    REQUIRE(run_cli(cli + " seq export " + quote(project) + " --format smf --out " +
+                    quote(planned) + " --plan > " + quote(plan_result)) == 0);
+    REQUIRE_FALSE(std::filesystem::exists(planned));
+    const auto plan_json = read_text(plan_result);
+    REQUIRE(parse_json(plan_json));
+    REQUIRE(plan_json.find(R"json("plan_only":true)json") != std::string::npos);
+    REQUIRE(plan_json.find(R"json("manifest":{"schema_version":1)json") !=
+            std::string::npos);
+    REQUIRE(plan_json.find(R"json("required_consent":[])json") != std::string::npos);
+    const auto export_result = temp.path() / "export-result.json";
+    REQUIRE(run_cli(export_command + " > " + quote(export_result)) == 0);
+    const auto export_json = read_text(export_result);
+    REQUIRE(parse_json(export_json));
+    REQUIRE(export_json.find(R"json("manifest":{"schema_version":1)json") !=
+            std::string::npos);
+    REQUIRE(export_json.find(R"json("plan_only":false)json") != std::string::npos);
     REQUIRE(std::filesystem::is_regular_file(exported / "project.mid"));
     REQUIRE(std::filesystem::is_regular_file(exported / "pulp-loss-manifest.json"));
 
     write_text(exported / "sentinel.txt", "preserve");
-    REQUIRE(run_cli(export_command + " > /dev/null 2>&1") == 1);
+    const auto publish_refusal = temp.path() / "publish-refusal.json";
+    REQUIRE(run_cli(export_command + " > /dev/null 2> " + quote(publish_refusal)) == 1);
+    const auto publish_refusal_json = read_text(publish_refusal);
+    REQUIRE(parse_json(publish_refusal_json));
+    REQUIRE(publish_refusal_json.find(R"json("manifest":{"schema_version":1)json") !=
+            std::string::npos);
+    REQUIRE(publish_refusal_json.find(R"json("stage":"publish")json") != std::string::npos);
     REQUIRE(read_text(exported / "sentinel.txt") == "preserve");
 
     const auto unknown = temp.path() / "unknown";
@@ -337,10 +360,16 @@ TEST_CASE("timeline CLI interchange requires exact consent and publishes new dir
     const auto lossy_project = temp.path() / "lossy-project.json";
     write_text(lossy_project, project_json(source_path));
     const auto partially_consented = temp.path() / "partially-consented";
+    const auto refusal_result = temp.path() / "refusal-result.json";
     REQUIRE(run_cli(cli + " seq export " + quote(lossy_project) + " --format smf --out " +
-                    quote(partially_consented) + " --accept-loss clip.absolute > /dev/null 2>&1") ==
-            1);
+                    quote(partially_consented) + " --accept-loss clip.absolute 2> " +
+                    quote(refusal_result)) == 1);
     REQUIRE_FALSE(std::filesystem::exists(partially_consented));
+    const auto refusal_json = read_text(refusal_result);
+    REQUIRE(parse_json(refusal_json));
+    REQUIRE(refusal_json.find(R"json("manifest":{"schema_version":1)json") !=
+            std::string::npos);
+    REQUIRE(refusal_json.find(R"json("required_consent":[)json") != std::string::npos);
 
     const auto imported = temp.path() / "imported";
     REQUIRE(run_cli(cli + " seq import " + quote(exported / "project.mid") +

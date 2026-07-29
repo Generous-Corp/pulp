@@ -202,11 +202,18 @@ def generate(manifest: dict) -> str:
                         "type": "string",
                         "description": "New destination directory; it must not exist.",
                     },
-                    "accepted_losses": {
+                    "accept_losses": {
                         "type": "array",
                         "uniqueItems": True,
                         "items": {"type": "string", "enum": loss_concepts},
                         "description": "Exact interchange concepts explicitly accepted as loss.",
+                    },
+                    "plan_only": {
+                        "type": "boolean",
+                        "description": (
+                            "Return the canonical loss manifest and required consent without "
+                            "writing or publishing artifacts."
+                        ),
                     },
                 },
                 ["format", "output", "project"],

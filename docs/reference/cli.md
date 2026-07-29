@@ -1567,6 +1567,7 @@ pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
 pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq export song.pulpseq.json --format smf --out song-smf --plan
 pulp seq export song.pulpseq.json --format smf --out song-smf \
   [--accept-loss concept-id]...
 pulp seq export song.pulpseq.json --format dawproject --out song-dawproject \
@@ -1585,7 +1586,10 @@ partial edit.
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`
 argument. There is deliberately no force or accept-all switch: a newly
 introduced loss stops an unattended pipeline until that exact concept is
-reviewed. Unknown concept IDs are rejected.
+reviewed. Unknown concept IDs are rejected. `--plan` always writes nothing and
+returns the canonical manifest plus `required_consent`, including for a
+lossless project that could otherwise export immediately. Normal refusal and
+successful export results carry the same manifest object.
 
 Import and export publish only to a new directory. The destination and even a
 symlink at that path must not already exist. Files are staged in a private

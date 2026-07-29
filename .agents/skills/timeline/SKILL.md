@@ -13,9 +13,10 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   `pulp_timeline_command_apply`, `pulp_timeline_validate`,
   `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, and
   `pulp_timeline_import`.
-- Use `pulp seq` and `pulp render` for shell scripts, CI, and human-operated
-  headless workflows. Prefer `seq apply` with typed command envelopes over
-  inventing one-off mutation flags.
+- Use `/seq` for the agent-guided inspect, validate, edit, explain, import, and
+  consent-gated export workflow. Use `pulp seq` and `pulp render` directly for
+  shell scripts, CI, and human-operated headless workflows. Prefer `seq apply`
+  with typed command envelopes over inventing one-off mutation flags.
 - Use the C++ SDK when embedding an editor, transport, compiler, renderer,
   recorder, or durable session. Keep document mutation in `DocumentSession`,
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
@@ -757,7 +758,7 @@ pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
 pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
-  [--accept-loss <concept-id>]...
+  [--plan] [--accept-loss <concept-id>]...
 pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \
   --out <new-directory>
 pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
@@ -772,7 +773,11 @@ Import and export refuse every existing destination, stage into a private
 sibling directory, and publish the complete directory atomically. Never add a
 force, overwrite, or accept-all path. Export requires separate consent for
 every planned lossy concept so a newly introduced loss stops an unattended
-pipeline. SMF exports contain `project.mid`; DAWproject exports are currently
+pipeline. Run `--plan` first: it returns the canonical manifest and
+`required_consent` without writing anything, even when the project is lossless.
+MCP uses the equivalent `plan_only: true` input. Refusal and successful export
+results carry the same manifest object. SMF exports contain `project.mid`;
+DAWproject exports are currently
 unpacked `project.xml` plus sibling media, not packaged `.dawproject` files.
 DAWproject import likewise requires the input filename `project.xml`, confines
 sibling media resolution to its directory, and publishes canonical
