@@ -45,6 +45,7 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/claude_html_dependencies.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp)

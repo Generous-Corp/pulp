@@ -124,25 +124,6 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
     return result;
 }
 
-std::vector<DependencyReference> referenced_design_system_roots(
-    std::string_view content) {
-    // Claude project exports can load a bound design system by constructing
-    // URLs at runtime (`base + "/" + tokenPath`). Those files are not visible
-    // to the ordinary src/href/import graph, but the base declaration is.
-    static const std::regex kDesignSystemBase{
-        R"((?:const|let|var)\s+\w*base\w*\s*=\s*["']([^"']*_ds/[^"']+)["'])",
-        std::regex::icase};
-    std::vector<DependencyReference> result;
-    const std::string text(content);
-    for (std::sregex_iterator it(
-             text.begin(), text.end(), kDesignSystemBase), end;
-         it != end; ++it) {
-        if (auto path = safe_relative_reference((*it)[1].str()))
-            result.push_back(std::move(*path));
-    }
-    return result;
-}
-
 bool should_scan(const fs::path& path) {
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
@@ -167,7 +148,8 @@ std::string read_text(const fs::path& path) {
 
 StagedHtmlProject stage_html_project(
     const fs::path& input_file,
-    std::string_view input_content) {
+    std::string_view input_content,
+    const HtmlProjectStageOptions& options) {
     StagedHtmlProject result;
     std::string workspace_error;
     result.workspace =
@@ -208,12 +190,17 @@ StagedHtmlProject stage_html_project(
         auto [base, content] = std::move(pending.front());
         pending.pop_front();
         auto references = referenced_paths(content);
-        for (const auto& design_system :
-             referenced_design_system_roots(content)) {
+        const auto additional_roots =
+            options.discover_additional_roots
+                ? options.discover_additional_roots(content)
+                : std::vector<std::string>{};
+        for (const auto& root : additional_roots) {
+            const auto dependency_root = safe_relative_reference(root);
+            if (!dependency_root) continue;
             const auto relative_root =
-                (design_system.root_relative
-                     ? design_system.path
-                     : base / design_system.path).lexically_normal();
+                (dependency_root->root_relative
+                     ? dependency_root->path
+                     : base / dependency_root->path).lexically_normal();
             if (relative_root.empty() || relative_root.is_absolute() ||
                 *relative_root.begin() == "..") {
                 continue;

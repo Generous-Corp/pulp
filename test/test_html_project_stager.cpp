@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "tools/import-design/html_project_stager.hpp"
 #include "tools/import-design/browser_capture_workspace.hpp"
+#include "tools/import-design/claude_html_dependencies.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,6 +12,8 @@
 namespace fs = std::filesystem;
 using pulp::import_design::stage_html_project;
 using pulp::import_design::commit_browser_capture_directory;
+using pulp::import_design::claude_html_dependency_roots;
+using pulp::import_design::HtmlProjectStageOptions;
 
 namespace {
 
@@ -175,13 +178,36 @@ TEST_CASE("HTML staging includes a runtime-bound Claude design system",
 
     auto staged = stage_html_project(
         tree.root / "index.html",
-        R"(<script src="ds-base.js"></script>)");
+        R"(<script src="ds-base.js"></script>)",
+        HtmlProjectStageOptions{claude_html_dependency_roots});
     INFO(staged.error);
     REQUIRE(staged);
     CHECK(fs::exists(
         staged.root /
         "_ds/pulp-design-system-123/tokens/fonts.css"));
     CHECK_FALSE(fs::exists(staged.root / "unrelated-secret.txt"));
+}
+
+TEST_CASE("generic HTML staging does not infer Claude dependency roots",
+          "[import-design][browser-capture][staging]") {
+    TempTree tree;
+    tree.write("index.html", R"(<script src="ds-base.js"></script>)");
+    tree.write(
+        "ds-base.js",
+        R"(const base = "_ds/pulp-design-system-123";)");
+    tree.write(
+        "_ds/pulp-design-system-123/styles.css",
+        "body { color: white; }");
+
+    auto staged = stage_html_project(
+        tree.root / "index.html",
+        R"(<script src="ds-base.js"></script>)");
+
+    INFO(staged.error);
+    REQUIRE(staged);
+    CHECK(fs::exists(staged.root / "ds-base.js"));
+    CHECK_FALSE(fs::exists(
+        staged.root / "_ds/pulp-design-system-123/styles.css"));
 }
 
 TEST_CASE("browser capture commit replaces only marked owned evidence",

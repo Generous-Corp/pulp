@@ -17,8 +17,11 @@ capture adoption and publication, `browser_import_cli` owns the
 capture/validation/evidence transaction, `browser_html_import` owns Chromium
 orchestration policy, `browser_capture_backend` owns
 discovery/process/security, and `browser_capture_ir` owns
-protocol-to-DesignIR lowering. Keep those boundaries intact; the static parser
-is an explicit fallback, not another automatic decision branch.
+protocol-to-DesignIR lowering. `html_project_stager` owns the generic contained
+dependency graph and staging limits, while provider-specific dynamic dependency
+discovery belongs in provider modules such as `claude_html_dependencies`.
+Keep those boundaries intact; the static parser is an explicit fallback, not
+another automatic decision branch.
 
 CLI help output is also extracted: `import_design_cli_help.{hpp,cpp}` owns the
 byte-stable usage text, while `pulp_import_design.cpp` only decides when to
@@ -78,6 +81,8 @@ data structs over pulling the entire CLI state into every module.
 | `browser_import_session` | Browser-capture adoption, preparation policy, generated-output staging, and final publication. | Browser capture/validation mechanics or generated-output writes. |
 | `browser_import_cli` | Browser capture CLI diagnostics, settled canvas/reference propagation, portable-asset localization, DesignIR validation, and deferred evidence commit. | Browser discovery/subprocess implementation, parser dispatch, or generated output writes. |
 | `browser_html_import` | Runnable-HTML classification, capture orchestration, and lowering result. | CLI printing, generated output writes, browser subprocess implementation. |
+| `html_project_stager` | Contained relative dependency traversal, staging limits, and optional provider-discovery callback execution. | Provider signatures or export-format-specific dependency inference. |
+| `claude_html_dependencies` | Dynamic dependency roots encoded by Claude project exports. | Filesystem traversal, containment policy, staging limits, or browser execution. |
 | `import_design_parse` | Source parser dispatch and parser-result normalization. | Source detection internals or code emit. |
 | `import_design_asset_enrichment` | Font/asset resolution, PNG metadata, sprite knobs, fader/meter skins, portable asset paths. | CLI argv parsing. |
 | `import_design_emit_baked` | IR JSON, C++, and SwiftUI output flows. | JS emit sidecars. |

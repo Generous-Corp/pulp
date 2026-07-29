@@ -3,6 +3,7 @@
 #include "browser_capture_backend.hpp"
 #include "browser_capture_ir.hpp"
 #include "browser_capture_workspace.hpp"
+#include "claude_html_dependencies.hpp"
 #include "html_intake.hpp"
 #include "html_project_stager.hpp"
 
@@ -83,7 +84,15 @@ BrowserHtmlImportResult import_browser_html(
             (request.output_file.stem().string() + "-browser-capture");
     }
 
-    auto staged = stage_html_project(request.input_file, content);
+    HtmlProjectStageOptions stage_options;
+    if (intake.shape == HtmlExportShape::claude_project_bundle ||
+        intake.shape == HtmlExportShape::claude_design_component ||
+        intake.shape == HtmlExportShape::claude_standalone_bundle) {
+        stage_options.discover_additional_roots =
+            claude_html_dependency_roots;
+    }
+    auto staged =
+        stage_html_project(request.input_file, content, stage_options);
     if (!staged) {
         return BrowserHtmlFailure{
             2,
