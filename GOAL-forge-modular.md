@@ -168,3 +168,25 @@ Launching Rack opens an audio device — say so in the message that dispatches
 it, cap the run, and quit gracefully rather than killing it (a hard kill
 truncates Rack's log and triggers a crash-recovery modal that swallows the next
 patch argument). Never regenerate while Rack is reading the plugin.
+
+## CLAP flush — two hypotheses already ruled out
+
+Do not re-walk these:
+
+- **Not the read path.** `params_get_value` reads `store.get_value`
+  (`clap_entry.hpp:376`) — the same store `clap_params_flush` writes
+  (`clap_adapter.cpp:1655`).
+- **Not the host-write guard.** `ScopedClapHostParamWrite` is read only by the
+  outbound listener and the two gesture callbacks
+  (`clap_adapter.cpp:260-273`), where it suppresses the *event echo*. It never
+  blocks the store write.
+
+What is left, and the first thing to test: `maybe_synthesize_bypass` is a no-op
+when the host quirk is off, so under clap-validator this plugin may expose **no
+parameters at all** — and a plugin with zero parameters trivially cannot show a
+value change after a flush. If that is the cause, flush is not broken; the
+plugin simply gives the validator nothing to flush, and the question becomes
+whether Forge Modular should declare a real Bypass. `DECISIONS.md` currently
+answers no, deliberately. Log `params_count` under the validator before
+changing anything — `PulpGain` passes both flush tests and would regress
+silently.
