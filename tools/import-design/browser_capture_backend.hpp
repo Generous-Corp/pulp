@@ -148,6 +148,7 @@ struct CaptureRequest {
 
     std::optional<fs::path> node_executable;
     std::optional<fs::path> capture_script;
+    std::optional<fs::path> interaction_plan;
 
     int initial_width = 1280;
     int initial_height = 800;

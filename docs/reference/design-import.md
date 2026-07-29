@@ -40,6 +40,7 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
 | `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides path env, mode, managed, and system selection. | — |
+| `--browser-interactions <json>` | Apply a versioned bounded click/type/wait plan before browser evidence capture. | initial state |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. | off |
 | `--allow-browser-network` | Permit only the source document's declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
@@ -65,6 +66,31 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
+
+For a secondary prototype screen, pass
+`--browser-interactions <plan.json>`. The versioned
+`pulp-browser-interactions-v1` document accepts only bounded `click`, `type`,
+`wait-for`, and `wait-ms` actions. Selectors and action results are saved in
+the capture evidence; typed text is represented by its length and SHA-256,
+not persisted as plaintext. There is deliberately no arbitrary JavaScript
+action. A `wait-for` action checks the live rendered element state, so hidden
+or inert DOM content does not count merely because its strings exist in the
+document.
+
+```json
+{
+  "schema": "pulp-browser-interactions-v1",
+  "version": 1,
+  "actions": [
+    { "action": "click", "selector": "[data-view='patch']" },
+    {
+      "action": "wait-for",
+      "selector": "[data-screen='patch-composer']",
+      "state": "visible"
+    }
+  ]
+}
+```
 
 `--url` fetches **unauthenticated** and sends no credential of any kind. It is therefore only useful for URLs that serve the design data itself — a v0 share link, or any host that returns design JSON/HTML directly. It is not a Figma import path; see below.
 

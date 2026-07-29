@@ -52,6 +52,8 @@ void print_usage() {
     std::cout << "                    Permit source-declared public HTTPS origins while Chromium\n";
     std::cout << "                    evaluates HTML; private/local and WebSocket access stays blocked\n";
     std::cout << "  --browser <path>  Chromium/Chrome executable for browser-solved HTML import\n";
+    std::cout << "  --browser-interactions <json>\n";
+    std::cout << "                    Apply a versioned bounded click/type/wait plan before capture\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";

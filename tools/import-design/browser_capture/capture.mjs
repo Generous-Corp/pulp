@@ -52,6 +52,8 @@ import {
   installCaptureHealthMonitor,
   verifyCaptureHealth,
 } from "./health.mjs";
+import { executeInteractionPlan } from "./interaction_executor.mjs";
+import { readInteractionPlan } from "./interaction_plan.mjs";
 import { armCleanupDeadline } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
 
@@ -359,6 +361,10 @@ async function runCapture(options) {
   validateCaptureDimensions(initialWidth, initialHeight, dpr);
   const timeoutMs = positiveInteger(
     options.values, "--timeout-ms", 60000);
+  const interactionPlanPath = options.values.get("--interactions");
+  const interactionPlan = interactionPlanPath
+    ? await readInteractionPlan(interactionPlanPath)
+    : null;
   const allowNetwork = options.flags.has("--allow-network");
   const declaredNetworkOrigins =
     options.multiValues.get("--declared-network-origin") ?? [];
@@ -475,6 +481,26 @@ async function runCapture(options) {
     const rendererSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
     });
+    let interactionReport = null;
+    let interactionSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
+    if (interactionPlan) {
+      phase = "browser-interactions";
+      const settleAfterInteraction = async () => {
+        const settled = await waitForStable(cdp, {
+          networkIdle: () => pendingNetwork.size === 0,
+          minimumElapsedMs: 100,
+        });
+        interactionSettle.rounds += settled.rounds;
+        interactionSettle.stableRounds += settled.stableRounds;
+        interactionSettle.elapsedMs += settled.elapsedMs;
+      };
+      interactionReport = await executeInteractionPlan(
+        cdp, interactionPlan, {
+          settle: settleAfterInteraction,
+        });
+      await settleAfterInteraction();
+      phase = "page-settle";
+    }
     // Keep the viewport that authored the responsive layout. Resizing it to the
     // measured document extent creates a feedback loop for 100vh/min-height
     // application shells: the act of measuring changes the page being measured.
@@ -643,6 +669,11 @@ async function runCapture(options) {
       writeJson(path.join(outputDir, "dom-snapshot.json"), sanitizedSnapshot),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
+      ...(interactionReport
+        ? [writeJson(
+            path.join(outputDir, "interaction-report.json"),
+            interactionReport)]
+        : []),
     ]);
 
     const browserVersion = await cdp.call("Browser.getVersion");
@@ -685,12 +716,15 @@ async function runCapture(options) {
         settle: {
           rounds:
             firstSettle.rounds + rendererSettle.rounds +
+            interactionSettle.rounds +
             widthSettle.rounds + heightSettle.rounds,
           stable_rounds:
             firstSettle.stableRounds + rendererSettle.stableRounds +
+            interactionSettle.stableRounds +
             widthSettle.stableRounds + heightSettle.stableRounds,
           elapsed_ms:
             firstSettle.elapsedMs + rendererSettle.elapsedMs +
+            interactionSettle.elapsedMs +
             widthSettle.elapsedMs + heightSettle.elapsedMs,
         },
         network: {
@@ -702,6 +736,17 @@ async function runCapture(options) {
         health: captureHealth,
         readiness,
         renderer_hooks: rendererHooks,
+        ...(interactionReport
+          ? {
+              interactions: {
+                schema: interactionReport.schema,
+                version: interactionReport.version,
+                report: "interaction-report.json",
+                plan_sha256: interactionReport.plan_sha256,
+                action_count: interactionReport.action_count,
+              },
+            }
+          : {}),
       },
       documents: [{
         id: "document:0",

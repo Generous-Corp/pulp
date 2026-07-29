@@ -112,6 +112,7 @@ BrowserHtmlImportResult import_browser_html(
     capture.output_directory = capture_directory;
     capture.initial_width = request.initial_width;
     capture.initial_height = request.initial_height;
+    capture.interaction_plan = request.browser_interactions;
     capture.allow_network = request.allow_browser_network;
 
     std::error_code ec;

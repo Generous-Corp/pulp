@@ -166,6 +166,85 @@ test("real browser capture waits through a delayed DOM commit",
         contract: "__pulpCaptureReady",
         awaited: true,
       });
+      await assert.rejects(
+        access(path.join(output, "interaction-report.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("real browser interactions capture a rendered secondary screen",
+  { timeout: 20000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-interactions-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<style>
+  html, body { margin: 0; width: 160px; height: 120px; overflow: hidden; }
+  section { position: absolute; inset: 0; }
+  #landing { background: rgb(220, 20, 20); }
+  #working { display: none; background: rgb(20, 210, 40); }
+  body.working #landing { display: none; }
+  body.working #working { display: block; }
+</style>
+<section id="landing">
+  <button id="open" onclick="setTimeout(() => {
+    document.body.className = 'working';
+  }, 100)">Open working screen</button>
+</section>
+<section id="working">WORKING SCREEN STRING EXISTS WHILE HIDDEN</section>
+`);
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [
+          { action: "click", selector: "#open" },
+          {
+            action: "wait-for",
+            selector: "#working",
+            state: "visible",
+            timeout_ms: 3000,
+          },
+        ],
+      }));
+      await execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 });
+
+      const screenshot = await readFile(path.join(output, "browser.png"));
+      const [red, green, blue, alpha] = rgbaPixel(screenshot, 40, 80);
+      assert.ok(red < 40 && green > 190 && blue < 70 && alpha > 240);
+      const report = JSON.parse(
+        await readFile(path.join(output, "interaction-report.json"), "utf8"));
+      assert.equal(report.action_count, 2);
+      assert.deepEqual(report.actions.map(({ action }) => action),
+        ["click", "wait-for"]);
+      const envelope = JSON.parse(
+        await readFile(path.join(output, "capture.json"), "utf8"));
+      assert.equal(envelope.provenance.interactions.action_count, 2);
+      assert.equal(
+        envelope.provenance.interactions.report,
+        "interaction-report.json");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

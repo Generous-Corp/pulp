@@ -751,6 +751,10 @@ CaptureResult capture_document(
         "--initial-height", std::to_string(request.initial_height),
         "--dpr", std::to_string(request.device_scale_factor),
         "--timeout-ms", std::to_string(request.timeout_ms)};
+    if (request.interaction_plan) {
+        args.push_back("--interactions");
+        args.push_back(request.interaction_plan->string());
+    }
     if (request.allow_network) args.push_back("--allow-network");
     if (request.allow_network) {
         for (const auto& origin : declared_https_origins(canonical_root)) {
