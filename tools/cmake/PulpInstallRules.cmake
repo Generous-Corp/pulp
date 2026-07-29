@@ -28,7 +28,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
-    pulp-interchange pulp-dawproject-import pulp-smf-interop
+    pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
@@ -236,7 +236,7 @@ endif()
 # aligned with the targets exported above: iOS deliberately has no pulp-host,
 # so it must not receive orphaned desktop-host headers either.
 set(_pulp_sdk_header_subsystems
-    platform runtime timebase timeline playback interchange events state audio midi signal graph format sequence osc canvas
+    platform runtime timebase timeline playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)

@@ -46,7 +46,7 @@ std::string export_xml(const Project& project, const std::vector<Concept>& accep
     const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
     interchange::ExportOptions options;
     options.accepted_losses = accept;
-    auto artifacts = interchange::run_export(plan, options, dawproject::writer(project));
+    auto artifacts = interchange::run_export(plan, options, dawproject::writer());
     REQUIRE(artifacts.has_value());
     for (const auto& artifact : artifacts.value().artifacts)
         if (artifact.name == "project.xml")
@@ -117,6 +117,32 @@ TEST_CASE("a bounded document exports and re-imports with its music intact",
     REQUIRE(after.count(Concept::TrackFlat) == before.count(Concept::TrackFlat));
 }
 
+TEST_CASE("the deprecated writer overload preserves the plan-owned snapshot",
+          "[interchange][dawproject][export][compatibility]") {
+    const Project authoritative = note_project();
+    auto legacy_track = take(Track::create({50}, "legacy-only", {}));
+    auto legacy_sequence = take(Sequence::create(
+        {30}, "legacy", TickDuration{4 * kQuarter}, {std::move(legacy_track)}));
+    const Project legacy = take(Project::create(
+        ProjectInput{{10}, "legacy", 60, {30}, {}, {std::move(legacy_sequence)}}));
+
+    const auto plan =
+        interchange::plan_export(authoritative, interchange::Format::DawProject);
+    auto exported = interchange::run_export(plan, interchange::ExportOptions{},
+                                            dawproject::writer(legacy));
+    REQUIRE(exported.has_value());
+
+    const auto artifact = std::find_if(
+        exported.value().artifacts.begin(), exported.value().artifacts.end(),
+        [](const interchange::ExportArtifact& candidate) {
+            return candidate.name == "project.xml";
+        });
+    REQUIRE(artifact != exported.value().artifacts.end());
+    const std::string xml(artifact->bytes.begin(), artifact->bytes.end());
+    REQUIRE(xml.find("name=\"lead\"") != std::string::npos);
+    REQUIRE(xml.find("legacy-only") == std::string::npos);
+}
+
 TEST_CASE("the round-trip comparison detects a mutated export",
           "[interchange][dawproject][export]") {
     // NEGATIVE CONTROL for the test above. A round-trip assertion can pass
@@ -156,7 +182,7 @@ TEST_CASE("an export refuses a loss the caller has not accepted",
 
     // Without consent: refused before the writer is ever called.
     interchange::ExportOptions none;
-    auto refused = interchange::run_export(plan, none, dawproject::writer(project));
+    auto refused = interchange::run_export(plan, none, dawproject::writer());
     REQUIRE_FALSE(refused.has_value());
     REQUIRE(refused.error().code == interchange::ExportErrorCode::UnacceptedLoss);
 
@@ -164,7 +190,7 @@ TEST_CASE("an export refuses a loss the caller has not accepted",
     // naming what was dropped.
     interchange::ExportOptions accepted;
     accepted.accepted_losses = consent;
-    auto exported = interchange::run_export(plan, accepted, dawproject::writer(project));
+    auto exported = interchange::run_export(plan, accepted, dawproject::writer());
     REQUIRE(exported.has_value());
     bool found_manifest = false;
     for (const auto& artifact : exported.value().artifacts) {

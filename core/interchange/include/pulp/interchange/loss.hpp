@@ -45,6 +45,21 @@ class LossManifest {
     std::vector<LossEntry> entries_;
 };
 
+/// Stable id for the lossy export level written into manifests.
+constexpr std::string_view export_level_id(ExportLevel level) noexcept {
+    switch (level) {
+    case ExportLevel::Drop:
+        return "drop";
+    case ExportLevel::Degrade:
+        return "degrade";
+    case ExportLevel::RoundtripOnly:
+        return "roundtrip-only";
+    case ExportLevel::Full:
+        return "full";
+    }
+    return "drop";
+}
+
 /// Stable id for a loss class, for manifests written into an artifact.
 constexpr std::string_view loss_class_id(LossClass loss_class) noexcept {
     switch (loss_class) {

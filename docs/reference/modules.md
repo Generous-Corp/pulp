@@ -1033,8 +1033,13 @@ A **capability table** declares, per concept, what a given format can represent;
 The seam is deliberately **consent-based and fail-closed**: `run_export()`
 refuses a plan whose losses the caller has not accepted **concept by concept**.
 There is no force flag, so an export cannot silently discard authored material.
-Writers plug in as an `ExportWriter` callable, which keeps the planning and
-loss accounting in one place rather than duplicated per format.
+New adapters plug in as format-bound `FormatBoundExportWriter` handles whose
+callable is private to `run_export()`. The released callable `ExportWriter`
+alias remains available for source compatibility. The plan owns the exact
+immutable `Project` snapshot the writer receives, so consent measured on one
+revision cannot authorize bytes
+captured from another. `run_export()` centrally appends the versioned
+`pulp-loss-manifest.json` artifact and reserves that name from adapters.
 
 A census pass records which concepts a project actually uses, so a document that
 never uses a lossy concept is reported lossless rather than being flagged on the
@@ -1073,25 +1078,37 @@ symlink that points outside.
 
 ## smf
 
-Standard MIDI File import and export.
+Standard MIDI File import and export, plus a consent-gated interchange adapter.
 
-**Link:** `pulp::smf-interop` · **Include prefix:** `<pulp/timeline/smf.hpp>`
+**Links:** `pulp::smf-interop` / `pulp::smf-interchange` · **Include prefixes:**
+`<pulp/timeline/smf.hpp>` / `<pulp/smf/interchange.hpp>`
 
-The library is separate so a consumer can leave SMF out, but its API lives with
-the timeline surface it operates on rather than under its own include prefix.
+The raw codec library is separate so a consumer can leave SMF out, but that raw
+API lives with the timeline surface it operates on. The consent adapter has its
+own `<pulp/smf/...>` include prefix.
 
 Import accepts **format 0 and 1 with a metrical division**, note on/off, and the
 tempo, time-signature, track-name, and end-of-track meta events. SMPTE divisions,
 format 2, and any other event **fail the import** unless the caller explicitly
 opts into ignoring non-note events.
 
-Export covers note content plus the tempo and meter maps. Device chains,
-automation, takes, freezes, and media assets have no SMF representation. A tempo
-ramp, or a tick the requested division cannot represent exactly, is an **error
-rather than a silent approximation** — conversion is exact on dividing grids and
-any rounding is reported.
+The raw export API strictly rejects unsupported clip/event/time-grid shapes it
+visits, but it does not census unrelated project-wide state. The separate
+`pulp::smf-interchange` adapter binds SMF to `plan_export()` / `run_export()`.
+With exact per-concept consent it can omit unsupported concepts, strip note
+modifiers, and approximate tempo ramps as discrete authored-point steps; the
+central loss manifest records every such decision. Tick rounding remains under
+the raw SMF export option and is never implied by concept consent.
 
-**Depends on:** `pulp::timeline`, `pulp::runtime`
+Interchange planning is concept-level. `representable()` says that a concept
+kind has format support in isolation; it is not an instance survivor list. For
+example, notes inside an accepted dropped absolute clip remain a supported note
+concept even though the container loss explains why those instances are
+omitted. Only the census-backed adapter provides project-wide loss consent; the
+raw codec is not a full-project loss audit.
+
+**Depends on:** `pulp::timeline`, `pulp::runtime`; adapter additionally depends
+on `pulp::interchange`
 
 
 ## graph
