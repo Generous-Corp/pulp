@@ -877,8 +877,10 @@ so any release SDK build that forgets to opt in will ship a
 
 Keep the release SDK path aligned with the GitHub release workflow:
 1. Configure release SDK builds with `-DPULP_BUILD_WEBVIEW=ON`.
-2. On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` before
-   configuring.
+2. On Linux, use `.github/actions/install-linux-build-deps` with the
+   `native-webview` capability profile. Shared release headers belong in
+   `tools/ci/linux_build_deps.json`; do not copy an apt list into
+   `release-cli.yml` or its PR gate.
 3. Before packaging, verify the staged SDK view-core archive still contains
    `WebViewPanel` and `make_webview_embedded_resource_fetcher`.
 
