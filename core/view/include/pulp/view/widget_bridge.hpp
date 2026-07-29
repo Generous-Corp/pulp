@@ -46,6 +46,7 @@ namespace pulp::view {
 class QueryService;
 class ValueChannelSet;
 class MeterSource;
+class VectorSource;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -478,6 +479,14 @@ private:
         /// Non-null when bound to a `value:<name>` channel instead of a param;
         /// owned by the processor's ValueChannelSet, resolved once at bind.
         MeterSource* value_meter = nullptr;
+        VectorSource* value_vector = nullptr;   ///< as above, for a scope target
+        /// Staleness tracking. A channel that stops PUBLISHING decays to its
+        /// declared neutral; one that publishes the same number forever does
+        /// not. Comparing values cannot distinguish those, so watch the
+        /// publish sequence instead (see PublishCounter).
+        std::uint32_t last_publish_seq = 0;
+        std::chrono::steady_clock::time_point last_publish_at{};
+        float neutral = 0.0f;
         Target target = Target::value;
         BindingTransform transform;
         /// `{fromParam: true}`, not yet derived. Derivation needs the widget
@@ -545,6 +554,11 @@ private:
     bool apply_param_binding(ParamBinding& binding, View* w);
     /// Fill a `{fromParam: true}` transform from the param's declared range.
     void derive_binding_transform(ParamBinding& binding, View* w);
+    /// Push a whole block to a SpectrumView / WaveformView.
+    bool apply_scope_binding(ParamBinding& binding, View* w);
+    /// True when the channel has not published for kValueChannelStaleAfter.
+    /// Updates the binding's sequence/timestamp as a side effect.
+    static bool value_channel_is_stale(ParamBinding& binding, std::uint32_t seq);
 
 public:
     /// Binding attempts in call order, bound or not (binding_diagnostics.hpp).
