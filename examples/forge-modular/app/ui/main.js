@@ -51,12 +51,23 @@ setFlex("root", "height", "100%");
 // Forge's rail, with the two icons that differ: module and patch, which is what
 // this product makes instead of plugins.
 
-const rail = createCol("rail", "root");
+// The rounded card in the render is a WINDOW shape, not a widget one. Rounding
+// the columns that paint the edges gets us the radii, but the window behind
+// them is opaque and square, so the corners do not read. Finishing this means
+// a borderless rounded window on the host side; it is not reachable from here.
+const shell = createRow("shell", "root");
+setBackground("shell", C.appBg);
+setFlex("shell", "flex_grow", 1);
+setFlex("shell", "width", "100%");
+
+const rail = createCol("rail", "shell");
 setBackground("rail", C.rail);
 setFlex("rail", "width", 64);
 setFlex("rail", "align_items", "center");
 setFlex("rail", "padding_top", 14);
 setFlex("rail", "flex_direction", "column");
+setCornerRadius("rail", "TopLeft", 14);
+setCornerRadius("rail", "BottomLeft", 14);
 
 // The logo tile is the accent square Forge uses, not a button.
 const brand = createRow("rail-brand", "rail");
@@ -140,9 +151,11 @@ setFlex("rail-account", "margin_bottom", 14);
 
 // ── everything right of the rail ─────────────────────────────────────────────
 
-const main = createCol("main", "root");
+const main = createCol("main", "shell");
 setFlex("main", "flex_grow", 1);
 setFlex("main", "flex_direction", "column");
+setCornerRadius("main", "TopRight", 14);
+setCornerRadius("main", "BottomRight", 14);
 
 // ── top bar ──────────────────────────────────────────────────────────────────
 
@@ -151,6 +164,7 @@ setFlex("topbar", "align_items", "center");
 setFlex("topbar", "padding_left", 18);
 setFlex("topbar", "padding_right", 18);
 setFlex("topbar", "height", 46);
+setCornerRadius("topbar", "TopRight", 14);
 
 createLabel("topbar-name", "Forge Modular", "topbar");
 setFontFamily("topbar-name", FONT);
