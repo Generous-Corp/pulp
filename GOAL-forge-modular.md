@@ -1,115 +1,125 @@
-# Goal — finish Forge Modular
+# Goal — deliver Forge Modular, testable on another machine
 
-Paste the block below as a prompt. It assumes nothing about the session that
+Paste everything below the line. It assumes nothing about the session that
 wrote it.
 
 ---
 
-Finish building **Forge Modular** — a sibling to Forge for VCV Rack that turns
-a prompt into a Eurorack module or a whole patch.
+Finish **Forge Modular** — a sibling to Forge for VCV Rack that turns a prompt
+into a Eurorack module or a whole patch — to the point where it can be
+installed and used on a second machine.
 
 Work in `/Volumes/Workshop/Code/pulp-modular-rack` on branch
-`explore/modular-rack`. Nothing is on `main` and nothing should go there
-without being asked.
+`explore/modular-rack`. Only `tools/dsp_vocabulary.py` and its self-test have
+gone to `main` (PR #6820, merged); nothing else should without being asked.
 
-**Read first, in this order:**
-
-1. `planning/2026-07-29-forge-modular-build-status.md` (in the pulp-planning
-   repo) — what is proven, what remains, and the findings that cost time.
-2. `DECISIONS.md` — the arguable calls and what would change our mind about
-   each. Do not silently re-decide any of them; if you think one is wrong, say
-   so and why.
-3. `planning-draft-forge-modular-ux.md` — the full spec. §11 is measured
-   capabilities, §12 is agent settings, §13 is the DAW plugin.
-
-**Keep the status document current.** Update it as work lands, including
-anything that turns out to be wrong. It is the handoff.
+**Read first:** `planning/2026-07-29-forge-modular-build-status.md` in
+pulp-planning (what is proven, what remains, what cost time), then
+`DECISIONS.md` (the arguable calls and what would change our mind about each —
+do not silently re-decide any; say so if you think one is wrong), then
+`planning-draft-forge-modular-ux.md` (§11 capabilities, §12 agent settings,
+§13 the DAW plugin). **Keep the status document current. It is the handoff.**
 
 ## The standing rule, learned expensively
 
-Every gate written for this pipeline has been wrong the first time it met real
-material. Two manifest rules rejected correct modules. The behavioural gate
-failed six of eleven working ones. The capability preflight read "hat" out of
-"that" and refused an ambient drone. The patch explainer described a correct
-cross-modulation patch as an oscillator modulating itself. Every one was found
-by running it; none by reading it.
+Every gate written for this pipeline was wrong the first time it met real
+material — manifest rules rejecting correct modules, the behavioural gate
+failing six of eleven working ones, the preflight reading "hat" out of "that",
+the explainer describing a correct cross-modulation patch as self-modulation,
+the UI check passing a shell whose every label was unparented. Twelve
+instances. **Every one found by running it; none by reading it.**
 
-So: **anything that checks, rejects or explains ships with a corpus it must
-pass and a negative control it must fail.** A check that rejects everything
-scores perfectly on negative cases alone, which is why failing for the *wrong
-reason* must also count as a failure. This is not optional polish — it is the
-only thing that has reliably worked here.
+So anything that checks, rejects or explains ships with a corpus it must pass
+and a negative control it must fail, and failing for the *wrong reason* counts
+as a failure. And **render before you reason about a design** — two rounds were
+lost this session to conclusions drawn from files that had never been opened.
 
-Prefer running something over reasoning about it. Where a claim can be
-measured, measure it.
+## What is already true
 
-## Order of work
+- Module generation: 8/8 across a spread, every one using Pulp's DSP.
+- Patch generation: 8/8, gated so a silent patch is rejected and retried.
+- Four formats build. **AU passes `auval`.** All three installed here.
+- The button path provably reaches `patch.py`.
+- One unsigned installer, 64 MB, carrying app and all three formats.
+- 22 modules in Rack, drawn with our own components.
 
-**Independent of anything else:**
+## What is wrong, specifically
 
-1. Put a small data adapter between `tools/rack/export_design_data.py` and
-   whatever consumes it, so the browser-capture envelope can change without
-   dragging the preview with it.
-2. Make "used no Pulp DSP" a failure rather than a warning, with a
-   `{type, reason}` waiver whose reason names the specific blocker — not "not
-   supported yet" but what is actually hard.
-3. Land `tools/dsp_vocabulary.py` and `tools/test_dsp_vocabulary.py` on Pulp
-   `main` as their own small PR. Forge's exporter consumes the extractor and
-   should not depend on an unmerged, off-by-default branch.
-4. Fetch the Rack SDK silently during install, with exactly one licence
-   checkbox. No wizard, no first-run panel. All three platform URLs are live,
-   unauthenticated, ~40 MB.
-5. Per-patch settings — module preference, module-creation opt-in (off by
-   default), explanation depth (standard by default) — persisted so reopening
-   a project restores how it was built.
+**The shell does not match the design.** The reference render is at
+`/tmp/bcap-out/browser.png` — regenerate it with:
 
-**Once the HTML-import work lands** (ask before assuming it has):
+```
+node <browser_capture>/capture.mjs capture \
+  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --root "$HOME/Downloads/Design brief prototype-2" \
+  --input "$HOME/Downloads/Design brief prototype-2/ForgeModular.dc.html" \
+  --output /tmp/bcap-out --profile-dir /tmp/bcap-prof \
+  --initial-width 1330 --initial-height 900 --dpr 2 --allow-network
+```
 
-6. The app shell — two tabs, chat, a preview compositing real panel images at
-   true widths with cables drawn between recorded jack coordinates, the
-   mention picker, and the model picker and agent settings inherited from
-   Forge. The imported design system is in `design/prototype/`.
-7. Our own Eurorack knobs, jacks, switches and sliders, replacing Rack's
-   component graphics — which are CC BY-NC and put a non-commercial obligation
-   on the artwork of every module someone builds.
+(The helper is on `feature/browser-solved-html-import-20260728` at
+`tools/import-design/browser_capture/`. Its blocked-network error tells you to
+use `--allow-browser-network`, which **does not exist** — the flag is
+`--allow-network`. Worth fixing upstream.)
 
-**After the shell exists:**
+Missing from `examples/forge-modular/app/ui/main.js`, all present in the
+render: the **left icon rail**; the **top bar** with the `MODULE · 12 HP` chip
+and the `RACK NOT RUNNING` / `VCV / VST3 / STANDALONE` status chips; the
+**centred hero** (`FORGE MODULAR · FOR VCV RACK` eyebrow, *"What should the
+module do?"*, subtitle); the **composer centred at ~1000 px with the
+Module/Patch tabs joined to its top-left corner**; **icon+label buttons** with a
+glowing teal `Build module` pill; and the **project shelf** (`Patches / My
+modules`, gradient cards with module and cable counts, `Module library →`).
 
-8. The DAW plugin — audio effect, AU + VST3 + CLAP, as a thin client on the
-   shared engine. Verify whether Logic's AU sandbox blocks spawning a compiler
-   before committing to the shape.
-9. Report collisions: `lsof` on the installed `.vcvplugin` names every process
-   holding it, so regenerating while Rack has it open says so rather than
-   appearing to do nothing.
+The structural error underneath: **the home screen has no chat/preview split.**
+That is a second screen, reached after building. The current implementation
+collapses the two, which is why nothing lines up.
 
-## Things that are true and easy to get wrong
+## The work
 
-- **A new module needs a Rack restart.** `plugin::init()` runs once and the
-  plugin API is read-only. A patch, by contrast, loads instantly. This
-  asymmetry shapes both flows; do not design around a hot-reload that does not
-  exist.
-- **Rack does not silently drop modules it cannot find.** It names them, offers
-  to open the VCV Library, and keeps the modules and their cables so installing
-  later completes the patch. Our checks are a courtesy while building, not a
-  rescue.
-- **Rack unpacks a `.vcvplugin` only when it loads it**, so a plugin installed
-  since the last Rack run is still an archive and will look entirely
-  uninstantiable.
-- **Nothing on disk describes a module's ports.** Index, name and jack position
-  exist only in compiled widget code. The MAP module records them from inside a
-  running rack. Index order is *not* visual order.
-- **Model slugs are not unique across the library.** Fundamental also ships
-  VCO, VCF, VCA and LFO.
-- **No plugin can instantiate another plugin or tell its host to open a file.**
+1. **Rebuild `ui/main.js` to the render, 1:1.** Screenshot the standalone with
+   `--screenshot` after every pass and compare against `browser.png` until they
+   agree. Do not ask anyone to look before that comparison has been made.
+2. **Build the working screen** — chat with role-grouped wiring lines and their
+   *why* clauses, preview compositing real panels, hover-a-line-lights-a-cable.
+   `patch_layout.hpp` already computes the geometry and is tested.
+3. **Rebuild and revalidate** all four formats. `auval` for the AU;
+   `clap-validator` for the CLAP (not installed here — install it). Never leave
+   a plugin in a plug-in folder that has not passed.
+4. **Sign and notarize** the installer. Credentials are in
+   `~/.config/pulp/secrets/`; `pulp ship doctor` prepares the keychain.
+5. **Install on m5 and confirm** — the standalone opens, the three plugins load
+   in a DAW, the modules appear in Rack, and a prompt produces a module.
+
+## Facts that are true and easy to get wrong
+
+- A new module needs a **Rack restart** (`plugin::init()` runs once). A patch
+  loads instantly. This asymmetry shapes both flows.
+- Rack does **not** silently drop missing modules: it names them, offers the
+  Library, and keeps their cables.
+- Rack unpacks a `.vcvplugin` **only on load**, so a freshly installed one
+  reads as an archive and looks entirely uninstantiable.
+- Nothing on disk describes a module's ports; **index order is not visual
+  order**.
+- Model slugs are **not unique** across the library (Fundamental also ships
+  VCO, VCF, VCA, LFO).
+- **No plugin can instantiate another** or tell its host to open a file.
   Standalone Rack can be launched and handed a patch; a Rack Pro instance in a
   DAW can be neither.
+- A first-run **`auval` failure on a freshly copied AU is usually the
+  registration cache**, not the plugin. `killall AudioComponentRegistrar`.
+  Nothing in the error says so.
+- The **AU factory symbol is derived from the CMake target**: the bundle wants
+  `<target>AUFactory`, the SDK emits `<ClassName>Factory`, so the class must be
+  `<target>AU`. Renaming a target leaves stale object directories that link
+  cleanly and export the old symbol.
+- **`createLabel` is `(id, text, parent)`** and every widget but the root needs
+  a parent as the second argument. `setFlex(id,"display","none")` is a no-op;
+  `setVisible` hides.
 
 ## Etiquette
 
-Launching Rack opens an audio device. Say so in the message that dispatches it,
-cap the run, and quit gracefully rather than killing it — a hard kill truncates
-Rack's log and triggers a crash-recovery modal that swallows the next patch
-argument.
-
-Do not run a generation that reinstalls the plugin while Rack is reading it.
-That crashed Rack mid-screenshot once and looked like a Rack bug for a while.
+Launching Rack opens an audio device — say so in the message that dispatches
+it, cap the run, and quit gracefully rather than killing it (a hard kill
+truncates Rack's log and triggers a crash-recovery modal that swallows the next
+patch argument). Never regenerate while Rack is reading the plugin.
