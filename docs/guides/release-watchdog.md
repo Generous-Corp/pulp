@@ -94,11 +94,15 @@ contexts from `.github/rulesets/main-protection.json` and queries GitHub's
 check-runs for the exact merged SHA. Every required context must have a completed
 successful check-run on that SHA. A path filter that silently stops matching, a
 renamed job, a pending check, or a failed check makes the workflow fail and opens
-or updates one stable incident; the incident closes on recovery.
+or updates one stable incident; the incident closes on recovery. A skipped
+duplicate from a separate cache-warming push does not shadow a real executed
+gate on the same SHA, but an only-skipped context still fails closed.
 
 `test_required_gate_liveness.py` supplies the negative controls: an absent
 path-filtered gate, a check attached only to another SHA, pending and failed
-checks, and an empty required-check contract must all fail.
+checks, an only-skipped context, and an empty required-check contract must all
+fail. A regression control also proves that a later skipped duplicate cannot
+erase an executed success.
 
 ## Layer 4 — Release reconciler (detection AND repair)
 
