@@ -22,6 +22,7 @@ target_sources(pulp-host PRIVATE
     src/background_scanner.cpp
     src/isolated_scanner.cpp
     src/node_pack.cpp
+    src/forge_descriptor_audit.cpp
     src/signal_graph_executor_routing.cpp
     src/baked_graph_processor.cpp
     src/baked_graph_param_injection.cpp
