@@ -8,6 +8,15 @@
 #include <cstddef>
 
 namespace pulp::examples::delay {
+namespace {
+
+constexpr float kControlRampSeconds = 0.005f;
+
+float mono_routing_target(Routing routing) noexcept {
+    return routing == Routing::mono ? 1.0f : 0.0f;
+}
+
+} // namespace
 
 format::PluginDescriptor PulpDelayProcessor::descriptor() const {
     return {
@@ -31,6 +40,13 @@ void PulpDelayProcessor::prepare(const format::PrepareContext& context) {
     dry_right_.assign(scratch_size_, 0.0f);
     alternate_left_.assign(scratch_size_, 0.0f);
     alternate_right_.assign(scratch_size_, 0.0f);
+    routing_blend_.assign(scratch_size_, 0.0f);
+    const auto sample_rate = static_cast<float>(context.sample_rate);
+    mix_smoother_.set_ramp_time(kControlRampSeconds, sample_rate);
+    routing_mono_smoother_.set_ramp_time(kControlRampSeconds, sample_rate);
+    mix_smoother_.set_immediate(std::clamp(state().get_value(kMix) * 0.01f, 0.0f, 1.0f));
+    routing_mono_smoother_.set_immediate(
+        mono_routing_target(routing_from_param(state().get_value(kRouting))));
     engines_.prepare(context.sample_rate, character_from_param(state().get_value(kCharacter)));
     prepared_ = true;
 }
@@ -61,6 +77,11 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
     engines_.apply(engine_config(times, routing));
 
     const float mix = std::clamp(state().get_value(kMix) * 0.01f, 0.0f, 1.0f);
+    if (mix != mix_smoother_.target())
+        mix_smoother_.set_target(mix);
+    const float mono_target = mono_routing_target(routing);
+    if (mono_target != routing_mono_smoother_.target())
+        routing_mono_smoother_.set_target(mono_target);
     auto* output_left = output.channel_ptr(0);
     auto* output_right = output.channel_ptr(1);
     const auto* input_left = input.channel_ptr(0);
@@ -71,7 +92,7 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
         const auto remaining = samples - offset;
         const int chunk = static_cast<int>(std::min(remaining, scratch_size_));
         process_chunk(output_left + offset, output_right + offset, input_left + offset,
-                      input_right + offset, chunk, mix, routing);
+                      input_right + offset, chunk);
         offset += static_cast<std::size_t>(chunk);
     }
 
@@ -124,21 +145,16 @@ CharacterEngineConfig PulpDelayProcessor::engine_config(const EffectiveDelayTime
 
 void PulpDelayProcessor::process_chunk(float* output_left, float* output_right,
                                        const float* input_left, const float* input_right,
-                                       int num_samples, float mix, Routing routing) noexcept {
+                                       int num_samples) noexcept {
     for (int i = 0; i < num_samples; ++i) {
         const auto index = static_cast<std::size_t>(i);
-        if (routing == Routing::mono) {
-            const float mono = 0.5f * (input_left[index] + input_right[index]);
-            dry_left_[index] = mono;
-            dry_right_[index] = mono;
-            output_left[index] = mono;
-            output_right[index] = mono;
-        } else {
-            dry_left_[index] = input_left[index];
-            dry_right_[index] = input_right[index];
-            output_left[index] = input_left[index];
-            output_right[index] = input_right[index];
-        }
+        dry_left_[index] = input_left[index];
+        dry_right_[index] = input_right[index];
+        const float mono = 0.5f * (input_left[index] + input_right[index]);
+        const float mono_blend = routing_mono_smoother_.next();
+        routing_blend_[index] = mono_blend;
+        output_left[index] = input_left[index] + mono_blend * (mono - input_left[index]);
+        output_right[index] = input_right[index] + mono_blend * (mono - input_right[index]);
     }
 
     engines_.process(output_left, output_right, num_samples, alternate_left_.data(),
@@ -146,16 +162,17 @@ void PulpDelayProcessor::process_chunk(float* output_left, float* output_right,
 
     for (int i = 0; i < num_samples; ++i) {
         const auto index = static_cast<std::size_t>(i);
-        if (routing == Routing::mono) {
-            const float wet = 0.5f * (output_left[index] + output_right[index]);
-            const float result = dry_left_[index] + mix * (wet - dry_left_[index]);
-            output_left[index] = result;
-            output_right[index] = result;
-        } else {
-            output_left[index] = dry_left_[index] + mix * (output_left[index] - dry_left_[index]);
-            output_right[index] =
-                dry_right_[index] + mix * (output_right[index] - dry_right_[index]);
-        }
+        const float mix = mix_smoother_.next();
+        const float stereo_left =
+            dry_left_[index] + mix * (output_left[index] - dry_left_[index]);
+        const float stereo_right =
+            dry_right_[index] + mix * (output_right[index] - dry_right_[index]);
+        const float dry_mono = 0.5f * (dry_left_[index] + dry_right_[index]);
+        const float wet_mono = 0.5f * (output_left[index] + output_right[index]);
+        const float mono_result = dry_mono + mix * (wet_mono - dry_mono);
+        const float mono_blend = routing_blend_[index];
+        output_left[index] = stereo_left + mono_blend * (mono_result - stereo_left);
+        output_right[index] = stereo_right + mono_blend * (mono_result - stereo_right);
     }
 }
 

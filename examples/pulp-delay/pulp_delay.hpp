@@ -4,6 +4,7 @@
 #include "delay_time_model.hpp"
 
 #include <pulp/format/processor.hpp>
+#include <pulp/signal/smoothed_value.hpp>
 
 #include <memory>
 #include <vector>
@@ -27,14 +28,16 @@ class PulpDelayProcessor final : public format::Processor {
     CharacterEngineConfig engine_config(const EffectiveDelayTimes& times,
                                         Routing routing) const noexcept;
     void process_chunk(float* output_left, float* output_right, const float* input_left,
-                       const float* input_right, int num_samples, float mix,
-                       Routing routing) noexcept;
+                       const float* input_right, int num_samples) noexcept;
 
     CharacterEngineBank engines_;
     std::vector<float> dry_left_;
     std::vector<float> dry_right_;
     std::vector<float> alternate_left_;
     std::vector<float> alternate_right_;
+    std::vector<float> routing_blend_;
+    signal::SmoothedValue<float> mix_smoother_;
+    signal::SmoothedValue<float> routing_mono_smoother_;
     std::size_t scratch_size_ = 0;
     bool prepared_ = false;
 };

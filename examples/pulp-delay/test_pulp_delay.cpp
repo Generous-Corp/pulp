@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -30,6 +31,16 @@ void process(format::HeadlessHost& host, const audio::Buffer<float>& input,
     audio::BufferView<const float> input_view(input_channels, 2, input.num_samples());
     auto output_view = output.view();
     host.process(output_view, input_view);
+}
+
+float max_step(const audio::Buffer<float>& buffer, std::size_t channel,
+               float previous_sample) {
+    float result = 0.0f;
+    for (const float sample : buffer.channel(channel)) {
+        result = std::max(result, std::abs(sample - previous_sample));
+        previous_sample = sample;
+    }
+    return result;
 }
 
 } // namespace
@@ -138,10 +149,63 @@ TEST_CASE("Character engine bank switches topology through a bounded crossfade",
         REQUIRE(std::isfinite(sample));
 }
 
+TEST_CASE("Character engine bank preserves the latest rapid request",
+          "[pulp-delay][characters][automation]") {
+    CharacterEngineBank bank;
+    bank.prepare(48000.0, Character::tape);
+    CharacterEngineConfig config;
+    config.time_ms = 1.0f;
+    config.right_time_ms = 1.0f;
+    config.right_uses_ratio = false;
+    bank.apply(config);
+
+    bank.request_character(Character::clean);
+    bank.request_character(Character::vintage);
+    bank.request_character(Character::bbd);
+    REQUIRE(bank.target_character() == Character::bbd);
+
+    std::array<float, 256> left{};
+    std::array<float, 256> right{};
+    std::array<float, 256> alternate_left{};
+    std::array<float, 256> alternate_right{};
+    for (int block = 0; block < 12; ++block) {
+        bank.process(left.data(), right.data(), static_cast<int>(left.size()),
+                     alternate_left.data(), alternate_right.data());
+    }
+    REQUIRE_FALSE(bank.is_crossfading());
+    REQUIRE(bank.active_character() == Character::bbd);
+}
+
+TEST_CASE("Character request work stays below the 192 kHz callback reserve",
+          "[pulp-delay][characters][realtime]") {
+    CharacterEngineBank bank;
+    bank.prepare(192000.0, Character::tape);
+
+    // A 16-frame callback at 192 kHz lasts 83.3 us. Character selection gets
+    // at most 60% of that interval so the rest of the processor still has a
+    // useful deadline reserve. Capacity-sized reset work violates this budget.
+    constexpr double kRequestBudgetUs = 50.0;
+    constexpr std::size_t kIterations = 64;
+    std::array<double, kIterations> elapsed_us{};
+    for (std::size_t iteration = 0; iteration < kIterations; ++iteration) {
+        bank.reset(); // deliberately outside the timed live-control operation
+        const auto begin = std::chrono::steady_clock::now();
+        bank.request_character(Character::clean);
+        const auto end = std::chrono::steady_clock::now();
+        elapsed_us[iteration] =
+            std::chrono::duration<double, std::micro>(end - begin).count();
+    }
+    std::sort(elapsed_us.begin(), elapsed_us.end());
+    const double p99_us = elapsed_us[kIterations - 2];
+    INFO("character request p99 " << p99_us << " us; budget "
+                                  << kRequestBudgetUs << " us");
+    REQUIRE(p99_us < kRequestBudgetUs);
+}
+
 TEST_CASE("Pulp Delay zero mix is exact dry pass-through", "[pulp-delay][audio]") {
     format::HeadlessHost host(create_pulp_delay);
-    host.prepare(48000.0, 128);
     host.state().set_value(kMix, 0.0f);
+    host.prepare(48000.0, 128);
 
     audio::Buffer<float> input(2, 128);
     audio::Buffer<float> output(2, 128);
@@ -160,12 +224,12 @@ TEST_CASE("Pulp Delay zero mix is exact dry pass-through", "[pulp-delay][audio]"
 TEST_CASE("Pulp Delay wet path is a real delayed signal", "[pulp-delay][audio]") {
     format::HeadlessHost host(create_pulp_delay);
     host.state().set_value(kCharacter, static_cast<float>(Character::clean));
-    host.prepare(48000.0, 128);
     host.state().set_value(kTime, 20.0f);
     host.state().set_value(kMix, 100.0f);
     host.state().set_value(kFeedback, 0.0f);
     host.state().set_value(kLowCut, 20.0f);
     host.state().set_value(kHighCut, 20000.0f);
+    host.prepare(48000.0, 128);
 
     audio::Buffer<float> input(2, 128);
     audio::Buffer<float> output(2, 128);
@@ -193,9 +257,9 @@ TEST_CASE("Pulp Delay wet path is a real delayed signal", "[pulp-delay][audio]")
 
 TEST_CASE("Pulp Delay mono routing produces matched output channels", "[pulp-delay][routing]") {
     format::HeadlessHost host(create_pulp_delay);
-    host.prepare(48000.0, 128);
     host.state().set_value(kRouting, static_cast<float>(Routing::mono));
     host.state().set_value(kMix, 0.0f);
+    host.prepare(48000.0, 128);
 
     audio::Buffer<float> input(2, 128);
     audio::Buffer<float> output(2, 128);
@@ -206,11 +270,64 @@ TEST_CASE("Pulp Delay mono routing produces matched output channels", "[pulp-del
     REQUIRE_THAT(output.channel(1)[0], WithinAbs(0.5, 1e-7));
 }
 
+TEST_CASE("Pulp Delay mix automation ramps across the block boundary",
+          "[pulp-delay][audio][automation][discontinuity]") {
+    format::HeadlessHost host(create_pulp_delay);
+    host.state().set_value(kCharacter, static_cast<float>(Character::clean));
+    host.state().set_value(kTime, 2000.0f);
+    host.state().set_value(kFeedback, 0.0f);
+    host.state().set_value(kMix, 0.0f);
+    host.prepare(48000.0, 64);
+
+    audio::Buffer<float> input(2, 64);
+    audio::Buffer<float> output(2, 64);
+    std::fill(input.channel(0).begin(), input.channel(0).end(), 0.75f);
+    std::fill(input.channel(1).begin(), input.channel(1).end(), -0.50f);
+    process(host, input, output);
+    const float previous_left = output.channel(0).back();
+    const float previous_right = output.channel(1).back();
+
+    host.state().set_value(kMix, 100.0f);
+    process(host, input, output);
+
+    constexpr float kMaxAutomationStep = 0.02f;
+    REQUIRE(max_step(output, 0, previous_left) < kMaxAutomationStep);
+    REQUIRE(max_step(output, 1, previous_right) < kMaxAutomationStep);
+}
+
+TEST_CASE("Pulp Delay routing automation crossfades stereo to mono",
+          "[pulp-delay][routing][automation][discontinuity]") {
+    format::HeadlessHost host(create_pulp_delay);
+    host.state().set_value(kMix, 0.0f);
+    host.state().set_value(kRouting, static_cast<float>(Routing::stereo));
+    host.prepare(48000.0, 64);
+
+    audio::Buffer<float> input(2, 64);
+    audio::Buffer<float> output(2, 64);
+    std::fill(input.channel(0).begin(), input.channel(0).end(), 1.0f);
+    std::fill(input.channel(1).begin(), input.channel(1).end(), -1.0f);
+    process(host, input, output);
+    const float previous_left = output.channel(0).back();
+    const float previous_right = output.channel(1).back();
+
+    host.state().set_value(kRouting, static_cast<float>(Routing::mono));
+    process(host, input, output);
+
+    constexpr float kMaxRoutingStep = 0.02f;
+    REQUIRE(max_step(output, 0, previous_left) < kMaxRoutingStep);
+    REQUIRE(max_step(output, 1, previous_right) < kMaxRoutingStep);
+
+    for (int block = 0; block < 4; ++block)
+        process(host, input, output);
+    REQUIRE_THAT(output.channel(0).back(), WithinAbs(0.0, 1.0e-6));
+    REQUIRE_THAT(output.channel(1).back(), WithinAbs(0.0, 1.0e-6));
+}
+
 TEST_CASE("Pulp Delay safely chunks blocks larger than the prepared maximum",
           "[pulp-delay][audio]") {
     format::HeadlessHost host(create_pulp_delay);
-    host.prepare(48000.0, 64);
     host.state().set_value(kMix, 0.0f);
+    host.prepare(48000.0, 64);
 
     audio::Buffer<float> input(2, 257);
     audio::Buffer<float> output(2, 257);

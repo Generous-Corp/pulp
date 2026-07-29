@@ -16,6 +16,7 @@ void CharacterEngineBank::prepare(double sample_rate, Character initial_characte
     active_index_ = 0;
     active_character_ = initial_character;
     target_character_ = initial_character;
+    fade_character_ = initial_character;
     crossfading_ = false;
     fade_position_ = 0;
     fade_samples_ = std::max(1, static_cast<int>(std::lround(valid_rate * 0.020)));
@@ -30,13 +31,17 @@ void CharacterEngineBank::reset() noexcept {
 }
 
 void CharacterEngineBank::request_character(Character character) noexcept {
+    target_character_ = character;
     if (crossfading_ || character == active_character_)
         return;
 
+    start_crossfade(character);
+}
+
+void CharacterEngineBank::start_crossfade(Character character) noexcept {
     const int incoming = 1 - active_index_;
     engines_[incoming].set_character(to_engine_character(character));
-    engines_[incoming].reset();
-    target_character_ = character;
+    fade_character_ = character;
     crossfading_ = true;
     fade_position_ = 0;
 }
@@ -76,9 +81,11 @@ void CharacterEngineBank::process(float* left, float* right, int num_samples, fl
     fade_position_ += num_samples;
     if (fade_position_ >= fade_samples_) {
         active_index_ = incoming;
-        active_character_ = target_character_;
+        active_character_ = fade_character_;
         crossfading_ = false;
         fade_position_ = 0;
+        if (target_character_ != active_character_)
+            start_crossfade(target_character_);
     }
 }
 

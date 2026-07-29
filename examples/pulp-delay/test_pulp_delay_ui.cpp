@@ -7,8 +7,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -47,6 +49,16 @@ std::uint64_t bytes_hash(const std::vector<std::uint8_t>& bytes) {
     return hash;
 }
 
+view::Point root_origin(const view::View& view) {
+    float x = view.bounds().x;
+    float y = view.bounds().y;
+    for (auto* parent = view.parent(); parent; parent = parent->parent()) {
+        x += parent->bounds().x;
+        y += parent->bounds().y;
+    }
+    return {x, y};
+}
+
 } // namespace
 
 TEST_CASE("Pulp Delay native editor binds every stable parameter",
@@ -73,6 +85,30 @@ TEST_CASE("Pulp Delay native editor binds every stable parameter",
         REQUIRE(knob != nullptr);
         REQUIRE(knob->render_style() == view::WidgetRenderStyle::standard);
     }
+}
+
+TEST_CASE("Pulp Delay UI labels and control-state bars have truthful provenance",
+          "[pulp-delay][ui][truth]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+
+    std::string header;
+    for (const auto label : PulpDelayEditor::truthful_header_labels()) {
+        header.append(label);
+        header.push_back(' ');
+    }
+    for (const auto forbidden : {"kHz", "DSP", "ONLINE", "PRESET", "DEFAULT"})
+        REQUIRE(header.find(forbidden) == std::string::npos);
+
+    store.set_normalized(kMix, 0.27f);
+    store.set_normalized(kFeedback, 0.81f);
+    REQUIRE_THAT(editor.control_state_level(kMix),
+                 WithinAbs(store.get_normalized(kMix), 1.0e-6));
+    REQUIRE_THAT(editor.control_state_level(kFeedback),
+                 WithinAbs(store.get_normalized(kFeedback), 1.0e-6));
+    REQUIRE(editor.control_state_level(kTime) == 0.0f);
 }
 
 TEST_CASE("Pulp Delay controls follow host automation and preset restore",
@@ -158,6 +194,8 @@ TEST_CASE("Pulp Delay feedback knob paints five synchronized normalized states",
     constexpr std::array<float, 5> normalized = {
         0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
     std::array<std::uint64_t, normalized.size()> hashes{};
+    std::array<std::vector<std::uint8_t>, normalized.size()> knob_crops;
+    const auto knob_origin = root_origin(*knob);
     for (std::size_t index = 0; index < normalized.size(); ++index) {
         const float value = normalized[index];
         CAPTURE(value);
@@ -175,9 +213,30 @@ TEST_CASE("Pulp Delay feedback knob paints five synchronized normalized states",
         REQUIRE(capture.ok);
         REQUIRE(capture.png.size() > 4096);
         hashes[index] = bytes_hash(capture.png);
+        knob_crops[index] = view::crop_png(
+            capture.png, static_cast<std::uint32_t>(std::lround(knob_origin.x)),
+            static_cast<std::uint32_t>(std::lround(knob_origin.y)),
+            static_cast<std::uint32_t>(std::lround(knob->bounds().width)),
+            static_cast<std::uint32_t>(std::lround(knob->bounds().height)));
+        REQUIRE_FALSE(knob_crops[index].empty());
     }
-    for (std::size_t index = 1; index < hashes.size(); ++index)
+    for (std::size_t index = 1; index < hashes.size(); ++index) {
         REQUIRE(hashes[index] != hashes[index - 1]);
+        const auto diff = view::diff_bounds(
+            knob_crops[index - 1], knob_crops[index], 16);
+        REQUIRE(diff.valid);
+        const auto dial = knob->dial_geometry();
+        const float angle = view::Knob::start_angle
+            + normalized[index] * (view::Knob::end_angle - view::Knob::start_angle);
+        const float endpoint_x = dial.center_x + std::cos(angle) * dial.arc_radius;
+        const float endpoint_y = dial.center_y + std::sin(angle) * dial.arc_radius;
+        constexpr float kAntialiasMargin = 4.0f;
+        CAPTURE(index, endpoint_x, endpoint_y, diff.x, diff.y, diff.width, diff.height);
+        REQUIRE(endpoint_x >= static_cast<float>(diff.x) - kAntialiasMargin);
+        REQUIRE(endpoint_x <= static_cast<float>(diff.x + diff.width) + kAntialiasMargin);
+        REQUIRE(endpoint_y >= static_cast<float>(diff.y) - kAntialiasMargin);
+        REQUIRE(endpoint_y <= static_cast<float>(diff.y + diff.height) + kAntialiasMargin);
+    }
 
     store.set_normalized(kFeedback, 0.5f);
     knob->on_focus_changed(true);

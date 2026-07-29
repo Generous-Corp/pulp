@@ -53,11 +53,13 @@ class CharacterEngineBank {
     static signal::CharacterDelay::Character to_engine_character(Character character) noexcept;
     static void apply_to(signal::CharacterDelay& engine,
                          const CharacterEngineConfig& config) noexcept;
+    void start_crossfade(Character character) noexcept;
 
     std::array<signal::CharacterDelay, 2> engines_;
     int active_index_ = 0;
     Character active_character_ = Character::tape;
     Character target_character_ = Character::tape;
+    Character fade_character_ = Character::tape;
     bool crossfading_ = false;
     int fade_position_ = 0;
     int fade_samples_ = 1;
