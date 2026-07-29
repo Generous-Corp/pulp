@@ -175,6 +175,16 @@
       ]
     },
     {
+      "slug": "OFFSETLY",
+      "name": "OFFSET",
+      "description": "Bipolar attenuverter with offset and CV over the gain, polyphonic, normalled to 10 V so it doubles as a voltage source",
+      "tags": [
+        "Attenuator",
+        "Utility",
+        "Polyphonic"
+      ]
+    },
+    {
       "slug": "SANDH",
       "name": "SH",
       "description": "Sample and hold with an internal white-noise source, a slewed output, CV over the slew time, and a switchable linear or exponential glide curve.",

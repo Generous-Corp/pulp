@@ -220,8 +220,18 @@ def install(lib):
         p = os.path.join(PACK, f)
         if os.path.exists(p):
             shutil.copy(p, d)
-    for svg in os.listdir(os.path.join(PACK, "res")):
-        shutil.copy(os.path.join(PACK, "res", svg), os.path.join(d, "res"))
+    # res/ holds panel SVGs AND the components/ directory our own knobs and
+    # jacks live in, so a flat copy raised IsADirectoryError and took the whole
+    # generation down at the last step -- after the module had been written,
+    # gated and compiled. copytree for directories, copy for files.
+    res_src = os.path.join(PACK, "res")
+    for entry in os.listdir(res_src):
+        src = os.path.join(res_src, entry)
+        dst = os.path.join(d, "res", entry)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy(src, dst)
     pkg = os.path.join(stage, "ForgeModular-2.0.0-mac-arm64.vcvplugin")
     tar = subprocess.Popen(["tar", "--no-xattrs", "-cf", "-", "-C", stage, "ForgeModular"],
                            stdout=subprocess.PIPE)
