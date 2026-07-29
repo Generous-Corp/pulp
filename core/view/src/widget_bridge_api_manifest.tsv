@@ -309,6 +309,7 @@ setPlaceholder	widget_value	function	core/view/src/widget_bridge/widget_value_co
 setPointerEvents	css_style	function	core/view/src/widget_bridge/style_visibility_api.cpp
 setPosition	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setProgress	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
+setRadioGroup	style	function	core/view/src/widget_bridge/border_box_api.cpp
 setRight	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setRotation	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setScale	animation	function	core/view/src/widget_bridge/animation_api.cpp
@@ -355,6 +356,7 @@ setTextTransform	typography	function	core/view/src/widget_bridge/typography_api.
 setTheme	theme	function	core/view/src/widget_bridge/theme_api.cpp
 setToggleBackground	style	function	core/view/src/widget_bridge/border_box_api.cpp
 setToggleBorderColor	style	function	core/view/src/widget_bridge/border_box_api.cpp
+setToggleOn	style	function	core/view/src/widget_bridge/border_box_api.cpp
 setToggleTextColor	style	function	core/view/src/widget_bridge/border_box_api.cpp
 setTop	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setTransform	animation	function	core/view/src/widget_bridge/animation_api.cpp

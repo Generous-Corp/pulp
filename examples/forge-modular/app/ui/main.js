@@ -153,6 +153,19 @@ function icon(id, parent, name, size, color) {
 }
 
 
+/// Wire a momentary action to a ToggleButton.
+///
+/// A ToggleButton latches, so pressing an action button a second time only
+/// un-latched it and appeared to do nothing -- "I have to press it twice".
+/// Release it after acting so every press is a press.
+function onPress(id, fn) {
+    on(id, "toggle", function (v) {
+        if (!v) return;
+        setToggleOn(id, false);
+        fn();
+    });
+}
+
 /// Mark a control's contents as decoration.
 ///
 /// hit_test() returns the DEEPEST view under the point, so a label or icon
@@ -197,6 +210,10 @@ railIcon("rail-home", "home", true, 14);
 railIcon("rail-module", "module", false, 6);
 railIcon("rail-patch", "patch", false, 6);
 railIcon("rail-settings", "settings", false, 6);
+
+for (const r of ["rail-home", "rail-module", "rail-patch", "rail-settings"])
+    setRadioGroup(r, 2);
+setToggleOn("rail-home", true);
 
 const railGap = createCol("rail-gap", "rail");
 setFlex("rail-gap", "flex_grow", 1);
@@ -343,6 +360,13 @@ function tab(id, glyph, title, sub, active) {
 tab("tab-module", "module", "Module", "ONE PANEL", true);
 tab("tab-patch", "patch", "Patch", "A WHOLE RACK", false);
 
+// One or the other, never both. Two toggles that look exclusive have to be
+// exclusive, or the mode becomes whichever was clicked last rather than the one
+// being shown.
+setRadioGroup("tab-module", 1);
+setRadioGroup("tab-patch", 1);
+setToggleOn("tab-module", true);
+
 // ── composer ─────────────────────────────────────────────────────────────────
 
 const composer = createCol("composer", "hero");
@@ -444,10 +468,14 @@ const shelfBar = createRow("shelf-bar", "shelf");
 setFlex("shelf-bar", "align_items", "center");
 
 function shelfTab(id, title, active) {
-    const t = createRow(id, "shelf-bar");
+    // A row, so it was a box that looked pressable and was not -- the third
+    // place in this file with that bug after the buttons and the tabs.
+    const t = createToggleButton(id, "shelf-bar");
     setFlex(id, "margin_right", 22);
     setFlex(id, "padding_bottom", 8);
-    createLabel(id + "-text", title, id);
+    setToggleBackground(id, C.appBg, C.appBg);
+    setToggleBorderColor(id, C.appBg, C.appBg);
+    textLabel(id + "-text", title, id);
     setFontFamily(id + "-text", FONT);
     setFontSize(id + "-text", 16);
     setFontWeight(id + "-text", 600);
@@ -576,6 +604,12 @@ setFontWeight("chat-title", 700);
 setTextColor("chat-title", C.textStrong);
 
 createLabel("chat-prompt", "", "chat");
+textLabel("chat-status", "", "chat");
+setFontFamily("chat-status", MONO);
+setFontSize("chat-status", 11);
+setLetterSpacing("chat-status", 0.06);
+setTextColor("chat-status", C.muted);
+setFlex("chat-status", "margin_top", 10);
 setFontFamily("chat-prompt", FONT);
 setFontSize("chat-prompt", 14);
 setTextColor("chat-prompt", C.muted);
@@ -700,7 +734,20 @@ function showScreen(name) {
 function beginBuild(promptText) {
     setText("chat-prompt", promptText);
     setText("chat-title", mode === "patch" ? "Wiring" : "Building");
+    setText("chat-status", "Working\u2026");
+    setTextColor("chat-status", C.muted);
     showScreen("work");
+}
+
+/// Report progress, or a refusal, on the working screen.
+///
+/// The generator has plenty to say -- which gate rejected an attempt, that a
+/// patch needs a drum module and which free ones would do -- and all of it went
+/// to a log nobody opens. Whatever the host reads out of that log lands here.
+function setBuildStatus(text, kind) {
+    setText("chat-status", text);
+    setTextColor("chat-status", kind === "error" ? C.amber
+                              : kind === "done" ? C.leaf : C.muted);
 }
 
 /// Surface a handler that threw.
@@ -762,8 +809,7 @@ on("rail-settings", "toggle", function (v) { if (v) selectRail("rail-settings");
 
 // Random fills the composer rather than building straight away: a suggestion
 // you cannot read before committing to it is a dice roll, not a prompt.
-on("btn-random", "toggle", function (v) {
-    if (!v) return;
+onPress("btn-random", function () {
     // A hard-coded [0] was not random -- it was the same suggestion every time.
     // Avoiding an immediate repeat matters more than uniformity here: drawing
     // the prompt you just dismissed reads as the button being broken.
@@ -779,6 +825,39 @@ on("btn-random", "toggle", function (v) {
 // reads the mode through, and it is a label so it can be asserted in a test.
 createLabel("mode-state", "module", "root");
 setVisible("mode-state", false);
+
+const shelfModules = createRow("shelf-modules-list", "shelf");
+setFlex("shelf-modules-list", "padding_left", 18);
+setFlex("shelf-modules-list", "padding_bottom", 18);
+// Says what it will hold rather than showing an empty box. The generated
+// modules are on disk; listing them is the next slice, and claiming to list
+// them while showing nothing would be worse than saying so.
+textLabel("shelf-modules-empty",
+          "Modules you build appear here. Open Rack to play them.",
+          "shelf-modules-list");
+setFontFamily("shelf-modules-empty", FONT);
+setFontSize("shelf-modules-empty", 14);
+setTextColor("shelf-modules-empty", C.faint);
+
+setRadioGroup("shelf-patches", 3);
+setRadioGroup("shelf-modules", 3);
+setToggleOn("shelf-patches", true);
+
+/// Which half of the shelf is showing. Only the active title is bright, and the
+/// cards below change with it -- a tab that highlights and changes nothing is
+/// indistinguishable from one that is broken.
+function selectShelf(which) {
+    const patches = which === "patches";
+    setTextColor("shelf-patches-text", patches ? C.textStrong : C.faint);
+    setTextColor("shelf-modules-text", patches ? C.faint : C.textStrong);
+    setVisible("cards", patches);
+    setVisible("shelf-modules-list", !patches);
+}
+
+on("shelf-patches", "toggle", function (v) { if (v) selectShelf("patches"); });
+on("shelf-modules", "toggle", function (v) { if (v) selectShelf("modules"); });
+
+selectShelf("patches");
 
 setMode(mode);
 showScreen("home");

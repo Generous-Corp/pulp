@@ -27,6 +27,25 @@
 namespace forge_modular {
 namespace {
 
+/// Quote a string for splicing into a JavaScript expression.
+///
+/// A prompt is user text: a quote or a backslash in it would otherwise end the
+/// string early and evaluate whatever followed.
+std::string js_quote(const std::string& in) {
+    std::string out = "\"";
+    for (char c : in) {
+        switch (c) {
+            case '\"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            default:   out += c; break;
+        }
+    }
+    out += '\"';
+    return out;
+}
+
 /// A root that owns its scripted session, so the JS tree lives exactly as long
 /// as the editor does. A host may open and close the editor repeatedly; the
 /// session must not outlive the view it built.
@@ -94,14 +113,25 @@ public:
                 // than inferred: an Ask turn must not be able to rewrite the
                 // patch even if the intent were misread.
                 engine->submit(prompt, mutating && patch_mode_now());
-                // Say when nothing started. A Build that silently does nothing
-                // is the worst outcome available, and it is what shipped.
+                const auto err = engine->last_error();
+
+                // A Build moves to the working screen, the way Forge does.
+                // Leaving the user on the composer with one changed word is how
+                // a refusal the generator DID produce -- "no drum module is
+                // installed, here are four free ones" -- reached a log file and
+                // never a person.
+                if (mutating && err.empty())
+                    bridge->load_script("beginBuild(" + js_quote(prompt) + ")");
+
                 if (auto* status = dynamic_cast<pulp::view::Label*>(
                         bridge->widget("rack-status"))) {
-                    const auto err = engine->last_error();
-                    status->set_text(err.empty() ? "\xE2\x97\x8F BUILDING\xE2\x80\xA6"
-                                                 : "\xE2\x97\x8F " + err);
+                    status->set_text(err.empty()
+                        ? "\xE2\x97\x8F BUILDING\xE2\x80\xA6"
+                        : "\xE2\x97\x8F " + err);
                 }
+                if (!err.empty())
+                    bridge->load_script("setBuildStatus(" + js_quote(err) +
+                                        ", 'error')");
             };
             return true;
         };

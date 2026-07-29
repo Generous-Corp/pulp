@@ -449,3 +449,90 @@ TEST_CASE("a Build that cannot start says so",
     INFO("status line: " << status);
     CHECK(status.find("not installed") != std::string::npos);
 }
+
+TEST_CASE("the mode tabs are mutually exclusive",
+          "[forge-modular][shell][interaction]") {
+    // Both could read as selected at once, which made the mode whichever was
+    // clicked last rather than the one being shown.
+    Harness h;
+    auto* mod = dynamic_cast<pulp::view::ToggleButton*>(h.control("tab-module"));
+    auto* pat = dynamic_cast<pulp::view::ToggleButton*>(h.control("tab-patch"));
+    REQUIRE(mod != nullptr);
+    REQUIRE(pat != nullptr);
+
+    CHECK(mod->is_on());
+    CHECK_FALSE(pat->is_on());
+
+    h.click("tab-patch");
+    CHECK(pat->is_on());
+    CHECK_FALSE(mod->is_on());       // never both
+
+    h.click("tab-module");
+    CHECK(mod->is_on());
+    CHECK_FALSE(pat->is_on());
+}
+
+TEST_CASE("an action button works on every press, not every other one",
+          "[forge-modular][shell][interaction]") {
+    // A ToggleButton latches: the second press only un-latched it and appeared
+    // to do nothing, so Random needed pressing twice.
+    Harness h;
+    auto* ed = dynamic_cast<pulp::view::TextEditor*>(h.control("prompt"));
+    REQUIRE(ed != nullptr);
+
+    for (int press = 1; press <= 4; ++press) {
+        ed->set_text("");
+        h.click("btn-random");
+        INFO("press " << press);
+        REQUIRE_FALSE(ed->text().empty());   // every press, not alternate ones
+    }
+}
+
+TEST_CASE("Build moves to the working screen",
+          "[forge-modular][shell][interaction]") {
+    // It left the user on the composer with one changed word, so a refusal the
+    // generator did produce reached a log file and never a person.
+    Harness h;
+    REQUIRE(h.control("hero") != nullptr);
+    REQUIRE(h.control("work") != nullptr);
+    CHECK(h.control("hero")->visible());
+    CHECK_FALSE(h.control("work")->visible());
+
+    h.type("a 4 hp clock divider with reset");
+    h.click("btn-build");
+
+    CHECK(h.control("work")->visible());
+    CHECK_FALSE(h.control("hero")->visible());
+    CHECK(h.label("chat-prompt") == "a 4 hp clock divider with reset");
+}
+
+TEST_CASE("a refusal reaches the working screen, not just a log",
+          "[forge-modular][shell][interaction]") {
+    Harness h;
+    h.engine.error = "no drum module is installed";
+    h.type("a kick and hat pattern");
+    h.click("btn-build");
+
+    INFO("chat status: " << h.label("chat-status"));
+    CHECK(h.label("chat-status").find("drum") != std::string::npos);
+}
+
+TEST_CASE("the shelf tabs switch what is shown",
+          "[forge-modular][shell][interaction]") {
+    // "My modules" did nothing at all: the shelf tabs were rows, so they were
+    // boxes that looked pressable. A tab that highlights and changes nothing is
+    // indistinguishable from a broken one, so both halves are asserted.
+    Harness h;
+    REQUIRE(h.control("cards") != nullptr);
+    REQUIRE(h.control("shelf-modules-list") != nullptr);
+    CHECK(h.control("cards")->visible());
+    CHECK_FALSE(h.control("shelf-modules-list")->visible());
+
+    h.click("shelf-modules");
+    CHECK(h.control("shelf-modules-list")->visible());
+    CHECK_FALSE(h.control("cards")->visible());
+
+    h.click("shelf-patches");
+    CHECK(h.control("cards")->visible());
+    CHECK_FALSE(h.control("shelf-modules-list")->visible());
+}

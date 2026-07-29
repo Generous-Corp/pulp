@@ -117,6 +117,36 @@ def main():
             else:
                 print(f"  ok     every setFlex key is one of the bridge's {len(known)}")
 
+    # Anything that paints like a control must BE one. This was missed three
+    # times running -- the composer buttons, then the mode tabs, then the shelf
+    # tabs -- each fixed in isolation without asking what else was a box
+    # pretending to be a button. A row cannot take a click, show hover or hold
+    # focus, so an id in these families has to come from createToggleButton.
+    CONTROL_PREFIXES = ("btn-", "tab-", "shelf-patches", "shelf-modules", "rail-")
+    toggles = set(re.findall(r'createToggleButton\(\s*"([^"]+)"', text))
+    for helper in LOCAL:
+        if re.search(rf"function {helper}\s*\(\s*id\b", text) and \
+           re.search(rf"function {helper}\b[^{{]*{{[^}}]*createToggleButton", text, re.S):
+            toggles |= set(re.findall(rf'\b{helper}\(\s*"([^"]+)"', text))
+    rows = set(re.findall(r'create(?:Row|Col|Panel)\(\s*"([^"]+)"', text))
+    for helper in LOCAL:
+        if re.search(rf"function {helper}\s*\(\s*id\b", text) and \
+           not re.search(rf"function {helper}\b[^{{]*{{[^}}]*createToggleButton", text, re.S):
+            rows |= set(re.findall(rf'\b{helper}\(\s*"([^"]+)"', text))
+    # rail-brand is the logo tile, which Forge draws as an accent square rather
+    # than a button. An exception with a reason, not a hole in the rule.
+    NOT_CONTROLS = {"rail-brand"}
+    fake = sorted(r for r in rows - toggles - NOT_CONTROLS
+                  if any(r.startswith(pre) for pre in CONTROL_PREFIXES)
+                  and not r.endswith(("-glyph", "-label", "-text", "-name",
+                                      "-sub", "-mark", "-gap", "-list", "-empty")))
+    if fake:
+        for f in fake[:6]:
+            print(f"  WRONG  '{f}' paints like a control but is not a ToggleButton")
+        bad += 1
+    else:
+        print(f"  ok     all {len(toggles)} control-shaped ids are real controls")
+
     # Not every set*() call addresses a widget. The shell's own state setters --
     # setMode("patch"), setRackStatus(...) -- take a value in the first slot, so
     # a naive scan reported "patch" as an unstyled widget. Scanning by shape
