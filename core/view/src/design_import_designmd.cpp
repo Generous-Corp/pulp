@@ -261,12 +261,12 @@ int yaml_line(const YAML::Node& node, int fallback) {
 // to arbitrary depth, joining segments with `.` so the emitted token key
 // matches the `{path.to.token}` reference syntax (e.g. a nested
 // `colors.background.light` resolves a `{colors.background.light}` reference).
-// DESIGN.md permits nested declarations; validation caps them at 20 levels.
+// DESIGN.md permits 20 nested objects plus the scalar leaf (21 path segments).
 void walk_color_node(const std::string& path,
                      const YAML::Node& node,
                      DesignMdParseResult& result,
                      int depth) {
-    if (depth > kDesignMdMaxTokenNestingDepth) return;
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         std::string value = node.as<std::string>("");
         if (is_token_reference(value) || looks_like_css_color(value)) {
@@ -328,7 +328,7 @@ void walk_dimension_node(const std::string& prefix,
                          const YAML::Node& node,
                          DesignMdParseResult& result,
                          int depth) {
-    if (depth > kDesignMdMaxTokenNestingDepth) return;
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         std::string raw = node.as<std::string>("");
         std::string token_name = prefix + "-" + subpath;
@@ -371,7 +371,7 @@ void walk_shadow_node(const std::string& subpath,
                       const YAML::Node& node,
                       DesignMdParseResult& result,
                       int depth) {
-    if (depth > kDesignMdMaxTokenNestingDepth) return;
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         result.ir.tokens.strings.emplace("shadow-" + subpath, node.as<std::string>(""));
     } else if (node.IsMap()) {

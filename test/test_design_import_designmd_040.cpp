@@ -51,6 +51,14 @@ std::string nested_spacing_document(int levels) {
     return markdown;
 }
 
+std::string nested_spacing_token_name(int levels) {
+    std::string name = "spacing";
+    for (int i = 0; i < levels; ++i) {
+        name += i == 0 ? "-level0" : ".level" + std::to_string(i);
+    }
+    return name + ".value";
+}
+
 } // namespace
 
 TEST_CASE("omitted accepts bare and structured declarations and suppresses missing findings",
@@ -125,14 +133,26 @@ TEST_CASE("flat and grouped token names that serialize identically are rejected"
     CHECK(finding->severity == DesignMdSeverity::error);
 }
 
-TEST_CASE("over-depth token branches are skipped without discarding valid siblings",
+TEST_CASE("token nesting accepts 21 path segments and rejects 22 branch-locally",
           "[view][import][designmd][security][designmd040]") {
-    const auto parsed = parse_designmd(nested_spacing_document(22));
+    SECTION("20 nested objects plus the scalar leaf are accepted") {
+        const auto parsed = parse_designmd(nested_spacing_document(20));
 
-    CHECK(has_diag_code(parsed.diagnostics, "token-nesting-depth"));
-    CHECK(parsed.ir.tokens.dimensions.size() == 1);
-    CHECK(parsed.ir.tokens.dimensions.at("spacing-valid") == 4.0f);
-    CHECK(parsed.ir.tokens.colors.at("primary") == "#123456");
+        CHECK_FALSE(has_diag_code(parsed.diagnostics, "token-nesting-depth"));
+        CHECK(parsed.ir.tokens.dimensions.size() == 2);
+        CHECK(parsed.ir.tokens.dimensions.at(nested_spacing_token_name(20)) == 8.0f);
+        CHECK(parsed.ir.tokens.dimensions.at("spacing-valid") == 4.0f);
+        CHECK(parsed.ir.tokens.colors.at("primary") == "#123456");
+    }
+
+    SECTION("21 nested objects reject only that branch") {
+        const auto parsed = parse_designmd(nested_spacing_document(21));
+
+        CHECK(has_diag_code(parsed.diagnostics, "token-nesting-depth"));
+        CHECK(parsed.ir.tokens.dimensions.size() == 1);
+        CHECK(parsed.ir.tokens.dimensions.at("spacing-valid") == 4.0f);
+        CHECK(parsed.ir.tokens.colors.at("primary") == "#123456");
+    }
 }
 
 TEST_CASE("dimension recognition rejects oversized and post-conversion nonfinite values",

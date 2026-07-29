@@ -42,7 +42,7 @@ void collect_leaf_paths(const YAML::Node& node,
                         const std::string& category,
                         std::vector<std::pair<std::string, YAML::Node>>& leaves,
                         DesignMdParseResult& result) {
-    if (depth > kDesignMdMaxTokenNestingDepth) {
+    if (depth > kDesignMdMaxTokenPathSegments) {
         result.diagnostics.push_back(diagnostic(
             DesignMdSeverity::error, "token-nesting-depth",
             category + "." + path, node,

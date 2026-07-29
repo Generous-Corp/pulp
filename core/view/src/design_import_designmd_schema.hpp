@@ -8,7 +8,9 @@
 
 namespace pulp::view {
 
-inline constexpr int kDesignMdMaxTokenNestingDepth = 20;
+// The 0.4 limit is 20 nested objects plus the scalar leaf. The recursive
+// walkers count path segments, so their inclusive boundary is 21.
+inline constexpr int kDesignMdMaxTokenPathSegments = 21;
 
 /// Parse and validate frontmatter features that describe the DESIGN.md schema
 /// rather than producing Pulp tokens.
