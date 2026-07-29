@@ -261,6 +261,14 @@ fi
 # it reads checked-out trees and never queries upstream (that is --check-upstream).
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
+    echo "▸ forge-descriptor coverage (indexed packs carry semantic descriptors)" >&2
+    if ! "$PYTHON" "$ROOT/tools/scripts/forge_descriptor_coverage.py" --root "$ROOT" >/dev/null 2>&1; then
+        echo "  forge-descriptor-coverage: a Forge-indexed catalog pack has no semantic descriptors — run \`python3 tools/scripts/forge_descriptor_coverage.py\` for details." >&2
+        fail=1
+    else
+        echo "  forge-descriptor-coverage: ok" >&2
+    fi
+
     echo "▸ deps-audit (attribution drift + license truthfulness)" >&2
     if ! "$PYTHON" "$DEPS_AUDIT" --strict --verify-licenses >/dev/null 2>&1; then
         echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict --verify-licenses\` for details." >&2

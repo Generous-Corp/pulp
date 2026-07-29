@@ -3,6 +3,7 @@
 // FuzzPair bake catalog. Device chemistry and oversampling are realizations:
 // both are circuit identity, and oversampling changes reported latency.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/fuzz_pair.hpp>
 
@@ -96,6 +97,53 @@ inline int latency_samples(bool oversampled, double sample_rate = 48000.0) {
     probe.set_oversampling_enabled(oversampled);
     probe.prepare(sample_rate);
     return probe.latency_samples();
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "fuzz";
+    d.label = "Fuzz";
+    d.description =
+        "Transistor-style fuzz with selectable device chemistry, bias starvation, "
+        "and source-impedance interaction.";
+    d.axes = {
+        {"device", "Device", "Transistor chemistry. Germanium is softer and more "
+                             "temperature-dependent; silicon is harder and more stable.",
+         {{"silicon", "Silicon", 0.0f}, {"germanium", "Germanium", 1.0f}}},
+        {"oversampling", "Oversampling",
+         "Four-times oversampling trades reported latency for reduced aliasing.",
+         {{"x1", "Off", 0.0f}, {"x4", "4x", 1.0f}}},
+    };
+    d.realizations = {
+        {"silicon_x1", type_id(Device::silicon, false)},
+        {"silicon_x4", type_id(Device::silicon, true)},
+        {"germanium_x1", type_id(Device::germanium, false)},
+        {"germanium_x4", type_id(Device::germanium, true)},
+    };
+    d.params = {
+        {"fuzz", kFuzz, "Fuzz", "",
+         "Nonlinear intensity — how hard the pair is driven into its fuzz region.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"bias_starve", kBiasStarve, "Bias Starve", "",
+         "Starves the bias supply, producing gating, splatter, and note dropout.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"source_kohm", kSourceKohm, "Source Impedance", "kOhm",
+         "Impedance of the source feeding the input, which loads the circuit and "
+         "changes both gain and brightness.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"output_db", kOutputDb, "Output", "dB",
+         "Output trim applied after the nonlinearity.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"mix", kMix, "Mix", "%",
+         "Blend between the dry input and the fuzz output.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"drift_enabled", kDriftEnabled, "Drift", "",
+         "Slow deterministic component drift, modelling a circuit that is not "
+         "perfectly stable.",
+         ForgeParamKind::stepped, ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+    };
+    return d;
 }
 
 }  // namespace pulp::host::fuzz
