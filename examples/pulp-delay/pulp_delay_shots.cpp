@@ -44,5 +44,25 @@ int main(int argc, char** argv) {
                     path.string().c_str());
         ok = ok && captured;
     }
+
+    constexpr std::array<Character, 4> characters = {
+        Character::clean, Character::vintage, Character::tape, Character::bbd};
+    constexpr std::array<const char*, 4> character_names = {
+        "clean", "vintage", "tape", "bbd"};
+    store.set_value(kFeedback, 62.0f);
+    for (std::size_t index = 0; index < characters.size(); ++index) {
+        store.set_value(kCharacter, static_cast<float>(characters[index]));
+        store.pump_listeners();
+        const auto path = output_dir
+            / (std::string("pulp-delay-character-")
+               + character_names[index] + ".png");
+        const bool captured = view::render_to_file(
+            *editor, 1120, 740, path.string(), 1.0f,
+            view::ScreenshotBackend::skia);
+        std::printf("%s  character=%s  %s\n",
+                    captured ? "OK" : "FAILED", character_names[index],
+                    path.string().c_str());
+        ok = ok && captured;
+    }
     return ok ? 0 : 1;
 }

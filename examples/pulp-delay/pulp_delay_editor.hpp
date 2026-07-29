@@ -52,13 +52,14 @@ class PulpDelayEditor final : public view::View {
     DelayActionCard& add_action(view::View& parent, view::Rect bounds,
                                 state::ParamID id, std::string caption,
                                 std::string subtitle, std::string glyph,
-                                bool compact = false);
+                                bool compact = false, bool warning = false);
     void register_control(DelayParameterControl& control, view::View& control_view);
     void set_control_present(state::ParamID id, bool present);
     void update_timing_presentation();
     void build();
 
     state::StateStore* store_ = nullptr;
+    CharacterPalette palette_;
     std::array<DelayParameterControl*, kParameterCount> controls_{};
     std::array<view::View*, kParameterCount> control_views_{};
     std::vector<view::ParameterBinding> bindings_;

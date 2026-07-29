@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
@@ -23,6 +24,18 @@ using namespace pulp::examples::delay;
 using namespace pulp::examples::delay::ui;
 
 namespace {
+
+class CountingWindowHost final : public view::WindowHost {
+  public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaint_count; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+
+    int repaint_count = 0;
+};
 
 PulpDelayEditor& as_delay_editor(std::unique_ptr<view::View>& root) {
     auto* editor = dynamic_cast<PulpDelayEditor*>(root.get());
@@ -56,6 +69,17 @@ std::uint64_t bytes_hash(const std::vector<std::uint8_t>& bytes) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+std::size_t count_paint_colour(const canvas::RecordingCanvas& canvas,
+                               canvas::Color colour) {
+    return static_cast<std::size_t>(std::count_if(
+        canvas.commands().begin(), canvas.commands().end(),
+        [argb = colour.to_argb32()](const canvas::DrawCommand& command) {
+            return (command.type == canvas::DrawCommand::Type::set_fill_color
+                    || command.type == canvas::DrawCommand::Type::set_stroke_color)
+                && command.color.to_argb32() == argb;
+        }));
 }
 
 view::Point root_origin(const view::View& view) {
@@ -118,6 +142,54 @@ TEST_CASE("Pulp Delay UI labels and control-state bars have truthful provenance"
     REQUIRE_THAT(editor.control_state_level(kFeedback),
                  WithinAbs(store.get_normalized(kFeedback), 1.0e-6));
     REQUIRE(editor.control_state_level(kTime) == 0.0f);
+}
+
+TEST_CASE("Pulp Delay character palette matches the four authored HTML accents",
+          "[pulp-delay][ui][palette][mapping]") {
+    constexpr std::array expected{
+        canvas::Color::rgba8(0x16, 0xDA, 0xC2),
+        canvas::Color::rgba8(0xA9, 0x7B, 0xFF),
+        canvas::Color::rgba8(0xB8, 0xE6, 0x35),
+        canvas::Color::rgba8(0xFF, 0x4F, 0x4F),
+    };
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const auto actual =
+            CharacterPalette::accent_for(static_cast<Character>(index));
+        REQUIRE(actual.to_argb32() == expected[index].to_argb32());
+    }
+    REQUIRE(CharacterPalette::accent_for(Character::tape).r8() == 0xB8);
+    REQUIRE(CharacterPalette::accent_for(Character::tape).g8() == 0xE6);
+    REQUIRE(CharacterPalette::accent_for(Character::tape).b8() == 0x35);
+}
+
+TEST_CASE("Pulp Delay character accent propagates globally without recoloring Reverse",
+          "[pulp-delay][ui][palette][propagation]") {
+    constexpr std::array characters{
+        Character::clean, Character::vintage, Character::tape, Character::bbd};
+    constexpr std::array labels{"CLEAN", "VINT", "TAPE", "BBD"};
+
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    CountingWindowHost host;
+    editor.set_window_host(&host);
+    canvas::RecordingCanvas canvas;
+
+    for (std::size_t index = 0; index < characters.size(); ++index) {
+        CAPTURE(index);
+        host.repaint_count = 0;
+        store.set_value(kCharacter, static_cast<float>(characters[index]));
+        REQUIRE(host.repaint_count == 1);
+        canvas.clear();
+        editor.paint_all(canvas);
+        REQUIRE(count_paint_colour(
+                    canvas, CharacterPalette::accent_for(characters[index]))
+                >= 20);
+        REQUIRE(count_paint_colour(canvas, color::warning) >= 1);
+        REQUIRE(control_view(editor, kCharacter).access_value() == labels[index]);
+        REQUIRE(host.repaint_count == 1);
+    }
 }
 
 TEST_CASE("Pulp Delay Stereo Field exposes only the active timing branch",
@@ -250,6 +322,32 @@ TEST_CASE("Pulp Delay timing presentation follows live state transitions",
     REQUIRE(editor.crossfeed_override_visible());
     REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
     REQUIRE(editor.effective_right_time_text() == "RIGHT = LEFT · HOST SYNC");
+}
+
+TEST_CASE("Pulp Delay static editor becomes idle and external state repaints once",
+          "[pulp-delay][ui][repaint][quiescence]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    CountingWindowHost host;
+    editor.set_window_host(&host);
+    canvas::RecordingCanvas canvas;
+
+    editor.paint_all(canvas);
+    REQUIRE(host.repaint_count == 0);
+    editor.paint_all(canvas);
+    REQUIRE(host.repaint_count == 0);
+
+    store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
+    REQUIRE(host.repaint_count == 1);
+    REQUIRE_FALSE(control_view(editor, kCrossfeed).visible());
+    REQUIRE(editor.crossfeed_override_visible());
+    REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
+
+    host.repaint_count = 0;
+    editor.paint_all(canvas);
+    REQUIRE(host.repaint_count == 0);
 }
 
 TEST_CASE("Pulp Delay controls follow host automation and preset restore",

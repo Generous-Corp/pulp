@@ -12,9 +12,9 @@ mixing.
 ## Native editor
 
 `PulpDelayProcessor::create_view()` returns an authored native Pulp View tree.
-The dark graphite/lime design is painted through the Canvas/Skia surface; it
-does not load the browser handoff's static full-frame `ui.js` image. That
-browser-captured DesignIR remains the import/reference artifact, while the
+The dark graphite/character-accent design is painted through the Canvas/Skia
+surface; it does not load the browser handoff's static full-frame `ui.js` image.
+That browser-captured DesignIR remains the import/reference artifact, while the
 shipping editor uses modular native tokens, controls and panel layout:
 
 - `pulp_delay_ui_tokens.hpp` owns the visual tokens.
@@ -26,15 +26,21 @@ shipping editor uses modular native tokens, controls and panel layout:
 Continuous controls use Pulp's gesture-aware two-way parameter bindings.
 Segmented controls emit one-shot host gestures and hold scoped main-thread
 listeners. Host automation updates are marshalled through the StateStore, and
-the editor reconciles from the store before each paint so a deliberately
-listener-silent preset/session deserialization appears on the next frame.
+the editor exposes `sync_from_store()` for the deliberately listener-silent
+preset/session deserialization path. Paint itself is side-effect free, so an
+unchanged editor reaches idle instead of scheduling another frame.
 
 The knob renderer always uses the authored dark body. Its inactive 270-degree
-track, lime active arc, pointer and display text all derive from the same
-normalized value; focus adds a lime outer ring. No generic silver knob artwork
-is used. The footer reports the current Mix and Feedback parameter state; it is
-deliberately not presented as an audio output meter. Header badges describe
-static editor capabilities rather than invented host telemetry or preset state.
+track, character-coloured active arc, pointer and display text all derive from
+the same normalized value; focus adds a character-coloured outer ring. No
+generic silver knob artwork is used. The footer reports the current Mix and
+Feedback parameter state; it is deliberately not presented as an audio output
+meter. Header badges describe static editor capabilities rather than invented
+host telemetry or preset state.
+
+The authored accent follows Character through one immutable palette resolver:
+Clean `#16DAC2`, Vintage `#A97BFF`, Tape `#B8E635`, and BBD `#FF4F4F`.
+Reverse keeps its separate warning colour.
 
 Mix and mono/stereo topology changes use per-sample 5 ms ramps. Character
 changes crossfade between two pre-prepared engines without resetting either
@@ -53,8 +59,9 @@ The tests cover all 25 bindings, host/RT updates, a routed drag with balanced
 gesture begin/end, state restore, truthful state provenance, click-free mix and
 routing automation, rapid character selection, a measured 192 kHz callback
 budget, and Skia frames at feedback-normalized `0`, `0.25`, `0.5`, `0.75` and
-`1`. Screenshot checks decode knob crops and require the changed-pixel geometry
-to contain each computed arc endpoint.
+`1`, plus one full frame for each Character palette. Screenshot checks decode
+knob crops and require the changed-pixel geometry to contain each computed arc
+endpoint.
 
 ```sh
 cmake --build build-delay --target pulp-delay-test pulp-delay-ui-shots
