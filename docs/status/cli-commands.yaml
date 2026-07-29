@@ -1094,7 +1094,7 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Connect to a running plugin inspector server.
+    summary: Experimental client for a custom host/test fixture that explicitly starts an inspector server; normal Pulp launches do not.
     args:
       - name: --host
         kind: option
@@ -1120,7 +1120,7 @@ commands:
 
   - name: motion
     status: experimental
-    summary: Agent-facing wrappers around the inspector `Motion.*` protocol. Requires a running inspector with the motion server enabled, then records traces, snapshots state, replays `.motion.jsonl` fixtures, and toggles motion-cost sampling from a terminal.
+    summary: Experimental Motion.* clients requiring a custom source-checkout fixture that explicitly constructs the inspector server; normal Pulp launches do not.
     args:
       - name: --host
         kind: option

@@ -199,6 +199,18 @@ through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
 this: loopback must connect (the control) and the host's real IPv4 must be
 refused.
 
+Normal Pulp standalone and plugin-format launches do **not** construct this
+server. `pulp inspect` is currently an experimental client for an explicitly
+hosted custom/test fixture, and the inspector-proxy MCP tools additionally
+shell through a Pulp source checkout's build-tree CLI. Do not describe either
+surface as an installed-user or ordinary `pulp run` workflow. Keep
+`tools/cli/pulp_cli.cpp`, `cmd_inspect.cpp`,
+`experimental/pulp-rs/src/help.rs`, the slash commands, MCP tool descriptions,
+`docs/reference/cli.md`, and
+`docs/reference/development-inspector-capabilities.md` aligned; the
+`inspector_truth_check.py` mutation gate protects selected documentation and
+client-description claims, but does not prove runtime construction sites.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
@@ -1155,28 +1167,29 @@ Reference: `feature/ship-oneoff-notarize` (2026-06-01). Files:
 selection, `share`), `test/test_cli_ship_shellout.cpp` `[oneoff]` cases,
 `.claude/commands/ship.md`, `.agents/skills/ship/SKILL.md`.
 
-### SDK build strips the dev authoring surface (§6a)
+### SDK build disables dev authoring features (§6a)
 
-`cli_sdk.cpp`'s release configure deliberately disables the developer-only
-surfaces so shipped SDKs / plugins don't carry them: it passes
-`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF` (the
-inspector is the in-plugin authoring / MCP-reachable surface). The scaffolded
-project templates (`tools/templates/.../build.gradle.kts.template`) mirror this.
+`cli_sdk.cpp`'s release configure passes
+`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF`. The
+scaffolded project templates (`tools/templates/.../build.gradle.kts.template`)
+mirror this. These flags disable their guarded behavior; they do not by
+themselves prove archive stripping, unlinkage, or endpoint reachability.
 
 Keep the two flags together when editing the SDK configure command. A developer
-who deliberately wants an inspectable / MCP-reachable plugin re-enables it in
-their own plugin build with `-DPULP_ENABLE_INSPECTOR=ON`. The standalone `pulp`
-CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are **separate binaries** —
-not compiled into a plugin — so this flag never strips them; bundling them
-alongside a plugin distribution is a packaging choice.
+can re-enable the guarded inspector components with
+`-DPULP_ENABLE_INSPECTOR=ON`, but that still does not create a normal runtime
+endpoint: a custom host must explicitly construct and own `InspectorServer`.
+The standalone `pulp` CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are
+**separate binaries** — not compiled into a plugin — so this flag never strips
+them; bundling them alongside a plugin distribution is a packaging choice.
 
 The SDK build also passes `-DPULP_ENABLE_DESIGN_IMPORT=OFF`, which strips the
 design-import authoring cluster (importers, codegen, `lock_to_source`,
 `jsx_lock`, `token_lock`, runtime design-import) from shipped plugins. The
 runtime W3C token pair (`importDesignTokens` / `exportDesignTokens`, via
 `core/view/src/w3c_tokens.cpp`) stays compiled; `WidgetBridge::install_runtime_import_handlers()`
-becomes a no-op stub. Keep all three strip flags (audio-probes / inspector /
-design-import) together in the SDK configure command. Building the test suite
+becomes a no-op stub. Keep all three feature-configuration flags (audio-probes /
+inspector / design-import) together in the SDK configure command. Building the test suite
 requires `PULP_ENABLE_DESIGN_IMPORT=ON` (the CMake gate hard-errors otherwise);
 a stripped build uses `PULP_BUILD_TESTS=OFF`.
 
