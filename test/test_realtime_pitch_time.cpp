@@ -15,6 +15,7 @@
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <complex>
@@ -140,6 +141,71 @@ RealtimePitchTimeConfig quality_config(int channels = 1) {
     config.channels = channels;
     config.max_block = 4096;
     return config;
+}
+
+struct StreamRender {
+    std::vector<float> samples;
+    int finalize_calls = 0;
+    int backpressure_count = 0;
+};
+
+StreamRender render_stretched_stream(const std::vector<float>& input,
+                                     float ratio,
+                                     const std::vector<int>& schedule,
+                                     bool drain_after_each_feed) {
+    REQUIRE_FALSE(schedule.empty());
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = *std::max_element(schedule.begin(), schedule.end());
+    config.max_time_ratio = 2.0f;
+
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+    proc.set_time_ratio(ratio);
+
+    StreamRender rendered;
+    std::vector<float> scratch(static_cast<size_t>(config.max_block));
+    float* output[] = {scratch.data()};
+    auto drain = [&] {
+        while (proc.available_stretched() > 0) {
+            const int count = std::min(proc.available_stretched(), config.max_block);
+            REQUIRE(proc.read_stretched(output, count) == count);
+            rendered.samples.insert(rendered.samples.end(), scratch.begin(),
+                                    scratch.begin() + count);
+        }
+    };
+
+    int position = 0;
+    size_t schedule_index = 0;
+    while (position < static_cast<int>(input.size())) {
+        const int count = std::min(schedule[schedule_index % schedule.size()],
+                                   static_cast<int>(input.size()) - position);
+        const float* source[] = {input.data() + position};
+        const auto result = proc.feed(source, count);
+        if (result == PitchTimeStreamFeedStatus::backpressure) {
+            ++rendered.backpressure_count;
+            drain();
+            continue;
+        }
+        REQUIRE(result == PitchTimeStreamFeedStatus::accepted);
+        position += count;
+        ++schedule_index;
+        if (drain_after_each_feed) drain();
+    }
+
+    for (;;) {
+        const auto status = proc.finalize();
+        ++rendered.finalize_calls;
+        drain();
+        if (status == PitchTimeStreamFinalizeStatus::complete) break;
+        REQUIRE((status == PitchTimeStreamFinalizeStatus::draining
+                 || status == PitchTimeStreamFinalizeStatus::backpressure));
+        REQUIRE(rendered.finalize_calls < 1000);
+    }
+    REQUIRE(proc.available_stretched() == 0);
+    REQUIRE(proc.finalize() == PitchTimeStreamFinalizeStatus::complete);
+    return rendered;
 }
 
 } // namespace
@@ -332,6 +398,176 @@ TEST_CASE("RealtimePitchTimeProcessor time-stretch changes duration but not pitc
     const double cents = 1200.0 * std::log2(f / 440.0);
     INFO("stretched tone: " << f << " Hz (" << cents << " cents)");
     REQUIRE(std::abs(cents) < 2.0);
+}
+
+TEST_CASE("RealtimePitchTimeProcessor finite stream duration is exact and schedule invariant",
+          "[signal][pitch-time][streaming]") {
+    auto input = sine(440.0, 0.6, 12'345);
+    input.back() += 0.25f;
+
+    for (const float ratio : {0.5f, 1.0f, 1.25f, 1.5f, 2.0f}) {
+        const auto steady = render_stretched_stream(input, ratio, {1024}, true);
+        const auto varied =
+            render_stretched_stream(input, ratio, {17, 509, 64, 1000, 3, 256}, true);
+        const auto expected = static_cast<size_t>(std::llround(input.size() * ratio));
+        INFO("ratio=" << ratio << " expected=" << expected
+                       << " actual=" << steady.samples.size());
+        REQUIRE(steady.samples.size() == expected);
+        REQUIRE(varied.samples.size() == steady.samples.size());
+        float max_schedule_error = 0.0f;
+        for (size_t i = 0; i < steady.samples.size(); ++i)
+            max_schedule_error = std::max(
+                max_schedule_error, std::abs(varied.samples[i] - steady.samples[i]));
+        INFO("ratio=" << ratio << " maximum schedule error=" << max_schedule_error);
+        REQUIRE(max_schedule_error < 1e-4f);
+        REQUIRE(steady.finalize_calls < 16);
+        REQUIRE(varied.finalize_calls < 16);
+    }
+}
+
+TEST_CASE("RealtimePitchTimeProcessor declares priming and preserves an EOF tail",
+          "[signal][pitch-time][streaming]") {
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = 256;
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+    REQUIRE(proc.output_alignment_samples() == 0);
+    REQUIRE(proc.input_priming_samples() == proc.fft_size() + 256);
+
+    std::vector<float> zeros(static_cast<size_t>(proc.input_priming_samples()), 0.0f);
+    int fed = 0;
+    while (fed < proc.input_priming_samples() - 1) {
+        const int count = std::min(256, proc.input_priming_samples() - 1 - fed);
+        const float* source[] = {zeros.data() + fed};
+        REQUIRE(proc.feed(source, count) == PitchTimeStreamFeedStatus::accepted);
+        fed += count;
+    }
+    REQUIRE(proc.available_stretched() == 0);
+    const float* final_priming[] = {zeros.data() + fed};
+    REQUIRE(proc.feed(final_priming, 1) == PitchTimeStreamFeedStatus::accepted);
+    REQUIRE(proc.available_stretched() > 0);
+
+    std::vector<float> tail_input(4097, 0.0f);
+    tail_input[tail_input.size() - 96] = 1.0f;
+    const auto rendered = render_stretched_stream(tail_input, 1.0f, {127, 251}, true);
+    REQUIRE(rendered.samples.size() == tail_input.size());
+    float tail_peak = 0.0f;
+    for (size_t i = tail_input.size() - 512; i < rendered.samples.size(); ++i)
+        tail_peak = std::max(tail_peak, std::abs(rendered.samples[i]));
+    INFO("EOF tail peak=" << tail_peak);
+    REQUIRE(tail_peak > 0.1f);
+}
+
+TEST_CASE("RealtimePitchTimeProcessor backpressure is lossless and close is final",
+          "[signal][pitch-time][streaming]") {
+    auto input = sine(317.0, 0.5, 80'000);
+    const auto reference = render_stretched_stream(input, 2.0f, {1024}, true);
+    const auto pressured = render_stretched_stream(input, 2.0f, {1024}, false);
+    REQUIRE(pressured.backpressure_count > 0);
+    REQUIRE(pressured.samples == reference.samples);
+
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = 256;
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+    REQUIRE(proc.output_free_space() > 0);
+    const int output_capacity = proc.output_free_space();
+    const float sample = 1.0f;
+    const float* source[] = {&sample};
+    REQUIRE(proc.feed(source, -1) == PitchTimeStreamFeedStatus::invalid_request);
+    REQUIRE(proc.feed(source, config.max_block + 1)
+            == PitchTimeStreamFeedStatus::invalid_request);
+    REQUIRE(proc.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);
+    REQUIRE(proc.finalize() == PitchTimeStreamFinalizeStatus::draining);
+    REQUIRE(proc.feed(source, 1) == PitchTimeStreamFeedStatus::input_closed);
+
+    std::array<float, 256> output_storage {};
+    float* output[] = {output_storage.data()};
+    for (int guard = 0; guard < 1000; ++guard) {
+        const int available = proc.available_stretched();
+        if (available > 0)
+            REQUIRE(proc.read_stretched(output, std::min(available, 256)) > 0);
+        const auto status = proc.finalize();
+        if (status == PitchTimeStreamFinalizeStatus::complete) break;
+        REQUIRE(guard < 999);
+    }
+    REQUIRE(proc.finalize() == PitchTimeStreamFinalizeStatus::complete);
+    REQUIRE(proc.read_stretched(output, 256) == 0);
+    REQUIRE(std::all_of(output_storage.begin(), output_storage.end(),
+                        [](float value) { return value == 0.0f; }));
+    REQUIRE(proc.output_free_space() == output_capacity);
+
+    RealtimePitchTimeConfig pitch_config = config;
+    pitch_config.mode = PitchTimeMode::realtime_pitch;
+    RealtimePitchTimeProcessor pitch;
+    pitch.prepare(kSr, pitch_config);
+    REQUIRE(pitch.feed(source, 1) == PitchTimeStreamFeedStatus::invalid_request);
+    REQUIRE(pitch.finalize() == PitchTimeStreamFinalizeStatus::invalid_mode);
+}
+
+TEST_CASE("RealtimePitchTimeProcessor rejects backpressure without consuming input",
+          "[signal][pitch-time][streaming]") {
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = 1024;
+    config.max_time_ratio = 2.0f;
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+    proc.set_time_ratio(2.0f);
+
+    std::vector<float> input(1024, 0.25f);
+    const float* source[] = {input.data()};
+    PitchTimeStreamFeedStatus status = PitchTimeStreamFeedStatus::accepted;
+    for (int guard = 0; guard < 1000; ++guard) {
+        status = proc.feed(source, 1024);
+        if (status == PitchTimeStreamFeedStatus::backpressure) break;
+        REQUIRE(status == PitchTimeStreamFeedStatus::accepted);
+    }
+    REQUIRE(status == PitchTimeStreamFeedStatus::backpressure);
+    const int available_before_retry = proc.available_stretched();
+    const int free_before_retry = proc.output_free_space();
+    REQUIRE(proc.feed(source, 1024) == PitchTimeStreamFeedStatus::backpressure);
+    REQUIRE(proc.available_stretched() == available_before_retry);
+    REQUIRE(proc.output_free_space() == free_before_retry);
+
+    std::vector<float> output_storage(1024);
+    float* output[] = {output_storage.data()};
+    for (int guard = 0; guard < 100; ++guard) {
+        const int count = std::min(proc.available_stretched(), 1024);
+        REQUIRE(count > 0);
+        REQUIRE(proc.read_stretched(output, count) == count);
+        status = proc.feed(source, 1024);
+        if (status == PitchTimeStreamFeedStatus::accepted) break;
+        REQUIRE(status == PitchTimeStreamFeedStatus::backpressure);
+    }
+    REQUIRE(status == PitchTimeStreamFeedStatus::accepted);
+}
+
+TEST_CASE("RealtimePitchTimeProcessor empty EOF drains in the declared finite bound",
+          "[signal][pitch-time][streaming]") {
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = 1;
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+
+    int calls = 0;
+    PitchTimeStreamFinalizeStatus status = PitchTimeStreamFinalizeStatus::draining;
+    while (status != PitchTimeStreamFinalizeStatus::complete) {
+        status = proc.finalize();
+        ++calls;
+        REQUIRE(status != PitchTimeStreamFinalizeStatus::backpressure);
+        REQUIRE(calls <= proc.input_priming_samples());
+    }
+    REQUIRE(calls == proc.input_priming_samples());
+    REQUIRE(proc.available_stretched() == 0);
+    REQUIRE(proc.output_free_space() > 0);
 }
 
 TEST_CASE("RealtimePitchTimeProcessor preserves formants when asked to",

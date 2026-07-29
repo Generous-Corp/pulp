@@ -35,6 +35,29 @@ const long out_frames = offline_stretch_output_frames(in_frames, o.time_ratio);
 eng.process(in_ptrs, in_frames, out_ptrs, out_frames, o);
 ```
 
+### Finite realtime stretch streams
+
+`RealtimePitchTimeProcessor` in `time_stretch` mode owns a bounded pull stream.
+`feed()` accepts a complete input block or returns typed backpressure without
+consuming it. Use `output_free_space()` only as scheduling information; the
+`feed()` result is authoritative because one analysis boundary can publish a
+whole synthesis hop.
+
+Call `finalize()` to seal EOF. It advances at most one prepared input block per
+call and may return backpressure until queued output is read. Continue
+`read_stretched()` / `finalize()` until `complete`; feeding after the first
+finalize returns `input_closed`. The final frame count comes from the engine's
+hop map and is exactly `round(input_frames * ratio)` for a constant ratio, with
+the end overlap-add tail preserved inside that duration.
+
+The producer must supply `input_priming_samples()` before output can become
+readable. This is scheduling latency, not a silence prefix:
+`output_alignment_samples()` is zero, so output frame zero corresponds to input
+frame zero. All streaming calls are allocation-free after `prepare()` and are
+bounded by `RealtimePitchTimeConfig::max_block` and the prepared output ring.
+This is the DSP prerequisite for future clip integration; no Timeline renderer
+selects it yet.
+
 ## Character modes — an "engine per job"
 
 `OfflineStretchOptions::character` (`StretchCharacter`) picks the algorithm voicing:

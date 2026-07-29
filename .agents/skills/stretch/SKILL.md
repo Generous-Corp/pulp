@@ -20,6 +20,27 @@ stretch public config remains control-plane double regardless of sample type;
 only the sample buffers and internal DSP storage widen for the f64 aliases.
 Keep quality comparisons explicit about which sample type is under test.
 
+## Finite streaming contract
+
+For clip-ready streaming, prepare `RealtimePitchTimeProcessor` in
+`PitchTimeMode::time_stretch`. `feed()` is all-or-nothing: on
+`backpressure`, drain `available_stretched()` with `read_stretched()` and retry
+the identical input block. Never advance a decoder on a rejected feed.
+
+At source EOF, call `finalize()` repeatedly, alternating with output reads,
+until it returns `complete`. Finalization seals input, advances at most one
+prepared block per call, preserves the overlap-add tail, and publishes the
+frame-map-derived duration (exactly `round(input_frames * ratio)` for a constant
+ratio). A later feed returns `input_closed`; reset starts a new stream.
+
+`input_priming_samples()` is how much source must be queued before the first
+final output becomes readable. It is not leading silence:
+`output_alignment_samples()` is zero. `output_free_space()` is an advisory
+scheduling value; the typed feed/finalize result remains authoritative. These
+methods allocate nothing after `prepare()`. Do not wire this path into Timeline
+clips until the renderer owns this retry/drain lifecycle and proves it under
+varying host block schedules.
+
 ## Build + run
 
 ```bash
