@@ -143,6 +143,11 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DPULP_PARENT_BUILD_TYPE=$<CONFIG>
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_C_FLAGS=${CMAKE_C_FLAGS}"
+        "-DPULP_PARENT_OBJCXX_FLAGS=${CMAKE_OBJCXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        "-DPULP_PARENT_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_sdk_runtime_staging.cmake)
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"

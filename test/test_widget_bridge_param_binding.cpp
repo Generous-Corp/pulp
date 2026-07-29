@@ -1646,6 +1646,7 @@ TEST_CASE("listValueChannels reports what a UI can bind",
     ValueChannelSet channels;
     channels.declare_meter("gr", "dB", 0.0f);
     channels.declare_vector("env");
+    channels.declare_events("onsets");
 
     WidgetBridge bridge(engine, root, store);
     bridge.set_value_channels(&channels);
@@ -1655,12 +1656,12 @@ TEST_CASE("listValueChannels reports what a UI can bind",
     INFO("payload: " << json);
     CHECK(json.find("\"name\":\"gr\"") != std::string::npos);
     CHECK(json.find("\"unit\":\"dB\"") != std::string::npos);
-    // `shape` is what tells a caller which binder applies — meter -> bindMeter,
-    // vector -> bindScope.
+    // `shape` is what tells a caller which binder applies.
     CHECK(json.find("\"shape\":\"meter\"") != std::string::npos);
     CHECK(json.find("\"shape\":\"vector\"") != std::string::npos);
+    CHECK(json.find("\"shape\":\"events\"") != std::string::npos);
     CHECK(json.find("\"neutral\":0") != std::string::npos);
-    CHECK(eval_json(engine, "listValueChannels().length") == "2");
+    CHECK(eval_json(engine, "listValueChannels().length") == "3");
 }
 
 TEST_CASE("listValueChannels is an empty array when nothing is declared",
@@ -1679,4 +1680,114 @@ TEST_CASE("listValueChannels is an empty array when nothing is declared",
     bridge.load_script("");
     CHECK(eval_json(engine, "listValueChannels().length") == "0");
     CHECK(eval_json(engine, "Array.isArray(listValueChannels())") == "true");
+}
+
+TEST_CASE("bindEvents delivers frame offsets and zero-valued occurrences",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* onsets = channels.declare_events("onsets", "velocity");
+    REQUIRE(onsets != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        globalThis.eventBlocks = [];
+        globalThis.eventBinding = bindEvents('value:onsets', function(events) {
+            eventBlocks.push(events);
+        });
+    )");
+    REQUIRE(bridge.event_binding_count() == 1);
+    REQUIRE(eval_json(engine, "eventBinding > 0") == "true");
+
+    const ValueEvent occurrences[] = {
+        {.frame_index = 0, .value = 0.0f},
+        {.frame_index = 127, .value = 0.75f},
+    };
+    onsets->publish(occurrences, 2);
+    bridge.service_frame_callbacks();
+
+    CHECK(eval_json(engine, "eventBlocks.length") == "1");
+    CHECK(eval_json(engine, "eventBlocks[0].length") == "2");
+    CHECK(eval_json(engine, "eventBlocks[0][0].frameIndex") == "0");
+    CHECK(eval_json(engine, "eventBlocks[0][0].value") == "0");
+    CHECK(eval_json(engine, "eventBlocks[0][1].frameIndex") == "127");
+    CHECK(eval_json(engine, "eventBlocks[0][1].value") == "0.75");
+
+    // No new publish means no synthetic event block on later UI frames.
+    bridge.service_frame_callbacks();
+    CHECK(eval_json(engine, "eventBlocks.length") == "1");
+
+    REQUIRE(eval_json(engine, "unbindEvents(eventBinding)") == "true");
+    CHECK(bridge.event_binding_count() == 0);
+    onsets->publish(occurrences, 1);
+    bridge.service_frame_callbacks();
+    CHECK(eval_json(engine, "eventBlocks.length") == "1");
+}
+
+TEST_CASE("bindEvents rejects absent and non-event channels",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    channels.declare_vector("scope");
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        globalThis.notEvents = bindEvents('value:scope', function() {});
+        globalThis.absent = bindEvents('value:absent', function() {});
+        globalThis.noPrefix = bindEvents('scope', function() {});
+    )");
+
+    CHECK(eval_json(engine, "notEvents") == "0");
+    CHECK(eval_json(engine, "absent") == "0");
+    CHECK(eval_json(engine, "noPrefix") == "0");
+    CHECK(bridge.event_binding_count() == 0);
+}
+
+TEST_CASE("bindEvents neither replays old blocks nor invalidates reentrant unbind",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* onsets = channels.declare_events("onsets");
+    REQUIRE(onsets != nullptr);
+    const ValueEvent occurrence{.frame_index = 4, .value = 1.0f};
+    onsets->publish(&occurrence, 1);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        globalThis.calls = 0;
+        globalThis.binding = bindEvents('value:onsets', function() {
+            ++calls;
+            unbindEvents(binding);
+        });
+    )");
+
+    // Binding starts at the current publication rather than synthesizing a
+    // callback for a block that preceded the subscription.
+    bridge.service_frame_callbacks();
+    CHECK(eval_json(engine, "calls") == "0");
+
+    onsets->publish(&occurrence, 1);
+    bridge.service_frame_callbacks();
+    CHECK(eval_json(engine, "calls") == "1");
+    CHECK(bridge.event_binding_count() == 0);
+
+    onsets->publish(&occurrence, 1);
+    bridge.service_frame_callbacks();
+    CHECK(eval_json(engine, "calls") == "1");
 }

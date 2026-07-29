@@ -360,7 +360,9 @@ the tool takes arguments:
   mis-reads the other; the same reason `param_json` backs both
   `getParamMetadata` and `State.getParameters`. Assert the two payloads are
   byte-identical (and not vacuously equal on two empty results) in
-  `test_inspector_domains.cpp`.
+  `test_inspector_domains.cpp`. Keep its binder guidance complete as shapes
+  land: `meter` → `bindMeter`, `vector` → `bindScope`, and `events` →
+  `bindEvents`.
 - **An inspector-proxy tool that reads an optional processor surface returns the
   EMPTY value, not an error, when the processor declares none** — e.g.
   `State.getValueChannels` yields `[]` for a processor that never overrode
