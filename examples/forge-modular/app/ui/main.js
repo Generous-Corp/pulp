@@ -504,6 +504,9 @@ card("card-4", "PATCH", "Bouncing ball", "5 modules · 7 cables", "#16351F");
 
 function setMode(next) {
     mode = next;
+    // Published for the host: wire() reads this rather than keeping a second
+    // copy of the mode that could disagree with the one the tabs set.
+    setText("mode-state", mode);
     const isPatch = mode === "patch";
     setBackground("tab-module", isPatch ? C.panel : C.raised);
     setBackground("tab-patch", isPatch ? C.raised : C.panel);
@@ -748,6 +751,11 @@ on("btn-random", "toggle", function (v) {
     if (!v) return;
     setText("prompt", mode === "patch" ? RANDOM_PATCH[0] : RANDOM_MODULE[0]);
 });
+
+// Not visible, but not a hack either -- it is the documented channel the host
+// reads the mode through, and it is a label so it can be asserted in a test.
+createLabel("mode-state", "module", "root");
+setVisible("mode-state", false);
 
 setMode(mode);
 showScreen("home");

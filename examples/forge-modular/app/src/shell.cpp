@@ -72,25 +72,35 @@ public:
             return ed ? ed->text() : std::string();
         };
 
-        auto hook = [&](const char* id, bool patch_mode, bool mutating) {
+        // The mode lives in the script, which owns the tabs. Reading it at
+        // click time rather than capturing it is the whole point: it was
+        // hard-coded to `true` here, so Build generated a patch no matter which
+        // tab was selected, and a module could not be made at all.
+        auto patch_mode_now = [bridge]() -> bool {
+            auto* v = bridge->widget("mode-state");
+            auto* l = dynamic_cast<pulp::view::Label*>(v);
+            return l && l->text() == "patch";
+        };
+
+        auto hook = [&](const char* id, bool mutating) {
             auto* v = bridge->widget(id);
             auto* btn = dynamic_cast<pulp::view::ToggleButton*>(v);
             if (!btn) return false;
-            btn->on_toggle = [engine, prompt_text, patch_mode, mutating](bool) {
+            btn->on_toggle = [engine, prompt_text, patch_mode_now, mutating](bool) {
                 const std::string prompt = prompt_text();
                 if (prompt.empty()) return;
                 if (!engine->ensure_running()) return;
                 // Ask and Build differ in one bit, and it is carried rather
                 // than inferred: an Ask turn must not be able to rewrite the
                 // patch even if the intent were misread.
-                engine->submit(prompt, patch_mode && mutating);
+                engine->submit(prompt, mutating && patch_mode_now());
             };
             return true;
         };
 
         // Mode is owned by the script; the host asks for it rather than
         // tracking a second copy that could disagree.
-        wired_ = hook("btn-build", true, true) && hook("btn-ask", false, false);
+        wired_ = hook("btn-build", true) && hook("btn-ask", false);
     }
 
     bool wired() const { return wired_; }

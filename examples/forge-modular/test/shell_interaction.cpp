@@ -212,6 +212,21 @@ TEST_CASE("Build carries the selected mode to the engine",
     REQUIRE(h.engine.calls[0].patch_mode == true);
 }
 
+TEST_CASE("Build in module mode asks for a MODULE",
+          "[forge-modular][shell][interaction]") {
+    // The case that was missing. wire() hard-coded patch_mode to true, so Build
+    // generated a patch whichever tab was selected -- a module could not be made
+    // at all -- and the only mode assertion here clicked the Patch tab first,
+    // so it saw the value it wanted and passed. Asserting one side of a boolean
+    // is not asserting the boolean.
+    Harness h;
+    h.type("a 4 hp clock divider with reset");
+    h.click("btn-build");
+
+    REQUIRE(h.engine.calls.size() == 1);
+    REQUIRE(h.engine.calls[0].patch_mode == false);
+}
+
 TEST_CASE("the rail reaches both modes",
           "[forge-modular][shell][interaction]") {
     Harness h;
@@ -338,4 +353,63 @@ TEST_CASE("the real engine reports a tools directory that is not there",
     REQUIRE(engine != nullptr);
     CHECK_FALSE(engine->available());
     ::unsetenv("FORGE_MODULAR_TOOLS");
+}
+
+TEST_CASE("driven: a click generates a real module",
+          "[.e2e]") {
+    // The two halves proven separately -- a click reaching the engine, and the
+    // engine's generator producing a module -- joined into one run. Hidden
+    // behind [.e2e] because it spawns the real generator: minutes of wall
+    // clock and a paid API call, which has no business in ctest.
+    //
+    //   pulp-test-forge-modular-shell "[.e2e]"
+    //
+    // Counts module manifests before and after rather than looking for a
+    // specific slug: the generator names what it makes, and demanding a name
+    // would make the test a lie about what was asked for.
+    const std::filesystem::path modules{
+        std::filesystem::path(FORGE_MODULAR_TOOLS_DIR).parent_path().parent_path()
+        / "examples" / "forge-modular" / "modules"};
+    REQUIRE(std::filesystem::exists(modules));
+
+    const auto count = [&] {
+        std::size_t n = 0;
+        for (const auto& e : std::filesystem::directory_iterator(modules))
+            if (e.path().extension() == ".json") ++n;
+        return n;
+    };
+    const std::size_t before = count();
+
+    pulp::state::StateStore store;
+    auto engine = forge_modular::make_engine();
+    REQUIRE(engine != nullptr);
+    REQUIRE(engine->available());
+
+    forge_modular::Shell shell;
+    shell.set_engine(engine.get());
+    shell.define_parameters(store);
+    auto root = shell.create_view();
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, 1280.0f, 800.0f});
+    root->layout_children();
+
+    auto* ed = dynamic_cast<pulp::view::TextEditor*>(find_by_id(*root, "prompt"));
+    REQUIRE(ed != nullptr);
+    ed->set_text("a 4 HP clock divider with reset and four divisions");
+
+    auto* build = find_by_id(*root, "btn-build");
+    REQUIRE(build != nullptr);
+    const auto b = absolute_bounds(*build);
+    root->simulate_click({b.x + b.width * 0.5f, b.y + b.height * 0.5f});
+
+    // The generator is detached and slow. Wait, but bounded, and fail rather
+    // than hang -- an e2e check that can hang forever gets disabled and then
+    // nobody runs it at all.
+    bool grew = false;
+    for (int waited = 0; waited < 600 && !grew; ++waited) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        grew = count() > before;
+    }
+    INFO("modules before " << before << ", after " << count());
+    REQUIRE(grew);
 }
