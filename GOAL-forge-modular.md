@@ -221,3 +221,34 @@ anything to do with flush. That is shared-adapter surface: it will change
 `PulpGain` and every other Pulp CLAP, so it needs its own test and a
 re-validation of both plugins. It also wants checking against the VST3 and AU
 adapters, which may or may not quantize the same way.
+
+## CLAP flush — resolved: not a Pulp defect
+
+`clap-validator` picks each parameter's new value with
+`random_range(range).round()` for stepped parameters, from a **hard-coded seed**
+(`0x1337_6767`, `src/tests/rng.rs:17`), then fails if no value changed
+(`src/tests/plugin_instance/params.rs:243`). Forge Modular's only parameter is
+the synthesized Bypass — two legal values, 0 and 1, sitting at 0. When the
+seeded draw is 0, nothing changes and the test fails on a plugin that behaved
+correctly. `PulpGain` has many continuous parameters, so something always
+changes and it passes both flush tests.
+
+`tools/clap_param_probe.c` confirms the plugin side is sound: flush applies
+values before *and* after `activate()`.
+
+**So do not "fix" this.** The two failures are an artifact of a single
+two-state parameter meeting a fixed seed. What to do instead is decide whether
+a plugin with no automatable parameters should expose a lone Bypass at all.
+
+### A real defect found on the way, still unfixed
+
+A bypass parameter accepts and returns non-integral values — flush 0.37 into
+Bypass and 0.37 reads back — while `params_get_info` reports it as
+`CLAP_PARAM_IS_STEPPED`. `StateStore` quantizes *discrete* parameters, so this
+affects bypass only.
+
+Rounding in `clap_params_flush` fixes it, and was tried here and reverted,
+because the obvious test is a **false green**: the `test_clap_entry` fixture's
+stepped parameter is discrete, so it is already quantized upstream and the test
+passes with or against the change. A real test needs a bypass parameter in the
+fixture. Shared-adapter surface, so it needs that test before it lands.
