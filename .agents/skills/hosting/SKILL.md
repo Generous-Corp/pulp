@@ -1105,9 +1105,21 @@ registry header. Use the family header that owns the DSP you are exposing:
   `forge_tape_catalog.hpp` for nonlinear/color processors.
 - `forge_dynamics_catalog.hpp` for feed-forward, VCA, FET, and diode-bridge
   compressors.
+- `forge_multiband_catalog.hpp` for the two-band Linkwitz-Riley plus compressor
+  composition, and `forge_sidechain_catalog.hpp` for the two-input compressor
+  whose port 0 is signal and port 1 is the external detector/key.
+- `forge_wavetable_catalog.hpp` for the zero-input, one-output fixed-bank
+  wavetable source. Source-node consumers must preserve that 0 -> 1 shape; do
+  not invent a dummy audio input in an application registry.
 - `forge_effect_modulation_catalog.hpp`, `forge_pitch_catalog.hpp`,
   `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
   `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
+
+The sidechain HPF setter resets its biquad when the cutoff changes. Cache the
+last applied cutoff in any baked adapter and call the setter only on an actual
+change; calling it unconditionally per block manufactures a fresh detector
+transient and prevents the HPF state from ever settling. Keep a regression that
+runs enough unchanged blocks for a DC key to disappear through the HPF.
 
 Each header owns its stable type/parameter IDs, declared ranges, and `make_*_node`
 factory. Consumers should use those constants and factories rather than duplicate

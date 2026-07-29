@@ -12,6 +12,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/value_channel_json.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include "api_registry.hpp"
 #include "bridge_dispatch.hpp"
@@ -776,6 +777,18 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
                               args.get<std::string>(1, ""),
                               WidgetBridge::ParamBinding::Target::scope,
                               args.numArgs > 2 ? args[2] : nullptr));
+    });
+
+    // listValueChannels() -> [{name, unit, shape, neutral}], or [] when the
+    // processor declares none. This is what lets a UI discover what it can bind
+    // instead of hard-coding names that silently stop resolving when the
+    // processor is edited — the same drift `getParamMetadata` removed for
+    // parameters. `shape` tells a caller which binder applies: `meter` for
+    // bindMeter, `vector` for bindScope.
+    register_bridge_function(api, "listValueChannels", [&self](choc::javascript::ArgumentList) {
+        // Shared with the inspector's State.getValueChannels — one serializer,
+        // so the two descriptions of the same channels cannot disagree.
+        return value_channels_to_value(self.value_channels_);
     });
 
     // unbindWidget(widgetId) -> remove any binding(s) for that widget. Returns

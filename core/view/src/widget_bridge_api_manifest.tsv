@@ -43,6 +43,7 @@ setParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cp
 bindWidgetToParam	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindMeter	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 bindScope	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
+listValueChannels	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 unbindWidget	state_binding	function	core/view/src/widget_bridge/state_binding_api.cpp
 animate	animation	function	core/view/src/widget_bridge/animation_api.cpp
 setMotionToken	tokens	function	core/view/src/widget_bridge/tokens_api.cpp

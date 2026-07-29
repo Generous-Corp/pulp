@@ -3,6 +3,7 @@
 #include <pulp/inspect/domain_handler.hpp>
 
 #include <pulp/state/param_json.hpp>
+#include <pulp/view/value_channel_json.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/source_jump.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
@@ -706,6 +707,15 @@ InspectorMessage DomainHandler::handle_state(const InspectorMessage& req) {
         for (std::size_t i = 0; i < store.param_count(); ++i)
             arr.addArrayElement(state::param_snapshot_to_value(store, store.all_params()[i]));
         return make_response(req.id, choc::json::toString(arr, false));
+    }
+    if (req.method == methods::kStateGetValueChannels) {
+        // What the processor publishes that is NOT a parameter — gain
+        // reduction, an envelope, a spectrum. Serialized by the same
+        // value_channel_json the scripted-UI bridge's listValueChannels() uses,
+        // so the two descriptions of one channel set cannot drift.
+        return make_response(
+            req.id,
+            choc::json::toString(view::value_channels_to_value(state_->value_channels()), false));
     }
     if (req.method == methods::kStateSetParameter) {
         try {

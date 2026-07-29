@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 56 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 58 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -28,6 +28,8 @@ for its complete, authoritative guidance.
 | `cmajor-external` | Use Pulp's MIT-safe Cmajor support lane via source-owned patches, an external `cmaj` toolchain, and explicit generated-artifact workflows. |
 | `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
 | `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
+| `contrib-intake` | Maintainer side of an outside contribution — find what has arrived (fork PR, issue, or patches sent out-of-band), adopt it into an in-repo branch with authorship intact, review it against the repo's bar, and ship it through the normal merge path. |
+| `contribute` | Prepare an outside contribution to Pulp or Forge that a maintainer can land with minimal rework — routing (Core vs Forge), local build and test on a plain Mac, the checks that are worth running without Shipyard/Tart/VMs, and the handoff format. |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |

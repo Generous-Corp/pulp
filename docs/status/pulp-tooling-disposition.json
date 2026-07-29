@@ -4071,6 +4071,14 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "contrib-intake",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "contribute",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "daw-smoke",
         "disposition": "excluded"
       },
@@ -4377,6 +4385,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "pulp_inspect_value_channels",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_kit",
         "disposition": "pulp-owned"
       },
@@ -4509,7 +4521,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.394.2",
+        "version": "0.396.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4524,13 +4536,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.394.2",
+        "catalog_version": "0.396.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.394.2",
+        "version": "0.396.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

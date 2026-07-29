@@ -1543,6 +1543,8 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
 | `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
+| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
+| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
