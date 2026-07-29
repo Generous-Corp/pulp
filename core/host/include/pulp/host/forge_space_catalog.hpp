@@ -327,7 +327,7 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
 
 /// Construct the metadata/audit realization without making the central
 /// registry know how to synthesize this asset-backed family's required input.
-inline CustomNodeType make_catalog_probe_node() {
+inline CustomNodeType catalog_probe_node() {
     return make_convolution_reverb_node({{{1.0f}}, 48000.0});
 }
 

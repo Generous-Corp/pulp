@@ -445,7 +445,7 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         {realization("default", sequencing::prob_gate::make_prob_gate_node())});
 
     add(space::convolution::descriptor(),
-        {realization("default", space::convolution::make_catalog_probe_node())});
+        {realization("default", space::convolution::catalog_probe_node())});
     add(space::nonlin_ambience::descriptor(),
         {realization("default", space::nonlin_ambience::make_nonlin_ambience_node())});
     add(space::cabinet::descriptor(),
