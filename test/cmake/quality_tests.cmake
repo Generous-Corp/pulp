@@ -54,6 +54,11 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    # A fork's code must never be routed onto the self-hosted Macs, which hold
+    # the signing keychain. Runs the resolver build.yml actually embeds.
+    add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fork_pr_runner_routing.py")
+    set_tests_properties(fork-pr-runner-routing PROPERTIES TIMEOUT 120)
 
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp

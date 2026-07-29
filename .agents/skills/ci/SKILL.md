@@ -520,6 +520,28 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
+## Fork PRs are structurally kept off the local Macs
+
+`build.yml`'s resolver blanks both self-hosted macOS selectors when a pull
+request's head lives in another repository, so the leg falls through to
+GitHub-hosted `macos-15`. The reason it must be structural rather than a habit:
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable**, and variables — unlike
+secrets — *do* resolve for fork runs, so an "Approve and run" click would
+otherwise dispatch contributor code onto the Studios that hold the signing
+keychain and notary key.
+
+Consequences worth knowing:
+
+- A fork PR still gets a macOS result (clean hosted runner), but the required
+  `macos` check is posted by the local lane, so it **cannot merge on its own**.
+  That is intended — adopt the commits onto an in-repo `contrib/*` branch and
+  ship that (see the `contrib-intake` skill).
+- If a fork PR's macOS leg unexpectedly shows a self-hosted runner, the guard has
+  regressed — `tools/scripts/test_fork_pr_runner_routing.py` (ctest
+  `fork-pr-runner-routing`) exists to catch that, and runs the resolver the
+  workflow actually embeds rather than a copy of its logic.
+- Same-repo PRs, pushes, and `workflow_dispatch` are unaffected.
+
 ## GitHub workflow gotchas
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&

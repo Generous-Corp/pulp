@@ -7,6 +7,30 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## Pull requests from forks never reach the local Macs
+
+The macOS runner is chosen by the resolver in `build.yml`, which normally honors
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the Mac Studios (or the M5 on
+overflow). For a pull request whose head branch lives in **another repository**,
+both self-hosted selectors are ignored and the leg falls through to the
+GitHub-hosted `macos-15` label.
+
+This is a security boundary, not a preference. The local Macs hold the Developer
+ID signing keychain and the notary key (`~/.config/pulp/secrets/`), and
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable** — variables, unlike
+secrets, *do* resolve for fork runs. Without the guard, one "Approve and run"
+click on a fork pull request would execute contributor code on the credentialed
+machines.
+
+The leg is rerouted rather than skipped, so a fork contributor still gets a real
+macOS result on a clean throwaway runner. Note that the required `macos` check
+is posted by the local lane, so a fork PR still cannot merge on its own — the
+maintainer adopts the commits onto an in-repo `contrib/*` branch and ships that.
+
+Same-repo pull requests, pushes, and `workflow_dispatch` runs are unaffected.
+Covered by `tools/scripts/test_fork_pr_runner_routing.py` (ctest:
+`fork-pr-runner-routing`), which runs the resolver the workflow actually embeds.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
