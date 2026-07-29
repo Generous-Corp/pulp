@@ -20,6 +20,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "tools/cli/cmd_inspect.cpp": "custom fixture only\n",
             "tools/cli/pulp_cli.cpp":
                 "Connect to an explicitly hosted inspector fixture\n",
+            "experimental/pulp-rs/src/help.rs":
+                "Connect to an explicitly hosted inspector fixture\n",
             "docs/reference/scripted-ui-inspector.md": "loopback only\n",
             "docs/guides/coming-from-juce.md": "visual overlay only\n",
             ".claude/commands/inspect.md":
@@ -96,6 +98,16 @@ class InspectorTruthCheckTests(unittest.TestCase):
         errors = " ".join(inspector_truth_check.check_root(root))
         self.assertIn("stale claim", errors)
         self.assertIn("source-checkout-only", errors)
+
+    def test_rejects_stale_rust_help_claim(self) -> None:
+        root = self.make_root()
+        (root / "experimental/pulp-rs/src/help.rs").write_text(
+            "Connect to a running plugin inspector\n", encoding="utf-8"
+        )
+        self.assertIn(
+            "experimental/pulp-rs/src/help.rs retains stale claim",
+            " ".join(inspector_truth_check.check_root(root)),
+        )
 
     def test_rejects_eval_and_policy_truth_drift(self) -> None:
         root = self.make_root()

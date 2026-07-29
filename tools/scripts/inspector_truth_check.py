@@ -29,6 +29,9 @@ FORBIDDEN_CLAIMS = {
     "tools/cli/pulp_cli.cpp": (
         "Connect to a running plugin inspector",
     ),
+    "experimental/pulp-rs/src/help.rs": (
+        "Connect to a running plugin inspector",
+    ),
     "docs/reference/scripted-ui-inspector.md": (
         "binds all interfaces",
     ),

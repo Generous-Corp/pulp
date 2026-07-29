@@ -137,7 +137,7 @@ pub const COMMANDS: &[Entry] = &[
     },
     Entry {
         name: "inspect",
-        summary: "Connect to a running plugin inspector",
+        summary: "Connect to an explicitly hosted inspector fixture",
     },
     Entry {
         name: "motion",
