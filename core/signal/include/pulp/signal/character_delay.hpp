@@ -165,8 +165,9 @@ public:
     /// right channel tracks the left, which is what a stereo-spread delay
     /// wants.
     void set_time_offset(SampleType multiplier) {
-        time_offset_ = std::clamp(finite_or(static_cast<double>(multiplier), time_offset_),
-                                  chardelay::kTimeOffsetMin,
+        const double candidate = static_cast<double>(multiplier);
+        if (!std::isfinite(candidate)) return;
+        time_offset_ = std::clamp(candidate, chardelay::kTimeOffsetMin,
                                   chardelay::kTimeOffsetMax);
         right_time_absolute_ = false;
     }
@@ -179,8 +180,10 @@ public:
     ///
     /// Ratio mode is restored by calling set_time_offset().
     void set_right_time_ms(SampleType right_ms) {
-        right_time_ms_ = std::clamp(finite_or(static_cast<double>(right_ms), right_time_ms_), 1.0,
-                                    chardelay::kMaxAddressableDelayMs);
+        const double candidate = static_cast<double>(right_ms);
+        if (!std::isfinite(candidate)) return;
+        right_time_ms_ =
+            std::clamp(candidate, 1.0, chardelay::kMaxAddressableDelayMs);
         right_time_absolute_ = true;
     }
 
@@ -208,9 +211,10 @@ public:
             std::clamp(finite_or(static_cast<double>(amount), character_target_), 0.0, 1.0);
     }
 
-    // Cross-character diffusion: smears ANY character's repeats through the
-    // diffusion network by this 0..1 amount, in-loop (same placement the
-    // diffusion character uses). 0 leaves the selected character untouched.
+    // Cross-character diffusion: smears ANY character's wet output through the
+    // diffusion network by this 0..1 amount. It stays outside the feedback
+    // loop, so increasing the amount cannot dissipate or destabilize the echo
+    // train. 0 leaves the selected character untouched.
     void set_diffusion_amount(SampleType amount) {
         diffusion_amount_target_ =
             std::clamp(finite_or(static_cast<double>(amount), diffusion_amount_target_), 0.0, 1.0);

@@ -9,14 +9,12 @@
 #include "support/character_delay_fixture.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 using namespace pulp::test::character_delay;
-
-#include <array>
-#include <utility>
-
 
 namespace {
 
