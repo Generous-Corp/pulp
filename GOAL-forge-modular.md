@@ -269,3 +269,25 @@ expired and were re-run:
 rather than a full validation. It catches a missing binary, an unresolved
 symbol, and a bundle whose entry point never ran, which are the failures that
 break a host scan.
+
+## The rounded window corners
+
+Not closed, and the reason is worth stating precisely.
+
+The radii are on the columns that paint the outer edges, so the widget side is
+done. What is square is the **window**, and two facts bear on that:
+
+- `WindowHost::set_client_decoration(bool)` exists and does the right thing on
+  macOS -- transparent titlebar, hidden title, full-size content view. It has
+  **no callers anywhere in the tree**. Calling it from the standalone would
+  change every Pulp standalone, not just this app, which is wider than this
+  branch should reach.
+- macOS rounds window corners itself. `--screenshot` captures the *render
+  surface*, not the composited window, so corners will look square in a capture
+  even when the window on screen is rounded. **The gap may therefore be partly
+  an artifact of how we capture.**
+
+That second point is unconfirmed: capturing the live window headlessly needs a
+screenshot provider or Quartz bindings that are not available here, so it could
+not be settled either way. Settle it before building anything -- looking at the
+running app on a screen for ten seconds answers it.
