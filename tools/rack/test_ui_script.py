@@ -101,6 +101,39 @@ def main():
         print(f"  ok     all {len(styled)} styled ids are created "
               f"({len(created)} literal, {len(dynamic)} built)")
 
+    # createLabel is (id, text, parent) -- three arguments. Called with two,
+    # the parent lands in the TEXT slot and the label is never attached, so it
+    # renders unparented at the top level. Every label in this shell did that,
+    # and the earlier checks passed it: the function existed and the id was
+    # created, so nothing looked wrong until a screenshot was taken.
+    two_arg = re.findall(r'createLabel\(\s*[^,()]+(?:\+[^,()]+)?\s*,\s*[^,()]+\s*\)', text)
+    if two_arg:
+        for t in two_arg[:5]:
+            print(f"  WRONG  {t.strip()} — createLabel takes (id, text, parent); "
+                  f"with two arguments the parent becomes the text")
+        bad += 1
+    else:
+        print("  ok     every createLabel passes id, text and parent")
+
+    # A widget with no parent is created and never attached, so it renders at
+    # the top level and the layout collapses into a vertical stack. The first
+    # headless render of this shell looked exactly like that, and this check
+    # passed it -- functions existed, ids were created, nothing was assembled.
+    unparented = []
+    for m in re.finditer(r'create[A-Za-z]+\(\s*"([^"]+)"\s*([,)])', text):
+        wid, nxt = m.group(1), m.group(2)
+        if nxt == ")" and wid != "root":
+            unparented.append(wid)
+    # A helper that parents through a variable is fine; only literals with no
+    # second argument at all are a problem.
+    if unparented:
+        for u in sorted(set(unparented))[:6]:
+            print(f"  WRONG  '{u}' is created with no parent — it will render "
+                  f"at the top level instead of inside the layout")
+        bad += 1
+    else:
+        print("  ok     every widget but the root is parented")
+
     # The two-button send is a decision, not a detail: an inferred intent chip
     # was rejected because it guesses and the user has to notice the guess.
     for needed, why in (("btn-ask", "the Ask button"),

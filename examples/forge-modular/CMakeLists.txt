@@ -68,6 +68,7 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
     pulp_add_plugin(forge-modular-app
         FORMATS           Standalone AU VST3 CLAP
         SOURCES           "${_fm_app}/src/shell.cpp"
+                          "${_fm_app}/src/main.cpp"
         PLUGIN_NAME       "Forge Modular"
         BUNDLE_ID         "com.generous.forgemodular"
         MANUFACTURER      "Generous"
