@@ -1547,6 +1547,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
 | `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
+| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
