@@ -84,13 +84,12 @@ migrate_clip_v1_to_v2(std::string_view source, BoundedJsonSink& output, const vo
     auto* time_range = data ? member(*data, "time_range") : nullptr;
     if (!data || !version || !version_is(*version, clip_schema_policy.oldest_readable_version) ||
         !time_range || !common_shape(*data) || member(*data, "time_conform") ||
-        version->begin >= version->end)
+        data->object.empty() || version->begin >= version->end)
         return fail();
-    constexpr std::string_view time_range_key = ",\"time_range\":";
-    const auto insertion = source.rfind(time_range_key, time_range->begin);
-    if (insertion == std::string_view::npos || insertion < data->begin ||
-        insertion + time_range_key.size() != time_range->begin || insertion >= data->end)
-        return fail();
+    // Append after the final parsed top-level value. This retains every authored
+    // byte (including member order and whitespace) and cannot be confused by a
+    // nested key with the same spelling.
+    const auto insertion = data->object.back().second.end;
     return finish(output,
                   apply_edits(source,
                               {RawEdit{insertion, insertion, ",\"time_conform\":\"none\""},
@@ -112,15 +111,30 @@ migrate_clip_v2_to_v1(std::string_view source, BoundedJsonSink& output, const vo
         !common_shape(*data) || !time_conform || time_conform->kind != JsonValue::Kind::String ||
         time_conform->scalar != "none" || version->begin >= version->end)
         return fail();
-    constexpr std::string_view time_conform_key = ",\"time_conform\":";
-    const auto erase_begin = source.rfind(time_conform_key, time_conform->begin);
-    if (erase_begin == std::string_view::npos || erase_begin < data->begin ||
-        erase_begin + time_conform_key.size() != time_conform->begin ||
-        erase_begin >= time_conform->begin)
+    const auto found = std::find_if(data->object.begin(), data->object.end(),
+                                    [](const auto& entry) {
+                                        return entry.first == "time_conform";
+                                    });
+    if (found == data->object.end() || data->object.size() < 2)
         return fail();
+    const auto index = static_cast<std::size_t>(found - data->object.begin());
+    std::size_t erase_begin = data->begin + 1;
+    std::size_t erase_end = time_conform->end;
+    if (index != 0) {
+        // The structural comma between the known adjacent top-level values is
+        // the member boundary. Searches are bounded by parsed sibling spans.
+        erase_begin = source.find(',', data->object[index - 1].second.end);
+        if (erase_begin == std::string_view::npos || erase_begin >= time_conform->begin)
+            return fail();
+    } else {
+        const auto comma = source.find(',', time_conform->end);
+        if (comma == std::string_view::npos || comma >= data->object[1].second.begin)
+            return fail();
+        erase_end = comma + 1;
+    }
     return finish(output,
                   apply_edits(source,
-                              {RawEdit{erase_begin, time_conform->end, {}},
+                              {RawEdit{erase_begin, erase_end, {}},
                                RawEdit{version->begin, version->end, "1"}},
                               output));
 }
