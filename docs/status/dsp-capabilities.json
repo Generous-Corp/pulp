@@ -1,7 +1,7 @@
 {
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
-    "catalogs": 25,
+    "catalogs": 30,
     "type_ids": 103,
     "factories": 65,
     "baked_params": 393
@@ -60,7 +60,17 @@
       ]
     },
     {
+      "header": "core/host/include/pulp/host/forge_catalog_export.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/forge_catalog_index.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_catalog_json.hpp",
       "type_ids": [],
       "nodes": []
     },
@@ -2972,6 +2982,11 @@
       ]
     },
     {
+      "header": "core/host/include/pulp/host/detail/forge_drum_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/detail/forge_drum_catalog_impl.hpp",
       "type_ids": [],
       "nodes": [
@@ -3000,6 +3015,11 @@
       "nodes": []
     },
     {
+      "header": "core/host/include/pulp/host/detail/forge_effect_modulation_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
       "header": "core/host/include/pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
       "type_ids": [
         {
@@ -3019,6 +3039,12 @@
         {
           "factory": "make_flanger_node",
           "baked_params": [
+            {
+              "id": "kBarberpoleHz",
+              "min": "static_cast<float>(-Engine::kBarberpoleShiftMaxHz)",
+              "max": "static_cast<float>(Engine::kBarberpoleShiftMaxHz)",
+              "default": "3.0f"
+            },
             {
               "id": "kRate",
               "min": "static_cast<float>(Engine::kRateMinHz)",
@@ -3066,12 +3092,6 @@
               "min": "0.0f",
               "max": "1.0f",
               "default": "0.0f"
-            },
-            {
-              "id": "kBarberpoleHz",
-              "min": "static_cast<float>(-Engine::kBarberpoleShiftMaxHz)",
-              "max": "static_cast<float>(Engine::kBarberpoleShiftMaxHz)",
-              "default": "3.0f"
             },
             {
               "id": "kWave",
@@ -3278,6 +3298,11 @@
           ]
         }
       ]
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_lofi_catalog_descriptor.hpp",
+      "type_ids": [],
+      "nodes": []
     }
   ]
 }

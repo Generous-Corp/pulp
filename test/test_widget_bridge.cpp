@@ -1817,54 +1817,47 @@ TEST_CASE("WidgetBridge native recognizer registrations dispatch gesture-specifi
     REQUIRE(multi_surface->gesture_recognizer_count() == 2);
 
     double t = 0.0;
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({30, 30}, MousePhase::press, &t, 0.05, 11), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({30, 30}, MousePhase::release, &t, 0.05, 11), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({30, 30}, MousePhase::press, &t, 0.10, 11), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({30, 30}, MousePhase::release, &t, 0.05, 11), t));
+    auto dispatch_pointer = [&](Point position, MousePhase phase,
+                                double advance, int pointer_id) {
+        auto event = bridge_gesture_pointer_event(
+            position, phase, &t, advance, pointer_id);
+        return root.dispatch_gesture_pointer_event(event, t);
+    };
+    auto dispatch_touch = [&](Point position, MousePhase phase,
+                              int pointer_id, double advance) {
+        auto event = bridge_gesture_touch_event(
+            position, phase, pointer_id, &t, advance);
+        return root.dispatch_gesture_pointer_event(event, t);
+    };
+
+    REQUIRE(dispatch_pointer({30, 30}, MousePhase::press, 0.05, 11));
+    REQUIRE(dispatch_pointer({30, 30}, MousePhase::release, 0.05, 11));
+    REQUIRE(dispatch_pointer({30, 30}, MousePhase::press, 0.10, 11));
+    REQUIRE(dispatch_pointer({30, 30}, MousePhase::release, 0.05, 11));
     REQUIRE(engine.evaluate("double_tap_count").getWithDefault<int>(0) == 2);
 
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({100, 30}, MousePhase::press, &t, 0.20, 12), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({120, 35}, MousePhase::drag, &t, 0.05, 12), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({138, 44}, MousePhase::drag, &t, 0.05, 12), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({138, 44}, MousePhase::release, &t, 0.05, 12), t));
+    REQUIRE(dispatch_pointer({100, 30}, MousePhase::press, 0.20, 12));
+    REQUIRE(dispatch_pointer({120, 35}, MousePhase::drag, 0.05, 12));
+    REQUIRE(dispatch_pointer({138, 44}, MousePhase::drag, 0.05, 12));
+    REQUIRE(dispatch_pointer({138, 44}, MousePhase::release, 0.05, 12));
     REQUIRE(engine.evaluate("pan_log.join('|')").toString() == "start:20|change:38|end:38");
 
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({185, 35}, MousePhase::press, &t, 0.20, 13), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({225, 35}, MousePhase::drag, &t, 0.05, 13), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({250, 35}, MousePhase::release, &t, 0.05, 13), t));
+    REQUIRE(dispatch_pointer({185, 35}, MousePhase::press, 0.20, 13));
+    REQUIRE(dispatch_pointer({225, 35}, MousePhase::drag, 0.05, 13));
+    REQUIRE(dispatch_pointer({250, 35}, MousePhase::release, 0.05, 13));
     REQUIRE(engine.evaluate("swipe_velocity_x").getWithDefault<double>(0.0) > 300.0);
 
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({25, 115}, MousePhase::press, &t, 0.20, 14), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({80, 115}, MousePhase::drag, &t, 0.05, 14), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_pointer_event({130, 115}, MousePhase::release, &t, 0.05, 14), t));
+    REQUIRE(dispatch_pointer({25, 115}, MousePhase::press, 0.20, 14));
+    REQUIRE(dispatch_pointer({80, 115}, MousePhase::drag, 0.05, 14));
+    REQUIRE(dispatch_pointer({130, 115}, MousePhase::release, 0.05, 14));
     REQUIRE(engine.evaluate("fling_velocity_x").getWithDefault<double>(0.0) > 800.0);
 
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({180, 150}, MousePhase::press, 31, &t, 0.20), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({240, 150}, MousePhase::press, 32, &t, 0.05), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({180, 120}, MousePhase::drag, 31, &t, 0.05), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({250, 170}, MousePhase::drag, 32, &t, 0.05), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({180, 120}, MousePhase::release, 31, &t, 0.05), t));
-    REQUIRE(root.dispatch_gesture_pointer_event(
-        bridge_gesture_touch_event({250, 170}, MousePhase::release, 32, &t, 0.05), t));
+    REQUIRE(dispatch_touch({180, 150}, MousePhase::press, 31, 0.20));
+    REQUIRE(dispatch_touch({240, 150}, MousePhase::press, 32, 0.05));
+    REQUIRE(dispatch_touch({180, 120}, MousePhase::drag, 31, 0.05));
+    REQUIRE(dispatch_touch({250, 170}, MousePhase::drag, 32, 0.05));
+    REQUIRE(dispatch_touch({180, 120}, MousePhase::release, 31, 0.05));
+    REQUIRE(dispatch_touch({250, 170}, MousePhase::release, 32, 0.05));
 
     REQUIRE(engine.evaluate("pinch_types.join('|')").toString() == "start|change|end");
     REQUIRE(engine.evaluate("rotate_types.join('|')").toString() == "start|change|end");

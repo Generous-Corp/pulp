@@ -55,9 +55,13 @@ enum class Concept : std::uint16_t {
     ContextChordScale = 41,
     ContextGroove = 42,
     ClipNoteModifier = 43,
+    ClipEmpty = 44,
+    TempoRamp = 45,
+    ClipNoteVelocityQuantized = 46,
+    TempoValueQuantized = 47,
 };
 
-inline constexpr std::size_t kConceptCount = 44;
+inline constexpr std::size_t kConceptCount = 48;
 
 namespace detail {
 struct ConceptRecord {
@@ -111,6 +115,10 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"context.chord-scale", "A sequence-owned lane of chord and scale statements that other items read while compiling.", true},
     {"context.groove", "A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling.", true},
     {"clip.note-modifier", "Per-note playback modifiers: probability, pass condition, and ratchet.", true},
+    {"clip.empty", "A positioned clip with no note, media, registered, opaque, or nested-sequence content.", true},
+    {"tempo.ramp", "A continuous tempo curve between two tempo-map points.", true},
+    {"clip.note-velocity-quantized", "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value.", true},
+    {"tempo.value-quantized", "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation.", true},
 };
 } // namespace detail
 

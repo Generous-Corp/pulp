@@ -6,6 +6,7 @@
 // followed by independent shipped Compressor instances. This two-band node is
 // that composition made directly lowerable, not a parallel DSP implementation.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/compressor.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>
@@ -114,6 +115,45 @@ inline CustomNodeType make_multiband_compressor_node() {
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {
+        "multiband_compressor",
+        "Multiband Compressor",
+        "A two-band compressor with independent low- and high-band dynamics.",
+        {},
+        {{"default", kTypeId}},
+        {
+            {"crossover_hz", kCrossoverHz, "Crossover", "Hz",
+             "Frequency that divides the low and high compression bands.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"low_threshold_db", kLowThresholdDb, "Low Threshold", "dB",
+             "Level above which the low band is compressed.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"low_ratio", kLowRatio, "Low Ratio", ":1",
+             "Gain-reduction ratio for the low band.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"high_threshold_db", kHighThresholdDb, "High Threshold", "dB",
+             "Level above which the high band is compressed.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"high_ratio", kHighRatio, "High Ratio", ":1",
+             "Gain-reduction ratio for the high band.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"attack_ms", kAttackMs, "Attack", "ms",
+             "Time for compression to engage in both bands.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"release_ms", kReleaseMs, "Release", "ms",
+             "Time for compression to recover in both bands.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"low_makeup_db", kLowMakeupDb, "Low Makeup", "dB",
+             "Output gain applied after low-band compression.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"high_makeup_db", kHighMakeupDb, "High Makeup", "dB",
+             "Output gain applied after high-band compression.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+        },
+    };
 }
 
 inline float worst_case_gain() {

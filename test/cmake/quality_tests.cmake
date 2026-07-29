@@ -162,6 +162,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME advisory-macos-runner-policy COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_advisory_macos_runner_policy.py")
 
+    # DSP vocabulary: derives what pulp::signal exposes by parsing its headers,
+    # for anything that has to tell a model or a generator which DSP exists.
+    # The parse is regex-based, so a break would shrink the vocabulary silently
+    # and its consumers would quietly stop reaching for the SDK -- which has
+    # happened. The self-test pins a floor on the totals and on the classes
+    # that are actually depended on.
+    add_test(NAME dsp-vocabulary-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_dsp_vocabulary.py")
+
     # Version-at-land: single-writer version assignment on main. Drives
     # plan_assignments over throwaway git ranges, asserting it reproduces the
     # same path + conventional-commit heuristic the hand-bump model uses (the

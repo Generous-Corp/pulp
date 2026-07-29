@@ -19,17 +19,38 @@ source->publish(frame)  ──►    binding snapshots once per FrameClock tick
                                paint() reads the snapshot  (no lock, no alloc)
 ```
 
-Two channels, both lock-free, one writer and one reader (the `TripleBuffer`
+Four channels, all lock-free, one writer and one reader (the `TripleBuffer`
 contract):
 
 | Type | Carries | Use for |
 |------|---------|---------|
 | `MeterSource` | a `MeterFrame`: RMS + peak for up to `MeterFrame::kMaxChannels` (8) channels | level meters, gain-reduction meters, multi-channel strips |
 | `ScalarSource` | one `float` | a readout value, a modulation ring's modulated position |
+| `VectorSource` | a `VectorFrame`: up to 4096 contiguous values | one-block scope and spectrum snapshots |
+| `EventSource` | an `EventFrame`: up to 1024 `(frame_index, value)` occurrences | grain triggers, note onsets, and other things that happen at particular offsets |
 
-`MeterFrame` is fixed-capacity and trivially copyable on purpose: that is what
+Every frame is fixed-capacity and trivially copyable on purpose: that is what
 makes `publish()` allocation-free on the audio thread and the snapshot a plain
-copy on the UI thread. Do not grow it into something that allocates.
+copy on the UI thread. Do not grow one into something that allocates.
+
+An event's slot is its presence. `ValueEvent{.frame_index = 12, .value = 0.0f}`
+is one occurrence at frame 12; an `EventFrame` with `count == 0` means nothing
+happened. No payload value is reserved as a sentinel. `EventSource` is
+latest-wins like the other channels, not a lossless queue: if the UI misses
+several audio blocks, it consumes the newest published block.
+
+Scripted UIs consume a declared events channel with `bindEvents`:
+
+```js
+const binding = bindEvents("value:onsets", events => {
+  for (const { frameIndex, value } of events) {
+    drawOnset(frameIndex, value);
+  }
+});
+
+// During teardown:
+unbindEvents(binding);
+```
 
 ## Binding a source to a view
 
@@ -134,7 +155,8 @@ observe the same order.
 ## What this is not
 
 These are latest-value channels. There is **no rolling sample-history channel**
-for a scrolling waveform scope: a `MeterSource` carries a reading, not a signal.
-A view that needs rolling history (a limiter scope redrawn each frame) still owns
-that buffer itself. `WaveformView::set_data` takes a complete window per call and
-replaces it — the caller supplies the history.
+for a scrolling waveform scope: a `VectorSource` carries one bounded snapshot,
+not history, and an `EventSource` carries one bounded occurrence block, not a
+queue. A view that needs rolling history (a limiter scope redrawn each frame)
+still owns that buffer itself. `WaveformView::set_data` takes a complete window
+per call and replaces it — the caller supplies the history.

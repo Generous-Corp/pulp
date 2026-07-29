@@ -55,6 +55,11 @@ class RequiredGateLivenessTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertIn("failure", findings[0].reason)
 
+    def test_negative_control_only_skipped_gate_fires(self) -> None:
+        findings = rgl.evaluate(REQUIRED, [run("macos", conclusion="skipped"), run(REQUIRED[1])])
+        self.assertEqual(len(findings), 1)
+        self.assertIn("skipped", findings[0].reason)
+
     def test_newer_successful_rerun_satisfies_context(self) -> None:
         checks = [
             run("macos", conclusion="failure", check_id=1),
@@ -72,6 +77,14 @@ class RequiredGateLivenessTests(unittest.TestCase):
         findings = rgl.evaluate(REQUIRED, checks)
         self.assertEqual(len(findings), 1)
         self.assertIn("failure", findings[0].reason)
+
+    def test_later_skipped_duplicate_does_not_mask_executed_success(self) -> None:
+        checks = [
+            run("macos", check_id=1),
+            run("macos", conclusion="skipped", check_id=2),
+            run(REQUIRED[1]),
+        ]
+        self.assertEqual(rgl.evaluate(REQUIRED, checks), [])
 
     def test_ruleset_parser_is_non_vacuous_and_authoritative(self) -> None:
         doc = {

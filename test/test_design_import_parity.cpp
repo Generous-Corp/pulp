@@ -10,7 +10,7 @@
 //
 // A typed `IRStyle`/`IRLayout` field can be lowered in one surface and
 // silently skipped in the others (real examples: `h_constraint`/`v_constraint`
-// lower only in the JS lane; `mix_blend_mode` and `text_runs` skip cpp+native).
+// lower only in the JS lane; `text_runs` skips cpp+native).
 // This test makes that gap loud: every lowerable field must either be
 // referenced by ALL FOUR surface files, or carry an explicit allowlist entry
 // below naming exactly which surfaces skip it and why. Adding a new IR field
@@ -93,9 +93,8 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"object_fit",
          {{"swift"}, "js+cpp+native lower it; SwiftUI content-mode mapping deferred"}},
         {"mix_blend_mode",
-         {{"cpp", "native"},
-          "js+swift lower it; cpp codegen and native materializer skip it "
-          "(known partial — View::set_mix_blend_mode exists but is not wired)"}},
+         {{"cpp"},
+          "js+swift+native lower it; cpp codegen deferred"}},
         {"border",
          {{"cpp", "swift", "native"},
           "raw CSS shorthand passthrough emitted by the JS lane only; the "
@@ -110,9 +109,8 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
         {"backdrop_filter",
          {{"cpp", "swift"}, "js+native lower it; cpp/swift deferred"}},
         {"clip_path",
-         {{"cpp", "swift", "native"},
-          "js-only; engine consumes it via the setClipPath bridge, other "
-          "surfaces deferred"}},
+         {{"cpp", "swift"},
+          "js+native lower it; cpp/swift deferred"}},
         {"mask",
          {{"cpp", "swift", "native"}, "js-only; setMask bridge consumer, others deferred"}},
         {"mask_image",

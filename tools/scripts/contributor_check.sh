@@ -50,7 +50,7 @@ CHANGED=()
 while IFS= read -r _line; do
     [ -n "$_line" ] && CHANGED+=("$_line")
 done < <(git diff --name-only "$MERGE_BASE"..HEAD)
-if [ "${#CHANGED[@]:-0}" -eq 0 ]; then
+if [ "${#CHANGED[@]}" -eq 0 ]; then
     echo "  no changes vs $BASE — nothing to check." >&2
     exit 0
 fi
@@ -67,7 +67,7 @@ for f in ${CHANGED[@]+"${CHANGED[@]}"}; do
             VERSION_HITS+=("$f") ;;
     esac
 done
-if [ "${#VERSION_HITS[@]:-0}" -gt 0 ]; then
+if [ "${#VERSION_HITS[@]}" -gt 0 ]; then
     if git diff "$MERGE_BASE"..HEAD -- ${VERSION_HITS[@]+"${VERSION_HITS[@]}"} | grep -qE '^\+.*(VERSION [0-9]|"version")'; then
         bad "version/changelog edits detected: ${VERSION_HITS[*]:-}"
         echo "        Pulp assigns versions post-merge (version-at-land). Revert these."
@@ -191,7 +191,7 @@ say "5. Tests"
 # Checking that a test FILE changed is not the same as running it. Without this
 # the script could print "Ready to hand off" for a diff whose tests were never
 # built, which is the exact claim the repo says is not a test.
-if [ "${#TARGETS[@]:-0}" -eq 0 ]; then
+if [ "${#TARGETS[@]}" -eq 0 ]; then
     skip "no test target given — this check ran NO tests; build and run yours, or say so"
 elif [ ! -d build-tests ] && [ ! -d build ]; then
     skip "no build dir (build-tests/ or build/) — tests not built or run by this check"
@@ -230,7 +230,7 @@ elif ! command -v diff-cover >/dev/null 2>&1 && ! "$PYTHON" -c "import diff_cove
     skip "diff-cover not installed — coverage not measured locally (maintainer CI enforces it)"
 elif [ ! -x tools/scripts/local_diff_cover.sh ]; then
     skip "tools/scripts/local_diff_cover.sh not present"
-elif [ "${#TARGETS[@]:-0}" -eq 0 ] && [ "${CONTRIB_FULL_COVERAGE:-0}" != "1" ]; then
+elif [ "${#TARGETS[@]}" -eq 0 ] && [ "${CONTRIB_FULL_COVERAGE:-0}" != "1" ]; then
     # A whole-tree coverage build is 30+ minutes. Make that opt-in rather than
     # the default a contributor stumbles into with no warning.
     skip "coverage skipped: pass your test target(s) to measure it, e.g."
@@ -248,7 +248,7 @@ fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
 say "Summary"
-if [ "${#NOTES[@]:-0}" -gt 0 ]; then
+if [ "${#NOTES[@]}" -gt 0 ]; then
     echo "  Copy these into your handoff under \"What I could not do\":"
     for n in ${NOTES[@]+"${NOTES[@]}"}; do echo "    - $n"; done
     echo ""

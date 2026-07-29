@@ -352,6 +352,10 @@ namespace {
 std::string param_subscription_key(std::uint32_t id) {
     return "__param__" + std::to_string(id);
 }
+
+std::string event_binding_key(std::uint32_t id) {
+    return "__value_events__" + std::to_string(id);
+}
 } // namespace
 
 std::size_t WidgetBridge::param_subscription_count() const noexcept {
@@ -418,6 +422,52 @@ void WidgetBridge::service_param_subscriptions() {
     in_param_dispatch_ = reentrant;
     if (!in_param_dispatch_) {
         std::erase_if(param_subscriptions_, [](const auto& s) { return s.id == 0; });
+    }
+}
+
+std::size_t WidgetBridge::event_binding_count() const noexcept {
+    return static_cast<std::size_t>(
+        std::count_if(event_bindings_.begin(), event_bindings_.end(),
+                      [](const EventBinding& binding) { return binding.id != 0; }));
+}
+
+void WidgetBridge::service_event_bindings() {
+    if (event_bindings_.empty()) return;
+
+    const bool reentrant = in_event_dispatch_;
+    in_event_dispatch_ = true;
+    const std::size_t count = event_bindings_.size();
+    for (std::size_t i = 0; i < count && i < event_bindings_.size(); ++i) {
+        const auto id = event_bindings_[i].id;
+        auto* source = event_bindings_[i].source;
+        if (id == 0 || source == nullptr) continue;
+
+        const auto frame = source->read();
+        if (frame.publication == event_bindings_[i].last_publication) continue;
+        event_bindings_[i].last_publication = frame.publication;
+        const int event_count =
+            std::clamp(frame.count, 0, EventFrame::kMaxEvents);
+        if (event_count == 0) continue;
+
+        auto payload = choc::value::createEmptyArray();
+        for (int event_index = 0; event_index < event_count; ++event_index) {
+            auto occurrence = choc::value::createObject("ValueEvent");
+            occurrence.addMember(
+                "frameIndex",
+                static_cast<std::int64_t>(frame.events[event_index].frame_index));
+            occurrence.addMember("value", frame.events[event_index].value);
+            payload.addArrayElement(std::move(occurrence));
+        }
+        safe_dispatch_eval(
+            callback_alive_, &engine_,
+            "__dispatch__(" + js_string_literal(event_binding_key(id)) +
+                ", 'events', " + choc::json::toString(payload, false) + ")",
+            "value event binding");
+    }
+    in_event_dispatch_ = reentrant;
+    if (!in_event_dispatch_) {
+        std::erase_if(event_bindings_,
+                      [](const EventBinding& binding) { return binding.id == 0; });
     }
 }
 
@@ -603,6 +653,17 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
         "  delete __callbacks__['__param__' + id + ':paramchange'];"
         "  return true;"
         "}"
+        "function bindEvents(source, fn) {"
+        "  if (typeof fn !== 'function') return 0;"
+        "  var id = __bindEvents__(source);"
+        "  if (id > 0) __callbacks__['__value_events__' + id + ':events'] = fn;"
+        "  return id;"
+        "}"
+        "function unbindEvents(id) {"
+        "  if (!__unbindEvents__(id)) return false;"
+        "  delete __callbacks__['__value_events__' + id + ':events'];"
+        "  return true;"
+        "}"
     );
 
     BridgeApiContext api{self.engine_};
@@ -663,6 +724,42 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
             it->id = 0;
         } else {
             subs.erase(it);
+        }
+        return choc::value::createBool(true);
+    });
+
+    // bindEvents("value:<name>", handler) delivers one array per newly
+    // published non-empty EventFrame. The JS shim retains the function; native
+    // code retains only a channel pointer and callback id.
+    register_bridge_function(api, "__bindEvents__", [&self](choc::javascript::ArgumentList args) {
+        const auto source_name = args.get<std::string>(0, "");
+        const auto channel_name = value_channel_name(source_name);
+        if (channel_name.empty() || self.value_channels_ == nullptr)
+            return choc::value::createInt64(0);
+        auto* source = self.value_channels_->events(channel_name);
+        if (source == nullptr) return choc::value::createInt64(0);
+
+        WidgetBridge::EventBinding binding;
+        binding.id = self.next_event_binding_id_++;
+        binding.source = source;
+        binding.last_publication = source->read().publication;
+        self.event_bindings_.push_back(binding);
+        return choc::value::createInt64(static_cast<std::int64_t>(binding.id));
+    });
+
+    register_bridge_function(api, "__unbindEvents__", [&self](choc::javascript::ArgumentList args) {
+        const auto id = static_cast<std::uint32_t>(args.get<int64_t>(0, 0));
+        if (id == 0) return choc::value::createBool(false);
+        auto& bindings = self.event_bindings_;
+        const auto it = std::find_if(bindings.begin(), bindings.end(),
+                                     [id](const auto& binding) {
+                                         return binding.id == id;
+                                     });
+        if (it == bindings.end()) return choc::value::createBool(false);
+        if (self.in_event_dispatch_) {
+            it->id = 0;
+        } else {
+            bindings.erase(it);
         }
         return choc::value::createBool(true);
     });
@@ -784,7 +881,7 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     // instead of hard-coding names that silently stop resolving when the
     // processor is edited — the same drift `getParamMetadata` removed for
     // parameters. `shape` tells a caller which binder applies: `meter` for
-    // bindMeter, `vector` for bindScope.
+    // bindMeter, `vector` for bindScope, `events` for bindEvents.
     register_bridge_function(api, "listValueChannels", [&self](choc::javascript::ArgumentList) {
         // Shared with the inspector's State.getValueChannels — one serializer,
         // so the two descriptions of the same channels cannot disagree.

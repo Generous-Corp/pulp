@@ -11,8 +11,6 @@ const char* ValueChannelSet::describe(DeclareError e) noexcept {
         case DeclareError::duplicate_name: return "a channel with that name is already declared";
         case DeclareError::reserved_character:
             return "channel name contains ':', which is reserved for the value: prefix";
-        case DeclareError::shape_not_implemented:
-            return "that channel shape is reserved but not yet declarable";
     }
     return "unknown declaration error";
 }
@@ -29,8 +27,6 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
     // ':' separates the "value:" namespace from the key on the JS side, so a
     // name containing one would resolve ambiguously there.
     if (name.find(':') != std::string::npos) return fail(DeclareError::reserved_character);
-    if (shape == ValueChannelShape::events) return fail(DeclareError::shape_not_implemented);
-
     const auto clash = std::find_if(infos_.begin(), infos_.end(),
                                     [&](const ValueChannelInfo& i) { return i.name == name; });
     if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
@@ -68,6 +64,15 @@ VectorSource* ValueChannelSet::declare_vector(std::string name, std::string unit
     return entry->vector.get();
 }
 
+EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
+                                             DeclareError* error) {
+    auto* entry = add_entry(std::move(name), std::move(unit), 0.0f,
+                            ValueChannelShape::events, error);
+    if (!entry) return nullptr;
+    entry->events = std::make_unique<EventSource>();
+    return entry->events.get();
+}
+
 std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
                                          ValueChannelShape shape) const {
     for (std::size_t i = 0; i < infos_.size(); ++i) {
@@ -93,6 +98,11 @@ MeterSource* ValueChannelSet::meter(std::string_view name) const {
 VectorSource* ValueChannelSet::vector(std::string_view name) const {
     const auto i = index_of(name, ValueChannelShape::vector);
     return i < 0 ? nullptr : entries_[static_cast<std::size_t>(i)]->vector.get();
+}
+
+EventSource* ValueChannelSet::events(std::string_view name) const {
+    const auto i = index_of(name, ValueChannelShape::events);
+    return i < 0 ? nullptr : entries_[static_cast<std::size_t>(i)]->events.get();
 }
 
 }  // namespace pulp::view

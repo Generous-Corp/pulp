@@ -45,7 +45,11 @@ check() {
         printf '  FAIL  %s\n        expected exit %s, got %s\n' "$name" "$want" "$rc"
         echo "$out" | sed 's/^/        | /'
         fail=$((fail + 1))
-    elif ! printf '%s' "$out" | grep -q "$needle"; then
+    # With pipefail, grep -q exits as soon as it matches and the upstream
+    # printf can receive SIGPIPE for a long report, turning a successful match
+    # into a failed pipeline. Feed grep directly so this assertion observes
+    # only whether the expected text is present.
+    elif ! grep -Fq -- "$needle" <<<"$out"; then
         printf '  FAIL  %s\n        output missing: %s\n' "$name" "$needle"
         echo "$out" | sed 's/^/        | /'
         fail=$((fail + 1))
@@ -58,6 +62,17 @@ check() {
 
 echo ""
 echo "contributor_check.sh self-tests"
+
+# `${#arr[@]:-0}` is a bad substitution in bash 5 but silently tolerated by the
+# bash 3.2 macOS ships, so this suite passes locally and fails on Linux. Grep for
+# it directly — the behavior itself is unreachable from here.
+if grep -n '\[@\]:-' "$SCRIPT"; then
+    echo "  FAIL  \${#arr[@]:-N} is a bash-5 bad substitution; arrays are initialized, so use \${#arr[@]}"
+    fail=$((fail + 1))
+else
+    printf '  ok    no bash-5-invalid array substitutions\n'
+    pass=$((pass + 1))
+fi
 
 # 1. A version bump must be rejected — version-at-land assigns these post-merge,
 #    so a contributor-side bump only produces a conflict.

@@ -28,7 +28,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
-    pulp-interchange pulp-dawproject-import pulp-smf-interop
+    pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components
@@ -156,6 +156,26 @@ if(TARGET yogacore)
         )
     endif()
 endif()
+if(PULP_ENABLE_DESIGN_IMPORT AND TARGET yaml-cpp)
+    # yaml-cpp remains an implementation detail of the public DESIGN.md parser,
+    # but pulp-view-core is static, so installed consumers need its archive in
+    # their final link closure. Export it under Pulp's namespace rather than
+    # installing a second, independently discoverable yaml-cpp package.
+    set_target_properties(yaml-cpp PROPERTIES EXPORT_NAME yaml-cpp)
+    install(TARGETS yaml-cpp
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    if(DEFINED yaml-cpp_SOURCE_DIR
+       AND EXISTS "${yaml-cpp_SOURCE_DIR}/include/yaml-cpp")
+        install(DIRECTORY "${yaml-cpp_SOURCE_DIR}/include/yaml-cpp"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
+endif()
 # Perfetto tracing (PULP_TRACING=ON only; the OFF default defines an empty
 # INTERFACE target and installs nothing).
 #
@@ -216,7 +236,7 @@ endif()
 # aligned with the targets exported above: iOS deliberately has no pulp-host,
 # so it must not receive orphaned desktop-host headers either.
 set(_pulp_sdk_header_subsystems
-    platform runtime timebase timeline playback interchange events state audio midi signal graph format sequence osc canvas
+    platform runtime timebase timeline playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
@@ -236,9 +256,10 @@ unset(_pulp_sdk_header_subsystems)
 # SDK license + third-party attribution.
 #
 # The rules above install third-party headers and archives into the SDK tree —
-# VST3, CLAP, AudioUnitSDK, LV2, Yoga, Highway, mbedTLS, SDL3, SheenBidi. That
-# is redistribution, and MIT conditions it on shipping the copyright and
-# permission notice with "all copies or substantial portions of the Software"
+# VST3, CLAP, AudioUnitSDK, LV2, Yoga, yaml-cpp, Highway, mbedTLS, SDL3,
+# SheenBidi. That is redistribution. MIT conditions it on shipping the
+# copyright and permission notice with "all copies or substantial portions of
+# the Software"
 # (Apache-2.0 §4 likewise requires the license text and any NOTICE). Without
 # these two files the installed SDK carried none: a `cmake --install` tree held
 # 218 files of third-party code and zero attribution, and every plugin that
@@ -270,6 +291,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json"
             DESTINATION "share/pulp")
 endif()
+
+# Joined semantic Forge catalog. Unlike the static DSP capability inventory,
+# this snapshot includes ranges/defaults read from constructed baked nodes.
+# Forge consumes the copy belonging to its selected SDK, never a source tree.
+set(_pulp_forge_catalog_snapshot
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/forge-catalog.json")
+if(NOT EXISTS "${_pulp_forge_catalog_snapshot}")
+    message(FATAL_ERROR
+        "Required Forge catalog snapshot is missing: ${_pulp_forge_catalog_snapshot}\n"
+        "Regenerate it with `pulp forge catalog export --write`.")
+endif()
+install(FILES "${_pulp_forge_catalog_snapshot}" DESTINATION "share/pulp")
+unset(_pulp_forge_catalog_snapshot)
 
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")

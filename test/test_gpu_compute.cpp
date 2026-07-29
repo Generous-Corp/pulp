@@ -41,6 +41,27 @@ TEST_CASE("GpuCompute standalone initialization", "[render][gpu][compute]") {
     REQUIRE(compute->is_initialized());
 }
 
+TEST_CASE("GpuCompute rejects a shared Dawn null adapter",
+          "[render][gpu][compute]") {
+    auto surface = GpuSurface::create_dawn();
+    auto compute = GpuCompute::create();
+    if (!surface || !compute)
+        SKIP("Dawn GPU compute support is not compiled into this build");
+
+    GpuSurface::Config config;
+    config.width = 16;
+    config.height = 16;
+    config.backend_preference =
+        GpuSurface::AdapterBackendPreference::null_backend;
+    if (!surface->initialize(config))
+        SKIP("Dawn Null adapter is unavailable on this platform");
+
+    REQUIRE(surface->adapter_info().backend_type == "Null");
+    REQUIRE_FALSE(compute->initialize_from_surface(*surface));
+    REQUIRE_FALSE(compute->is_initialized());
+    REQUIRE_FALSE(compute->capabilities().available);
+}
+
 TEST_CASE("GpuCompute magnitude correctness", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
     if (!compute || !compute->initialize_standalone()) return;

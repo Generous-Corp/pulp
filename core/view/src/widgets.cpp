@@ -644,8 +644,11 @@ void Knob::paint(canvas::Canvas& canvas) {
             canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
         }
 
-        // Raised body disc
-        auto body_color = resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
+        // Raised body disc. A design that styled this control keeps its own
+        // cap; painting the stock fill over it is what made designed panels
+        // come back wearing our knobs. The token answers when it said nothing.
+        auto body_color = has_background_color() ? background_color()
+            : resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
         canvas.set_fill_color(body_color);
         canvas.fill_circle(cx, cy, body_r);
 

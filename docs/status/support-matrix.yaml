@@ -1007,7 +1007,7 @@ timeline_engine:
     notes: Bounded DAWproject writer over the same subset the importer reads. Emits project.xml plus an in-band loss manifest; everything outside the subset is declared in the capability table and refused by run_export unless the caller accepts each concept by name.
   smf_interop:
     status: experimental
-    notes: Fail-closed Standard MIDI File import/export against the tempo and meter maps, with exact canonical tick conversion on dividing grids and reported rounding otherwise.
+    notes: Fail-closed Standard MIDI File import and a raw exporter that strictly checks visited clip event and tick-grid shapes but does not audit unrelated project state. The separate Format::Smf adapter performs the project-wide census, requires per-concept consent, and emits a versioned central loss manifest.
   cli_mcp:
     status: experimental
     notes: pulp seq validate/explain/apply, pulp render, five generated MCP operations, and the Claude Timeline skill share one headless implementation.
@@ -1054,7 +1054,7 @@ limitations:
   timeline_engine.smf_interop:
     - text: "Standard MIDI File import accepts format 0/1 with a metrical division, note on/off, and the tempo, time-signature, track-name, and end-of-track meta events; SMPTE divisions, format 2, and any other event fail the import unless the caller opts into ignoring non-note events."
       tracked_in: "../guides/timeline-sdk.md#optional-standard-midi-file-interop"
-    - text: "SMF export covers note content plus the tempo and meter maps; device chains, automation, takes, freezes, and media assets have no SMF representation, and a tempo ramp or a tick the requested division cannot represent exactly is an error rather than an approximation."
+    - text: "Raw SMF export strictly rejects unsupported clip, event, and time-grid shapes it visits, but it is not a project-wide loss audit. The separate smf-interchange adapter performs the full concept census and requires per-concept consent before omitting unsupported containers or project state, stripping note modifiers, quantizing velocity, or stepping tempo ramps; run_export appends a versioned loss manifest."
       tracked_in: "../guides/timeline-sdk.md#optional-standard-midi-file-interop"
   timeline_engine.capture:
     - text: "Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities."

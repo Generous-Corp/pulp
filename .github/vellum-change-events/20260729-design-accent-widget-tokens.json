@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-design-accent-widget-tokens",
+  "kind": "change",
+  "created_at": "2026-07-29T11:20:00Z",
+  "slices": [
+    "design-schema-compiler"
+  ],
+  "rationale": "Imported design colors are copied into Theme by token name, while Pulp controls resolve widget-specific names such as `knob.arc`, `knob.arc.bg`, and `knob.thumb`. A design that supplied only the documented semantic palette therefore colored panels and text but left every knob on Pulp's built-in blue. This Pulp-only compatibility mapping derives absent widget tokens from the imported semantic palette using the same relationships as the built-in themes, while preserving every explicitly supplied widget token and inventing nothing when no semantic accent exists. It changes only the Pulp DesignIR-to-Theme projection and does not alter the transferred schema or add a separate source of token authority.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-design-token-widget-derive"
+  ],
+  "disposition": "pulp-only"
+}
