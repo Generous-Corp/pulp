@@ -129,3 +129,23 @@ emitter function and a regeneration, with no hand-written code to migrate.
 
 **Would change our mind:** building a panel designer, at which point live edits
 matter more than the extra failure mode.
+
+## The DSP gate checks that Pulp's DSP was used, not that the right class was
+
+A module reaching for `SmoothedValue` passes even where `SimpleMixerT` would
+have been the better fit. The gate can see that the SDK was used at all; it
+cannot judge whether the choice was apt.
+
+This is deliberate rather than unfinished. Judging aptness means encoding which
+class belongs to which kind of module, which is exactly the hand-maintained
+mapping the header-derived vocabulary exists to avoid — and it would be wrong
+often, since a mixer that de-zippers its gains with `SmoothedValue` and sums by
+hand is arguably better than one that reaches for a mixer class and clicks.
+
+The gate catches the failure that actually happened: a module using none of
+Pulp at all, because the vocabulary in the prompt was wrong or too awkward to
+use. That failure is unambiguous. "Used a suboptimal class" is a judgement, and
+a gate that makes judgements will make them badly.
+
+**Would change our mind:** evidence that generated modules routinely pick a
+technically-valid but poor class, in a pattern specific enough to name.
