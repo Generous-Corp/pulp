@@ -123,6 +123,16 @@ three `state-reproducibility` variants) and passes both flush tests. The
 suspect is that Forge Modular declares no parameters at all, so the only one
 present is the adapter's synthesized Bypass, and flush does not apply it.
 
+Narrowed but not fixed. Two obvious explanations are both ruled out:
+`clap_params_flush` does write incoming `CLAP_EVENT_PARAM_VALUE` events through
+`store.set_value` (`clap_adapter.cpp:1655`), and `maybe_synthesize_bypass`
+injects the Bypass param *into that same store* before the id is detected
+(`clap_adapter.cpp:291`). So the param exists and flush does write it. The
+remaining suspect is the read path -- whether `clap_params_get_value` reports
+the bypass param from somewhere other than the store, or normalizes
+differently from `set_value`. That is where to look next; do not guess a fix,
+because `PulpGain` passes both flush tests and would regress silently.
+
 **The CLAP must not go into a plug-in folder until this passes.** The AU
 passed `auval` on the previous pass and the four formats rebuild clean.
 
