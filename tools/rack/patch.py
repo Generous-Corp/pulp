@@ -242,15 +242,42 @@ def _group_of(inv, mod_ref, out_idx, in_role):
     return "MODULATION"
 
 
-def label(inv, m):
-    """How a module is referred to in prose: its model name, not its slug."""
+def label(inv, m, disambig=None):
+    """How a module is referred to in prose: its model name, not its slug.
+
+    Numbered when a patch holds more than one of the same model. Without it a
+    cross-modulation patch -- two oscillators each modulating the other --
+    reads as a single oscillator modulating itself, because both are called
+    "VCO". The patch is right and the explanation lies, which is the worst
+    failure available to a surface whose whole job is teaching.
+    """
     mod = inv.get(m["plugin"], {}).get("modules", {}).get(m["model"])
-    return (mod or {}).get("name") or m["model"]
+    name = (mod or {}).get("name") or m["model"]
+    if disambig:
+        n = disambig.get(m["id"])
+        if n:
+            return f"{name} {n}"
+    return name
+
+
+def _disambiguate(patch, inv):
+    """Number repeated models left to right, the order they sit in the rack."""
+    seen = {}
+    for m in patch.get("modules", []):
+        seen.setdefault((m.get("plugin"), m.get("model")), []).append(m)
+    out = {}
+    for mods in seen.values():
+        if len(mods) < 2:
+            continue
+        for i, m in enumerate(sorted(mods, key=lambda x: (x.get("pos") or [0])[0]), 1):
+            out[m["id"]] = i
+    return out
 
 
 def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
     """The patch's signal flow, grouped by role. Computed, never asserted."""
     by_id = {m["id"]: m for m in patch.get("modules", [])}
+    dis = _disambiguate(patch, inv)
     groups: dict[str, list[str]] = {}
     for c in patch.get("cables", []):
         src, dst = by_id.get(c.get("outputModuleId")), by_id.get(c.get("inputModuleId"))
@@ -261,7 +288,7 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
         dp = port_name(inv, dst["plugin"], dst["model"], "in", ii)
         role = port_role(inv, dst["plugin"], dst["model"], "in", ii)
         g = _group_of(inv, (src["plugin"], src["model"]), oi, role)
-        line = f"  {label(inv, src)} {sp} → {label(inv, dst)} {dp}"
+        line = f"  {label(inv, src, dis)} {sp} → {label(inv, dst, dis)} {dp}"
         groups.setdefault(g, []).append(line)
         note = (why or {}).get(f"{c.get('outputModuleId')}:{oi}>"
                               f"{c.get('inputModuleId')}:{ii}")
@@ -369,17 +396,19 @@ def diff(old: dict, new: dict, inv: dict) -> list[str]:
     by_id_new = {m["id"]: m for m in new.get("modules", [])}
     by_id_old = {m["id"]: m for m in old.get("modules", [])}
 
-    def cable_str(c, table):
+    dis_old, dis_new = _disambiguate(old, inv), _disambiguate(new, inv)
+
+    def cable_str(c, table, dis):
         s, d = table.get(c[0]), table.get(c[2])
         if not s or not d:
             return f"module {c[0]} port {c[1]} → module {c[2]} port {c[3]}"
-        return (f"{label(inv, s)} {port_name(inv, s['plugin'], s['model'], 'out', c[1])}"
-                f" → {label(inv, d)} {port_name(inv, d['plugin'], d['model'], 'in', c[3])}")
+        return (f"{label(inv, s, dis)} {port_name(inv, s['plugin'], s['model'], 'out', c[1])}"
+                f" → {label(inv, d, dis)} {port_name(inv, d['plugin'], d['model'], 'in', c[3])}")
 
     for c in nc - oc:
-        out.append(f"+ added cable    {cable_str(c, by_id_new)}")
+        out.append(f"+ added cable    {cable_str(c, by_id_new, dis_new)}")
     for c in oc - nc:
-        out.append(f"- removed cable  {cable_str(c, by_id_old)}")
+        out.append(f"- removed cable  {cable_str(c, by_id_old, dis_old)}")
 
     for k in o.keys() & n.keys():
         ov = {p["id"]: p["value"] for p in o[k].get("params", [])}

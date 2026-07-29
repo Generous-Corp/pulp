@@ -109,6 +109,29 @@ CASES = [
 ]
 
 
+def check_disambiguation(inv) -> int:
+    """Two of the same model must not read as one.
+
+    A cross-modulation patch is two oscillators each modulating the other. If
+    both are called "VCO", the explanation describes an oscillator modulating
+    itself -- a correct patch explained wrongly, which on a teaching surface
+    is worse than an obvious error.
+    """
+    pch = {"version": "2.6.6",
+           "modules": [mod(1, "Fundamental", "VCO", (0, 0)),
+                       mod(2, "Fundamental", "VCO", (10, 0)),
+                       mod(3, "Core", "AudioInterface2", (20, 0))],
+           "cables": [cable(1, 1, 0, 2, 1), cable(2, 2, 0, 1, 1),
+                      cable(3, 2, 0, 3, 0)]}
+    text = P.explain(pch, inv)
+    if "VCO 1" not in text or "VCO 2" not in text:
+        print("  WRONG  two VCOs are not told apart:\n" +
+              "\n".join("         " + l for l in text.splitlines()))
+        return 1
+    print("  ok     two of the same model are numbered")
+    return 0
+
+
 def main():
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
@@ -133,7 +156,8 @@ def main():
             continue
         print(f"  ok     {name}")
 
-    print(f"\n{len(CASES) - bad}/{len(CASES)} correct")
+    bad += check_disambiguation(inv)
+    print(f"\n{len(CASES) + 1 - bad}/{len(CASES) + 1} correct")
     return 1 if bad else 0
 
 
