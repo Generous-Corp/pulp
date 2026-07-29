@@ -1,0 +1,73 @@
+#include "delay_time_model.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+
+namespace pulp::examples::delay {
+
+namespace {
+
+constexpr std::array<double, 11> kDivisionBeats = {
+    0.125, 1.0 / 6.0, 0.25, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 2.0, 4.0,
+};
+
+constexpr float kMinTimeMs = 1.0f;
+constexpr float kMaxTimeMs = 2000.0f;
+constexpr float kMaxAddressableTimeMs = 3000.0f;
+
+double valid_tempo(double bpm) noexcept {
+    return std::isfinite(bpm) && bpm > 0.0 ? bpm : DelayTimeModel::kFallbackTempoBpm;
+}
+
+float clamp_left(float milliseconds) noexcept {
+    return std::clamp(milliseconds, kMinTimeMs, kMaxTimeMs);
+}
+
+float clamp_right(float milliseconds) noexcept {
+    return std::clamp(milliseconds, kMinTimeMs, kMaxAddressableTimeMs);
+}
+
+} // namespace
+
+double DelayTimeModel::division_beats(int index) noexcept {
+    const auto bounded = std::clamp(index, 0, static_cast<int>(kDivisionBeats.size()) - 1);
+    return kDivisionBeats[static_cast<std::size_t>(bounded)];
+}
+
+float DelayTimeModel::synced_time_ms(int index, double tempo_bpm) noexcept {
+    return clamp_left(static_cast<float>(division_beats(index) * 60000.0 / valid_tempo(tempo_bpm)));
+}
+
+EffectiveDelayTimes DelayTimeModel::derive(const DelayTimeInputs& inputs) noexcept {
+    EffectiveDelayTimes result;
+    result.left_ms = inputs.sync ? synced_time_ms(inputs.division, inputs.tempo_bpm)
+                                 : clamp_left(inputs.time_ms);
+
+    if (inputs.routing == Routing::ping_pong) {
+        result.right_ms = result.left_ms;
+        result.right_uses_ratio = true;
+        result.right_ratio = 1.0f;
+        return result;
+    }
+
+    if (inputs.link && inputs.offset_mode == OffsetMode::ratio) {
+        result.right_ratio = std::clamp(inputs.time_offset, 0.5f, 1.5f);
+        result.right_ms = clamp_right(result.left_ms * result.right_ratio);
+        result.right_uses_ratio = true;
+        return result;
+    }
+
+    result.right_uses_ratio = false;
+    if (inputs.link) {
+        result.right_ms = clamp_right(result.left_ms + inputs.offset_ms);
+    } else if (inputs.sync) {
+        result.right_ms = synced_time_ms(inputs.division_right, inputs.tempo_bpm);
+    } else {
+        result.right_ms = clamp_right(inputs.time_right_ms);
+    }
+    result.right_ratio = result.right_ms / result.left_ms;
+    return result;
+}
+
+} // namespace pulp::examples::delay
