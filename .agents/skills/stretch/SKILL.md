@@ -26,6 +26,8 @@ For clip-ready streaming, prepare `RealtimePitchTimeProcessor` in
 `PitchTimeMode::time_stretch` and check its `PitchTimePrepareStatus`.
 Non-positive sample rates, channel counts outside the prepared ceiling, and
 non-positive `max_block` capacities are rejected before processor state changes.
+Time-stretch sizing also requires a finite `max_time_ratio >= 1`; pitch sizing
+requires a finite, non-negative semitone bound whose derived ratio is finite.
 `feed()` is all-or-nothing: on
 `backpressure`, drain `available_stretched()` with `read_stretched()` and retry
 the identical input block. Never advance a decoder on a rejected feed.

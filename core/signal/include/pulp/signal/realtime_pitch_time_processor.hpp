@@ -75,6 +75,8 @@ enum class PitchTimePrepareStatus {
     invalid_sample_rate,
     invalid_channel_count,
     invalid_max_block,
+    invalid_max_time_ratio,
+    invalid_max_pitch_semitones,
 };
 
 struct RealtimePitchTimeConfig {
@@ -132,6 +134,12 @@ public:
         if (config.channels < 1 || config.channels > kMaxChannels)
             return PitchTimePrepareStatus::invalid_channel_count;
         if (config.max_block <= 0) return PitchTimePrepareStatus::invalid_max_block;
+        if (config.mode == PitchTimeMode::time_stretch
+            && (!std::isfinite(config.max_time_ratio) || config.max_time_ratio < 1.0f))
+            return PitchTimePrepareStatus::invalid_max_time_ratio;
+        if (!std::isfinite(config.max_pitch_semitones) || config.max_pitch_semitones < 0.0f
+            || !std::isfinite(std::exp2(config.max_pitch_semitones / 12.0f)))
+            return PitchTimePrepareStatus::invalid_max_pitch_semitones;
         config_ = config;
         sample_rate_ = sample_rate;
 

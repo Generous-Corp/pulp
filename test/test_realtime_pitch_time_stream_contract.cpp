@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -58,6 +59,61 @@ TEST_CASE("RealtimePitchTimeProcessor rejects non-positive prepared block capaci
         RealtimePitchTimeProcessor processor;
         REQUIRE(processor.prepare(kSampleRate, stream_config(invalid))
                 == PitchTimePrepareStatus::invalid_max_block);
+    }
+}
+
+TEST_CASE("RealtimePitchTimeProcessor rejects invalid prepared ratio bounds atomically",
+          "[signal][pitch-time][streaming]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+    const std::vector<float> invalid_time_ratios{0.0f, 0.5f, nan, infinity, -infinity};
+
+    RealtimePitchTimeProcessor previously_prepared;
+    REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
+            == PitchTimePrepareStatus::prepared);
+    const int prepared_capacity = previously_prepared.output_free_space();
+    REQUIRE(prepared_capacity > 0);
+
+    for (const float invalid : invalid_time_ratios) {
+        auto config = stream_config(256);
+        config.max_time_ratio = invalid;
+
+        RealtimePitchTimeProcessor fresh;
+        REQUIRE(fresh.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_max_time_ratio);
+        REQUIRE(fresh.output_free_space() == 0);
+
+        REQUIRE(previously_prepared.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_max_time_ratio);
+        REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+    }
+
+    const float sample = 0.25f;
+    const float* source[] = {&sample};
+    REQUIRE(previously_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);
+
+    const std::vector<float> invalid_pitch_bounds{-1.0f, nan, infinity, -infinity,
+                                                   std::numeric_limits<float>::max()};
+    RealtimePitchTimeProcessor realtime_prepared;
+    auto realtime_config = stream_config(256);
+    realtime_config.mode = PitchTimeMode::realtime_pitch;
+    REQUIRE(realtime_prepared.prepare(kSampleRate, realtime_config)
+            == PitchTimePrepareStatus::prepared);
+    const int prepared_fft_size = realtime_prepared.fft_size();
+
+    for (const float invalid : invalid_pitch_bounds) {
+        auto config = stream_config(256);
+        config.max_pitch_semitones = invalid;
+
+        RealtimePitchTimeProcessor fresh;
+        REQUIRE(fresh.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_max_pitch_semitones);
+        REQUIRE(fresh.output_free_space() == 0);
+
+        REQUIRE(realtime_prepared.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_max_pitch_semitones);
+        REQUIRE(realtime_prepared.fft_size() == prepared_fft_size);
+        REQUIRE(realtime_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::invalid_request);
     }
 }
 
