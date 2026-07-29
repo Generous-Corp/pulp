@@ -23,7 +23,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.normpath(os.path.join(
     HERE, "..", "..", "examples", "forge-modular", "app", "ui", "main.js"))
-PULP = "/Volumes/Workshop/Code/pulp"
+# This checkout, not a hard-coded sibling. It pointed at
+# /Volumes/Workshop/Code/pulp, so every bridge name was validated against a
+# DIFFERENT tree: a function added here read as missing, and one deleted here
+# read as present. The fallback is kept for a checkout without core/view, but
+# the local tree wins.
+PULP = REPO if os.path.isdir(os.path.join(REPO, "core", "view", "src")) \
+       else "/Volumes/Workshop/Code/pulp"
 
 def local_helpers(text: str) -> set:
     """Functions the script declares itself, which are not bridge calls.

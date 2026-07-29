@@ -162,6 +162,11 @@ function textLabel(id, text, parent) {
 function railIcon(id, glyph, active, marginTop) {
     const b = createToggleButton(id, "rail");
     setFlex(id, "direction", "row");
+    // The rail reads as icons, not buttons. An unselected tile takes the rail's
+    // own colour on both background and border, or the rail becomes a grid of
+    // boxes -- which is what it looked like before these were set.
+    setToggleBackground(id, C.rail, C.raised);
+    setToggleBorderColor(id, C.rail, C.raised);
     setBackground(id, active ? C.raised : C.rail);
     setCornerRadius(id, 12);
     setFlex(id, "width", 40);
@@ -290,6 +295,8 @@ setFlex("tabs", "margin_top", 34);
 function tab(id, glyph, title, sub, active) {
     const t = createToggleButton(id, "tabs");
     setFlex(id, "direction", "row");
+    setToggleBackground(id, C.panel, C.raised);
+    setToggleBorderColor(id, C.line, C.lineStrong);
     setBackground(id, active ? C.raised : C.panel);
     setBorder(id, active ? C.lineStrong : C.line, 1);
     setCornerRadius(id, 12);
@@ -351,8 +358,12 @@ setFlex("actions", "margin_top", 18);
 function button(id, parent, glyph, label, kind, width) {
     const b = createToggleButton(id, parent);
     setFlex(id, "direction", "row");
-    setBackground(id, kind === "primary" ? C.accent : C.panel);
-    setBorder(id, kind === "primary" ? C.accent : C.line, 1);
+    const fill = kind === "primary" ? C.accent : C.panel;
+    const edge = kind === "primary" ? C.accent : C.line;
+    setToggleBackground(id, fill, kind === "primary" ? C.accentDeep : C.raised);
+    setToggleBorderColor(id, edge, edge);
+    setBackground(id, fill);
+    setBorder(id, edge, 1);
     setCornerRadius(id, 11);
     setFlex(id, "padding_left", kind === "icon" ? 13 : 17);
     setFlex(id, "padding_right", kind === "icon" ? 13 : 17);

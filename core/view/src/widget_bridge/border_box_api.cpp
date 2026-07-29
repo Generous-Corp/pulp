@@ -4,6 +4,8 @@
 #include "api_registry.hpp"
 #include "css_color.hpp"
 
+#include <pulp/view/widgets.hpp>
+
 #include <string>
 
 namespace pulp::view {
@@ -103,6 +105,48 @@ void BridgeRegistrars::register_widget_border_box_api(WidgetBridge& self) {
         else if (s == "none")     v->set_border_style(View::BorderStyle::none);
         else if (s == "hidden")   v->set_border_style(View::BorderStyle::hidden);
         else                      v->set_border_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+    // A ToggleButton paints its own background, border and text from its own
+    // on/off colour pairs, overdrawing the generic View background. So a
+    // script could create one and then had no way to make it look like
+    // anything: setBackground() was simply painted over. These expose the
+    // pairs the widget already keeps.
+    //
+    // Both colours in one call because a control styled for one state and
+    // defaulted in the other flickers to a stock blue the moment it is
+    // pressed, which is worse than either colour alone.
+    auto toggle_of = [&self](const std::string& id) -> ToggleButton* {
+        return dynamic_cast<ToggleButton*>(id.empty() ? &self.root_ : self.widget(id));
+    };
+
+    register_bridge_function(api, "setToggleBackground",
+                             [toggle_of](choc::javascript::ArgumentList args) {
+        auto* t = toggle_of(args.get<std::string>(0, ""));
+        auto off = args.get<std::string>(1, "");
+        auto on = args.get<std::string>(2, "");
+        if (t && !off.empty()) t->set_off_background_color(parse_bridge_css_color(off));
+        if (t && !on.empty()) t->set_on_background_color(parse_bridge_css_color(on));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "setToggleBorderColor",
+                             [toggle_of](choc::javascript::ArgumentList args) {
+        auto* t = toggle_of(args.get<std::string>(0, ""));
+        auto off = args.get<std::string>(1, "");
+        auto on = args.get<std::string>(2, "");
+        if (t && !off.empty()) t->set_off_border_color(parse_bridge_css_color(off));
+        if (t && !on.empty()) t->set_on_border_color(parse_bridge_css_color(on));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "setToggleTextColor",
+                             [toggle_of](choc::javascript::ArgumentList args) {
+        auto* t = toggle_of(args.get<std::string>(0, ""));
+        auto off = args.get<std::string>(1, "");
+        auto on = args.get<std::string>(2, "");
+        if (t && !off.empty()) t->set_off_text_color(parse_bridge_css_color(off));
+        if (t && !on.empty()) t->set_on_text_color(parse_bridge_css_color(on));
         return choc::value::Value();
     });
 }
