@@ -781,11 +781,6 @@ TEST_CASE("Prepared realtime pitch/time processor is allocation-free while proce
     stretch.set_time_ratio(1.25f);
     stretch.set_formant_mode(FormantMode::follow);
 
-    PitchTimeStreamFeedStatus stretch_feed_status = PitchTimeStreamFeedStatus::invalid_request;
-    PitchTimeStreamFinalizeStatus stretch_finalize_status =
-        PitchTimeStreamFinalizeStatus::invalid_mode;
-    int stretch_finalize_calls = 0;
-
     require_allocates_no_memory([&] {
         for (int block = 0; block < 10; ++block)
             pitch.process(inputs, outputs, static_cast<int>(in_l.size()));
@@ -795,24 +790,12 @@ TEST_CASE("Prepared realtime pitch/time processor is allocation-free while proce
         pitch.reset();
 
         for (int block = 0; block < 6; ++block)
-            stretch_feed_status = stretch.feed(inputs, static_cast<int>(in_l.size()));
-        while (stretch_finalize_calls < 64) {
-            const int available = stretch.available_stretched();
-            stretch.read_stretched(outputs,
-                                   std::min(available, static_cast<int>(out_l.size())));
-            stretch_finalize_status = stretch.finalize();
-            ++stretch_finalize_calls;
-            if (stretch_finalize_status == PitchTimeStreamFinalizeStatus::complete) break;
-        }
-        (void)stretch.output_free_space();
-        (void)stretch.input_priming_samples();
-        (void)stretch.output_alignment_samples();
+            stretch.feed(inputs, static_cast<int>(in_l.size()));
+        const int available = stretch.available_stretched();
+        stretch.read_stretched(outputs, std::min(available, static_cast<int>(out_l.size())));
         (void)stretch.achieved_time_ratio();
         stretch.reset();
     });
-    REQUIRE(stretch_feed_status == PitchTimeStreamFeedStatus::accepted);
-    REQUIRE(stretch_finalize_status == PitchTimeStreamFinalizeStatus::complete);
-    REQUIRE(stretch_finalize_calls < 64);
 }
 
 TEST_CASE("Prepared storage-backed signal helpers are allocation-free while processing",

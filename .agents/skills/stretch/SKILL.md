@@ -23,7 +23,10 @@ Keep quality comparisons explicit about which sample type is under test.
 ## Finite streaming contract
 
 For clip-ready streaming, prepare `RealtimePitchTimeProcessor` in
-`PitchTimeMode::time_stretch`. `feed()` is all-or-nothing: on
+`PitchTimeMode::time_stretch` and check its `PitchTimePrepareStatus`.
+Non-positive sample rates, channel counts outside the prepared ceiling, and
+non-positive `max_block` capacities are rejected before processor state changes.
+`feed()` is all-or-nothing: on
 `backpressure`, drain `available_stretched()` with `read_stretched()` and retry
 the identical input block. Never advance a decoder on a rejected feed.
 
