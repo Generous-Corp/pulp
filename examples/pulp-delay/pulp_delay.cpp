@@ -72,7 +72,8 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
 
     const auto character = character_from_param(state().get_value(kCharacter));
     const auto routing = routing_from_param(state().get_value(kRouting));
-    const auto times = DelayTimeModel::derive(time_inputs(context));
+    const auto times =
+        DelayTimeModel::derive(delay_time_inputs_from_store(state(), context.tempo_bpm));
     engines_.request_character(character);
     engines_.apply(engine_config(times, routing));
 
@@ -99,23 +100,6 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
     for (std::size_t channel = 2; channel < channels; ++channel) {
         std::copy_n(input.channel_ptr(channel), samples, output.channel_ptr(channel));
     }
-}
-
-DelayTimeInputs
-PulpDelayProcessor::time_inputs(const format::ProcessContext& context) const noexcept {
-    return {
-        .time_ms = state().get_value(kTime),
-        .sync = state().get_value(kSync) >= 0.5f,
-        .division = division_index_from_param(state().get_value(kDivision)),
-        .link = state().get_value(kLink) >= 0.5f,
-        .offset_mode = offset_mode_from_param(state().get_value(kOffsetMode)),
-        .time_offset = state().get_value(kTimeOffset),
-        .offset_ms = state().get_value(kOffsetMs),
-        .time_right_ms = state().get_value(kTimeRight),
-        .division_right = division_index_from_param(state().get_value(kDivisionRight)),
-        .routing = routing_from_param(state().get_value(kRouting)),
-        .tempo_bpm = context.tempo_bpm,
-    };
 }
 
 CharacterEngineConfig PulpDelayProcessor::engine_config(const EffectiveDelayTimes& times,

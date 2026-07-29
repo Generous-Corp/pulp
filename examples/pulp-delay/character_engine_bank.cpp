@@ -57,6 +57,16 @@ void CharacterEngineBank::process(float* left, float* right, int num_samples, fl
         return;
     if (!crossfading_) {
         engines_[active_index_].process(left, right, num_samples);
+        if (alternate_left != nullptr && alternate_right != nullptr) {
+            // Keep the inactive timeline moving so A -> B -> A cannot resume
+            // a tail that was paused at the first switch. This intentionally
+            // costs a second CharacterDelay pass; the Release benchmark guards
+            // both its relative cost and its share of the callback budget.
+            std::fill_n(alternate_left, num_samples, 0.0f);
+            std::fill_n(alternate_right, num_samples, 0.0f);
+            engines_[1 - active_index_].process(alternate_left, alternate_right,
+                                                num_samples);
+        }
         return;
     }
     if (alternate_left == nullptr || alternate_right == nullptr)

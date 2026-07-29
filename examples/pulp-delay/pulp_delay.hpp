@@ -24,7 +24,6 @@ class PulpDelayProcessor final : public format::Processor {
                  const format::ProcessContext& context) override;
 
   private:
-    DelayTimeInputs time_inputs(const format::ProcessContext& context) const noexcept;
     CharacterEngineConfig engine_config(const EffectiveDelayTimes& times,
                                         Routing routing) const noexcept;
     void process_chunk(float* output_left, float* output_right, const float* input_left,

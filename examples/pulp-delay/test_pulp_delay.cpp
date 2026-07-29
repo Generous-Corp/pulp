@@ -131,6 +131,36 @@ TEST_CASE("Delay time model selects exactly one right-time policy", "[pulp-delay
     REQUIRE_THAT(ping_pong.right_ms, WithinAbs(ping_pong.left_ms, 0.001));
 }
 
+TEST_CASE("Delay time inputs project store state with caller-owned tempo",
+          "[pulp-delay][timing][projection]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    store.set_value(kTime, 731.0f);
+    store.set_value(kSync, 1.0f);
+    store.set_value(kDivision, 8.0f);
+    store.set_value(kLink, 0.0f);
+    store.set_value(kOffsetMode,
+                    static_cast<float>(OffsetMode::milliseconds));
+    store.set_value(kTimeOffset, 0.75f);
+    store.set_value(kOffsetMs, -27.0f);
+    store.set_value(kTimeRight, 911.0f);
+    store.set_value(kDivisionRight, 10.0f);
+    store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
+
+    const auto inputs = delay_time_inputs_from_store(store, 137.5);
+    REQUIRE_THAT(inputs.time_ms, WithinAbs(731.0, 0.001));
+    REQUIRE(inputs.sync);
+    REQUIRE(inputs.division == 8);
+    REQUIRE_FALSE(inputs.link);
+    REQUIRE(inputs.offset_mode == OffsetMode::milliseconds);
+    REQUIRE_THAT(inputs.time_offset, WithinAbs(0.75, 0.001));
+    REQUIRE_THAT(inputs.offset_ms, WithinAbs(-27.0, 0.001));
+    REQUIRE_THAT(inputs.time_right_ms, WithinAbs(911.0, 0.001));
+    REQUIRE(inputs.division_right == 10);
+    REQUIRE(inputs.routing == Routing::ping_pong);
+    REQUIRE_THAT(inputs.tempo_bpm, WithinAbs(137.5, 1.0e-9));
+}
+
 TEST_CASE("Character engine bank switches topology through a bounded crossfade",
           "[pulp-delay][characters]") {
     CharacterEngineBank bank;
@@ -186,6 +216,103 @@ TEST_CASE("Character engine bank preserves the latest rapid request",
     REQUIRE(bank.active_character() == Character::bbd);
 }
 
+TEST_CASE("Character engine bank does not resume paused history after A-B-A switching",
+          "[pulp-delay][characters][audio][roundtrip]") {
+    CharacterEngineBank bank;
+    CharacterEngineBank reference;
+    bank.prepare(48000.0, Character::clean);
+    reference.prepare(48000.0, Character::clean);
+    CharacterEngineConfig config;
+    config.time_ms = 8.0f;
+    config.right_time_ms = 8.0f;
+    config.right_uses_ratio = false;
+    config.feedback = 0.95f;
+    config.crossfeed = 0.0f;
+    config.character_amount = 0.0f;
+    config.diffusion = 0.0f;
+    config.duck = 0.0f;
+    config.low_cut_hz = 20.0f;
+    config.high_cut_hz = 20000.0f;
+    config.mod_depth = 0.0f;
+    bank.apply(config);
+    reference.apply(config);
+
+    struct Buffers {
+        std::array<float, 256> left{};
+        std::array<float, 256> right{};
+        std::array<float, 256> alternate_left{};
+        std::array<float, 256> alternate_right{};
+    };
+    Buffers actual;
+    Buffers expected;
+    const auto process_silence = [](CharacterEngineBank& engine, Buffers& buffers) {
+        buffers.left.fill(0.0f);
+        buffers.right.fill(0.0f);
+        buffers.alternate_left.fill(0.0f);
+        buffers.alternate_right.fill(0.0f);
+        engine.process(buffers.left.data(), buffers.right.data(),
+                       static_cast<int>(buffers.left.size()),
+                       buffers.alternate_left.data(),
+                       buffers.alternate_right.data());
+    };
+
+    actual.left[0] = 1.0f;
+    actual.right[0] = 1.0f;
+    expected.left[0] = 1.0f;
+    expected.right[0] = 1.0f;
+    bank.process(actual.left.data(), actual.right.data(),
+                 static_cast<int>(actual.left.size()),
+                 actual.alternate_left.data(), actual.alternate_right.data());
+    reference.process(expected.left.data(), expected.right.data(),
+                      static_cast<int>(expected.left.size()),
+                      expected.alternate_left.data(), expected.alternate_right.data());
+    process_silence(bank, actual);
+    process_silence(reference, expected);
+
+    bank.request_character(Character::vintage);
+    while (bank.is_crossfading()) {
+        process_silence(bank, actual);
+        process_silence(reference, expected);
+    }
+    REQUIRE(bank.active_character() == Character::vintage);
+    for (int block = 0; block < 8; ++block) {
+        process_silence(bank, actual);
+        process_silence(reference, expected);
+    }
+
+    bank.request_character(Character::clean);
+    constexpr int kFadeSamples = 960;
+    // The vintage outgoing engine has a deterministic character-noise floor;
+    // paused clean-history failure is three orders of magnitude larger.
+    constexpr float kMaxCharacterNoiseResidual = 1.0e-4f;
+    int return_frame = 0;
+    float reference_peak = 0.0f;
+    float residual_peak = 0.0f;
+    while (bank.is_crossfading()) {
+        process_silence(bank, actual);
+        process_silence(reference, expected);
+        for (std::size_t i = 0; i < actual.left.size(); ++i) {
+            const float blend = std::clamp(
+                static_cast<float>(return_frame + static_cast<int>(i))
+                    / static_cast<float>(kFadeSamples),
+                0.0f, 1.0f);
+            reference_peak =
+                std::max(reference_peak, std::abs(expected.left[i]));
+            residual_peak = std::max(
+                residual_peak, std::abs(actual.left[i] - blend * expected.left[i]));
+            residual_peak = std::max(
+                residual_peak, std::abs(actual.right[i] - blend * expected.right[i]));
+        }
+        return_frame += static_cast<int>(actual.left.size());
+    }
+
+    INFO("continuously decaying reference peak " << reference_peak
+                                                  << "; A-B-A residual peak "
+                                                  << residual_peak);
+    REQUIRE(reference_peak > 1.0e-4f);
+    REQUIRE(residual_peak <= kMaxCharacterNoiseResidual);
+}
+
 TEST_CASE("Character request work stays below the 192 kHz callback reserve",
           "[pulp-delay][characters][realtime]") {
     CharacterEngineBank bank;
@@ -210,6 +337,88 @@ TEST_CASE("Character request work stays below the 192 kHz callback reserve",
     INFO("character request p99 " << p99_us << " us; budget "
                                   << kRequestBudgetUs << " us");
     REQUIRE(p99_us < kRequestBudgetUs);
+}
+
+TEST_CASE("Character engine bank steady processing keeps realtime reserve",
+          "[pulp-delay][characters][realtime][performance]") {
+    constexpr double kSampleRate = 48000.0;
+    constexpr int kBlockSize = 128;
+    constexpr std::size_t kBlocksPerTrial = 256;
+    constexpr std::size_t kTrials = 9;
+    constexpr double kMaxRelativeCost = 2.5;
+    constexpr double kMaxCallbackFraction = 0.10;
+    constexpr double kCallbackUs =
+        static_cast<double>(kBlockSize) / kSampleRate * 1.0e6;
+
+    CharacterEngineConfig config;
+    signal::CharacterDelay baseline;
+    baseline.set_character(signal::CharacterDelay::Character::tape);
+    baseline.set_sample_rate(kSampleRate);
+    baseline.set_time_ms(config.time_ms);
+    baseline.set_time_offset(config.time_offset);
+    baseline.set_feedback(config.feedback);
+    baseline.set_crossfeed(config.crossfeed);
+    baseline.set_character_amount(config.character_amount);
+    baseline.set_diffusion_amount(config.diffusion);
+    baseline.set_duck(config.duck);
+    baseline.set_loop_low_cut_hz(config.low_cut_hz);
+    baseline.set_loop_high_cut_hz(config.high_cut_hz);
+    baseline.set_loop_low_cut_resonance(config.low_cut_resonance);
+    baseline.set_loop_high_cut_resonance(config.high_cut_resonance);
+    baseline.set_mod(config.mod_rate_normalized, config.mod_depth);
+    baseline.set_freeze(config.freeze);
+    baseline.set_reverse(config.reverse);
+
+    CharacterEngineBank bank;
+    bank.prepare(kSampleRate, Character::tape);
+    bank.apply(config);
+
+    std::array<float, kBlockSize> baseline_left{};
+    std::array<float, kBlockSize> baseline_right{};
+    std::array<float, kBlockSize> bank_left{};
+    std::array<float, kBlockSize> bank_right{};
+    std::array<float, kBlockSize> alternate_left{};
+    std::array<float, kBlockSize> alternate_right{};
+
+    // Batch timing amortizes the clock read; the median of warmed trials keeps
+    // scheduler noise from turning the callback-reserve gate flaky.
+    const auto measure = [](auto&& process_block) {
+        std::array<double, kTrials> elapsed_us{};
+        for (std::size_t trial = 0; trial < kTrials; ++trial) {
+            const auto begin = std::chrono::steady_clock::now();
+            for (std::size_t block = 0; block < kBlocksPerTrial; ++block)
+                process_block();
+            const auto end = std::chrono::steady_clock::now();
+            elapsed_us[trial] =
+                std::chrono::duration<double, std::micro>(end - begin).count()
+                / static_cast<double>(kBlocksPerTrial);
+        }
+        std::sort(elapsed_us.begin(), elapsed_us.end());
+        return elapsed_us[kTrials / 2];
+    };
+
+    for (int block = 0; block < 32; ++block) {
+        baseline.process(baseline_left.data(), baseline_right.data(), kBlockSize);
+        bank.process(bank_left.data(), bank_right.data(), kBlockSize,
+                     alternate_left.data(), alternate_right.data());
+    }
+    const double baseline_us = measure([&] {
+        baseline.process(baseline_left.data(), baseline_right.data(), kBlockSize);
+    });
+    const double bank_us = measure([&] {
+        bank.process(bank_left.data(), bank_right.data(), kBlockSize,
+                     alternate_left.data(), alternate_right.data());
+    });
+    const double relative_cost = bank_us / std::max(baseline_us, 0.001);
+    const double callback_fraction = bank_us / kCallbackUs;
+
+    INFO("active-only baseline " << baseline_us << " us/block; two-engine bank "
+                                  << bank_us << " us/block; delta "
+                                  << (bank_us - baseline_us) << " us; multiplier "
+                                  << relative_cost << "x; callback fraction "
+                                  << callback_fraction);
+    REQUIRE(relative_cost < kMaxRelativeCost);
+    REQUIRE(callback_fraction < kMaxCallbackFraction);
 }
 
 TEST_CASE("Pulp Delay zero mix is exact dry pass-through", "[pulp-delay][audio]") {
