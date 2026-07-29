@@ -563,6 +563,61 @@ setFontFamily("preview-empty", FONT);
 setFontSize("preview-empty", 14);
 setTextColor("preview-empty", C.faint);
 
+
+// ── the preview ──────────────────────────────────────────────────────────────
+//
+// The rack as it is wired, drawn from the geometry patch_layout.hpp computes:
+// panels at their assigned x with HP-proportional widths, ports where the
+// cartographer recorded them, cables between the two endpoints.
+//
+// A port the cartographer never mapped docks to the panel edge instead of
+// being invented. That is drawn differently on purpose -- a cable that lands
+// in the right place by accident teaches the wrong thing about the patch.
+
+let previewShown = 0;
+
+/// Draw a rack. `modules` are {slug, x, width, height, known}, x being px from
+/// the rack's left edge as patch_layout.hpp assigns it.
+///
+/// Panels are laid out as a row with the gap between them expressed as a
+/// margin, rather than positioned absolutely. The bridge exposes `start` and
+/// `end` insets but no vertical one, so absolute placement can only control
+/// one axis -- and a rack is a left-to-right run of panels anyway, which a row
+/// models exactly.
+///
+/// Cables are not drawn yet for the same reason: an overlay needs both axes.
+function showPatch(modules) {
+    setVisible("preview-empty", false);
+    const stage = "preview-stage-" + (++previewShown);
+    createRow(stage, "preview");
+    setFlex(stage, "align_items", "center");
+    setFlex(stage, "flex_grow", 1);
+
+    let cursor = 0;
+    for (let i = 0; i < modules.length; ++i) {
+        const m = modules[i];
+        const id = stage + "-m" + i;
+        createCol(id, stage);
+        setFlex(id, "width", m.width);
+        setFlex(id, "height", m.height);
+        setFlex(id, "flex_shrink", 0);
+        setFlex(id, "margin_left", Math.max(0, m.x - cursor));
+        cursor = m.x + m.width;
+        // A module we have never seen is drawn, but not as though we know it.
+        setBackground(id, m.known ? C.panel : C.surface);
+        setBorder(id, m.known ? C.lineStrong : C.line, 1);
+        setCornerRadius(id, 3);
+
+        createLabel(id + "-slug", m.slug, id);
+        setFontFamily(id + "-slug", MONO);
+        setFontSize(id + "-slug", 9);
+        setLetterSpacing(id + "-slug", 0.1);
+        setTextColor(id + "-slug", m.known ? C.muted : C.faint);
+        setFlex(id + "-slug", "margin_top", 6);
+        setFlex(id + "-slug", "margin_left", 5);
+    }
+}
+
 /// Move between the composer and the build. setFlex(id,"display","none") is a
 /// no-op in this bridge; setVisible is what hides.
 function showScreen(name) {

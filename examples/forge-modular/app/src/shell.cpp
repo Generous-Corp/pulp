@@ -143,13 +143,20 @@ void Shell::process(pulp::audio::BufferView<float>& out,
 
 /// Where the interface script lives.
 ///
-/// FORGE_MODULAR_UI_DIR is an absolute path into the source tree, which is
-/// right while developing and wrong the moment the app is installed anywhere
-/// else: the path does not exist, the script does not load, and the window
-/// comes up blank with no error a user would see. So the bundled copy wins
-/// when it is there, and the source tree is the fallback.
+/// FORGE_MODULAR_UI_DIR is an absolute path into the source tree. It is right
+/// while developing and wrong the moment the app is installed anywhere else:
+/// the path does not exist, the script never loads, and the window comes up
+/// blank with no error a user would see.
+///
+/// The source tree is tried FIRST and the bundled copy is the fallback, which
+/// looks backwards until you notice what the other order does: on the machine
+/// that built the app, editing ui/main.js would stop having any effect,
+/// because the stale copy inside the bundle would win every time. Anywhere
+/// else the source path simply does not exist, so the bundled copy is used.
 std::filesystem::path resolve_ui_dir() {
     std::error_code ec;
+    const std::filesystem::path source_ui{FORGE_MODULAR_UI_DIR};
+    if (std::filesystem::exists(source_ui / "main.js", ec)) return source_ui;
 #if defined(__APPLE__)
     std::uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
@@ -162,7 +169,7 @@ std::filesystem::path resolve_ui_dir() {
         if (std::filesystem::exists(bundled / "main.js", ec)) return bundled;
     }
 #endif
-    return std::filesystem::path(FORGE_MODULAR_UI_DIR);
+    return source_ui;
 }
 
 std::unique_ptr<pulp::view::View> Shell::create_view() {
