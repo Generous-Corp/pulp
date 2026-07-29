@@ -21,6 +21,18 @@ public:
     void set_resonance(SampleType q) { q_ = q; update(); }
     void set_mode(Mode m) { mode_ = m; }
 
+    /// Install a coherent coefficient set in one prewarp. Use this when sample
+    /// rate and cutoff change together so neither setter temporarily evaluates
+    /// the new value against the old value's Nyquist limit.
+    void configure(Mode mode, SampleType sample_rate, SampleType frequency,
+                   SampleType resonance) {
+        mode_ = mode;
+        sample_rate_ = sample_rate;
+        freq_ = frequency;
+        q_ = resonance;
+        update();
+    }
+
     SampleType process(SampleType input) {
         SampleType v3 = input - ic2_;
         SampleType v1 = a1_ * ic1_ + a2_ * v3;
