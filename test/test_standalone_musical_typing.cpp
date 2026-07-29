@@ -104,21 +104,27 @@ TEST_CASE("standalone musical typing exposes one discoverable toggle command",
     view::WindowOptions options;
     harness.typing.add_menu_command(options);
 
-    REQUIRE(options.menu_commands.size() == 1);
-    const auto& menu = options.menu_commands.front();
-    // Empty menu name = the application menu, where it sits above Quit.
-    CHECK(menu.menu.empty());
-    CHECK(menu.title == "Musical Typing Keyboard");
-    CHECK(menu.key == view::KeyCode::k);
-    CHECK(view::is_main_modifier(menu.modifiers));
+    REQUIRE(harness.typing.commands() ==
+            std::vector<view::CommandID>{format::detail::kToggleStandaloneMusicalTypingCommand});
+    REQUIRE(options.menu_commands.size() == 2);
+    const auto& application_menu = options.menu_commands[0];
+    const auto& window_menu = options.menu_commands[1];
+    CHECK(application_menu.menu.empty());
+    CHECK(window_menu.menu == "Window");
+    CHECK(application_menu.title == "Musical Typing Keyboard");
+    CHECK(window_menu.title == application_menu.title);
+    CHECK(application_menu.key == view::KeyCode::k);
+    CHECK(window_menu.key == application_menu.key);
+    CHECK(view::is_main_modifier(application_menu.modifiers));
+    CHECK(window_menu.modifiers == application_menu.modifiers);
 
-    menu.action();
+    application_menu.action();
     REQUIRE(harness.typing.is_visible());
     REQUIRE(harness.window != nullptr);
     CHECK(harness.created_options.secondary_window);
     CHECK(harness.created_options.use_gpu);
 
-    menu.action();
+    window_menu.action();
     CHECK_FALSE(harness.typing.is_visible());
 }
 
