@@ -1282,6 +1282,12 @@ Both paths satisfy the branch-protection-required `macos` /
 advisory `linux` / advisory `windows` alias gates because the alias
 jobs read each matrix leg's outcome via the GitHub API.
 
+The Linux leg probes the runner with `vulkaninfo --summary` before CMake
+configure. When no usable Vulkan implementation is available, it configures
+with `PULP_ENABLE_GPU=OFF` instead of running Dawn against an unusable backend.
+This keeps the CPU fallback coverage registered; runners with working Vulkan
+continue to exercise the GPU path.
+
 ### Tagging a new test as slow
 
 Add `LABELS slow` either to a single test's `set_tests_properties`, or
@@ -1436,6 +1442,13 @@ nightly Intel workflow unless this one is deliberately retired.
 
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
+
+ASan configures through `PULP_SANITIZER=address`, including its example-bundle
+lifecycle build. Besides applying the compiler and linker flags, the named
+option marks those bundles as test-only instrumentation so relocatability
+validation permits the compiler-injected Xcode ASan runtime. The strict
+shipping verifier remains unchanged and still rejects that external runtime
+for ordinary release artifacts.
 
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|

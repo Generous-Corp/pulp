@@ -89,7 +89,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
                     set(cmd.group("labels").split("|")),
                 )
 
-    def test_build_workflow_shipyard_dispatch_skips_examples_with_gpu_off(self) -> None:
+    def test_build_workflow_gates_gpu_on_runner_capability(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn(
@@ -99,9 +99,23 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn(
             """if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+          elif [ "${RUNNER_OS}" = "Linux" ]; then
+            vulkan_log="${RUNNER_TEMP}/pulp-vulkan-summary.log"
+            if vulkaninfo --summary >"$vulkan_log" 2>&1; then""",
+            text,
+        )
+        self.assertIn(
+            'echo "Linux Configure: no usable Vulkan capability; configuring the GPU-off fallback"',
+            text,
+        )
+        self.assertIn(
+            """cat "$vulkan_log"
+              cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+            fi
           fi""",
             text,
         )
+        self.assertIn("vulkan-tools", text)
         self.assertIn(
             'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
             text,
@@ -125,6 +139,15 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertNotIn("-B build \\", text)
         self.assertNotIn("cmake --build build ", text)
         self.assertNotIn("ctest --test-dir build ", text)
+
+    def test_asan_uses_canonical_sanitizer_configuration(self) -> None:
+        """The named option also marks bundles as test-only instrumentation."""
+        text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
+        asan = text.split("  asan:", 1)[1].split("  tsan:", 1)[0]
+
+        self.assertEqual(asan.count("-DPULP_SANITIZER=address"), 2)
+        self.assertNotIn("-DCMAKE_CXX_FLAGS=", asan)
+        self.assertNotIn("-DCMAKE_SHARED_LINKER_FLAGS=", asan)
 
     def test_ubsan_optimizes_instrumented_dsp_certifications(self) -> None:
         """UBSan keeps symbols without running production-scale DSP at O0."""

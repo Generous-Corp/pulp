@@ -689,6 +689,7 @@ jobs:
             libxss-dev \
             libxtst-dev \
             libwayland-dev \
+            vulkan-tools \
             wayland-protocols \
             ccache
 
@@ -939,6 +940,15 @@ jobs:
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+          elif [ "${RUNNER_OS}" = "Linux" ]; then
+            vulkan_log="${RUNNER_TEMP}/pulp-vulkan-summary.log"
+            if vulkaninfo --summary >"$vulkan_log" 2>&1; then
+              echo "Linux Configure: usable Vulkan capability detected; keeping GPU coverage enabled"
+            else
+              echo "Linux Configure: no usable Vulkan capability; configuring the GPU-off fallback"
+              cat "$vulkan_log"
+              cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+            fi
           fi
           cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a

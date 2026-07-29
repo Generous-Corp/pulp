@@ -123,6 +123,14 @@ it is, the exclusion regressed. The `example-validation` lane is **not yet in
 `required_status_checks`**; promote it once it is green on a real `examples/**`
 run.
 
+### Linux GPU coverage is capability-gated before configure
+
+The Linux leg installs `vulkan-tools` and runs `vulkaninfo --summary` before
+CMake configure. If the probe cannot find a usable Vulkan implementation, the
+leg configures with `PULP_ENABLE_GPU=OFF`. Do not replace this with CTest name
+exclusions: the GPU-off configuration keeps CPU fallback coverage registered,
+while Linux runners with working Vulkan continue to exercise the GPU path.
+
 ### Gotcha: a broken example goes green on `main` and breaks the RELEASE build
 
 Because the required gate builds `PULP_BUILD_EXAMPLES=OFF` and only `release-cli`
@@ -1008,6 +1016,12 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **ASan uses `PULP_SANITIZER=address`, including its example-bundle build.**
+  Do not replace the named option with raw `CMAKE_*_FLAGS`: the option both
+  applies the instrumentation and explicitly marks compiler-injected
+  `libclang_rt.asan_*_dynamic.dylib` as test-only for bundle-relocatability
+  validation. Ordinary release bundles do not set it, so the shipping guard
+  remains strict.
 - **UBSan is pinned to `macos-26`, not `macos-15`.** Xcode 16.4's Apple
   Clang/libc++ combination reported invalid `std::__shared_weak_count` vptrs
   while destroying ordinary persistent timeline trees, even though the same
