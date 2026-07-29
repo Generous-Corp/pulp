@@ -39,7 +39,7 @@ Pulp, and it should be split out from your product work.
 **Split by concern, not by session.** If one branch contains two unrelated core
 fixes plus a feature, prepare them as separate patches in dependency order and
 say which are independent. Independent bug fixes land fast; anything that
-changes how something *sounds* gets scrutinised, and shouldn't hold them up.
+changes how something *sounds* gets scrutinized, and shouldn't hold them up.
 
 ## 2. Never touch version files
 
@@ -133,7 +133,7 @@ Two environment facts worth knowing before you read its output:
 Some gates key off *paths*, not semantics. Touching `widget_bridge.hpp` demands
 a `test/test_widget_bridge*.cpp` change and compat-doc updates even if you only
 added a private declaration. If your tests genuinely belong elsewhere (beside
-existing coverage for the same behaviour), leave them there and **say so** — the
+existing coverage for the same behavior), leave them there and **say so** — the
 maintainer decides whether the gate is meant literally. Do not scatter tests to
 appease a path match.
 

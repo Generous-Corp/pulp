@@ -23,7 +23,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 BASE="${BASE:-origin/main}"
-# gates.sh honours PYTHON; honour it here too so `PYTHON=python3.12 …` means
+# gates.sh honors PYTHON; honor it here too so `PYTHON=python3.12 …` means
 # one interpreter for the whole run rather than two disagreeing about the version.
 PYTHON="${PYTHON:-python3}"
 export PYTHON
@@ -132,13 +132,18 @@ say "4. Repo gates (fast, offline)"
 # But an old interpreter must never launder a REAL failure. Partition the
 # reported problems: anything not on the known version-sensitive list is a
 # genuine defect and fails, whatever Python is installed. Only a run whose
-# problems are ALL version artefacts is downgraded to "inconclusive".
+# problems are ALL version artifacts is downgraded to "inconclusive".
 PY_OK=0
 "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null && PY_OK=1
 
-# Gates known to misreport on Python < 3.11. Keep this list narrow — a gate
-# added here stops being enforced for every contributor on a stock Mac.
-VERSION_SENSITIVE='deps-audit self-tests|codecov-config|scheduled_workflow_fork_guard|tomllib|enterContext'
+# Gates known to misreport on Python < 3.11. Keep this list narrow — a gate added
+# here stops being enforced for every contributor on a stock Mac.
+#
+# Anchored to each gate's exact reported line, NOT to loose substrings. Matching a
+# bare 'tomllib' would suppress any real failure whose message happens to mention
+# it, and this filter errs toward silence — so a miss here hides a defect rather
+# than merely adding noise.
+VERSION_SENSITIVE='deps-audit self-tests: failing|codecov-config: skipped|scheduled_workflow_fork_guard_check: PyYAML not available'
 
 if [ ! -x tools/scripts/gates.sh ]; then
     skip "tools/scripts/gates.sh not present"
@@ -153,7 +158,7 @@ else
         bad "gates.sh reported problems — see /tmp/contrib-gates.log"
         head -8 /tmp/contrib-gates-real.txt | sed 's/^/        /'
         if [ "$PY_OK" -eq 0 ] && [ -s /tmp/contrib-gates-problems.txt ]; then
-            echo "        (further problems were suppressed as Python-version artefacts)"
+            echo "        (further problems were suppressed as Python-version artifacts)"
         fi
         # Path-keyed gates fire on files you barely touched. The repo's sanctioned
         # answer is a trailer stating why, not contorting the change to satisfy a
@@ -168,7 +173,7 @@ else
         fi
     elif [ "$PY_OK" -eq 0 ]; then
         skip "gates.sh inconclusive: $PYTHON is $("$PYTHON" -V 2>&1 | awk '{print $2}'), and every"
-        echo "        reported problem is a known Python 3.11+ artefact:"
+        echo "        reported problem is a known Python 3.11+ artifact:"
         head -4 /tmp/contrib-gates-problems.txt | sed 's/^/          /'
         echo "        Nothing here is attributable to your change, but install 3.11+ for a"
         echo "        definitive answer."

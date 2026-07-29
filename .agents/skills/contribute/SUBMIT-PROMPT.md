@@ -24,7 +24,7 @@ everything silently:
 2. Check the routing: does anything here belong in Forge rather than Pulp, or
    vice versa? Flag it if so.
 
-3. For every behaviour change, confirm a test covers it. Where the fix can be
+3. For every behavior change, confirm a test covers it. Where the fix can be
    cleanly reverted on its own, revert it, rebuild, show me the test failing, and
    restore. Where it cannot — an early commit that later ones build on — say so
    and tell me when the failure was actually observed during development. Do not

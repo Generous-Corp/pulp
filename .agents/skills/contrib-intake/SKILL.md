@@ -96,23 +96,35 @@ someone files an issue for it.
 Their commits should stay theirs. `git am` and `git bundle` both preserve author
 metadata; the mistake is squashing it away later.
 
+**Import the ref first, from the main checkout, then make the worktree at it.**
+Doing it the other way round does not work: `git fetch <src>:<dst>` refuses when
+`<dst>` is checked out anywhere (`fatal: refusing to fetch into branch ... checked
+out at ...`), and `gh pr checkout --branch` fails when the branch already exists.
+
 ```sh
+# ── a fork PR
+git fetch origin pull/<N>/head:contrib/<topic>
+
+# ── a bundle
+git fetch /path/to/work.bundle <their-branch>:contrib/<topic>
+
+# ── then, for either of the above:
+git worktree add /tmp/adopt contrib/<topic>          # no -b; the branch exists
+
+# ── a patch series is the one case that creates the branch itself
 git worktree add /tmp/adopt -b contrib/<topic> <their-base-commit>
-
-# patch series
 git -C /tmp/adopt am /path/to/patches/*.patch
+```
 
-# or a bundle
-git -C /tmp/adopt fetch /path/to/work.bundle <their-branch>:contrib/<topic>
+Check attribution survived, **before any rebase** — after one, this range spans
+everything main gained since:
 
-# or a fork PR
-gh pr checkout <N> --repo Generous-Corp/pulp --branch contrib/<topic>
-
+```sh
 git -C /tmp/adopt log --format='%an <%ae>  %s' <their-base-commit>..HEAD
 ```
 
-That last line is the check that matters: if it shows your name, you have
-already lost the attribution. If you later squash, carry it forward explicitly:
+If that shows your name, the attribution is already lost. If you later squash,
+carry it forward explicitly:
 
 ```
 Co-authored-by: Their Name <their@email>
@@ -122,38 +134,53 @@ Co-authored-by: Their Name <their@email>
 is not what the handoff says, and their test results were measured against
 different code than you are about to land.
 
-## 3. Rebase onto current main before judging it
+## 3. Validate at their base first, then rebase, then re-validate
 
-A contribution built a week ago is being reviewed against a `main` that moved.
-Rebase first, then re-run — otherwise you will attribute a merge-skew failure to
-their work.
-
-```sh
-git -C /tmp/adopt fetch origin main && git -C /tmp/adopt rebase origin/main
-```
-
-## 4. Run the same check they were asked to run
-
-Only after Rule 0, and per Rule 1 not on a Studio:
+Do not rebase before you have reproduced anything. Their claims are only
+measurable at the commit they measured them on, and after a rebase a failure is
+unattributable — their bug or merge skew, with no way to tell which.
 
 ```sh
+# 1. at their stated base: reproduce what the handoff claims
 cd /tmp/adopt && tools/scripts/contributor_check.sh <test targets>
+
+# 2. only then move it forward
+git fetch origin main && git rebase origin/main
+
+# 3. and run it again — a new failure here is merge skew, not their work
+tools/scripts/contributor_check.sh <test targets>
 ```
 
-Then read their handoff's **"What I could not do"** section against it. Those two
-things together are the review: the check tells you what is mechanically wrong,
-their gaps list tells you what nobody has verified yet. A contribution whose gaps
-list is empty deserves *more* scrutiny, not less.
+Read the handoff for per-commit warnings before you judge an intermediate state:
+a series can legitimately have the suite red partway through and green at the tip,
+and the handoff is where they say so.
 
-**Their gaps list is your to-do list, not a disclaimer.** Diff coverage, the full
-suite, Linux/Windows, sanitizers, and — for view, editor, or format-adapter
-changes — the real-DAW smoke (`tools/testing/daw-smoke/reaper_smoke.py`) are all
-things they were told not to attempt. Someone still has to do them.
+## 4. Review it, then execute their gaps list
+
+Run the check (Rule 0 first, and per Rule 1 not on a Studio) and read their
+**"What I could not do"** section against it. The check tells you what is
+mechanically wrong; their gaps list tells you what nobody has verified yet. A
+contribution whose gaps list is empty deserves *more* scrutiny, not less.
+
+**That list is your to-do list, not a disclaimer.** They were told not to attempt
+these, which means the work still exists and it is now yours:
+
+```sh
+tools/scripts/local_diff_cover.sh <targets>        # the gate they most often cannot run
+ctest --test-dir build --output-on-failure         # beyond their targeted suites
+tools/testing/daw-smoke/reaper_smoke.py            # view / editor / format-adapter changes
+```
+
+Honor explicit requests in the handoff — "run the full `pulp-test-<x>` suite
+before landing", "this needs host-in-the-loop verification". They are telling you
+where they know the risk is.
 
 Expect path-based gates to fire on files they barely touched — a `widget_bridge.hpp`
 edit demands compat-doc updates and a specifically-named test file. Decide whether
 the gate is meant literally here; that judgment is yours, not theirs, and it is
-the most common thing they will have flagged and left alone.
+the most common thing they will have flagged and left alone. If they left a skip
+trailer with a reason, that is the intended mechanism, and the reason is what you
+are agreeing or disagreeing with.
 
 ## 5. Split before shipping
 
@@ -165,8 +192,15 @@ dependency order.
 ## 6. Ship it normally
 
 ```sh
-cd /tmp/adopt && PULP_SKIP_DIFF_COVER=1 shipyard pr --base main
+cd /tmp/adopt && shipyard pr --base main
 ```
+
+**Do not add `PULP_SKIP_DIFF_COVER=1` out of habit.** That is the docs-only
+recipe. Diff coverage is usually the one gate the contributor could not run, it
+is not among the required checks, and you are the only person who will ever
+measure it — so skipping it here means contributed C++ reaches `main` with its
+coverage never measured by anyone. Skip it only for a genuinely docs-only
+contribution, and say so.
 
 Version bumps are yours, not theirs — `version-at-land` assigns them post-merge,
 and the contributor was told not to touch version files. If `shipyard pr` asks
@@ -187,7 +221,7 @@ almost entirely on whether the last one got a real answer.
   submodule, and adopting from a worktree is exactly the situation where a stray
   gitlink bump gets staged. Stage explicit paths.
 - **Their "tests pass" is real but narrow.** They ran targeted suites on macOS
-  only. Linux, Windows, sanitizers, and DAW behaviour are all yours.
+  only. Linux, Windows, sanitizers, and DAW behavior are all yours.
 - **`git am` failing on the last patch of a series leaves the earlier ones
   applied.** `git am --abort` and restart from a clean branch rather than
   hand-fixing the tail.

@@ -110,7 +110,7 @@ check "skips coverage when no C/C++ changed" 0 "coverage not applicable" "$r"
 r="$(make_repo)"
 cat > "$r/tools/scripts/gates.sh" <<'GATES'
 #!/bin/sh
-echo "  deps-audit self-tests: failing"     # version artefact
+echo "  deps-audit self-tests: failing"     # version artifact
 echo "  ✗ doc: docs/reference/compat/css.md NOT updated"   # real
 echo "gates: ✗ one or more gates failed (see above)."
 exit 1
@@ -118,9 +118,9 @@ GATES
 chmod +x "$r/tools/scripts/gates.sh"
 printf 'x\n' > "$r/notes.md"
 git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
-check "fails on a real gate problem despite version artefacts" 1 "compat/css.md NOT updated" "$r"
+check "fails on a real gate problem despite version artifacts" 1 "compat/css.md NOT updated" "$r"
 
-# 8. A run whose problems are ALL version artefacts is inconclusive, not a
+# 8. A run whose problems are ALL version artifacts is inconclusive, not a
 #    failure — only meaningful on a Python that cannot run those gates.
 if python3 -c 'import sys; sys.exit(0 if sys.version_info < (3,11) else 1)' 2>/dev/null; then
     r="$(make_repo)"
@@ -133,9 +133,9 @@ GATES
     chmod +x "$r/tools/scripts/gates.sh"
     printf 'x\n' > "$r/notes.md"
     git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
-    check "treats version-only gate problems as inconclusive" 0 "known Python 3.11+ artefact" "$r"
+    check "treats version-only gate problems as inconclusive" 0 "known Python 3.11+ artifact" "$r"
 else
-    printf '  skip  version-artefact case (needs Python < 3.11 to be meaningful)\n'
+    printf '  skip  version-artifact case (needs Python < 3.11 to be meaningful)\n'
 fi
 
 # 9. With no test target, the script must SAY it ran no tests. Printing "Ready to
@@ -147,7 +147,22 @@ printf 'TEST_CASE("f") {}\n' > "$r/test/test_thing.cpp"
 git -C "$r" add -A >/dev/null && git -C "$r" commit -qm "src plus test"
 check "states plainly when it ran no tests" 0 "ran NO tests" "$r"
 
-# 10. An identical branch has nothing to say.
+# 10. A real failure whose text merely MENTIONS a version-sensitive word must
+#     still fail. The artifact filter errs toward silence, so a loose match here
+#     would hide a defect rather than just add noise.
+r="$(make_repo)"
+cat > "$r/tools/scripts/gates.sh" <<'GATES'
+#!/bin/sh
+echo "  ✗ config-doc: tomllib parser rejected .shipyard/config.toml"
+echo "gates: ✗ one or more gates failed (see above)."
+exit 1
+GATES
+chmod +x "$r/tools/scripts/gates.sh"
+printf 'x\n' > "$r/notes.md"
+git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
+check "does not suppress a real failure that mentions tomllib" 1 "config-doc: tomllib parser" "$r"
+
+# 11. An identical branch has nothing to say.
 r="$(make_repo)"
 check "exits cleanly with no changes" 0 "nothing to check" "$r"
 
