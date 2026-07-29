@@ -67,9 +67,10 @@ std::string format_parameter_value(const state::StateStore& store,
 }
 
 DelayKnob::DelayKnob(state::StateStore& store,
+                     const CharacterPalette& palette,
                      state::ParamID id,
                      std::string caption)
-    : store_(&store), id_(id), caption_(std::move(caption)) {
+    : store_(&store), palette_(&palette), id_(id), caption_(std::move(caption)) {
     set_id("delay-param-" + std::to_string(id_));
     set_label(caption_);
     set_show_label(false);
@@ -112,11 +113,11 @@ void DelayKnob::paint(canvas::Canvas& c) {
     const float angle = pointer_angle();
 
     if (has_focus()) {
-        c.set_stroke_color(with_alpha(color::lime, 0.78f));
+        c.set_stroke_color(with_alpha(palette_->accent(), 0.78f));
         c.set_line_width(2.0f);
         c.stroke_circle(cx, cy, radius + 10.0f);
     } else if (is_hovered()) {
-        c.set_stroke_color(with_alpha(color::lime_soft, 0.42f));
+        c.set_stroke_color(with_alpha(palette_->soft(), 0.42f));
         c.set_line_width(1.5f);
         c.stroke_circle(cx, cy, radius + 8.0f);
     }
@@ -128,7 +129,7 @@ void DelayKnob::paint(canvas::Canvas& c) {
                  view::Knob::start_angle, view::Knob::end_angle);
 
     if (value() > 0.0001f) {
-        c.set_stroke_color(color::lime);
+        c.set_stroke_color(palette_->accent());
         c.set_line_width(5.0f);
         c.stroke_arc(cx, cy, geometry.arc_radius,
                      view::Knob::start_angle, angle);
@@ -144,14 +145,14 @@ void DelayKnob::paint(canvas::Canvas& c) {
 
     const float pointer_inner = radius * 0.22f;
     const float pointer_outer = radius * 0.72f;
-    c.set_stroke_color(color::lime);
+    c.set_stroke_color(palette_->accent());
     c.set_line_width(2.4f);
     c.set_line_cap(canvas::LineCap::round);
     c.stroke_line(cx + std::cos(angle) * pointer_inner,
                   cy + std::sin(angle) * pointer_inner,
                   cx + std::cos(angle) * pointer_outer,
                   cy + std::sin(angle) * pointer_outer);
-    c.set_fill_color(color::lime);
+    c.set_fill_color(palette_->accent());
     c.fill_circle(cx + std::cos(angle) * pointer_outer,
                   cy + std::sin(angle) * pointer_outer, 2.2f);
 
@@ -167,9 +168,10 @@ void DelayKnob::on_focus_changed(bool gained) {
 }
 
 DelayFader::DelayFader(state::StateStore& store,
+                       const CharacterPalette& palette,
                        state::ParamID id,
                        std::string caption)
-    : store_(&store), id_(id), caption_(std::move(caption)) {
+    : store_(&store), palette_(&palette), id_(id), caption_(std::move(caption)) {
     set_id("delay-param-" + std::to_string(id_));
     set_label(caption_);
     set_orientation(view::Fader::Orientation::horizontal);
@@ -192,7 +194,7 @@ void DelayFader::paint(canvas::Canvas& c) {
     const float thumb_x = x0 + (x1 - x0) * value();
 
     if (has_focus()) {
-        c.set_stroke_color(with_alpha(color::lime, 0.72f));
+        c.set_stroke_color(with_alpha(palette_->accent(), 0.72f));
         c.set_line_width(1.0f);
         c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                               b.height - 1.0f, metric::control_radius);
@@ -208,12 +210,12 @@ void DelayFader::paint(canvas::Canvas& c) {
     c.set_line_width(4.0f);
     c.stroke_line(x0, y, x1, y);
     if (value() > 0.0001f) {
-        c.set_stroke_color(color::lime);
+        c.set_stroke_color(palette_->accent());
         c.stroke_line(x0, y, thumb_x, y);
     }
     c.set_fill_color(color::panel_deep);
     c.fill_circle(thumb_x, y, 4.7f);
-    c.set_stroke_color(color::lime);
+    c.set_stroke_color(palette_->accent());
     c.set_line_width(1.4f);
     c.stroke_circle(thumb_x, y, 4.7f);
 }
@@ -224,11 +226,12 @@ void DelayFader::on_focus_changed(bool gained) {
 }
 
 DelayTapField::DelayTapField(state::StateStore& store,
+                             const CharacterPalette& palette,
                              state::ParamID time_id,
                              state::ParamID feedback_id,
                              state::ParamID sync_id,
                              state::ParamID division_id)
-    : DelayFader(store, time_id, "TIME"), feedback_id_(feedback_id),
+    : DelayFader(store, palette, time_id, "TIME"), feedback_id_(feedback_id),
       sync_id_(sync_id), division_id_(division_id) {
     feedback_listener_ = store.add_listener(
         [this](state::ParamID changed, float) {
@@ -258,7 +261,7 @@ void DelayTapField::paint(canvas::Canvas& c) {
     c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                           b.height - 1.0f, 6.0f);
 
-    text(c, timing_display_text(), 16.0f, 28.0f, 22.0f, color::lime,
+    text(c, timing_display_text(), 16.0f, 28.0f, 22.0f, palette_->accent(),
          canvas::TextAlign::left, 700, -0.4f);
     text(c, format_parameter_value(*store_, feedback_id_, feedback),
          b.width - 16.0f, 27.0f, 15.0f, color::ink,
@@ -298,16 +301,16 @@ void DelayTapField::paint(canvas::Canvas& c) {
                        0.30f + static_cast<float>(tap) * 0.27f);
         const float height = 16.0f + decay * (bottom - top) * 0.58f;
         const float y = mid - height * 0.5f;
-        c.set_fill_color(with_alpha(color::lime, 0.20f + decay * 0.78f));
+        c.set_fill_color(with_alpha(palette_->accent(), 0.20f + decay * 0.78f));
         c.fill_rounded_rect(x, y, tap == 0 ? 8.0f : 5.0f,
                             height, 2.5f);
-        c.set_stroke_color(with_alpha(color::lime_soft, 0.18f + decay * 0.45f));
+        c.set_stroke_color(with_alpha(palette_->soft(), 0.18f + decay * 0.45f));
         c.set_line_width(1.0f);
         const float next_x = std::min(right - 4.0f, x + spacing);
         c.stroke_line(x + 5.0f, mid, next_x, mid);
     }
     const float marker = left + (right - left) * time;
-    c.set_stroke_color(with_alpha(color::lime, 0.55f));
+    c.set_stroke_color(with_alpha(palette_->accent(), 0.55f));
     c.set_line_width(1.0f);
     c.stroke_line(marker, top, marker, bottom);
 
@@ -316,20 +319,22 @@ void DelayTapField::paint(canvas::Canvas& c) {
     c.set_stroke_color(color::track);
     c.set_line_width(4.0f);
     c.stroke_line(left, track_y, right, track_y);
-    c.set_stroke_color(color::lime);
+    c.set_stroke_color(palette_->accent());
     c.stroke_line(left, track_y, marker, track_y);
     c.set_fill_color(color::panel_deep);
     c.fill_circle(marker, track_y, 5.0f);
-    c.set_stroke_color(color::lime);
+    c.set_stroke_color(palette_->accent());
     c.set_line_width(has_focus() ? 2.0f : 1.3f);
     c.stroke_circle(marker, track_y, 5.0f);
 }
 
 DelayChoice::DelayChoice(state::StateStore& store,
+                         const CharacterPalette& palette,
                          state::ParamID id,
                          std::string caption,
                          std::vector<std::string> labels)
     : store_(&store),
+      palette_(&palette),
       id_(id),
       caption_(std::move(caption)),
       labels_(std::move(labels)) {
@@ -343,8 +348,8 @@ DelayChoice::DelayChoice(state::StateStore& store,
         [this](state::ParamID changed, float) {
             if (changed != id_)
                 return;
-            sync_access_value();
-            request_repaint();
+            if (sync_access_value())
+                request_repaint();
         },
         state::ListenerThread::Main);
 }
@@ -354,8 +359,8 @@ float DelayChoice::normalized_value() const noexcept {
 }
 
 void DelayChoice::sync_from_store(state::StateStore&) {
-    sync_access_value();
-    request_repaint();
+    if (sync_access_value())
+        request_repaint();
 }
 
 int DelayChoice::selected_index() const noexcept {
@@ -369,9 +374,14 @@ int DelayChoice::selected_index() const noexcept {
         0, static_cast<int>(labels_.size()) - 1);
 }
 
-void DelayChoice::sync_access_value() {
-    if (!labels_.empty())
-        set_access_value(labels_[static_cast<std::size_t>(selected_index())]);
+bool DelayChoice::sync_access_value() {
+    if (labels_.empty())
+        return false;
+    const auto& next = labels_[static_cast<std::size_t>(selected_index())];
+    if (access_value() == next)
+        return false;
+    set_access_value(next);
+    return true;
 }
 
 void DelayChoice::paint(canvas::Canvas& c) {
@@ -395,7 +405,7 @@ void DelayChoice::paint(canvas::Canvas& c) {
         const float x = static_cast<float>(index) * segment_width;
         const bool active = static_cast<int>(index) == selected;
         if (active) {
-            c.set_fill_color(color::lime);
+            c.set_fill_color(palette_->accent());
             c.fill_rounded_rect(x + 1.0f, control_y + 1.0f,
                                 segment_width - 2.0f, control_h - 2.0f, 3.0f);
         } else if (index > 0) {
@@ -412,7 +422,7 @@ void DelayChoice::paint(canvas::Canvas& c) {
              labels_.size() > 8 ? -0.25f : 0.15f);
     }
 
-    c.set_stroke_color(has_focus() ? color::lime : color::border);
+    c.set_stroke_color(has_focus() ? palette_->accent() : color::border);
     c.set_line_width(has_focus() ? 1.5f : 1.0f);
     c.stroke_rounded_rect(0.5f, control_y + 0.5f, b.width - 1.0f,
                           control_h - 1.0f, 4.0f);
@@ -440,16 +450,20 @@ void DelayChoice::on_focus_changed(bool gained) {
     request_repaint();
 }
 
-DelayActionCard::DelayActionCard(state::ParamID id,
+DelayActionCard::DelayActionCard(const CharacterPalette& palette,
+                                 state::ParamID id,
                                  std::string caption,
                                  std::string subtitle,
                                  std::string glyph,
-                                 bool compact)
-    : id_(id),
+                                 bool compact,
+                                 bool warning)
+    : palette_(&palette),
+      id_(id),
       caption_(std::move(caption)),
       subtitle_(std::move(subtitle)),
       glyph_(std::move(glyph)),
-      compact_(compact) {
+      compact_(compact),
+      warning_(warning) {
     set_id("delay-param-" + std::to_string(id_));
     set_label(caption_);
 }
@@ -461,37 +475,41 @@ void DelayActionCard::sync_from_store(state::StateStore& store) {
 void DelayActionCard::paint(canvas::Canvas& c) {
     const auto b = local_bounds();
     const bool active = is_on();
+    const auto accent = warning_ ? color::warning : palette_->accent();
+    const auto accent_dim = warning_
+        ? color::warning.interpolate(color::panel_deep, 0.68f)
+        : palette_->dim();
     c.set_fill_color(active
-        ? with_alpha(color::lime_dim, 0.88f)
+        ? with_alpha(accent_dim, 0.88f)
         : color::panel);
     c.fill_rounded_rect(0, 0, b.width, b.height, metric::panel_radius);
     c.set_stroke_color(
-        has_focus() || active ? color::lime : color::border);
+        has_focus() || active ? accent : color::border);
     c.set_line_width(has_focus() ? 2.0f : 1.0f);
     c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                           b.height - 1.0f, metric::panel_radius);
 
     if (compact_) {
-        c.set_fill_color(active ? color::lime : color::track);
+        c.set_fill_color(active ? accent : color::track);
         c.fill_circle(13.0f, b.height * 0.5f, 4.0f);
         text(c, caption_, 23.0f, b.height * 0.64f, 8.4f,
-             active ? color::lime : color::text,
+             active ? accent : color::text,
              canvas::TextAlign::left, 700, 0.35f);
         return;
     }
 
-    c.set_fill_color(active ? color::lime : color::raised);
+    c.set_fill_color(active ? accent : color::raised);
     c.fill_circle(34.0f, b.height * 0.5f, 18.0f);
     text(c, glyph_, 34.0f, b.height * 0.5f + 5.0f, 15.0f,
-         active ? color::black : color::lime,
+         active ? color::black : accent,
          canvas::TextAlign::center, 750);
     text(c, caption_, 64.0f, 30.0f, 13.0f,
-         active ? color::lime : color::ink,
+         active ? accent : color::ink,
          canvas::TextAlign::left, 750, 1.0f);
     text(c, subtitle_, 64.0f, 48.0f, 8.5f, color::muted,
          canvas::TextAlign::left, 550, 0.45f);
     text(c, active ? "ON" : "OFF", b.width - 18.0f, 39.0f, 9.0f,
-         active ? color::lime : color::muted,
+         active ? accent : color::muted,
          canvas::TextAlign::right, 700, 0.8f);
 }
 

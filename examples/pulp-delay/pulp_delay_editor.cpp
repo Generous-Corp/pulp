@@ -33,16 +33,18 @@ DelayTimeInputs time_inputs_from_store(const state::StateStore& store) noexcept 
 
 class HeaderView final : public view::View {
   public:
+    explicit HeaderView(const CharacterPalette& palette) : palette_(&palette) {}
+
     void layout_children() override {}
 
     void paint(canvas::Canvas& c) override {
         const auto b = local_bounds();
         c.set_fill_color(color::header);
         c.fill_rect(0, 0, b.width, b.height);
-        c.set_fill_color(color::lime);
+        c.set_fill_color(palette_->accent());
         c.fill_rect(0, b.height - 2.0f, b.width, 2.0f);
 
-        text(c, "PULP", 20.0f, 31.0f, 22.0f, color::lime,
+        text(c, "PULP", 20.0f, 31.0f, 22.0f, palette_->accent(),
              canvas::TextAlign::left, 800, 2.4f);
         text(c, "DELAY", 20.0f, 49.0f, 10.0f, color::ink,
              canvas::TextAlign::left, 650, 4.2f);
@@ -53,7 +55,7 @@ class HeaderView final : public view::View {
         c.set_line_width(1.0f);
         c.stroke_rounded_rect(202.5f, 12.5f, 305.0f, 39.0f, 5.0f);
         const auto labels = PulpDelayEditor::truthful_header_labels();
-        text(c, std::string(labels[0]), 218.0f, 31.0f, 9.0f, color::lime,
+        text(c, std::string(labels[0]), 218.0f, 31.0f, 9.0f, palette_->accent(),
              canvas::TextAlign::left, 600, 0.65f);
         text(c, std::string(labels[1]), 218.0f, 44.0f, 7.5f, color::muted,
              canvas::TextAlign::left, 550, 0.5f);
@@ -61,14 +63,19 @@ class HeaderView final : public view::View {
              canvas::TextAlign::left, 550, 0.35f);
         text(c, std::string(labels[3]), b.width - 166.0f, 35.0f, 8.5f, color::ink,
              canvas::TextAlign::left, 650, 0.8f);
-        text(c, std::string(labels[4]), b.width - 58.0f, 35.0f, 8.5f, color::lime,
+        text(c, std::string(labels[4]), b.width - 58.0f, 35.0f, 8.5f,
+             palette_->accent(),
              canvas::TextAlign::right, 650, 0.8f);
     }
+
+  private:
+    const CharacterPalette* palette_ = nullptr;
 };
 
 class ToneResponseView final : public view::View {
   public:
-    explicit ToneResponseView(state::StateStore& store) : store_(&store) {
+    ToneResponseView(state::StateStore& store, const CharacterPalette& palette)
+        : store_(&store), palette_(&palette) {
         set_hit_testable(false);
         listeners_.push_back(store.add_listener(
             [this](state::ParamID changed, float) {
@@ -99,10 +106,10 @@ class ToneResponseView final : public view::View {
         const float high_x = b.width * 0.54f + high * b.width * 0.42f;
         const float pass_left = std::min(low_x, high_x - 6.0f);
         const float pass_right = std::max(high_x, pass_left + 6.0f);
-        c.set_fill_color(with_alpha(color::lime_dim, 0.60f));
+        c.set_fill_color(with_alpha(palette_->dim(), 0.60f));
         c.fill_rounded_rect(pass_left, 12.0f, pass_right - pass_left,
                             b.height - 24.0f, 3.0f);
-        c.set_stroke_color(color::lime);
+        c.set_stroke_color(palette_->accent());
         c.set_line_width(2.0f);
         c.stroke_line(low_x, b.height - 10.0f, low_x, 10.0f);
         c.stroke_line(high_x, 10.0f, high_x, b.height - 10.0f);
@@ -113,12 +120,14 @@ class ToneResponseView final : public view::View {
 
   private:
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
     std::vector<state::ListenerToken> listeners_;
 };
 
 class ControlStateView final : public view::View {
   public:
-    explicit ControlStateView(state::StateStore& store) : store_(&store) {
+    ControlStateView(state::StateStore& store, const CharacterPalette& palette)
+        : store_(&store), palette_(&palette) {
         set_hit_testable(false);
         listeners_.push_back(store.add_listener(
             [this](state::ParamID changed, float) {
@@ -157,7 +166,7 @@ class ControlStateView final : public view::View {
             const float level = levels[static_cast<std::size_t>(channel)];
             c.set_fill_color(color::track);
             c.fill_rounded_rect(meter_x, y, meter_w, 7.0f, 3.5f);
-            c.set_fill_color(color::lime);
+            c.set_fill_color(palette_->accent());
             c.fill_rounded_rect(meter_x, y, meter_w * level, 7.0f, 3.5f);
             for (int tick = 1; tick < 12; ++tick) {
                 const float x = meter_x + meter_w * static_cast<float>(tick) / 12.0f;
@@ -170,6 +179,7 @@ class ControlStateView final : public view::View {
 
   private:
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
     std::vector<state::ListenerToken> listeners_;
 };
 
@@ -177,7 +187,8 @@ class CrossfeedOverrideView final : public view::View {
   public:
     static constexpr std::string_view display_text = "100% · PING PONG";
 
-    CrossfeedOverrideView() {
+    explicit CrossfeedOverrideView(const CharacterPalette& palette)
+        : palette_(&palette) {
         set_hit_testable(false);
         set_access_role(view::View::AccessRole::label);
         set_access_label("Crossfeed overridden by Ping Pong");
@@ -190,23 +201,26 @@ class CrossfeedOverrideView final : public view::View {
         const auto b = local_bounds();
         text(c, "CROSSFEED", 2.0f, 11.0f, 8.5f, color::muted,
              canvas::TextAlign::left, 600, 0.65f);
-        text(c, std::string(display_text), b.width - 2.0f, 11.0f, 9.5f, color::lime,
-             canvas::TextAlign::right, 650);
-        c.set_stroke_color(color::lime);
+        text(c, std::string(display_text), b.width - 2.0f, 11.0f, 9.5f,
+             palette_->accent(), canvas::TextAlign::right, 650);
+        c.set_stroke_color(palette_->accent());
         c.set_line_width(4.0f);
         c.set_line_cap(canvas::LineCap::round);
         c.stroke_line(2.0f, b.height - 8.0f, b.width - 2.0f, b.height - 8.0f);
         text(c, "ROUTING OVERRIDE", 2.0f, b.height - 15.0f, 7.2f, color::muted,
              canvas::TextAlign::left, 600, 0.5f);
     }
+
+  private:
+    const CharacterPalette* palette_ = nullptr;
 };
 
 } // namespace
 
 class PulpDelayEditor::Panel final : public view::View {
   public:
-    Panel(int index, std::string title)
-        : index_(index), title_(std::move(title)) {
+    Panel(const CharacterPalette& palette, int index, std::string title)
+        : palette_(&palette), index_(index), title_(std::move(title)) {
         set_access_role(view::View::AccessRole::group);
         set_access_label(title_);
     }
@@ -222,7 +236,7 @@ class PulpDelayEditor::Panel final : public view::View {
         c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                               b.height - 1.0f, metric::panel_radius);
         text(c, std::to_string(index_), 13.0f, 23.0f, 9.0f,
-             color::lime, canvas::TextAlign::left, 750, 0.8f);
+             palette_->accent(), canvas::TextAlign::left, 750, 0.8f);
         text(c, title_, 31.0f, 23.0f, 10.0f, color::ink,
              canvas::TextAlign::left, 700, 1.35f);
         c.set_stroke_color(color::border);
@@ -231,13 +245,16 @@ class PulpDelayEditor::Panel final : public view::View {
     }
 
   private:
+    const CharacterPalette* palette_ = nullptr;
     int index_ = 0;
     std::string title_;
 };
 
 class PulpDelayEditor::EffectiveRightTimeView final : public view::View {
   public:
-    explicit EffectiveRightTimeView(state::StateStore& store) : store_(&store) {
+    EffectiveRightTimeView(state::StateStore& store,
+                           const CharacterPalette& palette)
+        : store_(&store), palette_(&palette) {
         set_hit_testable(false);
         set_access_role(view::View::AccessRole::label);
         set_access_label("Effective right delay time");
@@ -277,15 +294,18 @@ class PulpDelayEditor::EffectiveRightTimeView final : public view::View {
         c.set_line_width(1.0f);
         c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f, b.height - 1.0f,
                               metric::control_radius);
-        text(c, display_text(), 8.0f, b.height * 0.63f, 8.3f, color::lime,
+        text(c, display_text(), 8.0f, b.height * 0.63f, 8.3f,
+             palette_->accent(),
              canvas::TextAlign::left, 650, 0.15f);
     }
 
   private:
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
 };
 
-PulpDelayEditor::PulpDelayEditor(state::StateStore& store) : store_(&store) {
+PulpDelayEditor::PulpDelayEditor(state::StateStore& store)
+    : store_(&store), palette_(store) {
     set_id("pulp-delay-editor");
     set_access_role(view::View::AccessRole::group);
     set_access_label("Pulp Delay editor");
@@ -298,7 +318,6 @@ PulpDelayEditor::PulpDelayEditor(state::StateStore& store) : store_(&store) {
                 || changed == kRouting || changed == kTime || changed == kTimeOffset
                 || changed == kOffsetMs) {
                 update_timing_presentation();
-                request_repaint();
             }
         },
         state::ListenerThread::Main));
@@ -319,11 +338,6 @@ std::size_t PulpDelayEditor::bound_parameter_count() const noexcept {
 }
 
 void PulpDelayEditor::paint(canvas::Canvas& c) {
-    // StateStore::deserialize intentionally restores atomics without dispatching
-    // listeners. A native editor therefore reconciles once at frame paint so a
-    // host preset/session recall is visible on the very next frame. The silent
-    // setters below never write back into the store or open host gestures.
-    sync_from_store();
     const auto b = local_bounds();
     c.set_fill_color(color::background);
     c.fill_rect(0, 0, b.width, b.height);
@@ -371,7 +385,7 @@ std::string PulpDelayEditor::left_time_display_text() const {
 
 PulpDelayEditor::Panel& PulpDelayEditor::add_panel(
     view::Rect bounds, int index, std::string title) {
-    auto panel = std::make_unique<Panel>(index, std::move(title));
+    auto panel = std::make_unique<Panel>(palette_, index, std::move(title));
     auto* result = panel.get();
     panel->set_bounds(bounds);
     add_child(std::move(panel));
@@ -390,7 +404,8 @@ void PulpDelayEditor::register_control(DelayParameterControl& control,
 DelayKnob& PulpDelayEditor::add_knob(
     view::View& parent, view::Rect bounds, state::ParamID id,
     std::string caption) {
-    auto control = std::make_unique<DelayKnob>(*store_, id, std::move(caption));
+    auto control =
+        std::make_unique<DelayKnob>(*store_, palette_, id, std::move(caption));
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
@@ -402,7 +417,8 @@ DelayKnob& PulpDelayEditor::add_knob(
 DelayFader& PulpDelayEditor::add_fader(
     view::View& parent, view::Rect bounds, state::ParamID id,
     std::string caption) {
-    auto control = std::make_unique<DelayFader>(*store_, id, std::move(caption));
+    auto control =
+        std::make_unique<DelayFader>(*store_, palette_, id, std::move(caption));
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
@@ -414,7 +430,7 @@ DelayFader& PulpDelayEditor::add_fader(
 DelayTapField& PulpDelayEditor::add_tap_field(
     view::View& parent, view::Rect bounds) {
     auto control = std::make_unique<DelayTapField>(
-        *store_, kTime, kFeedback, kSync, kDivision);
+        *store_, palette_, kTime, kFeedback, kSync, kDivision);
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(
@@ -428,7 +444,7 @@ DelayChoice& PulpDelayEditor::add_choice(
     view::View& parent, view::Rect bounds, state::ParamID id,
     std::string caption, std::vector<std::string> labels) {
     auto control = std::make_unique<DelayChoice>(
-        *store_, id, std::move(caption), std::move(labels));
+        *store_, palette_, id, std::move(caption), std::move(labels));
     auto* result = control.get();
     control->set_bounds(bounds);
     register_control(*result, *result);
@@ -439,10 +455,10 @@ DelayChoice& PulpDelayEditor::add_choice(
 DelayActionCard& PulpDelayEditor::add_action(
     view::View& parent, view::Rect bounds, state::ParamID id,
     std::string caption, std::string subtitle, std::string glyph,
-    bool compact) {
+    bool compact, bool warning) {
     auto control = std::make_unique<DelayActionCard>(
-        id, std::move(caption), std::move(subtitle),
-        std::move(glyph), compact);
+        palette_, id, std::move(caption), std::move(subtitle),
+        std::move(glyph), compact, warning);
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(
@@ -453,7 +469,7 @@ DelayActionCard& PulpDelayEditor::add_action(
 }
 
 void PulpDelayEditor::build() {
-    auto header = std::make_unique<HeaderView>();
+    auto header = std::make_unique<HeaderView>(palette_);
     header->set_bounds({0, 0, metric::editor_width, 65.0f});
     add_child(std::move(header));
 
@@ -471,7 +487,8 @@ void PulpDelayEditor::build() {
                std::vector<std::string>(
                    kDivisionLabels.begin(), kDivisionLabels.end()));
     add_fader(stereo, {12, 99, 166, 31}, kTimeRight, "RIGHT TIME");
-    auto effective_right = std::make_unique<EffectiveRightTimeView>(*store_);
+    auto effective_right =
+        std::make_unique<EffectiveRightTimeView>(*store_, palette_);
     effective_right_time_ = effective_right.get();
     effective_right->set_bounds({12, 99, 166, 31});
     stereo.add_child(std::move(effective_right));
@@ -495,14 +512,14 @@ void PulpDelayEditor::build() {
     add_knob(energy, {22, 38, 135, 128}, kFeedback, "FEEDBACK");
     add_knob(energy, {209, 38, 135, 128}, kMix, "MIX");
     add_fader(energy, {16, 178, 160, 50}, kCrossfeed, "CROSSFEED");
-    auto crossfeed_override = std::make_unique<CrossfeedOverrideView>();
+    auto crossfeed_override = std::make_unique<CrossfeedOverrideView>(palette_);
     crossfeed_override_ = crossfeed_override.get();
     crossfeed_override->set_bounds({16, 178, 160, 50});
     energy.add_child(std::move(crossfeed_override));
     add_fader(energy, {190, 178, 160, 50}, kDuck, "DUCK");
 
     auto& tone = add_panel({735, 339, 366, 296}, 5, "TONE + MOVEMENT");
-    auto response = std::make_unique<ToneResponseView>(*store_);
+    auto response = std::make_unique<ToneResponseView>(*store_, palette_);
     response->set_bounds({12, 38, 342, 53});
     tone.add_child(std::move(response));
     add_fader(tone, {16, 101, 158, 38}, kLowCut, "LOW CUT");
@@ -515,9 +532,9 @@ void PulpDelayEditor::build() {
     add_action(*this, {19, 649, 387, 72}, kFreeze,
                "FREEZE", "HOLD THE DELAY BUFFER", "||");
     add_action(*this, {418, 649, 387, 72}, kReverse,
-               "REVERSE", "TURN THE ECHO AROUND", "<-");
+               "REVERSE", "TURN THE ECHO AROUND", "<-", false, true);
 
-    auto control_state = std::make_unique<ControlStateView>(*store_);
+    auto control_state = std::make_unique<ControlStateView>(*store_, palette_);
     control_state->set_bounds({817, 649, 284, 72});
     add_child(std::move(control_state));
 }
@@ -560,11 +577,9 @@ void PulpDelayEditor::update_timing_presentation() {
     if (effective_right_time_) {
         effective_right_time_->set_visible(ping_pong || linked_ratio || linked_ms);
         effective_right_time_->set_access_value(effective_right_time_->display_text());
-        effective_right_time_->request_repaint();
     }
     if (crossfeed_override_) {
         crossfeed_override_->set_visible(ping_pong);
-        crossfeed_override_->request_repaint();
     }
 }
 

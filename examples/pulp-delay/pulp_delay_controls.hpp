@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pulp_delay_ui_tokens.hpp"
+#include "pulp_delay_ui_palette.hpp"
 
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/store.hpp>
@@ -32,7 +32,8 @@ class DelayKnob final : public view::Knob, public DelayParameterControl {
         float arc_radius = 0.0f;
     };
 
-    DelayKnob(state::StateStore& store, state::ParamID id, std::string caption);
+    DelayKnob(state::StateStore& store, const CharacterPalette& palette,
+              state::ParamID id, std::string caption);
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return value(); }
@@ -46,13 +47,15 @@ class DelayKnob final : public view::Knob, public DelayParameterControl {
 
   private:
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
     state::ParamID id_ = 0;
     std::string caption_;
 };
 
 class DelayFader : public view::Fader, public DelayParameterControl {
   public:
-    DelayFader(state::StateStore& store, state::ParamID id, std::string caption);
+    DelayFader(state::StateStore& store, const CharacterPalette& palette,
+               state::ParamID id, std::string caption);
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return value(); }
@@ -64,6 +67,7 @@ class DelayFader : public view::Fader, public DelayParameterControl {
 
   protected:
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
 
   private:
     state::ParamID id_ = 0;
@@ -73,6 +77,7 @@ class DelayFader : public view::Fader, public DelayParameterControl {
 class DelayTapField final : public DelayFader {
   public:
     DelayTapField(state::StateStore& store,
+                  const CharacterPalette& palette,
                   state::ParamID time_id,
                   state::ParamID feedback_id,
                   state::ParamID sync_id,
@@ -91,6 +96,7 @@ class DelayTapField final : public DelayFader {
 class DelayChoice final : public view::View, public DelayParameterControl {
   public:
     DelayChoice(state::StateStore& store,
+                const CharacterPalette& palette,
                 state::ParamID id,
                 std::string caption,
                 std::vector<std::string> labels);
@@ -107,9 +113,10 @@ class DelayChoice final : public view::View, public DelayParameterControl {
     void layout_children() override {}
 
   private:
-    void sync_access_value();
+    bool sync_access_value();
 
     state::StateStore* store_ = nullptr;
+    const CharacterPalette* palette_ = nullptr;
     state::ParamID id_ = 0;
     std::string caption_;
     std::vector<std::string> labels_;
@@ -119,11 +126,13 @@ class DelayChoice final : public view::View, public DelayParameterControl {
 class DelayActionCard final : public view::ToggleButton,
                               public DelayParameterControl {
   public:
-    DelayActionCard(state::ParamID id,
+    DelayActionCard(const CharacterPalette& palette,
+                    state::ParamID id,
                     std::string caption,
                     std::string subtitle,
                     std::string glyph,
-                    bool compact = false);
+                    bool compact = false,
+                    bool warning = false);
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return is_on() ? 1.0f : 0.0f; }
@@ -133,11 +142,13 @@ class DelayActionCard final : public view::ToggleButton,
     void on_focus_changed(bool gained) override;
 
   private:
+    const CharacterPalette* palette_ = nullptr;
     state::ParamID id_ = 0;
     std::string caption_;
     std::string subtitle_;
     std::string glyph_;
     bool compact_ = false;
+    bool warning_ = false;
 };
 
 } // namespace pulp::examples::delay::ui
