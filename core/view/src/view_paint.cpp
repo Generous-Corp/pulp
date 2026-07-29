@@ -250,6 +250,14 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                        || (effect_ && effect_->needs_layer())
                        || needs_blend_layer
                        || needs_mask_layer;
+    // A blur spreads past the box it is drawn in, so a layer sized to the box
+    // clips it — a bloom comes out with a straight cut down one side, which
+    // reads as a rendering bug rather than a soft edge. Skia's blur reaches
+    // about three sigma and CSS defines sigma as half the stated radius, so
+    // one and a half radii covers the visible tail; two is used here so the
+    // rounding never lands inside it.
+    const float blur_pad = filter_blur_ > 0.0f ? filter_blur_ * 2.0f : 0.0f;
+
     // How many layers we pushed, so we pop exactly that many below. Only an
     // effect can push more than one (EffectChain pushes one per child); every
     // other path pushes a single layer.
@@ -327,10 +335,15 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
                                             static_cast<int>(chain.size()));
         } else if (needs_blend_layer) {
             // saveLayer with explicit blend mode for CSS / RN `mix-blend-mode`.
-            canvas.save_layer_with_blend(0, 0, bounds_.width, bounds_.height,
+            canvas.save_layer_with_blend(-blur_pad, -blur_pad,
+                                         bounds_.width + blur_pad * 2.0f,
+                                         bounds_.height + blur_pad * 2.0f,
                                          opacity_, filter_blur_, mix_blend_mode_);
         } else {
-            canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
+            canvas.save_layer(-blur_pad, -blur_pad,
+                              bounds_.width + blur_pad * 2.0f,
+                              bounds_.height + blur_pad * 2.0f,
+                              opacity_, filter_blur_);
         }
         // Every non-effect branch above pushes exactly one layer.
         if (layers_pushed == 0) layers_pushed = 1;

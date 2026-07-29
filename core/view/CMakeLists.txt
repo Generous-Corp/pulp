@@ -447,6 +447,7 @@ target_sources(pulp-view-core PRIVATE
     src/virtual_grid.cpp
     src/relative_point.cpp
     src/css_gradient.cpp
+    src/css_effect_parse.cpp
     src/w3c_tokens.cpp
     src/widget_skin_derive.cpp
     src/screenshot_compare.cpp
