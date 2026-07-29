@@ -70,6 +70,49 @@ createLabel("rail-brand-mark", "⠿", "rail-brand");
 setTextColor("rail-brand-mark", C.onAccent);
 setFontSize("rail-brand-mark", 17);
 
+
+// ── icons ────────────────────────────────────────────────────────────────────
+//
+// Our own strokes on a 24x24 grid, not an imported set. The same reasoning as
+// the Eurorack components: the design references a library whose licence we do
+// not want to inherit, and these shapes are simple enough to draw. Stroke
+// weight and cap style are what make them read as one family, so both are set
+// centrally rather than per icon.
+
+const ICON = {
+    home:     "M3 11 L12 3 L21 11 M6 9 V21 H18 V9",
+    module:   "M7 3 H17 V21 H7 Z M10 7 h4 M12 10 a1.6 1.6 0 1 0 .01 0" +
+              " M10.4 16 a1 1 0 1 0 .01 0 M13.6 16 a1 1 0 1 0 .01 0",
+    patch:    "M6 3 a3 3 0 1 0 .01 0 M6 6 v5 a5 5 0 0 0 5 5 h2 a5 5 0 0 1 5 5 M18 21 a3 3 0 1 0 .01 0",
+    settings: "M12 3 a9 9 0 1 0 0.01 0 M12 9 a3 3 0 1 0 0.01 0",
+    install:  "M12 3 v11 M8 11 l4 4 4-4 M4 19 h16",
+    account:  "M12 4 a4 4 0 1 0 0.01 0 M4 21 c0-4 4-6 8-6 s8 2 8 6",
+    at:       "M16 12 a4 4 0 1 0-4 4 M16 8 v5 a3 3 0 0 0 5 -2 A9 9 0 1 0 17 19",
+    dice:     "M4 4 h16 v16 H4 Z" +
+              " M8.2 8.2 a1 1 0 1 0 .01 0 M15.8 8.2 a1 1 0 1 0 .01 0" +
+              " M12 12 a1 1 0 1 0 .01 0" +
+              " M8.2 15.8 a1 1 0 1 0 .01 0 M15.8 15.8 a1 1 0 1 0 .01 0",
+    hammer:   "M14 3 l7 7 -3 3 -7-7 Z M11 8 L3 16 v5 h5 l8-8",
+    ask:      "M12 3 a9 9 0 1 0 0.01 0 M9.5 9.5 a2.5 2.5 0 1 1 3.2 2.4 c-.8.3-1.2.9-1.2 1.7 M12 17 h.01",
+    library:  "M4 4 v16 M8 4 v16 M13 5 l5 15 M20 20 H3",
+    arrow:    "M4 12 h15 M14 7 l5 5 -5 5",
+};
+
+/// One icon. Sized in points and coloured like text, because that is what it
+/// stands in for -- a glyph that happens to be drawn rather than typeset.
+function icon(id, parent, name, size, color) {
+    createSvgPath(id, parent);
+    setSvgViewBox(id, 24, 24);
+    setSvgPath(id, ICON[name] || ICON.module);
+    setSvgStroke(id, color);
+    setSvgStrokeWidth(id, 1.7);
+    setSvgFill(id, "transparent");
+    setFlex(id, "width", size);
+    setFlex(id, "height", size);
+    setFlex(id, "flex_grow", 0);
+    setFlex(id, "flex_shrink", 0);
+}
+
 function railIcon(id, glyph, active, marginTop) {
     const b = createRow(id, "rail");
     setBackground(id, active ? C.raised : C.rail);
@@ -79,22 +122,20 @@ function railIcon(id, glyph, active, marginTop) {
     setFlex(id, "margin_top", marginTop);
     setFlex(id, "align_items", "center");
     setFlex(id, "justify_content", "center");
-    createLabel(id + "-glyph", glyph, id);
-    setTextColor(id + "-glyph", active ? C.accent : C.faint);
-    setFontSize(id + "-glyph", 16);
+    icon(id + "-glyph", id, glyph, 19, active ? C.accent : C.faint);
     return b;
 }
 
-railIcon("rail-home", "⌂", true, 14);
-railIcon("rail-module", "▯", false, 6);
-railIcon("rail-patch", "⑂", false, 6);
-railIcon("rail-settings", "◎", false, 6);
+railIcon("rail-home", "home", true, 14);
+railIcon("rail-module", "module", false, 6);
+railIcon("rail-patch", "patch", false, 6);
+railIcon("rail-settings", "settings", false, 6);
 
 const railGap = createCol("rail-gap", "rail");
 setFlex("rail-gap", "flex_grow", 1);
 
-railIcon("rail-install", "⤓", false, 0);
-railIcon("rail-account", "☺", false, 6);
+railIcon("rail-install", "install", false, 0);
+railIcon("rail-account", "account", false, 6);
 setFlex("rail-account", "margin_bottom", 14);
 
 // ── everything right of the rail ─────────────────────────────────────────────
@@ -207,8 +248,7 @@ function tab(id, glyph, title, sub, active) {
     setFlex(id, "padding_bottom", 10);
     setFlex(id, "align_items", "center");
 
-    createLabel(id + "-glyph", glyph, id);
-    setFontSize(id + "-glyph", 13);
+    icon(id + "-glyph", id, glyph, 15, C.muted);
     setTextColor(id + "-glyph", active ? C.textStrong : C.faint);
 
     createLabel(id + "-name", title, id);
@@ -227,8 +267,8 @@ function tab(id, glyph, title, sub, active) {
     return t;
 }
 
-tab("tab-module", "▯", "Module", "ONE PANEL", true);
-tab("tab-patch", "⑂", "Patch", "A WHOLE RACK", false);
+tab("tab-module", "module", "Module", "ONE PANEL", true);
+tab("tab-patch", "patch", "Patch", "A WHOLE RACK", false);
 
 // ── composer ─────────────────────────────────────────────────────────────────
 
@@ -275,9 +315,8 @@ function button(id, parent, glyph, label, kind, width) {
     // the composer and pushed its siblings off the panel's right edge.
     setFlex(id, "width", width);
 
-    createLabel(id + "-glyph", glyph, id);
-    setFontSize(id + "-glyph", 13);
-    setTextColor(id + "-glyph", kind === "primary" ? C.onAccent : C.muted);
+    icon(id + "-glyph", id, glyph, 16,
+         kind === "primary" ? C.onAccent : C.muted);
 
     createLabel(id + "-label", label, id);
     setFontFamily(id + "-label", FONT);
@@ -288,9 +327,9 @@ function button(id, parent, glyph, label, kind, width) {
     return b;
 }
 
-button("btn-mention", "actions", "@", "", "icon", 44);
+button("btn-mention", "actions", "at", "", "icon", 44);
 setFlex("btn-mention", "margin_right", 9);
-button("btn-random", "actions", "⚄", "Random module", "ghost", 186);
+button("btn-random", "actions", "dice", "Random module", "ghost", 186);
 
 const actionsGap = createRow("actions-gap", "actions");
 setFlex("actions-gap", "flex_grow", 1);
@@ -298,9 +337,9 @@ setFlex("actions-gap", "flex_grow", 1);
 // Two labelled buttons rather than an inferred intent chip: a chip guesses and
 // the user still has to notice the guess, while an unwanted rebuild rewrites
 // their work and an unwanted answer costs nothing.
-button("btn-ask", "actions", "?", "Ask", "ghost", 96);
+button("btn-ask", "actions", "ask", "Ask", "ghost", 96);
 setFlex("btn-ask", "margin_right", 10);
-button("btn-build", "actions", "⚒", "Build module", "primary", 176);
+button("btn-build", "actions", "hammer", "Build module", "primary", 176);
 setBoxShadow("btn-build", 0, 0, 18, 2, "#16DAC255");
 
 createLabel("composer-hint",
