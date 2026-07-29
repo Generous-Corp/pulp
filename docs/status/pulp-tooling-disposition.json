@@ -4071,6 +4071,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "contribute",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "daw-smoke",
         "disposition": "excluded"
       },

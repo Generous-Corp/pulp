@@ -113,6 +113,11 @@ existing coverage for the same behaviour), leave them there and **say so** — t
 maintainer decides whether the gate is meant literally. Do not scatter tests to
 appease a path match.
 
+Adding a file under `tools/scripts/` or a new skill also has an inventory to
+regenerate — `python3 tools/scripts/pulp_tooling_disposition.py --write`, which
+needs PyYAML and then an explicit disposition for the new entry. `contributor_check.sh`
+does not catch this one; the `Vellum freeze` CI check does.
+
 ## 6. Structure — keep it landable
 
 Before handing off:
