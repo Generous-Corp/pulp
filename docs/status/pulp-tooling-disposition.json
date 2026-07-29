@@ -4373,6 +4373,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "pulp_inspect_value_channels",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_kit",
         "disposition": "pulp-owned"
       },
