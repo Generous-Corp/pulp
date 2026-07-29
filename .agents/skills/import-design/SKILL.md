@@ -3260,7 +3260,8 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `wait-for`, and `wait-ms` actions. End navigation sequences with
   `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
   script source do not prove which screen rendered. Capture records action
-  results and hashes typed text. Never add an arbitrary JavaScript action.
+  results and typed-text length without retaining the text or a per-action
+  text hash. Never add an arbitrary JavaScript action.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated

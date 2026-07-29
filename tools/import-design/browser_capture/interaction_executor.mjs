@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-import { createHash } from "node:crypto";
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -115,8 +114,6 @@ function publicActionEvidence(action) {
   }
   if (action.text !== undefined) {
     evidence.text_length = action.text.length;
-    evidence.text_sha256 =
-      createHash("sha256").update(action.text, "utf8").digest("hex");
   }
   evidence.status = "completed";
   return evidence;

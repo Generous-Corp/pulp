@@ -723,6 +723,7 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
              "semantic-report.json",
              "tokens.json",
              "dom-snapshot.json",
+             "interaction-report.json",
              "capture-error.json",
          }) {
         std::ofstream(request.output_directory / name) << "stale";
@@ -735,8 +736,37 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     CHECK(result.diagnostic.code == "browser-capture-incomplete");
     CHECK_FALSE(fs::exists(
         request.output_directory / "semantic-report.json"));
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
     CHECK(fs::exists(request.output_directory / "capture-error.json"));
     CHECK(read_file(request.output_directory / "keep.me") == "unrelated");
+}
+
+TEST_CASE("non-interactive reuse clears prior interaction evidence",
+          "[import-design][browser-capture][interactions]") {
+    TempTree tree("interaction-reuse");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.interaction_plan = tree.write(
+        "interactions.json",
+        R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+
+    const auto interactive =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE(interactive.ok());
+    CHECK(fs::exists(
+        request.output_directory / "interaction-report.json"));
+    CHECK(read_file(request.output_directory / "capture.json")
+          .find("\"interactions\"") != std::string::npos);
+
+    request.interaction_plan.reset();
+    const auto initial =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE(initial.ok());
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
+    CHECK(read_file(request.output_directory / "capture.json")
+          .find("\"interactions\"") == std::string::npos);
 }
 
 TEST_CASE("capture never accepts a stale token report",

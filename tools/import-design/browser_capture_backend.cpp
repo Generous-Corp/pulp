@@ -437,12 +437,13 @@ std::optional<fs::path> prepare_capture_output_directory(
         return std::nullopt;
     }
 
-    constexpr std::array<std::string_view, 6> kGeneratedArtifacts{
+    constexpr std::array<std::string_view, 7> kGeneratedArtifacts{
         "capture.json",
         "browser.png",
         "semantic-report.json",
         "tokens.json",
         "dom-snapshot.json",
+        "interaction-report.json",
         "capture-error.json",
     };
     for (const auto name : kGeneratedArtifacts) {

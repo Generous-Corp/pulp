@@ -105,11 +105,21 @@ int main(int argc, char** argv) {
             << "browser-capture-timeout: browser capture timed out\n";
         return 124;
     }
-    if (!write_file(output / "capture.json",
-                       R"({"schema":"pulp-browser-capture-v1","version":1})")
+    const bool has_interactions =
+        !value_after(args, "--interactions").empty();
+    const std::string_view capture_json = has_interactions
+        ? R"({"schema":"pulp-browser-capture-v1","version":1,"provenance":{"interactions":{"report":"interaction-report.json"}}})"
+        : R"({"schema":"pulp-browser-capture-v1","version":1,"provenance":{}})";
+    if (!write_file(output / "capture.json", capture_json)
         || !write_file(output / "browser.png", "fixture-png")
         || !write_file(output / "dom-snapshot.json",
                        R"({"documents":[]})")) {
+        return 70;
+    }
+    if (has_interactions
+        && !write_file(
+            output / "interaction-report.json",
+            R"({"schema":"pulp-browser-interactions-v1","version":1,"action_count":1})")) {
         return 70;
     }
     if (capture_script.filename().string().find("omit-token")
