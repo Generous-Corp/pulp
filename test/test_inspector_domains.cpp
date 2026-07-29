@@ -8,6 +8,8 @@
 #include <pulp/inspect/tweak_store.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/audio_inspector.hpp>
+#include <pulp/view/value_channel_json.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/inspect/domain_handler.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/render/atlas_inventory.hpp>
@@ -918,4 +920,71 @@ TEST_CASE("ConsoleCapture: entry sink fires live and seq increases",
     REQUIRE(since.size() == 1);
     REQUIRE(since[0].message == "two");
     REQUIRE(next == 2);
+}
+
+TEST_CASE("DomainHandler: State.getValueChannels", "[inspect][domain][value-channel]") {
+    StateStore store;
+    StateInspector state_inspector(store);
+    pulp::view::ValueChannelSet channels;
+    channels.declare_meter("gr", "dB", 0.0f);
+    channels.declare_vector("env");
+    state_inspector.set_value_channels(&channels);
+
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+    auto resp = handler.handle(make_request(1, "State.getValueChannels"));
+    REQUIRE_FALSE(resp.is_error);
+    INFO("payload: " << resp.params_json);
+    // Parsed rather than substring-matched: the wire format's whitespace is
+    // choc's business, and a test that pins it fails on a formatting change
+    // while proving nothing about the contract.
+    const auto parsed = choc::json::parse(resp.params_json);
+    REQUIRE(parsed.isArray());
+    REQUIRE(parsed.size() == 2);
+    CHECK(parsed[0]["name"].getString() == "gr");
+    CHECK(parsed[0]["unit"].getString() == "dB");
+    // `shape` is what tells a caller which binder applies.
+    CHECK(parsed[0]["shape"].getString() == "meter");
+    CHECK(parsed[1]["name"].getString() == "env");
+    CHECK(parsed[1]["shape"].getString() == "vector");
+}
+
+TEST_CASE("DomainHandler: State.getValueChannels is [] when none are declared",
+          "[inspect][domain][value-channel]") {
+    StateStore store;
+    StateInspector state_inspector(store);  // no channel set attached
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+
+    // The default every processor inherits. A caller must get an empty array,
+    // not an error and not undefined, so iterating is safe without a guard.
+    auto resp = handler.handle(make_request(1, "State.getValueChannels"));
+    REQUIRE_FALSE(resp.is_error);
+    CHECK(resp.params_json == "[]");
+}
+
+TEST_CASE("the inspector and the scripted-UI bridge describe channels identically",
+          "[inspect][domain][value-channel][parity]") {
+    // The whole reason value_channel_json exists. Two consumers describe the
+    // same set; if they ever diverge, a UI built against one silently
+    // mis-reads the other. Assert they are byte-identical rather than merely
+    // both plausible.
+    pulp::view::ValueChannelSet channels;
+    channels.declare_meter("gr", "dB", 0.0f);
+    channels.declare_vector("env", "", 0.5f);
+    channels.declare_scalar("drive", "x", 1.0f);
+
+    StateStore store;
+    StateInspector state_inspector(store);
+    state_inspector.set_value_channels(&channels);
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+    const auto inspector_json = handler.handle(make_request(1, "State.getValueChannels")).params_json;
+
+    const auto shared_json =
+        choc::json::toString(pulp::view::value_channels_to_value(&channels), false);
+
+    CHECK(inspector_json == shared_json);
+    // ...and it is not vacuously equal because both are empty.
+    CHECK(inspector_json.find("drive") != std::string::npos);
 }

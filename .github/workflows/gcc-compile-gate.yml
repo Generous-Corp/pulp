@@ -190,8 +190,7 @@ jobs:
           cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
 
       - name: Summarize
-        if: steps.scope.outputs.relevant == 'true'
-        if: always()
+        if: always() && steps.scope.outputs.relevant == 'true'
         run: |
           {
             echo "GCC compiled the core libraries with tests, examples, and GPU disabled."
