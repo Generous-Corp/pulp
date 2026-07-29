@@ -8,6 +8,7 @@ pulp_add_test_suite(pulp-test-character-delay
     SOURCES
         test_character_delay.cpp
         test_character_delay_characters.cpp
+        test_character_delay_controls.cpp
         test_character_delay_physical.cpp
     LIBRARIES pulp::signal pulp::native-components pulp::runtime ${CMAKE_DL_LIBS}
     TIMEOUT 900)
