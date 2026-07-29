@@ -159,6 +159,11 @@
         "docs/status/cli-commands.yaml"
       ]
     },
+    "contribute": {
+      "paths": [
+        "tools/scripts/contributor_check.sh"
+      ]
+    },
     "daw-smoke": {
       "paths": [
         ".agents/skills/daw-smoke/**",
