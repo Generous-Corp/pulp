@@ -45,7 +45,7 @@ pulp import-design --from designmd --file DESIGN.md --detect-only
 ## Supported subset
 
 The parser handles the canonical frontmatter keys (tracked against the
-upstream format spec, pinned at tag `0.3.0`). Unrecognized top-level keys
+upstream format spec, pinned at tag `0.4.0`). Unrecognized top-level keys
 are flagged with a warning and otherwise ignored, so a typo'd key surfaces
 instead of silently dropping its tokens.
 
@@ -54,14 +54,23 @@ instead of silently dropping its tokens.
 | `version` | yes | Stored on the IR; not emitted into `tokens.json`. |
 | `name` | yes | Required for detection. Stored on the IR. |
 | `description` | yes | Block scalars (`|`, `>`) handled by yaml-cpp. |
-| `colors.*` | yes | Each entry becomes a `color` token. The value may be any valid CSS color — hex (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA`), a named keyword (`cornflowerblue`, `transparent`), or a functional notation (`rgb()`, `hsl()`, `hwb()`, `oklch()`, `lab()`, `color-mix()`, …) — and is preserved verbatim. Nested palettes nest to arbitrary depth and key on the dot-joined path (e.g. `colors.background.light` → token `background.light`). |
-| `typography.*` | yes | Composite `typography` tokens with `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `fontFeature`, `fontVariation`. |
-| `rounded.*` | yes | `dimension` tokens. Nested levels nest to arbitrary depth (dot-joined path). |
-| `spacing.*` | yes | `dimension` tokens. A bare number (e.g. `base: 8`) is read as px per spec; nested levels nest to arbitrary depth. Genuinely non-dimensional values (e.g. `auto`) are preserved as strings. |
-| `shadows.*` | yes | **Pulp extension**, not an upstream 0.3.0 key. `shadow-<name>` `string` tokens holding the CSS shadow value verbatim (`0 1px 3px rgba(0,0,0,.2)`); nested levels nest to arbitrary depth (dot-joined path). The `shadow-*` namespace already exists via the `## Shadows` body section — this gives structured frontmatter a door to it, so a DESIGN.md can declare a shadow without dropping to prose. Authors coming from `## Elevation` should spell the frontmatter key `shadows`; `elevation:` warns as an unknown key. |
+| `omitted` | yes | Bare section names and `{section, reason?}` entries are retained as lint metadata. Intentional omissions suppress matching missing-section findings; unknown or redundant declarations are reported. |
+| `colors.*` | yes | Each entry becomes a `color` token. The value may be any valid CSS color — hex (`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA`), a named keyword (`cornflowerblue`, `transparent`), or a functional notation (`rgb()`, `hsl()`, `hwb()`, `oklch()`, `lab()`, `color-mix()`, …) — and is preserved verbatim. Nested palettes nest up to 20 levels and key on the dot-joined path (e.g. `colors.background.light` → token `background.light`). |
+| `typography.*` | yes | Composite `typography` tokens with `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `letterSpacing`, `fontFeature`, `fontVariation`. Unknown sub-properties warn and remain preserved rather than being silently dropped. |
+| `rounded.*` | yes | `dimension` tokens. Nested levels nest up to 20 levels (dot-joined path). |
+| `spacing.*` | yes | `dimension` tokens. A bare number (e.g. `base: 8`) is read as px per spec; nested levels nest up to 20 levels. Genuinely non-dimensional values (e.g. `auto`) are preserved as strings. |
+| `shadows.*` | yes | **Pulp extension**, not an upstream 0.4.0 key. `shadow-<name>` `string` tokens holding the CSS shadow value verbatim (`0 1px 3px rgba(0,0,0,.2)`); nested levels nest up to 20 levels (dot-joined path). The `shadow-*` namespace already exists via the `## Shadows` body section — this gives structured frontmatter a door to it, so a DESIGN.md can declare a shadow without dropping to prose. Authors coming from `## Elevation` should spell the frontmatter key `shadows`; `elevation:` warns as an unknown key. |
 | `components.*` | yes | Each component is a flat map of token references and literal style values; numeric and boolean YAML scalars (e.g. `fontWeight: 600`, `enabled: true`) flow through as strings. References are *not* resolved at parse time (see below). |
 | Unknown top-level keys | warn | The parser emits one `designmd.unknown-key` warning per unrecognized top-level key (catches typos like `color:`/`typgrphy:`) and otherwise ignores it. The file still imports. |
 | Unknown component properties | passthrough | Per the spec, unknown component props are preserved as opaque strings. |
+
+The 0.4 parser also rejects ambiguous flattened token names such as
+`brand-primary` alongside nested `brand.primary`. Recursive token groups are
+limited to 20 levels and dimension recognition is capped at 64 characters, so
+malformed input cannot turn validation into unbounded recursion or regex work.
+Pulp preserves color strings and delegates their actual rendering to its CSS
+and theme consumers; it does not reimplement upstream's color evaluator, so the
+0.4 `grad` and `color-mix()` evaluator fixes do not create a Pulp parsing delta.
 
 Frontmatter is authoritative but not exclusive. The parser also scans the
 Markdown body for token sections and lets the body **fill gaps** frontmatter
@@ -178,6 +187,10 @@ The import path ships exactly the surface above:
 - This documentation page and the cross-references listed below.
 - `pulp design lint <DESIGN.md>` for DESIGN.md quality findings.
 - `pulp design diff <before.md> <after.md>` for semantic token diffs.
+- CSS custom-property export via
+  `pulp import-design --from designmd --format css-variables`. This predates
+  upstream 0.4's equivalent `css-vars` spelling. Pulp does not currently expose
+  upstream's optional `--prefix`; import compatibility does not depend on it.
 
 Tailwind v3 + v4 exporters remain future work.
 

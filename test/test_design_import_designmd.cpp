@@ -10,6 +10,7 @@
 
 #include "import_detect.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include <filesystem>
@@ -904,4 +905,97 @@ TEST_CASE("frontmatter beats a body table that restates the same token",
     // Control: a token the frontmatter never mentioned still comes through, so
     // the shadow-drop isn't just suppressing the whole body scan.
     REQUIRE(result.ir.tokens.colors.at("accent") == "#00ff00");
+}
+
+// ── DESIGN.md 0.4.0 format coverage ─────────────────────────────────────
+
+TEST_CASE("omitted accepts bare and structured declarations and suppresses missing findings",
+          "[view][import][designmd][parse][designmd040]") {
+    const auto text = read_fixture(
+        "test/fixtures/imports/designmd/alpha/designmd-0.4-compat.md");
+    REQUIRE_FALSE(text.empty());
+
+    auto parsed = parse_designmd(text);
+    REQUIRE(parsed.omitted_sections.size() == 2);
+    CHECK(parsed.omitted_sections[0].section == "spacing");
+    CHECK(parsed.omitted_sections[1].section == "rounded");
+    CHECK(parsed.omitted_sections[1].reason == "Rectangular hardware language");
+    CHECK_FALSE(has_diag_code(parsed.diagnostics, "unknown-key"));
+
+    const auto findings = lint_designmd(parsed);
+    CHECK_FALSE(std::any_of(findings.begin(), findings.end(), [](const auto& d) {
+        return d.code == "missing-sections" &&
+               (d.path == "spacing" || d.path == "rounded");
+    }));
+    CHECK(std::count_if(findings.begin(), findings.end(), [](const auto& d) {
+        return d.code == "declared-omission";
+    }) == 2);
+}
+
+TEST_CASE("omitted lint reports unknown and redundant declarations",
+          "[view][import][designmd][lint][designmd040]") {
+    auto parsed = parse_designmd(
+        "---\n"
+        "name: Omitted checks\n"
+        "omitted:\n"
+        "  - colors\n"
+        "  - animation\n"
+        "colors:\n"
+        "  primary: \"#000000\"\n"
+        "---\n");
+    const auto findings = lint_designmd(parsed);
+    CHECK(has_diag_code(findings, "redundant-omission"));
+    CHECK(has_diag_code(findings, "unknown-omission"));
+}
+
+TEST_CASE("unrecognized typography sub-properties warn without dropping source data",
+          "[view][import][designmd][lint][designmd040]") {
+    auto parsed = parse_designmd(
+        "---\n"
+        "name: Typography typo\n"
+        "typography:\n"
+        "  heading:\n"
+        "    fontFamily: Inter\n"
+        "    fontSze: 24px\n"
+        "---\n");
+    REQUIRE(has_diag_code(parsed.diagnostics, "unknown-typography-property"));
+    CHECK(parsed.ir.tokens.strings.at("typography.heading.fontSze") == "24px");
+}
+
+TEST_CASE("flat and grouped token names that serialize identically are rejected",
+          "[view][import][designmd][lint][designmd040]") {
+    auto parsed = parse_designmd(
+        "---\n"
+        "name: Collision\n"
+        "colors:\n"
+        "  brand-primary: \"#111111\"\n"
+        "  brand:\n"
+        "    primary: \"#222222\"\n"
+        "---\n");
+    REQUIRE(has_diag_code(parsed.diagnostics, "token-name-collision"));
+    const auto finding = std::find_if(
+        parsed.diagnostics.begin(), parsed.diagnostics.end(), [](const auto& d) {
+            return d.code == "token-name-collision";
+        });
+    REQUIRE(finding != parsed.diagnostics.end());
+    CHECK(finding->severity == DesignMdSeverity::error);
+}
+
+TEST_CASE("malformed token sizes and nesting are bounded",
+          "[view][import][designmd][security][designmd040]") {
+    std::string deeply_nested =
+        "---\nname: Bounded\nspacing:\n";
+    for (int i = 0; i < 22; ++i) {
+        deeply_nested += std::string(static_cast<size_t>(i + 1) * 2, ' ') +
+                         "level" + std::to_string(i) + ":\n";
+    }
+    deeply_nested += std::string(46, ' ') + "value: 8px\n---\n";
+    auto nested = parse_designmd(deeply_nested);
+    CHECK(has_diag_code(nested.diagnostics, "token-nesting-depth"));
+
+    const std::string oversized(65, '9');
+    auto long_dimension = parse_designmd(
+        "---\nname: Long\nspacing:\n  huge: \"" + oversized + "px\"\n---\n");
+    CHECK(long_dimension.ir.tokens.dimensions.count("spacing-huge") == 0);
+    CHECK(long_dimension.ir.tokens.strings.at("spacing-huge") == oversized + "px");
 }
