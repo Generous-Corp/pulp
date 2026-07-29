@@ -47,6 +47,7 @@ class QueryService;
 class ValueChannelSet;
 class MeterSource;
 class VectorSource;
+class EventSource;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -257,6 +258,12 @@ public:
 
     // Live paramchange subscriptions, excluding mid-dispatch tombstones.
     std::size_t param_subscription_count() const noexcept;
+
+    // Deliver event-channel blocks to JS handlers on the frame tick.
+    void service_event_bindings();
+
+    // Live event-channel bindings, excluding mid-dispatch tombstones.
+    std::size_t event_binding_count() const noexcept;
 
     // ── Runtime design import ─────────────────────────────────────
     //
@@ -502,6 +509,14 @@ private:
     // True while service_param_subscriptions() is dispatching into JS, so an
     // unsubscribe from inside a handler tombstones instead of erasing.
     bool in_param_dispatch_ = false;
+    struct EventBinding {
+        std::uint32_t id = 0;
+        EventSource* source = nullptr;  ///< owned by the processor's channel set
+        std::uint32_t last_publication = 0;
+    };
+    std::vector<EventBinding> event_bindings_;
+    std::uint32_t next_event_binding_id_ = 1;
+    bool in_event_dispatch_ = false;
     struct ParamGestureRoute {
         state::ParamID active_param_id = 0;
         bool active = false;

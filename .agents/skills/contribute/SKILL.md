@@ -174,6 +174,20 @@ Write what the code does; the narrative belongs in the commit message.
 git diff origin/main | grep -nE '^\+.*(//|#|\*).*(#[0-9]{3,}|[Pp]hase [0-9]|slice [0-9])'
 ```
 
+### If you touch the check script itself
+
+It runs on two very different shells: bash 3.2 on a contributor's macOS, and
+bash 5 on Linux CI. They fail in opposite directions, so passing locally proves
+little.
+
+The concrete trap: `${#arr[@]:-0}` is a **bad substitution in bash 5** but is
+accepted silently by 3.2. Arrays here are all explicitly initialized, so plain
+`${#arr[@]}` is right on both. `mapfile` is the mirror image — bash 4+ only, so
+it breaks on macOS instead.
+
+`bash -n` catches neither; both are runtime. The self-tests grep for the known
+bad form, because macOS cannot execute its way into the failure.
+
 ## 6. Structure — keep it landable
 
 Before handing off:

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-yoga-non-finite-measurement",
+  "kind": "change",
+  "created_at": "2026-07-29T08:20:19Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's design-import runtime can construct intrinsic leaf views without an explicit width. Yoga represents an undefined available dimension as NaN, and the retained UI adapter previously returned that sentinel as a measured width, producing an invalid-dimension warning and collapsing the imported view. The adapter now resolves undefined fallbacks to zero, preserves finite intrinsic and constrained measurements, and sanitizes every value before it can enter text shaping or return to Yoga. Rejected measurements include view identity in the diagnostic. The policy is isolated in a private view-core module so native and WebAssembly source lists share one implementation without adding a public framework API. This is Pulp-specific importer and plug-in UI hardening; no Vellum source or framework contract is being backported.",
+  "tests": [
+    "Forge Claude bundle execute and validate",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-layout-w3c"
+  ],
+  "disposition": "pulp-only"
+}

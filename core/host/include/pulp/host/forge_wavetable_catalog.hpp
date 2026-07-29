@@ -6,6 +6,7 @@
 // Table construction allocates and therefore happens in the node instance's
 // control-thread lifetime; prepare and process only update scalar state.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/wavetable.hpp>
 
@@ -71,6 +72,27 @@ inline CustomNodeType make_wavetable_oscillator_node() {
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {
+        "wavetable_oscillator",
+        "Wavetable Oscillator",
+        "An oscillator that morphs continuously across sine, saw, square, and triangle tables.",
+        {},
+        {{"default", kTypeId}},
+        {
+            {"frequency_hz", kFrequencyHz, "Frequency", "Hz",
+             "Oscillator frequency.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"position", kPosition, "Position", "%",
+             "Morph position across the wavetable bank.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"level_db", kLevelDb, "Level", "dB",
+             "Oscillator output level.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+        },
+    };
 }
 
 inline constexpr float worst_case_gain() {

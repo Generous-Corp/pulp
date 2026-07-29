@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-value-channel-events",
+  "kind": "change",
+  "created_at": "2026-07-29T08:24:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Event-shaped value channels carry occurrences rather than sampled state. One transferred surface moves with this capability: value_source.hpp gains ValueEvent, EventFrame, and EventSource. EventFrame uses a compile-time ceiling plus runtime count, preserving the fixed-size trivially-copyable TripleBuffer payload required for an allocation-free, non-blocking audio-thread publish path. Presence is structural: a zero-valued occurrence occupies a slot with its frame index, while no occurrence means count is zero, so authors never need a sentinel. The channel is latest-wins like the existing visualization sources and inherits PublishCounter so the UI crosses into JavaScript only for a newly published non-empty block. This is Pulp-specific plugin-UI capability work with no counterpart framework behavior to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-meter-source",
+    "pulp-test-widget-bridge-param-binding"
+  ],
+  "disposition": "pulp-only"
+}

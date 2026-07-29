@@ -72,6 +72,7 @@
 // standard, so `stage_seq` → `quantize_scale` → an oscillator needs no
 // conversion.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/modular_sequencing.hpp>
@@ -253,6 +254,17 @@ inline CustomNodeType make_stage_seq_node(Pattern pattern = default_pattern(),
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"stage_seq", "Stage Sequencer", "A clocked stage sequencer with direction, slide, and repeated-gate shaping.",
+            {}, {{"default", kTypeId}},
+            {{"run", kRun, "Run", "", "Enables clocked advancement.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"stopped", "Stopped", 0}, {"running", "Running", 1}}},
+             {"num_stages", kNumStages, "Stages", "", "Sets the active pattern length.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"direction", kDirection, "Direction", "", "Selects stage traversal.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"forward", "Forward", 0}, {"reverse", "Reverse", 1}, {"ping_pong", "Ping Pong", 2}, {"random", "Random", 3}}},
+             {"slide_ms", kSlideMs, "Slide", "ms", "Sets pitch glide between stages.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"repeat_duty_pct", kRepeatDutyPct, "Repeat Duty", "%", "Sets repeated-gate pulse width.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
 }  // namespace stage_seq
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -391,6 +403,19 @@ inline CustomNodeType make_cartesian_walk_node(Grid grid = default_grid(),
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"cartesian_walk", "Cartesian Walk", "Walks a two-dimensional value grid from independent clock inputs.",
+            {{"order", "Order", "Selects Cartesian or row-major traversal.",
+              {{"cartesian", "Cartesian", 0}, {"row_major", "Row Major", 1}}}},
+            {{"cartesian", kTypeId, {{"order", "cartesian"}}},
+             {"row_major", kRowMajorTypeId, {{"order", "row_major"}}}},
+            {{"run", kRun, "Run", "", "Enables grid traversal.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"stopped", "Stopped", 0}, {"running", "Running", 1}}},
+             {"grid_width", kGridW, "Grid Width", "cell", "Sets the active grid width.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"grid_height", kGridH, "Grid Height", "cell", "Sets the active grid height.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"x_offset", kXOffset, "X Offset", "cell", "Offsets the horizontal counter.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"y_offset", kYOffset, "Y Offset", "cell", "Offsets the vertical counter.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
 }  // namespace cartesian
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -512,6 +537,17 @@ inline CustomNodeType make_rungler_node(int reg_bits = Rung::kDefaultBits,
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"rungler", "Rungler", "A clocked shift-register sequencer producing stepped pseudo-random control voltage.",
+            {}, {{"default", kTypeId}},
+            {{"run", kRun, "Run", "", "Enables register advancement.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"stopped", "Stopped", 0}, {"running", "Running", 1}}},
+             {"dac_bits", kDacBits, "DAC Bits", "bit", "Sets the output quantization depth.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"feedback_tap", kFeedbackTap, "Feedback Tap", "", "Selects the register bit fed back into the sequence.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"range_v", kRangeV, "Range", "V", "Sets the output voltage span.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"external_data", kExternalData, "External Data", "", "Selects an external steering bit.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"internal", "Internal", 0}, {"external", "External", 1}}},
+             {"data_in", kDataIn, "Data In", "", "Sets the external steering bit.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"low", "Low", 0}, {"high", "High", 1}}}}};
 }
 
 }  // namespace rungler
@@ -636,6 +672,18 @@ inline CustomNodeType make_quantize_scale_node() {
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"quantize_scale", "Scale Quantizer", "Quantizes a control voltage to equal divisions or a pitch-class scale.",
+            {}, {{"default", kTypeId}},
+            {{"mode", kMode, "Mode", "", "Selects equal divisions or a pitch-class mask.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"equal_divisions", "Equal Divisions", 0}, {"scale_mask", "Scale Mask", 1}}},
+             {"edo_n", kEdoN, "Divisions", "", "Sets equal divisions per octave.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"scale_mask", kScaleMask, "Scale Mask", "", "Selects enabled pitch classes as a bit mask.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"root_pc", kRootPc, "Root", "", "Sets the root pitch class.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"hysteresis_cents", kHystCents, "Hysteresis", "cent", "Prevents chatter near quantization boundaries.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"reset", kReset, "Reset", "", "Clears the quantizer latch.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"idle", "Idle", 0}, {"reset", "Reset", 1}}}}};
+}
+
 }  // namespace quantize
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -706,6 +754,13 @@ inline CustomNodeType make_gate_logic_node() {
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"gate_logic", "Gate Logic", "Combines two gate signals with selectable Boolean logic.",
+            {}, {{"default", kTypeId}},
+            {{"operation", kOp, "Operation", "", "Selects the Boolean gate operation.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"and", "AND", 0}, {"or", "OR", 1}, {"xor", "XOR", 2}, {"nand", "NAND", 3}, {"nor", "NOR", 4}, {"xnor", "XNOR", 5}}}}};
 }
 
 }  // namespace gate_logic
@@ -786,6 +841,13 @@ inline CustomNodeType make_prob_gate_node(std::uint32_t seed = Prob::kProbSeed) 
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"prob_gate", "Probability Gate", "Passes incoming gates according to a deterministic probability decision.",
+            {}, {{"default", kTypeId}},
+            {{"probability_pct", kProbabilityPct, "Probability", "%", "Sets the chance that each gate passes.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"reset", kReset, "Reset", "", "Clears the gate latch and random sequence.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"idle", "Idle", 0}, {"reset", "Reset", 1}}}}};
 }
 
 }  // namespace prob_gate

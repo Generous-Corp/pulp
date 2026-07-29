@@ -70,10 +70,65 @@ set(_configure_args
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
     "-DCMAKE_BUILD_TYPE=${_config}")
 
+# An installed SDK produced under a sanitizer contains instrumented static
+# libraries. Its smoke consumer must use the same compile/link flags or the
+# first executable fails to resolve the sanitizer runtime before the staging
+# behavior can run.
+foreach(_flag_var CXX_FLAGS C_FLAGS OBJCXX_FLAGS EXE_LINKER_FLAGS SHARED_LINKER_FLAGS)
+    if(DEFINED PULP_PARENT_${_flag_var} AND NOT PULP_PARENT_${_flag_var} STREQUAL "")
+        list(APPEND _configure_args
+            "-DCMAKE_${_flag_var}=${PULP_PARENT_${_flag_var}}")
+    endif()
+endforeach()
+
+# The relocatability checker deliberately keeps compiler sanitizer runtimes
+# strict for shipping bundles and softens them only for explicitly marked
+# test-only sanitizer builds. Raw CMAKE_*_FLAGS carry the instrumentation into
+# this nested consumer, but not that identity, so propagate it when (and only
+# when) the inherited flags actually request a sanitizer.
+set(_parent_instrumentation_flags
+    "${PULP_PARENT_CXX_FLAGS} ${PULP_PARENT_C_FLAGS} "
+    "${PULP_PARENT_OBJCXX_FLAGS} ${PULP_PARENT_EXE_LINKER_FLAGS} "
+    "${PULP_PARENT_SHARED_LINKER_FLAGS}")
+if(_parent_instrumentation_flags MATCHES "(^|[ ;])-fsanitize=([^ ;]+)")
+    list(APPEND _configure_args "-DPULP_SANITIZER=${CMAKE_MATCH_2}")
+endif()
+
 # Match the sibling installed-SDK fixtures: a Debug producer (the sanitizer
 # lanes) is an acknowledged configuration, not a failure.
 if(_config_lower STREQUAL "debug")
     list(APPEND _configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
+
+# The SDK under test comes from the parent build. When that producer is
+# instrumented, its installed static libraries retain references to the
+# matching runtime. Propagate the producer flags into this real external
+# consumer just as the Timeline SDK fixture does; otherwise the proof fails at
+# link time before it can exercise runtime-sidecar staging.
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+set(_consumer_linker_flags "${PULP_PARENT_EXE_LINKER_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags
+        " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    string(APPEND _consumer_linker_flags
+        " ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
+
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _configure_args
+        "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
+if(_consumer_cxx_flags)
+    list(APPEND _configure_args
+        "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
+endif()
+if(_consumer_linker_flags)
+    list(APPEND _configure_args
+        "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_linker_flags}")
 endif()
 
 execute_process(

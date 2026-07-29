@@ -145,6 +145,34 @@ Theme ir_tokens_to_theme(const IRTokens& tokens) {
     Theme theme;
     for (auto& [name, hex] : tokens.colors)
         theme.colors[name] = parse_hex_color_str(hex);
+
+    // Derive the widget tokens a design does not name for itself.
+    //
+    // Tokens are copied across by NAME, so a design that says `primary` has no
+    // `knob.arc` — and Knob::paint resolves `knob.arc`, falling back to a
+    // built-in blue. The result: an imported design's accent reached its
+    // panels and text but never its controls, so every knob wore the same
+    // colour whatever the design said. theme_presets.cpp already states the
+    // semantic → widget mapping for built-in themes; an imported design
+    // deserves the same one rather than a second, silently different answer.
+    //
+    // Only fills what is ABSENT: a design that names knob.arc explicitly keeps
+    // it, and this never overwrites a deliberate choice.
+    const auto derive = [&theme](const char* widget, const char* semantic) {
+        if (theme.colors.count(widget)) return;
+        auto it = theme.colors.find(semantic);
+        if (it != theme.colors.end()) theme.colors[widget] = it->second;
+    };
+    derive("knob.arc", "primary");
+    derive("knob.arc.bg", "muted");
+    derive("knob.thumb", "foreground");
+    derive("focus.ring", "primary");
+    // Material-style palettes name these differently; accept either spelling
+    // rather than forcing a design to know Pulp's internal vocabulary.
+    derive("knob.arc", "accent");
+    derive("knob.arc.bg", "outline");
+    derive("knob.thumb", "on-surface");
+
     theme.dimensions = tokens.dimensions;
     theme.strings = tokens.strings;
     return theme;

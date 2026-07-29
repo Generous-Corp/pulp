@@ -550,11 +550,21 @@
     },
     "timeline": {
       "paths": [
+        "core/interchange/**",
+        "core/dawproject/**",
+        "core/smf/**",
         "core/timeline/**",
         "test/test_timeline_*.cpp",
+        "test/test_interchange_*.cpp",
+        "test/test_dawproject_*.cpp",
+        "test/test_smf_*.cpp",
         "test/fixtures/timeline/**",
         "test/timeline_command_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/cmake/test_timeline_sdk_consumer.cmake",
         "test/cmake/sampler_runtime_tests.cmake",
+        "tools/timeline/**",
+        "tools/mcp/mcp_timeline_tools.cpp",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
         ".agents/skills/timeline/**"
       ]

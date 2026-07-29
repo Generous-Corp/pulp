@@ -278,10 +278,21 @@ TEST_CASE("Forge modulation: every node in the family has a distinct type id",
 TEST_CASE("Forge modulation: flanger, Leslie and scanner factories expose canonical contracts",
           "[host][baked][forge][forge-modulation][catalog]") {
     auto flanger = mod::flanger::make_flanger_node();
+    const auto barberpole =
+        mod::flanger::make_flanger_node(pulp::signal::FlangerMode::barberpole);
     auto leslie = mod::leslie::make_leslie_node();
     auto scanner = mod::leslie::make_scanner_vibrato_node();
     REQUIRE(flanger.type_id == mod::flanger::kTypeId);
-    REQUIRE(flanger.baked_params.size() == 10);
+    REQUIRE(flanger.baked_params.size() == 9);
+    REQUIRE(barberpole.baked_params.size() == 10);
+    REQUIRE(std::none_of(flanger.baked_params.begin(), flanger.baked_params.end(),
+                         [](const auto& row) {
+                             return row.id == mod::flanger::kBarberpoleHz;
+                         }));
+    REQUIRE(std::any_of(barberpole.baked_params.begin(), barberpole.baked_params.end(),
+                        [](const auto& row) {
+                            return row.id == mod::flanger::kBarberpoleHz;
+                        }));
     REQUIRE(flanger.num_input_ports == 2);
     REQUIRE(flanger.num_output_ports == 2);
     REQUIRE(leslie.type_id == mod::leslie::kTypeId);

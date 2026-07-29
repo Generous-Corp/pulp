@@ -466,13 +466,16 @@ if (!imported)
 
 The importer rejects unsupported or unresolved input as a whole. Review its
 bounded subset in the [SDK guide](timeline-sdk.md#optional-dawproject-importer).
-For MIDI-only interchange, link `Pulp::smf-interop` and use `import_smf()` or
-`export_smf()` with explicit unsupported-event and tick-rounding policies.
+For MIDI-only raw codec access, link `Pulp::smf-interop` and use `import_smf()`
+or `export_smf()` with explicit unsupported-event and tick-rounding policies.
+For project-wide census and loss consent, link `Pulp::smf-interchange` and pass
+`smf::writer()` to `run_export()`.
 
 Before any format writer runs, produce and show its loss plan:
 
 ```cpp
 #include <pulp/interchange/export_plan.hpp>
+#include <pulp/dawproject/dawproject_export.hpp>
 
 const auto plan = interchange::plan_export(
     project, interchange::Format::DawProject);
@@ -482,14 +485,15 @@ for (const auto& loss : plan.losses().entries())
 
 interchange::ExportOptions options;
 options.accepted_losses = user_approved_concepts;
-auto artifacts = interchange::run_export(plan, options, selected_writer);
+auto artifacts = interchange::run_export(plan, options, dawproject::writer());
 ```
 
 Consent is per concept. There is no blanket force option. `run_export()` refuses
-before calling the writer when any required loss is unaccepted. The built-in
-DAWproject capability entry declares no writer, so invoking `run_export()`
-without an application-supplied writer returns `NoWriterRegistered`. The plan
-remains useful for inspecting what such a writer would preserve or lose.
+before calling the writer when any required loss is unaccepted. The plan owns
+the immutable project snapshot the built-in writer serializes, so consent cannot
+be measured on one revision and applied to another. On success the central
+runner returns `project.xml` plus the versioned, reserved
+`pulp-loss-manifest.json` artifact.
 
 ## Apply the same edit through CLI or MCP
 

@@ -834,11 +834,11 @@ public:
     virtual std::vector<NoteName> note_names() const { return {}; }
 
     /// Named value channels this processor publishes for its UI — gain
-    /// reduction, an envelope follower, a spectrum — i.e. everything a meter
-    /// wants to show that is NOT a parameter. Returning `nullptr` (the default)
-    /// means the processor declares none, and nothing in the framework runs on
-    /// its behalf: the cost of not using this is structurally zero, not a
-    /// per-block branch.
+    /// reduction, an envelope follower, a spectrum, or bounded trigger
+    /// occurrences — i.e. UI data that is NOT a parameter. Returning `nullptr`
+    /// (the default) means the processor declares none, and nothing in the
+    /// framework runs on its behalf: the cost of not using this is structurally
+    /// zero, not a per-block branch.
     ///
     /// Own the set as a subclass member and declare its channels in your
     /// constructor, before audio starts. The returned pointer must outlive

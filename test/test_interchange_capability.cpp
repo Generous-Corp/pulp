@@ -13,6 +13,10 @@ TEST_CASE("concept vocabulary is a closed, self-describing set", "[interchange]"
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipCrossfade) == 10);
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ContextGroove) == 42);
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipNoteModifier) == 43);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipEmpty) == 44);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::TempoRamp) == 45);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipNoteVelocityQuantized) == 46);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::TempoValueQuantized) == 47);
 
     SECTION("Unknown is the zero value so an unclassified construct refuses by default") {
         REQUIRE(static_cast<std::size_t>(Concept::Unknown) == 0);
@@ -37,6 +41,43 @@ TEST_CASE("concept vocabulary is a closed, self-describing set", "[interchange]"
         REQUIRE(concept_from_id("clip.telepathy") == Concept::Unknown);
         REQUIRE(concept_from_id("") == Concept::Unknown);
     }
+}
+
+TEST_CASE("the SMF table declares its bounded reader and writer", "[interchange][smf]") {
+    STATIC_REQUIRE(static_cast<std::uint8_t>(Format::DawProject) == 0);
+    STATIC_REQUIRE(static_cast<std::uint8_t>(Format::Smf) == 1);
+    STATIC_REQUIRE(kFormatCount == 2);
+
+    Format resolved{};
+    REQUIRE(format_from_id("smf", resolved));
+    REQUIRE(resolved == Format::Smf);
+    REQUIRE(format_display_name(Format::Smf) == "Standard MIDI File");
+    REQUIRE(format_has_writer(Format::Smf));
+
+    for (Concept concept_value : {Concept::TrackFlat, Concept::ClipNote})
+        REQUIRE(import_capability(Format::Smf, concept_value).level == ImportLevel::Full);
+    for (Concept concept_value : {Concept::ClipMusical, Concept::TempoSingle,
+                                  Concept::TempoMap, Concept::MeterSingle,
+                                  Concept::MeterMap})
+        REQUIRE(import_capability(Format::Smf, concept_value).level ==
+                ImportLevel::Partial);
+
+    for (Concept concept_value :
+         {Concept::TrackFlat, Concept::ClipMusical, Concept::ClipNote,
+          Concept::TempoSingle, Concept::TempoMap, Concept::MeterSingle,
+          Concept::MeterMap})
+        REQUIRE(export_capability(Format::Smf, concept_value).level == ExportLevel::Full);
+    REQUIRE(export_capability(Format::Smf, Concept::ClipMedia).level == ExportLevel::Drop);
+    REQUIRE(export_capability(Format::Smf, Concept::ClipNoteModifier).level ==
+            ExportLevel::Degrade);
+    REQUIRE(export_capability(Format::Smf, Concept::ClipNoteModifier).degrade_to ==
+            Concept::ClipNote);
+    REQUIRE(export_capability(Format::Smf, Concept::TempoRamp).level ==
+            ExportLevel::Degrade);
+    REQUIRE(export_capability(Format::Smf, Concept::TempoRamp).degrade_to ==
+            Concept::TempoMap);
+    REQUIRE(export_capability(Format::Smf, Concept::ClipNoteVelocityQuantized).level ==
+            ExportLevel::Degrade);
 }
 
 TEST_CASE("the capability world is closed: undeclared means refused", "[interchange]") {
@@ -77,6 +118,8 @@ TEST_CASE("the capability world is closed: undeclared means refused", "[intercha
         REQUIRE_FALSE(export_is_lossless(Format::DawProject, Concept::Marker));
         REQUIRE(export_capability(Format::DawProject, Concept::Marker).level == ExportLevel::Drop);
         REQUIRE_FALSE(export_capability(Format::DawProject, Concept::Marker).loss.empty());
+        REQUIRE(export_capability(Format::DawProject, Concept::AssetEmbeddedMedia).level ==
+                ExportLevel::Drop);
     }
 }
 
