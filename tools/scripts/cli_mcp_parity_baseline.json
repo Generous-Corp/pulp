@@ -103,6 +103,7 @@
     "pulp_timeline_explain": "Sub-tool of `pulp seq` \u2014 structured playback-program explanation, no top-level CLI peer",
     "pulp_timeline_project_open": "Sub-tool of `pulp seq` \u2014 canonical project loading, no top-level CLI peer",
     "pulp_timeline_render": "Timeline offline-render operation under the parent `pulp render` command",
-    "pulp_timeline_validate": "Sub-tool of `pulp seq` \u2014 structured project validation, no top-level CLI peer"
+    "pulp_timeline_validate": "Sub-tool of `pulp seq` \u2014 structured project validation, no top-level CLI peer",
+    "pulp_inspect_value_channels": "Sub-tool of `pulp inspect` \u2014 State.getValueChannels over inspector socket"
   }
 }

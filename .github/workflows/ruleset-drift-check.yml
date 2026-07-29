@@ -46,13 +46,9 @@ concurrency:
 permissions:
   contents: read         # read checked-in ruleset JSON
   pull-requests: write   # post/update the drift comment on PRs
-  # `administration` is NOT a valid workflow permission scope — it exists only
-  # on fine-grained PATs, so declaring it here granted nothing and actionlint
-  # rejects it. Reading rulesets and classic branch protection therefore needs a
-  # token that already carries admin:read: set GH_TOKEN to a PAT or
-  # RELEASE_BOT_TOKEN. With the default GITHUB_TOKEN both live surfaces below
-  # return 403, which is reported as "unreadable", never silently as "no
-  # contexts required".
+  # GitHub Actions does not expose an `administration` permission key. If either
+  # live surface below returns 403, the workflow reports it as "unreadable",
+  # never silently as "no contexts required".
 
 jobs:
   diff:

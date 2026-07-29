@@ -331,6 +331,21 @@ the tool takes arguments:
   `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
   in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
   and the `engine` skill's interrupt section.
+- **A read-only inspector tool that describes something the scripted-UI bridge
+  ALSO describes must share one serializer.** `State.getValueChannels` and the
+  bridge's `listValueChannels()` both emit `{name, unit, shape, neutral}` and
+  both call `core/view/value_channel_json` — the bridge's hand-rolled copy was
+  deleted when the inspector gained the method. Two implementations drift the
+  day either side gains a field, and a UI built against one shape then silently
+  mis-reads the other; the same reason `param_json` backs both
+  `getParamMetadata` and `State.getParameters`. Assert the two payloads are
+  byte-identical (and not vacuously equal on two empty results) in
+  `test_inspector_domains.cpp`.
+- **An inspector-proxy tool that reads an optional processor surface returns the
+  EMPTY value, not an error, when the processor declares none** — e.g.
+  `State.getValueChannels` yields `[]` for a processor that never overrode
+  `value_channels()`, which is most of them. An error there would make callers
+  special-case the common case.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
