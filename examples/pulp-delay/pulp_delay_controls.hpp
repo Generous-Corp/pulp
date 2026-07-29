@@ -1,0 +1,125 @@
+#pragma once
+
+#include "pulp_delay_ui_tokens.hpp"
+
+#include <pulp/state/listener_token.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/widgets.hpp>
+
+#include <string>
+#include <vector>
+
+namespace pulp::examples::delay::ui {
+
+std::string format_parameter_value(const state::StateStore& store,
+                                   state::ParamID id,
+                                   float normalized);
+
+class DelayParameterControl {
+  public:
+    virtual ~DelayParameterControl() = default;
+    virtual state::ParamID parameter_id() const noexcept = 0;
+    virtual float normalized_value() const noexcept = 0;
+};
+
+class DelayKnob final : public view::Knob, public DelayParameterControl {
+  public:
+    DelayKnob(state::StateStore& store, state::ParamID id, std::string caption);
+
+    state::ParamID parameter_id() const noexcept override { return id_; }
+    float normalized_value() const noexcept override { return value(); }
+    float pointer_angle() const noexcept;
+    std::string display_text() const;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_focus_changed(bool gained) override;
+
+  private:
+    state::StateStore* store_ = nullptr;
+    state::ParamID id_ = 0;
+    std::string caption_;
+};
+
+class DelayFader : public view::Fader, public DelayParameterControl {
+  public:
+    DelayFader(state::StateStore& store, state::ParamID id, std::string caption);
+
+    state::ParamID parameter_id() const noexcept override { return id_; }
+    float normalized_value() const noexcept override { return value(); }
+    std::string display_text() const;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_focus_changed(bool gained) override;
+
+  protected:
+    state::StateStore* store_ = nullptr;
+
+  private:
+    state::ParamID id_ = 0;
+    std::string caption_;
+};
+
+class DelayTapField final : public DelayFader {
+  public:
+    DelayTapField(state::StateStore& store,
+                  state::ParamID time_id,
+                  state::ParamID feedback_id);
+
+    void paint(canvas::Canvas& canvas) override;
+
+  private:
+    state::ParamID feedback_id_ = 0;
+    state::ListenerToken feedback_listener_;
+};
+
+class DelayChoice final : public view::View, public DelayParameterControl {
+  public:
+    DelayChoice(state::StateStore& store,
+                state::ParamID id,
+                std::string caption,
+                std::vector<std::string> labels);
+
+    state::ParamID parameter_id() const noexcept override { return id_; }
+    float normalized_value() const noexcept override;
+    int selected_index() const noexcept;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(view::Point position) override;
+    void on_focus_changed(bool gained) override;
+    bool wants_mouse_input() const override { return true; }
+    void layout_children() override {}
+
+  private:
+    void sync_access_value();
+
+    state::StateStore* store_ = nullptr;
+    state::ParamID id_ = 0;
+    std::string caption_;
+    std::vector<std::string> labels_;
+    state::ListenerToken listener_;
+};
+
+class DelayActionCard final : public view::ToggleButton,
+                              public DelayParameterControl {
+  public:
+    DelayActionCard(state::ParamID id,
+                    std::string caption,
+                    std::string subtitle,
+                    std::string glyph,
+                    bool compact = false);
+
+    state::ParamID parameter_id() const noexcept override { return id_; }
+    float normalized_value() const noexcept override { return is_on() ? 1.0f : 0.0f; }
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_focus_changed(bool gained) override;
+
+  private:
+    state::ParamID id_ = 0;
+    std::string caption_;
+    std::string subtitle_;
+    std::string glyph_;
+    bool compact_ = false;
+};
+
+} // namespace pulp::examples::delay::ui

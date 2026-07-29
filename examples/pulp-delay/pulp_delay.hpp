@@ -14,6 +14,7 @@ class PulpDelayProcessor final : public format::Processor {
   public:
     format::PluginDescriptor descriptor() const override;
     void define_parameters(state::StateStore& store) override;
+    std::unique_ptr<view::View> create_view() override;
     void prepare(const format::PrepareContext& context) override;
     void release() override;
 
