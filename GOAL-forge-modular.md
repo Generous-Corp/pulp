@@ -252,3 +252,20 @@ because the obvious test is a **false green**: the `test_clap_entry` fixture's
 stepped parameter is discrete, so it is already quantized upstream and the test
 passes with or against the change. A real test needs a bypass parameter in the
 fixture. Shared-adapter surface, so it needs that test before it lands.
+
+## Validation state (after the bundled-UI rebuild)
+
+The binaries changed when `ui/` moved into the bundles, so earlier results
+expired and were re-run:
+
+| Format     | Result |
+|------------|--------|
+| Standalone | Runs; renders identically on a second machine |
+| AU         | `AU VALIDATION SUCCEEDED` |
+| VST3       | Loads; `bundleEntry` runs and `GetPluginFactory` returns (`tools/vst3_load_probe.c`) |
+| CLAP       | 33 pass, **2 fail** — the fixed-seed artifact above, not a defect |
+
+`pluginval` is not installed here, so the VST3 check is a scan-time load test
+rather than a full validation. It catches a missing binary, an unresolved
+symbol, and a bundle whose entry point never ran, which are the failures that
+break a host scan.
