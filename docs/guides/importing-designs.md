@@ -257,17 +257,24 @@ for the full reference.
 
 ### Claude Design
 
-Claude Design exports are standalone HTML files with an inline bundler
-script tag. Pulp detects them via the `__bundler/template` script type
-and parses the loader shell:
+Claude Design can export project folders, `.dc.html` design components, and
+standalone HTML bundles. Pass any of those HTML files directly; Pulp detects
+the shape and evaluates the runnable page in isolated Chromium:
 
 ```bash
-pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --validate --screenshot-backend skia
 ```
 
-The `classnames.json` artifact maps every plain-classname `<style>`
-rule to its camelCase CSS properties, for downstream merge into
-inline styles. See [`reference/cli.md#import-design`](../reference/cli.md#import-design).
+This produces a pixel-exact default frame in portable DesignIR, a browser
+reference image, a Skia render, a visual diff, computed CSS tokens, and
+semantic evidence. `--from claude` remains accepted for compatibility but is
+not required. External browser requests remain denied unless the reviewed
+source requires an explicit `--allow-browser-network` retry.
+
+The older static/QuickJS parser remains available through `--offline` for
+diagnostics and environments without Chromium. Its optional
+`classnames.json` sidecar maps plain-classname rules for that legacy path; it
+is not the authoritative layout evaluator.
 
 ## Audio Widget Detection
 
