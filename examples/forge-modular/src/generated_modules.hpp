@@ -826,6 +826,53 @@ inline void place_MORPHLFO(rack::app::ModuleWidget* w, rack::engine::Module* m) 
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(9.000f, 116.000f)), m, MORPHLFOLayout::LFO_LIGHT));
 }
 
+// ── OFFSETLY (6HP) ────────────────────────────────────
+struct OFFSETLYLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { GAIN_PARAM, OFFSET_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, CV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { POS_LIGHT = 0, NEG_LIGHT = 1, LIGHTS_LEN = 2 };
+};
+
+inline void config_OFFSETLY(rack::engine::Module* m) {
+    m->config(OFFSETLYLayout::PARAMS_LEN, OFFSETLYLayout::INPUTS_LEN, OFFSETLYLayout::OUTPUTS_LEN, OFFSETLYLayout::LIGHTS_LEN);
+    m->configParam(OFFSETLYLayout::GAIN_PARAM, -1.0f, 1.0f, 0.0f, "Gain", "x", 0.0f, 1.0f);
+    m->configParam(OFFSETLYLayout::OFFSET_PARAM, -5.0f, 5.0f, 0.0f, "Offset", " V", 0.0f, 1.0f);
+    m->configInput(OFFSETLYLayout::IN_INPUT, "Signal in (normalled to 10.0V)");
+    m->configInput(OFFSETLYLayout::CV_INPUT, "Gain CV");
+    m->configOutput(OFFSETLYLayout::OUT_OUTPUT, "Signal out");
+    m->configLight(OFFSETLYLayout::POS_LIGHT, "Positive output");
+    m->configLight(OFFSETLYLayout::NEG_LIGHT, "Negative output");
+}
+
+/// Channel count for OFFSETLY, from the manifest's declared source.
+inline int channels_OFFSETLY(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[OFFSETLYLayout::IN_INPUT].getChannels());
+}
+
+/// IN_INPUT with its declared normal applied.
+inline float read_OFFSETLY_IN_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[OFFSETLYLayout::IN_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+inline void place_OFFSETLY(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 30.000f)), m, OFFSETLYLayout::GAIN_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 52.000f)), m, OFFSETLYLayout::OFFSET_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 88.000f)), m, OFFSETLYLayout::IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 88.000f)), m, OFFSETLYLayout::CV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.240f, 108.000f)), m, OFFSETLYLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(9.000f, 70.000f)), m, OFFSETLYLayout::POS_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(21.500f, 70.000f)), m, OFFSETLYLayout::NEG_LIGHT));
+}
+
 // ── SANDH (4HP) ───────────────────────────────────────
 struct SANDHLayout {
     static constexpr int kHp = 4;
