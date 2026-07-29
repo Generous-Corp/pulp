@@ -2493,6 +2493,10 @@ int main(int argc, char* argv[]) {
         render_width = capture->render_width;
         render_height = capture->render_height;
         reference_image = std::move(capture->reference_image);
+        // Browser-backed imports always validate the portable capture against
+        // Chromium before adoption, even without --validate. For this lane the
+        // flag only requests convenience proof copies beside the output, so a
+        // second generated-JS validation pass would be redundant and divergent.
         validate = false;
         similarity_failed = capture->similarity_failed;
         browser_capture_ir = std::move(capture->design_ir);

@@ -3233,7 +3233,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Chromium captures the settled visual at DPR 2, CSS custom-property tokens,
   semantic candidates, and provenance. The portable DesignIR uses the captured
   visual as a `faithful_capture` backing and Pulp immediately renders it through
-  Skia for browser-vs-DesignIR A/B validation. Authored controls and knob art
+  Skia for browser-vs-DesignIR A/B validation. That proof is a required adoption
+  gate even without `--validate`; the flag additionally publishes convenient
+  render/diff copies beside the primary output. Authored controls and knob art
   remain pixels; never replace them with Pulp's silver/vector fallback.
 - External browser requests are denied by default. If the export depends on a
   CDN runtime and the health gate reports `capture-source-unresolved`, review

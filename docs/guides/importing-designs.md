@@ -37,9 +37,11 @@ The CLI detects the export shape and uses one path: isolated Chromium evaluates
 the real DOM, CSS, fonts, canvas, SVG, and JavaScript; Pulp records a DPR-2
 reference plus CSS custom-property tokens and semantic evidence; DesignIR keeps
 that evaluated visual as a portable `faithful_capture`; and Skia immediately
-renders it for A/B comparison. The capture, render, and diff images are written
-beside the requested output. Authored controls—including custom knob artwork—
-remain authored pixels and are not replaced by Pulp widget skins.
+renders it for A/B comparison. That validation is required even without
+`--validate`, and its proof remains in the durable browser-capture evidence
+directory. Pass `--validate` to additionally publish convenient render and diff
+copies beside the requested output. Authored controls—including custom knob
+artwork—remain authored pixels and are not replaced by Pulp widget skins.
 
 The default artifact is deliberately a **pixel-exact static frame**. Semantic
 evidence is captured for future reconstruction, but browser interactions do not
@@ -276,9 +278,11 @@ pulp import-design --file design.html --validate --screenshot-backend skia
 
 This produces a pixel-exact default frame in portable DesignIR, a browser
 reference image, a Skia render, a visual diff, computed CSS tokens, and
-semantic evidence. `--from claude` remains accepted for compatibility but is
-not required. External browser requests remain denied unless the reviewed
-source requires an explicit `--allow-browser-network` retry.
+semantic evidence. Browser validation itself is automatic; `--validate` in the
+example requests convenient render/diff copies beside the primary output.
+`--from claude` remains accepted for compatibility but is not required.
+External browser requests remain denied unless the reviewed source requires an
+explicit `--allow-browser-network` retry.
 
 The older static/QuickJS parser remains available through `--offline` for
 diagnostics and environments without Chromium. Its optional

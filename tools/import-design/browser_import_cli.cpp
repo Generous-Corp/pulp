@@ -76,6 +76,8 @@ bool validate_publication_destinations(
     const fs::path& rendered,
     const fs::path& diff,
     std::string& error) {
+    const bool has_rendered = !rendered.empty();
+    const bool has_diff = !diff.empty();
     const auto render = normalized_destination(rendered);
     const auto diff_path = normalized_destination(diff);
     std::vector<fs::path> protected_paths = request.reserved_output_paths;
@@ -89,7 +91,8 @@ bool validate_publication_destinations(
                 if (protected_path.empty()) return false;
                 const auto normalized =
                     normalized_destination(protected_path);
-                return render == normalized || diff_path == normalized ||
+                return (has_rendered && render == normalized) ||
+                       (has_diff && diff_path == normalized) ||
                        (!durable_capture.empty() &&
                         path_contains(durable_capture, normalized));
             })) {
@@ -98,13 +101,13 @@ bool validate_publication_destinations(
                 "contain one";
         return false;
     }
-    if (render == diff_path) {
+    if (has_rendered && has_diff && render == diff_path) {
         error = "browser render and diff destinations must be distinct";
         return false;
     }
     if (!durable_capture.empty() &&
-        (path_contains(durable_capture, render) ||
-         path_contains(durable_capture, diff_path))) {
+        ((has_rendered && path_contains(durable_capture, render)) ||
+         (has_diff && path_contains(durable_capture, diff_path)))) {
         error = "browser validation artifact destination must not be inside "
                 "the durable capture directory";
         return false;
@@ -132,8 +135,10 @@ bool validate_localized_asset_destinations(
         auto asset_path = fs::path(*asset.local_path);
         if (asset_path.is_relative()) asset_path = output_dir / asset_path;
         const auto normalized_asset = normalized_destination(asset_path);
-        if (normalized_render == normalized_asset ||
-            normalized_diff == normalized_asset) {
+        if ((!rendered.empty() &&
+             normalized_render == normalized_asset) ||
+            (!diff.empty() &&
+             normalized_diff == normalized_asset)) {
             error = "browser validation artifact destination collides with "
                     "a localized design asset";
             return false;
@@ -524,6 +529,9 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     int render_width = request.initial_width;
     int render_height = request.initial_height;
     std::string reference_image = request.reference_image;
+    const bool publish_validation_artifacts =
+        request.validate || !request.reference_image.empty() ||
+        !request.diff_output.empty();
     bool similarity_failed = false;
     pulp::view::DesignIR design_ir;
     fs::path transient_capture;
@@ -650,8 +658,14 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         : request.diff_output;
     std::string destination_error;
     if (!validate_publication_destinations(
-            request, durable_capture, published_rendered_path,
-            published_diff_path, destination_error)) {
+            request, durable_capture,
+            publish_validation_artifacts
+                ? fs::path(published_rendered_path)
+                : fs::path{},
+            publish_validation_artifacts
+                ? fs::path(published_diff_path)
+                : fs::path{},
+            destination_error)) {
         std::cerr << "Error: " << destination_error << "\n";
         return BrowserImportFailure{2};
     }
@@ -662,7 +676,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         return BrowserImportFailure{2};
     }
     std::vector<ArtifactPublication> published_artifacts;
-    if (!request.dry_run) {
+    if (!request.dry_run && publish_validation_artifacts) {
         published_artifacts.push_back(
             {rendered_path, published_rendered_path, true});
         published_artifacts.push_back(
@@ -700,8 +714,14 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             return BrowserImportFailure{1};
         }
         if (!validate_localized_asset_destinations(
-                request, design_ir, published_rendered_path,
-                published_diff_path, localization_error)) {
+                request, design_ir,
+                publish_validation_artifacts
+                    ? fs::path(published_rendered_path)
+                    : fs::path{},
+                publish_validation_artifacts
+                    ? fs::path(published_diff_path)
+                    : fs::path{},
+                localization_error)) {
             std::cerr << "Error: " << localization_error << "\n";
             return BrowserImportFailure{2};
         }
@@ -723,9 +743,27 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         }
     }
 
+    const auto retained_proof_root =
+        request.dry_run
+            ? validation_staging
+            : durable_capture / "validation-proof";
+    const auto reported_rendered_path =
+        !request.dry_run && publish_validation_artifacts
+            ? fs::path(published_rendered_path)
+            : retained_proof_root / "render/render.png";
+    const auto reported_diff_path =
+        !request.dry_run && publish_validation_artifacts
+            ? fs::path(published_diff_path)
+            : retained_proof_root / "diff/diff.png";
+    const auto proof_note =
+        request.dry_run
+            ? " (transient)"
+            : publish_validation_artifacts
+                ? ""
+                : " (required capture evidence)";
     std::cout << "Rendered DesignIR → "
-              << (request.dry_run ? rendered_path : published_rendered_path)
-              << (request.dry_run ? " (transient)" : "")
+              << reported_rendered_path.string()
+              << proof_note
               << " ("
               << render_width << "x" << render_height << ")\n";
     std::cout << "Similarity: "
@@ -736,8 +774,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     std::cout << "Validation: "
               << (comparison.passes ? "PASS" : "NEEDS REVIEW") << "\n";
     std::cout << "Diff image → "
-              << (request.dry_run ? diff_path : published_diff_path)
-              << (request.dry_run ? " (transient)" : "") << "\n";
+              << reported_diff_path.string()
+              << proof_note << "\n";
     if (!comparison.passes && request.fail_below_percent >= 0.0f) {
         similarity_failed = true;
     }

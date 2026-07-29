@@ -14,7 +14,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <regex>
+#include <set>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #  include <process.h>
@@ -69,6 +72,60 @@ void write_complete_browser_capture_runtime(
     }
 }
 
+std::vector<std::string> browser_capture_runtime_manifest() {
+    const auto manifest =
+        fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
+        "browser_capture" / "runtime_manifest.txt";
+    std::ifstream input(manifest);
+    std::vector<std::string> names;
+    std::string line;
+    while (std::getline(input, line)) {
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+        const auto last = line.find_last_not_of(" \t\r");
+        names.push_back(line.substr(first, last - first + 1));
+    }
+    return names;
+}
+
+void copy_source_browser_capture_runtime(const fs::path& runtime) {
+    const auto source =
+        fs::path{PULP_REPO_ROOT} / "tools" / "import-design" /
+        "browser_capture";
+    fs::create_directories(runtime);
+    for (const auto filename : ui::browser_capture_runtime_files) {
+        fs::copy_file(
+            source / filename, runtime / filename,
+            fs::copy_options::overwrite_existing);
+    }
+}
+
+std::string read_file(const fs::path& path);
+
+std::set<fs::path> unresolved_relative_runtime_modules(
+    const fs::path& runtime) {
+    static const std::regex relative_module{
+        R"pulp(["'](\./[^"']+\.mjs)["'])pulp"};
+    std::set<fs::path> unresolved;
+    for (const auto& entry : fs::recursive_directory_iterator(runtime)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".mjs")
+            continue;
+        const auto source = read_file(entry.path());
+        for (std::sregex_iterator it(
+                 source.begin(), source.end(), relative_module), end;
+             it != end; ++it) {
+            const auto dependency =
+                (entry.path().parent_path() / (*it)[1].str())
+                    .lexically_normal();
+            if (!fs::is_regular_file(dependency)) {
+                unresolved.insert(
+                    dependency.lexically_relative(runtime));
+            }
+        }
+    }
+    return unresolved;
+}
+
 std::string read_file(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in),
@@ -96,6 +153,44 @@ bool has_import_design_transaction(const fs::path& install_dir) {
 }
 
 }  // namespace
+
+TEST_CASE("upgrade runtime list matches the canonical browser manifest",
+          "[cli][upgrade][import-design][manifest]") {
+    const auto manifest = browser_capture_runtime_manifest();
+    const std::vector<std::string> cpp_runtime_files{
+        ui::browser_capture_runtime_files.begin(),
+        ui::browser_capture_runtime_files.end()};
+
+    REQUIRE(manifest.size() == 10);
+    CHECK(cpp_runtime_files == manifest);
+}
+
+TEST_CASE("upgrade-installed browser runtime resolves its relative module graph",
+          "[cli][upgrade][import-design][manifest]") {
+    auto incoming = make_tmpdir("browser-runtime-graph-incoming");
+    auto install = make_tmpdir("browser-runtime-graph-install");
+    const auto import_source =
+        incoming / ui::import_design_binary_name();
+    const auto runtime_source =
+        incoming / ui::browser_capture_runtime_name();
+    write_file(import_source, "import-helper");
+    copy_source_browser_capture_runtime(runtime_source);
+
+    ui::install_import_design_protocol_runtime(
+        install, import_source, runtime_source);
+
+    const auto installed_runtime =
+        install / ui::browser_capture_runtime_install_name();
+    const auto unresolved =
+        unresolved_relative_runtime_modules(installed_runtime);
+    for (const auto& module : unresolved) {
+        INFO("missing installed runtime module: " << module);
+    }
+    CHECK(unresolved.empty());
+
+    fs::remove_all(incoming);
+    fs::remove_all(install);
+}
 
 TEST_CASE("upgrade install copies sibling payloads before self replacement",
           "[cli][upgrade][issue-1673]") {

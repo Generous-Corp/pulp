@@ -51,8 +51,8 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--no-tokens` | Skip token extraction | — |
 | `--no-comments` | Omit comments from generated code | — |
 | `--web-compat` | Use DOM API instead of native Pulp API | — |
-| `--validate` | Render generated JS and validate layout | — |
-| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. **Skia** (default) composites file-backed images; **CoreGraphics** does not (it draws an image's filename placeholder — not faithful). | `skia` |
+| `--validate` | Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output. | — |
+| `--screenshot-backend {skia\|coregraphics}` | Validation render backend; browser-backed HTML uses it for the automatic A/B gate. **Skia** (default) composites file-backed images; **CoreGraphics** does not (it draws an image's filename placeholder — not faithful). | `skia` |
 | `--reference <png>` | Compare render against reference screenshot | — |
 | `--diff <png>` | Save visual diff image | — |
 | `--render-size WxH` | Render dimensions | `340x280` |
@@ -442,6 +442,12 @@ pulp import-design --from figma --file design.json --validate
 pulp import-design --from figma --file design.json \
     --validate --reference source.png --diff diff.png
 ```
+
+Runnable browser-backed HTML is the exception: its browser-to-DesignIR A/B
+validation is a required adoption gate and therefore runs even without
+`--validate`. The proof remains under the durable browser-capture evidence
+directory. Passing `--validate` additionally publishes convenient render and
+diff copies beside the primary output.
 
 Similarity threshold: 85% (PASS) / below 85% (NEEDS REVIEW).
 

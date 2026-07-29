@@ -1380,10 +1380,10 @@ commands:
         description: Use DOM API instead of native Pulp API
       - name: --validate
         kind: flag
-        description: Render generated JS and validate layout
+        description: "Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output."
       - name: --screenshot-backend
         kind: option
-        description: "--validate render backend: skia (default; composites file-backed images) or coregraphics (draws image filename placeholders — not faithful for asset-rich designs)"
+        description: "Validation render backend; browser-backed HTML uses it for the automatic A/B gate. skia is the default and composites file-backed images; coregraphics draws image filename placeholders and is not faithful for asset-rich designs."
       - name: --fidelity-report
         kind: option
         description: "Write the run's import-fidelity findings as a JSON ledger (named taxonomy + per-kind counts + per-finding severity). Emitted regardless of --strict-fidelity, so an import's fidelity is a durable, diffable artifact for review or a CI gate."

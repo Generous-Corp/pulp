@@ -74,10 +74,13 @@ void print_usage() {
     std::cout << "  --no-tokens       Skip token extraction\n";
     std::cout << "  --no-comments     Omit comments from generated code\n";
     std::cout << "  --web-compat      Use DOM API instead of native Pulp API\n";
-    std::cout << "  --validate        Render generated JS and validate layout\n";
+    std::cout << "  --validate        Render generated JS and validate layout. Browser-backed\n";
+    std::cout << "                    HTML always runs its required A/B validation; this flag\n";
+    std::cout << "                    also publishes convenience render/diff files beside output.\n";
     std::cout << "  --screenshot-backend {skia|coregraphics}\n";
-    std::cout << "                    Render backend for --validate (default: skia). Only the\n";
-    std::cout << "                    Skia backend composites file-backed images; coregraphics\n";
+    std::cout << "                    Validation render backend (default: skia); browser-backed\n";
+    std::cout << "                    HTML uses it for its automatic A/B gate. Only Skia\n";
+    std::cout << "                    composites file-backed images; coregraphics\n";
     std::cout << "                    draws an image's filename placeholder (not faithful).\n";
     std::cout << "  --knob-style {silver|sprite|auto|standard|default}\n";
     std::cout << "  --fader-style {skin|skinned|default|plain}\n";

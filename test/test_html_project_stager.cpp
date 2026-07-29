@@ -231,6 +231,62 @@ TEST_CASE("HTML staging includes a runtime-bound Claude design system",
     CHECK_FALSE(fs::exists(staged.root / "unrelated-secret.txt"));
 }
 
+TEST_CASE("HTML staging caps provider file discovery before copying",
+          "[import-design][browser-capture][staging][limits]") {
+    TempTree tree;
+    const auto source =
+        R"(<script>const base = "_ds/oversized-design-system";</script>)";
+    tree.write("index.html", source);
+    const auto dependency_root =
+        tree.root / "_ds/oversized-design-system";
+    fs::create_directories(dependency_root);
+    for (std::size_t index = 0; index <= 4096; ++index) {
+        std::ofstream(
+            dependency_root /
+            ("module-" + std::to_string(index) + ".mjs"));
+    }
+
+    const auto staged = stage_html_project(
+        tree.root / "index.html", source,
+        HtmlProjectStageOptions{claude_html_dependency_roots});
+
+    CHECK_FALSE(staged);
+    CHECK(staged.error == "HTML dependency graph exceeds 4096 files");
+    CHECK(staged.dependencies.empty());
+    CHECK_FALSE(fs::exists(
+        staged.root / "_ds/oversized-design-system/module-0.mjs"));
+}
+
+TEST_CASE("HTML staging caps provider bytes during discovery before copying",
+          "[import-design][browser-capture][staging][limits]") {
+    TempTree tree;
+    const auto source =
+        R"(<script>const base = "_ds/oversized-design-system";</script>)";
+    tree.write("index.html", source);
+    const auto dependency_root =
+        tree.root / "_ds/oversized-design-system";
+    fs::create_directories(dependency_root);
+    for (std::size_t index = 0; index < 9; ++index) {
+        const auto dependency =
+            dependency_root /
+            ("chunk-" + std::to_string(index) + ".bin");
+        std::ofstream output(dependency);
+        output.close();
+        fs::resize_file(dependency, 32ull * 1024ull * 1024ull);
+    }
+
+    const auto staged = stage_html_project(
+        tree.root / "index.html", source,
+        HtmlProjectStageOptions{claude_html_dependency_roots});
+
+    CHECK_FALSE(staged);
+    CHECK(staged.error ==
+          "HTML dependency graph exceeds capture staging limits");
+    CHECK(staged.dependencies.empty());
+    CHECK_FALSE(fs::exists(
+        staged.root / "_ds/oversized-design-system/chunk-0.bin"));
+}
+
 TEST_CASE("generic HTML staging does not infer Claude dependency roots",
           "[import-design][browser-capture][staging]") {
     TempTree tree;

@@ -203,6 +203,9 @@ StagedHtmlProject stage_html_project(
     pending.emplace_back(fs::path{}, std::string(input_content));
     std::set<fs::path> visited;
     std::set<fs::path> scanned;
+    std::set<fs::path> enumerated_provider_roots;
+    std::set<fs::path> enumerated_provider_files;
+    std::uintmax_t enumerated_provider_bytes = entry_bytes;
     std::uintmax_t total_bytes = entry_bytes;
 
     while (!pending.empty()) {
@@ -232,14 +235,40 @@ StagedHtmlProject stage_html_project(
                 ec.clear();
                 continue;
             }
+            if (!enumerated_provider_roots.insert(canonical_root).second)
+                continue;
             for (fs::recursive_directory_iterator it(canonical_root, ec), end;
                  !ec && it != end; it.increment(ec)) {
                 if (!it->is_regular_file(ec) || ec) {
                     ec.clear();
                     continue;
                 }
-                const auto relative =
-                    it->path().lexically_relative(source_root);
+                const auto relative = it->path()
+                    .lexically_relative(source_root)
+                    .lexically_normal();
+                if (!enumerated_provider_files.insert(relative).second)
+                    continue;
+                if (enumerated_provider_files.size() >
+                    kMaximumDependencyFiles) {
+                    result.error =
+                        "HTML dependency graph exceeds 4096 files";
+                    return result;
+                }
+                const auto size = it->file_size(ec);
+                if (ec) {
+                    result.error =
+                        "could not inspect bound design-system dependency: " +
+                        ec.message();
+                    return result;
+                }
+                if (size > kMaximumFileBytes ||
+                    enumerated_provider_bytes >
+                        kMaximumDependencyBytes - size) {
+                    result.error =
+                        "HTML dependency graph exceeds capture staging limits";
+                    return result;
+                }
+                enumerated_provider_bytes += size;
                 references.push_back(DependencyReference{
                     relative.lexically_relative(base), false, false});
             }

@@ -203,6 +203,79 @@ TEST_CASE("browser CLI adapter fails before localization when validation fails",
     CHECK(localization_calls == 0);
 }
 
+TEST_CASE("browser validation is required with and without --validate",
+          "[import-design][browser-capture][cli-adapter][validation-contract]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    bool publish_convenience_artifacts = false;
+    SECTION("no flag retains proof only in durable capture evidence") {
+        request.validate = false;
+    }
+    SECTION("--validate also publishes render and diff beside output") {
+        request.validate = true;
+        publish_convenience_artifacts = true;
+    }
+
+    int validation_calls = 0;
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            return captured_import(capture_request, tree);
+        };
+    operations.validate_capture =
+        [&](const pulp::view::DesignIR&,
+            const id::BrowserCaptureValidationOptions& options) {
+            ++validation_calls;
+            tree.write(options.rendered, "render");
+            tree.write(options.diff, "diff");
+            id::BrowserCaptureValidationResult result;
+            result.valid = true;
+            result.passes = true;
+            result.similarity = 1.0f;
+            result.total_pixels = 1;
+            return result;
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            return true;
+        };
+
+    auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    auto session = require_live_session(std::move(result));
+    REQUIRE(session.take_capture_adoption());
+    CHECK(validation_calls == 1);
+
+    std::ostringstream diagnostics;
+    const auto staged_primary =
+        session.stage_primary_output(request.output_file, diagnostics);
+    REQUIRE(staged_primary);
+    tree.write(*staged_primary, "primary");
+    REQUIRE(session.publish(diagnostics));
+    CHECK(diagnostics.str().empty());
+
+    const auto durable =
+        request.output_file.parent_path() / "ui-browser-capture";
+    CHECK(tree.read(
+              durable / "validation-proof/render/render.png") ==
+          "render");
+    CHECK(tree.read(
+              durable / "validation-proof/diff/diff.png") ==
+          "diff");
+    const auto published_render =
+        request.output_file.parent_path() /
+        "ui-claude-design-render.png";
+    const auto published_diff =
+        request.output_file.parent_path() /
+        "ui-claude-design-diff.png";
+    CHECK(fs::exists(published_render) ==
+          publish_convenience_artifacts);
+    CHECK(fs::exists(published_diff) ==
+          publish_convenience_artifacts);
+}
+
 TEST_CASE("browser CLI adapter stages proof and commits evidence once",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;
