@@ -196,6 +196,63 @@ TEST_CASE("RealtimePitchTimeProcessor rejects invalid spectral overrides atomica
     REQUIRE(previously_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);
 }
 
+TEST_CASE("RealtimePitchTimeProcessor rejects target-byte capacity atomically",
+          "[signal][pitch-time][streaming]") {
+    constexpr std::uint64_t wasm32_max_bytes =
+        std::numeric_limits<std::uint32_t>::max();
+    auto oversized = stream_config(100'000'000);
+    oversized.channels = 8;
+    oversized.max_time_ratio = 1.0f;
+
+    RealtimePitchTimeProcessor fresh;
+    REQUIRE(fresh.prepare(kSampleRate, oversized, wasm32_max_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(fresh.output_free_space() == 0);
+
+    RealtimePitchTimeProcessor previously_prepared;
+    REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
+            == PitchTimePrepareStatus::prepared);
+    const int prepared_capacity = previously_prepared.output_free_space();
+    REQUIRE(previously_prepared.prepare(kSampleRate, oversized, wasm32_max_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+
+    // At 4x the wrapper's stream ring is 16384 floats while the nested engine
+    // and every other prepared allocation fit below 40,000 bytes.
+    auto outer_ring_only = stream_config(256);
+    outer_ring_only.max_time_ratio = 4.0f;
+    constexpr std::uint64_t below_outer_ring_bytes = 40'000;
+    RealtimePitchTimeProcessor outer_fresh;
+    REQUIRE(outer_fresh.prepare(kSampleRate, outer_ring_only, below_outer_ring_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(outer_fresh.output_free_space() == 0);
+    REQUIRE(previously_prepared.prepare(kSampleRate, outer_ring_only,
+                                        below_outer_ring_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+
+    auto ordinary = stream_config(256);
+    ordinary.max_time_ratio = 1.0f;
+    ordinary.channels = 2;
+    constexpr std::uint64_t float_capacity_bytes = 8'208ULL * sizeof(float);
+    RealtimePitchTimeProcessor float_processor;
+    REQUIRE(float_processor.prepare(kSampleRate, ordinary, float_capacity_bytes)
+            == PitchTimePrepareStatus::prepared);
+
+    RealtimePitchTimeProcessor64 double_fresh;
+    REQUIRE(double_fresh.prepare(kSampleRate, ordinary, float_capacity_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(double_fresh.output_free_space() == 0);
+
+    RealtimePitchTimeProcessor64 double_prepared;
+    REQUIRE(double_prepared.prepare(kSampleRate, ordinary)
+            == PitchTimePrepareStatus::prepared);
+    const int double_capacity = double_prepared.output_free_space();
+    REQUIRE(double_prepared.prepare(kSampleRate, ordinary, float_capacity_bytes)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(double_prepared.output_free_space() == double_capacity);
+}
+
 TEST_CASE("RealtimePitchTimeProcessor partial EOF read preserves the real prefix",
           "[signal][pitch-time][streaming]") {
     RealtimePitchTimeProcessor exact;

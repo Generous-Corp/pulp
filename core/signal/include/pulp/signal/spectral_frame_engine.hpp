@@ -27,6 +27,7 @@
 /// Crochiere 1980 (weighted overlap-add). No allocation or locks after
 /// `prepare()`.
 
+#include <pulp/signal/checked_allocation.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <algorithm>
@@ -35,6 +36,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal {
@@ -71,12 +73,13 @@ inline bool is_valid_spectral_frame_geometry(int fft_size, int analysis_hop) noe
         && analysis_hop <= fft_size / 2;
 }
 
-/// Derive every integer and backing-store capacity used by prepare().
-/// target_max_elements makes 32-bit target limits testable on a 64-bit host.
+/// Derive every integer and typed backing-store capacity used by prepare().
+/// target_max_bytes makes 32-bit target limits testable on a 64-bit host.
+template <typename SampleType>
 inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_geometry(
     const SpectralFrameEngineConfig& config,
-    std::uint64_t target_max_elements =
-        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) noexcept {
+    std::uint64_t target_max_bytes = kTargetAddressMaximumBytes) noexcept {
+    static_assert(std::is_floating_point_v<SampleType>);
     if (!is_valid_spectral_frame_geometry(config.fft_size, config.analysis_hop)
         || config.channels < 1 || config.max_block <= 0)
         return std::nullopt;
@@ -86,23 +89,6 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
         : 2 * config.analysis_hop;
     if (max_synthesis_hop <= 0) return std::nullopt;
 
-    const auto checked_product = [](std::uint64_t lhs,
-                                    std::uint64_t rhs,
-                                    std::uint64_t maximum,
-                                    std::uint64_t& product) {
-        if (lhs != 0 && rhs > maximum / lhs) return false;
-        product = lhs * rhs;
-        return true;
-    };
-    const auto checked_sum = [](std::uint64_t lhs,
-                                std::uint64_t rhs,
-                                std::uint64_t maximum,
-                                std::uint64_t& sum) {
-        if (lhs > maximum || rhs > maximum - lhs) return false;
-        sum = lhs + rhs;
-        return true;
-    };
-
     const auto fft_size = static_cast<std::uint64_t>(config.fft_size);
     const auto channels = static_cast<std::uint64_t>(config.channels);
     const auto max_block = static_cast<std::uint64_t>(config.max_block);
@@ -111,12 +97,12 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
 
     std::uint64_t backlog = 0;
     std::uint64_t ring_span = 0;
-    if (!checked_product(worst_frames, synthesis_hop,
-                         kSpectralFrameEngineMaximumRingSize, backlog)
-        || !checked_sum(fft_size, max_block,
-                        kSpectralFrameEngineMaximumRingSize, ring_span)
-        || !checked_sum(ring_span, backlog,
-                        kSpectralFrameEngineMaximumRingSize, ring_span))
+    if (!checked_capacity_product(worst_frames, synthesis_hop,
+                                  kSpectralFrameEngineMaximumRingSize, backlog)
+        || !checked_capacity_sum(fft_size, max_block,
+                                 kSpectralFrameEngineMaximumRingSize, ring_span)
+        || !checked_capacity_sum(ring_span, backlog,
+                                 kSpectralFrameEngineMaximumRingSize, ring_span))
         return std::nullopt;
 
     std::uint64_t ring_size = 1;
@@ -124,15 +110,45 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
 
     const auto num_bins = fft_size / 2u + 1u;
     SpectralFrameEngineGeometry geometry;
-    if (!checked_product(channels, fft_size, target_max_elements,
-                         geometry.input_ring_elements)
-        || !checked_product(channels, ring_size, target_max_elements,
-                            geometry.output_ring_elements)
-        || !checked_product(channels, num_bins, target_max_elements,
-                            geometry.frame_elements)
-        || ring_size > target_max_elements || fft_size > target_max_elements
-        || channels > target_max_elements)
+    if (!checked_capacity_product(channels, fft_size,
+                                  std::numeric_limits<std::uint64_t>::max(),
+                                  geometry.input_ring_elements)
+        || !checked_capacity_product(channels, ring_size,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     geometry.output_ring_elements)
+        || !checked_capacity_product(channels, num_bins,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     geometry.frame_elements))
         return std::nullopt;
+
+    const bool explicit_buffers_fit =
+        checked_allocation_bytes<SampleType>(geometry.input_ring_elements, target_max_bytes)
+        && checked_allocation_bytes<SampleType>(geometry.output_ring_elements,
+                                                target_max_bytes)
+        && checked_allocation_bytes<SampleType>(ring_size, target_max_bytes) // norm ring
+        && checked_allocation_bytes<SampleType>(fft_size, target_max_bytes) // window
+        && checked_allocation_bytes<SampleType>(fft_size, target_max_bytes) // time scratch
+        && checked_allocation_bytes<std::complex<SampleType>>(
+            geometry.frame_elements, target_max_bytes)
+        && checked_allocation_bytes<std::complex<SampleType>>(fft_size,
+                                                              target_max_bytes) // freq scratch
+        && checked_allocation_bytes<std::complex<SampleType>*>(channels,
+                                                               target_max_bytes); // frame pointers
+    // FftT owns fallback twiddles on every platform. Apple's float backend
+    // additionally owns two fft-sized split buffers; the opaque vDSP plan is
+    // bounded by the already-validated public FFT limit but exposes no byte size.
+    const bool fft_buffers_fit =
+        checked_allocation_bytes<std::complex<double>>(fft_size / 2u, target_max_bytes);
+    if (!explicit_buffers_fit || !fft_buffers_fit) return std::nullopt;
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>) {
+        const bool split_buffers_fit =
+            checked_allocation_bytes<float>(fft_size, target_max_bytes)
+            && checked_allocation_bytes<float>(fft_size, target_max_bytes);
+        if (!split_buffers_fit)
+            return std::nullopt;
+    }
+#endif
 
     geometry.max_synthesis_hop = max_synthesis_hop;
     geometry.num_bins = static_cast<int>(num_bins);
@@ -154,7 +170,7 @@ public:
     /// synthesis hops no larger than max_synthesis_hop. The callback must also
     /// be RT-safe.
     void prepare(const SpectralFrameEngineConfig& config) {
-        const auto geometry = checked_spectral_frame_engine_geometry(config);
+        const auto geometry = checked_spectral_frame_engine_geometry<SampleType>(config);
         assert(geometry.has_value());
         if (!geometry) return;
 

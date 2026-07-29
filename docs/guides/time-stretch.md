@@ -42,8 +42,9 @@ Check the `PitchTimePrepareStatus` returned by `prepare()`; invalid sample rates
 channel counts, and non-positive `max_block` capacities are rejected before the
 processor is used. A time-stretch capacity must also have a finite
 `max_time_ratio >= 1`; pitch bounds must be finite, non-negative, and produce a
-finite derived ratio. Derived synthesis-hop, ring, and backing-buffer sizes must
-also be representable or preparation returns `unrepresentable_capacity` without
+finite derived ratio. Derived synthesis-hop, ring, and typed backing-buffer byte
+sizes must fit the target address space or preparation returns
+`unrepresentable_capacity` without
 changing the previously prepared processor. Optional FFT geometry must satisfy
 the spectral engine's 256–16384 power-of-two window and `hop <= fft/2` contract;
 invalid overrides return `invalid_spectral_geometry` atomically.
