@@ -1341,7 +1341,7 @@ commands:
         description: "Allow DesignIR asset-manifest HTTP(S) fetches at import time"
       - name: --browser
         kind: option
-        description: "Chromium/Chrome executable for browser-solved HTML import; defaults to system discovery"
+        description: "Explicit Chromium/Chrome executable for browser-solved HTML import; overrides PULP_DESIGN_BROWSER, browser mode, managed Chrome for Testing, and system discovery"
       - name: --offline
         kind: flag
         description: "Explicitly use the lower-fidelity static HTML parser instead of Chromium"

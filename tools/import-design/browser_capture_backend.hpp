@@ -30,6 +30,14 @@ enum class BrowserOrigin {
 
 std::string browser_origin_name(BrowserOrigin origin);
 
+enum class BrowserMode {
+    auto_select,
+    managed,
+    system,
+};
+
+std::string browser_mode_name(BrowserMode mode);
+
 struct BrowserCandidate {
     fs::path executable;
     BrowserOrigin origin = BrowserOrigin::system;
@@ -76,6 +84,11 @@ struct BrowserDiscoveryOptions {
     // environment lookup, which keeps tests and hermetic callers deterministic.
     std::optional<std::string> environment_override;
 
+    // nullopt reads PULP_DESIGN_BROWSER_MODE, then
+    // [import_design].browser. An engaged empty string selects auto without
+    // reading process configuration, which keeps tests hermetic.
+    std::optional<std::string> mode_override;
+
     // Defaults to PULP_HOME/tools/chrome-for-testing or the
     // platform-equivalent Pulp tool root.
     std::optional<fs::path> managed_root;
@@ -90,6 +103,15 @@ struct BrowserDiscoveryOptions {
     int minimum_major = kMinimumChromiumMajor;
     int probe_timeout_ms = 15000;
 };
+
+struct BrowserModeSelection {
+    std::optional<BrowserMode> mode;
+    std::string source;
+    std::string error;
+};
+
+BrowserModeSelection resolve_browser_mode(
+    const BrowserDiscoveryOptions& options = {});
 
 using BrowserProbeFunction =
     std::function<BrowserProbeResult(const BrowserCandidate&)>;

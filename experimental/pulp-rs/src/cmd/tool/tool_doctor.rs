@@ -132,7 +132,13 @@ fn doctor_one<S: Spawner>(
         return Ok(0);
     }
 
-    let inv = Invocation::new(loc.path.to_string_lossy().into_owned());
+    // A browser with no arguments opens a GUI and may remain alive forever.
+    // Chrome's version probe is deterministic and exits immediately.
+    let inv = if id == "chrome-for-testing" {
+        Invocation::new(loc.path.to_string_lossy().into_owned()).arg("--version")
+    } else {
+        Invocation::new(loc.path.to_string_lossy().into_owned())
+    };
     let rc = spawner.run(&inv)?;
     if rc == 0 {
         writeln!(

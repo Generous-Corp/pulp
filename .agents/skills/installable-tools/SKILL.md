@@ -59,6 +59,16 @@ self-fetching tool (like trace-processor, which routes to its verified fetcher)
 does not. If you add a delegated archive tool, validate its standalone install
 explicitly or thread the registry to the delegate.
 
+Large or separately licensed tools that must never join `pulp tool install
+--all` set `explicit_install_only: true` and provide a named Rust-side
+installer. Chrome for Testing is the reference: its complete versioned archive
+is SHA-256 pinned, extracted transactionally below
+`$PULP_HOME/tools/chrome-for-testing/<version>/<platform>/`, and selected only
+through the exact `current.json` manifest. Imports never trigger its download.
+Test install, repeat install, forced update, `doctor --run`, and uninstall from
+outside the checkout; `doctor --run` must use a bounded probe such as
+`--version`, never launch a long-lived GUI.
+
 ## Friendly aliases (discoverability)
 
 A tool may list `aliases` in its registry entry so a natural name resolves to the

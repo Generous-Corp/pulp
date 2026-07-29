@@ -253,9 +253,16 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
         Sub::Info { id, json } => info(&reg, &reg.canonical_id(id), *json, out),
-        Sub::Install { id, all, force: _, version } => {
+        Sub::Install { id, all, force, version } => {
             let canon = id.as_ref().map(|i| reg.canonical_id(i));
-            install(&reg, canon.as_deref(), *all, version.as_deref(), out)
+            install(
+                &reg,
+                canon.as_deref(),
+                *all,
+                *force,
+                version.as_deref(),
+                out,
+            )
         }
         Sub::Update { id, version } => {
             update(&reg, &reg.canonical_id(id), version.as_deref(), out)
@@ -499,11 +506,16 @@ fn install(
     reg: &ToolRegistry,
     id: Option<&str>,
     all: bool,
+    force: bool,
     version: Option<&str>,
     out: &mut impl Write,
 ) -> Result<i32> {
     if id == Some("trace-processor") {
         return install_trace_processor(version, out);
+    }
+    if id == Some("chrome-for-testing") {
+        crate::cmd::chrome_for_testing::validate_requested_version(version)?;
+        return crate::cmd::chrome_for_testing::install_pinned(force, out);
     }
     // `--all` sweeps every managed tool, but trace-processor is a bare binary
     // installed only by the SHA-256-verified fetcher: the generic archive
@@ -571,6 +583,12 @@ fn update(
         )
         .map_err(io)?;
         return Ok(1);
+    }
+    if id == "chrome-for-testing" {
+        crate::cmd::chrome_for_testing::validate_requested_version(version)?;
+        let _ = tool_version::clear_override(id)?;
+        report_active_version(id, &tool_version::resolve_active(tool), out)?;
+        return crate::cmd::chrome_for_testing::install_pinned(true, out);
     }
 
     match version {
@@ -852,6 +870,29 @@ mod tests {
         }"#
     }
 
+    fn chrome_registry_body() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "tools": {
+                "chrome-for-testing": {
+                    "display_name": "Chrome for Testing",
+                    "description": "managed browser fixture",
+                    "install_method": "verified_archive",
+                    "pinned_version": "151.0.7922.47",
+                    "install_scope": "machine",
+                    "distribution_lane": "external_tool",
+                    "binary_sources": {
+                        "macOS-arm64": {
+                            "url_template": "fixture",
+                            "archive_format": "zip",
+                            "binary_name": "Google Chrome for Testing"
+                        }
+                    }
+                }
+            }
+        }"#
+    }
+
     #[test]
     fn parse_list_simple() {
         assert_eq!(parse_sub(&["list".into()]).unwrap(), Sub::List);
@@ -1058,6 +1099,63 @@ mod tests {
     }
 
     #[test]
+    fn doctor_managed_chrome_uses_noninteractive_version_probe() {
+        let td = plant_project(chrome_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let root = home.join("tools/chrome-for-testing");
+        let browser = root.join(
+            "151.0.7922.47/mac-arm64/chrome-mac-arm64/\
+             Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        );
+        fs::create_dir_all(browser.parent().unwrap()).unwrap();
+        fs::write(&browser, "stub").unwrap();
+        fs::write(
+            root.join("current.json"),
+            format!(
+                "{{\"schema\":1,\"version\":\"151.0.7922.47\",\
+                 \"platform\":\"mac-arm64\",\"executable\":\"{}\"}}",
+                browser.strip_prefix(&root).unwrap().to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(
+            &reg,
+            Some("chrome-for-testing"),
+            true,
+            &spawner,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, browser.to_string_lossy());
+        assert_eq!(calls[0].args, ["--version"]);
+    }
+
+    #[test]
+    fn managed_chrome_locator_never_falls_through_without_current_json() {
+        let td = plant_project(chrome_registry_body());
+        let home = td.path().join("pulp-home");
+        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let stray = home
+            .join("tools/chrome-for-testing/stray")
+            .join("Google Chrome for Testing");
+        fs::create_dir_all(stray.parent().unwrap()).unwrap();
+        fs::write(&stray, "stray browser").unwrap();
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let located = crate::tool_registry::locate_tool(
+            &reg.tools["chrome-for-testing"],
+        );
+        assert!(!located.found);
+        assert_eq!(located.source, "not-found");
+    }
+
+    #[test]
     fn uninstall_reports_missing_entry() {
         // Intentionally no prior install — should return rc=1.
         let mut buf = Vec::new();
@@ -1074,7 +1172,7 @@ mod tests {
         let td = plant_project(registry_body());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let mut buf = Vec::new();
-        let rc = install(&reg, Some("uv"), false, None, &mut buf).unwrap();
+        let rc = install(&reg, Some("uv"), false, false, None, &mut buf).unwrap();
         assert_eq!(rc, 1);
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("not ported"));
@@ -1584,7 +1682,7 @@ mod tests {
         assert!(reg.tools.contains_key("trace-processor"));
 
         let mut buf = Vec::new();
-        install(&reg, None, true, None, &mut buf).unwrap();
+        install(&reg, None, true, false, None, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("already present"), "no pre-fetch marker: {s:?}");
     }
