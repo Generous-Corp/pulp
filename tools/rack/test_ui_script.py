@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import re
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -90,6 +92,25 @@ def main():
         created |= set(re.findall(rf'\b{helper}\(\s*"([^"]+)"', text))
     # Ids built by concatenation are checked by prefix rather than exactly.
     dynamic = set(re.findall(r'create[A-Za-z]+\(\s*(\w+)\s*\+', text))
+    # A flex key the bridge does not know is silently ignored, so the layout is
+    # wrong and nothing complains. Thirteen calls used "flex_direction" -- which
+    # does not exist; the key is "direction" -- and every one of them did
+    # nothing for as long as it took a screenshot to notice.
+    layout_api = os.path.join(REPO, "core", "view", "src", "widget_bridge",
+                              "layout_api.cpp")
+    if os.path.exists(layout_api):
+        known = set(re.findall(r'key == "([a-z_]+)"', open(layout_api).read()))
+        if known:
+            code = "\n".join(ln.split("//")[0] for ln in text.split("\n"))
+            used = set(re.findall(r'setFlex\(\s*[^,]+,\s*"([a-z_]+)"', code))
+            unknown = sorted(used - known)
+            if unknown:
+                for k in unknown[:6]:
+                    print(f"  WRONG  setFlex key '{k}' is not one the bridge accepts")
+                bad += 1
+            else:
+                print(f"  ok     every setFlex key is one of the bridge's {len(known)}")
+
     # Not every set*() call addresses a widget. The shell's own state setters --
     # setMode("patch"), setRackStatus(...) -- take a value in the first slot, so
     # a naive scan reported "patch" as an unstyled widget. Scanning by shape

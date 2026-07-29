@@ -77,7 +77,7 @@ setBackground("rail", C.rail);
 setFlex("rail", "width", 64);
 setFlex("rail", "align_items", "center");
 setFlex("rail", "padding_top", 14);
-setFlex("rail", "flex_direction", "column");
+setFlex("rail", "direction", "column");
 setCornerRadius("rail", "TopLeft", 14);
 setCornerRadius("rail", "BottomLeft", 14);
 
@@ -161,7 +161,7 @@ function textLabel(id, text, parent) {
 
 function railIcon(id, glyph, active, marginTop) {
     const b = createToggleButton(id, "rail");
-    setFlex(id, "flex_direction", "row");
+    setFlex(id, "direction", "row");
     setBackground(id, active ? C.raised : C.rail);
     setCornerRadius(id, 12);
     setFlex(id, "width", 40);
@@ -189,7 +189,7 @@ setFlex("rail-account", "margin_bottom", 14);
 
 const main = createCol("main", "shell");
 setFlex("main", "flex_grow", 1);
-setFlex("main", "flex_direction", "column");
+setFlex("main", "direction", "column");
 setCornerRadius("main", "TopRight", 14);
 setCornerRadius("main", "BottomRight", 14);
 
@@ -252,7 +252,7 @@ const hero = createCol("hero", "main");
 setFlex("hero", "flex_grow", 1);
 setFlex("hero", "align_items", "center");
 setFlex("hero", "justify_content", "center");
-setFlex("hero", "flex_direction", "column");
+setFlex("hero", "direction", "column");
 setBackground("hero", C.surface);
 
 createLabel("hero-eyebrow", "FORGE MODULAR · FOR VCV RACK", "hero");
@@ -289,7 +289,7 @@ setFlex("tabs", "margin_top", 34);
 
 function tab(id, glyph, title, sub, active) {
     const t = createToggleButton(id, "tabs");
-    setFlex(id, "flex_direction", "row");
+    setFlex(id, "direction", "row");
     setBackground(id, active ? C.raised : C.panel);
     setBorder(id, active ? C.lineStrong : C.line, 1);
     setCornerRadius(id, 12);
@@ -350,7 +350,7 @@ setFlex("actions", "margin_top", 18);
 /// icon and a word rather than as text alone.
 function button(id, parent, glyph, label, kind, width) {
     const b = createToggleButton(id, parent);
-    setFlex(id, "flex_direction", "row");
+    setFlex(id, "direction", "row");
     setBackground(id, kind === "primary" ? C.accent : C.panel);
     setBorder(id, kind === "primary" ? C.accent : C.line, 1);
     setCornerRadius(id, 11);
@@ -412,7 +412,7 @@ setFlex("shelf", "height", 300);
 setFlex("shelf", "padding_left", 22);
 setFlex("shelf", "padding_right", 22);
 setFlex("shelf", "padding_top", 16);
-setFlex("shelf", "flex_direction", "column");
+setFlex("shelf", "direction", "column");
 
 const shelfBar = createRow("shelf-bar", "shelf");
 setFlex("shelf-bar", "align_items", "center");
@@ -449,7 +449,7 @@ function card(id, kind, title, count, tint) {
     setCornerRadius(id, 12);
     setFlex(id, "width", 232);
     setFlex(id, "margin_right", 16);
-    setFlex(id, "flex_direction", "column");
+    setFlex(id, "direction", "column");
 
     const art = createRow(id + "-art", id);
     setBackground(id + "-art", tint);
@@ -537,7 +537,7 @@ const chat = createCol("chat", "work");
 setBackground("chat", C.surface);
 setFlex("chat", "width", 460);
 setFlex("chat", "flex_shrink", 0);
-setFlex("chat", "flex_direction", "column");
+setFlex("chat", "direction", "column");
 setFlex("chat", "padding", 22);
 
 createLabel("chat-title", "Building", "chat");
@@ -554,7 +554,7 @@ setFlex("chat-prompt", "margin_top", 6);
 
 const chatBody = createCol("chat-body", "chat");
 setFlex("chat-body", "flex_grow", 1);
-setFlex("chat-body", "flex_direction", "column");
+setFlex("chat-body", "direction", "column");
 setFlex("chat-body", "margin_top", 18);
 
 /// One role heading -- Voice, Modulation, Output -- above the cables that serve
@@ -562,7 +562,7 @@ setFlex("chat-body", "margin_top", 18);
 /// is just the order they happened to be made in.
 function roleGroup(id, role) {
     const g = createCol(id, "chat-body");
-    setFlex(id, "flex_direction", "column");
+    setFlex(id, "direction", "column");
     setFlex(id, "margin_bottom", 14);
     createLabel(id + "-role", role.toUpperCase(), id);
     setFontFamily(id + "-role", MONO);
@@ -576,7 +576,7 @@ function roleGroup(id, role) {
 /// the difference between a patch somebody can edit and one they can only run.
 function wireLine(id, parent, text, why) {
     const l = createCol(id, parent);
-    setFlex(id, "flex_direction", "column");
+    setFlex(id, "direction", "column");
     setFlex(id, "margin_top", 8);
     createLabel(id + "-what", text, id);
     setFontFamily(id + "-what", FONT);
@@ -593,7 +593,7 @@ function wireLine(id, parent, text, why) {
 const preview = createCol("preview", "work");
 setBackground("preview", C.appBg);
 setFlex("preview", "flex_grow", 1);
-setFlex("preview", "flex_direction", "column");
+setFlex("preview", "direction", "column");
 setFlex("preview", "align_items", "center");
 setFlex("preview", "justify_content", "center");
 
