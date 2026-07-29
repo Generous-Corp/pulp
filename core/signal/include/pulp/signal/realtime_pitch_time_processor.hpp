@@ -70,6 +70,13 @@ enum class PitchTimeStreamFinalizeStatus {
     invalid_mode,
 };
 
+enum class PitchTimePrepareStatus {
+    prepared,
+    invalid_sample_rate,
+    invalid_channel_count,
+    invalid_max_block,
+};
+
 struct RealtimePitchTimeConfig {
     PitchTimeMode mode = PitchTimeMode::realtime_pitch;
     PitchTimeQuality quality = PitchTimeQuality::quality;
@@ -120,13 +127,14 @@ public:
     /// read_stretched(), reset(), control setters, and accessors are
     /// allocation-free for blocks no larger than config.max_block and the
     /// prepared channel count.
-    void prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
-        assert(sample_rate > 0.0);
-        assert(config.channels >= 1);
+    PitchTimePrepareStatus prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
+        if (!(sample_rate > 0.0)) return PitchTimePrepareStatus::invalid_sample_rate;
+        if (config.channels < 1 || config.channels > kMaxChannels)
+            return PitchTimePrepareStatus::invalid_channel_count;
+        if (config.max_block <= 0) return PitchTimePrepareStatus::invalid_max_block;
         config_ = config;
         sample_rate_ = sample_rate;
 
-        assert(config.channels <= kMaxChannels);
         const bool quality = config.quality == PitchTimeQuality::quality;
         fft_size_ = quality ? 4096 : 1024;
         analysis_hop_ = quality ? 512 : 256;
@@ -236,6 +244,7 @@ public:
             tap_scratch_.assign(static_cast<size_t>(resampler_.taps()), SampleType{0});
         }
         reset();
+        return PitchTimePrepareStatus::prepared;
     }
 
     /// Fixed pipeline delay of process() in realtime_pitch mode.
