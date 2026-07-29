@@ -98,7 +98,10 @@ artifact is needed. Never modify canonical project JSON text directly.
   programs. Stage 1 accepts child note/audio clips and rejects child devices,
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
   reference gain/fades. Source windows that intersect child audio fades also
-  fail closed because Stage 1 cannot represent an envelope offset. Expansion
+  fail closed because Stage 1 cannot represent an envelope offset. A complete
+  nested media clip preserves its `TimeConform` intent, but a source window
+  that trims a conforming clip fails with `NestedSequenceUnsupported` until
+  playback has a conform-aware source-range mapping. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent

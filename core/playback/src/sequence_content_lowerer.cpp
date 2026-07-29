@@ -236,6 +236,16 @@ class SequenceContentLowerer::Impl {
         const auto left_trim = clipped_start.value - child.start().value;
         const auto right_trim = child.end().value - clipped_end.value;
         if (std::holds_alternative<timeline::MediaRef>(child.content())) {
+            // A conforming clip maps its complete authored source span onto its
+            // musical placement. The legacy nested-trim path below advances a
+            // raw source-frame offset from elapsed timeline samples, which is
+            // only valid for TimeConform::None. Refuse a partial view until the
+            // renderer owns a conform-aware source-range mapping; otherwise a
+            // nested tempo-ramped clip can silently start at the wrong audio.
+            if (child.time_conform() != timeline::TimeConform::None &&
+                (left_trim != 0 || right_trim != 0))
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedSequenceUnsupported, child.id()}};
             const auto playback = child.playback_properties();
             const auto retained_start = static_cast<std::uint64_t>(left_trim);
             const auto retained_end =
@@ -417,7 +427,8 @@ class SequenceContentLowerer::Impl {
         playback.fade_out_duration = std::min(playback.fade_out_duration, duration);
         auto flattened =
             timeline::Clip::create(pending.generated_id, pending.target_start,
-                                   pending.target_duration, std::move(content), playback);
+                                   pending.target_duration, std::move(content), playback,
+                                   pending.child.time_conform());
         if (!flattened)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};

@@ -65,9 +65,10 @@ Clip absolute_media_clip(std::uint64_t id, std::int64_t start, std::uint64_t dur
 
 Clip musical_media_clip(std::uint64_t id, std::int64_t start, std::int64_t duration,
                         std::uint64_t asset_id, std::uint64_t source_count,
-                        ClipPlaybackProperties playback = {}) {
-    return take(
-        Clip::create({id}, {start}, {duration}, MediaRef{{asset_id}, {0}, source_count}, playback));
+                        ClipPlaybackProperties playback = {},
+                        TimeConform time_conform = TimeConform::None) {
+    return take(Clip::create({id}, {start}, {duration},
+                             MediaRef{{asset_id}, {0}, source_count}, playback, time_conform));
 }
 
 std::shared_ptr<const Project> project_with_tracks(std::vector<Track> tracks,

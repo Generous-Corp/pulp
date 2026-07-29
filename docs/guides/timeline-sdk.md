@@ -313,7 +313,11 @@ reusing writer-scoped command IDs.
 audio thread. Stage 1 fails closed when a child contains device processing,
 automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
-closed because Stage 1 has no envelope-offset representation. Set
+closed. Complete nested media clips retain their authored time-conform intent;
+a source window that trims a `Resample` or `Stretch` clip fails with
+`NestedSequenceUnsupported` until playback can map that partial conforming
+source range without changing its authored phase.
+Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
 and reference traversal, including charges carried by reused track programs.
