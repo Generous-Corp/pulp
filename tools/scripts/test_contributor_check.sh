@@ -45,7 +45,11 @@ check() {
         printf '  FAIL  %s\n        expected exit %s, got %s\n' "$name" "$want" "$rc"
         echo "$out" | sed 's/^/        | /'
         fail=$((fail + 1))
-    elif ! printf '%s' "$out" | grep -q "$needle"; then
+    # With pipefail, grep -q exits as soon as it matches and the upstream
+    # printf can receive SIGPIPE for a long report, turning a successful match
+    # into a failed pipeline. Feed grep directly so this assertion observes
+    # only whether the expected text is present.
+    elif ! grep -Fq -- "$needle" <<<"$out"; then
         printf '  FAIL  %s\n        output missing: %s\n' "$name" "$needle"
         echo "$out" | sed 's/^/        | /'
         fail=$((fail + 1))
