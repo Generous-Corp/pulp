@@ -175,3 +175,57 @@ TEST_CASE("a submit starts the engine rather than assuming it is up",
     REQUIRE(h.engine.ensure_calls == 1);
     REQUIRE(h.engine.calls.empty());   // could not start, so nothing submitted
 }
+
+TEST_CASE("the mode tabs move the whole screen, not just themselves",
+          "[forge-modular][shell][interaction]") {
+    // A tab that highlights without changing the heading, the button labels
+    // and the artifact chip has told the user a lie about what Build will do.
+    Harness h;
+    REQUIRE(h.label("hero-title") == "What should the module do?");
+    REQUIRE(h.label("btn-build-label") == "Build module");
+
+    h.click("tab-patch");
+    REQUIRE(h.label("hero-title") == "What should the patch do?");
+    REQUIRE(h.label("btn-build-label") == "Build patch");
+    REQUIRE(h.label("btn-random-label") == "Random patch");
+    REQUIRE(h.label("chip-artifact-text") == "PATCH \u00b7 A WHOLE RACK");
+
+    h.click("tab-module");
+    REQUIRE(h.label("hero-title") == "What should the module do?");
+    REQUIRE(h.label("btn-build-label") == "Build module");
+}
+
+TEST_CASE("Build carries the selected mode to the engine",
+          "[forge-modular][shell][interaction]") {
+    Harness h;
+    h.click("tab-patch");
+    h.type("an ambient generative drone");
+    h.click("btn-build");
+
+    REQUIRE(h.engine.calls.size() == 1);
+    REQUIRE(h.engine.calls[0].patch_mode == true);
+}
+
+TEST_CASE("the rail reaches both modes",
+          "[forge-modular][shell][interaction]") {
+    Harness h;
+    h.click("rail-patch");
+    REQUIRE(h.label("hero-title") == "What should the patch do?");
+    h.click("rail-module");
+    REQUIRE(h.label("hero-title") == "What should the module do?");
+}
+
+TEST_CASE("Random fills the composer instead of building",
+          "[forge-modular][shell][interaction]") {
+    // A suggestion that builds itself is a dice roll. It has to be readable
+    // and editable before anything is committed to.
+    Harness h;
+    h.click("btn-random");
+
+    auto* ed = dynamic_cast<pulp::view::TextEditor*>(h.control("prompt"));
+    REQUIRE(ed != nullptr);
+    REQUIRE_FALSE(ed->text().empty());
+    REQUIRE(h.engine.calls.empty());
+}
+
+

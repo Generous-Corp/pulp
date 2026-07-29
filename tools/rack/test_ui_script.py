@@ -90,7 +90,16 @@ def main():
         created |= set(re.findall(rf'\b{helper}\(\s*"([^"]+)"', text))
     # Ids built by concatenation are checked by prefix rather than exactly.
     dynamic = set(re.findall(r'create[A-Za-z]+\(\s*(\w+)\s*\+', text))
-    styled = set(re.findall(r'set[A-Za-z]+\(\s*"([^"]+)"', text))
+    # Not every set*() call addresses a widget. The shell's own state setters --
+    # setMode("patch"), setRackStatus(...) -- take a value in the first slot, so
+    # a naive scan reported "patch" as an unstyled widget. Scanning by shape
+    # rather than by name is what makes this cheap; the exclusion list is what
+    # keeps it honest.
+    NOT_WIDGET_SETTERS = ("setMode", "setRackStatus", "setFidelity")
+    styled = set()
+    for name, target in re.findall(r'(set[A-Za-z]+)\(\s*"([^"]+)"', text):
+        if name not in NOT_WIDGET_SETTERS:
+            styled.add(target)
     missing = sorted(s for s in styled - created
                      if not any(s.startswith(c) for c in created))
     if missing:

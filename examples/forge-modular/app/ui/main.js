@@ -37,6 +37,18 @@ const MONO = "JetBrains Mono";
 
 let mode = "module";      // "module" | "patch"
 
+// Suggestions the Random button offers. Deliberately concrete: "a filter" is
+// not a prompt anybody can judge, and the whole point of showing it before
+// building is that it can be read and edited.
+const RANDOM_MODULE = [
+    "a 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount",
+    "an 8 HP slew limiter with separate rise and fall, and an end-of-rise gate",
+];
+const RANDOM_PATCH = [
+    "an ambient generative drone that never repeats",
+    "a bouncing-ball rhythm that slows down as it settles",
+];
+
 // ── root: rail on the left, everything else to its right ─────────────────────
 
 const root = createRow("root");
@@ -134,6 +146,17 @@ function icon(id, parent, name, size, color) {
 /// worked. Contents are decoration; only the control itself is a target.
 function decorative(id) {
     setPointerEvents(id, "none");
+}
+
+/// A label, which is decoration by default.
+///
+/// hit_test() returns the deepest view under a point, so any label inside a
+/// control swallows the click. Marking them one at a time is how the tabs kept
+/// the bug after the buttons were fixed -- so the default is inverted here and
+/// text is never a click target unless it is asked to be.
+function textLabel(id, text, parent) {
+    createLabel(id, text, parent);
+    decorative(id);
 }
 
 function railIcon(id, glyph, active, marginTop) {
@@ -279,14 +302,14 @@ function tab(id, glyph, title, sub, active) {
     icon(id + "-glyph", id, glyph, 15, C.muted);
     setTextColor(id + "-glyph", active ? C.textStrong : C.faint);
 
-    createLabel(id + "-name", title, id);
+    textLabel(id + "-name", title, id);
     setFontFamily(id + "-name", FONT);
     setFontSize(id + "-name", 13.5);
     setFontWeight(id + "-name", 600);
     setTextColor(id + "-name", active ? C.textStrong : C.muted);
     setFlex(id + "-name", "margin_left", 8);
 
-    createLabel(id + "-sub", sub, id);
+    textLabel(id + "-sub", sub, id);
     setFontFamily(id + "-sub", MONO);
     setFontSize(id + "-sub", 9.5);
     setLetterSpacing(id + "-sub", 0.08);
@@ -650,6 +673,70 @@ function beginBuild(promptText) {
     setText("chat-title", mode === "patch" ? "Wiring" : "Building");
     showScreen("work");
 }
+
+/// Surface a handler that threw.
+///
+/// __dispatch__ wraps every handler in a try/catch and, without this, drops the
+/// error on the floor -- a button toggles, nothing happens, and nothing is
+/// logged. A dead handler that says so is debuggable; a silent one is not.
+function __dispatchError__(id, eventName, err) {
+    setText("rack-status", "\u25cf HANDLER FAILED " + id + ": " + err);
+    setTextColor("rack-status", C.amber);
+}
+
+// ── wiring ───────────────────────────────────────────────────────────────────
+//
+// A control that looks pressable and is not is worse than no control, so
+// everything that paints as a button gets a handler here. Build and Ask are
+// wired natively in shell.cpp because they need the engine; the rest is
+// presentation and belongs with the presentation.
+
+on("tab-module", "toggle", function (v) { if (v) setMode("module"); });
+on("tab-patch",  "toggle", function (v) { if (v) setMode("patch"); });
+
+/// The rail selects a destination. Home is the composer; module and patch are
+/// the same two modes the tabs offer, reachable from either place so neither
+/// feels like the only way in.
+const RAIL = ["rail-home", "rail-module", "rail-patch", "rail-settings"];
+
+function selectRail(id) {
+    for (let i = 0; i < RAIL.length; ++i) {
+        const on_ = RAIL[i] === id;
+        setBackground(RAIL[i], on_ ? C.raised : C.rail);
+        setSvgStroke(RAIL[i] + "-glyph", on_ ? C.accent : C.faint);
+    }
+}
+
+// Navigation happens BEFORE the highlight, deliberately. __dispatch__ wraps
+// handlers in a try/catch, so anything that throws while restyling the rail
+// would silently swallow the navigation with it -- which is exactly what
+// happened: the button toggled, the heading never moved, and nothing was
+// logged. Cosmetics must not be able to block getting somewhere.
+on("rail-home", "toggle", function (v) {
+    if (!v) return;
+    showScreen("home");
+    selectRail("rail-home");
+});
+on("rail-module", "toggle", function (v) {
+    if (!v) return;
+    showScreen("home");
+    setMode("module");
+    selectRail("rail-module");
+});
+on("rail-patch", "toggle", function (v) {
+    if (!v) return;
+    showScreen("home");
+    setMode("patch");
+    selectRail("rail-patch");
+});
+on("rail-settings", "toggle", function (v) { if (v) selectRail("rail-settings"); });
+
+// Random fills the composer rather than building straight away: a suggestion
+// you cannot read before committing to it is a dice roll, not a prompt.
+on("btn-random", "toggle", function (v) {
+    if (!v) return;
+    setText("prompt", mode === "patch" ? RANDOM_PATCH[0] : RANDOM_MODULE[0]);
+});
 
 setMode(mode);
 showScreen("home");
