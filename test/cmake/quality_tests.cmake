@@ -54,6 +54,11 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    # Both Vellum gates post or gate a required check and grew a manual
+    # dispatch path. Runs the resolve step the workflow actually embeds.
+    add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
+    set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
 
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp

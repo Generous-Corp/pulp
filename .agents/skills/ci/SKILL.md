@@ -520,6 +520,28 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
+## Re-running a wedged required check
+
+`macos` and `Enforce version & skill sync` can be re-dispatched
+(`ghapp workflow run <workflow> --ref <branch>`). The two Vellum gates now can
+too — they take a `pr_number` input:
+
+```sh
+ghapp workflow run vellum-freeze-check.yml  --ref main -f pr_number=<N>
+ghapp workflow run vellum-trusted-gate.yml  --ref main -f pr_number=<N>
+```
+
+Before that they declared only `pull_request(_target)` and `merge_group`, so a
+wedged or cancelled run left a required check with no path back except pushing a
+commit to fire `synchronize` — which rewrites the history under review to fix a
+CI problem.
+
+Both refuse a closed PR: the trusted gate posts a commit status, and putting a
+fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
+checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
+it was fired from, and the inventory steps would then validate `main` instead of
+the PR.
+
 ## GitHub workflow gotchas
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
