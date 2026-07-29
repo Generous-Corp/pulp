@@ -1,6 +1,7 @@
 #include "pulp_delay_editor.hpp"
 
 #include "delay_time_model.hpp"
+#include "pulp_delay_paint_helpers.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,20 +11,8 @@ namespace pulp::examples::delay::ui {
 
 namespace {
 
-void text(canvas::Canvas& c, const std::string& value,
-          float x, float baseline, float size, canvas::Color colour,
-          canvas::TextAlign align = canvas::TextAlign::left,
-          int weight = 500, float spacing = 0.0f) {
-    c.set_font_full("Roboto Mono", size, weight, 0, spacing);
-    c.set_text_align(align);
-    c.set_fill_color(colour);
-    c.fill_text(value, x, baseline);
-}
-
-canvas::Color with_alpha(canvas::Color value, float alpha) {
-    value.a = std::clamp(alpha, 0.0f, 1.0f);
-    return value;
-}
+using paint_detail::text;
+using paint_detail::with_alpha;
 
 class HeaderView final : public view::View {
   public:
@@ -46,23 +35,17 @@ class HeaderView final : public view::View {
         c.set_stroke_color(color::border);
         c.set_line_width(1.0f);
         c.stroke_rounded_rect(202.5f, 12.5f, 305.0f, 39.0f, 5.0f);
-        text(c, "01", 218.0f, 36.0f, 11.0f, color::lime,
-             canvas::TextAlign::left, 700);
-        text(c, "DEFAULT SPACE", 255.0f, 36.0f, 11.0f, color::ink,
+        const auto labels = PulpDelayEditor::truthful_header_labels();
+        text(c, std::string(labels[0]), 218.0f, 31.0f, 9.0f, color::lime,
              canvas::TextAlign::left, 600, 0.65f);
-        text(c, "PRESET", 490.0f, 35.0f, 7.5f, color::muted,
-             canvas::TextAlign::right, 650, 0.8f);
-
-        text(c, "48.0 kHz", b.width - 258.0f, 29.0f, 8.5f, color::muted,
+        text(c, std::string(labels[1]), 218.0f, 44.0f, 7.5f, color::muted,
+             canvas::TextAlign::left, 550, 0.5f);
+        text(c, std::string(labels[2]), b.width - 258.0f, 35.0f, 8.5f, color::muted,
              canvas::TextAlign::left, 550, 0.35f);
-        text(c, "STEREO", b.width - 166.0f, 29.0f, 8.5f, color::ink,
+        text(c, std::string(labels[3]), b.width - 166.0f, 35.0f, 8.5f, color::ink,
              canvas::TextAlign::left, 650, 0.8f);
-        text(c, "DSP  2.1%", b.width - 92.0f, 29.0f, 8.5f, color::lime,
-             canvas::TextAlign::left, 650);
-        c.set_fill_color(color::lime);
-        c.fill_circle(b.width - 250.0f, 44.0f, 2.0f);
-        text(c, "ENGINE ONLINE", b.width - 241.0f, 47.0f, 7.5f,
-             color::muted, canvas::TextAlign::left, 550, 0.5f);
+        text(c, std::string(labels[4]), b.width - 58.0f, 35.0f, 8.5f, color::lime,
+             canvas::TextAlign::right, 650, 0.8f);
     }
 };
 
@@ -116,9 +99,9 @@ class ToneResponseView final : public view::View {
     std::vector<state::ListenerToken> listeners_;
 };
 
-class OutputMeterView final : public view::View {
+class ControlStateView final : public view::View {
   public:
-    explicit OutputMeterView(state::StateStore& store) : store_(&store) {
+    explicit ControlStateView(state::StateStore& store) : store_(&store) {
         set_hit_testable(false);
         listeners_.push_back(store.add_listener(
             [this](state::ParamID changed, float) {
@@ -126,6 +109,10 @@ class OutputMeterView final : public view::View {
                     request_repaint();
             },
             state::ListenerThread::Main));
+    }
+
+    static float level(const state::StateStore& store, state::ParamID id) noexcept {
+        return id == kMix || id == kFeedback ? store.get_normalized(id) : 0.0f;
     }
 
     void layout_children() override {}
@@ -138,21 +125,19 @@ class OutputMeterView final : public view::View {
         c.set_line_width(1.0f);
         c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                               b.height - 1.0f, metric::panel_radius);
-        text(c, "OUTPUT", 16.0f, 20.0f, 8.5f, color::muted,
+        text(c, "CONTROL STATE", 16.0f, 20.0f, 8.5f, color::muted,
              canvas::TextAlign::left, 650, 0.9f);
-        text(c, "L", 16.0f, 40.0f, 8.0f, color::ink);
-        text(c, "R", 16.0f, 57.0f, 8.0f, color::ink);
+        text(c, "MIX", 16.0f, 40.0f, 8.0f, color::ink);
+        text(c, "FB", 16.0f, 57.0f, 8.0f, color::ink);
 
-        const float mix = store_->get_normalized(kMix);
-        const float feedback = store_->get_normalized(kFeedback);
-        const float left_level = std::clamp(0.22f + mix * 0.70f, 0.0f, 1.0f);
-        const float right_level = std::clamp(
-            0.18f + mix * 0.54f + feedback * 0.18f, 0.0f, 1.0f);
+        const float mix = level(*store_, kMix);
+        const float feedback = level(*store_, kFeedback);
+        const std::array levels{mix, feedback};
         const float meter_x = 34.0f;
         const float meter_w = b.width - meter_x - 16.0f;
         for (int channel = 0; channel < 2; ++channel) {
             const float y = 34.0f + static_cast<float>(channel) * 17.0f;
-            const float level = channel == 0 ? left_level : right_level;
+            const float level = levels[static_cast<std::size_t>(channel)];
             c.set_fill_color(color::track);
             c.fill_rounded_rect(meter_x, y, meter_w, 7.0f, 3.5f);
             c.set_fill_color(color::lime);
@@ -248,16 +233,12 @@ void PulpDelayEditor::sync_from_store() {
     for (auto* control : controls_) {
         if (!control)
             continue;
-        const auto id = control->parameter_id();
-        if (auto* knob = dynamic_cast<DelayKnob*>(control)) {
-            knob->set_value(store_->get_normalized(id));
-        } else if (auto* fader = dynamic_cast<DelayFader*>(control)) {
-            fader->set_value(store_->get_normalized(id));
-        } else if (auto* action = dynamic_cast<DelayActionCard*>(control)) {
-            action->set_on(store_->get_value(id) >= 0.5f);
-        }
-        // DelayChoice reads StateStore directly in paint/normalized_value.
+        control->sync_from_store(*store_);
     }
+}
+
+float PulpDelayEditor::control_state_level(state::ParamID id) const noexcept {
+    return ControlStateView::level(*store_, id);
 }
 
 PulpDelayEditor::Panel& PulpDelayEditor::add_panel(
@@ -397,9 +378,9 @@ void PulpDelayEditor::build() {
     add_action(*this, {418, 649, 387, 72}, kReverse,
                "REVERSE", "TURN THE ECHO AROUND", "<-");
 
-    auto output = std::make_unique<OutputMeterView>(*store_);
-    output->set_bounds({817, 649, 284, 72});
-    add_child(std::move(output));
+    auto control_state = std::make_unique<ControlStateView>(*store_);
+    control_state->set_bounds({817, 649, 284, 72});
+    add_child(std::move(control_state));
 }
 
 std::unique_ptr<view::View> build_pulp_delay_editor(

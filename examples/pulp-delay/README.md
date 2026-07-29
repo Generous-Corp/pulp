@@ -32,13 +32,23 @@ listener-silent preset/session deserialization appears on the next frame.
 The knob renderer always uses the authored dark body. Its inactive 270-degree
 track, lime active arc, pointer and display text all derive from the same
 normalized value; focus adds a lime outer ring. No generic silver knob artwork
-is used.
+is used. The footer reports the current Mix and Feedback parameter state; it is
+deliberately not presented as an audio output meter. Header badges describe
+static editor capabilities rather than invented host telemetry or preset state.
+
+Mix and mono/stereo topology changes use per-sample 5 ms ramps. Character
+changes crossfade between two pre-prepared engines without resetting either
+engine in the audio callback, and rapid changes retain the most recently
+requested character.
 
 ## Validation and screenshots
 
-The UI tests cover all 25 bindings, host/RT updates, a routed drag with balanced
-gesture begin/end, state restore, and Skia frames at feedback-normalized
-`0`, `0.25`, `0.5`, `0.75` and `1`.
+The tests cover all 25 bindings, host/RT updates, a routed drag with balanced
+gesture begin/end, state restore, truthful state provenance, click-free mix and
+routing automation, rapid character selection, a measured 192 kHz callback
+budget, and Skia frames at feedback-normalized `0`, `0.25`, `0.5`, `0.75` and
+`1`. Screenshot checks decode knob crops and require the changed-pixel geometry
+to contain each computed arc endpoint.
 
 ```sh
 cmake --build build-delay --target pulp-delay-test pulp-delay-ui-shots

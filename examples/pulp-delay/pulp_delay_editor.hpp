@@ -9,6 +9,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::examples::delay::ui {
@@ -20,6 +21,11 @@ class PulpDelayEditor final : public view::View {
     DelayParameterControl* control_for(state::ParamID id) const noexcept;
     std::size_t bound_parameter_count() const noexcept;
     state::StateStore& parameter_store() const noexcept { return *store_; }
+    static constexpr std::array<std::string_view, 5> truthful_header_labels() noexcept {
+        return {"AUTHORED CONTROL SURFACE", "LIVE PARAMETER BINDINGS", "NATIVE VIEW",
+                "25 PARAMS", "SKIA CANVAS"};
+    }
+    float control_state_level(state::ParamID id) const noexcept;
     void sync_from_store();
 
     void paint(canvas::Canvas& canvas) override;

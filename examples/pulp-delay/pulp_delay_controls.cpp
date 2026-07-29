@@ -1,4 +1,5 @@
 #include "pulp_delay_controls.hpp"
+#include "pulp_delay_paint_helpers.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,20 +10,8 @@ namespace pulp::examples::delay::ui {
 
 namespace {
 
-void text(canvas::Canvas& c, const std::string& value,
-          float x, float baseline, float size, canvas::Color colour,
-          canvas::TextAlign align = canvas::TextAlign::left,
-          int weight = 500, float spacing = 0.0f) {
-    c.set_font_full("Roboto Mono", size, weight, 0, spacing);
-    c.set_text_align(align);
-    c.set_fill_color(colour);
-    c.fill_text(value, x, baseline);
-}
-
-canvas::Color with_alpha(canvas::Color value, float alpha) {
-    value.a = std::clamp(alpha, 0.0f, 1.0f);
-    return value;
-}
+using paint_detail::text;
+using paint_detail::with_alpha;
 
 std::string numeric_value(float raw, const std::string& unit) {
     char buffer[64]{};
@@ -93,17 +82,33 @@ float DelayKnob::pointer_angle() const noexcept {
         + (view::Knob::end_angle - view::Knob::start_angle) * value();
 }
 
+DelayKnob::DialGeometry DelayKnob::dial_geometry() const noexcept {
+    const auto b = local_bounds();
+    constexpr float footer = 35.0f;
+    const float radius =
+        std::max(15.0f, std::min(b.width * 0.36f, (b.height - footer) * 0.40f));
+    return {
+        .center_x = b.width * 0.5f,
+        .center_y = std::max(radius + 8.0f, (b.height - footer) * 0.49f),
+        .body_radius = radius,
+        .arc_radius = radius + 4.0f,
+    };
+}
+
+void DelayKnob::sync_from_store(state::StateStore& store) {
+    set_value(store.get_normalized(id_));
+}
+
 std::string DelayKnob::display_text() const {
     return store_ ? format_parameter_value(*store_, id_, value()) : std::string{};
 }
 
 void DelayKnob::paint(canvas::Canvas& c) {
     const auto b = local_bounds();
-    const float footer = 35.0f;
-    const float radius = std::max(
-        15.0f, std::min(b.width * 0.36f, (b.height - footer) * 0.40f));
-    const float cx = b.width * 0.5f;
-    const float cy = std::max(radius + 8.0f, (b.height - footer) * 0.49f);
+    const auto geometry = dial_geometry();
+    const float radius = geometry.body_radius;
+    const float cx = geometry.center_x;
+    const float cy = geometry.center_y;
     const float angle = pointer_angle();
 
     if (has_focus()) {
@@ -119,13 +124,13 @@ void DelayKnob::paint(canvas::Canvas& c) {
     c.set_line_cap(canvas::LineCap::round);
     c.set_stroke_color(color::track);
     c.set_line_width(5.0f);
-    c.stroke_arc(cx, cy, radius + 4.0f,
+    c.stroke_arc(cx, cy, geometry.arc_radius,
                  view::Knob::start_angle, view::Knob::end_angle);
 
     if (value() > 0.0001f) {
         c.set_stroke_color(color::lime);
         c.set_line_width(5.0f);
-        c.stroke_arc(cx, cy, radius + 4.0f,
+        c.stroke_arc(cx, cy, geometry.arc_radius,
                      view::Knob::start_angle, angle);
     }
 
@@ -173,6 +178,10 @@ DelayFader::DelayFader(state::StateStore& store,
 
 std::string DelayFader::display_text() const {
     return store_ ? format_parameter_value(*store_, id_, value()) : std::string{};
+}
+
+void DelayFader::sync_from_store(state::StateStore& store) {
+    set_value(store.get_normalized(id_));
 }
 
 void DelayFader::paint(canvas::Canvas& c) {
@@ -333,6 +342,11 @@ float DelayChoice::normalized_value() const noexcept {
     return store_->get_normalized(id_);
 }
 
+void DelayChoice::sync_from_store(state::StateStore&) {
+    sync_access_value();
+    request_repaint();
+}
+
 int DelayChoice::selected_index() const noexcept {
     const auto* info = store_->info(id_);
     if (!info || labels_.empty())
@@ -427,6 +441,10 @@ DelayActionCard::DelayActionCard(state::ParamID id,
       compact_(compact) {
     set_id("delay-param-" + std::to_string(id_));
     set_label(caption_);
+}
+
+void DelayActionCard::sync_from_store(state::StateStore& store) {
+    set_on(store.get_value(id_) >= 0.5f);
 }
 
 void DelayActionCard::paint(canvas::Canvas& c) {
