@@ -4,8 +4,9 @@
 
 /// @file value_source.hpp
 /// Paint-safe host→view value channels. A plugin's audio/host thread publishes
-/// meter levels or a scalar readout; a view reads the latest value paint-safe on
-/// the FrameClock — no lock, no allocation on either side. This is the SDK
+/// meter levels, a scalar readout, or bounded occurrences; a view reads the
+/// latest value paint-safe on the FrameClock — no lock, no allocation on either
+/// side. This is the SDK
 /// default for the pattern every native-import host otherwise hand-rolls (a
 /// reader polled on the frame clock), and the subscription that lets a live
 /// meter keep an editor's frames alive (see needs_continuous_frames).
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <type_traits>
 
 #include <pulp/runtime/triple_buffer.hpp>
 
@@ -90,6 +92,34 @@ struct VectorFrame {
     int count = 0;
 };
 
+/// One occurrence inside an audio block.
+///
+/// `value` is payload, never presence: an occurrence whose value is zero still
+/// occupies a slot and is therefore distinct from an empty `EventFrame`.
+struct ValueEvent {
+    std::uint32_t frame_index = 0;
+    float value = 0.0f;
+};
+
+static_assert(std::is_trivially_copyable_v<ValueEvent>);
+
+/// A bounded list of occurrences from one audio block.
+///
+/// Fixed capacity keeps the payload trivially copyable for `TripleBuffer`.
+/// Publishers call `publish()` only for blocks they want the UI to observe;
+/// an empty frame is valid but carries no occurrence to dispatch.
+struct EventFrame {
+    static constexpr int kMaxEvents = 1024;
+    std::array<ValueEvent, kMaxEvents> events{};
+    int count = 0;
+    /// Source-owned generation used by a reader to identify this exact block.
+    /// Unlike `PublishCounter`, this travels atomically with the payload, so a
+    /// publish racing the UI snapshot cannot duplicate the newest block.
+    std::uint32_t publication = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<EventFrame>);
+
 /// Lock-free vector channel: the writer publishes a block of samples, the view
 /// reads the latest block paint-safe. Same one-writer/one-reader contract as
 /// `MeterSource`.
@@ -120,6 +150,40 @@ public:
 
 private:
     runtime::TripleBuffer<VectorFrame> buffer_;
+};
+
+/// Lock-free event channel: the writer publishes the occurrences from one
+/// audio block and the view reads the latest completed block.
+///
+/// Like the other visualization channels this is latest-wins, not a lossless
+/// queue. A UI that misses an intermediate block observes the newest one.
+class EventSource : public PublishCounter {
+public:
+    /// Publish a block's occurrences from the writer thread. Alloc-free and
+    /// non-blocking. Oversized lists are truncated to their leading events.
+    void publish(const ValueEvent* events, int count) {
+        EventFrame frame;
+        frame.count = events == nullptr || count < 0
+                          ? 0
+                          : (count > EventFrame::kMaxEvents
+                                 ? EventFrame::kMaxEvents
+                                 : count);
+        if (frame.count > 0) {
+            std::copy_n(events, static_cast<std::size_t>(frame.count),
+                        frame.events.begin());
+        }
+        frame.publication = ++writer_publication_;
+        buffer_.write(frame);
+        note_publish();
+    }
+
+    /// Read the latest completed block from the reader thread.
+    EventFrame read() { return buffer_.read(); }
+
+private:
+    runtime::TripleBuffer<EventFrame> buffer_;
+    // Single-writer state: only publish() touches this counter.
+    std::uint32_t writer_publication_ = 0;
 };
 
 /// Lock-free scalar channel: a single paint-safe cached number (a readout value,

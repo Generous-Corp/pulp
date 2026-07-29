@@ -70,6 +70,17 @@ set(_configure_args
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
     "-DCMAKE_BUILD_TYPE=${_config}")
 
+# An installed SDK produced under a sanitizer contains instrumented static
+# libraries. Its smoke consumer must use the same compile/link flags or the
+# first executable fails to resolve the sanitizer runtime before the staging
+# behavior can run.
+foreach(_flag_var CXX_FLAGS C_FLAGS OBJCXX_FLAGS EXE_LINKER_FLAGS SHARED_LINKER_FLAGS)
+    if(DEFINED PULP_PARENT_${_flag_var} AND NOT PULP_PARENT_${_flag_var} STREQUAL "")
+        list(APPEND _configure_args
+            "-DCMAKE_${_flag_var}=${PULP_PARENT_${_flag_var}}")
+    endif()
+endforeach()
+
 # Match the sibling installed-SDK fixtures: a Debug producer (the sanitizer
 # lanes) is an acknowledged configuration, not a failure.
 if(_config_lower STREQUAL "debug")
