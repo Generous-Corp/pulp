@@ -467,11 +467,14 @@ inline std::string browser_capture_runtime_install_name() {
     return "browser_capture-v1";
 }
 
-inline constexpr std::array<std::string_view, 10>
+inline constexpr std::array<std::string_view, 13>
     browser_capture_runtime_files{
         "browser_process.mjs",
         "capture.mjs",
         "health.mjs",
+        "interaction_executor.mjs",
+        "interaction_plan.mjs",
+        "interaction_plan_protocol.json",
         "lifecycle.mjs",
         "network_dependencies.mjs",
         "renderers.mjs",
