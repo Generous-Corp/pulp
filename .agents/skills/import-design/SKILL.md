@@ -4987,3 +4987,28 @@ which reads as flakiness rather than the network dependency it is.
 case's scratch dir, restoring both on destruction. Redirecting `HOME` is the
 load-bearing half — the env var is usually not set, and the token comes from the
 file. Any new fixture lane that shells out to the exporter wants the same scope.
+
+## The native view tree and the JS lane must honor the same effects
+
+An imported design carries `filter`, `backdrop-filter` and `mix-blend-mode` in
+its IR, and for a long time only the **JS lane** acted on them:
+`web-compat-style-decl-paint.js` parsed the radius out of `blur(Npx)` and routed
+it to `View::set_backdrop_blur`. `build_native_view_tree` carried the same
+fields and applied none of them, so one document rendered soft through one lane
+and hard-edged through the other with nothing in the IR to explain the
+difference.
+
+Two consequences worth remembering when a render looks wrong:
+
+- **A blurred element that renders hard-edged is a lane problem, not a design
+  problem.** Check which lane produced the pixels before touching the design.
+- **`backdrop-filter` must be cropped to its own element.** Built without a crop
+  rect the filter samples and writes outside its layer, and a frosted deck at
+  the bottom of a panel will smear a title at the top. The tell is that the
+  reach grows with the radius — at `blur(4px)` the text is faintly soft, at
+  `blur(24px)` it is unreadable.
+
+Only `blur()` is read out of a filter list. `brightness`, `saturate` and the
+rest need a real filter chain, so a node carrying them is left unfiltered
+rather than approximated: an unfiltered element is visibly missing, a wrongly
+blurred one looks intentional.
