@@ -186,6 +186,19 @@ WidgetBridge::BindingTransform WidgetBridge::parse_transform(const choc::value::
 }
 
 namespace {
+/// Stable wire names for a channel's shape. Spelled out rather than derived
+/// from the enum's order so a future insertion cannot silently renumber what a
+/// UI or a lint already matches on.
+const char* value_channel_shape_name(ValueChannelShape shape) {
+    switch (shape) {
+        case ValueChannelShape::scalar: return "scalar";
+        case ValueChannelShape::meter:  return "meter";
+        case ValueChannelShape::vector: return "vector";
+        case ValueChannelShape::events: return "events";
+    }
+    return "scalar";
+}
+
 /// Returns the channel name for a `value:<name>` source, or empty for a plain
 /// parameter name.
 std::string_view value_channel_name(std::string_view source) {
@@ -776,6 +789,26 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
                               args.get<std::string>(1, ""),
                               WidgetBridge::ParamBinding::Target::scope,
                               args.numArgs > 2 ? args[2] : nullptr));
+    });
+
+    // listValueChannels() -> [{name, unit, shape, neutral}], or [] when the
+    // processor declares none. This is what lets a UI discover what it can bind
+    // instead of hard-coding names that silently stop resolving when the
+    // processor is edited — the same drift `getParamMetadata` removed for
+    // parameters. `shape` tells a caller which binder applies: `meter` for
+    // bindMeter, `vector` for bindScope.
+    register_bridge_function(api, "listValueChannels", [&self](choc::javascript::ArgumentList) {
+        auto arr = choc::value::createEmptyArray();
+        if (self.value_channels_ == nullptr) return arr;
+        for (const auto& info : self.value_channels_->infos()) {
+            auto o = choc::value::createObject("ValueChannel");
+            o.addMember("name", info.name);
+            o.addMember("unit", info.unit);
+            o.addMember("shape", value_channel_shape_name(info.shape));
+            o.addMember("neutral", static_cast<double>(info.neutral));
+            arr.addArrayElement(o);
+        }
+        return arr;
     });
 
     // unbindWidget(widgetId) -> remove any binding(s) for that widget. Returns

@@ -1628,3 +1628,55 @@ TEST_CASE("a meter holds a static-but-live reading, and decays once publishing s
     bridge.service_param_bindings();
     CHECK_THAT(meter->display_rms(), WithinAbs(0.4f, 1e-5f));
 }
+// ── listValueChannels ─────────────────────────────────────────────────
+//
+// Discovery. Without it a UI hard-codes channel names, and those names stop
+// resolving silently when the processor is edited — the same drift
+// getParamMetadata removed for parameters.
+
+TEST_CASE("listValueChannels reports what a UI can bind",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    channels.declare_meter("gr", "dB", 0.0f);
+    channels.declare_vector("env");
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script("");
+
+    const auto json = eval_json(engine, "listValueChannels()");
+    INFO("payload: " << json);
+    CHECK(json.find("\"name\":\"gr\"") != std::string::npos);
+    CHECK(json.find("\"unit\":\"dB\"") != std::string::npos);
+    // `shape` is what tells a caller which binder applies — meter -> bindMeter,
+    // vector -> bindScope.
+    CHECK(json.find("\"shape\":\"meter\"") != std::string::npos);
+    CHECK(json.find("\"shape\":\"vector\"") != std::string::npos);
+    CHECK(json.find("\"neutral\":0") != std::string::npos);
+    CHECK(eval_json(engine, "listValueChannels().length") == "2");
+}
+
+TEST_CASE("listValueChannels is an empty array when nothing is declared",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    // No set attached at all — the default for every processor that does not
+    // override value_channels(). A caller must get [] rather than undefined or
+    // a throw, so `for (const c of listValueChannels())` is always safe.
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+    CHECK(eval_json(engine, "listValueChannels().length") == "0");
+    CHECK(eval_json(engine, "Array.isArray(listValueChannels())") == "true");
+}
