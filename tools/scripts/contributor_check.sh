@@ -124,19 +124,29 @@ fi
 # gates.sh is sub-second and offline. It is the same set the maintainer's
 # pre-push hook runs, minus the heavy diff-coverage build.
 say "4. Repo gates (fast, offline)"
-if [ -x tools/scripts/gates.sh ]; then
-    if PULP_SKIP_DIFF_COVER=1 tools/scripts/gates.sh "$BASE" >/tmp/contrib-gates.log 2>&1; then
-        ok "gates.sh clean"
-    else
-        if grep -q "ModuleNotFoundError: No module named 'tomllib'" /tmp/contrib-gates.log; then
-            skip "gates.sh: needs Python 3.11+ (tomllib) — your python3 is older; maintainer CI covers it"
-        else
-            bad "gates.sh reported problems — see /tmp/contrib-gates.log"
-            grep -iE "✗|FAILED|NOT updated" /tmp/contrib-gates.log | head -6 | sed 's/^/        /'
-        fi
-    fi
-else
+# Several gates need Python 3.11+ (tomllib, unittest enterContext). macOS ships
+# 3.9, so on a stock Mac gates.sh fails for reasons unrelated to your change —
+# `deps-audit self-tests: failing` is the usual one. Report that honestly as
+# unverifiable rather than either hiding it or blaming the contribution.
+PY_OK=0
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null && PY_OK=1
+
+if [ ! -x tools/scripts/gates.sh ]; then
     skip "tools/scripts/gates.sh not present"
+elif PULP_SKIP_DIFF_COVER=1 tools/scripts/gates.sh "$BASE" >/tmp/contrib-gates.log 2>&1; then
+    ok "gates.sh clean"
+elif [ "$PY_OK" -eq 0 ]; then
+    skip "gates.sh inconclusive: python3 is $(python3 -V 2>&1 | awk '{print $2}'), several gates need 3.11+"
+    echo "        Gates that reported a problem (may be version artefacts):"
+    grep -iE "failing|✗|FAILED|NOT updated" /tmp/contrib-gates.log \
+        | grep -v "one or more gates failed" | head -6 | sed 's/^/          /'
+    echo "        For a real answer install Python 3.11+ and re-run. Skill-sync and"
+    echo "        version-bump — the two that most often send a PR back — run fine on 3.9"
+    echo "        and are included above if they appear."
+else
+    bad "gates.sh reported problems — see /tmp/contrib-gates.log"
+    grep -iE "failing|✗|FAILED|NOT updated" /tmp/contrib-gates.log \
+        | grep -v "one or more gates failed" | head -6 | sed 's/^/        /'
 fi
 
 # ── 5. Diff coverage ───────────────────────────────────────────────────────
@@ -144,12 +154,29 @@ fi
 # whole-repo percentage. Optional here: it needs a coverage build plus
 # diff-cover, and a contributor missing either should still be able to hand off.
 say "5. Diff coverage (target: 75% of changed lines)"
-if ! command -v diff-cover >/dev/null 2>&1 && ! python3 -c "import diff_cover" >/dev/null 2>&1; then
+# Only C/C++ sources produce coverage data. Running the coverage build for a
+# docs-, script-, or workflow-only diff costs many minutes and measures nothing —
+# and a check that appears to hang is a check people learn to interrupt.
+COVERABLE=0
+for f in ${CHANGED[@]+"${CHANGED[@]}"}; do
+    case "$f" in
+        *.cpp|*.hpp|*.cc|*.h|*.mm|*.m) COVERABLE=1 ;;
+    esac
+done
+if [ "$COVERABLE" -eq 0 ]; then
+    ok "no C/C++ sources changed — coverage not applicable"
+elif ! command -v diff-cover >/dev/null 2>&1 && ! python3 -c "import diff_cover" >/dev/null 2>&1; then
     skip "diff-cover not installed — coverage not measured locally (maintainer CI enforces it)"
 elif [ ! -x tools/scripts/local_diff_cover.sh ]; then
     skip "tools/scripts/local_diff_cover.sh not present"
+elif [ "${#TARGETS[@]:-0}" -eq 0 ] && [ "${CONTRIB_FULL_COVERAGE:-0}" != "1" ]; then
+    # A whole-tree coverage build is 30+ minutes. Make that opt-in rather than
+    # the default a contributor stumbles into with no warning.
+    skip "coverage skipped: pass your test target(s) to measure it, e.g."
+    printf '        tools/scripts/contributor_check.sh pulp-test-<subsystem>\n'
+    printf '        (or CONTRIB_FULL_COVERAGE=1 for the full ~30min tree build)\n'
 else
-    echo "  running coverage build (slow — several minutes)…"
+    echo "  running coverage build for: ${TARGETS[*]:-whole tree} (several minutes)…"
     if tools/scripts/local_diff_cover.sh ${TARGETS[@]+"${TARGETS[@]}"} >/tmp/contrib-cover.log 2>&1; then
         ok "diff coverage at or above threshold"
     else

@@ -78,17 +78,31 @@ most credible sentence you can write.
 ## 5. Run the contributor check
 
 ```sh
-tools/scripts/contributor_check.sh            # whole diff vs origin/main
-tools/scripts/contributor_check.sh <target>   # build only these test targets
+tools/scripts/contributor_check.sh                    # whole diff vs origin/main
+tools/scripts/contributor_check.sh pulp-test-<name>   # also measure diff coverage
 ```
 
-It runs only what is meaningful on a plain Mac: the sub-second repo gates, a
-size/test-presence review, and diff coverage when the tooling is available. It
-never needs Shipyard, Tart, or a VM.
+It runs only what is meaningful on a plain Mac: version-file hygiene, that tests
+accompany source, a size/structure review, the sub-second repo gates, and diff
+coverage. It never needs Shipyard, Tart, or a VM. Its own self-tests are
+`tools/scripts/test_contributor_check.sh`.
 
-**A check you cannot run is not a failure — it is a line in your handoff.** If
-`diff-cover` will not install (a broken Homebrew Python is the usual cause),
-record that and move on. Do not bypass a gate silently.
+**A check it cannot run is not a failure — it is a line in your handoff.** The
+script prints those together at the end, ready to paste. Do not bypass a gate
+silently.
+
+Two environment facts worth knowing before you read its output:
+
+- **Python 3.11+.** Parts of `gates.sh` need `tomllib` and `unittest`'s
+  `enterContext`, neither of which exists in the 3.9 macOS ships. On stock
+  Python you will see `deps-audit self-tests: failing` — that is the interpreter,
+  not your change. The script says so rather than blaming your work, but install
+  3.11+ if you want a real answer. Skill-sync and version-bump — the two gates
+  that most often send a PR back — do run correctly on 3.9.
+- **Coverage is opt-in.** Pass your test target(s) to measure it. With no target
+  the whole-tree coverage build takes ~30 minutes, so the script skips it and
+  tells you rather than appearing to hang. It also skips automatically when your
+  diff contains no C/C++ — there is nothing to cover.
 
 ### Path-based gates can fire on files you barely touched
 

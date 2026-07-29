@@ -161,7 +161,8 @@
     },
     "contribute": {
       "paths": [
-        "tools/scripts/contributor_check.sh"
+        "tools/scripts/contributor_check.sh",
+        "tools/scripts/test_contributor_check.sh"
       ]
     },
     "daw-smoke": {
