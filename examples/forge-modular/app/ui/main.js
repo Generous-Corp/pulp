@@ -1,15 +1,21 @@
 // Forge Modular — the app shell.
 //
-// Two things get built here and they are not the same activity, so the shell
-// says which one you are in and changes with it. A module is one panel; a
-// patch is a whole rack, and patch mode is as much a teaching surface as a
-// building one — the chat explains what was wired and why.
+// Built to match design/prototype/reference-render.png. That render is the
+// specification: an earlier version of this file was written from a reading of
+// the prototype rather than from the picture, and ended up matching neither it
+// nor Forge. Screenshot the standalone and compare before believing any change
+// here is right.
 //
-// Ink & Signal, shared with Forge, so the two read as one family.
+// The home screen is a rail, a hero, a composer and a project shelf. The
+// chat-and-preview split is a *second* screen, reached after building —
+// collapsing the two is what made the previous attempt line up with nothing.
+//
+// Ink & Signal throughout, shared with Forge, because these are one brand.
 
 const C = {
-    appBg:      "#161A21",
-    sunken:     "#0E1116",
+    appBg:      "#0F1217",
+    rail:       "#12161C",
+    surface:    "#161A21",
     panel:      "#1E2530",
     raised:     "#28303C",
     line:       "#2B3340",
@@ -29,55 +35,183 @@ const C = {
 const FONT = "Jost";
 const MONO = "JetBrains Mono";
 
-// Cable colours are Rack's own, assigned by role at generation time, so the
-// preview and Rack agree while the role still reads. See DECISIONS.md.
-const ROLE = {
-    audio:      { label: "AUDIO",        color: "#00b56e" },
-    pitch:      { label: "PITCH & GATE", color: "#3695ef" },
-    modulation: { label: "MODULATION",   color: "#8b4ade" },
-    output:     { label: "OUTPUT",       color: "#ffb437" },
-};
-
 let mode = "module";      // "module" | "patch"
 
-// ── shell ────────────────────────────────────────────────────────────────────
+// ── root: rail on the left, everything else to its right ─────────────────────
 
-const root = createCol("root");
+const root = createRow("root");
 setBackground("root", C.appBg);
-setFlex("root", "flex_direction", "column");
-// The root has to claim the window, or every child lays out against zero and
-// the whole shell huddles in the top corner.
 setFlex("root", "width", "100%");
 setFlex("root", "height", "100%");
 
-// ── tabs ─────────────────────────────────────────────────────────────────────
+// ── the rail ─────────────────────────────────────────────────────────────────
 //
-// The tabs and the composer are one shape, not two. An earlier prototype gave
-// them top-only radii and no bottom border -- every part of which says "these
-// join" -- and then held them 12px apart, so they read as floating buttons
-// above an unrelated box. They share an edge here.
+// Forge's rail, with the two icons that differ: module and patch, which is what
+// this product makes instead of plugins.
 
-const tabs = createRow("tabs", "root");
+const rail = createCol("rail", "root");
+setBackground("rail", C.rail);
+setFlex("rail", "width", 64);
+setFlex("rail", "align_items", "center");
+setFlex("rail", "padding_top", 14);
+setFlex("rail", "flex_direction", "column");
+
+// The logo tile is the accent square Forge uses, not a button.
+const brand = createPanel("rail-brand", "rail");
+setBackground("rail-brand", C.accent);
+setCornerRadius("rail-brand", 12);
+setFlex("rail-brand", "width", 40);
+setFlex("rail-brand", "height", 40);
+setFlex("rail-brand", "align_items", "center");
+setFlex("rail-brand", "justify_content", "center");
+createLabel("rail-brand-mark", "⠿", "rail-brand");
+setTextColor("rail-brand-mark", C.onAccent);
+setFontSize("rail-brand-mark", 17);
+
+function railIcon(id, glyph, active, marginTop) {
+    const b = createRow(id, "rail");
+    setBackground(id, active ? C.raised : C.rail);
+    setCornerRadius(id, 12);
+    setFlex(id, "width", 40);
+    setFlex(id, "height", 40);
+    setFlex(id, "margin_top", marginTop);
+    setFlex(id, "align_items", "center");
+    setFlex(id, "justify_content", "center");
+    createLabel(id + "-glyph", glyph, id);
+    setTextColor(id + "-glyph", active ? C.accent : C.faint);
+    setFontSize(id + "-glyph", 16);
+    return b;
+}
+
+railIcon("rail-home", "⌂", true, 14);
+railIcon("rail-module", "▯", false, 6);
+railIcon("rail-patch", "⑂", false, 6);
+railIcon("rail-settings", "◎", false, 6);
+
+const railGap = createCol("rail-gap", "rail");
+setFlex("rail-gap", "flex_grow", 1);
+
+railIcon("rail-install", "⤓", false, 0);
+railIcon("rail-account", "☺", false, 6);
+setFlex("rail-account", "margin_bottom", 14);
+
+// ── everything right of the rail ─────────────────────────────────────────────
+
+const main = createCol("main", "root");
+setFlex("main", "flex_grow", 1);
+setFlex("main", "flex_direction", "column");
+
+// ── top bar ──────────────────────────────────────────────────────────────────
+
+const topbar = createRow("topbar", "main");
+setFlex("topbar", "align_items", "center");
+setFlex("topbar", "padding_left", 18);
+setFlex("topbar", "padding_right", 18);
+setFlex("topbar", "height", 46);
+
+createLabel("topbar-name", "Forge Modular", "topbar");
+setFontFamily("topbar-name", FONT);
+setFontSize("topbar-name", 15);
+setFontWeight("topbar-name", 700);
+setTextColor("topbar-name", C.textStrong);
+
+/// A small monospace chip: the artifact summary on the left, Rack's state and
+/// the formats this build provides on the right.
+function chip(id, parent, text, color, marginLeft) {
+    const c = createRow(id, parent);
+    setBackground(id, C.surface);
+    setBorder(id, C.line, 1);
+    setCornerRadius(id, 7);
+    setFlex(id, "padding_left", 9);
+    setFlex(id, "padding_right", 9);
+    setFlex(id, "padding_top", 4);
+    setFlex(id, "padding_bottom", 4);
+    setFlex(id, "margin_left", marginLeft);
+    setFlex(id, "align_items", "center");
+    createLabel(id + "-text", text, id);
+    setFontFamily(id + "-text", MONO);
+    setFontSize(id + "-text", 10);
+    setLetterSpacing(id + "-text", 0.07);
+    setTextColor(id + "-text", color);
+    return c;
+}
+
+chip("chip-artifact", "topbar", "MODULE · 12 HP", C.muted, 12);
+
+const topGap = createRow("topbar-gap", "topbar");
+setFlex("topbar-gap", "flex_grow", 1);
+
+// Whether Rack is running is the one piece of state the whole product hangs
+// on, so it is stated rather than discovered when a button fails.
+createLabel("rack-status", "● RACK NOT RUNNING", "topbar");
+setFontFamily("rack-status", MONO);
+setFontSize("rack-status", 10);
+setLetterSpacing("rack-status", 0.07);
+setTextColor("rack-status", C.faint);
+
+chip("chip-vcv", "topbar", "VCV", C.faint, 12);
+chip("chip-vst3", "topbar", "VST3", C.faint, 6);
+chip("chip-standalone", "topbar", "STANDALONE", C.faint, 6);
+
+// ── hero ─────────────────────────────────────────────────────────────────────
+
+const hero = createCol("hero", "main");
+setFlex("hero", "flex_grow", 1);
+setFlex("hero", "align_items", "center");
+setFlex("hero", "justify_content", "center");
+setFlex("hero", "flex_direction", "column");
+setBackground("hero", C.surface);
+
+createLabel("hero-eyebrow", "FORGE MODULAR · FOR VCV RACK", "hero");
+setFontFamily("hero-eyebrow", MONO);
+setFontSize("hero-eyebrow", 11);
+setLetterSpacing("hero-eyebrow", 0.18);
+setTextColor("hero-eyebrow", C.muted);
+
+createLabel("hero-title", "What should the module do?", "hero");
+setFontFamily("hero-title", FONT);
+setFontSize("hero-title", 44);
+setFontWeight("hero-title", 700);
+setTextColor("hero-title", C.textStrong);
+setFlex("hero-title", "margin_top", 12);
+
+createLabel("hero-sub", "One Eurorack panel — knobs, jacks and the DSP behind them.", "hero");
+setFontFamily("hero-sub", FONT);
+setFontSize("hero-sub", 15);
+setTextColor("hero-sub", C.muted);
+setFlex("hero-sub", "margin_top", 10);
+
+// ── tabs, joined to the composer ─────────────────────────────────────────────
+//
+// One shape, not two. The tabs carry top-only radii and no bottom border, and
+// the composer's top-left corner is square, because they meet there.
+
+const tabs = createRow("tabs", "hero");
 setFlex("tabs", "align_items", "flex_end");
-setFlex("tabs", "padding_left", 20);
-setFlex("tabs", "padding_top", 18);
+setFlex("tabs", "width", 1000);
+setFlex("tabs", "margin_top", 34);
 
-function tab(id, parent, title, sub, active) {
-    const t = createRow(id, parent);
-    setBackground(id, active ? C.panel : C.appBg);
+function tab(id, glyph, title, sub, active) {
+    const t = createRow(id, "tabs");
+    setBackground(id, active ? C.raised : C.panel);
     setBorder(id, active ? C.lineStrong : C.line, 1);
     setCornerRadius(id, 12);
     setFlex(id, "padding_left", 16);
     setFlex(id, "padding_right", 16);
-    setFlex(id, "padding_top", 9);
-    setFlex(id, "padding_bottom", 9);
+    setFlex(id, "padding_top", 10);
+    setFlex(id, "padding_bottom", 10);
     setFlex(id, "align_items", "center");
+
+    createLabel(id + "-glyph", glyph, id);
+    setFontSize(id + "-glyph", 13);
+    setTextColor(id + "-glyph", active ? C.textStrong : C.faint);
 
     createLabel(id + "-name", title, id);
     setFontFamily(id + "-name", FONT);
     setFontSize(id + "-name", 13.5);
     setFontWeight(id + "-name", 600);
     setTextColor(id + "-name", active ? C.textStrong : C.muted);
+    setFlex(id + "-name", "margin_left", 8);
 
     createLabel(id + "-sub", sub, id);
     setFontFamily(id + "-sub", MONO);
@@ -88,373 +222,187 @@ function tab(id, parent, title, sub, active) {
     return t;
 }
 
-tab("tab-module", "tabs", "Module", "ONE PANEL", mode === "module");
-tab("tab-patch", "tabs", "Patch", "A WHOLE RACK", mode === "patch");
-
-// ── body: chat on the left, preview on the right ─────────────────────────────
-
-const body = createRow("body", "root");
-setFlex("body", "flex_grow", 1);
-setFlex("body", "padding_left", 20);
-setFlex("body", "padding_right", 20);
-setFlex("body", "padding_bottom", 20);
-
-// ── chat ─────────────────────────────────────────────────────────────────────
-
-const chat = createCol("chat", "body");
-setBackground("chat", C.panel);
-setBorder("chat", C.lineStrong, 1);
-// Square top-left: this is the selected tab's panel, and the corner is the joint.
-setCornerRadius("chat", 16);
-setFlex("chat", "width", 380);
-setFlex("chat", "flex_direction", "column");
-
-const history = createScrollView("history", "chat");
-setFlex("history", "flex_grow", 1);
-setFlex("history", "padding", 16);
-
-/// One wiring line, as the explanation prints it. Monospace because the arrows
-/// have to align down the column for the shape of a patch to be readable.
-function wiringLine(id, from, fromPort, to, toPort, color) {
-    const row = createRow(id, "history");
-    setFlex(id, "align_items", "center");
-    setFlex(id, "padding_top", 2);
-    setFlex(id, "padding_bottom", 2);
-
-    const dot = createPanel(id + "-dot", id);
-    setBackground(id + "-dot", color);
-    setCornerRadius(id + "-dot", 3);
-    setFlex(id + "-dot", "width", 6);
-    setFlex(id + "-dot", "height", 6);
-    setFlex(id + "-dot", "margin_right", 10);
-
-    createLabel(id + "-text", from + " " + fromPort + " → " + to + " " + toPort, id);
-    setFontFamily(id + "-text", MONO);
-    setFontSize(id + "-text", 12.5);
-    setTextColor(id + "-text", C.text);
-    return row;
-}
-
-/// The short musical reason a cable exists. Secondary to the connection above
-/// it -- this is the teaching, and it should read as an aside rather than
-/// competing with the wiring itself.
-function wiringWhy(id, why) {
-    createLabel(id, why, "history");
-    setFontFamily(id, FONT);
-    setFontSize(id, 12);
-    setTextColor(id, C.muted);
-    setFlex(id, "margin_left", 16);
-    setFlex(id, "margin_bottom", 6);
-    return l;
-}
-
-function roleHeader(id, role) {
-    createLabel(id, ROLE[role].label, "history");
-    setFontFamily(id, MONO);
-    setFontSize(id, 10);
-    setLetterSpacing(id, 0.1);
-    setTextColor(id, ROLE[role].color);
-    setFlex(id, "margin_top", 12);
-    setFlex(id, "margin_bottom", 4);
-    return l;
-}
+tab("tab-module", "▯", "Module", "ONE PANEL", true);
+tab("tab-patch", "⑂", "Patch", "A WHOLE RACK", false);
 
 // ── composer ─────────────────────────────────────────────────────────────────
 
-const composer = createCol("composer", "chat");
+const composer = createCol("composer", "hero");
 setBackground("composer", C.raised);
 setBorder("composer", C.lineStrong, 1);
-setCornerRadius("composer", 14);
-setFlex("composer", "margin", 12);
-setFlex("composer", "padding", 14);
+setCornerRadius("composer", 16);
+setFlex("composer", "width", 1000);
+setFlex("composer", "padding", 20);
 
-const input = createTextEditor("prompt", "composer");
+const prompt = createTextEditor("prompt", "composer");
 setFontFamily("prompt", FONT);
-setFontSize("prompt", 14);
-setTextColor("prompt", C.text);
+setFontSize("prompt", 16);
+setTextColor("prompt", C.muted);
 setBackground("prompt", C.raised);
-setFlex("prompt", "min_height", 46);
+setFlex("prompt", "min_height", 30);
 
 const actions = createRow("actions", "composer");
 setFlex("actions", "align_items", "center");
-setFlex("actions", "margin_top", 10);
+setFlex("actions", "margin_top", 18);
 
-// Two rows: tools while composing, then the two ways to send. One row cannot
-// hold four buttons in a 380px column without clipping their labels, and a
-// button whose label is cut is worse than one placed a line lower.
-const sendRow = createRow("send-row", "composer");
-setFlex("send-row", "align_items", "center");
-setFlex("send-row", "justify_content", "flex_end");
-setFlex("send-row", "margin_top", 8);
-
-function button(id, parent, label, kind) {
-    const b = createToggleButton(id, parent);
+/// A composer button: glyph then label, because the render's buttons read as an
+/// icon and a word rather than as text alone.
+function button(id, parent, glyph, label, kind) {
+    const b = createRow(id, parent);
     setBackground(id, kind === "primary" ? C.accent : C.panel);
     setBorder(id, kind === "primary" ? C.accent : C.line, 1);
-    setCornerRadius(id, 10);
-    setFlex(id, "padding_left", 15);
-    setFlex(id, "padding_right", 15);
-    setFlex(id, "padding_top", 9);
-    setFlex(id, "padding_bottom", 9);
-    setFlex(id, "margin_right", 8);
-    setLabel(id, label);
-    setTextColor(id, kind === "primary" ? C.onAccent : C.text);
-    setFontFamily(id, FONT);
-    setFontSize(id, 13);
-    setFontWeight(id, 600);
+    setCornerRadius(id, 11);
+    setFlex(id, "padding_left", kind === "icon" ? 13 : 17);
+    setFlex(id, "padding_right", kind === "icon" ? 13 : 17);
+    setFlex(id, "padding_top", 11);
+    setFlex(id, "padding_bottom", 11);
+    setFlex(id, "align_items", "center");
+
+    createLabel(id + "-glyph", glyph, id);
+    setFontSize(id + "-glyph", 13);
+    setTextColor(id + "-glyph", kind === "primary" ? C.onAccent : C.muted);
+
+    createLabel(id + "-label", label, id);
+    setFontFamily(id + "-label", FONT);
+    setFontSize(id + "-label", 14);
+    setFontWeight(id + "-label", 600);
+    setTextColor(id + "-label", kind === "primary" ? C.onAccent : C.text);
+    setFlex(id + "-label", "margin_left", 9);
     return b;
 }
 
-// @ opens the mention picker over 4,705 modules; Random follows the mode.
-button("btn-mention", "actions", "@", "ghost");
-button("btn-random", "actions", mode === "patch" ? "Random patch" : "Random", "ghost");
+button("btn-mention", "actions", "@", "", "icon");
+setFlex("btn-mention", "margin_right", 9);
+button("btn-random", "actions", "⚄", "Random module", "ghost");
 
+const actionsGap = createRow("actions-gap", "actions");
+setFlex("actions-gap", "flex_grow", 1);
 
+// Two labelled buttons rather than an inferred intent chip: a chip guesses and
+// the user still has to notice the guess, while an unwanted rebuild rewrites
+// their work and an unwanted answer costs nothing.
+button("btn-ask", "actions", "?", "Ask", "ghost");
+setFlex("btn-ask", "margin_right", 10);
+button("btn-build", "actions", "⚒", "Build module", "primary");
 
-// Two buttons rather than an inferred intent chip. A chip guesses and the user
-// still has to notice the guess before sending; a labelled button just says.
-// The asymmetry decides it: an unwanted answer costs nothing, an unwanted
-// rebuild rewrites their work. See DECISIONS.md.
-button("btn-ask", "send-row", "Ask", "ghost");
-button("btn-build", "send-row", mode === "patch" ? "Build patch" : "Build module", "primary");
-
-createLabel("composer-hint", "ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.", "composer");
+createLabel("composer-hint",
+            "↵  ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.",
+            "composer");
 setFontFamily("composer-hint", MONO);
 setFontSize("composer-hint", 9.5);
 setLetterSpacing("composer-hint", 0.06);
 setTextColor("composer-hint", C.faint);
-setFlex("composer-hint", "margin_top", 8);
-setFlex("composer-hint", "flex_wrap", "wrap");
+setFlex("composer-hint", "margin_top", 14);
 
-// ── preview ──────────────────────────────────────────────────────────────────
-//
-// In module mode this is the panel being built. In patch mode it is the rack:
-// real vendor panel images at true widths with the cables drawn over them.
-// A rack is a wide strip and this pane is not, so it fits rather than crops --
-// the explanation beside it describes the whole patch, so the whole patch has
-// to be visible.
+// ── project shelf ────────────────────────────────────────────────────────────
 
-const preview = createCol("preview", "body");
-setBackground("preview", C.sunken);
-setBorder("preview", C.line, 1);
-setCornerRadius("preview", 16);
-setFlex("preview", "flex_grow", 1);
-setFlex("preview", "margin_left", 14);
+const shelf = createCol("shelf", "main");
+setBackground("shelf", C.appBg);
+setFlex("shelf", "height", 300);
+setFlex("shelf", "padding_left", 22);
+setFlex("shelf", "padding_right", 22);
+setFlex("shelf", "padding_top", 16);
+setFlex("shelf", "flex_direction", "column");
 
-const previewBar = createRow("preview-bar", "preview");
-setFlex("preview-bar", "padding", 12);
-setFlex("preview-bar", "align_items", "center");
+const shelfBar = createRow("shelf-bar", "shelf");
+setFlex("shelf-bar", "align_items", "center");
 
-createLabel("preview-title", mode === "patch" ? "PATCH" : "PANEL", "preview-bar");
-setFontFamily("preview-title", MONO);
-setFontSize("preview-title", 10);
-setLetterSpacing("preview-title", 0.1);
-setTextColor("preview-title", C.faint);
+function shelfTab(id, title, active) {
+    const t = createRow(id, "shelf-bar");
+    setFlex(id, "margin_right", 22);
+    setFlex(id, "padding_bottom", 8);
+    createLabel(id + "-text", title, id);
+    setFontFamily(id + "-text", FONT);
+    setFontSize(id + "-text", 16);
+    setFontWeight(id + "-text", 600);
+    setTextColor(id + "-text", active ? C.textStrong : C.faint);
+    return t;
+}
 
-// Says how much of what is shown is exact. A preview that quietly guesses at
-// jack positions would teach a wiring that is not there, so when any module is
-// unmapped or has no image the caption says so rather than the picture
-// implying a precision it does not have.
-createLabel("preview-fidelity", "", "preview-bar");
-setFontFamily("preview-fidelity", MONO);
-setFontSize("preview-fidelity", 9.5);
-setTextColor("preview-fidelity", C.faint);
-setFlex("preview-fidelity", "margin_left", 12);
+shelfTab("shelf-patches", "Patches", true);
+shelfTab("shelf-modules", "My modules", false);
 
-const rack = createCanvas("rack", "preview");
-setFlex("rack", "flex_grow", 1);
+const shelfGap = createRow("shelf-gap", "shelf-bar");
+setFlex("shelf-gap", "flex_grow", 1);
+
+button("btn-library", "shelf-bar", "▥", "Module library  →", "ghost");
+
+const cards = createRow("cards", "shelf");
+setFlex("cards", "margin_top", 16);
+
+/// A project card. The count line is the honest summary of a patch: how many
+/// modules and how many cables, which is what tells you its size at a glance.
+function card(id, kind, title, count, tint) {
+    const c = createCol(id, "cards");
+    setBackground(id, C.panel);
+    setBorder(id, C.line, 1);
+    setCornerRadius(id, 12);
+    setFlex(id, "width", 232);
+    setFlex(id, "margin_right", 16);
+    setFlex(id, "flex_direction", "column");
+
+    const art = createPanel(id + "-art", id);
+    setBackground(id + "-art", tint);
+    setCornerRadius(id + "-art", 12);
+    setFlex(id + "-art", "height", 108);
+
+    createLabel(id + "-kind", kind, id);
+    setFontFamily(id + "-kind", MONO);
+    setFontSize(id + "-kind", 9.5);
+    setLetterSpacing(id + "-kind", 0.09);
+    setTextColor(id + "-kind", C.faint);
+    setFlex(id + "-kind", "margin_left", 12);
+    setFlex(id + "-kind", "margin_top", 10);
+
+    createLabel(id + "-title", title, id);
+    setFontFamily(id + "-title", FONT);
+    setFontSize(id + "-title", 15);
+    setFontWeight(id + "-title", 600);
+    setTextColor(id + "-title", C.textStrong);
+    setFlex(id + "-title", "margin_left", 12);
+    setFlex(id + "-title", "margin_top", 4);
+
+    createLabel(id + "-count", count, id);
+    setFontFamily(id + "-count", FONT);
+    setFontSize(id + "-count", 12.5);
+    setTextColor(id + "-count", C.muted);
+    setFlex(id + "-count", "margin_left", 12);
+    setFlex(id + "-count", "margin_top", 2);
+    setFlex(id + "-count", "margin_bottom", 12);
+    return c;
+}
+
+card("card-1", "PATCH", "Ambient drone", "8 modules · 9 cables", "#16403D");
+card("card-2", "PATCH", "Krell garden", "11 modules · 17 cables", "#2A2551");
+card("card-3", "PATCH", "Acid mutation", "9 modules · 14 cables", "#3D2A16");
+card("card-4", "PATCH", "Bouncing ball", "5 modules · 7 cables", "#16351F");
 
 // ── mode ─────────────────────────────────────────────────────────────────────
 
 function setMode(next) {
     mode = next;
-    setBackground("tab-module", mode === "module" ? C.panel : C.appBg);
-    setBackground("tab-patch", mode === "patch" ? C.panel : C.appBg);
-    setTextColor("tab-module-name", mode === "module" ? C.textStrong : C.muted);
-    setTextColor("tab-patch-name", mode === "patch" ? C.textStrong : C.muted);
-    setLabel("btn-random", mode === "patch" ? "Random patch" : "Random");
-    setLabel("btn-build", mode === "patch" ? "Build patch" : "Build module");
-    setText("preview-title", mode === "patch" ? "PATCH" : "PANEL");
+    const isPatch = mode === "patch";
+    setBackground("tab-module", isPatch ? C.panel : C.raised);
+    setBackground("tab-patch", isPatch ? C.raised : C.panel);
+    setTextColor("tab-module-name", isPatch ? C.muted : C.textStrong);
+    setTextColor("tab-patch-name", isPatch ? C.textStrong : C.muted);
+    setText("hero-title", isPatch ? "What should the patch do?"
+                                  : "What should the module do?");
+    setText("hero-sub", isPatch
+        ? "A whole rack — modules, cables, and why each one is there."
+        : "One Eurorack panel — knobs, jacks and the DSP behind them.");
+    setText("btn-random-label", isPatch ? "Random patch" : "Random module");
+    setText("btn-build-label", isPatch ? "Build patch" : "Build module");
+    setText("chip-artifact-text", isPatch ? "PATCH · A WHOLE RACK"
+                                          : "MODULE · 12 HP");
 }
 
-/// Called by the host once a patch has been laid out. `exact` is false when
-/// any module lacks an image or a port map.
-function setFidelity(modules, exact, unmapped) {
-    setText("preview-fidelity", exact
-        ? modules + " MODULES · EXACT"
-        : modules + " MODULES · " + unmapped + " NOT YET MAPPED");
+/// Called by the host once it knows. Rack's state is what the whole product
+/// depends on, so it is reported rather than left to be discovered when a
+/// button quietly fails.
+function setRackStatus(running) {
+    setText("rack-status", running ? "● RACK RUNNING" : "● RACK NOT RUNNING");
+    setTextColor("rack-status", running ? C.leaf : C.faint);
 }
 
 setMode(mode);
-
-// ── mention picker ───────────────────────────────────────────────────────────
-//
-// Typing @ searches 4,705 modules across 543 plugins, indexed locally so it is
-// instant and works offline. Three states, and only one of them can be wired:
-//
-//   ✓ ready    installed
-//   ↓ free     free, not installed
-//   $ premium  costs money, or comes with VCV+
-//
-// The copy never says "you need to buy this". We cannot tell an unsynced
-// module someone already owns from one they have never bought, and telling
-// somebody to purchase what they own is a worse error than telling them to
-// check. See DECISIONS.md.
-
-const mention = createPanel("mention", "chat");
-setBackground("mention", C.raised);
-setBorder("mention", C.lineStrong, 1);
-setCornerRadius("mention", 14);
-setFlex("mention", "padding", 6);
-setVisible("mention", false);   // shown while an @ query is live
-
-const mentionQuery = createRow("mention-query", "mention");
-setFlex("mention-query", "align_items", "center");
-setFlex("mention-query", "padding", 10);
-
-createLabel("mention-at", "@", "mention-query");
-setFontFamily("mention-at", MONO);
-setFontSize("mention-at", 13);
-setTextColor("mention-at", C.accent);
-
-createLabel("mention-text", "", "mention-query");
-setFontFamily("mention-text", MONO);
-setFontSize("mention-text", 13);
-setTextColor("mention-text", C.textStrong);
-setFlex("mention-text", "margin_left", 4);
-
-createLabel("mention-count", "", "mention-query");
-setFontFamily("mention-count", MONO);
-setFontSize("mention-count", 11);
-setTextColor("mention-count", C.faint);
-setFlex("mention-count", "margin_left", "auto");
-
-const mentionList = createScrollView("mention-list", "mention");
-setFlex("mention-list", "max_height", 260);
-
-const STATE = {
-    ready:   { mark: "✓", color: "#3FCF77", note: "" },
-    free:    { mark: "↓", color: "#5E78FF",
-               note: "install from Rack's Library, then rescan" },
-    premium: { mark: "$", color: "#F6B847",
-               note: "own it? sync it in Rack's Library. Otherwise buy it, or VCV+" },
-};
-
-/// One result. Only `ready` can go into a patch; the others are an offer.
-///
-/// Not a wall: a patch that names a module the user lacks still opens in Rack,
-/// which lists what is missing, offers the Library, and keeps the cables so
-/// installing later completes it. So this reads as a better option while
-/// building is cheap, never as a refusal.
-function mentionRow(id, state, plugin, model, name, tags) {
-    const row = createRow(id, "mention-list");
-    setFlex(id, "align_items", "center");
-    setFlex(id, "padding_left", 12);
-    setFlex(id, "padding_right", 12);
-    setFlex(id, "padding_top", 8);
-    setFlex(id, "padding_bottom", 8);
-    setCornerRadius(id, 9);
-
-    createLabel(id + "-mark", STATE[state].mark, id);
-    setFontFamily(id + "-mark", MONO);
-    setFontSize(id + "-mark", 12);
-    setTextColor(id + "-mark", STATE[state].color);
-    setFlex(id + "-mark", "width", 18);
-
-    createLabel(id + "-slug", plugin + "/" + model, id);
-    setFontFamily(id + "-slug", MONO);
-    setFontSize(id + "-slug", 12);
-    setTextColor(id + "-slug", state === "ready" ? C.text : C.muted);
-
-    createLabel(id + "-name", name, id);
-    setFontFamily(id + "-name", FONT);
-    setFontSize(id + "-name", 12.5);
-    setTextColor(id + "-name", state === "ready" ? C.textStrong : C.muted);
-    setFlex(id + "-name", "margin_left", 10);
-
-    createLabel(id + "-tags", tags, id);
-    setFontFamily(id + "-tags", MONO);
-    setFontSize(id + "-tags", 10);
-    setTextColor(id + "-tags", C.faint);
-    setFlex(id + "-tags", "margin_left", "auto");
-    return row;
-}
-
-/// Shown when a capability the request needs is not installed at all. Cheap to
-/// produce -- it is tag matching over local data, so nothing is spent finding
-/// out -- and it happens before any generation rather than after.
-const gap = createPanel("capability-gap", "history");
-setBackground("capability-gap", C.panel);
-setBorder("capability-gap", C.line, 1);
-setCornerRadius("capability-gap", 12);
-setFlex("capability-gap", "padding", 12);
-setVisible("capability-gap", false);
-
-createLabel("capability-gap-text", "", "capability-gap");
-setFontFamily("capability-gap-text", FONT);
-setFontSize("capability-gap-text", 12.5);
-setTextColor("capability-gap-text", C.text);
-
-// ── settings ─────────────────────────────────────────────────────────────────
-//
-// Forge's AI settings are inherited wholesale -- account menu, providers,
-// first-run gating, reasoning effort, credentials. Only the model roles differ,
-// and for a reason: Forge splits Engineering from UI designer because its
-// interface is JavaScript a model writes. Here a panel is emitted
-// deterministically from its manifest, so there is no UI model to pick and
-// nothing to run in parallel with the DSP.
-//
-// The split that fits is by artifact:
-//   Module engineer — one call returning the manifest and the DSP together.
-//   Patch designer  — reading an inventory, choosing modules, wiring them, and
-//                     explaining why. Musical judgement more than C++, and
-//                     plausibly a different model.
-
-const settings = createPanel("settings", "root");
-setBackground("settings", C.panel);
-setBorder("settings", C.lineStrong, 1);
-setCornerRadius("settings", 16);
-setFlex("settings", "padding", 18);
-setVisible("settings", false);
-
-function settingRow(id, title, detail, value) {
-    const row = createRow(id, "settings");
-    setFlex(id, "align_items", "center");
-    setFlex(id, "padding_top", 11);
-    setFlex(id, "padding_bottom", 11);
-    setFlex(id, "border_bottom", 1);
-
-    createLabel(id + "-title", title, id);
-    setFontFamily(id + "-title", FONT);
-    setFontSize(id + "-title", 14);
-    setFontWeight(id + "-title", 600);
-    setTextColor(id + "-title", C.textStrong);
-
-    createLabel(id + "-detail", detail, id);
-    setFontFamily(id + "-detail", FONT);
-    setFontSize(id + "-detail", 12);
-    setTextColor(id + "-detail", C.muted);
-
-    createLabel(id + "-value", value, id);
-    setFontFamily(id + "-value", MONO);
-    setFontSize(id + "-value", 12);
-    setTextColor(id + "-value", C.muted);
-    setFlex(id + "-value", "margin_left", "auto");
-    return row;
-}
-
-settingRow("set-engineer", "Module engineer",
-           "Writes the manifest and the DSP", "—");
-settingRow("set-designer", "Patch designer",
-           "Chooses modules, wires them, and explains why", "—");
-settingRow("set-effort", "Reasoning effort", "Low → Max", "Medium");
-
-// Per-patch, because the right answer changes per patch. Persisted with the
-// project so reopening restores how it was built.
-settingRow("set-prefer", "Prefer my own modules",
-           "Or let the whole installed library compete evenly", "on");
-settingRow("set-create", "Build a module when one is missing",
-           "Off by default: patch building is seconds, module building is a "
-           + "minute-plus compile", "off");
-settingRow("set-depth", "Explanation depth",
-           "Terse · Standard · Learning", "Standard");
