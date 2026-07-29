@@ -159,6 +159,11 @@
         "docs/status/cli-commands.yaml"
       ]
     },
+    "contrib-intake": {
+      "paths": [
+        ".agents/skills/contrib-intake/**"
+      ]
+    },
     "contribute": {
       "paths": [
         "tools/scripts/contributor_check.sh",
