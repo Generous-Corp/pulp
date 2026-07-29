@@ -36,7 +36,27 @@ struct TempoSyncBlockState {
     double tempo_bpm = 120.0;
     double beat_start = 0.0;
     double beat_end = 0.0;
+    /// Host-clock time at which is_playing becomes effective. This preserves
+    /// backends whose start/stop state changes at a time other than the block
+    /// boundary instead of flattening that transition into a block-wide bool.
+    std::int64_t is_playing_at_host_time_micros = 0;
     bool is_playing = false;
+};
+
+enum class TempoSyncPlayingBoundary : std::uint8_t {
+    BeforeOrAtBlockStart,
+    InsideBlock,
+    AtOrAfterBlockEnd,
+};
+
+/// Block-coherent projection of a timestamped start/stop state. Pulp's
+/// TransportSnapshot has one playing state for the whole half-open block, so
+/// transitions after its first sample are deferred to a later block rather
+/// than exposed as a false sample-accurate transition.
+struct TempoSyncPlayingProjection {
+    TempoSyncPlayingBoundary boundary = TempoSyncPlayingBoundary::BeforeOrAtBlockStart;
+    bool playing_for_block = false;
+    bool transition_deferred = false;
 };
 
 enum class TempoSyncError : std::uint8_t {
@@ -49,6 +69,11 @@ enum class TempoSyncError : std::uint8_t {
 
 bool valid_tempo_sync_request(const TempoSyncBlockRequest& request) noexcept;
 bool valid_tempo_sync_state(const TempoSyncBlockState& state) noexcept;
+bool tempo_sync_block_end_host_time_micros(const TempoSyncBlockRequest& request,
+                                           std::int64_t& block_end) noexcept;
+TempoSyncPlayingProjection project_tempo_sync_playing(const TempoSyncBlockRequest& request,
+                                                      const TempoSyncBlockState& state,
+                                                      bool previous_playing) noexcept;
 
 /// Backend-neutral session-tempo boundary. capture_audio_block() is the sole
 /// operation because enablement, peer discovery, and start/stop-sync policy are

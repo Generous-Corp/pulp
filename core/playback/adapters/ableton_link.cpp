@@ -55,10 +55,10 @@ TempoSyncError AbletonLinkTempoSync::capture_audio_block(const TempoSyncBlockReq
 
         using Micros = std::chrono::microseconds;
         const Micros start{request.output_host_time_micros};
-        const auto duration = static_cast<std::int64_t>(
-            std::llround(static_cast<long double>(request.frame_count) * 1'000'000.0L /
-                         static_cast<long double>(request.sample_rate)));
-        const Micros end{request.output_host_time_micros + duration};
+        std::int64_t block_end = 0;
+        if (!tempo_sync_block_end_host_time_micros(request, block_end))
+            return TempoSyncError::InvalidRequest;
+        const Micros end{block_end};
 
         auto session = impl_->link.captureAudioSessionState();
         const auto& command = request.command;
@@ -81,6 +81,7 @@ TempoSyncError AbletonLinkTempoSync::capture_audio_block(const TempoSyncBlockReq
         state.tempo_bpm = session.tempo();
         state.beat_start = session.beatAtTime(start, request.quantum_beats);
         state.beat_end = session.beatAtTime(end, request.quantum_beats);
+        state.is_playing_at_host_time_micros = session.timeForIsPlaying().count();
         state.is_playing = session.isPlaying();
         return valid_tempo_sync_state(state) ? TempoSyncError::None : TempoSyncError::InvalidState;
     } catch (...) {

@@ -66,6 +66,14 @@ CMake cache value is easier to audit.
   contract and precise fractional host ticks. `begin_scrub()` rejects an active
   shared tempo source because scrubbing needs a private repositioning clock;
   use an unsynchronized transport for scrub playback.
+- Preserve `SessionState::timeForIsPlaying()` in
+  `TempoSyncBlockState::is_playing_at_host_time_micros`. A
+  `TransportSnapshot` has one playing state for its whole half-open block: a
+  start/stop effective at or before the first sample applies immediately, while
+  one inside or at/after the block end is deterministically deferred until a
+  later block starts at or beyond that timestamp. Do not flatten the timestamp
+  into `SessionState::isPlaying()` or claim sample-accurate start/stop splitting
+  that the snapshot contract cannot represent.
 
 ## Verification
 

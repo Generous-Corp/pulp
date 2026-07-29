@@ -228,6 +228,13 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   rejects an active sync source: scrubbing owns a private repeated-window clock
   and cannot share authority with a network beat mapping. The audio-thread guard
   rejects any impossible mixed state defensively as well.
+- A tempo source must preserve the host-clock time at which its reported
+  `is_playing` state becomes effective. `project_tempo_sync_playing()` applies a
+  transition at or before the first sample and defers one inside or beyond the
+  half-open block, because `TransportSnapshot::is_playing` is block-wide. Keep
+  this quantization explicit; silently discarding the timestamp makes remote
+  starts and stops early, while pretending to split them would contradict the
+  snapshot consumed by renderers.
 - Keep `tempo_sync.cpp` in `PulpPlaybackSources.cmake`, which mirrors it into
   native, threadless, WAM, and WebCLAP builds. Keep SDK-backed adapters such as
   `adapters/ableton_link.cpp` outside `core/playback/src/` and in a separate

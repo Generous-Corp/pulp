@@ -29,15 +29,23 @@ int main() {
         source.set_enabled(true);
 
         pulp::playback::TempoSyncBlockRequest request;
+        request.output_host_time_micros = 42'000;
         request.frame_count = 64;
         request.sample_rate = 48'000.0;
         request.quantum_beats = 4.0;
+        request.command.request_playing = true;
+        request.command.playing = true;
         pulp::playback::TempoSyncBlockState state;
         const auto result = source.capture_audio_block(request, state);
         source.set_enabled(false);
         if (result != pulp::playback::TempoSyncError::None ||
             !pulp::playback::valid_tempo_sync_state(state)) {
             std::cerr << "desktop Ableton Link adapter returned an invalid block state\n";
+            return 1;
+        }
+        if (!state.is_playing ||
+            state.is_playing_at_host_time_micros != request.output_host_time_micros) {
+            std::cerr << "desktop Ableton Link adapter discarded the effective start time\n";
             return 1;
         }
         std::cout << "desktop Ableton Link adapter available; peers=" << source.peer_count()

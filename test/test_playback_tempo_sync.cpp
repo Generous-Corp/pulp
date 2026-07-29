@@ -52,6 +52,7 @@ class FakeTempoSyncSource final : public TempoSyncSource {
         state.beat_start = next_beat;
         state.beat_end = next_beat + static_cast<double>(request.frame_count) * tempo /
                                          (60.0 * request.sample_rate);
+        state.is_playing_at_host_time_micros = playing_transition_time_micros;
         state.is_playing = playing;
         next_beat = state.beat_end;
         return TempoSyncError::None;
@@ -61,6 +62,7 @@ class FakeTempoSyncSource final : public TempoSyncSource {
     std::uint32_t capture_count = 0;
     double tempo = 120.0;
     double next_beat = 1.25;
+    std::int64_t playing_transition_time_micros = 0;
     bool playing = true;
     bool invalid_state = false;
 
@@ -97,6 +99,8 @@ TEST_CASE("tempo sync request and state validation fail closed", "[playback][tem
     request.command.request_tempo = false;
     request.output_host_time_micros = std::numeric_limits<std::int64_t>::max();
     REQUIRE_FALSE(valid_tempo_sync_request(request));
+    std::int64_t invalid_block_end = 0;
+    REQUIRE_FALSE(tempo_sync_block_end_host_time_micros(request, invalid_block_end));
 
     TempoSyncBlockState state;
     state.tempo_bpm = 128.0;
@@ -112,6 +116,128 @@ TEST_CASE("tempo sync request and state validation fail closed", "[playback][tem
     REQUIRE(valid_tempo_sync_state(state));
     state.beat_end = std::numeric_limits<double>::quiet_NaN();
     REQUIRE_FALSE(valid_tempo_sync_state(state));
+}
+
+TEST_CASE("tempo sync playing projection honors half-open block boundaries",
+          "[playback][tempo-sync]") {
+    TempoSyncBlockRequest request;
+    request.output_host_time_micros = 10'000;
+    request.frame_count = 48;
+    request.sample_rate = 48'000.0;
+    REQUIRE(valid_tempo_sync_request(request));
+    std::int64_t block_end = 0;
+    REQUIRE(tempo_sync_block_end_host_time_micros(request, block_end));
+    REQUIRE(block_end == 11'000);
+
+    TempoSyncBlockState state;
+    state.is_playing = true;
+
+    state.is_playing_at_host_time_micros = 9'999;
+    auto projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::BeforeOrAtBlockStart);
+    REQUIRE(projection.playing_for_block);
+    REQUIRE_FALSE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 10'000;
+    projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::BeforeOrAtBlockStart);
+    REQUIRE(projection.playing_for_block);
+    REQUIRE_FALSE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 10'001;
+    projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::InsideBlock);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 10'999;
+    projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::InsideBlock);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 11'000;
+    projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::AtOrAfterBlockEnd);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 11'001;
+    projection = project_tempo_sync_playing(request, state, false);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::AtOrAfterBlockEnd);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing = false;
+    state.is_playing_at_host_time_micros = 9'999;
+    projection = project_tempo_sync_playing(request, state, true);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::BeforeOrAtBlockStart);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE_FALSE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 10'000;
+    projection = project_tempo_sync_playing(request, state, true);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::BeforeOrAtBlockStart);
+    REQUIRE_FALSE(projection.playing_for_block);
+    REQUIRE_FALSE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 10'500;
+    projection = project_tempo_sync_playing(request, state, true);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::InsideBlock);
+    REQUIRE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 11'000;
+    projection = project_tempo_sync_playing(request, state, true);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::AtOrAfterBlockEnd);
+    REQUIRE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+
+    state.is_playing_at_host_time_micros = 11'001;
+    projection = project_tempo_sync_playing(request, state, true);
+    REQUIRE(projection.boundary == TempoSyncPlayingBoundary::AtOrAfterBlockEnd);
+    REQUIRE(projection.playing_for_block);
+    REQUIRE(projection.transition_deferred);
+}
+
+TEST_CASE("master transport defers timestamped start and stop transitions to block boundaries",
+          "[playback][tempo-sync]") {
+    const auto map = constant_map();
+    FakeTempoSyncSource source;
+    source.playing = false;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(source)) == TransportError::None);
+
+    TransportSnapshot snapshot;
+    REQUIRE(transport.begin_block(48, 1'000, snapshot) == TransportError::None);
+    REQUIRE_FALSE(snapshot.is_playing);
+
+    source.playing = true;
+    source.playing_transition_time_micros = 2'500;
+    REQUIRE(transport.begin_block(48, 2'000, snapshot) == TransportError::None);
+    REQUIRE_FALSE(snapshot.is_playing);
+    REQUIRE_FALSE(snapshot.transport_changed);
+    REQUIRE_FALSE(snapshot.transport_started);
+    REQUIRE(snapshot.ranges[0].host_tick_end == snapshot.ranges[0].host_tick_start);
+
+    REQUIRE(transport.begin_block(48, 3'000, snapshot) == TransportError::None);
+    REQUIRE(snapshot.is_playing);
+    REQUIRE(snapshot.transport_changed);
+    REQUIRE(snapshot.transport_started);
+    REQUIRE(snapshot.ranges[0].host_tick_end > snapshot.ranges[0].host_tick_start);
+
+    source.playing = false;
+    source.playing_transition_time_micros = 4'500;
+    REQUIRE(transport.begin_block(48, 4'000, snapshot) == TransportError::None);
+    REQUIRE(snapshot.is_playing);
+    REQUIRE_FALSE(snapshot.transport_changed);
+    REQUIRE(snapshot.ranges[0].host_tick_end > snapshot.ranges[0].host_tick_start);
+
+    REQUIRE(transport.begin_block(48, 5'000, snapshot) == TransportError::None);
+    REQUIRE_FALSE(snapshot.is_playing);
+    REQUIRE(snapshot.transport_changed);
+    REQUIRE_FALSE(snapshot.transport_started);
+    REQUIRE(snapshot.ranges[0].host_tick_end == snapshot.ranges[0].host_tick_start);
 }
 
 TEST_CASE("master transport rejects invalid tempo sync configuration", "[playback][tempo-sync]") {
@@ -210,8 +336,7 @@ TEST_CASE("tempo sync failure never falls back to the document clock", "[playbac
     REQUIRE(transport.begin_block(128, 3'000, snapshot) == TransportError::InvalidTempoSyncState);
 }
 
-TEST_CASE("tempo sync rejects beats outside Pulp's signed tick domain",
-          "[playback][tempo-sync]") {
+TEST_CASE("tempo sync rejects beats outside Pulp's signed tick domain", "[playback][tempo-sync]") {
     const auto map = constant_map();
     FakeTempoSyncSource source;
     source.playing = false;
@@ -220,8 +345,7 @@ TEST_CASE("tempo sync rejects beats outside Pulp's signed tick domain",
     REQUIRE(transport.prepare(map, config(source, 256)) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(128, 1'000, snapshot) ==
-            TransportError::InvalidTempoSyncState);
+    REQUIRE(transport.begin_block(128, 1'000, snapshot) == TransportError::InvalidTempoSyncState);
 }
 
 TEST_CASE("tempo sync projection preserves the two-range loop contract", "[playback][tempo-sync]") {

@@ -584,21 +584,21 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         return TransportError::TempoSyncUnavailable;
     if (source_error != TempoSyncError::None || !valid_tempo_sync_state(state))
         return TransportError::InvalidTempoSyncState;
-
+    const bool block_playing =
+        project_tempo_sync_playing(request, state, previous_playing_).playing_for_block;
     const auto source_beat_start = state.beat_start;
-    const auto source_beat_end = state.is_playing ? state.beat_end : state.beat_start;
+    const auto source_beat_end = block_playing ? state.beat_end : state.beat_start;
     if (!beat_fits_tick_domain(source_beat_start) || !beat_fits_tick_domain(source_beat_end))
         return TransportError::InvalidTempoSyncState;
-
     const bool explicit_seek = request.command.request_beat;
     const auto continuity_tolerance =
         std::max(1.0e-9, 2.0 * state.tempo_bpm / (60.0 * request.sample_rate));
     const bool inferred_jump =
-        has_expected_tempo_sync_beat_ && state.is_playing &&
+        has_expected_tempo_sync_beat_ && block_playing &&
         !beats_nearly_equal(source_beat_start, expected_tempo_sync_beat_, continuity_tolerance);
     const bool loop_changed = !first_block_ && desired.loop != previous_loop_;
-    const bool transport_started = state.is_playing && (first_block_ || !previous_playing_);
-    if (!state.is_playing || explicit_seek || inferred_jump || transport_started || loop_changed)
+    const bool transport_started = block_playing && (first_block_ || !previous_playing_);
+    if (!block_playing || explicit_seek || inferred_jump || transport_started || loop_changed)
         loop_pass_index_ = 0;
 
     double local_beat_start = source_beat_start;
@@ -608,7 +608,7 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
     double next_loop_boundary = 0.0;
     bool crosses_loop = false;
     bool ends_at_loop = false;
-    if (state.is_playing && desired.loop.enabled) {
+    if (block_playing && desired.loop.enabled) {
         loop_start_beat = ticks_to_beats(desired.loop.start);
         loop_end_beat = ticks_to_beats(desired.loop.end);
         const auto loop_length = loop_end_beat - loop_start_beat;
@@ -660,9 +660,9 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
     snapshot.frame_count = frame_count;
     snapshot.meter = desired.meter;
     snapshot.loop = desired.loop;
-    snapshot.is_playing = state.is_playing;
+    snapshot.is_playing = block_playing;
     snapshot.transport_changed =
-        !first_block_ && (state.is_playing != previous_playing_ || loop_changed);
+        !first_block_ && (block_playing != previous_playing_ || loop_changed);
     snapshot.transport_started = transport_started;
     snapshot.reset_requested = explicit_seek || inferred_jump || loop_changed;
     snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
@@ -673,12 +673,12 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         range.sample_offset = offset;
         range.frame_count = count;
         beats_to_ticks(beat_start, range.timeline_tick_start);
-        beats_to_ticks(state.is_playing ? beat_end : beat_start, range.timeline_tick_end);
+        beats_to_ticks(block_playing ? beat_end : beat_start, range.timeline_tick_end);
         range.timeline_sample_start = tempo_map_->ticks_to_samples(range.timeline_tick_start);
         range.monotonic_start = monotonic_;
         range.monotonic_end =
-            state.is_playing ? monotonic_ + (range.timeline_tick_end - range.timeline_tick_start)
-                             : monotonic_;
+            block_playing ? monotonic_ + (range.timeline_tick_end - range.timeline_tick_start)
+                          : monotonic_;
         range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
                                       meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = state.tempo_bpm;
@@ -687,10 +687,10 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         range.discontinuity = discontinuity;
         range.host_beat_mapping = true;
         range.host_tick_start = beat_start * static_cast<double>(timebase::kTicksPerQuarter);
-        range.host_tick_end = (state.is_playing ? beat_end : beat_start) *
+        range.host_tick_end = (block_playing ? beat_end : beat_start) *
                               static_cast<double>(timebase::kTicksPerQuarter);
         range.has_precise_host_ticks = true;
-        range.loop_pass_index = state.is_playing && desired.loop.enabled ? loop_pass_index_ : 0;
+        range.loop_pass_index = block_playing && desired.loop.enabled ? loop_pass_index_ : 0;
         monotonic_ = range.monotonic_end;
         timeline_tick_ = range.timeline_tick_end;
         timeline_sample_ = tempo_map_->ticks_to_samples(timeline_tick_);
@@ -726,12 +726,12 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
 
     snapshot.tempo_bpm = state.tempo_bpm;
     previous_tempo_bpm_ = state.tempo_bpm;
-    previous_playing_ = state.is_playing;
+    previous_playing_ = block_playing;
     previous_scrubbing_ = false;
     previous_meter_ = desired.meter;
     previous_loop_ = desired.loop;
     first_block_ = false;
-    has_expected_tempo_sync_beat_ = state.is_playing;
+    has_expected_tempo_sync_beat_ = block_playing;
     expected_tempo_sync_beat_ = state.beat_end;
     applied_tempo_sync_playing_generation_ = desired.playing_generation;
     applied_tempo_sync_seek_generation_ = desired.seek_generation;
