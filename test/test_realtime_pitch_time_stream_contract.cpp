@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -162,6 +163,33 @@ TEST_CASE("RealtimePitchTimeProcessor rejects unrepresentable prepared geometry 
     REQUIRE(previously_prepared.prepare(std::numeric_limits<double>::infinity(), infinite_rate)
             == PitchTimePrepareStatus::invalid_sample_rate);
     REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+
+    const float sample = 0.25f;
+    const float* source[] = {&sample};
+    REQUIRE(previously_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);
+}
+
+TEST_CASE("RealtimePitchTimeProcessor rejects invalid spectral overrides atomically",
+          "[signal][pitch-time][streaming]") {
+    RealtimePitchTimeProcessor previously_prepared;
+    REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
+            == PitchTimePrepareStatus::prepared);
+    const int prepared_capacity = previously_prepared.output_free_space();
+
+    for (const auto [fft_size, analysis_hop] :
+         {std::pair{256, 256}, std::pair{32768, 512}}) {
+        auto config = stream_config(256);
+        config.fft_size = fft_size;
+        config.analysis_hop = analysis_hop;
+
+        RealtimePitchTimeProcessor fresh;
+        REQUIRE(fresh.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_spectral_geometry);
+        REQUIRE(fresh.output_free_space() == 0);
+        REQUIRE(previously_prepared.prepare(kSampleRate, config)
+                == PitchTimePrepareStatus::invalid_spectral_geometry);
+        REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+    }
 
     const float sample = 0.25f;
     const float* source[] = {&sample};

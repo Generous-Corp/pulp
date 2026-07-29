@@ -44,7 +44,9 @@ processor is used. A time-stretch capacity must also have a finite
 `max_time_ratio >= 1`; pitch bounds must be finite, non-negative, and produce a
 finite derived ratio. Derived synthesis-hop, ring, and backing-buffer sizes must
 also be representable or preparation returns `unrepresentable_capacity` without
-changing the previously prepared processor.
+changing the previously prepared processor. Optional FFT geometry must satisfy
+the spectral engine's 256–16384 power-of-two window and `hop <= fft/2` contract;
+invalid overrides return `invalid_spectral_geometry` atomically.
 `feed()` accepts a complete input block or returns typed backpressure without
 consuming it. Use `output_free_space()` only as scheduling information; the
 `feed()` result is authoritative because one analysis boundary can publish a
