@@ -143,6 +143,7 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_dom","description":"Get the view tree of a running plugin's UI via the inspector protocol","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_params","description":"Get all parameter info and current values from a running plugin","inputSchema":{"type":"object","properties":{}}},)JSON";
+    out += R"JSON({"name":"pulp_inspect_value_channels","description":"List the named value channels a running plugin publishes — gain reduction, envelopes, spectra: everything a meter can show that is NOT a parameter. Returns name, unit, shape and neutral per channel; `shape` says which binder applies (meter -> bindMeter, vector -> bindScope). Empty when the processor declares none.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_set_param","description":"Set a parameter value on a running plugin (standalone host) via the inspector. Wraps the write in a host gesture so DAW undo/automation grouping behaves like a user edit. Numeric parameters only; errors on an unknown parameter id. Note: the inspector is wired into the standalone host, not plugin formats loaded in a third-party DAW.","inputSchema":{"type":"object","required":["id","value"],"properties":{"id":{"type":"integer","description":"Parameter id (from pulp_inspect_params)"},"value":{"type":"number","description":"New value (raw, or a 0..1 position when normalized=true)"},"normalized":{"type":"boolean","description":"Treat value as a 0..1 normalized position (default false)"}}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_screenshot","description":"Request a live inspector screenshot. Currently returns the inspector unavailable error until WindowHost capture wiring lands; use pulp_validate screenshot=true or pulp run --headless --screenshot for project capture today.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_evaluate","description":"Request Runtime.evaluate in a running plugin. Currently returns the inspector unavailable error until ScriptEngine wiring lands.","inputSchema":{"type":"object","properties":{"expression":{"type":"string","description":"JS expression to evaluate"}}}},)JSON";
@@ -524,6 +525,7 @@ static std::string handle_request_raw(const std::string& json) {
         // Inspector tools — delegate to pulp inspect CLI for now
         // (in the future these could connect directly via TCP)
         else if (name == "pulp_inspect_dom" || name == "pulp_inspect_params" ||
+                 name == "pulp_inspect_value_channels" ||
                  name == "pulp_inspect_screenshot" || name == "pulp_inspect_evaluate" ||
                  name == "pulp_inspect_performance" || name == "pulp_inspect_audio") {
             // Map MCP tool name to inspector protocol method
@@ -531,6 +533,7 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_params;
             if (name == "pulp_inspect_dom")         inspector_method = "DOM.getDocument";
             else if (name == "pulp_inspect_params")  inspector_method = "State.getParameters";
+            else if (name == "pulp_inspect_value_channels") inspector_method = "State.getValueChannels";
             else if (name == "pulp_inspect_screenshot") inspector_method = "Capture.screenshot";
             else if (name == "pulp_inspect_evaluate") {
                 inspector_method = "Runtime.evaluate";
