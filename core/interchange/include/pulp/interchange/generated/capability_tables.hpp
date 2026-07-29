@@ -37,9 +37,10 @@ enum class LossClass : std::uint8_t {
 /// Interchange formats with a committed capability declaration.
 enum class Format : std::uint8_t {
     DawProject = 0,
+    Smf = 1,
 };
 
-inline constexpr std::size_t kFormatCount = 1;
+inline constexpr std::size_t kFormatCount = 2;
 
 struct ImportRow {
     ImportLevel level;
@@ -67,6 +68,7 @@ struct FormatRecord {
 
 inline constexpr FormatRecord kFormatRecords[kFormatCount] = {
     {"dawproject", "DAWproject", true},
+    {"smf", "Standard MIDI File", false},
 };
 
 inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
@@ -116,6 +118,61 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", "chord and scale context lanes"}, // context.chord-scale
         {ImportLevel::None, "", "groove templates and swing"}, // context.groove
         {ImportLevel::None, "", "per-note probability, conditions, and ratchets"}, // clip.note-modifier
+        {ImportLevel::Full, "", ""}, // clip.empty
+        {ImportLevel::None, "", ""}, // tempo.ramp
+        {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
+        {ImportLevel::None, "", ""}, // tempo.value-quantized
+    },
+    // smf
+    {
+        {ImportLevel::None, "", ""}, // unknown
+        {ImportLevel::Full, "", ""}, // track.flat
+        {ImportLevel::None, "", ""}, // track.group
+        {ImportLevel::None, "", ""}, // track.video
+        {ImportLevel::Partial, "positions are exact when the file division divides the canonical tick grid; otherwise import reports bounded nearest-tick rounding", ""}, // clip.musical
+        {ImportLevel::None, "", "sample-anchored clips"}, // clip.absolute
+        {ImportLevel::Full, "", ""}, // clip.note
+        {ImportLevel::None, "", "media clips"}, // clip.media
+        {ImportLevel::None, "", ""}, // clip.gain
+        {ImportLevel::None, "", ""}, // clip.fades
+        {ImportLevel::None, "", ""}, // clip.crossfade
+        {ImportLevel::None, "", ""}, // clip.warp
+        {ImportLevel::None, "", ""}, // clip.launch
+        {ImportLevel::None, "", ""}, // gap.explicit
+        {ImportLevel::Partial, "tempo periods are represented as integer microseconds and may round on import", ""}, // tempo.single
+        {ImportLevel::Partial, "tempo positions may use bounded nearest-tick rounding on non-dividing file grids, and periods are integer microseconds", ""}, // tempo.map
+        {ImportLevel::Partial, "meter positions may use bounded nearest-tick rounding on non-dividing file grids", ""}, // meter.single
+        {ImportLevel::Partial, "time-signature changes are admitted only when they land on canonical bar boundaries", ""}, // meter.map
+        {ImportLevel::None, "", "arrangement markers"}, // marker
+        {ImportLevel::None, "", ""}, // timecode.origin
+        {ImportLevel::None, "", ""}, // media.provenance
+        {ImportLevel::None, "", ""}, // mixer.track-gain
+        {ImportLevel::None, "", ""}, // mixer.track-pan
+        {ImportLevel::None, "", ""}, // mixer.sends
+        {ImportLevel::None, "", "automation lanes"}, // automation.device-param
+        {ImportLevel::None, "", ""}, // automation.track-gain
+        {ImportLevel::None, "", ""}, // automation.track-pan
+        {ImportLevel::None, "", "device chains"}, // device.placement
+        {ImportLevel::None, "", ""}, // device.payload
+        {ImportLevel::None, "", ""}, // effect.timewarp
+        {ImportLevel::None, "", "takes and comp lanes"}, // take.lane
+        {ImportLevel::None, "", ""}, // take.comp
+        {ImportLevel::None, "", ""}, // track.freeze
+        {ImportLevel::None, "", ""}, // asset.sealed-hash
+        {ImportLevel::None, "", ""}, // asset.embedded-media
+        {ImportLevel::None, "", ""}, // asset.referenced-media
+        {ImportLevel::None, "", ""}, // sequence.multiple
+        {ImportLevel::None, "", ""}, // sequence.nested
+        {ImportLevel::None, "", ""}, // content.registered
+        {ImportLevel::None, "", ""}, // content.opaque
+        {ImportLevel::None, "", ""}, // edit-rate.non-audio
+        {ImportLevel::None, "", ""}, // context.chord-scale
+        {ImportLevel::None, "", ""}, // context.groove
+        {ImportLevel::None, "", "per-note probability, conditions, and ratchets"}, // clip.note-modifier
+        {ImportLevel::None, "", "empty positioned clips"}, // clip.empty
+        {ImportLevel::None, "", "continuous tempo ramps"}, // tempo.ramp
+        {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
+        {ImportLevel::None, "", ""}, // tempo.value-quantized
     },
 };
 
@@ -127,7 +184,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for track.group"}, // track.group
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for track.video"}, // track.video
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.musical
-        {ExportLevel::Degrade, Concept::ClipMusical, LossClass::Approximated, "sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick"}, // clip.absolute
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer cannot place sample-anchored clips on its beats-only lane, so the clip and its content are omitted"}, // clip.absolute
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.media
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity"}, // clip.gain
@@ -152,20 +209,75 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "devices are identity-only in the document; DAWproject requires a device type to place one"}, // device.placement
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for device.payload"}, // device.payload
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for effect.timewarp"}, // effect.timewarp
-        {ExportLevel::Degrade, Concept::ClipMedia, LossClass::Flattened, "the active comp is flattened into arrangement clips; alternate takes are dropped"}, // take.lane
-        {ExportLevel::Degrade, Concept::ClipMedia, LossClass::Flattened, "comp segment boundaries become clip boundaries; the selection is no longer editable"}, // take.comp
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not inspect take lanes, so alternate takes are omitted"}, // take.lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not flatten comp selections, so comp segment choices are omitted"}, // take.comp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped"}, // track.freeze
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.sealed-hash
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve"}, // asset.embedded-media
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit embedded media bytes, so an embedded asset is omitted"}, // asset.embedded-media
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.referenced-media
-        {ExportLevel::Degrade, Concept::TrackFlat, LossClass::Flattened, "only the root sequence is written; other sequences are dropped"}, // sequence.multiple
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "only the root sequence is written; other sequences are dropped"}, // sequence.multiple
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for sequence.nested"}, // sequence.nested
-        {ExportLevel::RoundtripOnly, Concept::Unknown, LossClass::Dropped, ""}, // content.registered
-        {ExportLevel::RoundtripOnly, Concept::Unknown, LossClass::Dropped, ""}, // content.opaque
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer cannot preserve registered extension payloads, so the clip content is omitted"}, // content.registered
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer cannot preserve opaque extension payloads, so the clip content is omitted"}, // content.opaque
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for edit-rate.non-audio"}, // edit-rate.non-audio
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.chord-scale"}, // context.chord-scale
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.groove"}, // context.groove
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once"}, // clip.note-modifier
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.empty
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map"}, // tempo.ramp
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note-velocity-quantized
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.value-quantized
+    },
+    // smf
+    {
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for unknown"}, // unknown
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // track.flat
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for track.group"}, // track.group
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for track.video"}, // track.video
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.musical
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "sample-anchored clips cannot be placed on the Standard MIDI File tick grid, so the clip and its content are omitted"}, // clip.absolute
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files carry MIDI events rather than audio media, so media clips are omitted"}, // clip.media
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip gain, so authored clip gain is omitted"}, // clip.gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so authored fade shapes are omitted"}, // clip.fades
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.crossfade"}, // clip.crossfade
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.warp"}, // clip.warp
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files describe a linear arrangement, so launcher scenes are omitted"}, // clip.launch
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for gap.explicit"}, // gap.explicit
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.single
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.map
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // meter.single
+        {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // meter.map
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit marker meta-events, so markers and regions are omitted"}, // marker
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit a session timecode origin, so the document opens at zero"}, // timecode.origin
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for media.provenance"}, // media.provenance
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not lower authored track gain to MIDI controller events"}, // mixer.track-gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not lower authored track pan to MIDI controller events"}, // mixer.track-pan
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for mixer.sends"}, // mixer.sends
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not lower device automation to MIDI controller events"}, // automation.device-param
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not lower track-gain automation to MIDI controller events"}, // automation.track-gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not lower track-pan automation to MIDI controller events"}, // automation.track-pan
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "device chains have no Standard MIDI File representation and are omitted"}, // device.placement
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for device.payload"}, // device.payload
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for effect.timewarp"}, // effect.timewarp
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "takes and comp lanes have no Standard MIDI File representation and are omitted"}, // take.lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "take comp selections have no Standard MIDI File representation and are omitted"}, // take.comp
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "frozen audio renders have no Standard MIDI File representation and are omitted"}, // track.freeze
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files do not carry Pulp media identity hashes"}, // asset.sealed-hash
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files do not embed authored media assets"}, // asset.embedded-media
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files do not retain external media locators"}, // asset.referenced-media
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "only the root sequence is written; other sequences are omitted"}, // sequence.multiple
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "nested sequence placements have no Standard MIDI File representation and are omitted"}, // sequence.nested
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "registered extension clip content has no Standard MIDI File representation and is omitted"}, // content.registered
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "opaque extension clip content has no Standard MIDI File representation and is omitted"}, // content.opaque
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for edit-rate.non-audio"}, // edit-rate.non-audio
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not emit chord or scale context"}, // context.chord-scale
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the bounded writer does not apply or serialize authored groove context"}, // context.groove
+        {ExportLevel::Degrade, Concept::ClipNote, LossClass::Degraded, "Standard MIDI notes carry no probability, pass condition, or ratchet, so the notes play unconditionally once"}, // clip.note-modifier
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no positioned empty-clip object, so the clip is omitted"}, // clip.empty
+        {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "continuous tempo curves become discrete Set Tempo steps at the authored tempo points"}, // tempo.ramp
+        {ExportLevel::Degrade, Concept::ClipNote, LossClass::Approximated, "16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity"}, // clip.note-velocity-quantized
+        {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "tempo values are rounded to the nearest representable integer microseconds per quarter note"}, // tempo.value-quantized
     },
 };
 } // namespace detail

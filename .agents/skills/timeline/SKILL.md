@@ -961,6 +961,15 @@ cannot back this path, and the byte-stream traps (running-status cancellation,
 system-exclusive framing, FIFO note matching) a hand-rolled decoder must get
 right.
 
+The committed interchange capability data is the authority for both SMF and
+DAWproject admission and loss accounting. Each format JSON carries a stable,
+contiguous `ordinal`; never infer `Format` ABI order from filenames. Reader and
+writer implementations keep compile-time lists of the concepts they actually
+support, so widening a generated table row without matching code must fail the
+build. When the model gains a detectable semantic distinction, add a concept,
+teach the census to name it, and declare both formats' behavior in the same
+change before claiming a lossless path.
+
 ## Asset confinement is two layers, and they are not redundant
 
 A `PackageRelative` asset locator is checked twice, by checks with different

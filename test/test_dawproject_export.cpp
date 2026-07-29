@@ -177,3 +177,75 @@ TEST_CASE("an export refuses a loss the caller has not accepted",
     }
     REQUIRE(found_manifest);
 }
+
+TEST_CASE("consented absolute clips are omitted instead of serialized at zero",
+          "[interchange][dawproject][export]") {
+    auto absolute = take(Clip::create_absolute(
+        {10}, {48'000}, 48'000, {48'000, 1},
+        take(NoteContent::create({NoteEvent{{20}, {0}, {kQuarter}, 0xffffu, 60, 0}}))));
+    auto track = take(Track::create({5}, "absolute", {std::move(absolute)}));
+    auto sequence = take(Sequence::create({3}, "arrangement", TickDuration{4 * kQuarter},
+                                          {std::move(track)}));
+    const Project project = take(Project::create(
+        ProjectInput{{1}, "absolute", 40, {3}, {}, {std::move(sequence)}}));
+    const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
+    const auto* loss = plan.losses().find(Concept::ClipAbsolute);
+    REQUIRE(loss != nullptr);
+    REQUIRE(loss->level == interchange::ExportLevel::Drop);
+
+    const std::string xml = export_xml(project, plan.required_consent());
+    REQUIRE(xml.find("clip-10") == std::string::npos);
+    REQUIRE(xml.find("<Note ") == std::string::npos);
+}
+
+TEST_CASE("consented opaque content preserves its positioned clip as empty",
+          "[interchange][dawproject][export]") {
+    auto opaque = take(OpaqueContent::create(
+        {"vendor.future", 1},
+        R"({"data":{"value":7},"type_name":"vendor.future","version":1})"));
+    auto clip = take(Clip::create({10}, {kQuarter}, {2 * kQuarter}, std::move(opaque)));
+    auto track = take(Track::create({5}, "opaque", {std::move(clip)}));
+    auto sequence = take(Sequence::create({3}, "arrangement", TickDuration{4 * kQuarter},
+                                          {std::move(track)}));
+    const Project project = take(Project::create(
+        ProjectInput{{1}, "opaque", 40, {3}, {}, {std::move(sequence)}}));
+    const auto plan = interchange::plan_export(project, interchange::Format::DawProject);
+    const auto* loss = plan.losses().find(Concept::ContentOpaque);
+    REQUIRE(loss != nullptr);
+    REQUIRE(loss->level == interchange::ExportLevel::Drop);
+
+    const std::string xml = export_xml(project, plan.required_consent());
+    REQUIRE(xml.find("clip-10") != std::string::npos);
+    REQUIRE(xml.find("time=\"1\"") != std::string::npos);
+    REQUIRE(xml.find("duration=\"2\"") != std::string::npos);
+
+    const auto imported = import_dawproject_xml(xml);
+    if (!imported.has_value())
+        INFO(imported.error().message);
+    REQUIRE(imported.has_value());
+    const Project reimported = std::move(imported).value();
+    const auto* root = reimported.find_sequence(reimported.root_sequence_id());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->tracks().size() == 1);
+    REQUIRE(root->tracks().front().clips().size() == 1);
+    const Clip& preserved = root->tracks().front().clips()[0];
+    REQUIRE(preserved.start() == TickPosition{kQuarter});
+    REQUIRE(preserved.duration() == TickDuration{2 * kQuarter});
+    REQUIRE(std::holds_alternative<EmptyContent>(preserved.content()));
+}
+
+TEST_CASE("DAWproject tempo formatting preserves binary64 values",
+          "[interchange][dawproject][export]") {
+    ProjectInput input{{1}, "precise-tempo", 40, {3}, {},
+                       {take(Sequence::create({3}, "arrangement",
+                                              TickDuration{4 * kQuarter}, {}))}};
+    input.tempo_map =
+        take(TempoMap::create(std::array{TempoPoint{{0}, 120.1234567}}));
+    const Project original = take(Project::create(std::move(input)));
+
+    const auto plan = interchange::plan_export(original, interchange::Format::DawProject);
+    REQUIRE(plan.is_lossless());
+    const Project reimported = take(import_dawproject_xml(export_xml(original)));
+    REQUIRE(reimported.tempo_map().points().front().bpm ==
+            original.tempo_map().points().front().bpm);
+}
