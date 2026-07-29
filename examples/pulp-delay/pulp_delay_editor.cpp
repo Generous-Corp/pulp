@@ -338,6 +338,11 @@ std::size_t PulpDelayEditor::bound_parameter_count() const noexcept {
 }
 
 void PulpDelayEditor::paint(canvas::Canvas& c) {
+    // StateStore::deserialize intentionally restores atomics without
+    // dispatching listeners. Reconcile at the production frame boundary so
+    // preset/session recall is visible in this paint. Reconciliation is
+    // change-gated, so unchanged frames stay idle.
+    sync_from_store();
     const auto b = local_bounds();
     c.set_fill_color(color::background);
     c.fill_rect(0, 0, b.width, b.height);
@@ -543,9 +548,12 @@ void PulpDelayEditor::set_control_present(state::ParamID id, bool present) {
     if (id < kTime || id > kReverse)
         return;
     if (auto* control = control_views_[static_cast<std::size_t>(id - kTime)]) {
-        control->set_visible(present);
-        control->set_enabled(present);
-        control->set_hit_testable(present);
+        if (control->visible() != present)
+            control->set_visible(present);
+        if (control->enabled() != present)
+            control->set_enabled(present);
+        if (control->hit_testable() != present)
+            control->set_hit_testable(present);
     }
 }
 
@@ -562,8 +570,11 @@ void PulpDelayEditor::update_timing_presentation() {
     // visualization, but host-sync makes its raw Time parameter non-editable
     // and swaps its text/geometry to the selected Division.
     if (auto* time = control_views_[static_cast<std::size_t>(kTime - kTime)]) {
-        time->set_enabled(!inputs.sync);
-        time->set_hit_testable(!inputs.sync);
+        const bool editable = !inputs.sync;
+        if (time->enabled() != editable)
+            time->set_enabled(editable);
+        if (time->hit_testable() != editable)
+            time->set_hit_testable(editable);
     }
     set_control_present(kDivision, inputs.sync);
     set_control_present(kLink, !ping_pong);
@@ -575,10 +586,15 @@ void PulpDelayEditor::update_timing_presentation() {
     set_control_present(kCrossfeed, !ping_pong);
 
     if (effective_right_time_) {
-        effective_right_time_->set_visible(ping_pong || linked_ratio || linked_ms);
-        effective_right_time_->set_access_value(effective_right_time_->display_text());
+        const bool present = ping_pong || linked_ratio || linked_ms;
+        if (effective_right_time_->visible() != present)
+            effective_right_time_->set_visible(present);
+        const auto display = effective_right_time_->display_text();
+        if (effective_right_time_->access_value() != display)
+            effective_right_time_->set_access_value(display);
     }
-    if (crossfeed_override_) {
+    if (crossfeed_override_
+        && crossfeed_override_->visible() != ping_pong) {
         crossfeed_override_->set_visible(ping_pong);
     }
 }

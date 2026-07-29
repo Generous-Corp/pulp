@@ -350,6 +350,79 @@ TEST_CASE("Pulp Delay static editor becomes idle and external state repaints onc
     REQUIRE(host.repaint_count == 0);
 }
 
+TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore",
+          "[pulp-delay][ui][repaint][restore]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    auto* feedback = dynamic_cast<DelayKnob*>(editor.control_for(kFeedback));
+    auto* freeze = dynamic_cast<DelayActionCard*>(editor.control_for(kFreeze));
+    REQUIRE(feedback != nullptr);
+    REQUIRE(freeze != nullptr);
+    CountingWindowHost host;
+    editor.set_window_host(&host);
+    canvas::RecordingCanvas canvas;
+
+    store.set_normalized(kFeedback, 0.75f);
+    store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
+    store.set_value(kCharacter, static_cast<float>(Character::bbd));
+    store.set_value(kFreeze, 1.0f);
+    const auto preset = store.serialize();
+
+    store.set_normalized(kFeedback, 0.1f);
+    store.set_value(kRouting, static_cast<float>(Routing::stereo));
+    store.set_value(kCharacter, static_cast<float>(Character::clean));
+    store.set_value(kFreeze, 0.0f);
+    REQUIRE_THAT(feedback->value(), WithinAbs(0.1, 1.0e-6));
+    REQUIRE(control_view(editor, kCharacter).access_value() == "CLEAN");
+    REQUIRE_FALSE(freeze->is_on());
+    REQUIRE(control_view(editor, kCrossfeed).visible());
+    REQUIRE_FALSE(editor.crossfeed_override_visible());
+
+    host.repaint_count = 0;
+    REQUIRE(store.deserialize(preset));
+    REQUIRE_THAT(feedback->value(), WithinAbs(0.1, 1.0e-6));
+    REQUIRE(control_view(editor, kCharacter).access_value() == "CLEAN");
+    REQUIRE_FALSE(freeze->is_on());
+    REQUIRE(control_view(editor, kCrossfeed).visible());
+    REQUIRE_FALSE(editor.crossfeed_override_visible());
+
+    int store_callbacks = 0;
+    const auto callback_probe = store.add_listener(
+        [&store_callbacks](state::ParamID, float) { ++store_callbacks; },
+        state::ListenerThread::Main);
+    int gesture_begins = 0;
+    int gesture_ends = 0;
+    store.set_gesture_callbacks(
+        [&gesture_begins](state::ParamID) { ++gesture_begins; },
+        [&gesture_ends](state::ParamID) { ++gesture_ends; });
+
+    editor.paint_all(canvas);
+    REQUIRE_THAT(feedback->value(), WithinAbs(0.75, 1.0e-6));
+    REQUIRE(control_view(editor, kCharacter).access_value() == "BBD");
+    REQUIRE(freeze->is_on());
+    REQUIRE_FALSE(control_view(editor, kCrossfeed).visible());
+    REQUIRE(editor.crossfeed_override_visible());
+    REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
+    REQUIRE(host.repaint_count > 0);
+    REQUIRE(store_callbacks == 0);
+    REQUIRE(gesture_begins == 0);
+    REQUIRE(gesture_ends == 0);
+    REQUIRE(store.open_gesture_count() == 0);
+    REQUIRE(store.serialize() == preset);
+
+    host.repaint_count = 0;
+    canvas.clear();
+    editor.paint_all(canvas);
+    REQUIRE(host.repaint_count == 0);
+    REQUIRE(store_callbacks == 0);
+    REQUIRE(gesture_begins == 0);
+    REQUIRE(gesture_ends == 0);
+    REQUIRE(store.open_gesture_count() == 0);
+    REQUIRE(store.serialize() == preset);
+}
+
 TEST_CASE("Pulp Delay controls follow host automation and preset restore",
           "[pulp-delay][ui][automation][state]") {
     state::StateStore store;
