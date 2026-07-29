@@ -110,6 +110,22 @@ holds its profile, so it needs `--isolated` or a separate `userDataDir`.
 5. **Install on m5 and confirm** — the standalone opens, the three plugins load
    in a DAW, the modules appear in Rack, and a prompt produces a module.
 
+## Validation state
+
+`clap-validator` is installed (`~/.local/bin/clap-validator`, built from
+source). Forge Modular's CLAP runs 44 tests: **33 pass, 2 fail**. Both
+failures are one cause -- after `clap_plugin_params::flush()` the parameter
+values do not change, with set and with null cookies.
+
+This is Forge Modular's own bug, not a framework one: a stock `PulpGain` built
+from the same tree fails four *different* tests (`param-conversions` and the
+three `state-reproducibility` variants) and passes both flush tests. The
+suspect is that Forge Modular declares no parameters at all, so the only one
+present is the adapter's synthesized Bypass, and flush does not apply it.
+
+**The CLAP must not go into a plug-in folder until this passes.** The AU
+passed `auval` on the previous pass and the four formats rebuild clean.
+
 ## Facts that are true and easy to get wrong
 
 - A new module needs a **Rack restart** (`plugin::init()` runs once). A patch
