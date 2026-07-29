@@ -104,7 +104,41 @@ printf 'hello\n' > "$r/notes.md"
 git -C "$r" add -A >/dev/null && git -C "$r" commit -qm notes
 check "skips coverage when no C/C++ changed" 0 "coverage not applicable" "$r"
 
-# 7. An identical branch has nothing to say.
+# 7. A real gate failure must fail, even on a Python too old to run every gate.
+#    This is the case that matters: an old interpreter must never launder a
+#    genuine defect into "inconclusive". Deterministic on any Python.
+r="$(make_repo)"
+cat > "$r/tools/scripts/gates.sh" <<'GATES'
+#!/bin/sh
+echo "  deps-audit self-tests: failing"     # version artefact
+echo "  ✗ doc: docs/reference/compat/css.md NOT updated"   # real
+echo "gates: ✗ one or more gates failed (see above)."
+exit 1
+GATES
+chmod +x "$r/tools/scripts/gates.sh"
+printf 'x\n' > "$r/notes.md"
+git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
+check "fails on a real gate problem despite version artefacts" 1 "compat/css.md NOT updated" "$r"
+
+# 8. A run whose problems are ALL version artefacts is inconclusive, not a
+#    failure — only meaningful on a Python that cannot run those gates.
+if python3 -c 'import sys; sys.exit(0 if sys.version_info < (3,11) else 1)' 2>/dev/null; then
+    r="$(make_repo)"
+    cat > "$r/tools/scripts/gates.sh" <<'GATES'
+#!/bin/sh
+echo "  deps-audit self-tests: failing"
+echo "gates: ✗ one or more gates failed (see above)."
+exit 1
+GATES
+    chmod +x "$r/tools/scripts/gates.sh"
+    printf 'x\n' > "$r/notes.md"
+    git -C "$r" add -A >/dev/null && git -C "$r" commit -qm gates
+    check "treats version-only gate problems as inconclusive" 0 "known Python 3.11+ artefact" "$r"
+else
+    printf '  skip  version-artefact case (needs Python < 3.11 to be meaningful)\n'
+fi
+
+# 9. An identical branch has nothing to say.
 r="$(make_repo)"
 check "exits cleanly with no changes" 0 "nothing to check" "$r"
 

@@ -105,7 +105,7 @@ BIG=0
 for f in ${CHANGED[@]+"${CHANGED[@]}"}; do
     [ -f "$f" ] || continue
     case "$f" in *.json|*.md|*.txt|*.svg|*.lock) continue ;; esac
-    lines=$(wc -l < "$f" 2>/dev/null || echo 0)
+    lines=$(wc -l < "$f" 2>/dev/null | tr -d " " || echo 0)
     if [ "${lines:-0}" -gt 1000 ]; then
         note "$f is ${lines} lines — over ~1000; be ready to justify or split"
         BIG=1
@@ -124,29 +124,45 @@ fi
 # gates.sh is sub-second and offline. It is the same set the maintainer's
 # pre-push hook runs, minus the heavy diff-coverage build.
 say "4. Repo gates (fast, offline)"
-# Several gates need Python 3.11+ (tomllib, unittest enterContext). macOS ships
-# 3.9, so on a stock Mac gates.sh fails for reasons unrelated to your change —
-# `deps-audit self-tests: failing` is the usual one. Report that honestly as
-# unverifiable rather than either hiding it or blaming the contribution.
+# A few gates need Python 3.11+ (tomllib, unittest's enterContext). macOS ships
+# 3.9, so on a stock Mac those fail for reasons unrelated to the change.
+#
+# But an old interpreter must never launder a REAL failure. Partition the
+# reported problems: anything not on the known version-sensitive list is a
+# genuine defect and fails, whatever Python is installed. Only a run whose
+# problems are ALL version artefacts is downgraded to "inconclusive".
 PY_OK=0
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null && PY_OK=1
+
+# Gates known to misreport on Python < 3.11. Keep this list narrow — a gate
+# added here stops being enforced for every contributor on a stock Mac.
+VERSION_SENSITIVE='deps-audit self-tests|codecov-config|scheduled_workflow_fork_guard|tomllib|enterContext'
 
 if [ ! -x tools/scripts/gates.sh ]; then
     skip "tools/scripts/gates.sh not present"
 elif PULP_SKIP_DIFF_COVER=1 tools/scripts/gates.sh "$BASE" >/tmp/contrib-gates.log 2>&1; then
     ok "gates.sh clean"
-elif [ "$PY_OK" -eq 0 ]; then
-    skip "gates.sh inconclusive: python3 is $(python3 -V 2>&1 | awk '{print $2}'), several gates need 3.11+"
-    echo "        Gates that reported a problem (may be version artefacts):"
-    grep -iE "failing|✗|FAILED|NOT updated" /tmp/contrib-gates.log \
-        | grep -v "one or more gates failed" | head -6 | sed 's/^/          /'
-    echo "        For a real answer install Python 3.11+ and re-run. Skill-sync and"
-    echo "        version-bump — the two that most often send a PR back — run fine on 3.9"
-    echo "        and are included above if they appear."
 else
-    bad "gates.sh reported problems — see /tmp/contrib-gates.log"
     grep -iE "failing|✗|FAILED|NOT updated" /tmp/contrib-gates.log \
-        | grep -v "one or more gates failed" | head -6 | sed 's/^/        /'
+        | grep -v "one or more gates failed" > /tmp/contrib-gates-problems.txt 2>/dev/null
+    grep -vE "$VERSION_SENSITIVE" /tmp/contrib-gates-problems.txt \
+        > /tmp/contrib-gates-real.txt 2>/dev/null
+    if [ -s /tmp/contrib-gates-real.txt ]; then
+        bad "gates.sh reported problems — see /tmp/contrib-gates.log"
+        head -8 /tmp/contrib-gates-real.txt | sed 's/^/        /'
+        if [ "$PY_OK" -eq 0 ] && [ -s /tmp/contrib-gates-problems.txt ]; then
+            echo "        (further problems were suppressed as Python-version artefacts)"
+        fi
+    elif [ "$PY_OK" -eq 0 ]; then
+        skip "gates.sh inconclusive: python3 is $(python3 -V 2>&1 | awk '{print $2}'), and every"
+        echo "        reported problem is a known Python 3.11+ artefact:"
+        head -4 /tmp/contrib-gates-problems.txt | sed 's/^/          /'
+        echo "        Nothing here is attributable to your change, but install 3.11+ for a"
+        echo "        definitive answer."
+    else
+        bad "gates.sh failed — see /tmp/contrib-gates.log"
+        head -8 /tmp/contrib-gates-problems.txt | sed 's/^/        /'
+    fi
 fi
 
 # ── 5. Diff coverage ───────────────────────────────────────────────────────
