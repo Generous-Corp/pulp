@@ -100,6 +100,37 @@ if(_config_lower STREQUAL "debug")
     list(APPEND _configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
 endif()
 
+# The SDK under test comes from the parent build. When that producer is
+# instrumented, its installed static libraries retain references to the
+# matching runtime. Propagate the producer flags into this real external
+# consumer just as the Timeline SDK fixture does; otherwise the proof fails at
+# link time before it can exercise runtime-sidecar staging.
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+set(_consumer_linker_flags "${PULP_PARENT_EXE_LINKER_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags
+        " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    string(APPEND _consumer_linker_flags
+        " ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
+
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _configure_args
+        "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
+if(_consumer_cxx_flags)
+    list(APPEND _configure_args
+        "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
+endif()
+if(_consumer_linker_flags)
+    list(APPEND _configure_args
+        "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_linker_flags}")
+endif()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" ${_configure_args}
     RESULT_VARIABLE _configure_result

@@ -1268,24 +1268,18 @@ TEST_CASE("SuperConvolver's web-lane IR rebuild is bounded per tick",
     store.set_value(kSize, 4.0f);
     REQUIRE(proc.non_realtime_tick_pending());
 
-    // (a) EVERY tick is bounded. Wall clock is a proxy that varies with the
-    // machine, so the primary assertion is structural — the job needs many ticks,
-    // i.e. no single one did it all — and the timing check is a loose backstop
-    // against a regression to the 15 ms blocking pass.
+    // (a) EVERY tick is bounded. The job must need many ticks, which proves no
+    // single call performed the old blocking rebuild. Wall-clock limits do not
+    // belong in this portable correctness suite: runner contention can delay a
+    // bounded slice without changing how much work that slice performs.
     int ticks = 0;
-    double worst_ms = 0.0;
     while (proc.non_realtime_tick_pending() && ticks < 5000) {
-        const auto t0 = std::chrono::steady_clock::now();
         proc.on_non_realtime_tick();
-        const auto t1 = std::chrono::steady_clock::now();
-        worst_ms = std::max(
-            worst_ms, std::chrono::duration<double, std::milli>(t1 - t0).count());
         ++ticks;
     }
-    INFO("ticks=" << ticks << " worst tick=" << worst_ms << " ms");
+    INFO("ticks=" << ticks);
     CHECK_FALSE(proc.non_realtime_tick_pending());
-    CHECK(ticks > 20);          // a 4 s IR is many slices, never one
-    CHECK(worst_ms < 5.0);      // was 15.0 ms in ONE callback before slicing
+    CHECK(ticks > 20);  // a 4 s IR is many bounded slices, never one
 
     // (b) …and it lands on the same IR the one-shot path builds. Same generator,
     // same peak-response normalization — the sliced peak scan is a different

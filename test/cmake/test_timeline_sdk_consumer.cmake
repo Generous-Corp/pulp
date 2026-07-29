@@ -56,6 +56,10 @@ endif()
 string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
 string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
 
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _consumer_configure_args
+        "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
 if(_consumer_cxx_flags)
     list(APPEND _consumer_configure_args
         "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")

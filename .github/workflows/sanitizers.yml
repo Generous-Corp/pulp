@@ -191,11 +191,7 @@ jobs:
         run: |
           cmake -S . -B build-asan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_SANITIZER=address \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -221,11 +217,7 @@ jobs:
         run: |
           cmake -S . -B build-asan-artifact \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+            -DPULP_SANITIZER=address \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=ON \
             -DPULP_ENABLE_GPU=OFF
@@ -282,11 +274,7 @@ jobs:
         run: |
           cmake -S . -B build-tsan \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
-            -DCMAKE_C_FLAGS="-fsanitize=thread" \
-            -DCMAKE_OBJCXX_FLAGS="-fsanitize=thread" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" \
+            -DPULP_SANITIZER=thread \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF
@@ -344,9 +332,7 @@ jobs:
           # can exceed even their generous CTest hang guards.
           cmake -S . -B build-ubsan \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
-            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined" \
+            -DPULP_SANITIZER=undefined \
             -DPULP_BUILD_TESTS=ON \
             -DPULP_BUILD_EXAMPLES=OFF \
             -DPULP_ENABLE_GPU=OFF

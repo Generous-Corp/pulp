@@ -1437,6 +1437,15 @@ nightly Intel workflow unless this one is deliberately retired.
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
 
+ASan, TSan, and UBSan configure through `PULP_SANITIZER=<kind>`, including
+ASan's example-bundle lifecycle build. Besides applying the compiler and linker
+flags, the named option marks sanitizer bundles as test-only instrumentation so
+relocatability validation permits the compiler-injected Xcode runtime.
+Installed-SDK consumer fixtures carry the matching instrumentation flags
+because instrumented static libraries retain runtime references. The strict
+shipping verifier remains unchanged and still rejects external compiler
+runtimes for ordinary release artifacts.
+
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|
 | `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
