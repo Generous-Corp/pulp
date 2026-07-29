@@ -1,4 +1,4 @@
-# Goal — deliver Forge Modular, testable on another machine
+# Goal — Forge Modular, proven working before anyone is asked to look
 
 Paste everything below the line. It assumes nothing about the session that
 wrote it.
@@ -6,288 +6,192 @@ wrote it.
 ---
 
 Finish **Forge Modular** — a sibling to Forge for VCV Rack that turns a prompt
-into a Eurorack module or a whole patch — to the point where it can be
-installed and used on a second machine.
+into a Eurorack module or a whole patch — to the point where it is **proven to
+work by tests you ran**, then installed on a second machine.
 
 Work in `/Volumes/Workshop/Code/pulp-modular-rack` on branch
 `explore/modular-rack`. Only `tools/dsp_vocabulary.py` and its self-test have
 gone to `main` (PR #6820, merged); nothing else should without being asked.
 
 **Read first:** `planning/2026-07-29-forge-modular-build-status.md` in
-pulp-planning (what is proven, what remains, what cost time), then
-`DECISIONS.md` (the arguable calls and what would change our mind about each —
-do not silently re-decide any; say so if you think one is wrong), then
-`planning-draft-forge-modular-ux.md` (§11 capabilities, §12 agent settings,
-§13 the DAW plugin). **Keep the status document current. It is the handoff.**
+pulp-planning, then `DECISIONS.md`, then `planning-draft-forge-modular-ux.md`
+(§11 capabilities, §12 agent settings, §13 the DAW plugin). **Keep the status
+document current. It is the handoff.**
 
-## The standing rule, learned expensively
+## The rule that matters most
 
-Every gate written for this pipeline was wrong the first time it met real
-material — manifest rules rejecting correct modules, the behavioural gate
-failing six of eleven working ones, the preflight reading "hat" out of "that",
-the explainer describing a correct cross-modulation patch as self-modulation,
-the UI check passing a shell whose every label was unparented. Twelve
-instances. **Every one found by running it; none by reading it.**
+**Do not show anyone work you have not proven works.** Not "it builds", not
+"it renders", not "the log says the window opened" — *works*, meaning you drove
+it and watched it do the thing.
 
-So anything that checks, rejects or explains ships with a corpus it must pass
-and a negative control it must fail, and failing for the *wrong reason* counts
-as a failure. And **render before you reason about a design** — two rounds were
-lost this session to conclusions drawn from files that had never been opened.
+This was violated and cost the user's time. A shell was handed over that
+rendered correctly in a screenshot and was **completely inert**: not one button
+was clickable. A screenshot had been treated as proof of function. It is proof
+of paint and nothing else.
 
-## What is already true
+The related history: every gate written for this pipeline was wrong the first
+time it met real material — manifest rules rejecting correct modules, the
+behavioural gate failing six of eleven working ones, the preflight reading
+"hat" out of "that", the explainer calling cross-modulation self-modulation, a
+UI check passing a shell whose every label was unparented, an installer that
+silently shipped no modules, an installed app that came up blank while its log
+reported a window and a GPU, and a test that passed **with and without** the fix
+it was written to prove. Around twenty instances. **Every one found by running
+it. None by reading it.**
 
-- Module generation: 8/8 across a spread, every one using Pulp's DSP.
-- Patch generation: 8/8, gated so a silent patch is rejected and retried.
-- Four formats build. **AU passes `auval`.** All three installed here.
-- The button path provably reaches `patch.py`.
-- One unsigned installer, 64 MB, carrying app and all three formats.
-- 22 modules in Rack, drawn with our own components.
+So: anything that checks, rejects or explains ships with a corpus it must pass
+and a negative control it must fail; failing for the *wrong reason* counts as a
+failure. Render before reasoning about a design. And **drive before claiming**.
 
-## What is wrong, specifically
+## The architecture error to correct first
 
-**The shell does not match the design.** The reference render is at
-`/tmp/bcap-out/browser.png` — regenerate it with:
+Forge Modular's UI was built as ~700 lines of `createRow` / `createCol` in
+`ui/main.js`. Those are styled boxes. They have no `on_click`, no hover, no
+focus ring, no cursor. That one choice is why the shell is inert **and** why it
+looks flat and square next to Forge.
 
-```
-node <browser_capture>/capture.mjs capture \
-  --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --root "$HOME/Downloads/Design brief prototype-2" \
-  --input "$HOME/Downloads/Design brief prototype-2/ForgeModular.dc.html" \
-  --output /tmp/bcap-out --profile-dir /tmp/bcap-prof \
-  --initial-width 1330 --initial-height 900 --dpr 2 --allow-network
-```
+**Forge does it differently and Forge is the brand.** `/Volumes/Workshop/Code/forge`
+builds its chrome in **C++** (`src/chrome.cpp`, ~1800 lines) from real widget
+types — `TextButton` with `on_click` and `set_style(primary)`, `TextEditor`,
+`setCornerRadius` — and its `ui/main.js` is **129 lines**.
 
-Use **`pulp import-design`**, not `capture.mjs` directly. Both spellings of the
-network flag are accepted now. Initial-state capture works; multi-screen
-capture is coming as deterministic CDP actions (click / type / wait) against
-Pulp's own isolated Chrome profile. **Do not inject scripts into the prototype
-or fight the shared Chrome profile** — that was tried here, twelve attempts
-across four strategies, two distinct images. Reach for an isolated DevTools
-session only if a secondary-screen reference is immediately necessary.
+Match that. Real widgets, chrome in C++, JS kept small. `wire()` in `shell.cpp`
+already `dynamic_cast`s to `ToggleButton` and silently gives up when the cast
+fails, which is exactly what happened; whatever replaces it must fail **loudly**
+instead.
 
-Missing from `examples/forge-modular/app/ui/main.js`, all present in the
-render: the **left icon rail**; the **top bar** with the `MODULE · 12 HP` chip
-and the `RACK NOT RUNNING` / `VCV / VST3 / STANDALONE` status chips; the
-**centred hero** (`FORGE MODULAR · FOR VCV RACK` eyebrow, *"What should the
-module do?"*, subtitle); the **composer centred at ~1000 px with the
-Module/Patch tabs joined to its top-left corner**; **icon+label buttons** with a
-glowing teal `Build module` pill; and the **project shelf** (`Patches / My
-modules`, gradient cards with module and cable counts, `Module library →`).
+## The work, and the proof each piece owes
 
-The structural error underneath: **the home screen has no chat/preview split.**
-That is a second screen, reached after building. The current implementation
-collapses the two, which is why nothing lines up.
+### 1. Make the shell real and interactive
 
-## Capturing the other screens — what does not work
+Rebuild on real widgets. Every control must be clickable, show hover, and take
+focus where relevant.
 
-Every screen lives in the DOM at once and is switched by visibility, not by
-mounting. Two consequences, both of which cost a pass here:
+**Proof owed — an automated interaction harness, not a screenshot.** Headless,
+in `ctest`, using `View::simulate_click` / `simulate_drag` / `simulate_hover`
+and direct `on_text_input` / `on_key_event`. It must assert:
 
-- **A DOM snapshot cannot tell you which screen is showing.** All four headings
-  ("What should the module do?", "What should the rack do?", "Wiring",
-  "Building") are present in every capture, so text search reports success for a
-  click that did nothing. Only the pixels are evidence.
-- **Injected click scripts did not switch mode.** Twelve attempts across four
-  strategies -- `.click()` on the label, a full pointer sequence, walking the
-  ancestor chain, pressing the nearest clickable ancestor -- produced two
-  distinct images between them, and the second was only a hover ring.
+- clicking `Build` with text in the composer calls the engine **once**, with
+  that exact text, and with `patch_mode` matching the selected tab
+- clicking `Ask` calls the engine with the non-mutating flag — an Ask turn must
+  never be able to rewrite the patch
+- clicking `Build` with an **empty** composer calls nothing
+- clicking the `Module` / `Patch` tabs changes mode, and the heading, subtitle,
+  button labels and artifact chip all follow
+- the mention picker opens on `@` and inserts what is chosen
+- every rail icon and shelf card that looks pressable **is** pressable
 
-The promising route, untried: since every screen is already rendered, force the
-visibility directly rather than simulating input. Failing that, drive a real
-browser over CDP. The chrome-devtools MCP refuses to attach while a browser
-holds its profile, so it needs `--isolated` or a separate `userDataDir`.
+**Negative control:** delete a handler and confirm the harness goes red. A test
+that passes against a broken build is worse than no test — that already
+happened once here.
 
-## The work
+### 2. Reach 1:1 with the design, and prove it three ways
 
-1. **Rebuild `ui/main.js` to the render, 1:1.** Screenshot the standalone with
-   `--screenshot` after every pass and compare against `browser.png` until they
-   agree. Do not ask anyone to look before that comparison has been made.
-2. **Build the working screen** — chat with role-grouped wiring lines and their
-   *why* clauses, preview compositing real panels, hover-a-line-lights-a-cable.
-   `patch_layout.hpp` already computes the geometry and is tested.
-3. **Rebuild and revalidate** all four formats. `auval` for the AU;
-   `clap-validator` for the CLAP (not installed here — install it). Never leave
-   a plugin in a plug-in folder that has not passed.
-4. **Sign and notarize** the installer. Credentials are in
-   `~/.config/pulp/secrets/`; `pulp ship doctor` prepares the keychain.
-5. **Install on m5 and confirm** — the standalone opens, the three plugins load
-   in a DAW, the modules appear in Rack, and a prompt produces a module.
+The user wants a **three-way** comparison, every time:
 
-## Validation state
+1. **the source** — the prototype HTML rendered
+2. **our render** — the standalone and each plugin format
+3. **VCV Rack** — what the generated module or patch actually looks like in Rack
 
-`clap-validator` is installed (`~/.local/bin/clap-validator`, built from
-source). Forge Modular's CLAP runs 44 tests: **33 pass, 2 fail**. Both
-failures are one cause -- after `clap_plugin_params::flush()` the parameter
-values do not change, with set and with null cookies.
+Capture all three, put them side by side, and list every difference you can
+still see. Known-open: rounded window corners (see below).
 
-This is Forge Modular's own bug, not a framework one: a stock `PulpGain` built
-from the same tree fails four *different* tests (`param-conversions` and the
-three `state-reproducibility` variants) and passes both flush tests. The
-suspect is that Forge Modular declares no parameters at all, so the only one
-present is the adapter's synthesized Bypass, and flush does not apply it.
+Use **`pulp import-design`**, never `capture.mjs` directly. Both spellings of
+the network flag work now. Initial-state capture works; multi-screen capture is
+coming as deterministic CDP actions (click / type / wait) against Pulp's own
+isolated Chrome profile. **Do not inject scripts into the prototype or fight the
+shared Chrome profile** — twelve attempts, four strategies, two distinct images.
 
-Narrowed but not fixed. Two obvious explanations are both ruled out:
-`clap_params_flush` does write incoming `CLAP_EVENT_PARAM_VALUE` events through
-`store.set_value` (`clap_adapter.cpp:1655`), and `maybe_synthesize_bypass`
-injects the Bypass param *into that same store* before the id is detected
-(`clap_adapter.cpp:291`). So the param exists and flush does write it. The
-remaining suspect is the read path -- whether `clap_params_get_value` reports
-the bypass param from somewhere other than the store, or normalizes
-differently from `set_value`. That is where to look next; do not guess a fix,
-because `PulpGain` passes both flush tests and would regress silently.
+`dom-snapshot.json` is **not** evidence of which screen is showing: the
+prototype is self-contained, so every heading appears in it regardless. Only
+pixels are evidence.
 
-**The CLAP must not go into a plug-in folder until this passes.** The AU
-passed `auval` on the previous pass and the four formats rebuild clean.
+### 3. Prove generation end to end, by running it
+
+Not "the button path reaches `patch.py`". Actually:
+
+- type a prompt, click `Build module`, and get a **module** that appears in Rack
+- switch to Patch, click `Build patch`, and get a **patch** that loads and makes
+  sound
+- capture Rack showing each result
+
+### 4. Build and validate every target
+
+All four formats plus the `.vcvplugin`. `auval` for the AU, `clap-validator`
+for the CLAP, the load probe for the VST3, a run for the standalone.
+**Re-validate after any change that rebuilds a binary** — results expire.
+
+### 5. Sign, notarize, install, and confirm on m5
+
+Credentials are in `~/.config/pulp/secrets/`; `tools/scripts/ensure_signing_ready.sh`
+prepares the keychain. Confirm on m5 by **driving** the app, not by launching it.
+
+## What is already true (verified this way, not assumed)
+
+- Module generation 8/8 across a spread, every one using Pulp DSP.
+- Patch generation 8/8, gated so a silent patch is rejected and retried.
+- Behaviour gate 12/12 plus a negative control. Patch lint 13/13. Preflight 8/8.
+- AU passes `auval`; VST3 loads and returns a factory; CLAP 33 pass / 2 fail
+  (see below); standalone runs.
+- Signed + notarized installer, Gatekeeper-accepted on a second machine, and it
+  carries app, three plugins and the `.vcvplugin`.
+- The app renders identically on m5 — but **renders only**; it is inert there
+  too.
 
 ## Facts that are true and easy to get wrong
 
+- **The CLAP's 2 failures are not a defect.** `clap-validator` draws each
+  stepped parameter's new value with `random_range(range).round()` from a
+  hard-coded seed (`0x1337_6767`, `src/tests/rng.rs:17`) and fails if nothing
+  changed (`params.rs:243`). Forge Modular's only parameter is the synthesized
+  Bypass — two legal values, sitting at 0. `tools/clap_param_probe.c` shows
+  flush applies values before and after `activate()`. Do not "fix" this.
+- **A real defect nearby, unfixed:** a bypass parameter accepts and returns
+  non-integral values while advertised `IS_STEPPED`, because `StateStore`
+  quantizes discrete parameters but not bypass. Rounding in `clap_params_flush`
+  fixes it. The obvious test is a **false green** — the `test_clap_entry`
+  fixture's stepped parameter is discrete and already quantized upstream, so it
+  passes either way. A real test needs a bypass parameter in the fixture.
+- **Rounded window corners** are a *window* property, not a widget one.
+  `set_client_decoration()` exists, does the right thing on macOS, and has **no
+  callers anywhere** — wiring it up would change every Pulp standalone. Also
+  macOS rounds windows itself while `--screenshot` captures the render surface,
+  so a capture may show square corners on a window that is round on screen.
+  **Settle that by looking at the running app before building anything.**
+- The bundle must carry its own `ui/`. `FORGE_MODULAR_UI_DIR` is an absolute
+  source path; without the bundled copy an installed app opens blank with no
+  error. Source is tried **first** so editing `ui/main.js` still works on the
+  build machine — the other order makes the stale bundled copy win every time.
+- `package.sh` on the **signed** path had to be taught to include the
+  `.vcvplugin` (before signing) and to pass `--no-notarize` rather than
+  `--notarize`, which the combined-installer script rejects.
 - A new module needs a **Rack restart** (`plugin::init()` runs once). A patch
   loads instantly. This asymmetry shapes both flows.
 - Rack does **not** silently drop missing modules: it names them, offers the
-  Library, and keeps their cables.
-- Rack unpacks a `.vcvplugin` **only on load**, so a freshly installed one
-  reads as an archive and looks entirely uninstantiable.
+  Library, keeps their cables.
+- Rack unpacks a `.vcvplugin` **only on load**, so a fresh one reads as an
+  archive and looks uninstantiable.
 - Nothing on disk describes a module's ports; **index order is not visual
-  order**.
-- Model slugs are **not unique** across the library (Fundamental also ships
-  VCO, VCF, VCA, LFO).
+  order**. Model slugs are **not unique** across the library.
 - **No plugin can instantiate another** or tell its host to open a file.
-  Standalone Rack can be launched and handed a patch; a Rack Pro instance in a
-  DAW can be neither.
-- A first-run **`auval` failure on a freshly copied AU is usually the
-  registration cache**, not the plugin. `killall AudioComponentRegistrar`.
-  Nothing in the error says so.
-- The **AU factory symbol is derived from the CMake target**: the bundle wants
+- A first-run **`auval` failure is usually the registration cache**:
+  `killall AudioComponentRegistrar`. Over SSH it fails regardless — AU
+  registration needs a GUI login session.
+- The **AU factory symbol** derives from the CMake target: the bundle wants
   `<target>AUFactory`, the SDK emits `<ClassName>Factory`, so the class must be
-  `<target>AU`. Renaming a target leaves stale object directories that link
-  cleanly and export the old symbol.
+  `<target>AU`. Renaming a target leaves stale object dirs that link cleanly
+  and export the old symbol.
 - **`createLabel` is `(id, text, parent)`** and every widget but the root needs
   a parent as the second argument. `setFlex(id,"display","none")` is a no-op;
-  `setVisible` hides.
+  `setVisible` hides. `createPanel` does not take a background the way a row or
+  column does. `setOverflow("hidden")` does not clip a child's background.
+  There are `start` / `end` insets but **nothing vertical**, so absolute
+  placement controls one axis only.
 
 ## Etiquette
 
-Launching Rack opens an audio device — say so in the message that dispatches
-it, cap the run, and quit gracefully rather than killing it (a hard kill
-truncates Rack's log and triggers a crash-recovery modal that swallows the next
-patch argument). Never regenerate while Rack is reading the plugin.
-
-## CLAP flush — two hypotheses already ruled out
-
-Do not re-walk these:
-
-- **Not the read path.** `params_get_value` reads `store.get_value`
-  (`clap_entry.hpp:376`) — the same store `clap_params_flush` writes
-  (`clap_adapter.cpp:1655`).
-- **Not the host-write guard.** `ScopedClapHostParamWrite` is read only by the
-  outbound listener and the two gesture callbacks
-  (`clap_adapter.cpp:260-273`), where it suppresses the *event echo*. It never
-  blocks the store write.
-
-What is left, and the first thing to test: `maybe_synthesize_bypass` is a no-op
-when the host quirk is off, so under clap-validator this plugin may expose **no
-parameters at all** — and a plugin with zero parameters trivially cannot show a
-value change after a flush. If that is the cause, flush is not broken; the
-plugin simply gives the validator nothing to flush, and the question becomes
-whether Forge Modular should declare a real Bypass. `DECISIONS.md` currently
-answers no, deliberately. Log `params_count` under the validator before
-changing anything — `PulpGain` passes both flush tests and would regress
-silently.
-
-One more data point against the zero-parameter theory above: `param-set-events`
-**failed** rather than being skipped, and nine other tests did skip. A plugin
-exposing no parameters would be expected to skip it. So a parameter probably
-does exist and flush genuinely does not apply it. Confirm by reading
-`params_count` directly — a short host that dlopens the bundle and calls it is
-worth more here than another pass of reading the adapter.
-
-## CLAP flush — diagnosed
-
-Settled by `tools/clap_param_probe.c`, which dlopens the built bundle and calls
-the params extension directly. Reading the adapter had ruled out three theories
-without confirming one; one run of the probe answered it.
-
-- The plugin exposes **one** parameter — the synthesized Bypass, id 1883404656,
-  range 0..1, flags `0x31` (`IS_STEPPED | IS_BYPASS | IS_AUTOMATABLE`). So the
-  zero-parameter theory is dead too.
-- `flush()` **does** apply values: request 1.0, read back 1.0.
-- But request **0.37** and it reads back **0.37**. A parameter flagged
-  `CLAP_PARAM_IS_STEPPED` over 0..1 has two legal values, 0 and 1. Accepting
-  and returning 0.37 breaks the stepped contract, and is the likeliest reason
-  the validator's flush-versus-process comparison disagrees.
-
-So the fix is quantization of stepped parameters on the way into the store, not
-anything to do with flush. That is shared-adapter surface: it will change
-`PulpGain` and every other Pulp CLAP, so it needs its own test and a
-re-validation of both plugins. It also wants checking against the VST3 and AU
-adapters, which may or may not quantize the same way.
-
-## CLAP flush — resolved: not a Pulp defect
-
-`clap-validator` picks each parameter's new value with
-`random_range(range).round()` for stepped parameters, from a **hard-coded seed**
-(`0x1337_6767`, `src/tests/rng.rs:17`), then fails if no value changed
-(`src/tests/plugin_instance/params.rs:243`). Forge Modular's only parameter is
-the synthesized Bypass — two legal values, 0 and 1, sitting at 0. When the
-seeded draw is 0, nothing changes and the test fails on a plugin that behaved
-correctly. `PulpGain` has many continuous parameters, so something always
-changes and it passes both flush tests.
-
-`tools/clap_param_probe.c` confirms the plugin side is sound: flush applies
-values before *and* after `activate()`.
-
-**So do not "fix" this.** The two failures are an artifact of a single
-two-state parameter meeting a fixed seed. What to do instead is decide whether
-a plugin with no automatable parameters should expose a lone Bypass at all.
-
-### A real defect found on the way, still unfixed
-
-A bypass parameter accepts and returns non-integral values — flush 0.37 into
-Bypass and 0.37 reads back — while `params_get_info` reports it as
-`CLAP_PARAM_IS_STEPPED`. `StateStore` quantizes *discrete* parameters, so this
-affects bypass only.
-
-Rounding in `clap_params_flush` fixes it, and was tried here and reverted,
-because the obvious test is a **false green**: the `test_clap_entry` fixture's
-stepped parameter is discrete, so it is already quantized upstream and the test
-passes with or against the change. A real test needs a bypass parameter in the
-fixture. Shared-adapter surface, so it needs that test before it lands.
-
-## Validation state (after the bundled-UI rebuild)
-
-The binaries changed when `ui/` moved into the bundles, so earlier results
-expired and were re-run:
-
-| Format     | Result |
-|------------|--------|
-| Standalone | Runs; renders identically on a second machine |
-| AU         | `AU VALIDATION SUCCEEDED` |
-| VST3       | Loads; `bundleEntry` runs and `GetPluginFactory` returns (`tools/vst3_load_probe.c`) |
-| CLAP       | 33 pass, **2 fail** — the fixed-seed artifact above, not a defect |
-
-`pluginval` is not installed here, so the VST3 check is a scan-time load test
-rather than a full validation. It catches a missing binary, an unresolved
-symbol, and a bundle whose entry point never ran, which are the failures that
-break a host scan.
-
-## The rounded window corners
-
-Not closed, and the reason is worth stating precisely.
-
-The radii are on the columns that paint the outer edges, so the widget side is
-done. What is square is the **window**, and two facts bear on that:
-
-- `WindowHost::set_client_decoration(bool)` exists and does the right thing on
-  macOS -- transparent titlebar, hidden title, full-size content view. It has
-  **no callers anywhere in the tree**. Calling it from the standalone would
-  change every Pulp standalone, not just this app, which is wider than this
-  branch should reach.
-- macOS rounds window corners itself. `--screenshot` captures the *render
-  surface*, not the composited window, so corners will look square in a capture
-  even when the window on screen is rounded. **The gap may therefore be partly
-  an artifact of how we capture.**
-
-That second point is unconfirmed: capturing the live window headlessly needs a
-screenshot provider or Quartz bindings that are not available here, so it could
-not be settled either way. Settle it before building anything -- looking at the
-running app on a screen for ten seconds answers it.
+Launching Rack or the standalone opens an audio device — say so in the message
+that dispatches it, cap the run, and quit gracefully rather than killing it (a
+hard kill truncates Rack's log and triggers a crash-recovery modal that
+swallows the next patch argument). Never regenerate while Rack is reading the
+plugin.
