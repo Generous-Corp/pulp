@@ -702,8 +702,91 @@ def preflight(prompt: str, inv: dict, midx: dict, cat: dict) -> dict:
     return {"ok": False, "missing": options}
 
 
+GATE_SRC = os.path.join(HERE, "patch_gate.cpp")
+GATE_BIN = os.path.join(CACHE_DIR, "patch-gate")
+SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
+
+
+def _plugin_dir() -> str | None:
+    """A directory of unpacked plugins the gate can dlopen.
+
+    Rack unpacks a `.vcvplugin` the first time it loads it, so a plugin
+    installed since the last Rack run is still an archive and cannot be
+    opened. Unpacking here is what stops the gate reporting a freshly
+    generated module's patch as entirely uninstantiable.
+    """
+    import subprocess
+    for d in PLUGIN_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for entry in os.listdir(d):
+            if not entry.endswith(".vcvplugin"):
+                continue
+            slug = entry.split("-")[0]
+            if os.path.isdir(os.path.join(d, slug)):
+                continue
+            try:
+                tar = subprocess.Popen(["zstd", "-dc", os.path.join(d, entry)],
+                                       stdout=subprocess.PIPE)
+                subprocess.run(["tar", "xf", "-"], stdin=tar.stdout, cwd=d,
+                               timeout=120)
+                tar.wait()
+            except Exception:
+                pass
+        return d
+    return None
+
+
+def _build_gate() -> str | None:
+    import subprocess
+    if os.path.exists(GATE_BIN) and \
+            os.path.getmtime(GATE_BIN) > os.path.getmtime(GATE_SRC):
+        return GATE_BIN
+    if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
+        return None
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    r = subprocess.run(
+        ["clang++", "-std=c++20", "-O1", "-o", GATE_BIN, GATE_SRC,
+         f"-I{SDK}/include", f"-I{SDK}/dep/include", "-DARCH_MAC",
+         os.path.join(SDK, "libRack.dylib")],
+        capture_output=True, text=True)
+    return GATE_BIN if r.returncode == 0 else None
+
+
+def sounds(patch: dict) -> tuple[bool, str]:
+    """Does this patch actually make a sound? Returns (ok, report).
+
+    Structure is not audibility. A patch can name real modules, land every
+    cable on a real port and reach an audio interface while producing
+    nothing -- because a sequencer is never clocked, or a self-triggering
+    envelope has nothing to start it. Both happened in the first spread, and
+    neither is visible to anything short of running the DSP.
+
+    Skipped rather than failed when the SDK is absent, so the generator still
+    works on a machine that cannot build the harness.
+    """
+    import subprocess
+    import tempfile
+    gate = _build_gate()
+    pdir = _plugin_dir()
+    if not gate or not pdir:
+        return True, "(no SDK; audibility not checked)"
+    with tempfile.NamedTemporaryFile("w", suffix=".vcv", delete=False) as f:
+        json.dump(patch, f)
+        tmp = f.name
+    try:
+        r = subprocess.run([gate, tmp, pdir], capture_output=True, text=True,
+                           timeout=300,
+                           env=dict(os.environ, DYLD_LIBRARY_PATH=SDK))
+        return r.returncode == 0, r.stdout + r.stderr
+    except subprocess.TimeoutExpired:
+        return False, "the patch did not finish running within 300 s"
+    finally:
+        os.unlink(tmp)
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
-    """Prompt -> a patch that lints clean. Returns (patch, why) or raises."""
+    """Prompt -> a patch that lints clean and makes a sound."""
     import re
     import subprocess
     claude = os.environ.get("FORGE_CLAUDE_BIN", "claude")
@@ -737,12 +820,28 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             except json.JSONDecodeError:
                 pass                       # prose is optional; the patch is not
         errs = lint(patch, inv)
-        if not errs:
+        if errs:
+            print(f"  rejected (attempt {attempt + 1}):", flush=True)
+            for e in errs[:5]:
+                print(f"    {e}", flush=True)
+            ctx = "The patch was rejected:\n" + "\n".join(errs)
+            continue
+
+        ok, report = sounds(patch)
+        if ok:
             return patch, why
-        print(f"  rejected (attempt {attempt + 1}):", flush=True)
-        for e in errs[:5]:
-            print(f"    {e}", flush=True)
-        ctx = "The patch was rejected:\n" + "\n".join(errs)
+        print(f"  builds, but makes no sound (attempt {attempt + 1}):", flush=True)
+        for line in report.splitlines():
+            if "FAIL" in line or "silent" in line:
+                print(f"    {line.strip()}", flush=True)
+        ctx = ("The patch was structurally valid but SILENT when run. Every "
+               "cable into the audio interface carried nothing.\n\n" + report +
+               "\n\nUsual causes: a sequencer or clock divider with nothing "
+               "clocking it; an envelope whose gate is never driven; a "
+               "self-triggering loop with nothing to start it; a VCA whose CV "
+               "never rises and whose level defaults to zero. Give the patch "
+               "something that runs on its own, and make sure every module in "
+               "the audio path is actually opened by something.")
     raise SystemExit(f"gave up after {retries + 1} attempts")
 
 
