@@ -2057,3 +2057,30 @@ initializers. Two rules bind when you add or move a binder:
 
 `tools/scripts/designated_initializer_lint.py` guards the duplicate case; adding
 a binder out of order is still only caught by an MSVC build.
+
+## A Forge-exposed parameter needs a descriptor, not just a baked range
+
+`CustomNodeBakedParam` carries id, min, max and default — everything the audio
+graph needs, and nothing an agent choosing the node can read. The rest of the
+vocabulary (stable key, label, unit, stepped-vs-continuous, named states,
+description, and the finite construction axes) lives in
+`ForgeNodeDescriptor` (`pulp/host/forge_param_descriptor.hpp`), authored as an
+`inline ForgeNodeDescriptor descriptor()` next to the node it describes.
+`forge_fuzz_catalog.hpp` is the worked example.
+
+Two rules that are easy to get wrong:
+
+- **Descriptors carry no range or default.** Those are joined from the baked
+  node at export time so a number exists in exactly one place. Adding them back
+  reintroduces the drift the descriptor was built to end.
+- **A parameter absent on some realizations is expressed with
+  `realization_modes`, not by dropping it.** Some families deliberately omit a
+  control that would be inert (an Ampex deck has no selectable EQ standard), and
+  an inert control presented as live is a worse answer than an absent one.
+
+`audit_forge_descriptor()` joins descriptors against the node in both
+directions, so a node that gains a control with no descriptor fails as loudly
+as a descriptor for a control that was removed — the two ways a catalog goes
+quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
+half: every indexed pack either carries descriptors or sits in a `PENDING` list
+that may only shrink, so a newly indexed pack cannot land undescribed.
