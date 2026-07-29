@@ -1244,9 +1244,11 @@ Remaining limitation:
 
 **Status**: experimental
 
-Connect to a running Pulp inspector server. With no `--port`, the CLI
-auto-discovers the newest `pulp-inspector-*.port` file in the system temp
-directory.
+Experimental low-level client for a custom host/test fixture that explicitly
+constructs an inspector server. Normal `pulp run` and plugin-format launches do
+not currently start an endpoint. With no `--port`, the client chooses the
+newest `pulp-inspector-*.port` temp-file hint; that transitional discovery
+mechanism does not authenticate or identify an exact session.
 
 ```bash
 pulp inspect
@@ -1263,19 +1265,25 @@ Options:
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
 
-`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode` are
-reserved inspector protocol methods, but currently return explicit unavailable
-errors until script-engine and host-capture references are wired into the
-inspector domain.
+The current transport is loopback-only but unauthenticated. Do not use it for
+privileged mutation or runtime evaluation. Authenticated, exact-session
+discovery is not yet implemented.
+
+`Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
+protocol methods that currently return explicit unavailable errors until
+host-capture references are wired into the inspector domain.
+`Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
+and enabled custom fixture can evaluate code; treat that opt-in as remote code
+execution.
 
 ### motion
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Motion.*` protocol. Start the
-host with `PULP_MOTION_SERVER=1`, then use `pulp motion` to record traces,
-inspect active traces, replay `.motion.jsonl` fixtures, and toggle motion-cost
-sampling from a terminal.
+Experimental wrappers around the inspector `Motion.*` protocol. Normal Pulp
+launches do not start this endpoint, and `PULP_MOTION_SERVER` is not
+implemented. The live commands require a Pulp source checkout plus a custom
+fixture that explicitly constructs and wires the inspector server.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
@@ -1316,11 +1324,11 @@ runtime trace, fixture replay, and cost-attribution workflow.
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing
-protocol. Start the host with `PULP_TRACE_SERVER=1`, then use `pulp trace` to
-start/stop a tracing session, run SQL over the captured `.pftrace`, run L0
-preset queries, or ask for a one-shot narrated root cause. Motion tells you
-*what changed* on screen; tracing tells you *where the time went*.
+The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
+not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
+require a Pulp source checkout plus a custom inspector fixture. Offline
+`query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
+inspector session.
 
 ```bash
 pulp trace start --categories dsp,render --out /tmp/x.pftrace

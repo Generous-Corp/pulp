@@ -9,6 +9,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>  // Viewport-scale test: compute_design_viewport_transform
 
+#include <choc/text/choc_JSON.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -427,7 +429,9 @@ TEST_CASE("Protocol: empty response and default params omit payload keys",
 
 TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
           "[inspect][protocol]") {
-    auto encoded = encode_message(make_error(15, "View not found: gain"));
+    auto encoded = encode_message(make_error(
+        15, "View not found: gain", "capability_denied",
+        R"({"capability":"state.write","profile":"observe"})"));
     REQUIRE(encoded.find(R"("id")") != std::string::npos);
     REQUIRE(encoded.find(R"("error")") != std::string::npos);
     REQUIRE(encoded.find("View not found: gain") != std::string::npos);
@@ -437,11 +441,16 @@ TEST_CASE("Protocol: error encoding and decoding round-trips message payloads",
     REQUIRE(decoded.id == 15);
     REQUIRE(decoded.is_error);
     REQUIRE(decoded.params_json == "View not found: gain");
+    REQUIRE(decoded.error_code == "capability_denied");
+    const auto error_data = choc::json::parse(decoded.error_data_json);
+    REQUIRE(error_data["capability"].getString() == "state.write");
+    REQUIRE(error_data["profile"].getString() == "observe");
 
     InspectorMessage no_message;
     REQUIRE(decode_message(R"({"id":16,"error":{"code":-32000}})", no_message));
     REQUIRE(no_message.id == 16);
     REQUIRE(no_message.is_error);
+    REQUIRE(no_message.error_code == "-32000");
 }
 
 TEST_CASE("Protocol: decode preserves params, result arrays, and notifications",

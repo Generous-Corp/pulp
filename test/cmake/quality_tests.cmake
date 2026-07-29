@@ -55,6 +55,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Development-inspector truth gate: mutation tests prove capability/profile
+    # and user-facing runtime claims fail when either side drifts.
+    add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_inspector_truth_check.py")
+
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp
     # CLI's lease integration. Pins the lease-denial contract (back off to the
