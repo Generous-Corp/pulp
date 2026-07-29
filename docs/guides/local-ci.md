@@ -1443,12 +1443,14 @@ nightly Intel workflow unless this one is deliberately retired.
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
 
-ASan configures through `PULP_SANITIZER=address`, including its example-bundle
-lifecycle build. Besides applying the compiler and linker flags, the named
-option marks those bundles as test-only instrumentation so relocatability
-validation permits the compiler-injected Xcode ASan runtime. The strict
-shipping verifier remains unchanged and still rejects that external runtime
-for ordinary release artifacts.
+ASan, TSan, and UBSan configure through `PULP_SANITIZER=<kind>`, including
+ASan's example-bundle lifecycle build. Besides applying the compiler and linker
+flags, the named option marks sanitizer bundles as test-only instrumentation so
+relocatability validation permits the compiler-injected Xcode runtime.
+Installed-SDK consumer fixtures carry the matching instrumentation flags
+because instrumented static libraries retain runtime references. The strict
+shipping verifier remains unchanged and still rejects external compiler
+runtimes for ordinary release artifacts.
 
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|

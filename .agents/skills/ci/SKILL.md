@@ -1016,12 +1016,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
-- **ASan uses `PULP_SANITIZER=address`, including its example-bundle build.**
-  Do not replace the named option with raw `CMAKE_*_FLAGS`: the option both
-  applies the instrumentation and explicitly marks compiler-injected
-  `libclang_rt.asan_*_dynamic.dylib` as test-only for bundle-relocatability
-  validation. Ordinary release bundles do not set it, so the shipping guard
-  remains strict.
+- **ASan, TSan, and UBSan use `PULP_SANITIZER=<kind>`; ASan's
+  example-bundle build does too.** Do not replace the named options with raw
+  `CMAKE_*_FLAGS`: the option owns the compiler/linker flags and explicitly
+  marks compiler-injected sanitizer runtimes as test-only for
+  bundle-relocatability validation. Installed-SDK consumer fixtures propagate
+  the matching runtime requirement because instrumented static libraries retain
+  those references. Ordinary release bundles do not set the option, so the
+  shipping guard remains strict.
 - **UBSan is pinned to `macos-26`, not `macos-15`.** Xcode 16.4's Apple
   Clang/libc++ combination reported invalid `std::__shared_weak_count` vptrs
   while destroying ordinary persistent timeline trees, even though the same
