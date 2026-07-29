@@ -5,6 +5,7 @@
 #include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/forge_multiband_catalog.hpp>
 #include <pulp/host/forge_sidechain_catalog.hpp>
+#include <pulp/host/forge_synthesis_catalog.hpp>
 #include <pulp/host/forge_wavetable_catalog.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -135,6 +136,17 @@ TEST_CASE("Forge spectral and compound-dynamics packs declare their real port sh
     CHECK(sidechain.num_input_ports == 2);
     CHECK(sidechain.num_output_ports == 1);
     CHECK(sidechain.lowerable);
+}
+
+TEST_CASE("Forge vocoder exposes a sample-rate-independent registry gain ceiling",
+          "[host][forge][catalog][vocoder]") {
+    const float all_rates =
+        pulp::host::synthesis::vocoder::vocoder_all_sample_rates_worst_case_gain();
+    for (const double sample_rate :
+         {8000.0, 44100.0, 48000.0, 96000.0, 192000.0, 768000.0, 1000000.0}) {
+        INFO("sample_rate=" << sample_rate);
+        CHECK(pulp::host::synthesis::vocoder::vocoder_worst_case_gain(sample_rate) < all_rates);
+    }
 }
 
 TEST_CASE("Forge wavetable catalog source bakes and emits audio",

@@ -1842,7 +1842,7 @@ it with the index, so adding an unindexed pack or retaining an entry for a
 removed pack fails closed. Downstream consumers should derive their Pulp catalog
 header set from this index instead of maintaining another manual list.
 
-Two things bite when adding a pack:
+Three things bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every
   pack is a unipolar `[0, 1]` signal on a normal port — a source declares
@@ -1855,6 +1855,13 @@ Two things bite when adding a pack:
   header is invisible to that check — the nodes exist, nothing reaches them, and
   every test stays green — until the consumer's header list learns about it.
   When you add a pack, add its header to that list in the same change.
+- **Gain metadata belongs to the catalog that owns the DSP.** A downstream
+  registry must call a catalog helper, not reconstruct a bound from engine
+  constants. When the runtime helper depends on sample rate but the registry
+  stores one fixed number, expose a second catalog helper for the all-rate
+  ceiling (for example, `vocoder_all_sample_rates_worst_case_gain()`) and test
+  that it bounds the rate-specific helper. Otherwise DSP math leaks into the
+  importer/generator layer and the two formulas drift independently.
 
 Reconfiguring state (a filter's cutoff range, an envelope's stage lengths) is a
 per-block-on-change read of `BakedParamView::value_at(id, 0)`, not a per-sample
