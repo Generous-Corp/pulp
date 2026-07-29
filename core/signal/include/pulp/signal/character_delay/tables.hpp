@@ -71,11 +71,14 @@ inline constexpr double kLoopToneHpMinHz = 20.0;
 inline constexpr double kLoopToneHpMaxHz = 2000.0;
 inline constexpr double kLoopToneLpMinHz = 200.0;
 inline constexpr double kLoopToneLpMaxHz = 20000.0;
+/// Keep the TPT prewarp strictly below Nyquist. At or above Nyquist tan() is
+/// periodic rather than a meaningful analog-frequency mapping.
+inline constexpr double kLoopToneNyquistFraction = 0.45;
 /// Resonance range for both loop-tone filters. 0.5 is gently damped, 0.707 is
 /// Butterworth (flat), and 2.0 is a clear but controlled peak. The ceiling is
 /// deliberately low: these filters sit in a feedback loop that already has its
-/// own gain, so a high Q here multiplies with the loop and turns into an
-/// instability the saturator has to absorb on every pass.
+/// own gain. CharacterDelay reduces the unsaturated feedback ceiling by the
+/// active filters' worst-case resonant peaks so this range remains stable.
 inline constexpr double kLoopToneResMin = 0.5;
 inline constexpr double kLoopToneResMax = 2.0;
 
@@ -286,9 +289,9 @@ inline constexpr double kDiffusionTankApGain1 = 0.70;
 inline constexpr double kDiffusionTankApGain2 = 0.50;
 
 /// Tank size scaler and recirculation decay by character amount. The decay
-/// ceiling is deliberately below unity: this network sits INSIDE the delay's
-/// own feedback loop, so its gain multiplies with the feedback parameter and a
-/// tank at unity would be an oscillator rather than a reverb.
+/// ceiling is deliberately below unity because the output-only tank still owns
+/// an internal figure-of-eight recirculation; unity there would make the cloud
+/// an oscillator rather than a reverb.
 inline constexpr std::array<double, 3> kDiffusionTankSizeScale = {0.6, 1.0, 1.6};
 inline constexpr std::array<double, 3> kDiffusionTankDecay = {0.0, 0.62, 0.80};
 
@@ -317,6 +320,10 @@ inline constexpr std::array<double, 2> kDiffusionTankTapFraction = {0.37, 0.71};
 /// that GREW a thousandfold after the input stopped. Every recirculation must
 /// lose a little low end, exactly as it loses a little top. [design parameter]
 inline constexpr double kDiffusionTankLowGuardHz = 90.0;
+/// Live character automation moves tank taps toward their new positions over a
+/// short continuous glide instead of changing fractional reads at control-rate
+/// boundaries.
+inline constexpr double kDiffusionTankDelaySlewMs = 5.0;
 
 // ── Reverse ───────────────────────────────────────────────────────────────
 /// Raised-cosine splice fade at each end of a reversed segment, in samples.

@@ -64,6 +64,8 @@ class ReverbTank {
 public:
     void prepare(double fs) {
         sample_rate_ = fs;
+        delay_slew_coefficient_ =
+            std::exp(-1.0 / (kDiffusionTankDelaySlewMs * 0.001 * sample_rate_));
         const double longest = std::max({kDiffusionTankDelayAMs[1], kDiffusionTankDelayBMs[1],
                                          kDiffusionTankApAMs[1], kDiffusionTankApBMs[1]});
         const auto capacity = static_cast<std::size_t>(
@@ -81,6 +83,7 @@ public:
         for (auto& g : low_guard_) g.reset();
         feedback_ = {0.0, 0.0};
         mod_phase_ = {0.0, 0.0};
+        snap_delays_on_update_ = true;
     }
 
     void update(double character_amount) noexcept {
@@ -112,14 +115,19 @@ public:
                                             static_cast<double>(kTapCount));
 
         const double to_samples = 0.001 * sample_rate_ * size;
-        delay_len_[0] = kDiffusionTankDelayAMs[0] * to_samples;
-        delay_len_[1] = kDiffusionTankDelayAMs[1] * to_samples;
-        delay_len_[2] = kDiffusionTankDelayBMs[0] * to_samples;
-        delay_len_[3] = kDiffusionTankDelayBMs[1] * to_samples;
-        ap_len_[0] = kDiffusionTankApAMs[0] * to_samples;
-        ap_len_[1] = kDiffusionTankApAMs[1] * to_samples;
-        ap_len_[2] = kDiffusionTankApBMs[0] * to_samples;
-        ap_len_[3] = kDiffusionTankApBMs[1] * to_samples;
+        delay_len_target_[0] = kDiffusionTankDelayAMs[0] * to_samples;
+        delay_len_target_[1] = kDiffusionTankDelayAMs[1] * to_samples;
+        delay_len_target_[2] = kDiffusionTankDelayBMs[0] * to_samples;
+        delay_len_target_[3] = kDiffusionTankDelayBMs[1] * to_samples;
+        ap_len_target_[0] = kDiffusionTankApAMs[0] * to_samples;
+        ap_len_target_[1] = kDiffusionTankApAMs[1] * to_samples;
+        ap_len_target_[2] = kDiffusionTankApBMs[0] * to_samples;
+        ap_len_target_[3] = kDiffusionTankApBMs[1] * to_samples;
+        if (snap_delays_on_update_) {
+            delay_len_ = delay_len_target_;
+            ap_len_ = ap_len_target_;
+            snap_delays_on_update_ = false;
+        }
     }
 
     /// Zero mix means the tank contributes nothing at all — the character is
@@ -129,6 +137,7 @@ public:
     double mix() const noexcept { return mix_; }
 
     double process(double x, double decorrelation) noexcept {
+        advance_delay_slew();
         // Both branches read the OTHER branch's previous output, which is what
         // closes the figure of eight without a zero-delay loop.
         const double in_a = x + feedback_[1] * decay_;
@@ -155,6 +164,15 @@ private:
     static constexpr double kTapGain = 0.30;
     static constexpr std::size_t kTapCount = 4;   // two per branch
     static constexpr double kTankHeadroom = 1.0;
+
+    void advance_delay_slew() noexcept {
+        for (std::size_t i = 0; i < delay_len_.size(); ++i) {
+            delay_len_[i] = delay_len_target_[i] +
+                            delay_slew_coefficient_ * (delay_len_[i] - delay_len_target_[i]);
+            ap_len_[i] =
+                ap_len_target_[i] + delay_slew_coefficient_ * (ap_len_[i] - ap_len_target_[i]);
+        }
+    }
 
     /// One branch: allpass -> delay -> damp -> allpass -> delay, accumulating
     /// two offset taps from the first delay on the way through.
@@ -196,6 +214,8 @@ private:
     std::array<OnePole, 2> low_guard_{};
     std::array<double, 4> delay_len_ = {1.0, 1.0, 1.0, 1.0};
     std::array<double, 4> ap_len_ = {1.0, 1.0, 1.0, 1.0};
+    std::array<double, 4> delay_len_target_ = {1.0, 1.0, 1.0, 1.0};
+    std::array<double, 4> ap_len_target_ = {1.0, 1.0, 1.0, 1.0};
     std::array<double, 2> feedback_ = {0.0, 0.0};
     std::array<double, 2> mod_phase_ = {0.0, 0.0};
     double sample_rate_ = 48000.0;
@@ -203,6 +223,8 @@ private:
     double mix_ = 0.0;
     double output_scale_ = 0.0;
     double mod_depth_ = 0.0;
+    double delay_slew_coefficient_ = 0.0;
+    bool snap_delays_on_update_ = true;
 };
 
 /// The four-stage chain for one channel.
@@ -263,15 +285,12 @@ public:
 
     /// The reverb tank, crossfaded in — OUTPUT ONLY, never in the loop.
     ///
-    /// The first version recirculated this through the delay's feedback, and
-    /// that is a trap with no safe tuning: the tank rings for ~half a second,
-    /// longer than a typical loop period, so each repeat re-feeds a tank still
-    /// holding the last repeat's energy. Two resonators, each individually
-    /// decaying, composed into net growth — measured as a tail that took tens
-    /// of seconds to turn a 0.01 impulse into thousands. On the output the
-    /// tank is excited afresh by every repeat (the cloud still blooms per
-    /// repeat) but its energy never re-enters the line, so tank decay < 1 and
-    /// loop feedback < 1 each guarantee their own half of the contract.
+    /// The tank rings longer than a typical loop period, so it must not feed
+    /// back through the delay line and compose two resonators into net growth.
+    /// On the output it is excited afresh by every repeat (the cloud still
+    /// blooms per repeat), but its energy never re-enters the line. Tank decay
+    /// < 1 and loop feedback < 1 therefore guarantee their own halves of the
+    /// stability contract independently.
     double process_cloud(double x, double decorrelation) noexcept {
         if (!tank_.active()) return x;
         const double cloud = tank_.process(x, decorrelation);

@@ -6,6 +6,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/signal/character_delay/vintage.hpp>
+
 #include "support/character_delay_fixture.hpp"
 
 #include <algorithm>
@@ -17,6 +19,62 @@
 using namespace pulp::test::character_delay;
 
 namespace {
+
+double detrended_phase_rms(const std::vector<double>& phase) {
+    if (phase.size() < 2) return 0.0;
+    const double n = static_cast<double>(phase.size());
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_xx = 0.0;
+    double sum_xy = 0.0;
+    for (std::size_t i = 0; i < phase.size(); ++i) {
+        const double x = static_cast<double>(i);
+        const double y = phase[i];
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    const double denominator = n * sum_xx - sum_x * sum_x;
+    const double slope = denominator != 0.0 ? (n * sum_xy - sum_x * sum_y) / denominator : 0.0;
+    const double intercept = (sum_y - slope * sum_x) / n;
+    double energy = 0.0;
+    for (std::size_t i = 0; i < phase.size(); ++i) {
+        const double residual = phase[i] - (intercept + slope * static_cast<double>(i));
+        energy += residual * residual;
+    }
+    return std::sqrt(energy / n);
+}
+
+double vintage_fractional_phase_rms(double carrier_hz) {
+    cd::VintageChannel vintage;
+    vintage.prepare(kSr);
+    vintage.set_seed(0x12345678u);
+    vintage.update(0.0);
+    vintage.reset();
+
+    constexpr int kDuration = static_cast<int>(5.0 * kSr);
+    constexpr int kMeasureFrom = static_cast<int>(2.0 * kSr);
+    constexpr double kDelaySeconds = 0.137123;
+    constexpr double kAmplitude = 0.3;
+    std::array<double, 3> energy{};
+    std::array<std::size_t, 3> count{};
+    for (int i = 0; i < kDuration; ++i) {
+        const double input =
+            kAmplitude * std::sin(2.0 * cd::kPi * carrier_hz * static_cast<double>(i) / kSr);
+        const double output = vintage.process(input, kDelaySeconds);
+        if (i < kMeasureFrom) continue;
+        const auto phase_class = static_cast<std::size_t>(i % 3);
+        energy[phase_class] += output * output;
+        ++count[phase_class];
+    }
+
+    std::array<double, 3> class_rms{};
+    for (std::size_t i = 0; i < class_rms.size(); ++i)
+        class_rms[i] = std::sqrt(energy[i] / static_cast<double>(count[i]));
+    const auto [lo, hi] = std::minmax_element(class_rms.begin(), class_rms.end());
+    return (*hi - *lo) / std::max(*hi, 1e-12);
+}
 
 double measured_wet_tone_gain(Character character, double time_ms, double amount,
                               double hz) {
@@ -466,6 +524,50 @@ TEST_CASE("vintage quantization noise sits in the dithered PCM region",
     CHECK(noise_db <= -68.0);
 }
 
+TEST_CASE("vintage zero-depth delay has no fractional-clock phase warble",
+          "[character-delay][vintage][phase]") {
+    auto measure = [](double modulation_seconds) {
+        cd::VintageChannel vintage;
+        vintage.prepare(kSr);
+        vintage.set_seed(0x12345678u);
+        vintage.update(0.0);
+        vintage.reset();
+
+        constexpr double kCarrierHz = 4000.0;
+        constexpr double kDelaySeconds = 0.137123;
+        constexpr int kDuration = static_cast<int>(6.0 * kSr);
+        std::vector<float> output(static_cast<std::size_t>(kDuration));
+        for (int i = 0; i < kDuration; ++i) {
+            const double t = static_cast<double>(i) / kSr;
+            const double input = 0.3 * std::sin(2.0 * cd::kPi * kCarrierHz * t);
+            const double delay =
+                kDelaySeconds + modulation_seconds * std::sin(2.0 * cd::kPi * 0.7 * t);
+            output[static_cast<std::size_t>(i)] = static_cast<float>(vintage.process(input, delay));
+        }
+        const auto phase = phase_track(output, static_cast<int>(2.0 * kSr), kDuration, kCarrierHz);
+        return detrended_phase_rms(phase);
+    };
+
+    const double zero_depth = measure(0.0);
+    const double modulated_control = measure(0.0005);
+    INFO("zero-depth phase residual " << zero_depth << ", modulated control " << modulated_control);
+    CHECK(zero_depth < 0.02);
+    CHECK(modulated_control > 5.0 * zero_depth);
+}
+
+TEST_CASE("vintage Lagrange read keeps gain stable across fractional clock phase",
+          "[character-delay][vintage][phase]") {
+    const double low_frequency = vintage_fractional_phase_rms(1001.0);
+    const double near_band_edge = vintage_fractional_phase_rms(11003.0);
+    INFO("fractional-phase RMS spread low " << low_frequency << ", near edge " << near_band_edge);
+    // The modeled converter and reconstruction filter retain clock-phase
+    // coloration near the edge; this is not expected to be an ideal sinc DAC.
+    // The previous two-point read measures 0.719 here. The four-point Lagrange
+    // path measures 0.660 and stays below this deliberately separated bound.
+    CHECK(low_frequency < 0.01);
+    CHECK(near_band_edge < 0.69);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 9 — Diffusion
 // ═══════════════════════════════════════════════════════════════════════════
@@ -545,10 +647,10 @@ TEST_CASE("diffusion blooms into a reverb tail as the character opens",
 
 TEST_CASE("diffusion holds its cloud together without the delay's feedback",
           "[character-delay][diffusion]") {
-    // The tank recirculates on its own, so the character must still decay to
-    // silence on its own — a reverb, not an oscillator. It sits inside the
-    // delay's feedback loop, where any net gain above unity would compound on
-    // every repeat, so this is the property that keeps it usable.
+    // The output-only tank recirculates on its own, so the character must still
+    // decay to silence on its own — a reverb, not an oscillator. Its energy
+    // never re-enters the delay line; this test owns the tank's independent
+    // stability contract.
     Engine delay;
     configure(delay, Character::diffusion, 100.0, 0.0, 1.0);
     settle(delay, 0.3);
@@ -598,13 +700,11 @@ TEST_CASE("diffusion at zero amount adds no tail of its own",
 
 TEST_CASE("diffusion at maximum feedback blooms but never runs away",
           "[character-delay][diffusion]") {
-    // The tank is a recirculating network INSIDE the delay's own feedback
-    // loop, and its output level sits on a cliff: the level that measured
-    // stable (release bloom well under 2x the driven level) turned into a
-    // 300x runaway with ~3 dB more tank gain, because a resonant mode crosses
-    // unity. This pins the stable side of that cliff at the worst corner —
-    // maximum feedback, maximum character amount, sustained drive, then
-    // release — so a retune that re-crosses it fails here instead of in a mix.
+    // The tank recirculates internally on the wet OUTPUT, outside the delay's
+    // feedback loop. Its output level still sits on a cliff: a resonant mode
+    // above unity would make one repeat's cloud run away even though that
+    // energy never returns to the delay line. This pins the stable side of that
+    // cliff at maximum feedback and character amount.
     Engine delay;
     configure(delay, Character::diffusion, 100.0, 1.0, 1.0);
     settle(delay, 0.3);

@@ -250,20 +250,21 @@ public:
     //
     // Bypassed bit-exactly while low cut is at its minimum and high cut at its
     // maximum, so an untouched delay is unchanged. Also bypassed under freeze,
-    // which needs a unity loop to hold its content; the filters keep running so
-    // their state stays coherent when freeze releases.
+    // which needs a unity loop to hold its content. Crossing the explicit
+    // bypass boundary clears the integrators so suspended resonance cannot
+    // return as a transient later.
     void set_loop_low_cut_hz(SampleType hz) {
         const double next = std::clamp(finite_or(static_cast<double>(hz), loop_low_cut_hz_),
-                                      chardelay::kLoopToneHpMinHz, chardelay::kLoopToneHpMaxHz);
-        if (next == loop_low_cut_hz_) return;   // per-block pushes are free
+                                       chardelay::kLoopToneHpMinHz, chardelay::kLoopToneHpMaxHz);
+        if (next == loop_low_cut_hz_) return;  // per-block pushes are free
         loop_low_cut_hz_ = next;
         update_loop_tone();
     }
 
     void set_loop_low_cut_resonance(SampleType q) {
         const double next = std::clamp(finite_or(static_cast<double>(q), loop_low_cut_q_),
-                                     chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
-        if (next == loop_low_cut_q_) return;   // per-block pushes are free
+                                       chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
+        if (next == loop_low_cut_q_) return;  // per-block pushes are free
         loop_low_cut_q_ = next;
         update_loop_tone();
     }
@@ -474,18 +475,42 @@ private:
     /// Retune both loop-tone filters and latch whether the stage does anything.
     /// Fully-open controls bypass it so an untouched delay stays bit-exact.
     void update_loop_tone() noexcept {
-        loop_tone_active_ = loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz ||
-                            loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz;
+        const bool low_cut_active = loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz;
+        const bool high_cut_active = loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz;
+        const bool low_cut_boundary_crossed = low_cut_active != loop_low_cut_active_;
+        const bool high_cut_boundary_crossed = high_cut_active != loop_high_cut_active_;
+        loop_tone_active_ = low_cut_active || high_cut_active;
+        const double guarded_nyquist = chardelay::kLoopToneNyquistFraction * sample_rate_;
+        const double effective_low_cut = std::clamp(loop_low_cut_hz_, 0.1, guarded_nyquist);
+        const double effective_high_cut = std::clamp(loop_high_cut_hz_, 0.1, guarded_nyquist);
         for (auto& channel : channels_) {
-            channel.tone_high_pass.set_mode(Svf64::Mode::highpass);
-            channel.tone_high_pass.set_sample_rate(sample_rate_);
-            channel.tone_high_pass.set_frequency(loop_low_cut_hz_);
-            channel.tone_high_pass.set_resonance(loop_low_cut_q_);
-            channel.tone_low_pass.set_mode(Svf64::Mode::lowpass);
-            channel.tone_low_pass.set_sample_rate(sample_rate_);
-            channel.tone_low_pass.set_frequency(loop_high_cut_hz_);
-            channel.tone_low_pass.set_resonance(loop_high_cut_q_);
+            channel.tone_high_pass.configure(Svf64::Mode::highpass, sample_rate_, effective_low_cut,
+                                             loop_low_cut_q_);
+            channel.tone_low_pass.configure(Svf64::Mode::lowpass, sample_rate_, effective_high_cut,
+                                            loop_high_cut_q_);
+            // Each bypass is its own abrupt topology change. The other filter
+            // may keep the combined stage active, so reset the integrators
+            // whose individual boundary crossed rather than keying this to the
+            // aggregate loop_tone_active_ flag.
+            if (low_cut_boundary_crossed) channel.tone_high_pass.reset();
+            if (high_cut_boundary_crossed) channel.tone_low_pass.reset();
         }
+        loop_low_cut_active_ = low_cut_active;
+        loop_high_cut_active_ = high_cut_active;
+
+        const auto peak_bound = [](double q) noexcept {
+            constexpr double kButterworthQ = 0.7071067811865476;
+            if (q <= kButterworthQ) return 1.0;
+            // Worst-case magnitude of a normalized second-order LP/HP with Q
+            // above Butterworth. Cascaded active stages multiply their bounds.
+            return q / std::sqrt(1.0 - 1.0 / (4.0 * q * q));
+        };
+        double tone_gain_bound = 1.0;
+        if (loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz)
+            tone_gain_bound *= peak_bound(loop_low_cut_q_);
+        if (loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz)
+            tone_gain_bound *= peak_bound(loop_high_cut_q_);
+        loop_tone_feedback_ceiling_ = chardelay::kUnsaturatedFeedbackMax / tone_gain_bound;
     }
 
     /// One pass of the player's tone stage over the recirculating signal.
@@ -519,7 +544,7 @@ private:
             case Character::clean:
             case Character::diffusion:
             default:
-                return chardelay::kUnsaturatedFeedbackMax;
+                return std::min(chardelay::kUnsaturatedFeedbackMax, loop_tone_feedback_ceiling_);
         }
     }
 
@@ -812,7 +837,10 @@ private:
     double loop_low_cut_q_ = 0.707;
     double loop_high_cut_hz_ = chardelay::kLoopToneLpMaxHz;
     double loop_high_cut_q_ = 0.707;
+    bool loop_low_cut_active_ = false;
+    bool loop_high_cut_active_ = false;
     bool loop_tone_active_ = false;
+    double loop_tone_feedback_ceiling_ = chardelay::kUnsaturatedFeedbackMax;
     bool clean_lowpass_bypassed_ = true;
 
     double lfo_phase_ = 0.0;
