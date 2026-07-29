@@ -103,9 +103,31 @@ fi
 
 # Signed and optionally notarized: the canonical Pulp recipe, which deep-signs
 # each bundle inner-first and refuses to package one that is not relocatable.
+# The modules ride inside the app bundle on this path too, and must be placed
+# BEFORE signing or they invalidate the signature. Rack reads from the user's
+# Application Support, which a package payload cannot address, so a postinstall
+# step is what puts them in place -- the same reason as the unsigned path
+# above. Without this the signed installer carried the app and all three
+# plugins but silently no modules, which looks identical to one that has them.
+if [[ -n "$RACK_PLUGIN" ]]; then
+    mkdir -p "$APP/Contents/Resources/rack"
+    cp "$RACK_PLUGIN" "$APP/Contents/Resources/rack/"
+fi
+
+# The identities live in ~/.config/pulp/secrets/keychain.env as hashes, which
+# is what codesign wants anyway -- a name can match two certificates, a hash
+# cannot. ensure_signing_ready.sh puts them in the environment.
+: "${PULP_SIGN_IDENTITY_HASH:?set PULP_SIGN_IDENTITY_HASH (see ~/.config/pulp/secrets/keychain.env)}"
+: "${PULP_SIGN_INSTALLER_HASH:?set PULP_SIGN_INSTALLER_HASH (see ~/.config/pulp/secrets/keychain.env)}"
+
 ARGS=(--name "Forge Modular" --version "$VERSION" --out "$OUT_DIR"
+      --sign-identity "$PULP_SIGN_IDENTITY_HASH"
+      --installer-identity "$PULP_SIGN_INSTALLER_HASH"
       --app "Forge Modular" "$APP"
       --plugin au "$AU" --plugin vst3 "$VST3" --plugin clap "$CLAP")
-[[ $DO_NOTARIZE -eq 1 ]] && ARGS+=(--notarize)
+# build_combined_installer.sh notarizes by DEFAULT and takes --no-notarize to
+# opt out -- the inverse of this script's own flag. Passing --notarize through
+# made it reject the whole invocation.
+[[ $DO_NOTARIZE -eq 1 ]] || ARGS+=(--no-notarize)
 
 exec "$REPO/tools/scripts/build_combined_installer.sh" "${ARGS[@]}"
