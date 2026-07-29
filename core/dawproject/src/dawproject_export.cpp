@@ -6,7 +6,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
+#include <charconv>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <variant>
@@ -28,7 +29,10 @@ using interchange::Concept;
 /// not promise a construct the writer cannot emit.
 constexpr std::array kImplementedExports{
     Concept::TrackFlat,   Concept::ClipMusical,        Concept::ClipNote,
-    Concept::ClipMedia,   Concept::TempoSingle,        Concept::MeterSingle,
+    Concept::ClipEmpty,   Concept::ClipMedia,           Concept::TempoSingle,
+    Concept::ClipNoteVelocityQuantized,
+    Concept::TempoValueQuantized,
+    Concept::MeterSingle,
     Concept::AssetSealedHash, Concept::AssetReferencedMedia,
 };
 
@@ -37,18 +41,17 @@ constexpr bool implemented(Concept concept_value) noexcept {
            kImplementedExports.end();
 }
 
-// Every concept the table rates Full for DAWproject export must be one this
-// writer emits. A row widened to Full without writer code fails here.
+// Every concept the table rates lossless for DAWproject export must be one this
+// writer emits. A Full or RoundtripOnly row widened without writer code fails here.
 static_assert([] {
     for (std::size_t index = 0; index < interchange::kConceptCount; ++index) {
         const auto concept_value = static_cast<Concept>(index);
-        if (interchange::export_capability(interchange::Format::DawProject, concept_value).level ==
-                interchange::ExportLevel::Full &&
+        if (interchange::export_is_lossless(interchange::Format::DawProject, concept_value) &&
             !implemented(concept_value))
             return false;
     }
     return true;
-}(), "a DAWproject export row is rated Full but this writer does not emit it");
+}(), "a lossless DAWproject export row is not implemented by the writer");
 
 /// DAWproject measures arrangement time in beats; Pulp measures it in canonical
 /// ticks. One quarter note is one beat, so the conversion is exact division by
@@ -61,15 +64,16 @@ double beats(timebase::TickDuration duration) noexcept {
     return static_cast<double>(duration.value) / static_cast<double>(timebase::kTicksPerQuarter);
 }
 
-/// Fixed-precision so the output is byte-stable across platforms: a golden
-/// comparison of project.xml would otherwise drift on locale or default
-/// formatting. Trailing zeros are kept rather than trimmed for the same reason.
+/// Locale-independent, round-trip-safe formatting keeps output byte-stable
+/// without changing a binary64 tempo or normalized velocity value.
 std::string number(double value) {
     std::array<char, 64> buffer{};
-    const int written = std::snprintf(buffer.data(), buffer.size(), "%.6f", value);
-    if (written <= 0)
-        return "0.000000";
-    return std::string(buffer.data(), static_cast<std::size_t>(written));
+    const auto conversion =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                      std::chars_format::general, std::numeric_limits<double>::max_digits10);
+    if (conversion.ec != std::errc{})
+        return "0";
+    return std::string(buffer.data(), conversion.ptr);
 }
 
 std::string element_id(std::string_view prefix, timeline::ItemId id) {
@@ -129,6 +133,10 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
         file.append_attribute("path") =
             ("audio/" + (asset ? asset->name : std::string("unknown.wav"))).c_str();
     }
+}
+
+bool omit_clip(const timeline::Clip& clip) noexcept {
+    return clip.time_anchor() == timeline::ClipTimeAnchor::Absolute;
 }
 
 std::vector<std::uint8_t> to_bytes(std::string_view text) {
@@ -242,8 +250,10 @@ interchange::ExportWriter writer(const timeline::Project& project, const ExportO
             track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
             auto clips = track_lanes.append_child("Clips");
             clips.append_attribute("id") = element_id("clips", track.id()).c_str();
-            for (const timeline::Clip& clip : track.clips())
-                write_clip(clips, project, clip);
+            for (const timeline::Clip& clip : track.clips()) {
+                if (!omit_clip(clip))
+                    write_clip(clips, project, clip);
+            }
         }
 
         std::ostringstream xml;

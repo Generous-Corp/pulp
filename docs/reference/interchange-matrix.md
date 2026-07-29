@@ -63,6 +63,10 @@ is not a reason to add a model feature.
 | `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
 | `context.groove` | yes | A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling. |
 | `clip.note-modifier` | yes | Per-note playback modifiers: probability, pass condition, and ratchet. |
+| `clip.empty` | yes | A positioned clip with no note, media, registered, opaque, or nested-sequence content. |
+| `tempo.ramp` | yes | A continuous tempo curve between two tempo-map points. |
+| `clip.note-velocity-quantized` | yes | A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value. |
+| `tempo.value-quantized` | yes | A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation. |
 
 ## DAWproject
 
@@ -116,6 +120,10 @@ Format id `dawproject`. Writer registered: yes.
 | `context.chord-scale` | none | chord and scale context lanes |
 | `context.groove` | none | groove templates and swing |
 | `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
+| `clip.empty` | full |  |
+| `tempo.ramp` | none | not declared |
+| `clip.note-velocity-quantized` | none | not declared |
+| `tempo.value-quantized` | none | not declared |
 
 ### Export
 
@@ -126,7 +134,7 @@ Format id `dawproject`. Writer registered: yes.
 | `track.group` | drop | | dropped | not declared |
 | `track.video` | drop | | dropped | not declared |
 | `clip.musical` | full |  |  |  |
-| `clip.absolute` | degrade | `clip.musical` | approximated | sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick |
+| `clip.absolute` | drop |  | dropped | the writer cannot place sample-anchored clips on its beats-only lane, so the clip and its content are omitted |
 | `clip.note` | full |  |  |  |
 | `clip.media` | full |  |  |  |
 | `clip.gain` | drop |  | dropped | the writer does not emit a clip gain, so an authored clip gain is dropped and the clip exports at unity |
@@ -151,25 +159,140 @@ Format id `dawproject`. Writer registered: yes.
 | `device.placement` | drop |  | dropped | devices are identity-only in the document; DAWproject requires a device type to place one |
 | `device.payload` | drop | | dropped | not declared |
 | `effect.timewarp` | drop | | dropped | not declared |
-| `take.lane` | degrade | `clip.media` | flattened | the active comp is flattened into arrangement clips; alternate takes are dropped |
-| `take.comp` | degrade | `clip.media` | flattened | comp segment boundaries become clip boundaries; the selection is no longer editable |
+| `take.lane` | drop |  | dropped | the writer does not inspect take lanes, so alternate takes are omitted |
+| `take.comp` | drop |  | dropped | the writer does not flatten comp selections, so comp segment choices are omitted |
 | `track.freeze` | drop |  | dropped | DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped |
 | `asset.sealed-hash` | full |  |  |  |
-| `asset.embedded-media` | drop |  | dropped | the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve |
+| `asset.embedded-media` | drop |  | dropped | the writer does not emit embedded media bytes, so an embedded asset is omitted |
 | `asset.referenced-media` | full |  |  |  |
-| `sequence.multiple` | degrade | `track.flat` | flattened | only the root sequence is written; other sequences are dropped |
+| `sequence.multiple` | drop |  | dropped | only the root sequence is written; other sequences are dropped |
 | `sequence.nested` | drop | | dropped | not declared |
-| `content.registered` | roundtrip-only |  |  |  |
-| `content.opaque` | roundtrip-only |  |  |  |
+| `content.registered` | drop |  | dropped | the writer cannot preserve registered extension payloads, so the clip content is omitted |
+| `content.opaque` | drop |  | dropped | the writer cannot preserve opaque extension payloads, so the clip content is omitted |
 | `edit-rate.non-audio` | drop | | dropped | not declared |
 | `context.chord-scale` | drop | | dropped | not declared |
 | `context.groove` | drop | | dropped | not declared |
 | `clip.note-modifier` | drop |  | dropped | DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once |
+| `clip.empty` | full |  |  |  |
+| `tempo.ramp` | drop |  | dropped | the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map |
+| `clip.note-velocity-quantized` | full |  |  |  |
+| `tempo.value-quantized` | full |  |  |  |
+
+## Standard MIDI File
+
+Format id `smf`. Writer registered: no -- `run_export` refuses.
+
+### Import
+
+| Concept | Level | Detail |
+|---|---|---|
+| `unknown` | none | not declared |
+| `track.flat` | full |  |
+| `track.group` | none | not declared |
+| `track.video` | none | not declared |
+| `clip.musical` | partial | positions are exact when the file division divides the canonical tick grid; otherwise import reports bounded nearest-tick rounding |
+| `clip.absolute` | none | sample-anchored clips |
+| `clip.note` | full |  |
+| `clip.media` | none | media clips |
+| `clip.gain` | none | not declared |
+| `clip.fades` | none | not declared |
+| `clip.crossfade` | none | not declared |
+| `clip.warp` | none | not declared |
+| `clip.launch` | none | not declared |
+| `gap.explicit` | none | not declared |
+| `tempo.single` | partial | tempo periods are represented as integer microseconds and may round on import |
+| `tempo.map` | partial | tempo positions may use bounded nearest-tick rounding on non-dividing file grids, and periods are integer microseconds |
+| `meter.single` | partial | meter positions may use bounded nearest-tick rounding on non-dividing file grids |
+| `meter.map` | partial | time-signature changes are admitted only when they land on canonical bar boundaries |
+| `marker` | none | arrangement markers |
+| `timecode.origin` | none | not declared |
+| `media.provenance` | none | not declared |
+| `mixer.track-gain` | none | not declared |
+| `mixer.track-pan` | none | not declared |
+| `mixer.sends` | none | not declared |
+| `automation.device-param` | none | automation lanes |
+| `automation.track-gain` | none | not declared |
+| `automation.track-pan` | none | not declared |
+| `device.placement` | none | device chains |
+| `device.payload` | none | not declared |
+| `effect.timewarp` | none | not declared |
+| `take.lane` | none | takes and comp lanes |
+| `take.comp` | none | not declared |
+| `track.freeze` | none | not declared |
+| `asset.sealed-hash` | none | not declared |
+| `asset.embedded-media` | none | not declared |
+| `asset.referenced-media` | none | not declared |
+| `sequence.multiple` | none | not declared |
+| `sequence.nested` | none | not declared |
+| `content.registered` | none | not declared |
+| `content.opaque` | none | not declared |
+| `edit-rate.non-audio` | none | not declared |
+| `context.chord-scale` | none | not declared |
+| `context.groove` | none | not declared |
+| `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
+| `clip.empty` | none | empty positioned clips |
+| `tempo.ramp` | none | continuous tempo ramps |
+| `clip.note-velocity-quantized` | none | not declared |
+| `tempo.value-quantized` | none | not declared |
+
+### Export
+
+| Concept | Level | Becomes | Loss class | Detail |
+|---|---|---|---|---|
+| `unknown` | drop | | dropped | not declared |
+| `track.flat` | full |  |  |  |
+| `track.group` | drop | | dropped | not declared |
+| `track.video` | drop | | dropped | not declared |
+| `clip.musical` | full |  |  |  |
+| `clip.absolute` | drop |  | dropped | sample-anchored clips cannot be placed on the Standard MIDI File tick grid, so the clip and its content are omitted |
+| `clip.note` | full |  |  |  |
+| `clip.media` | drop |  | dropped | Standard MIDI Files carry MIDI events rather than audio media, so media clips are omitted |
+| `clip.gain` | drop |  | dropped | Standard MIDI Files have no per-clip gain, so authored clip gain is omitted |
+| `clip.fades` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so authored fade shapes are omitted |
+| `clip.crossfade` | drop | | dropped | not declared |
+| `clip.warp` | drop | | dropped | not declared |
+| `clip.launch` | drop |  | dropped | Standard MIDI Files describe a linear arrangement, so launcher scenes are omitted |
+| `gap.explicit` | drop | | dropped | not declared |
+| `tempo.single` | full |  |  |  |
+| `tempo.map` | full |  |  |  |
+| `meter.single` | full |  |  |  |
+| `meter.map` | full |  |  |  |
+| `marker` | drop |  | dropped | the bounded writer does not emit marker meta-events, so markers and regions are omitted |
+| `timecode.origin` | drop |  | dropped | the bounded writer does not emit a session timecode origin, so the document opens at zero |
+| `media.provenance` | drop | | dropped | not declared |
+| `mixer.track-gain` | drop |  | dropped | the bounded writer does not lower authored track gain to MIDI controller events |
+| `mixer.track-pan` | drop |  | dropped | the bounded writer does not lower authored track pan to MIDI controller events |
+| `mixer.sends` | drop | | dropped | not declared |
+| `automation.device-param` | drop |  | dropped | the bounded writer does not lower device automation to MIDI controller events |
+| `automation.track-gain` | drop |  | dropped | the bounded writer does not lower track-gain automation to MIDI controller events |
+| `automation.track-pan` | drop |  | dropped | the bounded writer does not lower track-pan automation to MIDI controller events |
+| `device.placement` | drop |  | dropped | device chains have no Standard MIDI File representation and are omitted |
+| `device.payload` | drop | | dropped | not declared |
+| `effect.timewarp` | drop | | dropped | not declared |
+| `take.lane` | drop |  | dropped | takes and comp lanes have no Standard MIDI File representation and are omitted |
+| `take.comp` | drop |  | dropped | take comp selections have no Standard MIDI File representation and are omitted |
+| `track.freeze` | drop |  | dropped | frozen audio renders have no Standard MIDI File representation and are omitted |
+| `asset.sealed-hash` | drop |  | dropped | Standard MIDI Files do not carry Pulp media identity hashes |
+| `asset.embedded-media` | drop |  | dropped | Standard MIDI Files do not embed authored media assets |
+| `asset.referenced-media` | drop |  | dropped | Standard MIDI Files do not retain external media locators |
+| `sequence.multiple` | drop |  | dropped | only the root sequence is written; other sequences are omitted |
+| `sequence.nested` | drop |  | dropped | nested sequence placements have no Standard MIDI File representation and are omitted |
+| `content.registered` | drop |  | dropped | registered extension clip content has no Standard MIDI File representation and is omitted |
+| `content.opaque` | drop |  | dropped | opaque extension clip content has no Standard MIDI File representation and is omitted |
+| `edit-rate.non-audio` | drop | | dropped | not declared |
+| `context.chord-scale` | drop |  | dropped | the bounded writer does not emit chord or scale context |
+| `context.groove` | drop |  | dropped | the bounded writer does not apply or serialize authored groove context |
+| `clip.note-modifier` | degrade | `clip.note` | degraded | Standard MIDI notes carry no probability, pass condition, or ratchet, so the notes play unconditionally once |
+| `clip.empty` | drop |  | dropped | Standard MIDI Files have no positioned empty-clip object, so the clip is omitted |
+| `tempo.ramp` | degrade | `tempo.map` | approximated | continuous tempo curves become discrete Set Tempo steps at the authored tempo points |
+| `clip.note-velocity-quantized` | degrade | `clip.note` | approximated | 16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity |
+| `tempo.value-quantized` | degrade | `tempo.map` | approximated | tempo values are rounded to the nearest representable integer microseconds per quarter note |
 
 ## Adding a format
 
-1. Write `core/interchange/capabilities/<format>.json` declaring an
-   `enumerator`, a `display_name`, a `writer` flag, and the `import` and
+1. Write `core/interchange/capabilities/<format>.json` declaring the next
+   stable contiguous `ordinal`, an `enumerator`, a `display_name`, a
+   `writer` flag, and the `import` and
    `export` rows the format supports.
 2. Regenerate: `capability_emit.py --emit concepts|tables|docs`, or let
    the drift gate print the diff.

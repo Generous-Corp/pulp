@@ -1,0 +1,210 @@
+{
+  "format": "smf",
+  "ordinal": 1,
+  "enumerator": "Smf",
+  "display_name": "Standard MIDI File",
+  "comment": [
+    "Capability declaration for Pulp's bounded Standard MIDI File subset.",
+    "",
+    "The reader and writer carry flat note tracks plus tempo and meter maps.",
+    "Every other authored timeline concept is either refused on import or",
+    "reported through the export plan before the adapter may omit it."
+  ],
+  "writer": false,
+  "import": {
+    "track.flat": { "level": "full" },
+    "clip.musical": {
+      "level": "partial",
+      "notes": "positions are exact when the file division divides the canonical tick grid; otherwise import reports bounded nearest-tick rounding"
+    },
+    "clip.note": { "level": "full" },
+    "tempo.single": {
+      "level": "partial",
+      "notes": "tempo periods are represented as integer microseconds and may round on import"
+    },
+    "tempo.map": {
+      "level": "partial",
+      "notes": "tempo positions may use bounded nearest-tick rounding on non-dividing file grids, and periods are integer microseconds"
+    },
+    "meter.single": {
+      "level": "partial",
+      "notes": "meter positions may use bounded nearest-tick rounding on non-dividing file grids"
+    },
+    "meter.map": {
+      "level": "partial",
+      "notes": "time-signature changes are admitted only when they land on canonical bar boundaries"
+    },
+    "clip.absolute": { "level": "none", "refusal": "sample-anchored clips" },
+    "clip.empty": { "level": "none", "refusal": "empty positioned clips" },
+    "clip.media": { "level": "none", "refusal": "media clips" },
+    "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
+    "tempo.ramp": { "level": "none", "refusal": "continuous tempo ramps" },
+    "marker": { "level": "none", "refusal": "arrangement markers" },
+    "automation.device-param": { "level": "none", "refusal": "automation lanes" },
+    "device.placement": { "level": "none", "refusal": "device chains" },
+    "take.lane": { "level": "none", "refusal": "takes and comp lanes" }
+  },
+  "export": {
+    "track.flat": { "level": "full" },
+    "clip.musical": { "level": "full" },
+    "clip.note": { "level": "full" },
+    "tempo.single": { "level": "full" },
+    "tempo.map": { "level": "full" },
+    "meter.single": { "level": "full" },
+    "meter.map": { "level": "full" },
+    "clip.empty": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no positioned empty-clip object, so the clip is omitted"
+    },
+    "clip.absolute": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "sample-anchored clips cannot be placed on the Standard MIDI File tick grid, so the clip and its content are omitted"
+    },
+    "clip.media": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files carry MIDI events rather than audio media, so media clips are omitted"
+    },
+    "clip.gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no per-clip gain, so authored clip gain is omitted"
+    },
+    "clip.fades": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files have no per-clip fades, so authored fade shapes are omitted"
+    },
+    "clip.launch": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files describe a linear arrangement, so launcher scenes are omitted"
+    },
+    "clip.note-modifier": {
+      "level": "degrade",
+      "to": "clip.note",
+      "loss_class": "degraded",
+      "loss": "Standard MIDI notes carry no probability, pass condition, or ratchet, so the notes play unconditionally once"
+    },
+    "clip.note-velocity-quantized": {
+      "level": "degrade",
+      "to": "clip.note",
+      "loss_class": "approximated",
+      "loss": "16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity"
+    },
+    "tempo.ramp": {
+      "level": "degrade",
+      "to": "tempo.map",
+      "loss_class": "approximated",
+      "loss": "continuous tempo curves become discrete Set Tempo steps at the authored tempo points"
+    },
+    "tempo.value-quantized": {
+      "level": "degrade",
+      "to": "tempo.map",
+      "loss_class": "approximated",
+      "loss": "tempo values are rounded to the nearest representable integer microseconds per quarter note"
+    },
+    "sequence.multiple": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "only the root sequence is written; other sequences are omitted"
+    },
+    "sequence.nested": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "nested sequence placements have no Standard MIDI File representation and are omitted"
+    },
+    "content.registered": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "registered extension clip content has no Standard MIDI File representation and is omitted"
+    },
+    "content.opaque": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "opaque extension clip content has no Standard MIDI File representation and is omitted"
+    },
+    "marker": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit marker meta-events, so markers and regions are omitted"
+    },
+    "timecode.origin": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit a session timecode origin, so the document opens at zero"
+    },
+    "mixer.track-gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not lower authored track gain to MIDI controller events"
+    },
+    "mixer.track-pan": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not lower authored track pan to MIDI controller events"
+    },
+    "device.placement": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "device chains have no Standard MIDI File representation and are omitted"
+    },
+    "automation.device-param": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not lower device automation to MIDI controller events"
+    },
+    "automation.track-gain": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not lower track-gain automation to MIDI controller events"
+    },
+    "automation.track-pan": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not lower track-pan automation to MIDI controller events"
+    },
+    "take.lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "takes and comp lanes have no Standard MIDI File representation and are omitted"
+    },
+    "take.comp": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "take comp selections have no Standard MIDI File representation and are omitted"
+    },
+    "track.freeze": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "frozen audio renders have no Standard MIDI File representation and are omitted"
+    },
+    "asset.sealed-hash": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files do not carry Pulp media identity hashes"
+    },
+    "asset.embedded-media": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files do not embed authored media assets"
+    },
+    "asset.referenced-media": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files do not retain external media locators"
+    },
+    "context.chord-scale": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not emit chord or scale context"
+    },
+    "context.groove": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the bounded writer does not apply or serialize authored groove context"
+    }
+  }
+}

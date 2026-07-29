@@ -3,11 +3,13 @@
 #include "smf_error.hpp"
 #include "smf_tick_scale.hpp"
 
+#include <pulp/interchange/capability.hpp>
 #include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timebase/tick.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,6 +29,29 @@ using runtime::Err;
 using runtime::Ok;
 
 using ExportResult = runtime::Result<SmfExport, SmfError>;
+
+using interchange::Concept;
+
+constexpr std::array kImplementedExports{
+    Concept::TrackFlat,   Concept::ClipMusical, Concept::ClipNote,
+    Concept::TempoSingle, Concept::TempoMap,    Concept::MeterSingle,
+    Concept::MeterMap,
+};
+
+constexpr bool implemented(Concept concept_value) noexcept {
+    return std::find(kImplementedExports.begin(), kImplementedExports.end(), concept_value) !=
+           kImplementedExports.end();
+}
+
+static_assert([] {
+    for (std::size_t index = 0; index < interchange::kConceptCount; ++index) {
+        const auto concept_value = static_cast<Concept>(index);
+        if (interchange::export_is_lossless(interchange::Format::Smf, concept_value) &&
+            !implemented(concept_value))
+            return false;
+    }
+    return true;
+}(), "a lossless SMF export row is not implemented by the writer");
 
 constexpr std::uint32_t kMaximumVariableLength = 0x0fff'ffffu;
 constexpr std::uint8_t kNoteOffReleaseVelocity = 0x40u;

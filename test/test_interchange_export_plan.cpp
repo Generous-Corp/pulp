@@ -70,16 +70,15 @@ TEST_CASE("a plan states what an export carries and what it costs", "[interchang
         REQUIRE(has(plan.representable(), Concept::TrackFlat));
     }
 
-    SECTION("a concept the format degrades is reported with what it becomes") {
+    SECTION("a concept the format drops is reported with its owner") {
         const ExportPlan plan = plan_export(lossy_project(), Format::DawProject);
         REQUIRE_FALSE(plan.is_lossless());
 
         const LossEntry* entry = plan.losses().find(Concept::ClipAbsolute);
         REQUIRE(entry != nullptr);
-        REQUIRE(entry->level == ExportLevel::Degrade);
-        REQUIRE(entry->loss_class == LossClass::Approximated);
-        REQUIRE(entry->degraded_to.has_value());
-        REQUIRE(*entry->degraded_to == Concept::ClipMusical);
+        REQUIRE(entry->level == ExportLevel::Drop);
+        REQUIRE(entry->loss_class == LossClass::Dropped);
+        REQUIRE_FALSE(entry->degraded_to.has_value());
         REQUIRE(entry->count == 1);
         REQUIRE(entry->owners.size() == 1);
         REQUIRE(entry->owners[0] == ItemId{9});
@@ -178,5 +177,5 @@ TEST_CASE("a loss manifest names its loss classes durably", "[interchange]") {
     const ExportPlan plan = plan_export(lossy_project(), Format::DawProject);
     const LossEntry* entry = plan.losses().find(Concept::ClipAbsolute);
     REQUIRE(entry != nullptr);
-    REQUIRE(loss_class_id(entry->loss_class) == "approximated");
+    REQUIRE(loss_class_id(entry->loss_class) == "dropped");
 }

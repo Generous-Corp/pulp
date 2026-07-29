@@ -47,7 +47,8 @@ constexpr interchange::Format kFormat = interchange::Format::DawProject;
 // quietly dropped -- the failure mode a capability table most has to avoid.
 constexpr interchange::Concept kImplementedImports[] = {
     interchange::Concept::TrackFlat,       interchange::Concept::ClipMusical,
-    interchange::Concept::ClipNote,        interchange::Concept::ClipMedia,
+    interchange::Concept::ClipNote,        interchange::Concept::ClipEmpty,
+    interchange::Concept::ClipMedia,
     interchange::Concept::TempoSingle,     interchange::Concept::MeterSingle,
     interchange::Concept::AssetSealedHash, interchange::Concept::AssetReferencedMedia,
 };
@@ -558,6 +559,10 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
     if (content_children > 1)
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    "<Clip> with multiple content timelines is not supported");
+    if (content_children == 0)
+        if (auto e = admit(interchange::Concept::ClipEmpty,
+                           "an empty positioned <Clip> is unsupported"))
+            return e;
 
     if (auto e = admit(interchange::Concept::ClipMusical,
                        "<Clip> beat-anchored placement is unsupported"))
