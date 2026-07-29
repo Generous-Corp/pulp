@@ -48,6 +48,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::signal {
@@ -77,6 +78,7 @@ enum class PitchTimePrepareStatus {
     invalid_max_block,
     invalid_max_time_ratio,
     invalid_max_pitch_semitones,
+    unrepresentable_capacity,
 };
 
 struct RealtimePitchTimeConfig {
@@ -130,45 +132,97 @@ public:
     /// allocation-free for blocks no larger than config.max_block and the
     /// prepared channel count.
     PitchTimePrepareStatus prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
-        if (!(sample_rate > 0.0)) return PitchTimePrepareStatus::invalid_sample_rate;
+        if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
+            return PitchTimePrepareStatus::invalid_sample_rate;
         if (config.channels < 1 || config.channels > kMaxChannels)
             return PitchTimePrepareStatus::invalid_channel_count;
         if (config.max_block <= 0) return PitchTimePrepareStatus::invalid_max_block;
         if (config.mode == PitchTimeMode::time_stretch
             && (!std::isfinite(config.max_time_ratio) || config.max_time_ratio < 1.0f))
             return PitchTimePrepareStatus::invalid_max_time_ratio;
+        const double max_pitch_ratio =
+            std::exp2(static_cast<double>(config.max_pitch_semitones) / 12.0);
         if (!std::isfinite(config.max_pitch_semitones) || config.max_pitch_semitones < 0.0f
-            || !std::isfinite(std::exp2(config.max_pitch_semitones / 12.0f)))
+            || !std::isfinite(max_pitch_ratio))
             return PitchTimePrepareStatus::invalid_max_pitch_semitones;
-        config_ = config;
-        sample_rate_ = sample_rate;
 
         const bool quality = config.quality == PitchTimeQuality::quality;
-        fft_size_ = quality ? 4096 : 1024;
-        analysis_hop_ = quality ? 512 : 256;
+        int prepared_fft_size = quality ? 4096 : 1024;
+        int prepared_analysis_hop = quality ? 512 : 256;
         // Offline geometry override (material-adaptive window/overlap). Only
         // honored when both are set and valid; the realtime path leaves them 0.
         if (config.fft_size >= 256
             && (config.fft_size & (config.fft_size - 1)) == 0
             && config.analysis_hop > 0
             && (config.fft_size % config.analysis_hop) == 0) {
-            fft_size_ = config.fft_size;
-            analysis_hop_ = config.analysis_hop;
+            prepared_fft_size = config.fft_size;
+            prepared_analysis_hop = config.analysis_hop;
         }
 
-        const float max_ratio = std::exp2(config.max_pitch_semitones / 12.0f);
-        const float max_stretch =
+        const double max_stretch =
             config.mode == PitchTimeMode::time_stretch
-                ? std::max(config.max_time_ratio, 1.0f)
-                : max_ratio;
+                ? static_cast<double>(config.max_time_ratio)
+                : max_pitch_ratio;
+        const double synthesis_hop =
+            std::ceil(max_stretch * static_cast<double>(prepared_analysis_hop)) + 1.0;
+        if (!std::isfinite(synthesis_hop)
+            || synthesis_hop > static_cast<double>(std::numeric_limits<int>::max()))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        const int prepared_max_synthesis_hop = static_cast<int>(synthesis_hop);
+        const int prepared_engine_max_block = std::max(config.max_block, prepared_analysis_hop);
+
+        const std::int64_t span_base = static_cast<std::int64_t>(prepared_fft_size)
+                                     + 2 * static_cast<std::int64_t>(prepared_analysis_hop)
+                                     + static_cast<std::int64_t>(prepared_engine_max_block);
+        const long double span = static_cast<long double>(span_base)
+                                     * static_cast<long double>(std::max(max_stretch, 1.0))
+                                 + static_cast<long double>(prepared_fft_size) + 64.0L;
+        constexpr std::uint64_t kMaximumPowerOfTwoRing = std::uint64_t{1} << 30u;
+        if (!std::isfinite(span) || span > static_cast<long double>(kMaximumPowerOfTwoRing))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        std::uint64_t prepared_ring_size = 1;
+        const auto required_ring_size = static_cast<std::uint64_t>(std::ceil(span));
+        while (prepared_ring_size < required_ring_size) prepared_ring_size <<= 1u;
+
+        const std::int64_t prepared_engine_worst_frames =
+            static_cast<std::int64_t>(prepared_engine_max_block) / prepared_analysis_hop + 2;
+        const std::int64_t prepared_engine_ring_span =
+            static_cast<std::int64_t>(prepared_fft_size) + prepared_engine_max_block
+            + prepared_engine_worst_frames * prepared_max_synthesis_hop;
+        if (prepared_engine_ring_span
+            > static_cast<std::int64_t>(kMaximumPowerOfTwoRing))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+
+        const auto size_product_fits = [](std::size_t lhs, std::size_t rhs) {
+            return lhs == 0 || rhs <= std::numeric_limits<std::size_t>::max() / lhs;
+        };
+        const auto channels = static_cast<std::size_t>(config.channels);
+        const auto ring_samples = static_cast<std::size_t>(prepared_ring_size);
+        const auto synthesis_hop_samples =
+            static_cast<std::size_t>(prepared_max_synthesis_hop);
+        const auto engine_block_samples = static_cast<std::size_t>(prepared_engine_max_block);
+        if (!size_product_fits(channels, ring_samples)
+            || !size_product_fits(channels, synthesis_hop_samples))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        const auto prepared_stretch_ring_samples = channels * ring_samples;
+        const auto prepared_channel_hop_samples = channels * synthesis_hop_samples;
+        if (!size_product_fits(prepared_channel_hop_samples, 4u)
+            || !size_product_fits(channels, engine_block_samples))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        const auto prepared_drain_samples = prepared_channel_hop_samples * 4u;
+        const auto prepared_finalize_zero_samples = channels * engine_block_samples;
+
+        config_ = config;
+        sample_rate_ = sample_rate;
+        fft_size_ = prepared_fft_size;
+        analysis_hop_ = prepared_analysis_hop;
 
         SpectralFrameEngineConfig engine_config;
         engine_config.fft_size = fft_size_;
         engine_config.analysis_hop = analysis_hop_;
         engine_config.channels = config.channels;
-        engine_config.max_block = std::max(config.max_block, analysis_hop_);
-        engine_config.max_synthesis_hop =
-            static_cast<int>(std::ceil(max_stretch * analysis_hop_)) + 1;
+        engine_config.max_block = prepared_engine_max_block;
+        engine_config.max_synthesis_hop = prepared_max_synthesis_hop;
         engine_.prepare(engine_config);
 
         coordinator_.prepare(fft_size_, config.channels);
@@ -199,21 +253,13 @@ public:
 
         // Stretched-stream ring: must span the read-to-write gap
         // (latency * ratio) plus one engine drain burst and one block.
-        const float span = static_cast<float>(fft_size_ + 2 * analysis_hop_
-                                              + engine_config.max_block)
-                           * std::max(max_stretch, 1.0f)
-                         + static_cast<float>(fft_size_) + 64.0f;
-        ring_size_ = 1;
-        while (ring_size_ < static_cast<int>(span)) ring_size_ <<= 1;
+        ring_size_ = static_cast<int>(prepared_ring_size);
         ring_mask_ = ring_size_ - 1;
-        stretch_ring_.assign(static_cast<size_t>(config.channels) * ring_size_, SampleType{0});
+        stretch_ring_.assign(prepared_stretch_ring_samples, SampleType{0});
 
-        drain_buf_.assign(static_cast<size_t>(config.channels)
-                          * engine_config.max_synthesis_hop * 4, SampleType{0});
+        drain_buf_.assign(prepared_drain_samples, SampleType{0});
         drain_ptrs_.resize(static_cast<size_t>(config.channels));
-        finalize_zero_buf_.assign(static_cast<size_t>(config.channels)
-                                      * static_cast<size_t>(engine_config.max_block),
-                                  SampleType{0});
+        finalize_zero_buf_.assign(prepared_finalize_zero_samples, SampleType{0});
         finalize_zero_ptrs_.resize(static_cast<size_t>(config.channels));
         for (int ch = 0; ch < config.channels; ++ch)
             finalize_zero_ptrs_[static_cast<size_t>(ch)] =

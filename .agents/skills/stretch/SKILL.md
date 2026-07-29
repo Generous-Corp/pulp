@@ -28,6 +28,9 @@ Non-positive sample rates, channel counts outside the prepared ceiling, and
 non-positive `max_block` capacities are rejected before processor state changes.
 Time-stretch sizing also requires a finite `max_time_ratio >= 1`; pitch sizing
 requires a finite, non-negative semitone bound whose derived ratio is finite.
+Preparation rejects any otherwise-valid bound whose synthesis hop, power-of-two
+ring, or backing-buffer product is not representable; never rely on a later
+float-to-int conversion or allocation failure to police capacity.
 `feed()` is all-or-nothing: on
 `backpressure`, drain `available_stretched()` with `read_stretched()` and retry
 the identical input block. Never advance a decoder on a rejected feed.
