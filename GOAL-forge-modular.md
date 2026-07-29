@@ -197,3 +197,24 @@ exposing no parameters would be expected to skip it. So a parameter probably
 does exist and flush genuinely does not apply it. Confirm by reading
 `params_count` directly — a short host that dlopens the bundle and calls it is
 worth more here than another pass of reading the adapter.
+
+## CLAP flush — diagnosed
+
+Settled by `tools/clap_param_probe.c`, which dlopens the built bundle and calls
+the params extension directly. Reading the adapter had ruled out three theories
+without confirming one; one run of the probe answered it.
+
+- The plugin exposes **one** parameter — the synthesized Bypass, id 1883404656,
+  range 0..1, flags `0x31` (`IS_STEPPED | IS_BYPASS | IS_AUTOMATABLE`). So the
+  zero-parameter theory is dead too.
+- `flush()` **does** apply values: request 1.0, read back 1.0.
+- But request **0.37** and it reads back **0.37**. A parameter flagged
+  `CLAP_PARAM_IS_STEPPED` over 0..1 has two legal values, 0 and 1. Accepting
+  and returning 0.37 breaks the stepped contract, and is the likeliest reason
+  the validator's flush-versus-process comparison disagrees.
+
+So the fix is quantization of stepped parameters on the way into the store, not
+anything to do with flush. That is shared-adapter surface: it will change
+`PulpGain` and every other Pulp CLAP, so it needs its own test and a
+re-validation of both plugins. It also wants checking against the VST3 and AU
+adapters, which may or may not quantize the same way.
