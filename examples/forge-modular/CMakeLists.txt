@@ -65,10 +65,9 @@ option(FORGE_MODULAR_BUILD_APP "Build the Forge Modular app and plugins" ON)
 if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
     set(_fm_app "${_fm_dir}/app")
 
-    pulp_add_plugin(forge-modular-app
+    pulp_add_plugin(ForgeModularApp
         FORMATS           Standalone AU VST3 CLAP
         SOURCES           "${_fm_app}/src/shell.cpp"
-                          "${_fm_app}/src/main.cpp"
         PLUGIN_NAME       "Forge Modular"
         BUNDLE_ID         "com.generous.forgemodular"
         MANUFACTURER      "Generous"
@@ -79,15 +78,34 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
         DESIGN_WIDTH      1280
         DESIGN_HEIGHT     800)
 
-    if(TARGET forge-modular-app_Core)
-        target_include_directories(forge-modular-app_Core PUBLIC
+    # main() belongs to the standalone alone. In the shared SOURCES it is
+    # compiled into every format, and the plugin targets do not link the
+    # standalone library -- so AU, VST3 and CLAP all failed on StandaloneApp
+    # symbols they had no business referencing.
+    if(TARGET ForgeModularApp_Standalone)
+        target_sources(ForgeModularApp_Standalone PRIVATE "${_fm_app}/src/main.cpp")
+    endif()
+
+    # Each format exports a different entry symbol and none can be shared, so
+    # one file is compiled per target with the format selected by a define.
+    foreach(_fm_fmt CLAP VST3 AU)
+        if(TARGET ForgeModularApp_${_fm_fmt})
+            target_sources(ForgeModularApp_${_fm_fmt} PRIVATE
+                "${_fm_app}/src/entries.cpp")
+            target_compile_definitions(ForgeModularApp_${_fm_fmt} PRIVATE
+                PULP_FORGE_MODULAR_${_fm_fmt}=1)
+        endif()
+    endforeach()
+
+    if(TARGET ForgeModularApp_Core)
+        target_include_directories(ForgeModularApp_Core PUBLIC
             "${_fm_app}/include" "${_fm_app}")
-        target_link_libraries(forge-modular-app_Core PUBLIC
+        target_link_libraries(ForgeModularApp_Core PUBLIC
             pulp::host pulp::signal
             pulp::view pulp::view-script pulp::canvas pulp::render)
         # The UI is read from disk so it can be edited and reloaded without a
         # rebuild; the packaged build embeds it and turns hot reload off.
-        target_compile_definitions(forge-modular-app_Core PUBLIC
+        target_compile_definitions(ForgeModularApp_Core PUBLIC
             FORGE_MODULAR_UI_DIR="${_fm_app}/ui"
             FORGE_MODULAR_UI_HOT_RELOAD=$<IF:$<CONFIG:Debug>,true,false>)
     endif()
@@ -95,8 +113,8 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
     # A bundle that only runs on the machine that built it is worse than one
     # that fails to build, because the failure surfaces at someone else's desk.
     if(COMMAND pulp_make_bundle_relocatable)
-        foreach(_fm_t forge-modular-app_Standalone forge-modular-app_AU
-                      forge-modular-app_VST3 forge-modular-app_CLAP)
+        foreach(_fm_t ForgeModularApp_Standalone ForgeModularApp_AU
+                      ForgeModularApp_VST3 ForgeModularApp_CLAP)
             if(TARGET ${_fm_t})
                 pulp_make_bundle_relocatable(${_fm_t})
             endif()
