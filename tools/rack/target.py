@@ -27,6 +27,12 @@ import os
 import subprocess
 import sys
 
+RACK_USER_DIR = os.path.expanduser("~/Library/Application Support/Rack2")
+PLUGIN_DIRS_RACK = [os.path.join(RACK_USER_DIR, d)
+                    for d in (os.listdir(RACK_USER_DIR)
+                              if os.path.isdir(RACK_USER_DIR) else [])
+                    if d.startswith("plugins-")]
+
 APPS = ["/Applications/VCV Rack 2 Free.app",
         "/Applications/VCV Rack 2 Pro.app"]
 
@@ -92,6 +98,48 @@ def detect(in_plugin: bool = False, host: str | None = None) -> dict:
     }
 
 
+def holders(plugin_dirs=None) -> list[dict]:
+    """Which processes currently have our installed plugin open.
+
+    Rack maps a plugin's library when it loads it and keeps that mapping.
+    Replacing the file underneath a running Rack is safe -- the old inode
+    survives -- but the running Rack keeps showing the OLD module, so a
+    regeneration appears to do nothing at all. That is the actual hazard, and
+    it is invisible without asking.
+
+    Answers for a Rack Pro instance inside a DAW as readily as a standalone
+    one, because both are processes holding the file.
+    """
+    import glob
+    if plugin_dirs is None:
+        plugin_dirs = PLUGIN_DIRS_RACK
+    files = []
+    for d in plugin_dirs:
+        files += glob.glob(os.path.join(d, "*.vcvplugin"))
+        files += glob.glob(os.path.join(d, "*", "plugin.dylib"))
+    if not files:
+        return []
+    try:
+        out = subprocess.run(["lsof", "-F", "cn", *files], capture_output=True,
+                             text=True, timeout=30).stdout
+    except Exception:
+        return []
+    found, cmd = [], None
+    for line in out.splitlines():
+        if line.startswith("c"):
+            cmd = line[1:]
+        elif line.startswith("n") and cmd:
+            found.append({"process": cmd, "file": line[1:]})
+    # One entry per process; a Rack maps several of our files at once.
+    seen, uniq = set(), []
+    for f in found:
+        if f["process"] in seen:
+            continue
+        seen.add(f["process"])
+        uniq.append(f)
+    return uniq
+
+
 def choose(env: dict) -> dict:
     """Pick a target, and say plainly what can and cannot be done with it.
 
@@ -148,6 +196,7 @@ def main(argv):
     if "--host" in argv:
         host = argv[argv.index("--host") + 1]
     env = detect(in_plugin, host)
+    env["holders"] = holders()
     pick = choose(env)
     if "--json" in argv:
         print(json.dumps({"environment": env, "target": pick}, indent=2))
@@ -158,6 +207,9 @@ def main(argv):
     print(f"  standalone running   : {env['standalone_running']}")
     print(f"  plugin formats       : {sorted(env['plugin_formats']) or 'none'}")
     print(f"  DAWs open            : {env['daws_open'] or 'none'}")
+    h = env.get("holders") or []
+    print(f"  has our plugin open  : "
+          f"{', '.join(x['process'] for x in h) if h else 'nothing'}")
     print(f"  we are               : {'a plugin in ' + (host or 'a DAW') if in_plugin else 'the standalone app'}")
     print()
     print("target")
