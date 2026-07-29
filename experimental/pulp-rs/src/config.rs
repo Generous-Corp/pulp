@@ -28,6 +28,7 @@
 //! [import_design]
 //!   default_mode           = live | baked                       (default live)
 //!   default_emit           = js | ir-json | cpp                 (default js)
+//!   browser                = auto | managed | system            (default auto)
 //!
 //! [claude]
 //!   send_user_file         = on | off                           (default on)
@@ -120,6 +121,7 @@ pub const KNOWN_KEYS: &[(&str, &str)] = &[
     ("update.bump_projects", "prompt"),
     ("import_design.default_mode", "live"),
     ("import_design.default_emit", "js"),
+    ("import_design.browser", "auto"),
     ("claude.send_user_file", "on"),
 ];
 
@@ -214,6 +216,15 @@ pub fn validate_value(section: &str, key: &str, value: &str) -> Result<()> {
             } else {
                 Err(bad(
                     "import_design.default_emit must be one of: js, ir-json, cpp",
+                ))
+            }
+        }
+        ("import_design", "browser") => {
+            if matches!(value, "auto" | "managed" | "system") {
+                Ok(())
+            } else {
+                Err(bad(
+                    "import_design.browser must be one of: auto, managed, system",
                 ))
             }
         }

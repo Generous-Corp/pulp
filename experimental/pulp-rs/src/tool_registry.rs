@@ -120,6 +120,9 @@ pub struct ToolDescriptor {
     /// `true` when Pulp is responsible for the tool's lifecycle.
     #[serde(default)]
     pub managed_by_pulp: bool,
+    /// Exclude from `pulp tool install --all`; requires a named opt-in.
+    #[serde(default)]
+    pub explicit_install_only: bool,
     /// `true` when the tool may be bundled into distributions.
     #[serde(default)]
     pub bundleable: bool,
@@ -349,6 +352,24 @@ pub fn locate_tool(tool: &ToolDescriptor) -> LocateResult {
                 source: "pulp-managed".to_owned(),
             };
         }
+    }
+    if tool.id == "chrome-for-testing" {
+        if let Some(found) =
+            crate::cmd::chrome_for_testing::current_browser_if_present()
+        {
+            return LocateResult {
+                found: true,
+                path: found,
+                source: "pulp-managed".to_owned(),
+            };
+        }
+        // Never fall through to the registry's recursive binary search:
+        // `current.json` is the only authority for the managed browser.
+        return LocateResult {
+            found: false,
+            path: PathBuf::new(),
+            source: "not-found".to_owned(),
+        };
     }
 
     // Pulp-managed binary.

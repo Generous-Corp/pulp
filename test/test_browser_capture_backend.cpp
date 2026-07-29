@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -51,6 +52,36 @@ public:
 
 private:
     fs::path root_;
+};
+
+class ScopedEnv {
+public:
+    ScopedEnv(const char* name, std::string value) : name_(name) {
+        if (const char* old = std::getenv(name); old) old_ = old;
+#ifdef _WIN32
+        _putenv_s(name, value.c_str());
+#else
+        setenv(name, value.c_str(), 1);
+#endif
+    }
+
+    ~ScopedEnv() {
+#ifdef _WIN32
+        _putenv_s(name_.c_str(), old_ ? old_->c_str() : "");
+#else
+        if (old_)
+            setenv(name_.c_str(), old_->c_str(), 1);
+        else
+            unsetenv(name_.c_str());
+#endif
+    }
+
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+private:
+    std::string name_;
+    std::optional<std::string> old_;
 };
 
 std::string read_file(const fs::path& path) {
@@ -115,14 +146,22 @@ capture::CaptureRequest fixture_request(
 TEST_CASE("browser discovery honors explicit, environment, managed, then system",
           "[import-design][browser-capture]") {
     TempTree tree("discovery");
+    const std::string platform = "test-platform";
+    const fs::path managed_relative =
+        fs::path("1.2.3") / platform / "payload" / managed_browser_name();
     const auto managed =
-        tree.write((fs::path("managed/version/bin") / managed_browser_name())
-                       .generic_string(),
+        tree.write((fs::path("managed") / managed_relative).generic_string(),
                    "managed");
+    tree.write(
+        "managed/current.json",
+        "{\"schema\":1,\"version\":\"1.2.3\",\"platform\":\"" +
+            platform + "\",\"executable\":\"" +
+            managed_relative.generic_string() + "\"}");
     const auto system = tree.write("system-browser", "system");
 
     capture::BrowserDiscoveryOptions options;
     options.environment_override = "";
+    options.mode_override = "";
     options.managed_root = tree.root() / "managed";
     options.system_candidates = {system};
     options.include_default_system_candidates = false;
@@ -154,6 +193,122 @@ TEST_CASE("browser discovery honors explicit, environment, managed, then system"
     }
 }
 
+TEST_CASE("browser modes constrain managed and system discovery",
+          "[import-design][browser-capture]") {
+    TempTree tree("modes");
+    const fs::path managed_relative =
+        fs::path("1.2.3/test-platform/payload") /
+        managed_browser_name();
+    const auto managed = tree.write(
+        (fs::path("managed") / managed_relative).generic_string(),
+        "managed");
+    tree.write(
+        "managed/current.json",
+        "{\"schema\":1,\"version\":\"1.2.3\","
+        "\"platform\":\"test-platform\",\"executable\":\"" +
+            managed_relative.generic_string() + "\"}");
+    const auto system = tree.write("system-browser", "system");
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.managed_root = tree.root() / "managed";
+    options.system_candidates = {system};
+    options.include_default_system_candidates = false;
+
+    options.mode_override = "managed";
+    auto candidates = capture::collect_browser_candidates(options);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates[0].executable == managed);
+
+    options.mode_override = "system";
+    candidates = capture::collect_browser_candidates(options);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates[0].executable == system);
+
+    options.mode_override = "invalid";
+    const auto mode = capture::resolve_browser_mode(options);
+    CHECK_FALSE(mode.mode.has_value());
+    CHECK(mode.error.find("expected auto, managed, or system") !=
+          std::string::npos);
+}
+
+TEST_CASE("browser mode precedence is caller then environment then config",
+          "[import-design][browser-capture]") {
+    TempTree tree("mode-precedence");
+    tree.write("config.toml", "[import_design]\nbrowser = \"system\"\n");
+    ScopedEnv home("PULP_HOME", tree.root().string());
+
+    capture::BrowserDiscoveryOptions options;
+    {
+        ScopedEnv environment_mode("PULP_DESIGN_BROWSER_MODE", "managed");
+        auto selection = capture::resolve_browser_mode(options);
+        REQUIRE(selection.mode.has_value());
+        CHECK(*selection.mode == capture::BrowserMode::managed);
+        CHECK(selection.source == "env:PULP_DESIGN_BROWSER_MODE");
+
+        options.mode_override = "auto";
+        selection = capture::resolve_browser_mode(options);
+        REQUIRE(selection.mode.has_value());
+        CHECK(*selection.mode == capture::BrowserMode::auto_select);
+        CHECK(selection.source == "caller");
+    }
+
+    options.mode_override.reset();
+    const auto selection = capture::resolve_browser_mode(options);
+    REQUIRE(selection.mode.has_value());
+    CHECK(*selection.mode == capture::BrowserMode::system);
+    CHECK(selection.source == "config:import_design.browser");
+}
+
+TEST_CASE("managed discovery trusts only exact current json",
+          "[import-design][browser-capture]") {
+    TempTree tree("current-authority");
+    const auto stray = tree.write(
+        (fs::path("managed/9.9.9/host/payload") /
+         managed_browser_name()).generic_string(),
+        "stray");
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "managed";
+    options.managed_root = tree.root() / "managed";
+    options.include_default_system_candidates = false;
+    CHECK(capture::collect_browser_candidates(options).empty());
+
+    tree.write(
+        "managed/current.json",
+        "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+        "\"executable\":\"9.9.9/host/payload/" +
+            managed_browser_name().generic_string() + "\"}");
+    const auto candidates = capture::collect_browser_candidates(options);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates[0].executable == stray);
+
+    SECTION("unknown current schema is rejected") {
+        tree.write(
+            "managed/current.json",
+            "{\"schema\":2,\"version\":\"9.9.9\",\"platform\":\"host\","
+            "\"executable\":\"9.9.9/host/payload/" +
+                managed_browser_name().generic_string() + "\"}");
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
+
+#ifndef _WIN32
+    SECTION("current executable symlink cannot escape managed root") {
+        const auto outside = tree.write("outside-browser", "outside");
+        const auto link = options.managed_root.value() /
+            "9.9.9/host/payload/escaped-browser";
+        std::error_code ec;
+        fs::create_symlink(outside, link, ec);
+        REQUIRE_FALSE(ec);
+        tree.write(
+            "managed/current.json",
+            "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+            "\"executable\":\"9.9.9/host/payload/escaped-browser\"}");
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
+#endif
+}
+
 TEST_CASE("browser capture rejects unsafe viewport allocations before launch",
           "[import-design][browser-capture]") {
     TempTree tree("unsafe-viewport");
@@ -176,14 +331,21 @@ TEST_CASE("browser capture rejects unsafe viewport allocations before launch",
 TEST_CASE("browser discovery probes in order and never falls through an override",
           "[import-design][browser-capture]") {
     TempTree tree("probe-order");
+    const fs::path managed_relative =
+        fs::path("1.2.3/test-platform/bin") / managed_browser_name();
     const auto managed =
-        tree.write((fs::path("managed/bin") / managed_browser_name())
-                       .generic_string(),
+        tree.write((fs::path("managed") / managed_relative).generic_string(),
                    "managed");
+    tree.write(
+        "managed/current.json",
+        "{\"schema\":1,\"version\":\"1.2.3\","
+        "\"platform\":\"test-platform\",\"executable\":\"" +
+            managed_relative.generic_string() + "\"}");
     const auto system = tree.write("system-browser", "system");
 
     capture::BrowserDiscoveryOptions options;
     options.environment_override = "";
+    options.mode_override = "";
     options.managed_root = tree.root() / "managed";
     options.system_candidates = {system};
     options.include_default_system_candidates = false;
@@ -263,6 +425,10 @@ TEST_CASE("missing browser guidance is actionable and explains its narrow use",
     });
 
     const auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("pulp tool install chrome-for-testing")
+          != std::string::npos);
+    CHECK(human.find("install system Google Chrome")
+          != std::string::npos);
     CHECK(human.find("https://www.google.com/chrome/") != std::string::npos);
     CHECK(human.find("temporary isolated profile") != std::string::npos);
     CHECK(human.find("not embedded") != std::string::npos);
@@ -271,9 +437,48 @@ TEST_CASE("missing browser guidance is actionable and explains its narrow use",
     const auto json = capture::browser_unavailable_json(discovery);
     CHECK(json.find("\"code\":\"browser-unavailable\"")
           != std::string::npos);
+    CHECK(json.find(
+              "\"remediation\":\"install-managed-or-system-browser\"")
+          != std::string::npos);
+    CHECK(json.find(
+              "\"managed_install_command\":\"pulp tool install "
+              "chrome-for-testing\"")
+          != std::string::npos);
+    CHECK(json.find("\"install_url\":\"https://www.google.com/chrome/\"")
+          != std::string::npos);
     CHECK(json.find("\"offline_flag\":\"--offline\"")
           != std::string::npos);
     CHECK(json.find("\"origin\":\"explicit\"") != std::string::npos);
+}
+
+TEST_CASE("explicit managed-browser guidance remains actionable",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryResult discovery;
+    discovery.diagnostic = {
+        "managed-browser-unavailable",
+        "Managed Chrome for Testing is selected but is not installed.",
+        "browser-discovery",
+    };
+    const auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("pulp tool install chrome-for-testing")
+          != std::string::npos);
+    CHECK(human.find("pulp config set import_design.browser system")
+          != std::string::npos);
+    CHECK(human.find("never downloads a browser during import")
+          != std::string::npos);
+
+    const auto json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find(
+              "\"remediation\":\"pulp-tool-install-chrome-for-testing\"")
+          != std::string::npos);
+    CHECK(json.find(
+              "\"managed_install_command\":\"pulp tool install "
+              "chrome-for-testing\"")
+          != std::string::npos);
+    CHECK(json.find(
+              "\"system_mode_command\":\"pulp config set "
+              "import_design.browser system\"")
+          != std::string::npos);
 }
 
 TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",

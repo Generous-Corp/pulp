@@ -5,6 +5,7 @@
 # along.
 add_library(pulp-browser-capture-backend STATIC
     browser_capture_backend.cpp
+    browser_discovery.cpp
     browser_capture_diagnostics.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)

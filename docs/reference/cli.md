@@ -1486,7 +1486,7 @@ exit codes, diagnostics, and current limitations).
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
-| `--browser <path>` | Use this Chromium/Chrome executable for browser-solved HTML import instead of system discovery. |
+| `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides `PULP_DESIGN_BROWSER`, browser mode, managed Chrome for Testing, and system discovery. |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
 | `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
@@ -1521,6 +1521,13 @@ Set `import_design.default_emit cpp` for baked C++ by default. If only
 session overrides, use `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
 `PULP_IMPORT_DESIGN_DEFAULT_EMIT`; direct CLI flags override the matching
 config and environment value. `pulp status` shows the effective defaults.
+
+Browser selection is `--browser` > `PULP_DESIGN_BROWSER` >
+`PULP_DESIGN_BROWSER_MODE` / `import_design.browser` > an explicitly installed
+managed Chrome for Testing > system Chrome/Chromium. The default is `auto`;
+imports never download a browser. Use `pulp tool install
+chrome-for-testing`, `pulp tool doctor chrome-for-testing --run`, and `pulp
+tool uninstall chrome-for-testing` for the opt-in managed lifecycle.
 
 With `--from jsx --mode live --emit js`, the CLI writes the precompiled JSX
 runtime bundle verbatim for runtime import. That pass-through path rejects
@@ -2134,6 +2141,9 @@ Supported import-design keys:
   `--emit`. `PULP_IMPORT_DESIGN_DEFAULT_EMIT` overrides this value for one
   environment/session. If the default mode is `baked` and this key is unset,
   Pulp implies `ir-json`.
+- `import_design.browser` — `auto | managed | system` (default `auto`).
+  `PULP_DESIGN_BROWSER_MODE` overrides the config value; `PULP_DESIGN_BROWSER`
+  and `--browser` are higher-precedence explicit executable paths.
 
 Supported Claude Code plugin keys:
 

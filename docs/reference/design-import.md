@@ -39,7 +39,7 @@ fingerprints retain `claude` provenance; ordinary pages use the distinct
 | `--mode {live\|baked}` | Runtime model. `live` is the built-in default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` built-in, or `import_design.default_mode` |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
-| `--browser <path>` | Chromium/Chrome executable for browser-solved HTML import. | discovered system browser |
+| `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides path env, mode, managed, and system selection. | — |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. | off |
 | `--allow-browser-network` | Permit only the source document's declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
@@ -101,6 +101,16 @@ artifact default. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
 environment/session, and direct `--mode` / `--emit` flags override the matching
 preference.
 `pulp status` reports the effective import-design defaults.
+
+Browser selection uses `--browser` > `PULP_DESIGN_BROWSER` >
+`PULP_DESIGN_BROWSER_MODE` / `import_design.browser` > an explicitly installed
+managed Chrome for Testing > system Chrome/Chromium. `auto` is the default;
+installing the managed option is explicit and never happens during import:
+
+```bash
+pulp tool install chrome-for-testing
+pulp config set import_design.browser auto
+```
 
 Mental model:
 

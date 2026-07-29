@@ -62,11 +62,25 @@ std::string browser_unavailable_human(
             << "The versioned browser-capture runtime must be installed beside "
                "pulp-import-design.\n"
             << "Use --offline for the lower-fidelity static/runtime fallback.";
+    } else if (code == "managed-browser-unavailable") {
+        out << discovery.diagnostic.message << "\n"
+            << "Install the pinned browser with: "
+               "pulp tool install chrome-for-testing\n"
+            << "Or select an existing installation with: "
+               "pulp config set import_design.browser system\n\n"
+            << "Pulp never downloads a browser during import.";
+    } else if (code == "browser-mode-invalid") {
+        out << discovery.diagnostic.message << "\n"
+            << "Choose one of: auto, managed, system.\n"
+            << "Example: pulp config set import_design.browser auto";
     } else {
         out << discovery.diagnostic.message << "\n"
+            << "Install Pulp's pinned browser with: "
+               "pulp tool install chrome-for-testing\n"
+            << "Or "
             << (code == "browser-incompatible"
-                    ? "Install or update Google Chrome: "
-                    : "Install Google Chrome: ")
+                    ? "install or update system Google Chrome: "
+                    : "install system Google Chrome: ")
             << kChromeDownloadUrl << "\n\n"
             << "Pulp launches it with a temporary isolated profile to evaluate "
                "layout and make\n"
@@ -96,11 +110,15 @@ std::string browser_unavailable_json(
         remediation = "install-node-22";
     } else if (code == "capture-runtime-unavailable") {
         remediation = "pulp-upgrade";
+    } else if (code == "managed-browser-unavailable") {
+        remediation = "pulp-tool-install-chrome-for-testing";
+    } else if (code == "browser-mode-invalid") {
+        remediation = "set-browser-mode";
     } else {
         install_url = kChromeDownloadUrl;
         remediation = code == "browser-incompatible"
-            ? "update-browser"
-            : "install-browser";
+            ? "install-managed-or-update-system-browser"
+            : "install-managed-or-system-browser";
     }
     std::ostringstream out;
     out << "{"
@@ -117,6 +135,18 @@ std::string browser_unavailable_json(
         << "\","
         << "\"install_url\":\"" << install_url << "\","
         << "\"remediation\":\"" << remediation << "\","
+        << "\"managed_install_command\":\""
+        << ((code == "browser-unavailable" ||
+             code == "browser-incompatible" ||
+             code == "managed-browser-unavailable")
+                ? "pulp tool install chrome-for-testing"
+                : "")
+        << "\","
+        << "\"system_mode_command\":\""
+        << (code == "managed-browser-unavailable"
+                ? "pulp config set import_design.browser system"
+                : "")
+        << "\","
         << "\"offline_flag\":\"--offline\","
         << "\"probes\":[";
     for (std::size_t i = 0; i < discovery.probes.size(); ++i) {

@@ -131,6 +131,7 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("pinned_version")) tool.pinned_version = v->as_string();
             if (auto v = val.get("requires_tools")) tool.requires_tools = v->as_string_array();
             if (auto v = val.get("managed_by_pulp")) tool.managed_by_pulp = v->as_bool();
+            if (auto v = val.get("explicit_install_only")) tool.explicit_install_only = v->as_bool();
             if (auto v = val.get("bundleable")) tool.bundleable = v->as_bool();
             if (auto v = val.get("install_scope")) tool.install_scope = v->as_string();
             if (auto v = val.get("distribution_lane")) tool.distribution_lane = v->as_string();
@@ -1178,7 +1179,9 @@ int cmd_tool(const std::vector<std::string>& args) {
 
         if (all) {
             int rc = 0;
-            for (auto& [id, tool] : reg.tools) rc |= install_one(id);
+            for (auto& [id, tool] : reg.tools) {
+                if (!tool.explicit_install_only) rc |= install_one(id);
+            }
             return rc;
         }
         return install_one(tool_id);
