@@ -5,7 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -352,41 +354,49 @@ TEST_CASE("Pulp Delay static editor becomes idle and external state repaints onc
 
 TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore",
           "[pulp-delay][ui][repaint][restore]") {
-    state::StateStore store;
-    define_delay_parameters(store);
-    auto root = build_pulp_delay_editor(store);
-    auto& editor = as_delay_editor(root);
-    auto* feedback = dynamic_cast<DelayKnob*>(editor.control_for(kFeedback));
-    auto* freeze = dynamic_cast<DelayActionCard*>(editor.control_for(kFreeze));
+    format::HeadlessHost plugin_host(create_pulp_delay);
+    auto* processor = plugin_host.processor();
+    REQUIRE(processor != nullptr);
+    auto& store = plugin_host.state();
+    format::ViewBridge bridge(*processor, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    auto* editor = dynamic_cast<PulpDelayEditor*>(bridge.view());
+    REQUIRE(editor != nullptr);
+    auto* feedback = dynamic_cast<DelayKnob*>(editor->control_for(kFeedback));
+    auto* freeze = dynamic_cast<DelayActionCard*>(editor->control_for(kFreeze));
     REQUIRE(feedback != nullptr);
     REQUIRE(freeze != nullptr);
     CountingWindowHost host;
-    editor.set_window_host(&host);
+    editor->set_window_host(&host);
     canvas::RecordingCanvas canvas;
 
     store.set_normalized(kFeedback, 0.75f);
     store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
     store.set_value(kCharacter, static_cast<float>(Character::bbd));
     store.set_value(kFreeze, 1.0f);
-    const auto preset = store.serialize();
+    const auto preset =
+        format::plugin_state_io::serialize(store, *processor);
 
     store.set_normalized(kFeedback, 0.1f);
     store.set_value(kRouting, static_cast<float>(Routing::stereo));
     store.set_value(kCharacter, static_cast<float>(Character::clean));
     store.set_value(kFreeze, 0.0f);
     REQUIRE_THAT(feedback->value(), WithinAbs(0.1, 1.0e-6));
-    REQUIRE(control_view(editor, kCharacter).access_value() == "CLEAN");
+    REQUIRE(control_view(*editor, kCharacter).access_value() == "CLEAN");
     REQUIRE_FALSE(freeze->is_on());
-    REQUIRE(control_view(editor, kCrossfeed).visible());
-    REQUIRE_FALSE(editor.crossfeed_override_visible());
+    REQUIRE(control_view(*editor, kCrossfeed).visible());
+    REQUIRE_FALSE(editor->crossfeed_override_visible());
 
     host.repaint_count = 0;
-    REQUIRE(store.deserialize(preset));
+    REQUIRE(format::plugin_state_io::deserialize(
+        preset, store, *processor));
+    REQUIRE(host.repaint_count == 0);
     REQUIRE_THAT(feedback->value(), WithinAbs(0.1, 1.0e-6));
-    REQUIRE(control_view(editor, kCharacter).access_value() == "CLEAN");
+    REQUIRE(control_view(*editor, kCharacter).access_value() == "CLEAN");
     REQUIRE_FALSE(freeze->is_on());
-    REQUIRE(control_view(editor, kCrossfeed).visible());
-    REQUIRE_FALSE(editor.crossfeed_override_visible());
+    REQUIRE(control_view(*editor, kCrossfeed).visible());
+    REQUIRE_FALSE(editor->crossfeed_override_visible());
 
     int store_callbacks = 0;
     const auto callback_probe = store.add_listener(
@@ -398,13 +408,17 @@ TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore
         [&gesture_begins](state::ParamID) { ++gesture_begins; },
         [&gesture_ends](state::ParamID) { ++gesture_ends; });
 
-    editor.paint_all(canvas);
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    REQUIRE(host.repaint_count == 1);
+
+    editor->paint_all(canvas);
     REQUIRE_THAT(feedback->value(), WithinAbs(0.75, 1.0e-6));
-    REQUIRE(control_view(editor, kCharacter).access_value() == "BBD");
+    REQUIRE(control_view(*editor, kCharacter).access_value() == "BBD");
     REQUIRE(freeze->is_on());
-    REQUIRE_FALSE(control_view(editor, kCrossfeed).visible());
-    REQUIRE(editor.crossfeed_override_visible());
-    REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
+    REQUIRE_FALSE(control_view(*editor, kCrossfeed).visible());
+    REQUIRE(editor->crossfeed_override_visible());
+    REQUIRE(editor->crossfeed_override_text() == "100% · PING PONG");
     REQUIRE(host.repaint_count > 0);
     REQUIRE(store_callbacks == 0);
     REQUIRE(gesture_begins == 0);
@@ -414,7 +428,7 @@ TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore
 
     host.repaint_count = 0;
     canvas.clear();
-    editor.paint_all(canvas);
+    editor->paint_all(canvas);
     REQUIRE(host.repaint_count == 0);
     REQUIRE(store_callbacks == 0);
     REQUIRE(gesture_begins == 0);

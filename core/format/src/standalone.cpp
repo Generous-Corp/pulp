@@ -842,7 +842,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     // Live editor reload (1.9): when the hosted processor's logic hot-swaps
     // (ReloadableShell), rebuild the OPEN editor in place and request a repaint —
-    // the same path the plugin editor pump uses (make_scripted_idle_pump), so the
+    // the same path the plugin editor pump uses (make_editor_idle_pump), so the
     // standalone dev window shows the swapped UI live too. Composed over whatever
     // idle work the build wired above; cheap no-op for non-reloadable processors.
     {

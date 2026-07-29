@@ -131,8 +131,8 @@ private:
             bridge_.reset();
             return;
         }
-        // Pump the scripted UI session (async results, timers, rAF) per vsync.
-        host_->set_idle_callback(make_scripted_idle_pump(*bridge_));
+        // Run editor automation, restore/reload, and scripted work per vsync.
+        host_->set_idle_callback(make_editor_idle_pump(*bridge_));
 
         // Follow the host's GPU surface rather than sampling it once: on
         // Windows it does not exist until try_attach_to_parent() below. Also

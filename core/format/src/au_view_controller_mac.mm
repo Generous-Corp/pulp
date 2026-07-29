@@ -372,7 +372,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         mode = gpu.mode;
         _viewHost = pulp::view::PluginViewHost::create(*_pendingRoot, opts);
         if (_viewHost) {
-            _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
+            _viewHost->set_idle_callback(pulp::format::make_editor_idle_pump(*_bridge));
             // Follow the host's GpuSurface so JS navigator.gpu /
             // canvas.getContext('webgpu') routes through Pulp's Dawn instance
             // instead of mocks — and so the session drops the pointer when the

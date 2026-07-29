@@ -375,6 +375,25 @@ public:
     /// @return True if deserialization succeeded.
     bool deserialize(std::span<const uint8_t> data);
 
+    /// Monotonic reconciliation edge published after each successful
+    /// deserialize().
+    ///
+    /// Deserialization deliberately does not dispatch parameter listeners:
+    /// format hosts may restore from a thread where author/UI callbacks are
+    /// unsafe. An attached ViewBridge polls this revision on its main-thread
+    /// idle tick and schedules one editor repaint, whose paint boundary can
+    /// then reconcile listener-silent control state.
+    ///
+    /// This is an edge, not a count of host-level restore successes. A
+    /// higher-level restore that applies parameter state and then rejects its
+    /// plugin-owned payload may deserialize the previous parameter snapshot as
+    /// rollback, advancing this revision twice. Consumers compare for
+    /// inequality and may coalesce either advance into one refresh of the final
+    /// state.
+    std::uint64_t state_restore_revision() const noexcept {
+        return state_restore_revision_.load(std::memory_order_acquire);
+    }
+
     /// Set the schema version embedded in serialized state.
     /// Increment this when the parameter layout changes between plugin versions.
     void set_state_version(uint32_t version) { state_version_ = version; }
@@ -413,6 +432,7 @@ private:
     mutable std::mutex parameter_display_mutex_;
     std::shared_ptr<const ParameterDisplayNames> parameter_display_names_;
     std::atomic<std::uint64_t> parameter_display_revision_{0};
+    std::atomic<std::uint64_t> state_restore_revision_{0};
     // Indices (into values_/params_) of trigger / momentary parameters, cached
     // at registration so reset_triggers_rt() is allocation-free on the audio
     // thread. Empty for the overwhelmingly common no-trigger store.

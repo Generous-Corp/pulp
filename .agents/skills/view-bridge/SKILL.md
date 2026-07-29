@@ -247,7 +247,7 @@ notarization, PlugInKit diagnostics) is in
 
 The same off-main hazard applies to `-dealloc`. A GPU-backed
 `PluginViewHost` owns a `CVDisplayLink` whose idle pump
-(`make_scripted_idle_pump`) is `dispatch_async`'d to the **main queue**
+(`make_editor_idle_pump`) is `dispatch_async`'d to the **main queue**
 and dereferences the `ViewBridge`. If the last controller release lands
 on the XPC connection queue (it can — `createAudioUnit…` and the rebuild
 bounce arrive off-main), destroying the host + bridge off-main races a
@@ -646,7 +646,7 @@ and look like it worked.
    `MacGpuWindowHost::paint_scene` overlay-inside-transform rule.
 9. **A GPU display-link idle pump can outlive its `ViewBridge` — guard on
    `ViewBridge::alive_token()`, not the host's own `alive_`.** The GPU
-   scripted-idle pump (`gpu_host_select.hpp::make_scripted_idle_pump`) is
+   editor idle pump (`gpu_host_select.hpp::make_editor_idle_pump`) is
    dispatched to the main queue by `CVDisplayLink` and captures the bridge by
    raw pointer. Two ways it runs after the bridge is gone: (a) a host reloading
    the embedded view REPLACES the bridge (`_bridge = make_unique<…>`) while the
@@ -727,7 +727,7 @@ and look like it worked.
 - `"ViewBridge destructor closes view"`
 - `"ViewBridge cross-format lifecycle invariants"` (VST3 / CLAP / AU v2 /
   AU v3 / Standalone / failed-attach replay)
-- `"scripted idle pump no-ops after the ViewBridge is destroyed"`
+- `"editor idle pump no-ops after the ViewBridge is destroyed"`
   (`[idle-pump][crash]`) — the GPU display-link pump liveness-token guard
   (pitfall 9); build the pump, `reset()` the bridge, call the pump → no UAF.
 
@@ -1079,7 +1079,7 @@ Rules when touching an adapter's editor-attach path:
 - A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
   override `Processor::active_scripted_ui()` so `ViewBridge` reports
   `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
-  `make_scripted_idle_pump` can poll that session. Chainer-style generated
+  `make_editor_idle_pump` can poll that session. Chainer-style generated
   processors use this path.
 - A custom non-scripted GPU view (WebGPU/Three.js canvas, hand-built Skia view)
   MUST call `view->set_requires_gpu_host(true)` on its root, or
@@ -1088,10 +1088,10 @@ Rules when touching an adapter's editor-attach path:
 - After `PluginViewHost::create(...)`, call
   `format::warn_if_unexpected_cpu_fallback(decision, host.get())` — it screams
   (`runtime::log_error`) if GPU was requested but the host fell back to CPU.
-- Wire the per-vsync scripted pump: `host->set_idle_callback(make_scripted_idle_pump(bridge))`.
+- Wire the per-vsync editor pump: `host->set_idle_callback(make_editor_idle_pump(bridge))`.
   Without it a JS UI paints its first frame but `requestAnimationFrame` /
   timers / async results never fire.
-- `make_scripted_idle_pump` captures the `ViewBridge` by raw pointer, so the
+- `make_editor_idle_pump` captures the `ViewBridge` by raw pointer, so the
   host MUST be destroyed before the bridge. In AU/VST3/CLAP the bridge is
   declared before the host (reverse-destruction → host first); keep that order.
 - AU v2 has no host resize callback — use `host->set_resize_callback(...)` to
@@ -1535,7 +1535,7 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   colors with `Color::rgba8(r,g,b,a)`, NOT `Color{26,26,32,255}` brace-init,
   which Skia clamps to opaque white (the white-on-white panel bug).
 - **The editor idle pump drains the param store (automation → widgets).**
-  `make_scripted_idle_pump(bridge)` (in `gpu_host_select.hpp`, set as every
+  `make_editor_idle_pump(bridge)` (in `gpu_host_select.hpp`, set as every
   format's `set_idle_callback`) calls `bridge.store().pump_listeners()` each
   vsync. This is what makes `bind_parameter`-bound widgets follow host
   automation playback / host-side edits: `ListenerThread::Main` store changes
@@ -1545,6 +1545,14 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   host's frame loop alive (`has_idle`), so the pump runs even when nothing
   else is animating. A custom view that reads the store directly each frame
   (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.
+- **Listener-silent state restore schedules one native reconciliation frame.**
+  `StateStore::deserialize()` publishes `state_restore_revision()` only after a
+  successful restore. The editor idle pump consumes that edge on the main
+  thread and requests one root repaint; native controls reconcile from the
+  store at the next paint boundary without running UI listeners on the host's
+  restore thread. Compare revisions for inequality: a failed plugin-envelope
+  restore can advance once for the candidate parameters and again for rollback,
+  and the pump intentionally coalesces both into one repaint of the final state.
 - **A native `create_view()` sizes the host window from its own layout bounds.**
   In `ViewBridge::open`, when the editor is native (not a scripted UI) and the
   view reports non-zero `bounds()`, those bounds override the processor's
@@ -1669,9 +1677,9 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   paint gets children+bg refreshed but not the subclass identity (fine for the
   common container-root editor).
 - **Repaint after rebuild.** The CPU (CoreGraphics) mac host only repaints on
-  `setNeedsDisplay`, so `make_scripted_idle_pump` calls `View::request_repaint()`
+  `setNeedsDisplay`, so `make_editor_idle_pump` calls `View::request_repaint()`
   after a rebuild. Mutating the tree alone does NOT repaint on CPU.
-- **One wiring point.** `make_scripted_idle_pump` (gpu_host_select.hpp) covers AU
+- **One wiring point.** `make_editor_idle_pump` (gpu_host_select.hpp) covers AU
   v2/v3, VST3, CLAP, and both the CPU CVDisplayLink tick and GPU display link.
   `set_idle_callback` reads "GPU only" in the base header, but the mac CPU host
   (plugin_view_host_mac.mm) runs it via its own CVDisplayLink — so the pump does
@@ -1836,7 +1844,7 @@ easy to miss:
   listener at all**. Nothing pushes to it. It has to be pulled with
   `sync_from_host_params()`.
 
-The editor idle pump (`make_scripted_idle_pump`) drives both — `pump_listeners()`
+The editor idle pump (`make_editor_idle_pump`) drives both — `pump_listeners()`
 and the bridge's private `sync_design_frames_from_host()`, which it reaches as a
 `friend` — so every plugin editor gets both channels. The pull is deliberately
 NOT public: the pump is its only production caller, and a view-side enrolment

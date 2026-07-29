@@ -567,8 +567,8 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
     p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
-        // Pump the scripted UI session (async results, timers, rAF) per vsync.
-        p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
+        // Run editor automation, restore/reload, and scripted work per vsync.
+        p->editor_host->set_idle_callback(make_editor_idle_pump(*p->bridge));
         // Route navigator.gpu / canvas.getContext('webgpu') through the host's
         // live GpuSurface instead of the JS mock path — and keep following it.
         // The Windows host does not have a surface until gui_set_parent()

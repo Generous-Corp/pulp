@@ -1048,7 +1048,11 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
 
     MemoryStream source{.bytes = sink.bytes};
     clap_istream_t in_stream{.ctx = &source, .read = stream_read};
+    const auto restore_revision =
+        proc2->state().state_restore_revision();
     REQUIRE(state2->load(plugin2, &in_stream));
+    REQUIRE(proc2->state().state_restore_revision() ==
+            restore_revision + 1);
     REQUIRE_THAT(proc2->state().get_value(1), WithinAbs(-12.5, 0.01));
     REQUIRE(proc2->plugin_state == "snapshots=A|B");
 

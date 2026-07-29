@@ -62,8 +62,8 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         bridge_.close();
         return kResultFalse;
     }
-    // Pump the scripted UI session (async results, timers, rAF) per vsync.
-    editor_host_->set_idle_callback(make_scripted_idle_pump(bridge_));
+    // Run editor automation, restore/reload, and scripted work per vsync.
+    editor_host_->set_idle_callback(make_editor_idle_pump(bridge_));
 
     // Subscribe to the host's GPU-surface lifecycle BEFORE attaching. On
     // Windows the surface is created inside attach_to_parent(), so a read taken
