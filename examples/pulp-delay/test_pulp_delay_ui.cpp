@@ -9,6 +9,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -27,6 +28,14 @@ PulpDelayEditor& as_delay_editor(std::unique_ptr<view::View>& root) {
     auto* editor = dynamic_cast<PulpDelayEditor*>(root.get());
     REQUIRE(editor != nullptr);
     return *editor;
+}
+
+view::View& control_view(PulpDelayEditor& editor, state::ParamID id) {
+    auto* control = editor.control_for(id);
+    REQUIRE(control != nullptr);
+    auto* result = dynamic_cast<view::View*>(control);
+    REQUIRE(result != nullptr);
+    return *result;
 }
 
 view::Point root_center(const view::View& view) {
@@ -109,6 +118,138 @@ TEST_CASE("Pulp Delay UI labels and control-state bars have truthful provenance"
     REQUIRE_THAT(editor.control_state_level(kFeedback),
                  WithinAbs(store.get_normalized(kFeedback), 1.0e-6));
     REQUIRE(editor.control_state_level(kTime) == 0.0f);
+}
+
+TEST_CASE("Pulp Delay Stereo Field exposes only the active timing branch",
+          "[pulp-delay][ui][timing][branches]") {
+    struct Branch {
+        bool sync;
+        bool link;
+        OffsetMode offset_mode;
+        std::array<state::ParamID, 3> active;
+        std::size_t active_count;
+    };
+    constexpr std::array branches{
+        Branch{false, true, OffsetMode::ratio, {kOffsetMode, kTimeOffset, 0}, 2},
+        Branch{false, true, OffsetMode::milliseconds, {kOffsetMode, kOffsetMs, 0}, 2},
+        Branch{true, true, OffsetMode::ratio, {kDivision, kOffsetMode, kTimeOffset}, 3},
+        Branch{true, true, OffsetMode::milliseconds,
+               {kDivision, kOffsetMode, kOffsetMs}, 3},
+        Branch{false, false, OffsetMode::ratio, {kTimeRight, 0, 0}, 1},
+        Branch{true, false, OffsetMode::ratio, {kDivision, kDivisionRight, 0}, 2},
+    };
+    constexpr std::array conditional{
+        kDivision, kTimeRight, kOffsetMode, kDivisionRight, kTimeOffset, kOffsetMs};
+
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    for (const auto& branch : branches) {
+        CAPTURE(branch.sync, branch.link, branch.offset_mode);
+        store.set_value(kRouting, static_cast<float>(Routing::stereo));
+        store.set_value(kSync, branch.sync ? 1.0f : 0.0f);
+        store.set_value(kLink, branch.link ? 1.0f : 0.0f);
+        store.set_value(kOffsetMode, static_cast<float>(branch.offset_mode));
+        editor.sync_from_store();
+
+        for (const auto id : conditional) {
+            const bool expected =
+                std::find(branch.active.begin(),
+                          branch.active.begin()
+                              + static_cast<std::ptrdiff_t>(branch.active_count),
+                          id)
+                != branch.active.begin()
+                    + static_cast<std::ptrdiff_t>(branch.active_count);
+            REQUIRE(control_view(editor, id).visible() == expected);
+        }
+        REQUIRE(control_view(editor, kTime).enabled() == !branch.sync);
+        REQUIRE(control_view(editor, kLink).visible());
+        REQUIRE(control_view(editor, kCrossfeed).visible());
+        REQUIRE(editor.effective_right_time_visible() == branch.link);
+        if (branch.link && !branch.sync) {
+            const auto expected = branch.offset_mode == OffsetMode::ratio
+                ? "RIGHT EFFECTIVE · 426 ms"
+                : "RIGHT EFFECTIVE · 394 ms";
+            REQUIRE(editor.effective_right_time_text() == expected);
+            REQUIRE(editor.effective_right_time_text().find("620") == std::string::npos);
+        } else if (branch.link) {
+            REQUIRE(editor.effective_right_time_text().find("HOST SYNC")
+                    != std::string::npos);
+        }
+        if (branch.sync)
+            REQUIRE(editor.left_time_display_text().find("SYNC 1/8") == 0);
+        else
+            REQUIRE(editor.left_time_display_text() == "380 ms");
+    }
+}
+
+TEST_CASE("Pulp Delay Ping Pong suppresses overridden right and crossfeed controls",
+          "[pulp-delay][ui][timing][ping-pong]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
+
+    for (const bool sync : {false, true}) {
+        CAPTURE(sync);
+        store.set_value(kSync, sync ? 1.0f : 0.0f);
+        store.set_value(kLink, sync ? 0.0f : 1.0f);
+        store.set_value(kOffsetMode, static_cast<float>(
+                                         sync ? OffsetMode::milliseconds : OffsetMode::ratio));
+        editor.sync_from_store();
+
+        REQUIRE(control_view(editor, kDivision).visible() == sync);
+        REQUIRE(control_view(editor, kTime).enabled() == !sync);
+        for (const auto id : {kLink, kTimeRight, kOffsetMode, kDivisionRight,
+                              kTimeOffset, kOffsetMs, kCrossfeed})
+            REQUIRE_FALSE(control_view(editor, id).visible());
+        REQUIRE(editor.effective_right_time_visible());
+        REQUIRE(editor.crossfeed_override_visible());
+        REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
+        REQUIRE(editor.effective_right_time_text()
+                == (sync ? "RIGHT = LEFT · HOST SYNC"
+                         : "RIGHT = LEFT · 380 ms"));
+        REQUIRE_THAT(store.get_value(kCrossfeed), WithinAbs(48.0, 1.0e-6));
+    }
+}
+
+TEST_CASE("Pulp Delay timing presentation follows live state transitions",
+          "[pulp-delay][ui][timing][transitions]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+
+    REQUIRE_FALSE(control_view(editor, kDivision).visible());
+    REQUIRE(control_view(editor, kTimeOffset).visible());
+    REQUIRE(editor.effective_right_time_text() == "RIGHT EFFECTIVE · 426 ms");
+
+    store.set_value(kOffsetMode, static_cast<float>(OffsetMode::milliseconds));
+    REQUIRE_FALSE(control_view(editor, kTimeOffset).visible());
+    REQUIRE(control_view(editor, kOffsetMs).visible());
+    REQUIRE(editor.effective_right_time_text() == "RIGHT EFFECTIVE · 394 ms");
+
+    store.set_value(kLink, 0.0f);
+    REQUIRE_FALSE(editor.effective_right_time_visible());
+    REQUIRE(control_view(editor, kTimeRight).visible());
+    REQUIRE_FALSE(control_view(editor, kOffsetMode).visible());
+
+    store.set_value(kSync, 1.0f);
+    REQUIRE_FALSE(control_view(editor, kTime).enabled());
+    REQUIRE(control_view(editor, kDivision).visible());
+    REQUIRE_FALSE(control_view(editor, kTimeRight).visible());
+    REQUIRE(control_view(editor, kDivisionRight).visible());
+    REQUIRE(editor.left_time_display_text() == "SYNC 1/8");
+
+    store.set_value(kRouting, static_cast<float>(Routing::ping_pong));
+    REQUIRE_FALSE(control_view(editor, kLink).visible());
+    REQUIRE_FALSE(control_view(editor, kDivisionRight).visible());
+    REQUIRE_FALSE(control_view(editor, kCrossfeed).visible());
+    REQUIRE(editor.crossfeed_override_visible());
+    REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
+    REQUIRE(editor.effective_right_time_text() == "RIGHT = LEFT · HOST SYNC");
 }
 
 TEST_CASE("Pulp Delay controls follow host automation and preset restore",

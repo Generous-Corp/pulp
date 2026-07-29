@@ -39,33 +39,45 @@ float DelayTimeModel::synced_time_ms(int index, double tempo_bpm) noexcept {
     return clamp_left(static_cast<float>(division_beats(index) * 60000.0 / valid_tempo(tempo_bpm)));
 }
 
+RightTimingBranch DelayTimeModel::right_timing_branch(
+    const DelayTimeInputs& inputs) noexcept {
+    if (inputs.routing == Routing::ping_pong)
+        return RightTimingBranch::ping_pong;
+    if (inputs.link && inputs.offset_mode == OffsetMode::ratio)
+        return RightTimingBranch::linked_ratio;
+    if (inputs.link)
+        return RightTimingBranch::linked_offset_ms;
+    return inputs.sync ? RightTimingBranch::synced_independent
+                       : RightTimingBranch::free_independent;
+}
+
 EffectiveDelayTimes DelayTimeModel::derive(const DelayTimeInputs& inputs) noexcept {
     EffectiveDelayTimes result;
     result.left_ms = inputs.sync ? synced_time_ms(inputs.division, inputs.tempo_bpm)
                                  : clamp_left(inputs.time_ms);
 
-    if (inputs.routing == Routing::ping_pong) {
+    switch (right_timing_branch(inputs)) {
+    case RightTimingBranch::ping_pong:
         result.right_ms = result.left_ms;
         result.right_uses_ratio = true;
         result.right_ratio = 1.0f;
         return result;
-    }
-
-    if (inputs.link && inputs.offset_mode == OffsetMode::ratio) {
+    case RightTimingBranch::linked_ratio:
         result.right_ratio = std::clamp(inputs.time_offset, 0.5f, 1.5f);
         result.right_ms = clamp_right(result.left_ms * result.right_ratio);
         result.right_uses_ratio = true;
         return result;
-    }
-
-    result.right_uses_ratio = false;
-    if (inputs.link) {
+    case RightTimingBranch::linked_offset_ms:
         result.right_ms = clamp_right(result.left_ms + inputs.offset_ms);
-    } else if (inputs.sync) {
+        break;
+    case RightTimingBranch::synced_independent:
         result.right_ms = synced_time_ms(inputs.division_right, inputs.tempo_bpm);
-    } else {
+        break;
+    case RightTimingBranch::free_independent:
         result.right_ms = clamp_right(inputs.time_right_ms);
+        break;
     }
+    result.right_uses_ratio = false;
     result.right_ratio = result.right_ms / result.left_ms;
     return result;
 }

@@ -18,6 +18,7 @@ if(PULP_BUILD_TESTS)
     add_executable(pulp-delay-ui-shots
         pulp_delay_shots.cpp
         delay_params.cpp
+        delay_time_model.cpp
         pulp_delay_controls.cpp
         pulp_delay_editor.cpp
     )

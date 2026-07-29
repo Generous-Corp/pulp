@@ -225,20 +225,31 @@ void DelayFader::on_focus_changed(bool gained) {
 
 DelayTapField::DelayTapField(state::StateStore& store,
                              state::ParamID time_id,
-                             state::ParamID feedback_id)
-    : DelayFader(store, time_id, "TIME"), feedback_id_(feedback_id) {
+                             state::ParamID feedback_id,
+                             state::ParamID sync_id,
+                             state::ParamID division_id)
+    : DelayFader(store, time_id, "TIME"), feedback_id_(feedback_id),
+      sync_id_(sync_id), division_id_(division_id) {
     feedback_listener_ = store.add_listener(
         [this](state::ParamID changed, float) {
-            if (changed == feedback_id_)
+            if (changed == feedback_id_ || changed == sync_id_ || changed == division_id_)
                 request_repaint();
         },
         state::ListenerThread::Main);
 }
 
+std::string DelayTapField::timing_display_text() const {
+    if (store_->get_value(sync_id_) < 0.5f)
+        return display_text();
+    return "SYNC " + format_parameter_value(
+                         *store_, division_id_, store_->get_normalized(division_id_));
+}
+
 void DelayTapField::paint(canvas::Canvas& c) {
     const auto b = local_bounds();
     const float feedback = store_->get_normalized(feedback_id_);
-    const float time = value();
+    const bool sync = store_->get_value(sync_id_) >= 0.5f;
+    const float time = sync ? store_->get_normalized(division_id_) : value();
 
     c.set_fill_color(color::panel_deep);
     c.fill_rounded_rect(0, 0, b.width, b.height, 6.0f);
@@ -247,12 +258,12 @@ void DelayTapField::paint(canvas::Canvas& c) {
     c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f,
                           b.height - 1.0f, 6.0f);
 
-    text(c, display_text(), 16.0f, 28.0f, 22.0f, color::lime,
+    text(c, timing_display_text(), 16.0f, 28.0f, 22.0f, color::lime,
          canvas::TextAlign::left, 700, -0.4f);
     text(c, format_parameter_value(*store_, feedback_id_, feedback),
          b.width - 16.0f, 27.0f, 15.0f, color::ink,
          canvas::TextAlign::right, 650);
-    text(c, "DELAY TIME", 16.0f, 42.0f, 8.0f, color::muted,
+    text(c, sync ? "HOST-SYNCED DELAY" : "DELAY TIME", 16.0f, 42.0f, 8.0f, color::muted,
          canvas::TextAlign::left, 600, 0.9f);
     text(c, "FEEDBACK", b.width - 16.0f, 42.0f, 8.0f, color::muted,
          canvas::TextAlign::right, 600, 0.9f);

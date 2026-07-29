@@ -41,6 +41,12 @@ changes crossfade between two pre-prepared engines without resetting either
 engine in the audio callback, and rapid changes retain the most recently
 requested character.
 
+The Stereo Field mirrors the processor's timing branches. Sync swaps raw Time
+editing for the selected beat division, Link swaps independent right timing for
+Ratio or millisecond offset, and the read-only right-time field reports the
+derived free-time result. Ping-Pong suppresses all ignored right/link controls
+and replaces stored Crossfeed with an explicit `100% · PING PONG` override.
+
 ## Validation and screenshots
 
 The tests cover all 25 bindings, host/RT updates, a routed drag with balanced

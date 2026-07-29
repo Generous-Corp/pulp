@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <utility>
 
 namespace pulp::examples::delay::ui {
@@ -13,6 +14,22 @@ namespace {
 
 using paint_detail::text;
 using paint_detail::with_alpha;
+
+DelayTimeInputs time_inputs_from_store(const state::StateStore& store) noexcept {
+    return {
+        .time_ms = store.get_value(kTime),
+        .sync = store.get_value(kSync) >= 0.5f,
+        .division = division_index_from_param(store.get_value(kDivision)),
+        .link = store.get_value(kLink) >= 0.5f,
+        .offset_mode = offset_mode_from_param(store.get_value(kOffsetMode)),
+        .time_offset = store.get_value(kTimeOffset),
+        .offset_ms = store.get_value(kOffsetMs),
+        .time_right_ms = store.get_value(kTimeRight),
+        .division_right = division_index_from_param(store.get_value(kDivisionRight)),
+        .routing = routing_from_param(store.get_value(kRouting)),
+        .tempo_bpm = DelayTimeModel::kFallbackTempoBpm,
+    };
+}
 
 class HeaderView final : public view::View {
   public:
@@ -156,6 +173,34 @@ class ControlStateView final : public view::View {
     std::vector<state::ListenerToken> listeners_;
 };
 
+class CrossfeedOverrideView final : public view::View {
+  public:
+    static constexpr std::string_view display_text = "100% · PING PONG";
+
+    CrossfeedOverrideView() {
+        set_hit_testable(false);
+        set_access_role(view::View::AccessRole::label);
+        set_access_label("Crossfeed overridden by Ping Pong");
+        set_access_value("100 percent");
+    }
+
+    void layout_children() override {}
+
+    void paint(canvas::Canvas& c) override {
+        const auto b = local_bounds();
+        text(c, "CROSSFEED", 2.0f, 11.0f, 8.5f, color::muted,
+             canvas::TextAlign::left, 600, 0.65f);
+        text(c, std::string(display_text), b.width - 2.0f, 11.0f, 9.5f, color::lime,
+             canvas::TextAlign::right, 650);
+        c.set_stroke_color(color::lime);
+        c.set_line_width(4.0f);
+        c.set_line_cap(canvas::LineCap::round);
+        c.stroke_line(2.0f, b.height - 8.0f, b.width - 2.0f, b.height - 8.0f);
+        text(c, "ROUTING OVERRIDE", 2.0f, b.height - 15.0f, 7.2f, color::muted,
+             canvas::TextAlign::left, 600, 0.5f);
+    }
+};
+
 } // namespace
 
 class PulpDelayEditor::Panel final : public view::View {
@@ -190,6 +235,56 @@ class PulpDelayEditor::Panel final : public view::View {
     std::string title_;
 };
 
+class PulpDelayEditor::EffectiveRightTimeView final : public view::View {
+  public:
+    explicit EffectiveRightTimeView(state::StateStore& store) : store_(&store) {
+        set_hit_testable(false);
+        set_access_role(view::View::AccessRole::label);
+        set_access_label("Effective right delay time");
+    }
+
+    std::string display_text() const {
+        const auto inputs = time_inputs_from_store(*store_);
+        if (inputs.routing == Routing::ping_pong) {
+            if (inputs.sync)
+                return "RIGHT = LEFT · HOST SYNC";
+            char buffer[64]{};
+            std::snprintf(buffer, sizeof(buffer), "RIGHT = LEFT · %.0f ms",
+                          DelayTimeModel::derive(inputs).right_ms);
+            return buffer;
+        }
+        if (inputs.sync) {
+            const auto id =
+                inputs.offset_mode == OffsetMode::ratio ? kTimeOffset : kOffsetMs;
+            const auto operation =
+                inputs.offset_mode == OffsetMode::ratio ? " × " : " + ";
+            return "RIGHT · HOST SYNC" + std::string(operation)
+                + format_parameter_value(*store_, id, store_->get_normalized(id));
+        }
+        char buffer[64]{};
+        std::snprintf(buffer, sizeof(buffer), "RIGHT EFFECTIVE · %.0f ms",
+                      DelayTimeModel::derive(inputs).right_ms);
+        return buffer;
+    }
+
+    void layout_children() override {}
+
+    void paint(canvas::Canvas& c) override {
+        const auto b = local_bounds();
+        c.set_fill_color(color::panel_deep);
+        c.fill_rounded_rect(0, 0, b.width, b.height, metric::control_radius);
+        c.set_stroke_color(color::border);
+        c.set_line_width(1.0f);
+        c.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f, b.height - 1.0f,
+                              metric::control_radius);
+        text(c, display_text(), 8.0f, b.height * 0.63f, 8.3f, color::lime,
+             canvas::TextAlign::left, 650, 0.15f);
+    }
+
+  private:
+    state::StateStore* store_ = nullptr;
+};
+
 PulpDelayEditor::PulpDelayEditor(state::StateStore& store) : store_(&store) {
     set_id("pulp-delay-editor");
     set_access_role(view::View::AccessRole::group);
@@ -197,6 +292,17 @@ PulpDelayEditor::PulpDelayEditor(state::StateStore& store) : store_(&store) {
     set_bounds({0, 0, metric::editor_width, metric::editor_height});
     bindings_.reserve(kParameterCount);
     build();
+    presentation_listeners_.push_back(store.add_listener(
+        [this](state::ParamID changed, float) {
+            if (changed == kSync || changed == kLink || changed == kOffsetMode
+                || changed == kRouting || changed == kTime || changed == kTimeOffset
+                || changed == kOffsetMs) {
+                update_timing_presentation();
+                request_repaint();
+            }
+        },
+        state::ListenerThread::Main));
+    update_timing_presentation();
 }
 
 DelayParameterControl* PulpDelayEditor::control_for(
@@ -235,10 +341,32 @@ void PulpDelayEditor::sync_from_store() {
             continue;
         control->sync_from_store(*store_);
     }
+    update_timing_presentation();
 }
 
 float PulpDelayEditor::control_state_level(state::ParamID id) const noexcept {
     return ControlStateView::level(*store_, id);
+}
+
+std::string PulpDelayEditor::effective_right_time_text() const {
+    return effective_right_time_ ? effective_right_time_->display_text() : std::string{};
+}
+
+bool PulpDelayEditor::effective_right_time_visible() const noexcept {
+    return effective_right_time_ && effective_right_time_->visible();
+}
+
+bool PulpDelayEditor::crossfeed_override_visible() const noexcept {
+    return crossfeed_override_ && crossfeed_override_->visible();
+}
+
+std::string PulpDelayEditor::crossfeed_override_text() const {
+    return crossfeed_override_visible() ? std::string(CrossfeedOverrideView::display_text)
+                                        : std::string{};
+}
+
+std::string PulpDelayEditor::left_time_display_text() const {
+    return tap_field_ ? tap_field_->timing_display_text() : std::string{};
 }
 
 PulpDelayEditor::Panel& PulpDelayEditor::add_panel(
@@ -250,10 +378,13 @@ PulpDelayEditor::Panel& PulpDelayEditor::add_panel(
     return *result;
 }
 
-void PulpDelayEditor::register_control(DelayParameterControl& control) {
+void PulpDelayEditor::register_control(DelayParameterControl& control,
+                                       view::View& control_view) {
     const auto id = control.parameter_id();
-    if (id >= kTime && id <= kReverse)
+    if (id >= kTime && id <= kReverse) {
         controls_[static_cast<std::size_t>(id - kTime)] = &control;
+        control_views_[static_cast<std::size_t>(id - kTime)] = &control_view;
+    }
 }
 
 DelayKnob& PulpDelayEditor::add_knob(
@@ -263,7 +394,7 @@ DelayKnob& PulpDelayEditor::add_knob(
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
-    register_control(*result);
+    register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
 }
@@ -275,7 +406,7 @@ DelayFader& PulpDelayEditor::add_fader(
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
-    register_control(*result);
+    register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
 }
@@ -283,12 +414,12 @@ DelayFader& PulpDelayEditor::add_fader(
 DelayTapField& PulpDelayEditor::add_tap_field(
     view::View& parent, view::Rect bounds) {
     auto control = std::make_unique<DelayTapField>(
-        *store_, kTime, kFeedback);
+        *store_, kTime, kFeedback, kSync, kDivision);
     auto* result = control.get();
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(
         static_cast<view::Fader&>(*result), *store_, kTime));
-    register_control(*result);
+    register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
 }
@@ -300,7 +431,7 @@ DelayChoice& PulpDelayEditor::add_choice(
         *store_, id, std::move(caption), std::move(labels));
     auto* result = control.get();
     control->set_bounds(bounds);
-    register_control(*result);
+    register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
 }
@@ -316,7 +447,7 @@ DelayActionCard& PulpDelayEditor::add_action(
     control->set_bounds(bounds);
     bindings_.push_back(view::bind_parameter(
         static_cast<view::ToggleButton&>(*result), *store_, id));
-    register_control(*result);
+    register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
 }
@@ -327,7 +458,7 @@ void PulpDelayEditor::build() {
     add_child(std::move(header));
 
     auto& circulation = add_panel({19, 79, 700, 322}, 1, "CIRCULATION");
-    add_tap_field(circulation, {12, 40, 676, 270});
+    tap_field_ = &add_tap_field(circulation, {12, 40, 676, 270});
 
     auto& stereo = add_panel({19, 413, 378, 222}, 2, "STEREO FIELD");
     add_action(stereo, {12, 36, 58, 24}, kSync,
@@ -340,13 +471,17 @@ void PulpDelayEditor::build() {
                std::vector<std::string>(
                    kDivisionLabels.begin(), kDivisionLabels.end()));
     add_fader(stereo, {12, 99, 166, 31}, kTimeRight, "RIGHT TIME");
+    auto effective_right = std::make_unique<EffectiveRightTimeView>(*store_);
+    effective_right_time_ = effective_right.get();
+    effective_right->set_bounds({12, 99, 166, 31});
+    stereo.add_child(std::move(effective_right));
     add_choice(stereo, {187, 99, 178, 31}, kOffsetMode, "OFFSET MODE",
                {"RATIO", "MS"});
     add_choice(stereo, {12, 134, 353, 30}, kDivisionRight, "RIGHT DIVISION",
                std::vector<std::string>(
                    kDivisionLabels.begin(), kDivisionLabels.end()));
-    add_fader(stereo, {12, 169, 109, 38}, kTimeOffset, "RATIO");
-    add_fader(stereo, {129, 169, 109, 38}, kOffsetMs, "OFFSET MS");
+    add_fader(stereo, {12, 169, 226, 38}, kTimeOffset, "RATIO");
+    add_fader(stereo, {12, 169, 226, 38}, kOffsetMs, "OFFSET MS");
 
     auto& character = add_panel({409, 413, 310, 222}, 3, "CHARACTER");
     add_choice(character, {12, 38, 286, 30}, kCharacter, {},
@@ -360,6 +495,10 @@ void PulpDelayEditor::build() {
     add_knob(energy, {22, 38, 135, 128}, kFeedback, "FEEDBACK");
     add_knob(energy, {209, 38, 135, 128}, kMix, "MIX");
     add_fader(energy, {16, 178, 160, 50}, kCrossfeed, "CROSSFEED");
+    auto crossfeed_override = std::make_unique<CrossfeedOverrideView>();
+    crossfeed_override_ = crossfeed_override.get();
+    crossfeed_override->set_bounds({16, 178, 160, 50});
+    energy.add_child(std::move(crossfeed_override));
     add_fader(energy, {190, 178, 160, 50}, kDuck, "DUCK");
 
     auto& tone = add_panel({735, 339, 366, 296}, 5, "TONE + MOVEMENT");
@@ -381,6 +520,52 @@ void PulpDelayEditor::build() {
     auto control_state = std::make_unique<ControlStateView>(*store_);
     control_state->set_bounds({817, 649, 284, 72});
     add_child(std::move(control_state));
+}
+
+void PulpDelayEditor::set_control_present(state::ParamID id, bool present) {
+    if (id < kTime || id > kReverse)
+        return;
+    if (auto* control = control_views_[static_cast<std::size_t>(id - kTime)]) {
+        control->set_visible(present);
+        control->set_enabled(present);
+        control->set_hit_testable(present);
+    }
+}
+
+void PulpDelayEditor::update_timing_presentation() {
+    const auto inputs = time_inputs_from_store(*store_);
+    const auto branch = DelayTimeModel::right_timing_branch(inputs);
+    const bool ping_pong = branch == RightTimingBranch::ping_pong;
+    const bool linked_ratio = branch == RightTimingBranch::linked_ratio;
+    const bool linked_ms = branch == RightTimingBranch::linked_offset_ms;
+    const bool synced_independent = branch == RightTimingBranch::synced_independent;
+    const bool free_independent = branch == RightTimingBranch::free_independent;
+
+    // The large circulation field remains visible as the primary timing
+    // visualization, but host-sync makes its raw Time parameter non-editable
+    // and swaps its text/geometry to the selected Division.
+    if (auto* time = control_views_[static_cast<std::size_t>(kTime - kTime)]) {
+        time->set_enabled(!inputs.sync);
+        time->set_hit_testable(!inputs.sync);
+    }
+    set_control_present(kDivision, inputs.sync);
+    set_control_present(kLink, !ping_pong);
+    set_control_present(kOffsetMode, linked_ratio || linked_ms);
+    set_control_present(kTimeOffset, linked_ratio);
+    set_control_present(kOffsetMs, linked_ms);
+    set_control_present(kTimeRight, free_independent);
+    set_control_present(kDivisionRight, synced_independent);
+    set_control_present(kCrossfeed, !ping_pong);
+
+    if (effective_right_time_) {
+        effective_right_time_->set_visible(ping_pong || linked_ratio || linked_ms);
+        effective_right_time_->set_access_value(effective_right_time_->display_text());
+        effective_right_time_->request_repaint();
+    }
+    if (crossfeed_override_) {
+        crossfeed_override_->set_visible(ping_pong);
+        crossfeed_override_->request_repaint();
+    }
 }
 
 std::unique_ptr<view::View> build_pulp_delay_editor(
