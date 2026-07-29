@@ -109,7 +109,7 @@ pub fn validate_requested_version(version: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn pulp_home() -> Option<PathBuf> {
+fn chrome_home() -> Option<PathBuf> {
     crate::config::pulp_home()
 }
 
@@ -158,7 +158,21 @@ pub fn current_browser_under(home: &Path) -> Option<PathBuf> {
 
 /// Resolve the managed current browser from the process Pulp home.
 pub fn current_browser_if_present() -> Option<PathBuf> {
-    current_browser_under(&pulp_home()?)
+    current_browser_under(&chrome_home()?)
+}
+
+/// Remove the complete managed Chrome installation from the same Pulp home
+/// used by install and import-time browser discovery.
+pub fn uninstall_pinned() -> Result<Option<PathBuf>> {
+    let home = chrome_home().ok_or_else(|| {
+        CliError::Other("cannot resolve Pulp home ($PULP_HOME / home directory unset)".to_owned())
+    })?;
+    let root = root_under(&home);
+    if !root.is_dir() {
+        return Ok(None);
+    }
+    std::fs::remove_dir_all(&root).map_err(|error| CliError::io(root.clone(), error))?;
+    Ok(Some(root))
 }
 
 fn write_current(root: &Path, pin: &Pin) -> Result<()> {
@@ -423,7 +437,7 @@ pub fn install_pinned(force: bool, out: &mut impl Write) -> Result<i32> {
         )));
     };
     let pin = pin_for(platform).expect("mapped platform must have a pin");
-    let home = pulp_home().ok_or_else(|| {
+    let home = chrome_home().ok_or_else(|| {
         CliError::Other("cannot resolve Pulp home ($PULP_HOME / home directory unset)".to_owned())
     })?;
     install_archive_under(&home, pin, &pin_url(pin), pin.sha256, force, out)

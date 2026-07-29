@@ -41,7 +41,12 @@ loopback HTTP, denies external requests by default, captures the evaluated
 design, and then exits. Generated plugins and applications do not require
 Chrome, Chromium, or Node.
 
-## Optional Externally Licensed Machine Tools
+| Name | License | Purpose | Link |
+|------|---------|---------|------|
+| **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |
+| **css-tree** | MIT | CSS value parsing and lexer validation for JSX source-contract extraction | [github.com/csstree/csstree](https://github.com/csstree/csstree) |
+
+### Optional Externally Licensed Machine Tools
 
 Pulp can manage a pinned copy of **Google Chrome for Testing** when a developer
 explicitly runs `pulp tool install chrome-for-testing`. It is a separate
@@ -57,11 +62,6 @@ downloads it silently; system Chrome/Chromium remains sufficient, and the
 managed copy is used only after explicit installation. Normal agent operation
 does not require a special enable switch: the user-visible `pulp tool install`
 command is the opt-in action.
-
-| Name | License | Purpose | Link |
-|------|---------|---------|------|
-| **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |
-| **css-tree** | MIT | CSS value parsing and lexer validation for JSX source-contract extraction | [github.com/csstree/csstree](https://github.com/csstree/csstree) |
 
 ### Design Formats and Test Fixtures
 

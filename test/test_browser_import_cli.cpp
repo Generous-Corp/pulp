@@ -629,6 +629,12 @@ TEST_CASE("browser CLI adapter rejects proof publication collisions",
     SECTION("explicit diff cannot overwrite source input") {
         request.diff_output = request.input_file.string();
     }
+    SECTION("explicit diff cannot overwrite interaction plan") {
+        request.browser_interactions =
+            tree.root / "interaction-plan.json";
+        request.diff_output =
+            request.browser_interactions->string();
+    }
     SECTION("explicit diff cannot overwrite explicit reference") {
         request.reference_image =
             (tree.root / "reference.png").string();
@@ -662,6 +668,12 @@ TEST_CASE("browser CLI adapter rejects proof publication collisions",
         request.diff_output =
             request.output_file.parent_path() /
             "UI-BROWSER-CAPTURE/proof.png";
+    }
+    SECTION("nonexistent mixed-case interaction aliases are collisions") {
+        request.browser_interactions =
+            request.output_file.parent_path() / "Interaction-Plan.JSON";
+        request.diff_output =
+            request.output_file.parent_path() / "interaction-plan.json";
     }
 #endif
 
@@ -758,6 +770,52 @@ TEST_CASE("evidence commit rechecks filesystem aliases",
     CHECK(diagnostics.str().find("aliases a protected path") !=
           std::string::npos);
     CHECK(tree.read(request.output_file) == "primary-output");
+}
+
+TEST_CASE("evidence commit rechecks aliases against the interaction plan",
+          "[import-design][browser-capture][cli-adapter][transaction][security]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions =
+        tree.root / "interaction-plan.json";
+    request.diff_output = tree.root / "proof/diff.png";
+    tree.write(*request.browser_interactions, "interaction-plan");
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            return captured_import(capture_request, tree);
+        };
+    operations.validate_capture =
+        [&](const pulp::view::DesignIR&,
+            const id::BrowserCaptureValidationOptions& options) {
+            tree.write(options.rendered, "render");
+            tree.write(options.diff, "diff");
+            id::BrowserCaptureValidationResult result;
+            result.valid = true;
+            result.passes = true;
+            return result;
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            return true;
+        };
+
+    auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    auto session = require_live_session(std::move(result));
+    REQUIRE(session.has_capture());
+    fs::create_directories(fs::path(request.diff_output).parent_path());
+    fs::create_hard_link(
+        *request.browser_interactions, request.diff_output);
+
+    std::ostringstream diagnostics;
+    CHECK_FALSE(session.publish(diagnostics));
+    CHECK(diagnostics.str().find("aliases a protected path") !=
+          std::string::npos);
+    CHECK(tree.read(*request.browser_interactions) == "interaction-plan");
 }
 
 TEST_CASE("late evidence failure restores primary, tokens, and required assets",

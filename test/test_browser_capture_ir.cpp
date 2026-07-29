@@ -111,6 +111,54 @@ std::string envelope(
 })JSON";
 }
 
+constexpr std::string_view kInteractionPlanHash =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+std::string interaction_report(
+    std::string_view plan_hash = kInteractionPlanHash) {
+    return std::string(R"JSON({
+  "schema":"pulp-browser-interactions-v1",
+  "version":1,
+  "plan_sha256":")JSON") + std::string(plan_hash) + R"JSON(",
+  "action_count":2,
+  "actions":[
+    {
+      "action":"click",
+      "selector":"#open",
+      "timeout_ms":5000,
+      "status":"completed"
+    },
+    {
+      "action":"type",
+      "selector":"input",
+      "timeout_ms":5000,
+      "text_length":7,
+      "status":"completed"
+    }
+  ]
+})JSON";
+}
+
+std::string with_interaction_provenance(
+    std::string capture,
+    std::string_view report_hash,
+    std::string_view report_path = "interaction-report.json",
+    std::string_view plan_hash = kInteractionPlanHash,
+    int action_count = 2) {
+    const std::string settle =
+        R"JSON("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120})JSON";
+    const auto position = capture.find(settle);
+    REQUIRE(position != std::string::npos);
+    const std::string replacement = settle +
+        R"JSON(,"interactions":{"schema":"pulp-browser-interactions-v1","version":1,"report":")JSON" +
+        std::string(report_path) +
+        R"JSON(","report_sha256":")JSON" + std::string(report_hash) +
+        R"JSON(","plan_sha256":")JSON" + std::string(plan_hash) +
+        R"JSON(","action_count":)JSON" + std::to_string(action_count) + "}";
+    capture.replace(position, settle.size(), replacement);
+    return capture;
+}
+
 void write_valid_reports(const TempCapture& temp) {
     temp.write("semantic-report.json", R"JSON({
       "schema":"pulp-browser-semantics-v1",
@@ -165,6 +213,7 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
          .source_file = "/source/editor.html"});
 
     REQUIRE(result);
+    REQUIRE_FALSE(result.interaction_report);
     REQUIRE(result.reference_png == fs::weakly_canonical(temp.root / "browser.png"));
     REQUIRE(result.design_ir->capture_method == "chromium-cdp");
     REQUIRE(result.design_ir->settle_rounds == 4);
@@ -189,6 +238,116 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
             "pulp-capture:///capture.json");
     REQUIRE(result.design_ir->root.attributes.at("browser_semantic_report") ==
             "pulp-capture:///semantic-report.json");
+}
+
+TEST_CASE("browser interaction evidence is contained parsed and integrity-bound",
+          "[import-design][browser-capture][ir][interactions][security]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto report = interaction_report();
+    temp.write("browser.png", png);
+    temp.write("interaction-report.json", report);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_interaction_provenance(
+        envelope("browser.png", pulp::runtime::sha256_hex(png)),
+        pulp::runtime::sha256_hex(report)));
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.require_interaction_report = true;
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", options);
+
+    REQUIRE(result);
+    REQUIRE(result.interaction_report);
+    CHECK(*result.interaction_report ==
+          fs::weakly_canonical(temp.root / "interaction-report.json"));
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_report") ==
+          "pulp-capture:///interaction-report.json");
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_report_sha256") ==
+          pulp::runtime::sha256_hex(report));
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_plan_sha256") ==
+          kInteractionPlanHash);
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_action_count") == "2");
+}
+
+TEST_CASE("browser interaction lowering fails closed on missing or unsafe evidence",
+          "[import-design][browser-capture][ir][interactions][security]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto report = interaction_report();
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.require_interaction_report = true;
+
+    SECTION("requested interactions require provenance") {
+        temp.write("capture.json", envelope(
+            "browser.png", pulp::runtime::sha256_hex(png)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("omitted interaction provenance") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report cannot escape the capture directory") {
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(report), "../interaction-report.json"));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("escapes the capture directory") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report bytes must match provenance") {
+        temp.write("interaction-report.json", report + " ");
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(report)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("report hash does not match") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report must parse") {
+        const std::string malformed = "{not-json";
+        temp.write("interaction-report.json", malformed);
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(malformed)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("invalid browser interaction JSON") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction plan identity must match the report") {
+        const auto mismatched_report = interaction_report(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        temp.write("interaction-report.json", mismatched_report);
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(mismatched_report)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("does not match capture provenance") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("browser capture lowering rejects sidecars outside the capture directory",

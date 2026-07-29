@@ -163,6 +163,7 @@ struct CaptureArtifacts {
     fs::path semantic_report;
     fs::path token_report;
     fs::path dom_snapshot;
+    std::optional<fs::path> interaction_report;
 };
 
 struct CaptureResult {

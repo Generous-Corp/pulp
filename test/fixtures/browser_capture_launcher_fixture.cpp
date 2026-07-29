@@ -116,7 +116,9 @@ int main(int argc, char** argv) {
                        R"({"documents":[]})")) {
         return 70;
     }
-    if (has_interactions
+    if (has_interactions &&
+        capture_script.filename().string().find("omit-interaction")
+            == std::string::npos
         && !write_file(
             output / "interaction-report.json",
             R"({"schema":"pulp-browser-interactions-v1","version":1,"action_count":1})")) {
