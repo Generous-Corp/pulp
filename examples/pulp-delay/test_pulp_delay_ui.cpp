@@ -5,7 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/view/window_host.hpp>
@@ -283,8 +283,6 @@ TEST_CASE("Pulp Delay Stereo Field exposes only the active timing branch",
         store.set_value(kSync, branch.sync ? 1.0f : 0.0f);
         store.set_value(kLink, branch.link ? 1.0f : 0.0f);
         store.set_value(kOffsetMode, static_cast<float>(branch.offset_mode));
-        editor.sync_from_store();
-
         for (const auto id : conditional) {
             const bool expected =
                 std::find(branch.active.begin(),
@@ -330,8 +328,6 @@ TEST_CASE("Pulp Delay Ping Pong suppresses overridden right and crossfeed contro
         store.set_value(kLink, sync ? 0.0f : 1.0f);
         store.set_value(kOffsetMode, static_cast<float>(
                                          sync ? OffsetMode::milliseconds : OffsetMode::ratio));
-        editor.sync_from_store();
-
         REQUIRE(control_view(editor, kDivision).visible() == sync);
         REQUIRE(control_view(editor, kTime).enabled() == !sync);
         for (const auto id : {kLink, kTimeRight, kOffsetMode, kDivisionRight,
@@ -410,7 +406,7 @@ TEST_CASE("Pulp Delay static editor becomes idle and external state repaints onc
     REQUIRE(host.repaint_count == 0);
 }
 
-TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore",
+TEST_CASE("Pulp Delay idle pump reconciles listener-silent preset restore",
           "[pulp-delay][ui][repaint][restore]") {
     format::HeadlessHost plugin_host(create_pulp_delay);
     auto* processor = plugin_host.processor();
@@ -468,9 +464,6 @@ TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore
 
     auto pump = format::make_editor_idle_pump(bridge);
     pump();
-    REQUIRE(host.repaint_count == 1);
-
-    editor->paint_all(canvas);
     REQUIRE_THAT(feedback->value(), WithinAbs(0.75, 1.0e-6));
     REQUIRE(control_view(*editor, kCharacter).access_value() == "BBD");
     REQUIRE(freeze->is_on());
@@ -478,17 +471,22 @@ TEST_CASE("Pulp Delay production paint reconciles listener-silent preset restore
     REQUIRE(editor->crossfeed_override_visible());
     REQUIRE(editor->crossfeed_override_text() == "100% · PING PONG");
     REQUIRE(host.repaint_count > 0);
-    REQUIRE(store_callbacks == 0);
+    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
     REQUIRE(gesture_begins == 0);
     REQUIRE(gesture_ends == 0);
     REQUIRE(store.open_gesture_count() == 0);
     REQUIRE(store.serialize() == preset);
 
+    const int restore_repaint_count = host.repaint_count;
+    pump();
+    REQUIRE(host.repaint_count == restore_repaint_count);
+    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
+
     host.repaint_count = 0;
     canvas.clear();
     editor->paint_all(canvas);
     REQUIRE(host.repaint_count == 0);
-    REQUIRE(store_callbacks == 0);
+    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
     REQUIRE(gesture_begins == 0);
     REQUIRE(gesture_ends == 0);
     REQUIRE(store.open_gesture_count() == 0);
@@ -526,8 +524,7 @@ TEST_CASE("Pulp Delay controls follow host automation and preset restore",
     const auto preset = store.serialize();
     store.reset_all_to_defaults();
     REQUIRE(store.deserialize(preset));
-    store.pump_listeners();
-    editor.sync_from_store();
+    REQUIRE(store.reconcile_main_listeners() > 0);
 
     for (state::ParamID id = kTime; id <= kReverse; ++id) {
         INFO("parameter id " << id);

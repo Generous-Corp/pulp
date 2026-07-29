@@ -19,6 +19,7 @@
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>

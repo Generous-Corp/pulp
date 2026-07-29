@@ -323,11 +323,6 @@ std::size_t PulpDelayEditor::bound_parameter_count() const noexcept {
 }
 
 void PulpDelayEditor::paint(canvas::Canvas& c) {
-    // StateStore::deserialize intentionally restores atomics without
-    // dispatching listeners. Reconcile at the production frame boundary so
-    // preset/session recall is visible in this paint. Reconciliation is
-    // change-gated, so unchanged frames stay idle.
-    sync_from_store();
     const auto b = local_bounds();
     c.set_fill_color(color::background);
     c.fill_rect(0, 0, b.width, b.height);
@@ -337,15 +332,6 @@ void PulpDelayEditor::paint(canvas::Canvas& c) {
         c.stroke_line(x, 65.0f, x, b.height);
     for (float y = 65.0f; y < b.height; y += 28.0f)
         c.stroke_line(0.0f, y, b.width, y);
-}
-
-void PulpDelayEditor::sync_from_store() {
-    for (auto* control : controls_) {
-        if (!control)
-            continue;
-        control->sync_from_store(*store_);
-    }
-    update_timing_presentation();
 }
 
 float PulpDelayEditor::control_state_level(state::ParamID id) const noexcept {

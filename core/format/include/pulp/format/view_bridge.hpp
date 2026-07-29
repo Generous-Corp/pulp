@@ -283,8 +283,9 @@ public:
 
 private:
     /// Consume a successful StateStore deserialize edge on the editor's
-    /// main-thread idle tick. Returns true once per edge while the bridge is
-    /// open; the caller schedules the repaint.
+    /// main-thread idle tick, reconciling Main listeners with the restored
+    /// parameter snapshot. Returns true once per edge while the bridge is open;
+    /// the caller schedules the repaint.
     bool poll_state_restore();
 
     /// Pump every owner-backed host-to-UI path while the adapter owner is

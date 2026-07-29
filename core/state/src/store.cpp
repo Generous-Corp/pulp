@@ -140,16 +140,17 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
 
     // Re-look-up + invoke at dispatch time so a token reset between
     // EventLoop enqueue and drain cancels the queued call.
-    void invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
+    bool invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
         auto snap = load_snapshot();
-        if (!snap) return;
+        if (!snap) return false;
         for (const auto& entry : *snap) {
             if (entry.id == entry_id) {
                 if (entry.callback) entry.callback(param_id, value);
-                return;
+                return static_cast<bool>(entry.callback);
             }
         }
         // Entry was removed between dispatch and drain — drop the call.
+        return false;
     }
 
     void notify(ParamID param_id, float value) {
@@ -259,6 +260,33 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
             }
         }
         return drained;
+    }
+
+    std::size_t reconcile_main_listeners(std::span<const ParamInfo> params) {
+        const auto snap = load_snapshot();
+        if (!snap || snap->empty()) return 0;
+
+        std::vector<std::uint64_t> listener_ids;
+        listener_ids.reserve(snap->size());
+        for (const auto& entry : *snap) {
+            if (entry.callback && entry.thread == ListenerThread::Main)
+                listener_ids.push_back(entry.id);
+        }
+
+        std::size_t invoked = 0;
+        for (const auto& param : params) {
+            const auto current =
+                value_getter ? value_getter(param.id) : std::nullopt;
+            if (!current) continue;
+            for (const auto listener_id : listener_ids) {
+                // Re-resolve by ID for every call. A callback may reset its
+                // own token or another listener's token, replacing the CoW
+                // snapshot while this reconciliation is in progress.
+                if (invoke_if_present(listener_id, param.id, *current))
+                    ++invoked;
+            }
+        }
+        return invoked;
     }
 
     RtListenerQueueTelemetry rt_queue_telemetry() const {
@@ -432,6 +460,11 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
 std::size_t StateStore::pump_listeners() {
     if (!registry_) return 0;
     return registry_->drain_main_listeners();
+}
+
+std::size_t StateStore::reconcile_main_listeners() {
+    if (!registry_) return 0;
+    return registry_->reconcile_main_listeners(params_);
 }
 
 RtListenerQueueTelemetry StateStore::rt_listener_queue_telemetry() const {

@@ -343,6 +343,20 @@ public:
     /// @return Number of changes drained from the queue.
     std::size_t pump_listeners();
 
+    /// Reconcile every Main listener with the current parameter snapshot.
+    ///
+    /// State restore writes parameter atomics without invoking listeners
+    /// because the host may deserialize on a non-UI thread. ViewBridge calls
+    /// this once from its main-thread idle tick after observing a successful
+    /// deserialize edge. Audio listeners are never invoked.
+    ///
+    /// Listener additions and removals during callbacks are safe. A listener
+    /// removed before its turn is skipped, and a listener added during this
+    /// pass participates only in the next reconciliation.
+    ///
+    /// @return Number of Main-listener callbacks invoked.
+    std::size_t reconcile_main_listeners();
+
     /// Latest telemetry for the RT-to-main listener queue used by
     /// @c set_value_rt() / @c pump_listeners().
     RtListenerQueueTelemetry rt_listener_queue_telemetry() const;

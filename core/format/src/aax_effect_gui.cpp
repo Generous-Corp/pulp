@@ -14,6 +14,7 @@
 #include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_model.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>

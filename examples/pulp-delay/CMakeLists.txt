@@ -1,14 +1,22 @@
+set(PULP_DELAY_UI_SOURCES
+    pulp_delay_controls.cpp
+    pulp_delay_editor.cpp
+)
+
+set(PULP_DELAY_PLUGIN_SOURCES
+    delay_params.cpp
+    delay_time_model.cpp
+    character_engine_bank.cpp
+    pulp_delay.cpp
+    ${PULP_DELAY_UI_SOURCES}
+    pulp_delay_view.cpp
+)
+
 if(PULP_BUILD_TESTS)
     add_executable(pulp-delay-test
         test_pulp_delay.cpp
         test_pulp_delay_ui.cpp
-        delay_params.cpp
-        delay_time_model.cpp
-        character_engine_bank.cpp
-        pulp_delay.cpp
-        pulp_delay_controls.cpp
-        pulp_delay_editor.cpp
-        pulp_delay_view.cpp
+        ${PULP_DELAY_PLUGIN_SOURCES}
     )
     target_link_libraries(pulp-delay-test PRIVATE
         pulp::audio-analysis pulp::format pulp::signal pulp::view Catch2::Catch2WithMain)
@@ -19,8 +27,7 @@ if(PULP_BUILD_TESTS)
         pulp_delay_shots.cpp
         delay_params.cpp
         delay_time_model.cpp
-        pulp_delay_controls.cpp
-        pulp_delay_editor.cpp
+        ${PULP_DELAY_UI_SOURCES}
     )
     target_link_libraries(pulp-delay-ui-shots PRIVATE pulp::view)
     target_include_directories(pulp-delay-ui-shots PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -43,13 +50,7 @@ pulp_add_plugin(PulpDelay
     DESIGN_WIDTH        1120
     DESIGN_HEIGHT       740
     SOURCES
-        delay_params.cpp
-        delay_time_model.cpp
-        character_engine_bank.cpp
-        pulp_delay.cpp
-        pulp_delay_controls.cpp
-        pulp_delay_editor.cpp
-        pulp_delay_view.cpp
+        ${PULP_DELAY_PLUGIN_SOURCES}
 )
 
 if(TARGET PulpDelay_Core)
