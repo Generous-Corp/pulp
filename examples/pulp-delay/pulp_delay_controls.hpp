@@ -74,12 +74,17 @@ class DelayTapField final : public DelayFader {
   public:
     DelayTapField(state::StateStore& store,
                   state::ParamID time_id,
-                  state::ParamID feedback_id);
+                  state::ParamID feedback_id,
+                  state::ParamID sync_id,
+                  state::ParamID division_id);
 
+    std::string timing_display_text() const;
     void paint(canvas::Canvas& canvas) override;
 
   private:
     state::ParamID feedback_id_ = 0;
+    state::ParamID sync_id_ = 0;
+    state::ParamID division_id_ = 0;
     state::ListenerToken feedback_listener_;
 };
 

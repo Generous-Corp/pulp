@@ -91,17 +91,23 @@ TEST_CASE("Delay time model maps every authored division at 120 BPM", "[pulp-del
 TEST_CASE("Delay time model selects exactly one right-time policy", "[pulp-delay][timing]") {
     DelayTimeInputs inputs;
 
+    REQUIRE(DelayTimeModel::right_timing_branch(inputs)
+            == RightTimingBranch::linked_ratio);
     auto linked_ratio = DelayTimeModel::derive(inputs);
     REQUIRE(linked_ratio.right_uses_ratio);
     REQUIRE_THAT(linked_ratio.left_ms, WithinAbs(380.0, 0.01));
     REQUIRE_THAT(linked_ratio.right_ms, WithinAbs(425.6, 0.01));
 
     inputs.offset_mode = OffsetMode::milliseconds;
+    REQUIRE(DelayTimeModel::right_timing_branch(inputs)
+            == RightTimingBranch::linked_offset_ms);
     auto linked_ms = DelayTimeModel::derive(inputs);
     REQUIRE_FALSE(linked_ms.right_uses_ratio);
     REQUIRE_THAT(linked_ms.right_ms, WithinAbs(394.0, 0.01));
 
     inputs.link = false;
+    REQUIRE(DelayTimeModel::right_timing_branch(inputs)
+            == RightTimingBranch::free_independent);
     auto split_free = DelayTimeModel::derive(inputs);
     REQUIRE_FALSE(split_free.right_uses_ratio);
     REQUIRE_THAT(split_free.right_ms, WithinAbs(620.0, 0.01));
@@ -110,11 +116,15 @@ TEST_CASE("Delay time model selects exactly one right-time policy", "[pulp-delay
     inputs.division = 4;
     inputs.division_right = 6;
     inputs.tempo_bpm = 120.0;
+    REQUIRE(DelayTimeModel::right_timing_branch(inputs)
+            == RightTimingBranch::synced_independent);
     auto split_sync = DelayTimeModel::derive(inputs);
     REQUIRE_THAT(split_sync.left_ms, WithinAbs(250.0, 0.01));
     REQUIRE_THAT(split_sync.right_ms, WithinAbs(333.333, 0.01));
 
     inputs.routing = Routing::ping_pong;
+    REQUIRE(DelayTimeModel::right_timing_branch(inputs)
+            == RightTimingBranch::ping_pong);
     auto ping_pong = DelayTimeModel::derive(inputs);
     REQUIRE(ping_pong.right_uses_ratio);
     REQUIRE_THAT(ping_pong.right_ratio, WithinAbs(1.0, 0.001));

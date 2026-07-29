@@ -25,12 +25,21 @@ struct EffectiveDelayTimes {
     float right_ratio = 1.12f;
 };
 
+enum class RightTimingBranch {
+    ping_pong,
+    linked_ratio,
+    linked_offset_ms,
+    synced_independent,
+    free_independent,
+};
+
 class DelayTimeModel {
   public:
     static constexpr double kFallbackTempoBpm = 120.0;
 
     static double division_beats(int index) noexcept;
     static float synced_time_ms(int index, double tempo_bpm) noexcept;
+    static RightTimingBranch right_timing_branch(const DelayTimeInputs& inputs) noexcept;
     static EffectiveDelayTimes derive(const DelayTimeInputs& inputs) noexcept;
 };
 
