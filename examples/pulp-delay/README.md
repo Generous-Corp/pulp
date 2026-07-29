@@ -27,7 +27,8 @@ Continuous controls use Pulp's gesture-aware two-way parameter bindings.
 Segmented controls emit one-shot host gestures and hold scoped main-thread
 listeners. Host automation updates are marshalled through the StateStore.
 Because preset/session deserialization deliberately restores state without
-listeners, the production paint boundary reconciles every control before
+listeners, the shared editor idle pump consumes the restore edge and schedules
+one frame. The production paint boundary then reconciles every control before
 drawing. Reconciliation uses silent, change-gated setters: a real restore can
 schedule one coalesced follow-up frame, while unchanged paints remain idle.
 

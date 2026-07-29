@@ -180,11 +180,10 @@ TEST_CASE("an open display-link driver refuses to replace its own handle",
 TEST_CASE("the CPU plugin-view host drives frames for a NATIVE editor too",
           "[view][mac][frame-pump][plugin-view]") {
     // MacPluginViewHost::update_render_link() used to start its CVDisplayLink
-    // only when a scripted idle callback was installed. The only callers of
-    // PluginViewHost::set_idle_callback are make_scripted_idle_pump (clap_entry,
-    // vst3_plug_view, au_v2_cocoa_view, au_view_controller_mac) — all guarded on
-    // a JS bridge. So a native C++ editor in a CPU host got NO frame source: no
-    // FrameClock tick, no widget or CSS animation, no caret blink. Being in a
+    // only when an idle callback was installed. Before make_editor_idle_pump
+    // became the shared native/scripted editor callback, a native C++ editor in
+    // a CPU host got NO frame source: no FrameClock tick, no widget or CSS
+    // animation, no caret blink. Being in a
     // window is the whole condition; an idle callback is one more thing to pump,
     // not the reason to pump.
     REQUIRE(plugin_view_wants_render_link(/*has_view=*/true, /*in_window=*/true));

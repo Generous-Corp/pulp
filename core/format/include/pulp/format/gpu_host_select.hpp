@@ -95,12 +95,12 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
 }
 
 /// Build the per-vsync idle pump for a bridge. GPU hosts invoke it once per
-/// display-link tick so the scripted UI session keeps polling async results,
-/// timers, and `requestAnimationFrame` while the editor is embedded. Captures
-/// the bridge by pointer; the host MUST drop this callback (via `detach()` /
+/// display-link tick to drain host automation, consume restore/reload edges,
+/// and poll scripted UI work while the editor is embedded. Captures the bridge
+/// by pointer; the host MUST drop this callback (via `detach()` /
 /// destruction) before the bridge is destroyed — every adapter resets its
 /// host before `bridge.close()`.
-inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
+inline std::function<void()> make_editor_idle_pump(ViewBridge& bridge) {
     auto* bridge_ptr = &bridge;
     // Copy the bridge's liveness token. This pump is dispatched to the main
     // queue by the GPU display link and can outlive the bridge (host view
@@ -119,6 +119,13 @@ inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
         // adapter writes the store from the audio thread, this propagates it
         // to the editor. Cheap when the queue is empty.
         bridge_ptr->pump_store_listeners();
+        // A host state restore deliberately bypasses listeners because the
+        // restore thread is not guaranteed to be the UI thread. Consume its
+        // atomic revision here, on the editor's main-thread tick, and schedule
+        // one frame so native controls can reconcile before drawing.
+        if (bridge_ptr->poll_state_restore()) {
+            if (auto* v = bridge_ptr->view()) v->request_repaint();
+        }
         // Live editor reload (1.9): when the processor's logic hot-swaps
         // (ReloadableShell), rebuild the OPEN editor in place and request a
         // repaint, so the DAW shows the new UI live without re-instantiating the
@@ -130,6 +137,12 @@ inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
             session->poll();
         }
     };
+}
+
+/// Compatibility spelling retained for downstream adapter code.
+[[deprecated("Use make_editor_idle_pump()")]]
+inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
+    return make_editor_idle_pump(bridge);
 }
 
 /// Scream-guard (runtime): after the host is created, verify the GPU path

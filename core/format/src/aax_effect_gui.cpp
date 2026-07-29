@@ -133,8 +133,8 @@ private:
         }
         warn_if_unexpected_cpu_fallback(gpu, host_.get());
 
-        // Pump the scripted UI session (async results, timers, rAF) per vsync.
-        host_->set_idle_callback(make_scripted_idle_pump(*bridge_));
+        // Run editor automation, restore/reload, and scripted work per vsync.
+        host_->set_idle_callback(make_editor_idle_pump(*bridge_));
 
         // Route navigator.gpu / canvas.getContext('webgpu') through the host's
         // live GpuSurface.

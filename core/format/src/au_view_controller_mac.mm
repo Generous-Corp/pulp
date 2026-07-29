@@ -367,7 +367,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         _viewHost = pulp::view::PluginViewHost::create(*_pendingRoot, opts);
         if (_viewHost) {
             pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
-            _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
+            _viewHost->set_idle_callback(pulp::format::make_editor_idle_pump(*_bridge));
             // Hand the host's live GpuSurface to the scripted-UI session so
             // JS navigator.gpu / canvas.getContext('webgpu') routes through
             // Pulp's Dawn instance instead of mocks.

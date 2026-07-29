@@ -418,8 +418,8 @@ in the `view-bridge` skill.
 
 `gui_create` calls
 `pulp::format::decide_gpu_host(*bridge)` so a Skia/Dawn/scripted editor
-auto-selects the GPU `PluginViewHost`, wires the per-vsync scripted idle pump
-(`make_scripted_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
+auto-selects the GPU `PluginViewHost`, wires the per-vsync editor idle pump
+(`make_editor_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
 on a silent CPU fallback. CLAP's `gui_set_size` already resizes the bridge +
 host, so no extra resize seam is needed (unlike AU v2). Full contract: the
 `view-bridge` skill's "GPU view host auto-selection" section.

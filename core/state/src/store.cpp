@@ -821,6 +821,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         }
     }
 
+    state_restore_revision_.fetch_add(1, std::memory_order_release);
     return true;
 }
 
