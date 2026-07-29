@@ -122,10 +122,23 @@ function icon(id, parent, name, size, color) {
     setFlex(id, "height", size);
     setFlex(id, "flex_grow", 0);
     setFlex(id, "flex_shrink", 0);
+    decorative(id);
+}
+
+
+/// Mark a control's contents as decoration.
+///
+/// hit_test() returns the DEEPEST view under the point, so a label or icon
+/// inside a button swallows the click and the button never sees it -- clicking
+/// the word "Build" would do nothing while clicking the padding beside it
+/// worked. Contents are decoration; only the control itself is a target.
+function decorative(id) {
+    setPointerEvents(id, "none");
 }
 
 function railIcon(id, glyph, active, marginTop) {
-    const b = createRow(id, "rail");
+    const b = createToggleButton(id, "rail");
+    setFlex(id, "flex_direction", "row");
     setBackground(id, active ? C.raised : C.rail);
     setCornerRadius(id, 12);
     setFlex(id, "width", 40);
@@ -252,7 +265,8 @@ setFlex("tabs", "flex_shrink", 0);
 setFlex("tabs", "margin_top", 34);
 
 function tab(id, glyph, title, sub, active) {
-    const t = createRow(id, "tabs");
+    const t = createToggleButton(id, "tabs");
+    setFlex(id, "flex_direction", "row");
     setBackground(id, active ? C.raised : C.panel);
     setBorder(id, active ? C.lineStrong : C.line, 1);
     setCornerRadius(id, 12);
@@ -312,7 +326,8 @@ setFlex("actions", "margin_top", 18);
 /// A composer button: glyph then label, because the render's buttons read as an
 /// icon and a word rather than as text alone.
 function button(id, parent, glyph, label, kind, width) {
-    const b = createRow(id, parent);
+    const b = createToggleButton(id, parent);
+    setFlex(id, "flex_direction", "row");
     setBackground(id, kind === "primary" ? C.accent : C.panel);
     setBorder(id, kind === "primary" ? C.accent : C.line, 1);
     setCornerRadius(id, 11);
@@ -338,6 +353,7 @@ function button(id, parent, glyph, label, kind, width) {
     setFontWeight(id + "-label", 600);
     setTextColor(id + "-label", kind === "primary" ? C.onAccent : C.text);
     setFlex(id + "-label", "margin_left", 9);
+    decorative(id + "-label");
     return b;
 }
 

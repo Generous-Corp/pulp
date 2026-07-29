@@ -129,6 +129,18 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
         endif()
     endforeach()
 
+    # The interaction harness. It lives with the example rather than in
+    # test/cmake/ because it drives this example's own shell, and it is
+    # registered at all because the two test files already sitting in
+    # test/ were never wired to anything -- an unregistered test is a
+    # file, not a check.
+    if(PULP_BUILD_TESTS AND TARGET ForgeModularApp_Core)
+        pulp_add_test_suite(pulp-test-forge-modular-shell
+            SOURCES    "${_fm_dir}/test/shell_interaction.cpp"
+            LIBRARIES  ForgeModularApp_Core pulp::state pulp::view pulp::format
+            LABELS     "forge-modular;interaction")
+    endif()
+
     # A bundle that only runs on the machine that built it is worse than one
     # that fails to build, because the failure surfaces at someone else's desk.
     if(COMMAND pulp_make_bundle_relocatable)
