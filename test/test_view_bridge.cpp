@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
-#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
@@ -11,6 +11,7 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -126,6 +127,25 @@ public:
         last_w = w;
         last_h = h;
     }
+};
+
+class BoundControlsView final : public view::View {
+public:
+    explicit BoundControlsView(state::StateStore& store) {
+        auto knob = std::make_unique<view::Knob>();
+        knob_ = knob.get();
+        bindings_.push_back(view::bind_parameter(*knob_, store, 1));
+        add_child(std::move(knob));
+
+        auto fader = std::make_unique<view::Fader>();
+        fader_ = fader.get();
+        bindings_.push_back(view::bind_parameter(*fader_, store, 1));
+        add_child(std::move(fader));
+    }
+
+    view::Knob* knob_ = nullptr;
+    view::Fader* fader_ = nullptr;
+    std::vector<view::ParameterBinding> bindings_;
 };
 
 class ScriptedCustomViewProcessor : public StubProcessor {
@@ -678,13 +698,16 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     REQUIRE(p.closed_count == 1);
 }
 
-TEST_CASE("ViewBridge idle pump schedules one frame for listener-silent restore",
+TEST_CASE("ViewBridge idle pump reconciles bound widgets after state restore",
           "[view_bridge][state-restore][repaint]") {
     StubProcessor processor;
     state::StateStore store;
     processor.set_state_store(&store);
     processor.define_parameters(store);
-    processor.custom_view = std::make_unique<view::View>();
+    auto controls = std::make_unique<BoundControlsView>(store);
+    auto* knob = controls->knob_;
+    auto* fader = controls->fader_;
+    processor.custom_view = std::move(controls);
 
     format::ViewBridge bridge(processor, store);
     REQUIRE(bridge.open());
@@ -696,6 +719,8 @@ TEST_CASE("ViewBridge idle pump schedules one frame for listener-silent restore"
     const auto preset =
         format::plugin_state_io::serialize(store, processor);
     store.set_value(1, 6.0f);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
     const auto revision = store.state_restore_revision();
     host.repaint_count = 0;
 
@@ -703,12 +728,34 @@ TEST_CASE("ViewBridge idle pump schedules one frame for listener-silent restore"
         preset, store, processor));
     REQUIRE(store.state_restore_revision() == revision + 1);
     REQUIRE(host.repaint_count == 0);
+    REQUIRE(knob->value() != Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() != Catch::Approx(store.get_normalized(1)));
+
+    int audio_callbacks = 0;
+    auto audio_listener = store.add_audio_listener(
+        [&audio_callbacks](state::ParamID, float) { ++audio_callbacks; });
+
+    state::ListenerToken removed_listener;
+    int removed_callbacks = 0;
+    auto removing_listener = store.add_listener(
+        [&removed_listener](state::ParamID, float) {
+            removed_listener.reset();
+        },
+        state::ListenerThread::Main);
+    removed_listener = store.add_listener(
+        [&removed_callbacks](state::ParamID, float) { ++removed_callbacks; },
+        state::ListenerThread::Main);
 
     auto pump = format::make_editor_idle_pump(bridge);
     pump();
-    REQUIRE(host.repaint_count == 1);
+    REQUIRE(host.repaint_count > 0);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(audio_callbacks == 0);
+    REQUIRE(removed_callbacks == 0);
+    const auto repaint_count = host.repaint_count;
     pump();
-    REQUIRE(host.repaint_count == 1);
+    REQUIRE(host.repaint_count == repaint_count);
 }
 
 TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",

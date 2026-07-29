@@ -20,7 +20,6 @@ class DelayParameterControl {
     virtual ~DelayParameterControl() = default;
     virtual state::ParamID parameter_id() const noexcept = 0;
     virtual float normalized_value() const noexcept = 0;
-    virtual void sync_from_store(state::StateStore& store) = 0;
 };
 
 class DelayKnob final : public view::Knob, public DelayParameterControl {
@@ -37,7 +36,6 @@ class DelayKnob final : public view::Knob, public DelayParameterControl {
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return value(); }
-    void sync_from_store(state::StateStore& store) override;
     float pointer_angle() const noexcept;
     DialGeometry dial_geometry() const noexcept;
     std::string display_text() const;
@@ -59,7 +57,6 @@ class DelayFader : public view::Fader, public DelayParameterControl {
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return value(); }
-    void sync_from_store(state::StateStore& store) override;
     std::string display_text() const;
 
     void paint(canvas::Canvas& canvas) override;
@@ -103,7 +100,6 @@ class DelayChoice final : public view::View, public DelayParameterControl {
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override;
-    void sync_from_store(state::StateStore& store) override;
     int selected_index() const noexcept;
 
     void paint(canvas::Canvas& canvas) override;
@@ -138,7 +134,6 @@ class DelayActionCard final : public view::ToggleButton,
 
     state::ParamID parameter_id() const noexcept override { return id_; }
     float normalized_value() const noexcept override { return is_on() ? 1.0f : 0.0f; }
-    void sync_from_store(state::StateStore& store) override;
 
     void paint(canvas::Canvas& canvas) override;
     void on_focus_changed(bool gained) override;

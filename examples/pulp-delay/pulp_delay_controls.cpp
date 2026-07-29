@@ -96,10 +96,6 @@ DelayKnob::DialGeometry DelayKnob::dial_geometry() const noexcept {
     };
 }
 
-void DelayKnob::sync_from_store(state::StateStore& store) {
-    set_value(store.get_normalized(id_));
-}
-
 std::string DelayKnob::display_text() const {
     return store_ ? format_parameter_value(*store_, id_, value()) : std::string{};
 }
@@ -180,10 +176,6 @@ DelayFader::DelayFader(state::StateStore& store,
 
 std::string DelayFader::display_text() const {
     return store_ ? format_parameter_value(*store_, id_, value()) : std::string{};
-}
-
-void DelayFader::sync_from_store(state::StateStore& store) {
-    set_value(store.get_normalized(id_));
 }
 
 void DelayFader::paint(canvas::Canvas& c) {
@@ -358,11 +350,6 @@ float DelayChoice::normalized_value() const noexcept {
     return store_->get_normalized(id_);
 }
 
-void DelayChoice::sync_from_store(state::StateStore&) {
-    if (sync_access_value())
-        request_repaint();
-}
-
 int DelayChoice::selected_index() const noexcept {
     const auto* info = store_->info(id_);
     if (!info || labels_.empty())
@@ -503,10 +490,6 @@ DelayActionCard::DelayActionCard(const CharacterPalette& palette,
       warning_(warning) {
     set_id("delay-param-" + std::to_string(id_));
     set_label(caption_);
-}
-
-void DelayActionCard::sync_from_store(state::StateStore& store) {
-    set_on(store.get_value(id_) >= 0.5f);
 }
 
 void DelayActionCard::paint(canvas::Canvas& c) {

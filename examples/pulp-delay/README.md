@@ -27,10 +27,11 @@ Continuous controls use Pulp's gesture-aware two-way parameter bindings.
 Segmented controls emit one-shot host gestures and hold scoped main-thread
 listeners. Host automation updates are marshalled through the StateStore.
 Because preset/session deserialization deliberately restores state without
-listeners, the shared editor idle pump consumes the restore edge and schedules
-one frame. The production paint boundary then reconciles every control before
-drawing. Reconciliation uses silent, change-gated setters: a real restore can
-schedule one coalesced follow-up frame, while unchanged paints remain idle.
+listeners, the shared editor idle pump consumes the restore edge on the UI
+thread and reconciles every main-thread parameter listener from the canonical
+StateStore snapshot. The same ordinary two-way bindings therefore cover user
+edits, host automation and preset restore; the editor has no paint-time restore
+protocol.
 
 The knob renderer always uses the authored dark body. Its inactive 270-degree
 track, character-coloured active arc, pointer and display text all derive from

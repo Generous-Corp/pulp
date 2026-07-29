@@ -18,6 +18,7 @@
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_version.hpp>
 #include <pulp/format/processor.hpp>

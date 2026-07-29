@@ -6,6 +6,7 @@
 
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/text_editor.hpp>

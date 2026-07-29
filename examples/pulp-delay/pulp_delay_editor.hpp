@@ -31,7 +31,6 @@ class PulpDelayEditor final : public view::View {
     bool crossfeed_override_visible() const noexcept;
     std::string crossfeed_override_text() const;
     std::string left_time_display_text() const;
-    void sync_from_store();
 
     void paint(canvas::Canvas& canvas) override;
     void layout_children() override {}
