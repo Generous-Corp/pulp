@@ -455,6 +455,8 @@ target_sources(pulp-view-core PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/native_view_host.cpp
+    src/gpu_surface_observer.cpp
+    src/plugin_frame_renderer.cpp
     src/design_frame_view.cpp
     src/design_param_binding.cpp
     src/svg_fragment.cpp

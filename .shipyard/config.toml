@@ -236,9 +236,21 @@ backend  = "local"
 platform = "macos-arm64"
 workflow = "build"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
-# git history for context. Kept at 1h because clean local builds still
-# run long on cold caches.
-timeout_secs = 3600
+# git history for context.
+#
+# 2026-07-27: raised 3600 -> 7200. One hour no longer covers a clean local
+# build on a loaded machine, and the failure mode is indistinguishable from a
+# broken PR: the lane is killed mid-build and reports `Validation timed out`
+# with no per-target diagnostics, so a perfectly good branch looks red.
+# Measured on this Mac with four agent sessions active: a change touching
+# core/view broadly ran 62 min and was killed at 98% with ZERO compile errors;
+# another ran 113 min and died at 67%. A small change against a warm build dir
+# finished in 41 min and passed — which is why this presents as flakiness
+# rather than as a ceiling everyone hits.
+#
+# Queue wait is NOT charged against this budget (the clock starts when the lane
+# starts), so 3600 was only ever bounding the build itself.
+timeout_secs = 7200
 
 # ── Cloud dispatch (manual only) ───────────────────────────────────────────
 # Namespace remains available only for explicit operator-dispatched cloud
