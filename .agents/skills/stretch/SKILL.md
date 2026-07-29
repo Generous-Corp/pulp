@@ -31,6 +31,9 @@ requires a finite, non-negative semitone bound whose derived ratio is finite.
 Preparation rejects any otherwise-valid bound whose synthesis hop, power-of-two
 ring, or backing-buffer product is not representable; never rely on a later
 float-to-int conversion or allocation failure to police capacity.
+Optional FFT overrides must satisfy the spectral engine's 256–16384 power-of-two
+window and `analysis_hop <= fft_size/2` invariants or preparation rejects them
+without changing prior state.
 `feed()` is all-or-nothing: on
 `backpressure`, drain `available_stretched()` with `read_stretched()` and retry
 the identical input block. Never advance a decoder on a rejected feed.

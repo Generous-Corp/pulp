@@ -13,11 +13,34 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <limits>
 #include <new>
 #include <vector>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("SpectralFrameEngine geometry validator catches 32-bit backing overflow",
+          "[signal][spectral-frame-engine][capacity]") {
+    SpectralFrameEngineConfig config;
+    config.fft_size = 1024;
+    config.analysis_hop = 256;
+    config.channels = 8;
+    config.max_block = 200'000'000;
+    config.max_synthesis_hop = 257; // ratio 1 plus the pitch/time hop guard sample
+
+    const auto wide = checked_spectral_frame_engine_geometry(
+        config, std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(wide.has_value());
+    REQUIRE(wide->ring_size == 536'870'912);
+    REQUIRE(wide->output_ring_elements == 4'294'967'296ULL);
+
+    constexpr std::uint64_t wasm32_max_elements =
+        std::numeric_limits<std::uint32_t>::max();
+    constexpr std::uint64_t outer_ring_elements = 8ULL * 268'435'456ULL;
+    STATIC_REQUIRE(outer_ring_elements <= wasm32_max_elements);
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry(config, wasm32_max_elements));
+}
 
 // ── allocation sentinel ─────────────────────────────────────────────────────
 // Replaces global operator new/delete for this test binary so realtime-path
