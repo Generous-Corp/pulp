@@ -32,6 +32,11 @@ tempo map but does not imply warp or time-stretch.
 Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
+When sequence lowering flattens a complete nested media clip, preserve its
+authored `TimeConform` value. Reject a nested source window that trims a
+`Resample` or `Stretch` clip with `NestedSequenceUnsupported`; advancing a raw
+source-frame offset is valid only for unconformed media and would corrupt the
+authored phase until playback owns a conform-aware source-range mapping.
 
 When host beat mapping intentionally makes musical material follow the host
 tempo, keep absolute clips, take-comp segments, and frozen artifacts on
