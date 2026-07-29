@@ -3,7 +3,7 @@
 
 modules:
   - name: playback
-    summary: Master transport immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
+    summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental
     dependencies: [runtime, timebase, timeline, audio, midi]
     docs: reference/modules.md#playback

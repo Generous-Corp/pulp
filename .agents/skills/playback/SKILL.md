@@ -207,6 +207,33 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   same as a loop wrap, so neither exceeds `max_messages_per_block`. Do not add a
   scrub branch to either; if the behavior needs to change, change what the
   transport publishes.
+- `TempoSyncSource` is the backend-neutral session-tempo boundary. Its only
+  virtual operation is the realtime `capture_audio_block()` mapping/command
+  exchange. Backend enablement, peer discovery, and start/stop-sync policy do
+  not belong on the interface; the desktop `AbletonLinkTempoSync` adapter owns
+  those Link-specific controls.
+- A configured `TempoSyncSource*` is non-owning and must outlive
+  `MasterTransport`. It switches callers to the host-time `begin_block`
+  overload. The timestamp names the first sample at the output boundary, so the
+  audio-device layer must add output latency before entering playback. A
+  missing host time, disabled backend, backend failure, or invalid mapping
+  fails closed and never advances on the document clock.
+- Joining an external tempo session is passive. `prepare()` does not broadcast
+  `initial_position` or `initially_playing`; only later explicit `seek()`,
+  `set_playing()`, or `set_tempo_sync_tempo()` calls become one-shot commands
+  on the next audio block. Applied generations advance only after a valid
+  capture, so a failed block retries the command rather than losing it.
+- Session-tempo projection still obeys the fixed one-or-two-range contract,
+  including one loop wrap and precise fractional host ticks. `begin_scrub()`
+  rejects an active sync source: scrubbing owns a private repeated-window clock
+  and cannot share authority with a network beat mapping. The audio-thread guard
+  rejects any impossible mixed state defensively as well.
+- Keep `tempo_sync.cpp` in `PulpPlaybackSources.cmake`, which mirrors it into
+  native, threadless, WAM, and WebCLAP builds. Keep SDK-backed adapters such as
+  `adapters/ableton_link.cpp` outside `core/playback/src/` and in a separate
+  non-installed target; the source-closure gate treats every `src/*.cpp` as
+  portable, so an SDK-backed translation unit there would be pulled toward the
+  wasm lanes.
 - A stopped block still emits one range covering all callback frames, but both
   musical clock intervals have zero duration.
 - The control thread is the sole writer of the complete desired-state `SeqLock`.

@@ -16,6 +16,7 @@ for its complete, authoritative guidance.
 | Skill | What it does |
 |-------|--------------|
 | `aax` | Optional AAX support for Pulp, including developer-supplied Avid SDK setup, CMake enablement, DigiShell/AAX Validator workflows, and local AAX builds on macOS or Windows. |
+| `ableton-link` | Configure, implement, and test Pulp's optional desktop Ableton Link tempo-sync adapter while preserving the developer-supplied SDK, licensing, realtime, latency-compensation, and no-install boundaries. |
 | `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
 | `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
 | `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
