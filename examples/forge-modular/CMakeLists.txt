@@ -68,6 +68,7 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
     pulp_add_plugin(ForgeModularApp
         FORMATS           Standalone AU VST3 CLAP
         SOURCES           "${_fm_app}/src/shell.cpp"
+                          "${_fm_app}/src/engine_client.cpp"
         PLUGIN_NAME       "Forge Modular"
         BUNDLE_ID         "com.generous.forgemodular"
         MANUFACTURER      "Generous"
@@ -107,6 +108,7 @@ if(FORGE_MODULAR_BUILD_APP AND COMMAND pulp_add_plugin)
         # rebuild; the packaged build embeds it and turns hot reload off.
         target_compile_definitions(ForgeModularApp_Core PUBLIC
             FORGE_MODULAR_UI_DIR="${_fm_app}/ui"
+            FORGE_MODULAR_TOOLS_DIR="${CMAKE_SOURCE_DIR}/tools/rack"
             FORGE_MODULAR_UI_HOT_RELOAD=$<IF:$<CONFIG:Debug>,true,false>)
     endif()
 

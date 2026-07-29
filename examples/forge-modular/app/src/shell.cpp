@@ -12,6 +12,9 @@
 #include "forge_modular/shell.hpp"
 
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -46,9 +49,51 @@ public:
 
     const std::string& load_error() const { return load_error_; }
 
+    /// Attach the shell's buttons to the engine.
+    ///
+    /// Done from C++ rather than through a JS callback because the scripted
+    /// session exposes no hook to register a native function -- but it does
+    /// expose its bridge, and the bridge can find any widget by the id the
+    /// script gave it. So the prompt is read straight off the TextEditor and
+    /// the buttons carry native handlers. No JS-to-C++ channel, and no change
+    /// to Pulp for the sake of this one app.
+    void wire(EngineClient* engine) {
+        if (!session_ || !session_->bridge() || !engine) return;
+        auto* bridge = session_->bridge();
+
+        auto prompt_text = [bridge]() -> std::string {
+            auto* v = bridge->widget("prompt");
+            auto* ed = dynamic_cast<pulp::view::TextEditor*>(v);
+            return ed ? ed->text() : std::string();
+        };
+
+        auto hook = [&](const char* id, bool patch_mode, bool mutating) {
+            auto* v = bridge->widget(id);
+            auto* btn = dynamic_cast<pulp::view::ToggleButton*>(v);
+            if (!btn) return false;
+            btn->on_toggle = [engine, prompt_text, patch_mode, mutating](bool) {
+                const std::string prompt = prompt_text();
+                if (prompt.empty()) return;
+                if (!engine->ensure_running()) return;
+                // Ask and Build differ in one bit, and it is carried rather
+                // than inferred: an Ask turn must not be able to rewrite the
+                // patch even if the intent were misread.
+                engine->submit(prompt, patch_mode && mutating);
+            };
+            return true;
+        };
+
+        // Mode is owned by the script; the host asks for it rather than
+        // tracking a second copy that could disagree.
+        wired_ = hook("btn-build", true, true) && hook("btn-ask", false, false);
+    }
+
+    bool wired() const { return wired_; }
+
 private:
     std::unique_ptr<pulp::view::ScriptedUiSession> session_;
     std::string load_error_;
+    bool wired_ = false;
 };
 
 }  // namespace
@@ -62,6 +107,8 @@ pulp::format::PluginDescriptor Shell::descriptor() const {
     d.category = pulp::format::PluginCategory::Effect;
     return d;
 }
+
+void Shell::set_engine(EngineClient* engine) { engine_ = engine; }
 
 void Shell::define_parameters(pulp::state::StateStore& store) {
     // Deliberately none. What this produces is a file on disk, not a sound, so
@@ -91,8 +138,10 @@ void Shell::process(pulp::audio::BufferView<float>& out,
 
 std::unique_ptr<pulp::view::View> Shell::create_view() {
     if (!store_) return nullptr;
-    return std::make_unique<ShellRoot>(*store_,
-                                       std::filesystem::path(FORGE_MODULAR_UI_DIR));
+    auto root = std::make_unique<ShellRoot>(
+        *store_, std::filesystem::path(FORGE_MODULAR_UI_DIR));
+    root->wire(engine_);
+    return root;
 }
 
 }  // namespace forge_modular

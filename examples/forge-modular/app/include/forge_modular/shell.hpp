@@ -12,8 +12,24 @@
 #include <pulp/view/view.hpp>
 
 #include <memory>
+#include <string>
 
 namespace forge_modular {
+
+/// Where the generation actually runs.
+///
+/// The shell never compiles anything itself: it hands a prompt to the helper
+/// and renders what comes back. That is what keeps a compiler out of a host's
+/// plugin sandbox and stops the engine existing in two places.
+class EngineClient {
+public:
+    virtual ~EngineClient() = default;
+    virtual bool available() const = 0;
+    /// Start the helper if it is not up. False means it could not be found at
+    /// all, which is a real failure -- unlike merely not running yet.
+    virtual bool ensure_running() = 0;
+    virtual void submit(const std::string& prompt, bool patch_mode) = 0;
+};
 
 class Shell : public pulp::format::Processor {
 public:
@@ -28,14 +44,28 @@ public:
 
     std::unique_ptr<pulp::view::View> create_view() override;
 
+    /// Set before the editor opens. Without one the shell still renders; the
+    /// buttons simply do nothing, which is the honest behaviour when there is
+    /// no engine to reach.
+    void set_engine(EngineClient* engine);
+
 private:
+    EngineClient* engine_ = nullptr;
     pulp::state::StateStore* store_ = nullptr;
     double sample_rate_ = 48000.0;
 };
 
+/// The engine this build was compiled to reach.
+std::unique_ptr<EngineClient> make_engine();
+
 /// The factory every format entry point calls.
 inline std::unique_ptr<pulp::format::Processor> create_shell() {
-    return std::make_unique<Shell>();
+    auto shell = std::make_unique<Shell>();
+    // The engine outlives the shell: a generation started from one editor
+    // should not die because that editor closed.
+    static auto engine = make_engine();
+    shell->set_engine(engine.get());
+    return shell;
 }
 
 }  // namespace forge_modular
