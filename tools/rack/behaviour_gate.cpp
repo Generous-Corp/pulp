@@ -172,10 +172,17 @@ int main() {
         rack::engine::Module* m = forge_make_module();
         reset_params(*m);
         const bool clocky = m->getNumInputs() > 0;
+        // A module with no outputs has nothing for a knob to change. Utility
+        // modules that only act on the host -- a scanner, a notes panel --
+        // are the real case, and measuring them here would fail every one of
+        // their controls for the wrong reason.
+        const bool measurable = m->getNumOutputs() > 0;
         auto base = run(*m, 2.5f, clocky);
         delete m;
+        if (!measurable)
+            std::printf("  --    no outputs; inert-control check does not apply\n");
 
-        for (int p = 0; p < 64; ++p) {
+        for (int p = 0; measurable && p < 64; ++p) {
             rack::engine::Module* probe = forge_make_module();
             if (p >= probe->getNumParams()) { delete probe; break; }
             reset_params(*probe);
