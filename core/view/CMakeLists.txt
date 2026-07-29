@@ -420,6 +420,7 @@ target_sources(pulp-view-core PRIVATE
     src/continuous_frames.cpp
     src/custom_shader_host.cpp
     src/host_param_surface.cpp
+    src/yoga_measurement_internal.cpp
     src/yoga_layout.cpp
     src/grid_layout.cpp
     src/layout_snapshot.cpp
