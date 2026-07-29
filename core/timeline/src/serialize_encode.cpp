@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
@@ -400,8 +401,21 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
 }
 
 bool write_clip(EncodeContext& context, const Clip& clip) {
-    return write_envelope(context, "pulp.timeline.clip", 1, [&] {
+    return write_envelope(context, detail::clip_schema_policy.type_name,
+                          detail::clip_schema_policy.current_version, [&] {
         const auto playback = clip.playback_properties();
+        std::string_view time_conform;
+        switch (clip.time_conform()) {
+            case TimeConform::None:
+                time_conform = "none";
+                break;
+            case TimeConform::Resample:
+                time_conform = "resample";
+                break;
+            case TimeConform::Stretch:
+                time_conform = "stretch";
+                break;
+        }
         if (!context.writer.append("{\"content\":") || !write_content(context, clip.content()) ||
             !context.writer.append(",\"fade_in_duration\":") ||
             !context.writer.u64(playback.fade_in_duration, true) ||
@@ -410,6 +424,8 @@ bool write_clip(EncodeContext& context, const Clip& clip) {
             !context.writer.append(",\"gain_linear_bits\":") ||
             !context.writer.u64(std::bit_cast<std::uint32_t>(playback.gain_linear), true) ||
             !context.writer.append(",\"id\":") || !context.writer.u64(clip.id().value, true) ||
+            !context.writer.append(",\"time_conform\":") ||
+            !context.writer.quoted(time_conform) ||
             !context.writer.append(",\"time_range\":"))
             return false;
         if (clip.time_anchor() == ClipTimeAnchor::Musical)

@@ -271,6 +271,26 @@ The cookbook provides the compile-backed
 [compile/publish/render](timeline-cookbook.md#compile-publish-and-render)
 recipes for that ownership flow.
 
+### Audio clip time-conform intent
+
+`Clip::time_conform()` records how authored media is intended to adapt when a
+musical clip's duration and its source-media duration differ:
+
+- `TimeConform::None` is the default and preserves the existing, unconformed
+  behavior.
+- `TimeConform::Resample` requests varispeed, coupling duration and pitch.
+- `TimeConform::Stretch` requests tempo-preserving time stretch.
+
+Pass the intent as the final argument to `Clip::create()` or
+`Clip::create_absolute()`, or derive a new immutable snapshot with
+`with_time_conform()`. Clip schema v2 persists the required values as `none`,
+`resample`, and `stretch`; v1 clips load as `None`, and release downgrade to v1
+refuses an authored non-default value rather than discarding it.
+
+This field is document intent only in the current playback stage. The compiler
+and renderers do not yet conform media from it, so setting `Resample` or
+`Stretch` does not change rendered audio until the playback integration lands.
+
 ### Reusing and diverging sequences
 
 A musical clip may contain `SequenceRef{sequence_id, source_start}` instead of

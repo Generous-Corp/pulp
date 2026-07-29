@@ -326,6 +326,7 @@ struct Clip::Data {
     ClipTimeRange range;
     ClipContent content;
     ClipPlaybackProperties playback;
+    TimeConform time_conform = TimeConform::None;
 };
 
 bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t duration) noexcept {
@@ -334,15 +335,28 @@ bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t du
     return playback.fade_in_duration <= duration && playback.fade_out_duration <= duration;
 }
 
+bool valid_time_conform(TimeConform time_conform) noexcept {
+    switch (time_conform) {
+        case TimeConform::None:
+        case TimeConform::Resample:
+        case TimeConform::Stretch:
+            return true;
+    }
+    return false;
+}
+
 runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition start,
                                                timebase::TickDuration duration, ClipContent content,
-                                               ClipPlaybackProperties playback) {
+                                               ClipPlaybackProperties playback,
+                                               TimeConform time_conform) {
     if (!id.valid())
         return fail<Clip>(ModelErrorCode::InvalidItemId, id);
     if (!positive_range(start.value, duration.value))
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
     if (!valid_playback_properties(playback, static_cast<std::uint64_t>(duration.value)))
         return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
+    if (!valid_time_conform(time_conform))
+        return fail<Clip>(ModelErrorCode::InvalidTimeConform, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
             static_cast<std::uint64_t>(media->source_start.value) >
@@ -357,14 +371,15 @@ runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition
             return fail<Clip>(ModelErrorCode::InvalidDuration, id, reference->sequence_id);
     }
     return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
-        Data{id, MusicalTimeRange{start, duration}, std::move(content), playback}))));
+        Data{id, MusicalTimeRange{start, duration}, std::move(content), playback, time_conform}))));
 }
 
 runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::SamplePosition start,
                                                         std::uint64_t sample_count,
                                                         timebase::RationalRate sample_rate,
                                                         ClipContent content,
-                                                        ClipPlaybackProperties playback) {
+                                                        ClipPlaybackProperties playback,
+                                                        TimeConform time_conform) {
     if (!id.valid())
         return fail<Clip>(ModelErrorCode::InvalidItemId, id);
     if (!sample_rate.valid())
@@ -376,6 +391,8 @@ runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::Sam
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
     if (!valid_playback_properties(playback, sample_count))
         return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
+    if (!valid_time_conform(time_conform))
+        return fail<Clip>(ModelErrorCode::InvalidTimeConform, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
             static_cast<std::uint64_t>(media->source_start.value) >
@@ -386,7 +403,7 @@ runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::Sam
         return fail<Clip>(ModelErrorCode::InvalidDuration, id, reference->sequence_id);
     return runtime::Result<Clip, ModelError>(runtime::Ok(Clip(std::make_shared<const Data>(
         Data{id, AbsoluteTimeRange{start, sample_count, sample_rate.normalized()},
-             std::move(content), playback}))));
+             std::move(content), playback, time_conform}))));
 }
 
 ItemId Clip::id() const noexcept {
@@ -431,28 +448,41 @@ const ClipContent& Clip::content() const noexcept {
 ClipPlaybackProperties Clip::playback_properties() const noexcept {
     return data_->playback;
 }
+TimeConform Clip::time_conform() const noexcept {
+    return data_->time_conform;
+}
 
 runtime::Result<Clip, ModelError> Clip::with_time_range(ClipTimeRange range) const {
     if (const auto* musical = std::get_if<MusicalTimeRange>(&range))
-        return create(id(), musical->start, musical->duration, content(), playback_properties());
+        return create(id(), musical->start, musical->duration, content(), playback_properties(),
+                      time_conform());
     const auto& absolute = std::get<AbsoluteTimeRange>(range);
     return create_absolute(id(), absolute.start, absolute.sample_count, absolute.sample_rate,
-                           content(), playback_properties());
+                           content(), playback_properties(), time_conform());
 }
 
 runtime::Result<Clip, ModelError> Clip::with_content(ClipContent replacement) const {
     if (time_anchor() == ClipTimeAnchor::Musical)
-        return create(id(), start(), duration(), std::move(replacement), playback_properties());
+        return create(id(), start(), duration(), std::move(replacement), playback_properties(),
+                      time_conform());
     return create_absolute(id(), absolute_start(), absolute_duration_samples(),
-                           absolute_sample_rate(), std::move(replacement), playback_properties());
+                           absolute_sample_rate(), std::move(replacement), playback_properties(),
+                           time_conform());
 }
 
 runtime::Result<Clip, ModelError>
 Clip::with_playback_properties(ClipPlaybackProperties playback) const {
     if (time_anchor() == ClipTimeAnchor::Musical)
-        return create(id(), start(), duration(), content(), playback);
+        return create(id(), start(), duration(), content(), playback, time_conform());
     return create_absolute(id(), absolute_start(), absolute_duration_samples(),
-                           absolute_sample_rate(), content(), playback);
+                           absolute_sample_rate(), content(), playback, time_conform());
+}
+
+runtime::Result<Clip, ModelError> Clip::with_time_conform(TimeConform time_conform) const {
+    if (time_anchor() == ClipTimeAnchor::Musical)
+        return create(id(), start(), duration(), content(), playback_properties(), time_conform);
+    return create_absolute(id(), absolute_start(), absolute_duration_samples(),
+                           absolute_sample_rate(), content(), playback_properties(), time_conform);
 }
 
 struct Project::Data {

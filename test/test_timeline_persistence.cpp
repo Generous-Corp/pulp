@@ -211,6 +211,89 @@ TEST_CASE("Timeline snapshots preserve clip gain and fades while old payloads de
         ClipPlaybackProperties{});
 }
 
+TEST_CASE("Timeline clips persist time-conform intent and legacy clips default to none") {
+    const auto registry = builtins();
+    const auto default_clip = take(Clip::create({5}, {0}, {100}, EmptyContent{}));
+    REQUIRE(default_clip.time_conform() == TimeConform::None);
+    const auto updated_clip = take(default_clip.with_time_conform(TimeConform::Resample));
+    REQUIRE(updated_clip.time_conform() == TimeConform::Resample);
+    REQUIRE(take(updated_clip.with_time_range(MusicalTimeRange{{10}, {90}})).time_conform() ==
+            TimeConform::Resample);
+    auto clip = take(Clip::create({4}, {0}, {100}, EmptyContent{}, {}, TimeConform::Stretch));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    auto project = take(Project::create(ProjectInput{{1}, "conform", 5, {2}, {}, {sequence}}));
+
+    const auto encoded = take(serialize_project(project, registry));
+    REQUIRE(encoded.json.find("\"time_conform\":\"stretch\"") != std::string::npos);
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.clip\",\"version\":2") !=
+            std::string::npos);
+    const auto decoded = take(deserialize_project(encoded.json, registry));
+    REQUIRE(decoded.find_sequence({2})->find_track({3})->find_clip({4})->time_conform() ==
+            TimeConform::Stretch);
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
+
+    auto legacy = encoded.json;
+    const std::string field = ",\"time_conform\":\"stretch\"";
+    const auto field_position = legacy.find(field);
+    REQUIRE(field_position != std::string::npos);
+    legacy.erase(field_position, field.size());
+    const std::string clip_version =
+        "\"type_name\":\"pulp.timeline.clip\",\"version\":2";
+    const auto version_position = legacy.find(clip_version);
+    REQUIRE(version_position != std::string::npos);
+    legacy.replace(version_position, clip_version.size(),
+                   "\"type_name\":\"pulp.timeline.clip\",\"version\":1");
+    const auto legacy_decoded = take(deserialize_project(legacy, registry));
+    REQUIRE(legacy_decoded.find_sequence({2})->find_track({3})->find_clip({4})->time_conform() ==
+            TimeConform::None);
+}
+
+TEST_CASE("Timeline clip time-conform rejects invalid model and persistence values") {
+    const auto invalid_model = Clip::create({4}, {0}, {100}, EmptyContent{}, {},
+                                            static_cast<TimeConform>(255));
+    REQUIRE_FALSE(invalid_model);
+    REQUIRE(invalid_model.error().code == ModelErrorCode::InvalidTimeConform);
+
+    const auto registry = builtins();
+    auto clip = take(Clip::create({4}, {0}, {100}, EmptyContent{}, {}, TimeConform::Resample));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    auto project = take(Project::create(ProjectInput{{1}, "invalid", 5, {2}, {}, {sequence}}));
+    const auto resample_encoded = take(serialize_project(project, registry));
+    const auto resample_decoded = take(deserialize_project(resample_encoded.json, registry));
+    REQUIRE(resample_decoded.find_sequence({2})->find_track({3})->find_clip({4})->time_conform() ==
+            TimeConform::Resample);
+    auto malformed = resample_encoded.json;
+    const auto value = malformed.find("\"time_conform\":\"resample\"");
+    REQUIRE(value != std::string::npos);
+    malformed.replace(value, std::string_view("\"time_conform\":\"resample\"").size(),
+                      "\"time_conform\":\"future\"");
+    const auto rejected = deserialize_project(malformed, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(rejected.error().path.ends_with("/time_conform"));
+}
+
+TEST_CASE("Timeline clip schema migration defaults none and refuses authored conform loss") {
+    const auto registry = builtins();
+    const std::string v1 =
+        R"({"data":{"content":{"data":{},"type_name":"pulp.timeline.content.empty","version":1},"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216","id":"4","time_range":{"duration_ticks":"100","kind":"musical","start_ticks":"0"}},"type_name":"pulp.timeline.clip","version":1})";
+    const auto v2 = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 1, 2, v1));
+    REQUIRE(v2.find("\"time_conform\":\"none\"") != std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 1, v2)) == v1);
+
+    auto authored = v2;
+    const auto none = authored.find("\"time_conform\":\"none\"");
+    REQUIRE(none != std::string::npos);
+    authored.replace(none, std::string_view("\"time_conform\":\"none\"").size(),
+                     "\"time_conform\":\"stretch\"");
+    const auto refused =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.clip", 2, 1, authored);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+}
+
 TEST_CASE("Timeline version-one fixture remains readable and canonical") {
     std::ifstream stream(std::string(PULP_TIMELINE_FIXTURE_DIR) + "/v1/minimal.json",
                          std::ios::binary);

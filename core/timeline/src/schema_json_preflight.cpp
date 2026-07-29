@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "bounded_increment.hpp"
 #include "json_span_reader.hpp"
 #include "project_schema_policy.hpp"
@@ -952,22 +953,34 @@ class StructuralScanner {
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape))
             return false;
-        if (type != "pulp.timeline.clip") {
+        if (type != detail::clip_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::clip_schema_policy.oldest_readable_version,
+                                      detail::clip_schema_policy.current_version))
             return false;
+        const auto clip_version = version;
         const auto data_path = path + "/data";
         std::array requested{
             detail::JsonSpanMember{"content"},
             detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"time_conform"},
             detail::JsonSpanMember{"time_range"},
         };
         if (!members(data, requested) ||
             !require_shape(requested[1], StringShape, data.begin, data_path) ||
-            !require_shape(requested[2], ObjectShape, data.begin, data_path))
+            !require_shape(requested[3], ObjectShape, data.begin, data_path))
             return false;
+        if (detail::clip_schema_policy.requires_time_conform(clip_version)) {
+            if (!require_shape(requested[2], StringShape, data.begin, data_path))
+                return false;
+        } else if (requested[2].found) {
+            set_error(PersistenceErrorCode::InvalidSchema, requested[2].span.begin, 0, 0,
+                      data_path + "/time_conform");
+            return false;
+        }
         if (!requested[0].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/content");

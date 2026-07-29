@@ -7,6 +7,7 @@ function(pulp_resolve_timeline_sources root output)
         automation_curve.cpp
         automation_document_internal.cpp
         automation_lane.cpp
+        clip_schema_migrations.cpp
         command.cpp
         compile_context.cpp
         document_session.cpp
