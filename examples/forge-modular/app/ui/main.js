@@ -40,7 +40,9 @@ let mode = "module";      // "module" | "patch"
 // ── root: rail on the left, everything else to its right ─────────────────────
 
 const root = createRow("root");
-setBackground("root", C.appBg);
+setBackground("root", "#07090C");
+const shellPad = 10;
+setFlex("root", "padding", shellPad);
 setFlex("root", "width", "100%");
 setFlex("root", "height", "100%");
 
@@ -246,6 +248,8 @@ setFontSize("prompt", 16);
 setTextColor("prompt", C.muted);
 setBackground("prompt", C.raised);
 setFlex("prompt", "min_height", 30);
+setPlaceholder("prompt",
+    "A 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount.");
 
 const actions = createRow("actions", "composer");
 setFlex("actions", "align_items", "center");
@@ -297,6 +301,7 @@ setFlex("actions-gap", "flex_grow", 1);
 button("btn-ask", "actions", "?", "Ask", "ghost", 96);
 setFlex("btn-ask", "margin_right", 10);
 button("btn-build", "actions", "⚒", "Build module", "primary", 176);
+setBoxShadow("btn-build", 0, 0, 18, 2, "#16DAC255");
 
 createLabel("composer-hint",
             "↵  ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.",
@@ -356,6 +361,8 @@ function card(id, kind, title, count, tint) {
 
     const art = createRow(id + "-art", id);
     setBackground(id + "-art", tint);
+    setBackgroundGradient(id + "-art",
+                          "linear-gradient(160deg, " + tint + " 0%, #12161C 100%)");
     setCornerRadius(id + "-art", 12);
     setFlex(id + "-art", "height", 108);
 
