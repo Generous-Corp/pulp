@@ -1647,6 +1647,31 @@
         "subcommands": []
       },
       {
+        "name": "forge",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "catalog export",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--check",
+                "kind": "flag"
+              },
+              {
+                "name": "--write",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
