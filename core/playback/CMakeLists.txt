@@ -37,7 +37,7 @@ if(PULP_HAS_ABLETON_LINK)
     target_compile_features(pulp_ableton_link_adapter PUBLIC cxx_std_20)
     target_include_directories(pulp_ableton_link_adapter
         PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/adapters/include>
     )
     target_link_libraries(pulp_ableton_link_adapter
         PUBLIC pulp::playback

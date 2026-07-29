@@ -27,7 +27,7 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_ENABLE_JS` | ON | Build the JS scripting + web-compat layer (`pulp::view-script`). `OFF` yields a native-only `pulp::view` with no JS engine — smaller binaries, and the native faithful-vector design-import path still works. |
 | `PULP_JS_ENGINE` | auto | JS engine: auto, quickjs, jsc, v8 (only when `PULP_ENABLE_JS=ON`) |
 | `PULP_ENABLE_AAX` | OFF | Enable optional AAX format |
-| `PULP_ENABLE_ABLETON_LINK` | OFF | Enable the source-build-only desktop Link adapter. Requires a developer-supplied, out-of-tree checkout at `PULP_ABLETON_LINK_SDK_DIR`; never installed or exported. |
+| `PULP_ENABLE_ABLETON_LINK` | OFF | Enable the source-build-only desktop Link adapter. Requires a developer-supplied, out-of-tree checkout at `PULP_ABLETON_LINK_SDK_DIR`; its adapter header and target are build-interface-only and never installed or exported. |
 
 ### Native-only builds (`-DPULP_ENABLE_JS=OFF`)
 

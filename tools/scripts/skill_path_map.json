@@ -16,7 +16,7 @@
     },
     "ableton-link": {
       "paths": [
-        "core/playback/include/pulp/playback/ableton_link.hpp",
+        "core/playback/adapters/include/pulp/playback/ableton_link.hpp",
         "core/playback/include/pulp/playback/tempo_sync.hpp",
         "core/playback/adapters/ableton_link.cpp",
         "core/playback/src/tempo_sync.cpp",

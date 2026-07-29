@@ -8,8 +8,8 @@
 namespace pulp::playback {
 
 /// Desktop Ableton Link adapter. This Pulp-owned declaration contains no Link
-/// types; the implementation is built only by the opt-in pulp::ableton-link
-/// target when a developer supplies an out-of-tree desktop SDK.
+/// types and is exposed only by the opt-in, source-build-only
+/// `pulp::ableton-link` target.
 class AbletonLinkTempoSync final : public TempoSyncSource {
   public:
     explicit AbletonLinkTempoSync(double initial_tempo_bpm);

@@ -21,7 +21,10 @@ or the backend-neutral tempo-sync seam in `core/playback`.
   `NOTICE.md` because Pulp ships none of it.
 - The portable `pulp::playback` target owns only Pulp code. The optional
   `pulp::ableton-link` target exists only in a source build with the SDK enabled
-  and must never enter `cmake --install` or Pulp's exported target closure.
+  and must never enter `cmake --install` or Pulp's exported target closure. Its
+  adapter declaration lives under `core/playback/adapters/include`, exposed
+  only through that target's `BUILD_INTERFACE`; do not place it under the
+  installed `core/playback/include` tree.
 
 ## Obtain and enable the desktop SDK
 
