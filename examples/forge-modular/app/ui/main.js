@@ -57,7 +57,7 @@ setFlex("rail", "padding_top", 14);
 setFlex("rail", "flex_direction", "column");
 
 // The logo tile is the accent square Forge uses, not a button.
-const brand = createPanel("rail-brand", "rail");
+const brand = createRow("rail-brand", "rail");
 setBackground("rail-brand", C.accent);
 setCornerRadius("rail-brand", 12);
 setFlex("rail-brand", "width", 40);
@@ -189,6 +189,9 @@ setFlex("hero-sub", "margin_top", 10);
 const tabs = createRow("tabs", "hero");
 setFlex("tabs", "align_items", "flex_end");
 setFlex("tabs", "width", 1000);
+setFlex("tabs", "max_width", 1000);
+setFlex("tabs", "flex_grow", 0);
+setFlex("tabs", "flex_shrink", 0);
 setFlex("tabs", "margin_top", 34);
 
 function tab(id, glyph, title, sub, active) {
@@ -232,6 +235,9 @@ setBackground("composer", C.raised);
 setBorder("composer", C.lineStrong, 1);
 setCornerRadius("composer", 16);
 setFlex("composer", "width", 1000);
+setFlex("composer", "max_width", 1000);
+setFlex("composer", "flex_grow", 0);
+setFlex("composer", "flex_shrink", 0);
 setFlex("composer", "padding", 20);
 
 const prompt = createTextEditor("prompt", "composer");
@@ -247,7 +253,7 @@ setFlex("actions", "margin_top", 18);
 
 /// A composer button: glyph then label, because the render's buttons read as an
 /// icon and a word rather than as text alone.
-function button(id, parent, glyph, label, kind) {
+function button(id, parent, glyph, label, kind, width) {
     const b = createRow(id, parent);
     setBackground(id, kind === "primary" ? C.accent : C.panel);
     setBorder(id, kind === "primary" ? C.accent : C.line, 1);
@@ -257,6 +263,13 @@ function button(id, parent, glyph, label, kind) {
     setFlex(id, "padding_top", 11);
     setFlex(id, "padding_bottom", 11);
     setFlex(id, "align_items", "center");
+    setFlex(id, "flex_grow", 0);
+    setFlex(id, "flex_shrink", 0);
+    setFlex(id, "justify_content", "center");
+    setFlex(id, "height", 44);
+    // Sized rather than left to content: a content-sized row here grew to fill
+    // the composer and pushed its siblings off the panel's right edge.
+    setFlex(id, "width", width);
 
     createLabel(id + "-glyph", glyph, id);
     setFontSize(id + "-glyph", 13);
@@ -271,9 +284,9 @@ function button(id, parent, glyph, label, kind) {
     return b;
 }
 
-button("btn-mention", "actions", "@", "", "icon");
+button("btn-mention", "actions", "@", "", "icon", 44);
 setFlex("btn-mention", "margin_right", 9);
-button("btn-random", "actions", "⚄", "Random module", "ghost");
+button("btn-random", "actions", "⚄", "Random module", "ghost", 186);
 
 const actionsGap = createRow("actions-gap", "actions");
 setFlex("actions-gap", "flex_grow", 1);
@@ -281,9 +294,9 @@ setFlex("actions-gap", "flex_grow", 1);
 // Two labelled buttons rather than an inferred intent chip: a chip guesses and
 // the user still has to notice the guess, while an unwanted rebuild rewrites
 // their work and an unwanted answer costs nothing.
-button("btn-ask", "actions", "?", "Ask", "ghost");
+button("btn-ask", "actions", "?", "Ask", "ghost", 96);
 setFlex("btn-ask", "margin_right", 10);
-button("btn-build", "actions", "⚒", "Build module", "primary");
+button("btn-build", "actions", "⚒", "Build module", "primary", 176);
 
 createLabel("composer-hint",
             "↵  ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.",
@@ -341,7 +354,7 @@ function card(id, kind, title, count, tint) {
     setFlex(id, "margin_right", 16);
     setFlex(id, "flex_direction", "column");
 
-    const art = createPanel(id + "-art", id);
+    const art = createRow(id + "-art", id);
     setBackground(id + "-art", tint);
     setCornerRadius(id + "-art", 12);
     setFlex(id + "-art", "height", 108);
