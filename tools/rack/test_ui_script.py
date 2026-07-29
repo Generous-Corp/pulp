@@ -23,9 +23,15 @@ SCRIPT = os.path.normpath(os.path.join(
     HERE, "..", "..", "examples", "forge-modular", "app", "ui", "main.js"))
 PULP = "/Volumes/Workshop/Code/pulp"
 
-# Calls that are the script's own helpers rather than bridge calls.
-LOCAL = {"tab", "button", "wiringLine", "wiringWhy", "roleHeader", "setMode",
-         "setFidelity"}
+def local_helpers(text: str) -> set:
+    """Functions the script declares itself, which are not bridge calls.
+
+    Derived rather than listed, because a hand-maintained list goes stale the
+    moment somebody adds a helper -- and it fails in the direction that looks
+    like a real problem, reporting the new helper as a function the bridge does
+    not expose.
+    """
+    return set(re.findall(r"function\s+(\w+)\s*\(", text))
 
 
 def bridge_names() -> set:
@@ -53,6 +59,7 @@ def main():
         print(f"  SKIP   no UI script at {SCRIPT}")
         return 0
     text = open(SCRIPT).read()
+    LOCAL = local_helpers(text)
 
     known = bridge_names()
     if not known:

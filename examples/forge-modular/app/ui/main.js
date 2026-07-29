@@ -282,3 +282,186 @@ function setFidelity(modules, exact, unmapped) {
 }
 
 setMode(mode);
+
+// ── mention picker ───────────────────────────────────────────────────────────
+//
+// Typing @ searches 4,705 modules across 543 plugins, indexed locally so it is
+// instant and works offline. Three states, and only one of them can be wired:
+//
+//   ✓ ready    installed
+//   ↓ free     free, not installed
+//   $ premium  costs money, or comes with VCV+
+//
+// The copy never says "you need to buy this". We cannot tell an unsynced
+// module someone already owns from one they have never bought, and telling
+// somebody to purchase what they own is a worse error than telling them to
+// check. See DECISIONS.md.
+
+const mention = createPanel("mention");
+setBackground("mention", C.raised);
+setBorder("mention", C.lineStrong, 1);
+setCornerRadius("mention", 14);
+setFlex("mention", "padding", 6);
+setFlex("mention", "display", "none");   // shown while an @ query is live
+
+const mentionQuery = createRow("mention-query");
+setFlex("mention-query", "align_items", "center");
+setFlex("mention-query", "padding", 10);
+
+const mentionAt = createLabel("mention-at");
+setText("mention-at", "@");
+setFontFamily("mention-at", MONO);
+setFontSize("mention-at", 13);
+setTextColor("mention-at", C.accent);
+
+const mentionText = createLabel("mention-text");
+setText("mention-text", "");
+setFontFamily("mention-text", MONO);
+setFontSize("mention-text", 13);
+setTextColor("mention-text", C.textStrong);
+setFlex("mention-text", "margin_left", 4);
+
+const mentionCount = createLabel("mention-count");
+setText("mention-count", "");
+setFontFamily("mention-count", MONO);
+setFontSize("mention-count", 11);
+setTextColor("mention-count", C.faint);
+setFlex("mention-count", "margin_left", "auto");
+
+const mentionList = createScrollView("mention-list");
+setFlex("mention-list", "max_height", 260);
+
+const STATE = {
+    ready:   { mark: "✓", color: "#3FCF77", note: "" },
+    free:    { mark: "↓", color: "#5E78FF",
+               note: "install from Rack's Library, then rescan" },
+    premium: { mark: "$", color: "#F6B847",
+               note: "own it? sync it in Rack's Library. Otherwise buy it, or VCV+" },
+};
+
+/// One result. Only `ready` can go into a patch; the others are an offer.
+///
+/// Not a wall: a patch that names a module the user lacks still opens in Rack,
+/// which lists what is missing, offers the Library, and keeps the cables so
+/// installing later completes it. So this reads as a better option while
+/// building is cheap, never as a refusal.
+function mentionRow(id, state, plugin, model, name, tags) {
+    const row = createRow(id);
+    setFlex(id, "align_items", "center");
+    setFlex(id, "padding_left", 12);
+    setFlex(id, "padding_right", 12);
+    setFlex(id, "padding_top", 8);
+    setFlex(id, "padding_bottom", 8);
+    setCornerRadius(id, 9);
+
+    const mark = createLabel(id + "-mark");
+    setText(id + "-mark", STATE[state].mark);
+    setFontFamily(id + "-mark", MONO);
+    setFontSize(id + "-mark", 12);
+    setTextColor(id + "-mark", STATE[state].color);
+    setFlex(id + "-mark", "width", 18);
+
+    const slug = createLabel(id + "-slug");
+    setText(id + "-slug", plugin + "/" + model);
+    setFontFamily(id + "-slug", MONO);
+    setFontSize(id + "-slug", 12);
+    setTextColor(id + "-slug", state === "ready" ? C.text : C.muted);
+
+    const label = createLabel(id + "-name");
+    setText(id + "-name", name);
+    setFontFamily(id + "-name", FONT);
+    setFontSize(id + "-name", 12.5);
+    setTextColor(id + "-name", state === "ready" ? C.textStrong : C.muted);
+    setFlex(id + "-name", "margin_left", 10);
+
+    const tag = createLabel(id + "-tags");
+    setText(id + "-tags", tags);
+    setFontFamily(id + "-tags", MONO);
+    setFontSize(id + "-tags", 10);
+    setTextColor(id + "-tags", C.faint);
+    setFlex(id + "-tags", "margin_left", "auto");
+    return row;
+}
+
+/// Shown when a capability the request needs is not installed at all. Cheap to
+/// produce -- it is tag matching over local data, so nothing is spent finding
+/// out -- and it happens before any generation rather than after.
+const gap = createPanel("capability-gap");
+setBackground("capability-gap", C.panel);
+setBorder("capability-gap", C.line, 1);
+setCornerRadius("capability-gap", 12);
+setFlex("capability-gap", "padding", 12);
+setFlex("capability-gap", "display", "none");
+
+const gapText = createLabel("capability-gap-text");
+setText("capability-gap-text", "");
+setFontFamily("capability-gap-text", FONT);
+setFontSize("capability-gap-text", 12.5);
+setTextColor("capability-gap-text", C.text);
+
+// ── settings ─────────────────────────────────────────────────────────────────
+//
+// Forge's AI settings are inherited wholesale -- account menu, providers,
+// first-run gating, reasoning effort, credentials. Only the model roles differ,
+// and for a reason: Forge splits Engineering from UI designer because its
+// interface is JavaScript a model writes. Here a panel is emitted
+// deterministically from its manifest, so there is no UI model to pick and
+// nothing to run in parallel with the DSP.
+//
+// The split that fits is by artifact:
+//   Module engineer — one call returning the manifest and the DSP together.
+//   Patch designer  — reading an inventory, choosing modules, wiring them, and
+//                     explaining why. Musical judgement more than C++, and
+//                     plausibly a different model.
+
+const settings = createPanel("settings");
+setBackground("settings", C.panel);
+setBorder("settings", C.lineStrong, 1);
+setCornerRadius("settings", 16);
+setFlex("settings", "padding", 18);
+setFlex("settings", "display", "none");
+
+function settingRow(id, title, detail, value) {
+    const row = createRow(id);
+    setFlex(id, "align_items", "center");
+    setFlex(id, "padding_top", 11);
+    setFlex(id, "padding_bottom", 11);
+    setFlex(id, "border_bottom", 1);
+
+    const t = createLabel(id + "-title");
+    setText(id + "-title", title);
+    setFontFamily(id + "-title", FONT);
+    setFontSize(id + "-title", 14);
+    setFontWeight(id + "-title", 600);
+    setTextColor(id + "-title", C.textStrong);
+
+    const d = createLabel(id + "-detail");
+    setText(id + "-detail", detail);
+    setFontFamily(id + "-detail", FONT);
+    setFontSize(id + "-detail", 12);
+    setTextColor(id + "-detail", C.muted);
+
+    const v = createLabel(id + "-value");
+    setText(id + "-value", value);
+    setFontFamily(id + "-value", MONO);
+    setFontSize(id + "-value", 12);
+    setTextColor(id + "-value", C.muted);
+    setFlex(id + "-value", "margin_left", "auto");
+    return row;
+}
+
+settingRow("set-engineer", "Module engineer",
+           "Writes the manifest and the DSP", "—");
+settingRow("set-designer", "Patch designer",
+           "Chooses modules, wires them, and explains why", "—");
+settingRow("set-effort", "Reasoning effort", "Low → Max", "Medium");
+
+// Per-patch, because the right answer changes per patch. Persisted with the
+// project so reopening restores how it was built.
+settingRow("set-prefer", "Prefer my own modules",
+           "Or let the whole installed library compete evenly", "on");
+settingRow("set-create", "Build a module when one is missing",
+           "Off by default: patch building is seconds, module building is a "
+           + "minute-plus compile", "off");
+settingRow("set-depth", "Explanation depth",
+           "Terse · Standard · Learning", "Standard");
