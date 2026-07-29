@@ -7,6 +7,7 @@
 // past its maintainability boundary.  The umbrella header includes this file,
 // preserving its existing include and symbol surface.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 
@@ -113,14 +114,16 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
         {kSpreadDeg, 0.0f, 180.0f, 90.0f},
         {kPolarity, 0.0f, 1.0f, 0.0f},
         {kEngine, 0.0f, 1.0f, 0.0f},
-        {kBarberpoleHz, static_cast<float>(-Engine::kBarberpoleShiftMaxHz),
-         static_cast<float>(Engine::kBarberpoleShiftMaxHz), 3.0f},
         {kWave, 0.0f, 6.0f, 0.0f},
     };
+    if (mode == Mode::barberpole)
+        t.baked_params.push_back(
+            {kBarberpoleHz, static_cast<float>(-Engine::kBarberpoleShiftMaxHz),
+             static_cast<float>(Engine::kBarberpoleShiftMaxHz), 3.0f});
     t.process_instance_baked_param =
-        [](void* p, audio::BufferView<float>& out,
-           const audio::BufferView<const float>& in, int n,
-           const BakedParamView& params) {
+        [mode](void* p, audio::BufferView<float>& out,
+               const audio::BufferView<const float>& in, int n,
+               const BakedParamView& params) {
             auto& engine = static_cast<Instance*>(p)->engine;
             for (int i = 0; i < n; ++i) {
                 const auto offset = static_cast<std::int32_t>(i);
@@ -136,7 +139,8 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
                 engine.set_delay_engine(params.value_at(kEngine, offset) >= 0.5f
                                             ? signal::FlangerDelayEngine::bbd
                                             : signal::FlangerDelayEngine::clean);
-                engine.set_barberpole_shift_hz(params.value_at(kBarberpoleHz, offset));
+                if (mode == Mode::barberpole)
+                    engine.set_barberpole_shift_hz(params.value_at(kBarberpoleHz, offset));
                 engine.set_waveform(wave_from_param(params.value_at(kWave, offset)));
 
                 float left = in.channel_ptr(0)[i];
@@ -146,6 +150,80 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
             }
         };
     return t;
+}
+
+inline ForgeNodeDescriptor flanger_descriptor() {
+    static const std::string through_zero_id = type_id(Mode::through_zero, 4.0);
+    ForgeNodeDescriptor d;
+    d.key = "flanger";
+    d.label = "Flanger";
+    d.description = "Stereo flanger with classic, through-zero, and barberpole topologies.";
+    d.axes = {{"mode",
+               "Mode",
+               "Delay-line topology and its fixed latency behavior.",
+               {{"classic", "Classic", 0.0f},
+                {"through_zero", "Through-Zero", 1.0f},
+                {"barberpole", "Barberpole", 2.0f}}}};
+    d.realizations = {{"classic", kTypeId, {{"mode", "classic"}}},
+                      {"through_zero", through_zero_id, {{"mode", "through_zero"}}},
+                      {"barberpole", "modulation.flanger.barberpole",
+                       {{"mode", "barberpole"}}}};
+    d.params = {
+        {"rate_hz", kRate, "Rate", "Hz", "Delay-sweep rate.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"depth_ms", kDepth, "Depth", "ms", "Delay-sweep excursion.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"center_ms", kCenter, "Center", "ms", "Center delay around which the sweep moves.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"feedback", kFeedback, "Feedback", "%",
+         "Signed delayed feedback that sharpens the comb notches.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mix", kMix, "Mix", "%", "Blend between dry and flanged signals.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"spread_deg", kSpreadDeg, "Stereo Spread", "deg",
+         "Phase separation of the left and right modulation.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"polarity",
+         kPolarity,
+         "Polarity",
+         "",
+         "Polarity of the delayed path.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"positive", "Positive", 0.0f}, {"negative", "Negative", 1.0f}}},
+        {"engine",
+         kEngine,
+         "Delay Engine",
+         "",
+         "Clean or bucket-brigade delay coloration.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"clean", "Clean", 0.0f}, {"bbd", "BBD", 1.0f}}},
+        {"barberpole_hz",
+         kBarberpoleHz,
+         "Barberpole Shift",
+         "Hz",
+         "Continuous spectral translation used by barberpole mode.",
+         ForgeParamKind::continuous,
+         ForgeParamCurve::linear,
+         {},
+         {"barberpole"}},
+        {"wave",
+         kWave,
+         "Wave",
+         "",
+         "Delay-sweep waveform.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"sine", "Sine", 0.0f},
+          {"triangle", "Triangle", 1.0f},
+          {"saw_up", "Saw Up", 2.0f},
+          {"saw_down", "Saw Down", 3.0f},
+          {"square", "Square", 4.0f},
+          {"sample_hold", "Sample & Hold", 5.0f},
+          {"smooth_random", "Smooth Random", 6.0f}}},
+    };
+    return d;
 }
 
 inline float worst_case_gain() {
@@ -259,6 +337,89 @@ inline CustomNodeType make_leslie_node() {
     return t;
 }
 
+inline ForgeNodeDescriptor leslie_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "leslie";
+    d.label = "Leslie";
+    d.description = "True-stereo horn-and-drum rotary speaker with acceleration, microphone, "
+                    "and early-reflection modeling.";
+    d.realizations = {{"default", kTypeId}};
+    d.params = {
+        {"speed",
+         kSpeed,
+         "Speed",
+         "",
+         "Stopped, chorale, or tremolo motor target.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"stop", "Stop", 0.0f}, {"slow", "Chorale", 1.0f}, {"fast", "Tremolo", 2.0f}}},
+        {"horn_fast_hz", kHornFast, "Horn Fast", "Hz", "Horn tremolo speed.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"horn_slow_hz", kHornSlow, "Horn Slow", "Hz", "Horn chorale speed.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"drum_fast_hz", kDrumFast, "Drum Fast", "Hz", "Drum tremolo speed.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"drum_slow_hz", kDrumSlow, "Drum Slow", "Hz", "Drum chorale speed.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"horn_accel_s", kHornAccel, "Horn Acceleration", "s", "Horn motor transition time.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"drum_accel_s", kDrumAccel, "Drum Acceleration", "s", "Drum motor transition time.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"crossover_hz", kCrossover, "Crossover", "Hz",
+         "Frequency dividing the horn and drum paths.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"horn_radius_m", kHornRadius, "Horn Radius", "m",
+         "Horn rotor radius used by the Doppler model.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"drum_radius_m", kDrumRadius, "Drum Radius", "m",
+         "Drum rotor radius used by the Doppler model.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"am_depth", kAmDepth, "AM Depth", "%", "Horn amplitude-modulation depth.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"horn_directivity_db", kDirDepth, "Horn Directivity", "dB",
+         "High-frequency horn directivity modulation.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"horn_directivity_hz", kDirCorner, "Horn Directivity Corner", "Hz",
+         "Corner frequency of horn directivity.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"drum_directivity_db", kDrumDirDepth, "Drum Directivity", "dB",
+         "Drum directivity modulation.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"doppler_bias_ms", kDBias, "Doppler Bias", "ms",
+         "Static delay bias supporting Doppler motion.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mic_angle_deg", kMicAngle, "Mic Angle", "deg",
+         "Angular separation of the stereo microphones.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mic_distance_m", kMicDistance, "Mic Distance", "m",
+         "Distance from rotors to microphones.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"reflection_db", kReflectionDb, "Reflection Level", "dB",
+         "Level of cabinet and room reflections.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"reflections",
+         kReflections,
+         "Reflections",
+         "",
+         "Number of modeled early reflections.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"one", "1", 1.0f}, {"two", "2", 2.0f}, {"three", "3", 3.0f}, {"four", "4", 4.0f}}},
+        {"reflection_delay_ms", kReflDelay, "Reflection Delay", "ms",
+         "Delay of the first reflection.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"reflection_spacing_ms", kReflSpacing, "Reflection Spacing", "ms",
+         "Spacing between successive reflections.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"reflection_corner_hz", kReflCorner, "Reflection Corner", "Hz",
+         "Low-pass corner of the reflected paths.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"drift_cents", kDrift, "Drift", "cent", "Slow mechanical speed instability.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"mix", kWetMix, "Mix", "%", "Blend between stationary and rotary signals.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+    };
+    return d;
+}
+
 enum : state::ParamID {
     kScannerMode = 1,
     kScanHz,
@@ -314,6 +475,43 @@ inline CustomNodeType make_scanner_vibrato_node() {
             }
         };
     return t;
+}
+
+inline ForgeNodeDescriptor scanner_vibrato_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "scanner_vibrato";
+    d.label = "Scanner Vibrato";
+    d.description = "Hammond-style tapped-delay scanner with vibrato and chorus positions.";
+    d.realizations = {{"default", kScannerTypeId}};
+    d.params = {
+        {"mode",
+         kScannerMode,
+         "Mode",
+         "",
+         "Scanner switch position.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f},
+          {"v1", "V1", 1.0f},
+          {"v2", "V2", 2.0f},
+          {"v3", "V3", 3.0f},
+          {"c1", "C1", 4.0f},
+          {"c2", "C2", 5.0f},
+          {"c3", "C3", 6.0f}}},
+        {"scan_hz", kScanHz, "Scan Rate", "Hz", "Mechanical scanner rotation rate.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"line_ms", kLineMs, "Line Time", "ms", "Total delay-line length.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"v1", kV1, "V1 Depth", "%", "Tap fraction used by the V1 position.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"v2", kV2, "V2 Depth", "%", "Tap fraction used by the V2 position.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"v3", kV3, "V3 Depth", "%", "Tap fraction used by the V3 position.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"chorus_mix", kChorusMix, "Chorus Mix", "%", "Direct-path blend in the chorus positions.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+    };
+    return d;
 }
 
 inline float leslie_worst_case_gain() {

@@ -540,6 +540,38 @@ where `EXPECTED` is generated at SDK release time from the actual
 library build. A stale header would then fail to compile against the
 fresh lib instead of segfaulting at first paint.
 
+## Value channels reach the editor through the ViewBridge, and must be re-attached on reload
+
+A processor publishes non-parameter values — gain reduction, an envelope, a
+spectrum — via `Processor::value_channels()`, and a scripted UI binds them with
+`bindMeter(id, "value:<name>")`. The set travels:
+
+```
+Processor::value_channels()
+  -> ViewBridge (it owns the Processor reference)
+  -> build_editor_ui(..., value_channels)
+  -> ScriptedUiOptions::value_channels
+  -> ScriptedUiSession (stored, like gpu_surface_)
+  -> WidgetBridge::set_value_channels()
+```
+
+**The re-attach is the part that bites.** `ScriptedUiSession` rebuilds the
+`WidgetBridge` on every hot reload, so the attach sits in the rebuild path next
+to `set_asset_roots()` — exactly like `attach_gpu_surface()`. Miss it and
+`value:` binds resolve on first load and then silently stop resolving after the
+first edit, which looks like the channel died rather than like a lifecycle bug.
+
+The set is **non-owning everywhere in that chain**: it belongs to the processor
+(usually a subclass member) and must outlive every attached view. The virtual
+returns `nullptr` by default, so a processor that declares nothing costs nothing
+— no set, no bindings, no framework work.
+
+**`value:` is a separate namespace from parameter names, with no fallback.** A
+`value:` source that names no declared channel fails with
+`BindingOutcome::unknown_value_channel`; it does NOT fall back to a parameter of
+the same name. Resolving across the two would bind a meter to the wrong signal
+and look like it worked.
+
 ## Common pitfalls
 
 1. **Forgetting `notify_attached()` after a successful attach.** The

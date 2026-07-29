@@ -13,6 +13,7 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <cstdlib>
@@ -1699,4 +1700,87 @@ TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
 
     p.set_editor_resize_handler(owner, nullptr);
     REQUIRE_FALSE(p.request_editor_resize(900, 700));
+}
+
+// ── Toggle parameter gestures ───────────────────────────────────────────────
+//
+// A Toggle was the one interactive widget wire_callbacks() never handed to
+// wire_parameter_gestures(): Knob, Fader and RangeSlider all did, Toggle did
+// not. Two things followed, and both are user-visible.
+//
+// First, a toggle's edit was never bracketed by a host gesture, so a host had
+// no undo group and no touch/release for it — a knob's click-drag was recorded
+// and a switch's click was not.
+//
+// Second, and worse: apply_param_binding re-asserts the bound store value onto
+// the widget EVERY frame, and its only escape is `w->is_gesture_active()`. A
+// Toggle has no drag lifecycle, so that predicate was permanently false and the
+// binding could overwrite the click on the very next frame — a switch that
+// visibly refused to move.
+
+TEST_CASE("a bound Toggle brackets its click in a host parameter gesture",
+          "[view-bridge][host-param]") {
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "freeze", .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](pulp::state::ParamID id) { events.push_back("begin:" + std::to_string(id)); },
+        [&](pulp::state::ParamID id) { events.push_back("end:" + std::to_string(id)); });
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createToggle('freeze', '');"
+        "bindWidgetToParam('freeze', 'freeze');"
+        "on('freeze', 'toggle', function (v) { setParam('freeze', v ? 1 : 0); });");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("freeze"));
+    REQUIRE(toggle != nullptr);
+
+    toggle->on_mouse_down({10.0f, 10.0f});
+
+    // The edit reached the parameter...
+    CHECK(toggle->is_on());
+    CHECK(store.get_normalized(1) == Catch::Approx(1.0f));
+    // ...bracketed by exactly one gesture, and closed.
+    CHECK(events == std::vector<std::string>{"begin:1", "end:1"});
+    CHECK(store.open_gesture_count() == 0);
+
+    // A second click is its own gesture, not a continuation of the first.
+    toggle->on_mouse_down({10.0f, 10.0f});
+    CHECK(!toggle->is_on());
+    CHECK(store.get_normalized(1) == Catch::Approx(0.0f));
+    CHECK(events.size() == 4);
+    CHECK(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("an unbound Toggle still dispatches without opening a gesture",
+          "[view-bridge][host-param]") {
+    // No binding means no parameter to bracket. The click must still reach the
+    // script rather than being swallowed by the gesture plumbing.
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+
+    int begins = 0;
+    store.set_gesture_callbacks([&](pulp::state::ParamID) { ++begins; },
+                                [](pulp::state::ParamID) {});
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "var seen = 0;"
+        "createToggle('plain', '');"
+        "on('plain', 'toggle', function (v) { seen = seen + 1; });");
+
+    auto* toggle = dynamic_cast<Toggle*>(bridge.widget("plain"));
+    REQUIRE(toggle != nullptr);
+    toggle->on_mouse_down({10.0f, 10.0f});
+
+    CHECK(toggle->is_on());
+    CHECK(begins == 0);
+    CHECK(store.open_gesture_count() == 0);
 }

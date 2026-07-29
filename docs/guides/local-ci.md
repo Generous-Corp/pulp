@@ -1482,6 +1482,15 @@ nightly Intel workflow unless this one is deliberately retired.
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
 
+ASan, TSan, and UBSan configure through `PULP_SANITIZER=<kind>`, including
+ASan's example-bundle lifecycle build. Besides applying the compiler and linker
+flags, the named option marks sanitizer bundles as test-only instrumentation so
+relocatability validation permits the compiler-injected Xcode runtime.
+Installed-SDK consumer fixtures carry the matching instrumentation flags
+because instrumented static libraries retain runtime references. The strict
+shipping verifier remains unchanged and still rejects external compiler
+runtimes for ordinary release artifacts.
+
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|
 | `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
@@ -2666,8 +2675,8 @@ by the release-path gate firing on an unrelated PR. The binder list is long and
 sits where merges collide, so the duplicate keeps coming back; what was missing
 was a PR-time lane that says so immediately.
 
-`gcc-compile-gate.yml` closes that hole. It triggers on `core/**` and compiles
-the core libraries with `g++` and nothing else:
+`gcc-compile-gate.yml` closes that hole. It runs on every PR and compiles the
+core libraries with `g++` and nothing else:
 
 | Option | Value | Why |
 |---|---|---|
@@ -2686,6 +2695,17 @@ not make it portable.
 a construct both compilers accept but implement differently is still only caught
 by the Clang test lanes. Widening this to run tests under GCC is a separate
 decision with a real time cost.
+
+**It also guards one option combination.** The lane configures with
+`PULP_ENABLE_DESIGN_IMPORT=OFF`, which is the option's own documented
+"release/ship OFF" setting — and that configuration was once unlinkable, because
+`tools/import-design` was added unconditionally while the `pulp::view` design-IR
+sources it links sit behind that option. The discovery step now runs
+`--assert-absent pulp-import-design` against the codemodel the lane already
+produces, so a re-broken guard fails here immediately instead of surfacing as an
+undefined-reference wall in someone's release build. It costs no extra configure
+time. Because the guard lives in the top-level `CMakeLists.txt`, that file is
+one of the lane's path triggers alongside `core/**`.
 
 ## For contributors
 

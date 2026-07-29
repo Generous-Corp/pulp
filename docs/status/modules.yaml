@@ -37,11 +37,43 @@ modules:
       - audio
       - runtime
     docs: reference/modules.md#dawproject
+  - name: host
+    summary: Plugin hosting and the SignalGraph binding that compiles an authored graph into an immutable routed runtime snapshot with latency compensation and anticipation lanes
+    status: experimental
+    dependencies:
+      - playback
+      - format
+      - graph
+      - audio
+      - midi
+      - state
+      - runtime
+    docs: reference/modules.md#host
+  - name: graph
+    summary: Graph runtime plan levelization buffer assignment and execution queue shared by the host binding and the sequence adapter
+    status: experimental
+    dependencies:
+      - midi
+      - runtime
+    docs: reference/modules.md#graph
+  - name: scene
+    summary: Scene3D glTF loading material keys and render packets for the optional 3D scene surface
+    status: experimental
+    dependencies:
+      - runtime
+    docs: reference/modules.md#scene
+  - name: sample_bank_manifest
+    summary: Sample-bank manifest parsing split out of pulp-audio so a consumer can link manifest handling without the full audio module
+    status: experimental
+    dependencies:
+      - runtime
+    docs: reference/modules.md#sample_bank_manifest
   - name: smf
-    summary: Fail-closed Standard MIDI File format 0/1 import and export against the tempo and meter maps with exact canonical tick conversion on dividing grids and reported rounding otherwise
+    summary: Fail-closed Standard MIDI File format 0/1 import and a raw codec strict for visited clip event and grid shapes plus a census-complete consent-gated adapter with a central per-concept loss manifest
     status: experimental
     dependencies:
       - timeline
+      - interchange
       - runtime
     docs: reference/modules.md#smf
   - name: sequence

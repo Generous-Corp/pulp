@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.757.0
+    VERSION 0.763.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -304,6 +304,10 @@ pulp_configure_aax_sdk()
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
+# After PulpDependencies: the runtime-staging entry point DELEGATES the wgpu
+# copy to the upstream FetchContent package's target_copy_webgpu_binaries(),
+# so that function has to exist first.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
 if(ANDROID)
@@ -395,6 +399,7 @@ add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
+    add_subdirectory(tools/design-ab)
     add_subdirectory(tools/timeline)
 endif()
 
@@ -491,7 +496,14 @@ endif()
 # ── Import Design Tool ────────────────────────────────────────────────────
 # Dev tool — only when Pulp is the top-level project (see PROJECT_IS_TOP_LEVEL
 # note above); an embedding consumer doesn't build Pulp's authoring CLIs.
-if(PROJECT_IS_TOP_LEVEL)
+#
+# Also gated on PULP_ENABLE_DESIGN_IMPORT: this tool links the `pulp::view`
+# design-IR sources, and those are themselves behind that option (see
+# core/view/CMakeLists.txt). Adding the executable while its implementation is
+# compiled out leaves the `all` target unlinkable — which broke the option's
+# own documented "release/ship OFF" configuration. The tool wraps the
+# subsystem, so building it without the subsystem has no meaning.
+if(PROJECT_IS_TOP_LEVEL AND PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(tools/import-design)
 endif()
 

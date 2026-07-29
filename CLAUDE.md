@@ -148,6 +148,7 @@ it through the governor), not the machine's core count.
 ./build/pulp version             # show SDK and project version
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
+./build/pulp forge catalog export --json  # emit selected-SDK Forge metadata
 ./build/pulp sdk install --local --profile forge-dev --print-path
                                 # immutable arm64 SDK for local Forge iteration
                                 # Forge configure must opt in; ship/release refuses it
@@ -311,7 +312,7 @@ deliberate call: hosting a **commercial competitor's** plugin and iterating a
 model until it matches — plugin EULAs commonly forbid reverse
 engineering/benchmarking (hardware carries no such clause), and an automated
 "iterate until it matches product X" loop drifts from measuring a fact toward
-producing a derivative. Hold the repo's clean-room line.
+producing a derivative. Hold the repo's independent line.
 
 Non-obvious things that cost real time when you don't know them:
 
@@ -1093,12 +1094,12 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 
 | Trailer                                                                                  |
 |------------------------------------------------------------------------------------------|
-| `Reference-Lineage: cleanroom reproducer=#<issue> docs=<url>`                           |
+| `Reference-Lineage: independent reproducer=#<issue> docs=<url>`                           |
 
 DAW-quirk fixes must be reached independently from host vendor docs + a
 reproducer Pulp issue — never by transcribing the reference framework's
 workaround. The trailer is the audit trail that proves the
-implementation is clean-room. See
+implementation is independent. See
 `planning/2026-05-24-daw-host-quirks-inheritance.md` for the
 license-hygiene contract and the catalog of accommodations the
 HostQuirks struct dispatches.
@@ -1541,8 +1542,10 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
 | `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
-| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/clean-room-breadcrumb rule with concrete rewrite examples |
+| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
+| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
+| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |

@@ -6,7 +6,7 @@
 // PROPOSES (generated/stub carry inline content; verbatim portable-core copies
 // carry an absolute `copy_from` source path), plus the migration-status
 // document, the format split, and the unresolved notes. The SDK — not the
-// importer — WRITES each file under the user's output dir, runs the clean-room
+// importer — WRITES each file under the user's output dir, runs the independent
 // output scan over the generated files, and records provenance.
 //
 // This header keeps the manifest model and the write-plan computation as PURE

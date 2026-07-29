@@ -264,11 +264,11 @@ Pulp implements or builds on these open standards:
     those are covered under [Plugin Format SDKs](#plugin-format-sdks) and carry
     their own attribution.
 
-    **DAWproject** and **Standard MIDI File** are different: both are
-    implemented **clean-room against the published specification**. Pulp fetches
-    no SDK, vendors no source, and bundles no schema for either, so neither
-    carries a `NOTICE.md` entry or a `DEPENDENCIES.md` row — there is nothing
-    third-party being redistributed. That is why they are not under [Optional
+    **DAWproject** and **Standard MIDI File** are different: Pulp implements
+    both **directly from their published specifications**. It fetches no SDK,
+    vendors no source, and bundles no schema for either, so neither carries a
+    `NOTICE.md` entry or a `DEPENDENCIES.md` row — there is nothing third-party
+    being redistributed. That is why they are not under [Optional
     Fetched Third-Party
     Integrations](#optional-fetched-third-party-integrations), where the
     distinguishing fact is that Pulp *does* redistribute the dependency through

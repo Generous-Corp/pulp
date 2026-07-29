@@ -29,6 +29,8 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <pulp/view/css_effect_parse.hpp>
+
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1260,6 +1262,27 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_opacity(*style.opacity);
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
+
+    // Filters, backdrop filters and blend modes. The JS lane already parses
+    // these — web-compat-style-decl-paint.js pulls the blur radius out and
+    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
+    // native tree did not, so the same document rendered soft through one lane
+    // and hard-edged through the other. An atmospheric design lives or dies on
+    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    if (style.filter) {
+        if (const auto radius = css_blur_radius(*style.filter))
+            view.set_filter_blur(*radius);
+    }
+    if (style.backdrop_filter) {
+        if (const auto radius = css_blur_radius(*style.backdrop_filter))
+            view.set_backdrop_blur(*radius);
+    }
+    if (style.mix_blend_mode) {
+        if (const auto mode = css_blend_mode(*style.mix_blend_mode))
+            view.set_mix_blend_mode(*mode);
+    }
+    if (style.clip_path)
+        view.set_clip_path(*style.clip_path);
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
     // the source stroke as border_color/border_width, but the stroke is already
     // baked into the raster. Drawing it again paints a spurious box outline —

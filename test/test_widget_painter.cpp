@@ -170,9 +170,8 @@ TEST_CASE("a delegate that declines a hook falls through to the stock look",
     b.set_bounds({0, 0, 80, 24});
     b.set_painter(p);
 
-    auto png = pulp::view::render_to_png(b, 80, 24, 1.0f,
-                                         pulp::view::ScreenshotBackend::skia);
-    REQUIRE_FALSE(png.empty());
+    pulp::canvas::RecordingCanvas canvas;
+    b.paint_all(canvas);
 
     // Both hooks were offered; the delegate took one and left the other.
     bool asked_bg = false, asked_text = false;
@@ -196,9 +195,8 @@ TEST_CASE("the rotary hook receives a normalized proportion rather than pixels",
     k.set_value(0.25f);
     k.set_painter(p);
 
-    auto png = pulp::view::render_to_png(k, 64, 64, 1.0f,
-                                         pulp::view::ScreenshotBackend::skia);
-    REQUIRE_FALSE(png.empty());
+    pulp::canvas::RecordingCanvas canvas;
+    k.paint_all(canvas);
 
     REQUIRE(p->seen_rotary_position >= 0.0);
     REQUIRE(p->seen_rotary_position <= 1.0);

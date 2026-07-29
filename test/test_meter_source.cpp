@@ -14,6 +14,11 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+
+#include <pulp/view/value_channel_set.hpp>
+#include <atomic>
+#include <thread>
+#include <vector>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/value_source.hpp>
@@ -984,4 +989,243 @@ TEST_CASE("binding one element scalar does not disturb another element's cached 
     CHECK(p->element_scalar(0) == Catch::Approx(0.42f));
     CHECK(clock.has_active_subscribers());
     root->set_frame_clock(nullptr);
+}
+
+// ── Vector channels and the named channel set ────────────────────────────────
+
+TEST_CASE("VectorSource publishes latest-wins and carries the sample count",
+          "[view][value-channel]") {
+    VectorSource src;
+
+    const std::vector<float> first{1.0f, 2.0f, 3.0f};
+    src.publish(first.data(), static_cast<int>(first.size()));
+    auto frame = src.read();
+    REQUIRE(frame.count == 3);
+    CHECK(frame.samples[0] == Catch::Approx(1.0f));
+    CHECK(frame.samples[2] == Catch::Approx(3.0f));
+
+    // Latest-wins: an unread block is replaced, not queued. A scope shows the
+    // current signal, not a backlog.
+    const std::vector<float> second{9.0f};
+    src.publish(second.data(), 1);
+    const std::vector<float> third{7.0f, 8.0f};
+    src.publish(third.data(), 2);
+    frame = src.read();
+    REQUIRE(frame.count == 2);
+    CHECK(frame.samples[0] == Catch::Approx(7.0f));
+}
+
+TEST_CASE("VectorSource truncates an oversized block instead of dropping it",
+          "[view][value-channel]") {
+    VectorSource src;
+    std::vector<float> huge(VectorFrame::kMaxSamples + 128, 0.0f);
+    huge[0] = 4.0f;
+    huge[VectorFrame::kMaxSamples - 1] = 5.0f;
+
+    src.publish(huge.data(), static_cast<int>(huge.size()));
+    const auto frame = src.read();
+
+    // Leading window survives — better a clipped scope than a blank one.
+    REQUIRE(frame.count == VectorFrame::kMaxSamples);
+    CHECK(frame.samples[0] == Catch::Approx(4.0f));
+    CHECK(frame.samples[VectorFrame::kMaxSamples - 1] == Catch::Approx(5.0f));
+
+    // Degenerate inputs are clamped, not UB.
+    src.publish(nullptr, 16);
+    CHECK(src.read().count == 16);
+    src.publish(huge.data(), -1);
+    CHECK(src.read().count == 0);
+}
+
+TEST_CASE("VectorSource::publish never allocates on the writer thread",
+          "[view][value-channel][rt-safety]") {
+    VectorSource src;
+    std::vector<float> block(512, 0.25f);
+    src.publish(block.data(), 512);  // warm any first-call state OUTSIDE the probe
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 64; ++i) src.publish(block.data(), 512);
+        CHECK(probe.allocation_count() == 0);
+    }
+
+    // POSITIVE CONTROL. A zero from an unarmed probe is indistinguishable from a
+    // zero from an allocation-free path, so prove the probe can still count. The
+    // result escapes so the allocation cannot be optimised away.
+    std::size_t seen = 0;
+    std::unique_ptr<VectorSource> escaped;
+    {
+        pulp::test::RtAllocationProbe probe;
+        escaped = std::make_unique<VectorSource>();
+        seen = probe.allocation_count();
+    }
+    REQUIRE(escaped != nullptr);
+    CHECK(seen >= 1);
+}
+
+TEST_CASE("VectorSource survives a concurrent writer and reader",
+          "[view][value-channel][rt-safety]") {
+    VectorSource src;
+    std::atomic<bool> stop{false};
+    // Blocks are pattern-stamped: sample[i] == first + i. A torn read shows up
+    // as a broken run, which a value-only check would miss.
+    std::atomic<int> torn{0};
+    std::atomic<int> reads{0};
+
+    std::thread writer([&] {
+        std::vector<float> block(256);
+        for (float base = 0.0f; !stop.load(std::memory_order_relaxed); base += 1.0f) {
+            for (std::size_t i = 0; i < block.size(); ++i)
+                block[i] = base + static_cast<float>(i);
+            src.publish(block.data(), static_cast<int>(block.size()));
+        }
+    });
+
+    for (int i = 0; i < 20000; ++i) {
+        const auto frame = src.read();
+        if (frame.count == 0) continue;
+        reads.fetch_add(1, std::memory_order_relaxed);
+        const float base = frame.samples[0];
+        for (int s = 1; s < frame.count; ++s) {
+            if (frame.samples[s] != base + static_cast<float>(s)) {
+                torn.fetch_add(1, std::memory_order_relaxed);
+                break;
+            }
+        }
+    }
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+
+    // Assert only after the join — a Catch2 assertion in a worker thread is not
+    // thread-safe and the repo gates against it.
+    CHECK(reads.load() > 0);
+    CHECK(torn.load() == 0);
+}
+
+TEST_CASE("EventSource preserves frame offsets and makes zero an occurrence",
+          "[view][value-channel]") {
+    EventSource source;
+
+    // An empty frame has no occurrence.
+    source.publish(nullptr, 0);
+    CHECK(source.read().count == 0);
+
+    // A zero payload is still present because count and the occupied slot carry
+    // presence; consumers never infer it from the payload value.
+    const ValueEvent occurrences[] = {
+        {.frame_index = 7, .value = 0.0f},
+        {.frame_index = 63, .value = -2.5f},
+    };
+    source.publish(occurrences, 2);
+    const auto frame = source.read();
+    REQUIRE(frame.count == 2);
+    CHECK(frame.events[0].frame_index == 7);
+    CHECK(frame.events[0].value == Catch::Approx(0.0f));
+    CHECK(frame.events[1].frame_index == 63);
+    CHECK(frame.events[1].value == Catch::Approx(-2.5f));
+}
+
+TEST_CASE("EventSource publish is bounded and alloc-free",
+          "[view][value-channel][rt-safety]") {
+    EventSource source;
+    std::vector<ValueEvent> occurrences(EventFrame::kMaxEvents + 16);
+    for (std::size_t i = 0; i < occurrences.size(); ++i) {
+        occurrences[i] = {
+            .frame_index = static_cast<std::uint32_t>(i),
+            .value = static_cast<float>(i),
+        };
+    }
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        source.publish(occurrences.data(), static_cast<int>(occurrences.size()));
+        CHECK(probe.allocation_count() == 0);
+    }
+
+    const auto frame = source.read();
+    REQUIRE(frame.count == EventFrame::kMaxEvents);
+    CHECK(frame.events[0].frame_index == 0);
+    CHECK(frame.events[EventFrame::kMaxEvents - 1].frame_index ==
+          static_cast<std::uint32_t>(EventFrame::kMaxEvents - 1));
+}
+
+TEST_CASE("ValueChannelSet resolves declared channels by exact name",
+          "[view][value-channel]") {
+    ValueChannelSet channels;
+
+    auto* gr = channels.declare_scalar("gain_reduction", "dB", 0.0f);
+    auto* out = channels.declare_meter("output", "", 0.0f);
+    auto* env = channels.declare_vector("envelope", "", 0.0f);
+    auto* onsets = channels.declare_events("onsets");
+    REQUIRE(gr != nullptr);
+    REQUIRE(out != nullptr);
+    REQUIRE(env != nullptr);
+    REQUIRE(onsets != nullptr);
+
+    CHECK(channels.scalar("gain_reduction") == gr);
+    CHECK(channels.meter("output") == out);
+    CHECK(channels.vector("envelope") == env);
+    CHECK(channels.events("onsets") == onsets);
+
+    // Verbatim: no case folding, no separator smoothing. A lookup key that
+    // resolved loosely would silently bind a UI to the wrong channel the day a
+    // near-name is added.
+    CHECK(channels.scalar("Gain_Reduction") == nullptr);
+    CHECK(channels.scalar("gain reduction") == nullptr);
+    CHECK(channels.scalar("absent") == nullptr);
+
+    // A shape mismatch is a miss, so binding a scope to a meter fails at bind
+    // time rather than reading a plausible wrong value.
+    CHECK(channels.vector("gain_reduction") == nullptr);
+    CHECK(channels.scalar("envelope") == nullptr);
+    CHECK(channels.vector("onsets") == nullptr);
+
+    REQUIRE(channels.size() == 4);
+    CHECK(channels.infos()[0].name == "gain_reduction");
+    CHECK(channels.infos()[0].unit == "dB");
+    CHECK(channels.infos()[0].shape == ValueChannelShape::scalar);
+    CHECK(channels.infos()[2].shape == ValueChannelShape::vector);
+    CHECK(channels.infos()[3].shape == ValueChannelShape::events);
+}
+
+TEST_CASE("ValueChannelSet refuses declarations that would break lookup",
+          "[view][value-channel]") {
+    ValueChannelSet channels;
+    using Err = ValueChannelSet::DeclareError;
+    Err err = Err::ok;
+
+    REQUIRE(channels.declare_scalar("gr", "dB", 0.0f, &err) != nullptr);
+    CHECK(err == Err::ok);
+
+    CHECK(channels.declare_scalar("", "", 0.0f, &err) == nullptr);
+    CHECK(err == Err::empty_name);
+
+    // Same name twice: one of the two bindings would silently win.
+    CHECK(channels.declare_scalar("gr", "", 0.0f, &err) == nullptr);
+    CHECK(err == Err::duplicate_name);
+    // A different shape does not make the name free.
+    CHECK(channels.declare_meter("gr", "", 0.0f, &err) == nullptr);
+    CHECK(err == Err::duplicate_name);
+
+    // ':' separates the "value:" namespace from the key on the JS side.
+    CHECK(channels.declare_scalar("value:gr", "", 0.0f, &err) == nullptr);
+    CHECK(err == Err::reserved_character);
+
+    // Only the refused declarations were refused.
+    CHECK(channels.size() == 1);
+}
+
+TEST_CASE("a processor that declares no channels holds nothing",
+          "[view][value-channel]") {
+    // Zero cost when undeclared is structural: there is no set to skip, no hook
+    // to branch around. This pins the empty case so a later change cannot
+    // quietly start allocating for plugins that use none.
+    ValueChannelSet channels;
+    CHECK(channels.empty());
+    CHECK(channels.size() == 0);
+    CHECK(channels.infos().empty());
+    CHECK(channels.scalar("anything") == nullptr);
+    CHECK(channels.meter("anything") == nullptr);
+    CHECK(channels.vector("anything") == nullptr);
+    CHECK(channels.events("anything") == nullptr);
 }

@@ -43,6 +43,7 @@ static const Command commands[] = {
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
     {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
+    {"forge", "Export Forge catalog integration data", cmd_forge},
     {"clean",    "Remove build directory",                cmd_clean},
     {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},
@@ -160,7 +161,7 @@ static void print_usage() {
         std::cout << "  " << std::left << std::setw(14) << binary_commands[i].name
                   << " " << binary_commands[i].summary << "\n";
     }
-    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and clean-room audit\n";
+    std::cout << "  " << std::left << std::setw(14) << "audit" << " License and provenance audit\n";
     std::cout << "  " << std::left << std::setw(14) << "add" << " Add a component to the project\n";
     std::cout << "  " << std::left << std::setw(14) << "remove" << " Remove a previously added package\n";
     std::cout << "  " << std::left << std::setw(14) << "list" << " Show installed packages\n";

@@ -66,6 +66,23 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     REQUIRE(sequence.duration()->value == 8 * kBeat);
 }
 
+TEST_CASE("DAWproject import preserves a positioned empty clip") {
+    const auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Structure><Track id="t" name="Empty"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t"><Clips>)"
+        R"(<Clip id="empty" time="2" duration="3"/>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)");
+
+    REQUIRE(result.has_value());
+    const auto& tracks = result.value().sequences()[0].tracks();
+    REQUIRE(tracks.size() == 1);
+    REQUIRE(tracks[0].clips().size() == 1);
+    const auto& clip = tracks[0].clips()[0];
+    REQUIRE(clip.start().value == 2 * kBeat);
+    REQUIRE(clip.duration().value == 3 * kBeat);
+    REQUIRE(std::holds_alternative<EmptyContent>(clip.content()));
+}
+
 TEST_CASE("DAWproject audio import requires media bytes to seal durable identity") {
     auto result = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"));
     REQUIRE_FALSE(result);

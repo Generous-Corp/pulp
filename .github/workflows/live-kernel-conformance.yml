@@ -32,10 +32,12 @@ on:
       - "examples/web-demos/live-kernel-spike/**"
       - "core/signal/include/pulp/signal/**"
       - ".github/workflows/live-kernel-conformance.yml"
-  # Run the required `Build + per-node null test + RT-safety gates` check on
-  # queued merge groups so a merge queue on `main` can land PRs. `merge_group`
-  # does not honour the `paths` filter above, so this fires on every group.
-  merge_group:
+  # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
+  # full rationale. `Build + per-node null test + RT-safety gates` is not a
+  # required context (do not confuse it with the required
+  # `Build + prove + (owner-gated) deploy`, which comes from
+  # wclap-cloudflare.yml), so its merge-group run gated nothing while consuming
+  # queue concurrency on every entry.
   workflow_dispatch:
 
 concurrency:

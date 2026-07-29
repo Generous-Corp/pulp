@@ -35,8 +35,8 @@ cleanup is removing. The cleanup backlog + classification rules are parked at
   `[codex-*]`, "per the reviewer", "sub-PR", "slice N of".
 - **Process/pipeline provenance.** No `[coverage]`, `[codecov]`, `[requested]`
   selector tags; no "added for coverage".
-- **Clean-room / reference-lineage *process* notes.** The clean-room audit
-  trail lives in the `Reference-Lineage: cleanroom …` **commit trailer**, never
+- **Independent / reference-lineage *process* notes.** The provenance audit
+  trail lives in the `Reference-Lineage: independent …` **commit trailer**, never
   in a source comment. Describe the DAW/host behavior, not how you derived it.
 - **Bare `#1234` as the explanation.** A PR/issue number is not a reason. If the
   issue explains a still-live invariant, state the invariant; a durable

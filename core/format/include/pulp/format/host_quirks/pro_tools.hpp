@@ -65,7 +65,7 @@
 /// remains `LessonOnly` since it ships as a 2026-05-25 iPlug2-audit
 /// catalog lesson without an in-tree bench yet.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.9
+/// **Reference-Lineage**: independent reproducer=macos-plan-item-5.9
 /// docs=Avid AAX SDK documentation (developer-supplied; opt-in lane)
 
 #include <pulp/format/host_quirks.hpp>

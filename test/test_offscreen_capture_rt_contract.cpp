@@ -137,7 +137,8 @@ TEST_CASE("live paint runs under the no-alloc contract",
 #endif
 }
 
-TEST_CASE("offscreen raster capture suspends the no-alloc contract",
+#ifdef PULP_HAS_SKIA
+TEST_CASE("offscreen Skia raster capture suspends the no-alloc contract",
           "[view][rt-safety][issue-6344]") {
     ContractProbeView root;
     root.set_bounds({0, 0, 64, 64});
@@ -147,6 +148,7 @@ TEST_CASE("offscreen raster capture suspends the no-alloc contract",
     require_capture_was_suspended(root);
     REQUIRE_FALSE(png.empty());
 }
+#endif
 
 #ifdef __APPLE__
 TEST_CASE("offscreen CoreGraphics capture suspends the no-alloc contract",

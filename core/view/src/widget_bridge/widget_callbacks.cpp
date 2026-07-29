@@ -41,8 +41,17 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* t = dynamic_cast<Toggle*>(w)) {
-        t->on_toggle = [alive, engine, id](bool v) {
+        // A Toggle has no drag lifecycle, so it never opened a host parameter
+        // gesture — its edits were not reported to the host the way a Knob's
+        // are, and because is_gesture_active() is therefore always false, the
+        // declarative binding re-asserted the store value over the top of the
+        // click on the very next frame. Bracket the instantaneous edit with a
+        // gesture so the host records it and the binding yields to it.
+        wire_parameter_gestures(id, w);
+        t->on_toggle = [this, alive, engine, id](bool v) {
+            begin_param_gesture(id);
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
+            end_param_gesture(id);
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
         wire_parameter_gestures(id, w);

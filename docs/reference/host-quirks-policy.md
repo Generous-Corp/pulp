@@ -198,7 +198,7 @@ planning submodule):
    format, and reproducer.
 2. Read the host's documentation. Do **not** open the reference
    framework to copy.
-3. Design a clean-room fix using only host docs + reproducer.
+3. Design a independent fix using only host docs + reproducer.
 4. Add a new field to `HostQuirks` (and the matching `HostQuirksMeta`
    field tagged `Speculative` if you haven't bench-confirmed it yet,
    or `Validated` once you have a regression test) in
@@ -212,7 +212,7 @@ planning submodule):
 7. Commit with the trailer:
 
    ```
-   Reference-Lineage: cleanroom reproducer=#NNNN docs=<url>
+   Reference-Lineage: independent reproducer=#NNNN docs=<url>
    ```
 
 ## When to flip the build-time default

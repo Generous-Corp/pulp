@@ -1078,6 +1078,13 @@ public:
     bool initialize_from_surface(GpuSurface& surface) override {
         if (!surface.is_initialized()) return false;
 
+        const auto surface_adapter = surface.adapter_info();
+        if (surface_adapter.backend_type == "Null") {
+            runtime::log_info(
+                "GpuCompute: shared surface has no usable WebGPU compute adapter");
+            return false;
+        }
+
         auto* dev = static_cast<wgpu::Device*>(surface.dawn_device_handle());
         auto* q = static_cast<wgpu::Queue*>(surface.dawn_queue_handle());
         auto* inst = static_cast<wgpu::Instance*>(surface.dawn_instance_handle());
@@ -1117,6 +1124,20 @@ public:
             });
         pump_events();
         if (!adapter_) return false;
+
+        wgpu::AdapterInfo adapter_info{};
+        if (adapter_.GetInfo(&adapter_info) != wgpu::Status::Success ||
+            adapter_info.backendType == wgpu::BackendType::Null ||
+            adapter_info.backendType == wgpu::BackendType::Undefined) {
+            // Dawn's Null backend is an API-validation fallback, not a compute
+            // device. Treating it as available lets initialization succeed on
+            // headless hosts and sends real workloads into a backend that
+            // cannot produce results.
+            runtime::log_info(
+                "GpuCompute: no usable WebGPU compute adapter is available");
+            adapter_ = nullptr;
+            return false;
+        }
 
         wgpu::DeviceDescriptor dev_desc{};
         dev_desc.label = "Pulp Compute Device";

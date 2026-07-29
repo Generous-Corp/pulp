@@ -409,6 +409,8 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/gesture.cpp
+    src/value_channel_json.cpp
+    src/value_channel_set.cpp
     src/value_source_binding.cpp
     src/view.cpp
     src/view_paint.cpp
@@ -418,6 +420,7 @@ target_sources(pulp-view-core PRIVATE
     src/continuous_frames.cpp
     src/custom_shader_host.cpp
     src/host_param_surface.cpp
+    src/yoga_measurement_internal.cpp
     src/yoga_layout.cpp
     src/grid_layout.cpp
     src/layout_snapshot.cpp
@@ -444,6 +447,7 @@ target_sources(pulp-view-core PRIVATE
     src/virtual_grid.cpp
     src/relative_point.cpp
     src/css_gradient.cpp
+    src/css_effect_parse.cpp
     src/w3c_tokens.cpp
     src/widget_skin_derive.cpp
     src/screenshot_compare.cpp
@@ -735,12 +739,16 @@ target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
 target_link_libraries(pulp-view-core PUBLIC pulp::runtime)
 target_link_libraries(pulp-view-script PRIVATE pulp::runtime)
 
-# yaml-cpp (MIT) — DESIGN.md frontmatter parsing.
-# Wrapped in $<BUILD_INTERFACE:...> because yaml-cpp is a build-only
-# dependency: Pulp's public headers never expose YAML types, so
-# downstream consumers of installed pulp-view (via PulpTargets export
-# set) must not see yaml-cpp as a transitive requirement.
-target_link_libraries(pulp-view-core PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
+# yaml-cpp (MIT) — DESIGN.md frontmatter parsing. Public Pulp headers expose no
+# YAML types, but pulp-view-core is static: its parser object retains YAML
+# symbols that the final consumer link must resolve. Keep yaml-cpp private in
+# the API while preserving that static link closure in installed SDKs.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    target_link_libraries(pulp-view-core PRIVATE
+        $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>
+        $<INSTALL_INTERFACE:Pulp::yaml-cpp>
+    )
+endif()
 
 # JavaScriptCore framework for JSC backend (Apple only)
 if(APPLE)

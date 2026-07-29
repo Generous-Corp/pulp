@@ -800,6 +800,12 @@ void WidgetBridge::poll_async_results() {
 void WidgetBridge::service_frame_callbacks() {
     // Declarative bindings first: pure C++ store→widget push, no JS crossing.
     service_param_bindings();
+    // Then paramchange subscriptions, so a handler that inspects a bound
+    // widget sees it already holding this frame's value.
+    service_param_subscriptions();
+    // Event-channel handlers also run on the frame tick, never on the writer's
+    // audio thread.
+    service_event_bindings();
     engine_.pump_message_loop();
     // Drain any expired native-tracked setTimeout/setInterval timers so
     // consumers do not need a JS shim around the frame loop.

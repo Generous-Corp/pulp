@@ -43,7 +43,7 @@ Commands:
   design-debug   Headless design debug runner
   import-design  Import designs from Figma/Stitch/v0/Pencil
   export-tokens  Export theme as W3C Design Tokens
-  audit          License and clean-room audit
+  audit          License and provenance audit
   add            Add a component to the project
   help           Show this help
 

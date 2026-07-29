@@ -20,11 +20,22 @@ name: GCC compile gate
 # than a full release build. It is a COMPILER-DIVERGENCE check, not a second
 # functional lane: the Clang lanes still own correctness.
 
+# Deliberately NOT path-filtered at the trigger, even though only `core/**`
+# changes can break this compile.
+#
+# A path-filtered workflow never reports its check on a PR that misses those
+# paths. That is harmless while the check is advisory, and it wedges the repo
+# the moment the check is made REQUIRED: GitHub blocks a PR indefinitely
+# waiting for a context that will never arrive, so every docs-only,
+# test-only and tooling-only PR stalls with no failure to point at. It reads
+# as queue lag rather than as a misconfiguration, which is the expensive part.
+#
+# So the job always runs and decides internally (see `scope`): when no
+# relevant file changed it reports success in seconds without installing a
+# toolchain. The check is therefore always present, which is the precondition
+# for making it required.
 on:
   pull_request:
-    paths:
-      - 'core/**'
-      - '.github/workflows/gcc-compile-gate.yml'
   workflow_dispatch:
 
 # A new commit supersedes the previous compile of the same branch.
@@ -43,6 +54,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The path filter that used to live on the trigger, moved inside so the
+      # check still REPORTS on a PR it does not apply to. Compare against the
+      # merge base rather than the previous commit: a PR is judged by its whole
+      # diff, not by whatever its most recent push happened to touch.
+      - name: Decide whether this PR can affect the GCC compile
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "manual dispatch: compiling"
+            exit 0
+          fi
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          if git diff --name-only "$base"...HEAD \
+               | grep -qE '^(core/|CMakeLists\.txt$|\.github/workflows/gcc-compile-gate\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "PR touches core/, CMakeLists.txt or this workflow: compiling"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "PR touches nothing this gate covers: reporting success without compiling"
+          fi
 
       # SDL3 is fetched unconditionally by PulpDependencies.cmake -- it is not
       # behind PULP_ENABLE_GPU -- and its configure step hard-fails when neither
@@ -57,6 +93,7 @@ jobs:
       # differently from every other lane", and the whole point of the gate is
       # that a red result has exactly one meaning.
       - name: Install Linux build dependencies
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -82,6 +119,7 @@ jobs:
             wayland-protocols
 
       - name: Report the compiler under test
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           g++ --version
           cmake --version
@@ -90,6 +128,7 @@ jobs:
       # Tests and examples off because this gate asks "does core/ compile under
       # GCC", not "does everything work" — the Clang lanes answer that.
       - name: Configure (g++, core only)
+        if: steps.scope.outputs.relevant == 'true'
         env:
           CC: gcc
           CXX: g++
@@ -124,23 +163,34 @@ jobs:
       # empty --target list makes cmake build the default target, and a
       # discovery bug that finds nothing would otherwise exit 0 and read as a
       # pass. So the count is asserted and the list is printed.
+      # `--assert-absent pulp-import-design` is a regression test for a real
+      # defect this lane found: the tool was added unconditionally while the
+      # `pulp::view` design-IR sources it links sit behind
+      # PULP_ENABLE_DESIGN_IMPORT, so `all` could not link with the option off --
+      # the option's own documented "release/ship OFF" configuration. This lane
+      # already configures with the option off and already has the codemodel, so
+      # asserting the target is not configured costs nothing and fails loudly if
+      # the guard is ever removed.
       - name: Discover core library targets
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           python3 tools/scripts/list_core_library_targets.py --self-test
-          python3 tools/scripts/list_core_library_targets.py build-gcc --minimum 20 > targets.txt
+          python3 tools/scripts/list_core_library_targets.py build-gcc \
+            --assert-absent pulp-import-design --minimum 20 > targets.txt
           echo "building $(wc -l < targets.txt) core library target(s):"
           cat targets.txt
 
       # An explicit job count, per the repo-wide rule that no build may fan out
       # unbounded on a shared machine.
       - name: Build core libraries
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           # Word splitting is intended: one target name per line.
           # shellcheck disable=SC2046
           cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
 
       - name: Summarize
-        if: always()
+        if: always() && steps.scope.outputs.relevant == 'true'
         run: |
           {
             echo "GCC compiled the core libraries with tests, examples, and GPU disabled."

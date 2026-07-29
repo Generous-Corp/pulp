@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Tests for `pulp import emit` materialisation: the manifest parser, the
-// write-plan computation, the clean-room OUTPUT denylist scan (all pure), and
+// write-plan computation, the framework-source OUTPUT denylist scan (all pure), and
 // an end-to-end shell-out through a mock emit responder that writes a real
 // scaffold + provenance marker into a temp dir.
 //
@@ -259,7 +259,7 @@ TEST_CASE("import emit write-plan rejects a copied-user-file without copy_from",
     REQUIRE(plan.error.find("copy_from") != std::string::npos);
 }
 
-// ── Clean-room OUTPUT denylist scan ──
+// ── Framework-source OUTPUT denylist scan ──
 
 TEST_CASE("import emit denylist comes from the known-frameworks content markers",
           "[cli][import][emit][scan]") {
@@ -400,7 +400,7 @@ TEST_CASE("import emit end-to-end materialises a scaffold + provenance marker",
     // Summary surfaced the format split + unresolved count.
     REQUIRE(r.stdout_output.find("Materialised Pulp migration scaffold")
             != std::string::npos);
-    REQUIRE(r.stdout_output.find("clean-room scan: passed") != std::string::npos);
+    REQUIRE(r.stdout_output.find("framework-source scan: passed") != std::string::npos);
 }
 
 TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
@@ -448,7 +448,7 @@ TEST_CASE("import emit end-to-end fails closed when the importer smuggles "
 
     INFO("stdout=" << r.stdout_output << " stderr=" << r.stderr_output);
     REQUIRE(r.exit_code != 0);
-    REQUIRE((r.stdout_output + r.stderr_output).find("clean-room output scan FAILED")
+    REQUIRE((r.stdout_output + r.stderr_output).find("framework-source output scan FAILED")
             != std::string::npos);
     // Failed closed: no generated source written.
     REQUIRE_FALSE(fs::exists(out / "src" / "PluginProcessor.hpp"));

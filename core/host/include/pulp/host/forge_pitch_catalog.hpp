@@ -92,6 +92,7 @@
 // `whammy_default_mix_for_mode()` exposes them so a preset can apply one at
 // load time, and the registry rows below quote them per mode.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 
@@ -341,6 +342,32 @@ inline CustomNodeType make_whammy_node(double window_ms = Shifter::kWindowMsDefa
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"whammy", "Whammy", "An expression-controlled pitch shifter for bends, harmony, detune, and dives.",
+            {}, {{"default", kTypeId}},
+            {
+                {"pedal", kPedal, "Pedal", "%", "Moves between the heel and toe targets.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"pedal_mode", kPedalMode, "Pedal Mode", "", "Selects the pedal's pitch behavior.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+                 {{"whammy", "Whammy", kModeWhammy}, {"harmony", "Harmony", kModeHarmony}, {"detune", "Detune", kModeDetune}, {"dive", "Dive", kModeDive}}},
+                {"shift_source", kShiftSource, "Shift Source", "", "Selects pedal mapping or a direct pitch target.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+                 {{"pedal", "Pedal", kSourcePedal}, {"direct", "Direct", kSourceDirect}}},
+                {"shift_semitones", kShiftSemitones, "Shift", "st", "Sets the direct pitch target.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"heel_semitones", kHeelSemis, "Heel", "st", "Sets pitch at the heel position.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"toe_semitones", kToeSemis, "Toe", "st", "Sets pitch at the toe position.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"interval_a_semitones", kIntervalASemis, "Harmony A", "st", "Sets the harmony interval at heel.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"interval_b_semitones", kIntervalBSemis, "Harmony B", "st", "Sets the harmony interval at toe.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"detune_cents", kDetuneCents, "Detune", "cent", "Sets the detune-mode pitch spread.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"dive_floor_semitones", kDiveFloorSemis, "Dive Floor", "st", "Sets the deepest dive target.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"glide_up_ms", kGlideUpMs, "Glide Up", "ms", "Sets upward pitch slew.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"glide_down_ms", kGlideDownMs, "Glide Down", "ms", "Sets downward pitch slew.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"mix", kMix, "Mix", "%", "Blends dry and shifted signals.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"detents", kDetents, "Detents", "", "Snaps pedal targets to musical detents.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+                {"interpolation", kInterp, "Interpolation", "", "Selects the delay-line interpolation quality.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+                 {{"linear", "Linear", kInterpLinear}, {"cubic", "Cubic", kInterpCubic}}},
+                {"drift_depth", kDriftDepth, "Drift", "%", "Adds slow pitch instability.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+            }};
+}
+
 }  // namespace whammy
 
 namespace harmony {
@@ -447,6 +474,33 @@ inline int latency_samples(double sample_rate) {
     Engine engine;
     engine.prepare(sample_rate);
     return engine.latency_samples();
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"harmony_engine", "Harmony Engine", "A scale-aware dual-voice pitch harmonizer with glide and humanization.",
+            {}, {{"default", kTypeId}},
+            {
+                {"key", kKey, "Key", "", "Selects the tonic pitch class.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+                 {{"c", "C", 0}, {"c_sharp", "C sharp", 1}, {"d", "D", 2}, {"d_sharp", "D sharp", 3},
+                  {"e", "E", 4}, {"f", "F", 5}, {"f_sharp", "F sharp", 6}, {"g", "G", 7},
+                  {"g_sharp", "G sharp", 8}, {"a", "A", 9}, {"a_sharp", "A sharp", 10}, {"b", "B", 11}}},
+                {"scale", kScale, "Scale", "", "Selects the pitch-quantization scale.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+                 {{"major", "Major", 0}, {"natural_minor", "Natural Minor", 1},
+                  {"dorian", "Dorian", 2}, {"phrygian", "Phrygian", 3},
+                  {"lydian", "Lydian", 4}, {"mixolydian", "Mixolydian", 5},
+                  {"harmonic_minor", "Harmonic Minor", 6}, {"melodic_minor", "Melodic Minor", 7},
+                  {"major_pentatonic", "Major Pentatonic", 8}, {"minor_pentatonic", "Minor Pentatonic", 9}}},
+                {"voice_one_interval", kV1Interval, "Voice One Interval", "degree", "Offsets the first harmony voice by scale degrees.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"voice_one_detune", kV1Detune, "Voice One Detune", "cent", "Fine-tunes the first harmony voice.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"voice_one_level", kV1Level, "Voice One Level", "dB", "Sets the first harmony voice level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"voice_two_enabled", kV2Enable, "Voice Two", "", "Enables the second harmony voice.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+                {"voice_two_interval", kV2Interval, "Voice Two Interval", "degree", "Offsets the second harmony voice by scale degrees.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"voice_two_detune", kV2Detune, "Voice Two Detune", "cent", "Fine-tunes the second harmony voice.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"voice_two_level", kV2Level, "Voice Two Level", "dB", "Sets the second harmony voice level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"glide_ms", kGlideMs, "Glide", "ms", "Smooths interval changes.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"dry_level", kDryLevel, "Dry Level", "dB", "Sets the unshifted signal level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"humanize", kHumanize, "Humanize", "cent", "Adds deterministic pitch variation to harmony voices.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+            }};
 }
 
 }  // namespace harmony

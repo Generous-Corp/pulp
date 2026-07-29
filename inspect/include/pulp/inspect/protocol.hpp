@@ -106,6 +106,7 @@ namespace methods {
     // State domain
     constexpr auto kStateGetParameters    = "State.getParameters";
     constexpr auto kStateSetParameter     = "State.setParameter";
+    constexpr auto kStateGetValueChannels = "State.getValueChannels";
     constexpr auto kStateParameterChanged = "State.parameterChanged";
 
     // Console domain

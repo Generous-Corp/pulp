@@ -14,6 +14,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/binding_diagnostics.hpp>
+#include <pulp/view/param_subscription.hpp>
 #include <pulp/view/reload_capabilities.hpp>
 #include <pulp/state/store.hpp>
 
@@ -42,6 +44,10 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
+class ValueChannelSet;
+class MeterSource;
+class VectorSource;
+class EventSource;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -87,6 +93,15 @@ public:
 
     // Read-back accessor for diagnostics + tests.
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
+
+    /// Attach the hosting processor's named value channels, enabling
+    /// `bindMeter(id, "value:<name>")`. Non-owning; the set must outlive this
+    /// bridge. Set post-construction for the same reason as the GPU surface:
+    /// the bridge is built before the adapter has resolved the processor.
+    void set_value_channels(ValueChannelSet* channels) noexcept {
+        value_channels_ = channels;
+    }
+    ValueChannelSet* value_channels() const noexcept { return value_channels_; }
 
     // True iff a GpuSurface is attached AND its adapter reports
     // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
@@ -235,6 +250,20 @@ public:
 
     // Number of live param/meter bindings (diagnostics + tests).
     std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }
+
+    // Deliver `paramchange` to JS subscriptions whose param moved since the
+    // last frame. Polled, not pushed — see state_binding_api.cpp for why that
+    // is what makes delivery origin-blind, coalesced, and off the audio thread.
+    void service_param_subscriptions();
+
+    // Live paramchange subscriptions, excluding mid-dispatch tombstones.
+    std::size_t param_subscription_count() const noexcept;
+
+    // Deliver event-channel blocks to JS handlers on the frame tick.
+    void service_event_bindings();
+
+    // Live event-channel bindings, excluding mid-dispatch tombstones.
+    std::size_t event_binding_count() const noexcept;
 
     // ── Runtime design import ─────────────────────────────────────
     //
@@ -451,14 +480,43 @@ private:
         float apply(float v) const;
     };
     struct ParamBinding {
-        enum class Target { value, meter };
+        using Target = BindingTarget;
         std::string widget_id;
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
+        /// Non-null when bound to a `value:<name>` channel instead of a param;
+        /// owned by the processor's ValueChannelSet, resolved once at bind.
+        MeterSource* value_meter = nullptr;
+        VectorSource* value_vector = nullptr;   ///< as above, for a scope target
+        /// Staleness tracking. A channel that stops PUBLISHING decays to its
+        /// declared neutral; one that publishes the same number forever does
+        /// not. Comparing values cannot distinguish those, so watch the
+        /// publish sequence instead (see PublishCounter).
+        std::uint32_t last_publish_seq = 0;
+        std::chrono::steady_clock::time_point last_publish_at{};
+        float neutral = 0.0f;
         Target target = Target::value;
         BindingTransform transform;
+        /// `{fromParam: true}`, not yet derived. Derivation needs the widget
+        /// type and a script may bind before creating the view, so it happens
+        /// on first apply — then clears. See derive_binding_transform.
+        bool derive_from_param = false;
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
+    ValueChannelSet* value_channels_ = nullptr;  ///< non-owning; see set_value_channels
+    std::vector<ParamSubscription> param_subscriptions_;
+    std::uint32_t next_param_subscription_id_ = 1;  ///< monotonic; never reused
+    // True while service_param_subscriptions() is dispatching into JS, so an
+    // unsubscribe from inside a handler tombstones instead of erasing.
+    bool in_param_dispatch_ = false;
+    struct EventBinding {
+        std::uint32_t id = 0;
+        EventSource* source = nullptr;  ///< owned by the processor's channel set
+        std::uint32_t last_publication = 0;
+    };
+    std::vector<EventBinding> event_bindings_;
+    std::uint32_t next_event_binding_id_ = 1;
+    bool in_event_dispatch_ = false;
     struct ParamGestureRoute {
         state::ParamID active_param_id = 0;
         bool active = false;
@@ -475,6 +533,8 @@ private:
     // Parse the optional JS transform object (`{db,dbMin,dbMax,scale,offset,
     // min,max,clamp}`) into a BindingTransform. Null / non-object → identity.
     static BindingTransform parse_transform(const choc::value::Value* v);
+    /// `{fromParam: true}` with no explicit db/dbMin/dbMax overriding it.
+    static bool transform_requests_derivation(const choc::value::Value* v);
     // Resolve a param NAME to its id via the store. Returns false when the
     // store has no param with that name (the binding is then not registered).
     bool resolve_param_id(const std::string& name, state::ParamID& out) const;
@@ -486,6 +546,12 @@ private:
     // The route retains the parameter that began an active gesture so rebinding
     // mid-drag still ends the original parameter exactly once.
     void wire_parameter_gestures(const std::string& widget_id, View* widget);
+    /// Open / close the host parameter gesture for a widget wired by
+    /// wire_parameter_gestures(). Drag controls drive these from their own
+    /// begin/end callbacks; a click control (Toggle) has no drag lifecycle and
+    /// brackets its instantaneous edit with them instead.
+    void begin_param_gesture(const std::string& widget_id);
+    void end_param_gesture(const std::string& widget_id);
     void finish_param_gesture_route(
         const std::shared_ptr<ParamGestureRoute>& route);
     void release_param_gesture_route(const std::string& widget_id) noexcept;
@@ -501,6 +567,28 @@ private:
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
     bool apply_param_binding(ParamBinding& binding, View* w);
+    /// Fill a `{fromParam: true}` transform from the param's declared range.
+    void derive_binding_transform(ParamBinding& binding, View* w);
+    /// Push a whole block to a SpectrumView / WaveformView.
+    bool apply_scope_binding(ParamBinding& binding, View* w);
+    /// True when the channel has not published for kValueChannelStaleAfter.
+    /// Updates the binding's sequence/timestamp as a side effect.
+    static bool value_channel_is_stale(ParamBinding& binding, std::uint32_t seq);
+
+public:
+    /// Binding attempts in call order, bound or not (binding_diagnostics.hpp).
+    /// Reset per bridge, so this is the log for the loaded script.
+    const std::vector<BindingAttempt>& binding_attempts() const noexcept {
+        return binding_attempts_;
+    }
+    /// Declared parameters no attempt reached — the UI cannot change them.
+    /// Excludes Bypass/Reset designations and triggers, which the host surfaces.
+    std::vector<std::string> unbound_params() const;
+
+private:
+    std::vector<BindingAttempt> binding_attempts_;
+    bool record_binding_attempt(const std::string& widget_id, const std::string& param_name,
+                                BindingTarget target, BindingOutcome outcome);
 
     std::function<void()> repaint_callback_;
 

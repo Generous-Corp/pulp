@@ -55,6 +55,7 @@
 // correct shape for it — the dry path in that topology is the mix bus, not
 // something this node should own.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 
@@ -217,6 +218,61 @@ inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f
     return t;
 }
 
+inline ForgeNodeDescriptor feedforward_compressor_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "feedforward_compressor";
+    d.label = "Feedforward Compressor";
+    d.description = "Transparent true-stereo compressor with linked detection and optional "
+                    "program-dependent release.";
+    d.realizations = {{"zero_lookahead", kFeedforwardCompressorTypeId}};
+    d.params = {
+        {"threshold_db", kThresholdDb, "Threshold", "dB",
+         "Level above which gain reduction begins.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"ratio", kRatio, "Ratio", ":1", "Gain-reduction ratio above threshold.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"knee_db", kKneeDb, "Knee", "dB", "Width of the transition into compression.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"attack_ms", kAttackMs, "Attack", "ms", "Time for gain reduction to engage.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"release_ms", kReleaseMs, "Release", "ms", "Time for gain reduction to recover.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"detector_mode",
+         kDetectorMode,
+         "Detector",
+         "",
+         "Peak or RMS level detection.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"peak", "Peak", 0.0f}, {"rms", "RMS", 1.0f}}},
+        {"rms_window_ms", kRmsWindowMs, "RMS Window", "ms",
+         "Averaging time used by the RMS detector.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"program_dependent",
+         kProgramDependent,
+         "Program Release",
+         "",
+         "Adapts release timing to sustained program material.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+        {"makeup_db", kMakeupDb, "Makeup", "dB", "Output gain after compression.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"auto_makeup",
+         kAutoMakeup,
+         "Auto Makeup",
+         "",
+         "Automatically compensates for expected gain reduction.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+        {"stereo_link", kStereoLink, "Stereo Link", "%",
+         "Couples channel detectors to preserve stereo balance.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+    };
+    return d;
+}
+
 // ── The VCA lineage (Blackmer/dbx) ────────────────────────────────────────
 //
 // One node type. Nothing here changes topology and nothing changes latency
@@ -339,6 +395,44 @@ inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
     return t;
 }
 
+inline ForgeNodeDescriptor vca_compressor_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "vca_compressor";
+    d.label = "VCA Compressor";
+    d.description = "Fast VCA-style compressor with OverEasy knee and optional negative-ratio "
+                    "behavior.";
+    d.realizations = {{"default", kTypeId}};
+    d.params = {
+        {"threshold_db", kThresholdDb, "Threshold", "dB",
+         "Level above which gain reduction begins.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"ratio", kRatio, "Ratio", ":1", "Gain-reduction ratio above threshold.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"knee_db", kKneeDb, "Knee", "dB", "Width of the soft-knee transition.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"time_ms", kTimeMs, "Time", "ms", "Coupled attack and release timing.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"makeup_db", kMakeupDb, "Makeup", "dB", "Output gain after compression.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"mix", kMix, "Mix", "%", "Blend between dry and compressed signals.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"negative_ratio",
+         kNegativeRatio,
+         "Negative Ratio",
+         "",
+         "Enables the beyond-limiting negative-ratio curve.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+        {"negative_ratio_amount", kNegRatioAmount, "Negative Ratio Amount", ":1",
+         "Slope used while negative-ratio mode is active.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"ceiling_db", kCeilingDb, "Ceiling", "dB", "Maximum output level in negative-ratio mode.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+    };
+    return d;
+}
+
 }  // namespace vca
 
 // ── The FET lineage (1176) ────────────────────────────────────────────────
@@ -444,6 +538,45 @@ inline CustomNodeType make_fet_compressor_node() {
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor fet_compressor_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "fet_compressor";
+    d.label = "FET Compressor";
+    d.description = "Fast 1176-style FET compressor with switched ratios and transformer color.";
+    d.realizations = {{"default", kTypeId}};
+    d.params = {
+        {"input_gain_db", kInputGainDb, "Input", "dB",
+         "Input drive into the gain-reduction circuit.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"output_gain_db", kOutputGainDb, "Output", "dB", "Output makeup gain.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"ratio",
+         kRatio,
+         "Ratio",
+         "",
+         "Front-panel ratio-button selection.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"four", "4:1", 0.0f},
+          {"eight", "8:1", 1.0f},
+          {"twelve", "12:1", 2.0f},
+          {"twenty", "20:1", 3.0f},
+          {"all_buttons", "All Buttons", 4.0f}}},
+        {"attack_us", kAttackUs, "Attack", "us", "Time for compression to engage.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"release_ms", kReleaseMs, "Release", "ms", "Time for compression to recover.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"knee_db", kKneeDb, "Knee", "dB", "Softness of the compression knee.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"transformer", kTransformerAmount, "Transformer", "%",
+         "Amount of output-transformer coloration.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mix", kMix, "Mix", "%", "Blend between dry and compressed signals.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+    };
+    return d;
 }
 
 }  // namespace fet
@@ -553,6 +686,52 @@ inline CustomNodeType make_diode_bridge_compressor_node(bool feedback = true, bo
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor diode_bridge_compressor_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "diode_bridge_compressor";
+    d.label = "Diode Bridge Compressor";
+    d.description = "Diode-bridge dynamics with transformer character and feedback or "
+                    "feedforward detection.";
+    d.axes = {{"topology",
+               "Topology",
+               "Position of the detector relative to the gain-control bridge.",
+               {{"feedback", "Feedback", 0.0f}, {"feedforward", "Feedforward", 1.0f}}}};
+    d.realizations = {{"feedback", kTypeId, {{"topology", "feedback"}}},
+                      {"feedforward", kFeedforwardTypeId, {{"topology", "feedforward"}}}};
+    d.params = {
+        {"threshold_db", kThresholdDb, "Threshold", "dB",
+         "Level above which gain reduction begins.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"ratio", kRatio, "Ratio", ":1", "Gain-reduction ratio above threshold.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"knee_db", kKneeDb, "Knee", "dB", "Width of the soft-knee transition.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"attack_ms", kAttackMs, "Attack", "ms", "Time for compression to engage.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"release_ms", kReleaseMs, "Release", "ms", "Time for compression to recover.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"makeup_db", kMakeupDb, "Makeup", "dB", "Output gain after compression.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"character", kCharacter, "Character", "%",
+         "Drive through the diode bridge and transformer stages.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mix", kMixPercent, "Mix", "%", "Blend between dry and compressed signals.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"sidechain_hpf_hz", kScHpfHz, "Sidechain HPF", "Hz",
+         "High-pass cutoff that reduces low-frequency detector sensitivity.",
+         ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+        {"auto_release",
+         kAutoRelease,
+         "Auto Release",
+         "",
+         "Adapts release timing to the detected program.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+    };
+    return d;
 }
 
 }  // namespace diode

@@ -46,6 +46,16 @@ contain `pulp-build*` or `pulp-preamble*`, and must carry a
 and `pulp-advisory-gpu` label. Do not add that advisory label to a required
 runner, and do not use Orchard.
 
+That isolation was being defeated by the workflow's trigger list, not by its
+runner selector: `web-plugins.yml` also ran on `merge_group`, so
+`GPU audio proof (macOS, real WebGPU)` claimed a macOS runner on **every merge-
+queue entry** while gating nothing — GitHub validates one merge group at a time,
+so that competed directly with the required `macos` gate for the same Mac pool.
+The workflow now runs on `pull_request` only. Capacity isolation is a claim about
+*when* a job runs as much as *where*: an advisory job must not appear on
+`merge_group`, because nothing there is advisory in effect — it either gates the
+merge or it just slows the queue down.
+
 `examples/web-demos/gpu-audio/` runs SuperConvolver's convolution as a **WGSL
 compute shader on the browser's real WebGPU device**. Do not repeat the old line
 that this is impossible or unstarted. But be equally precise about its shape,
@@ -670,6 +680,13 @@ new file is the same failure mode as a split file: `value_source_binding.cpp` (d
 not to `PulpWebUi.cmake`, and `view.cpp` — already in the wasm list — referenced it, so every web
 UI module link-failed and blocked the queue. Whoever adds a `core/view/**` or `core/canvas/**`
 `.cpp` must mirror it into `PulpWebUi.cmake` in the same change, or the whole PR queue wedges.
+
+This includes small internal policy/helper TUs, not only visible widget or renderer splits.
+`yoga_layout.cpp` was refactored to call `yoga_measurement_internal.cpp`; native view-core and
+all native tests stayed green, but the required WebCLAP build failed at `wasm-ld` with undefined
+`sanitize_yoga_measurement` / `resolve_yoga_measure_dimension` until the helper was added to
+`_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
+source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build

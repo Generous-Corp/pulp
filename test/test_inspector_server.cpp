@@ -24,6 +24,11 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #endif
 
@@ -644,4 +649,80 @@ TEST_CASE("InspectorServer stop disconnects clients and is idempotent after acti
     server.stop();
     REQUIRE(server.client_count() == 0);
     REQUIRE(server.port() == *port);
+}
+
+// ── Transport reachability ───────────────────────────────────────────────────
+//
+// The inspector protocol has no authentication and exposes Runtime.evaluate, so
+// where it binds decides whether "debug port" or "remote code execution in the
+// host process" is the accurate description. InterprocessConnectionServer binds
+// all interfaces when handed a bare port — deliberate for that general-purpose
+// class, wrong for this one — so InspectorServer qualifies the endpoint.
+
+namespace {
+
+#ifndef _WIN32
+// First non-loopback IPv4 on this machine, or nullopt when the host has none
+// (an isolated CI container often does not).
+std::optional<std::string> first_non_loopback_ipv4() {
+    struct ifaddrs* ifs = nullptr;
+    if (getifaddrs(&ifs) != 0 || ifs == nullptr) return std::nullopt;
+    std::optional<std::string> found;
+    for (auto* it = ifs; it != nullptr; it = it->ifa_next) {
+        if (it->ifa_addr == nullptr || it->ifa_addr->sa_family != AF_INET) continue;
+        if ((it->ifa_flags & IFF_LOOPBACK) != 0) continue;
+        if ((it->ifa_flags & IFF_UP) == 0) continue;
+        char buf[INET_ADDRSTRLEN] = {};
+        auto* in4 = reinterpret_cast<struct sockaddr_in*>(it->ifa_addr);
+        if (inet_ntop(AF_INET, &in4->sin_addr, buf, sizeof(buf)) == nullptr) continue;
+        found = std::string(buf);
+        break;
+    }
+    freeifaddrs(ifs);
+    return found;
+}
+#endif
+
+} // namespace
+
+TEST_CASE("InspectorServer is reachable on loopback and nowhere else",
+          "[inspect][server][security]") {
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     ("pulp-inspector-bind-test-" + std::to_string(socket_port_seed()));
+    std::filesystem::create_directories(tmp);
+    ScopedEnv tmpdir(discovery_env_name());
+    tmpdir.set(tmp.string());
+
+    InspectorServer server;
+    auto port = start_inspector_server(server);
+    REQUIRE(port.has_value());
+
+    // POSITIVE CONTROL. If loopback does not connect, the negative below proves
+    // nothing — an unreachable server is trivially unreachable off-box.
+    {
+        Socket loopback;
+        loopback.create(SocketType::TCP);
+        INFO("the inspector must still be reachable on 127.0.0.1:" << *port);
+        REQUIRE(loopback.connect("127.0.0.1", *port));
+    }
+
+#ifdef _WIN32
+    WARN("SKIPPED off-box reachability: no getifaddrs on Windows. The loopback "
+         "control above still ran; the off-box half is unverified here.");
+#else
+    const auto external = first_non_loopback_ipv4();
+    if (!external) {
+        WARN("SKIPPED off-box reachability: this host has no non-loopback IPv4 "
+             "interface, so there is no address to prove unreachable.");
+    } else {
+        Socket off_box;
+        off_box.create(SocketType::TCP);
+        INFO("the inspector must NOT accept connections on " << *external << ':' << *port
+             << " — that transport is unauthenticated and carries Runtime.evaluate");
+        CHECK_FALSE(off_box.connect(*external, *port));
+    }
+#endif
+
+    server.stop();
+    std::filesystem::remove_all(tmp);
 }

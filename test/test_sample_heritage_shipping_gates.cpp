@@ -738,7 +738,12 @@ TEST_CASE("Representative chain stays within the shipping CPU budget",
     const auto chain = validate_sample_heritage_profile(performance_profile());
     REQUIRE(chain.valid());
 
-#if defined(NDEBUG)
+// The budget is a RATIO of chain time to baseline time, but sanitizer
+// instrumentation does not scale the two halves equally — it taxes the chain's
+// extra work more than the baseline's — so the ratio drifts on an instrumented
+// build and the verdict tracks runner load rather than the code. Assert it only
+// where it means something.
+#if defined(NDEBUG) && !defined(PULP_TEST_WITH_SANITIZER)
     constexpr double shipping_budget_ratio = 2.0;
     constexpr double measurement_tolerance = 1.05;
     std::array<double, 5> ratios{};
@@ -760,7 +765,7 @@ TEST_CASE("Representative chain stays within the shipping CPU budget",
     REQUIRE(ratios[ratios.size() / 2] <=
             shipping_budget_ratio * measurement_tolerance);
 #else
-    SUCCEED("Relative CPU budget is enforced by the Release shipping configuration");
+    SUCCEED("Relative CPU budget is enforced by the uninstrumented Release configuration");
 #endif
 }
 
@@ -783,9 +788,12 @@ TEST_CASE("Live cyclic work and storage remain bounded per output frame",
     REQUIRE(resources.maximum_input_frames <= config.max_block_samples +
                                                    config.cycle_samples);
 
-#if defined(NDEBUG)
+// Same reasoning as the CPU-budget gate above: this is a measured wall-clock
+// ratio, and instrumentation does not tax both halves equally. The resource
+// bounds asserted above are exact and still run under a sanitizer.
+#if defined(NDEBUG) && !defined(PULP_TEST_WITH_SANITIZER)
     REQUIRE(measured_live_scaling_ratio(config) <= 1.5);
 #else
-    SUCCEED("Live scaling is measured by the Release shipping configuration");
+    SUCCEED("Live scaling is measured by the uninstrumented Release configuration");
 #endif
 }

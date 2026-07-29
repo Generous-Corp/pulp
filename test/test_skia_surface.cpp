@@ -153,6 +153,8 @@ TEST_CASE("SkiaSurface retains cacheable layers across frame canvases",
     gpu_config.height = 100;
     if (!gpu->initialize(gpu_config))
         SKIP("Dawn adapter initialization failed");
+    if (gpu->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 100, .height = 100});
     if (!skia || !skia->is_available())
@@ -1065,6 +1067,8 @@ TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
     gpu_config.width = 16;
     gpu_config.height = 16;
     if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+    if (gpu->adapter_info().backend_type == "Null")
+        SKIP("Dawn Null backend cannot produce raster output");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 16, .height = 16});
     if (!skia || !skia->is_available()) return;

@@ -83,6 +83,7 @@ CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
@@ -166,6 +167,23 @@ if ! "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report \
     fail=1
 fi
 
+# ── 2b. shipyard-pin lockstep ──────────────────────────────────────────────
+# `tools/shipyard.toml` and every workflow's inline `SHIPYARD_VERSION` must
+# agree. The checker for this already existed but was wired into nothing, so
+# the two drifted to 0.78.0 vs 0.70.0 unnoticed — and a post-tag-sync pin
+# below 0.79.0 stamps the changelog commit `[skip ci]`, which makes Actions
+# skip the required checks, which makes the changelog PR unmergeable. Nine
+# stacked up that way and stalled the release pipeline. Cheap and offline,
+# so it runs unconditionally.
+PIN_CHECK="$ROOT/tools/scripts/check_shipyard_pin.py"
+if [ -f "$PIN_CHECK" ]; then
+    echo "" >&2
+    echo "▸ shipyard-pin lockstep check" >&2
+    if ! "$PYTHON" "$PIN_CHECK"; then
+        fail=1
+    fi
+fi
+
 # ── 3. compat-sync (optional — only if both files exist) ───────────────────
 COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
@@ -243,6 +261,14 @@ fi
 # it reads checked-out trees and never queries upstream (that is --check-upstream).
 if [ -f "$DEPS_AUDIT" ]; then
     echo "" >&2
+    echo "▸ forge-descriptor coverage (indexed packs carry semantic descriptors)" >&2
+    if ! "$PYTHON" "$ROOT/tools/scripts/forge_descriptor_coverage.py" --root "$ROOT" >/dev/null 2>&1; then
+        echo "  forge-descriptor-coverage: the 77-family semantic manifest, descriptor sources, or export registry drifted — run \`python3 tools/scripts/forge_descriptor_coverage.py\` for details." >&2
+        fail=1
+    else
+        echo "  forge-descriptor-coverage: ok" >&2
+    fi
+
     echo "▸ deps-audit (attribution drift + license truthfulness)" >&2
     if ! "$PYTHON" "$DEPS_AUDIT" --strict --verify-licenses >/dev/null 2>&1; then
         echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict --verify-licenses\` for details." >&2
@@ -344,8 +370,20 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
     fi
 fi
 
+# ── 9b. MSVC-only designated-initializer breaks ───────────────────────────
+# Duplicate designators compile fine under Clang and break only on MSVC, so
+# they pass every blocking gate (all macOS) and surface hours later as an
+# unrelated-looking Windows library failure. Diff-scoped and sub-second.
+if [ -f "$DESIGNATED_INIT_LINT" ]; then
+    echo "" >&2
+    echo "▸ designated-initializer lint (MSVC C7560)" >&2
+    if ! "$PYTHON" "$DESIGNATED_INIT_LINT" --mode=changed --base "$BASE" >&2; then
+        fail=1
+    fi
+fi
+
 # ── 10. import-provenance (opt-in) ─────────────────────────────────────────
-# Audits that any emitted/migrated project carries a well-formed clean-room
+# Audits that any emitted/migrated project carries a well-formed independent
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands
 # a migrated project to enforce it here.

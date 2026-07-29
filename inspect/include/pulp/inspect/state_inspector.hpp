@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+namespace pulp::view { class ValueChannelSet; }
+
 namespace pulp::inspect {
 
 using namespace pulp::state;
@@ -22,6 +24,21 @@ using namespace pulp::state;
 class StateInspector {
 public:
     explicit StateInspector(StateStore& store);
+
+    /// The store this inspector observes. Exposed so protocol serialization can
+    /// go through pulp::state::param_json rather than hand-rolling a second
+    /// parameter payload that would drift from the bridge's.
+    StateStore& store() const noexcept { return store_; }
+
+    /// The hosting processor's declared value channels, or null when it
+    /// declares none. Non-owning and attached after construction for the same
+    /// reason the widget bridge does it that way: the inspector is built before
+    /// the adapter has resolved the processor. The set must outlive this
+    /// inspector.
+    void set_value_channels(view::ValueChannelSet* channels) noexcept {
+        value_channels_ = channels;
+    }
+    view::ValueChannelSet* value_channels() const noexcept { return value_channels_; }
     ~StateInspector();
 
     StateInspector(const StateInspector&) = delete;
@@ -67,6 +84,7 @@ public:
 
 private:
     StateStore& store_;
+    view::ValueChannelSet* value_channels_ = nullptr;
     mutable std::mutex changes_mutex_;
     std::vector<ParamChange> changes_;
     ListenerToken listener_token_;

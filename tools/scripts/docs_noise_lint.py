@@ -224,9 +224,9 @@ SOURCE_COMMENT_RULES = (
         "agent/review breadcrumbs belong in the commit message, not source",
     ),
     Rule(
-        "source-cleanroom-note",
+        "source-provenance-note",
         re.compile(r"\bclean[\s-]?room\b", re.IGNORECASE),
-        "clean-room provenance lives in the Reference-Lineage commit trailer, "
+        "provenance lives in the Reference-Lineage commit trailer, "
         "not a source comment — describe the behavior instead",
     ),
     Rule(

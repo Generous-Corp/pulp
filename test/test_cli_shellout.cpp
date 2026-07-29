@@ -1491,7 +1491,7 @@ TEST_CASE("pulp help output lists the top-level subcommands", "[cli][shellout][h
     }
 
     for (const char* row : {
-             "  audit          License and clean-room audit",
+             "  audit          License and provenance audit",
              "  add            Add a component to the project",
              "  remove         Remove a previously added package",
              "  list           Show installed packages",

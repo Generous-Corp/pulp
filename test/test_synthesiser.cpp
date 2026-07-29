@@ -397,6 +397,83 @@ TEST_CASE("Synthesiser MIDI-buffer policy propagates group and choke fade",
     REQUIRE(synth.voice(1).note().voice_group == 15);
 }
 
+TEST_CASE("Synthesiser per-note policy chokes one drum and spares another",
+          "[midi][synth][choke]") {
+    // A kit holds every drum in one instrument, so a single block carries
+    // note-ons needing different choke policy: the closed hat silences the open
+    // hat it shares a mechanism with, while the kick beside it rings on. A
+    // policy resolved once per buffer cannot say both.
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/15);
+    REQUIRE(synth.voice(0).active());
+
+    auto kit_policy = [](uint8_t, uint8_t note, uint8_t) {
+        if (note == 42) {
+            return SynthesiserNoteOnPolicy{.voice_group = 15,
+                                           .choke_group = true,
+                                           .choke_fade_ms = 4.0f};
+        }
+        return SynthesiserNoteOnPolicy{};
+    };
+
+    MidiBuffer events;
+    events.add(note_on_ev(0, 36, 110, 2));
+    events.add(note_on_ev(0, 42, 100, 6));
+    float out[12]{};
+    synth.process(events, out, 12, kit_policy);
+
+    REQUIRE(synth.voice(0).note().note == 46);
+    REQUIRE(synth.voice(0).choke_calls == 1);
+    REQUIRE_THAT(synth.voice(0).last_choke_fade_ms, WithinAbs(4.0f, 1e-6f));
+
+    const TestVoice* kick = nullptr;
+    for (std::size_t i = 0; i < synth.polyphony(); ++i) {
+        if (synth.voice(i).active() && synth.voice(i).note().note == 36) {
+            kick = &synth.voice(i);
+        }
+    }
+    REQUIRE(kick != nullptr);
+    REQUIRE(kick->note().voice_group == 0);
+    REQUIRE(kick->choke_calls == 0);
+}
+
+TEST_CASE("Synthesiser per-note policy carries steal priority through the buffer",
+          "[midi][synth][steal]") {
+    // Buffer dispatch used to hard-code priority 0, which made the Priority
+    // strategy unreachable for anything driven by MIDI. A kit needs it so a
+    // long crash tail outlives the hi-hat run playing over it.
+    auto kit_policy = [](uint8_t, uint8_t note, uint8_t) {
+        SynthesiserNoteOnPolicy policy;
+        policy.priority = note == 49 ? 100 : 1;
+        return policy;
+    };
+
+    Synthesiser<TestVoice> synth(2);
+    synth.set_steal_strategy(VoiceStealStrategy::Priority);
+
+    MidiBuffer opening;
+    opening.add(note_on_ev(0, 49, 100, 0));
+    opening.add(note_on_ev(0, 42, 100, 2));
+    float out[8]{};
+    synth.process(opening, out, 8, kit_policy);
+
+    REQUIRE(synth.voice(0).note().priority == 100);
+    REQUIRE(synth.voice(1).note().priority == 1);
+
+    // Pool full. The next hat must take the low-priority voice, not the crash.
+    MidiBuffer crowding;
+    crowding.add(note_on_ev(0, 42, 100, 0));
+    synth.process(crowding, out, 8, kit_policy);
+
+    bool crash_survived = false;
+    for (std::size_t i = 0; i < synth.polyphony(); ++i) {
+        if (synth.voice(i).active() && synth.voice(i).note().note == 49) {
+            crash_survived = true;
+        }
+    }
+    REQUIRE(crash_survived);
+}
+
 TEST_CASE("Synthesiser group choke reaches a ringing release tail",
           "[midi][synth][choke]") {
     Synthesiser<TestVoice> synth(4);

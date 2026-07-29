@@ -28,6 +28,10 @@ target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
 pulp_add_test_suite(pulp-test-timeline-smf
     SOURCES test_timeline_smf.cpp
     LIBRARIES pulp::smf-interop pulp::midi)
+pulp_add_test_suite(pulp-test-smf-interchange
+    SOURCES test_smf_interchange.cpp
+    LIBRARIES pulp::smf-interchange pulp::smf-interop pulp::interchange
+    INCLUDE_DIRS ${choc_SOURCE_DIR})
 pulp_add_test_suite(pulp-test-timeline-production-mode
     SOURCES test_timeline_production_mode.cpp
     LIBRARIES pulp::timeline)
@@ -419,3 +423,6 @@ catch_discover_tests(pulp-test-timeline-phase1-examples)
 add_test(NAME timeline-api-docs-check-selftest
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_api_docs_check.py --self-test)
+
+# Engine-side half of the reference-clock sync soak, owned by this subsystem.
+include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")

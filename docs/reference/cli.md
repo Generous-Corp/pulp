@@ -1973,7 +1973,7 @@ Subcommands:
 | `install <url>` | Clone an add-on importer from a git URL with the user's own git credentials, read its `tool.json` + terms **from the cloned repo** (never from anything the SDK ships), enforce the SPI version window, run the accept-to-run terms gate, and install the tree under `~/.pulp/tools/<id>/` with an install record. Detection merges the installed importer's own `known-frameworks.json` on the next `pulp import detect`. A private repo works exactly when the user can `git clone` it. |
 | `uninstall <id>` | Remove an installed importer by id: deletes the install tree under `~/.pulp/tools/<id>/`, the install record under `~/.pulp/importers/`, and any installed skill. |
 | `inspect --from <fw> <dir>` | Resolve the importer (tool registry or `--importer-cmd`) and run its SPI `analyze` verb to produce a ProjectIR. When no importer is resolvable, prints the install hint and exits non-zero. ProjectIR can include `integration_requirements` for optional packages, SDK/provider options, and source assets the scaffold needs to preserve. |
-| `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a clean-room output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
+| `emit --from <fw> <dir> --output <out>` | Resolves the importer, runs its SPI `analyze` then `emit` verbs to get an **EmissionManifest**, then the **SDK writes** a buildable Pulp migration scaffold under `<out>`. The importer only proposes files (generated/stub carry inline content; verbatim portable-core copies and safe source assets carry an absolute `copy_from`); the SDK materialises them, runs a framework-source output scan over every generated file, and writes `migration_status.json` + a `.pulp-import-provenance.json` marker. Skewed/symmetric source parameter curves emit as shaped `ParamRange`s (skew + symmetric fields), no longer downgraded to linear. |
 
 **`install` flags:** `--accept-importer-terms` accepts the terms non-interactively for CI (still recorded under `~/.pulp`); `--force` reinstalls even when an up-to-date record already exists.
 
@@ -1996,7 +1996,7 @@ Subcommands:
 
 The importer is resolved against `tools/packages/tool-registry.json`: an importer tool declares the `frameworks` it handles plus `spi_min` / `spi_max` (the SPI version window) and `sdk_min` / `sdk_max`. The SDK negotiates the SPI version on every call and fails loudly on a mismatch ("upgrade Pulp" / "upgrade the importer") rather than misbehaving silently. The data contracts are `tools/import/schemas/project-import-ir-v0.schema.json` and `tools/import/schemas/import-spi-v0.schema.json`.
 
-**Who writes what (clean-room boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a clean-room output denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
+**Who writes what (provenance boundary).** The importer is a separate add-on and never writes into the user's tree — it returns an EmissionManifest over the SPI `emit` verb. The **SDK** writes every file, and before writing each `generated` file it runs a framework-source OUTPUT denylist scan (sourced from the known-frameworks content markers) that rejects framework source or vendor banners; a `copied-user-file` is the user's own DSP, copied verbatim and recorded in provenance, so it is exempt. A misbehaving importer therefore cannot smuggle framework code into the scaffold. The SDK also writes `migration_status.json` (the migration verdict + unresolved notes) and `.pulp-import-provenance.json` (importer id, framework, SPI version, emit timestamp, source-tree hash, per-file provenance).
 
 ### identity
 
@@ -2189,6 +2189,31 @@ graph's sample rate — is absent rather than present-and-wrong. Two catalogs
 build their params from a spec table at construction time; those nodes are
 marked `baked_params_computed_at_runtime` instead of being reported as having
 no controls.
+
+### forge
+
+**Status**: experimental
+
+Exports the semantic Forge catalog as JSON without parsing Pulp's C++ headers:
+
+```bash
+pulp forge catalog export --json
+pulp forge catalog export --check
+pulp forge catalog export --write
+```
+
+Each node includes its stable key, label, description, finite realization axes,
+and concrete realizations with `type_id` plus explicit axis settings. Parameter
+vocabulary includes realization-scoped named choices and one numeric
+`min`/`max`/`default` contract per applicable realization. Those numbers are
+joined from every constructed baked node at export time; descriptors
+intentionally do not duplicate them.
+
+SDK installs carry the checked snapshot at
+`share/pulp/forge-catalog.json`. Forge should read that file from the selected
+SDK prefix so the vocabulary and numeric contract always match the SDK it
+builds against. `--check` fails if the committed snapshot is stale or if an
+expected semantic node is missing from the export.
 
 ### minos
 

@@ -20,10 +20,14 @@ on:
       - 'core/**/include/**'
       - 'tools/scripts/check_headers_selfcontained.py'
       - '.github/workflows/header-self-contained.yml'
-  # Run the required `Public headers compile standalone (Linux Clang)` check on
-  # queued merge groups so a merge queue on `main` can land PRs. `merge_group`
-  # does not honour the `paths` filter above, so this fires on every group.
-  merge_group:
+  # Deliberately NOT run on `merge_group`. `Public headers compile standalone
+  # (Linux Clang)` is not a required context on `main`, so its merge-group run
+  # could never gate a merge — but because `merge_group` ignores the `paths`
+  # filter above, it fired on every queue entry and competed for the same
+  # concurrency the required checks need. Add `merge_group:` back only if this
+  # job's name is added to the required contexts in
+  # `repos/{owner}/{repo}/branches/main/protection`; a required check that never
+  # reports on a merge group wedges the queue permanently.
 
 permissions:
   contents: read

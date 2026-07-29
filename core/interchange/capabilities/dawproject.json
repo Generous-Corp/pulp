@@ -1,5 +1,6 @@
 {
   "format": "dawproject",
+  "ordinal": 0,
   "enumerator": "DawProject",
   "display_name": "DAWproject",
   "comment": [
@@ -23,6 +24,9 @@
       "level": "full"
     },
     "clip.note": {
+      "level": "full"
+    },
+    "clip.empty": {
       "level": "full"
     },
     "clip.media": {
@@ -128,6 +132,15 @@
     "clip.note": {
       "level": "full"
     },
+    "clip.empty": {
+      "level": "full"
+    },
+    "clip.note-velocity-quantized": {
+      "level": "full"
+    },
+    "tempo.value-quantized": {
+      "level": "full"
+    },
     "clip.media": {
       "level": "full"
     },
@@ -146,25 +159,22 @@
     "asset.embedded-media": {
       "level": "drop",
       "loss_class": "dropped",
-      "loss": "the writer references media by package-relative path and does not embed bytes, so an embedded asset is exported as a reference the receiving DAW must resolve"
+      "loss": "the writer does not emit embedded media bytes, so an embedded asset is omitted"
     },
     "clip.absolute": {
-      "level": "degrade",
-      "to": "clip.musical",
-      "loss_class": "approximated",
-      "loss": "sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick"
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer cannot place sample-anchored clips on its beats-only lane, so the clip and its content are omitted"
     },
     "take.lane": {
-      "level": "degrade",
-      "to": "clip.media",
-      "loss_class": "flattened",
-      "loss": "the active comp is flattened into arrangement clips; alternate takes are dropped"
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not inspect take lanes, so alternate takes are omitted"
     },
     "take.comp": {
-      "level": "degrade",
-      "to": "clip.media",
-      "loss_class": "flattened",
-      "loss": "comp segment boundaries become clip boundaries; the selection is no longer editable"
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer does not flatten comp selections, so comp segment choices are omitted"
     },
     "track.freeze": {
       "level": "drop",
@@ -217,16 +227,19 @@
       "loss": "devices are identity-only in the document; DAWproject requires a device type to place one"
     },
     "sequence.multiple": {
-      "level": "degrade",
-      "to": "track.flat",
-      "loss_class": "flattened",
+      "level": "drop",
+      "loss_class": "dropped",
       "loss": "only the root sequence is written; other sequences are dropped"
     },
     "content.registered": {
-      "level": "roundtrip-only"
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer cannot preserve registered extension payloads, so the clip content is omitted"
     },
     "content.opaque": {
-      "level": "roundtrip-only"
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer cannot preserve opaque extension payloads, so the clip content is omitted"
     },
     "marker": {
       "level": "drop",
@@ -237,6 +250,11 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "the writer does not emit a session timecode origin, so the exported document starts at zero and every timecode reference shifts"
+    },
+    "tempo.ramp": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map"
     }
   }
 }

@@ -1,0 +1,41 @@
+name: Required gate liveness
+
+# Branch protection proves which contexts GitHub intends to require. This
+# workflow proves those contexts actually materialized on the exact merged SHA.
+# A renamed job or path filter that silently stops matching is therefore red,
+# not invisible. The schedule is a backstop for push-event delivery failures.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Merged commit to audit (defaults to the workflow SHA).'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+  issues: write
+
+concurrency:
+  group: required-gate-liveness
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TARGET_SHA: ${{ inputs.target_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Prove every required gate ran for this commit
+        run: python3 tools/scripts/required_gate_liveness.py

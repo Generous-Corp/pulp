@@ -152,13 +152,13 @@
         "provenance": {
           "type": "string",
           "enum": ["pulp-generated", "copied-user-file", "scaffold", "report"],
-          "description": "Drives license_provenance in the report and the clean-room output check."
+          "description": "Drives license_provenance in the report and the framework-source output check."
         }
       }
     },
     "emit_result": {
       "type": "object",
-      "description": "The `emit` verb's result: an EmissionManifest the importer PROPOSES and the SDK MATERIALISES. The importer never writes into the user's tree — every generated/stub file ships its `content` inline, every verbatim portable-core copy ships an absolute `copy_from` source path. The SDK writes each file under the request's `output_dir`, runs the clean-room output denylist scan over every `generated` file (a `copied-user-file` is the user's own code and is EXEMPT), and records provenance. `migration_status` here is the rich status document (the on-disk migration_status.json), distinct from the short enum in `emission_manifest`.",
+      "description": "The `emit` verb's result: an EmissionManifest the importer PROPOSES and the SDK MATERIALISES. The importer never writes into the user's tree — every generated/stub file ships its `content` inline, every verbatim portable-core copy ships an absolute `copy_from` source path. The SDK writes each file under the request's `output_dir`, runs the framework-source OUTPUT denylist scan over every `generated` file (a `copied-user-file` is the user's own code and is EXEMPT), and records provenance. `migration_status` here is the rich status document (the on-disk migration_status.json), distinct from the short enum in `emission_manifest`.",
       "required": ["schema", "files"],
       "additionalProperties": true,
       "properties": {
@@ -188,7 +188,7 @@
       "additionalProperties": true,
       "properties": {
         "path": { "type": "string", "description": "Destination path relative to output_dir." },
-        "provenance": { "type": "string", "enum": ["generated", "copied-user-file", "stub"], "description": "Drives the clean-room output scan: generated/stub are scanned for framework-source tells, copied-user-file is the user's own code and is exempt." },
+        "provenance": { "type": "string", "enum": ["generated", "copied-user-file", "stub"], "description": "Drives the framework-source output scan: generated/stub are scanned for framework-source tells, copied-user-file is the user's own code and is exempt." },
         "classification": { "type": "string", "description": "Optional hint, e.g. 'source' / 'build' / 'report' / 'manifest'." },
         "content": { "type": "string", "description": "Inline file content (generated/stub files)." },
         "copy_from": { "type": "string", "description": "Absolute source path for a verbatim copied-user-file." }

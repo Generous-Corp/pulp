@@ -4,6 +4,7 @@
 #include <pulp/timeline/model.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -344,4 +345,50 @@ TEST_CASE("a census records markers, regions, and the session timecode origin",
     REQUIRE(concept_detectable_in_model(Concept::TimecodeOrigin));
     for (Concept concept_value : counted.present())
         REQUIRE(concept_detectable_in_model(concept_value));
+}
+
+TEST_CASE("a census names empty clips and continuous tempo ramps", "[interchange]") {
+    auto empty = take_value(Clip::create({4}, {0}, {100}, EmptyContent{}));
+    auto note_content = take_value(NoteContent::create(
+        {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 40'000, 60, 0}}));
+    auto note = take_value(Clip::create({7}, {100}, {100}, std::move(note_content)));
+    auto track =
+        take_value(Track::create({5}, "empty", {std::move(empty), std::move(note)}));
+    auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000},
+                                                {std::move(track)}));
+    const std::array tempo_points{
+        TempoPoint{TickPosition{0}, 100.0, TempoCurve::LinearInTicks},
+        TempoPoint{TickPosition{1'000}, 140.0, TempoCurve::Constant}};
+    auto tempo = TempoMap::create(tempo_points);
+    REQUIRE(tempo);
+    ProjectInput input{{1}, "ramped", 10, {3}, {}, {std::move(sequence)}};
+    input.tempo_map = std::move(tempo.value());
+    const ConceptCensus counted = census(take_value(Project::create(std::move(input))));
+
+    REQUIRE(counted.count(Concept::ClipEmpty) == 1);
+    REQUIRE(counted.owners(Concept::ClipEmpty).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipEmpty)[0] == ItemId{4});
+    REQUIRE(counted.count(Concept::TempoRamp) == 1);
+    REQUIRE(counted.owners(Concept::TempoRamp).size() == 1);
+    REQUIRE(counted.owners(Concept::TempoRamp)[0] == ItemId{1});
+    REQUIRE(counted.count(Concept::ClipNoteVelocityQuantized) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized)[0] == ItemId{7});
+    REQUIRE(counted.contains(Concept::TempoMap));
+}
+
+TEST_CASE("a census names a zero velocity that cannot be a sounding SMF Note On",
+          "[interchange]") {
+    auto notes = take_value(NoteContent::create(
+        {NoteEvent{{6}, TickPosition{0}, TickDuration{100}, 0, 60, 0}}));
+    auto clip = take_value(Clip::create({7}, {0}, {100}, std::move(notes)));
+    auto track = take_value(Track::create({5}, "silent", {std::move(clip)}));
+    auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000},
+                                                {std::move(track)}));
+    const auto project = take_value(Project::create(
+        ProjectInput{{1}, "zero velocity", 10, {3}, {}, {std::move(sequence)}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNoteVelocityQuantized) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteVelocityQuantized)[0] == ItemId{7});
 }

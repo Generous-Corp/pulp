@@ -45,9 +45,13 @@ function(_pulp_add_standalone target name bundle_id version)
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${version}"
         )
     endif()
-    if(COMMAND target_copy_webgpu_binaries)
-        target_copy_webgpu_binaries(${target}_Standalone)
-    endif()
+    # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and
+    # Skia's icudtl.dat on Windows. Unguarded on purpose —
+    # pulp_stage_runtime_dependencies() is defined in both the source and
+    # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
+    # a missing definition silently skip staging entirely.
+    pulp_stage_runtime_dependencies(${target}_Standalone)
+    pulp_assert_runtime_dependencies_staged(${target}_Standalone)
     # Portability guard (runs AFTER the WebGPU dylib is bundled, so a correctly
     # set-up standalone is clean): fail/warn if the binary bakes a build-tree
     # absolute path — the "works on the build box, breaks when shared" footgun.

@@ -10,7 +10,7 @@
 /// with stale labels and stale value-domain bounds in DP's automation
 /// lane.
 ///
-/// The clean-room fix layers an additional `kReloadComponent`
+/// The independent fix layers an additional `kReloadComponent`
 /// notification onto the standard restart bundle when the detected
 /// host is Digital Performer. Cubase / Logic / Reaper do not require
 /// this — they re-query the parameter list whenever the edit
@@ -37,7 +37,7 @@
 /// per-symptom isolation tests ship; promote to `Validated` after
 /// Digital Performer bench evidence lands.
 ///
-/// **Reference-Lineage**: cleanroom reproducer=#3046
+/// **Reference-Lineage**: independent reproducer=#3046
 /// docs=https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Workflow+Diagrams/Edit+Controller+Call+Sequence.html
 
 #include <pulp/format/host_quirks.hpp>
