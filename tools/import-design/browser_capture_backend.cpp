@@ -30,6 +30,9 @@ namespace {
 
 constexpr std::string_view kChromeDownloadUrl =
     "https://www.google.com/chrome/";
+constexpr std::string_view kNodeDownloadUrl =
+    "https://nodejs.org/en/download";
+constexpr int kMinimumNodeMajor = 22;
 constexpr int kLauncherCleanupGraceMs = 5000;
 
 int outer_process_timeout(int runtime_timeout_ms) {
@@ -402,6 +405,68 @@ bool parse_browser_version(std::string_view output,
     return !product.empty() && major > 0;
 }
 
+bool parse_node_version(std::string_view output,
+                        std::string& version,
+                        int& major) {
+    static const std::regex kVersionPattern{
+        R"(\bv?([0-9]+(?:\.[0-9]+){1,3})\b)"};
+    std::smatch match;
+    const std::string line = one_line(std::string(output));
+    if (!std::regex_search(line, match, kVersionPattern)) return false;
+    version = match[1].str();
+    try {
+        major = std::stoi(match[1].str());
+    } catch (...) {
+        return false;
+    }
+    return major > 0;
+}
+
+Diagnostic discovery_diagnostic(
+    const std::vector<BrowserProbeResult>& probes) {
+    const auto has_failure = [&](BrowserProbeFailure kind) {
+        return std::any_of(
+            probes.begin(), probes.end(),
+            [kind](const BrowserProbeResult& probe) {
+                return probe.failure_kind == kind;
+            });
+    };
+    if (has_failure(BrowserProbeFailure::node_unavailable)) {
+        return {
+            "node-unavailable",
+            "Node.js was not found; faithful HTML import needs Node.js 22 or newer.",
+            "runtime-discovery"};
+    }
+    if (has_failure(BrowserProbeFailure::node_incompatible)) {
+        return {
+            "node-incompatible",
+            "The installed Node.js is too old; faithful HTML import needs Node.js 22 or newer.",
+            "runtime-discovery"};
+    }
+    if (has_failure(BrowserProbeFailure::capture_runtime_unavailable)) {
+        return {
+            "capture-runtime-unavailable",
+            "The Pulp browser-capture runtime is missing or incomplete.",
+            "runtime-discovery"};
+    }
+    if (has_failure(BrowserProbeFailure::capture_capability_unavailable)) {
+        return {
+            "browser-capability-unavailable",
+            "Chrome or Chromium does not provide the required headless capture capabilities.",
+            "browser-discovery"};
+    }
+    if (has_failure(BrowserProbeFailure::browser_incompatible)) {
+        return {
+            "browser-incompatible",
+            "Chrome or Chromium was found, but it is too old or incompatible.",
+            "browser-discovery"};
+    }
+    return {
+        "browser-unavailable",
+        "No compatible Google Chrome or Chromium installation was found.",
+        "browser-discovery"};
+}
+
 bool path_is_within(const fs::path& root,
                     const fs::path& child,
                     fs::path& canonical_root,
@@ -578,6 +643,7 @@ BrowserProbeResult probe_browser(
     result.candidate = candidate;
 
     if (!is_executable_file(candidate.executable)) {
+        result.failure_kind = BrowserProbeFailure::browser_unavailable;
         result.failure = "browser executable does not exist or is not executable";
         return result;
     }
@@ -588,10 +654,12 @@ BrowserProbeResult probe_browser(
     auto version_process = platform::ChildProcess::run(
         candidate.executable.string(), {"--version"}, version_options);
     if (version_process.timed_out) {
+        result.failure_kind = BrowserProbeFailure::browser_incompatible;
         result.failure = "browser version probe timed out";
         return result;
     }
     if (version_process.exit_code != 0) {
+        result.failure_kind = BrowserProbeFailure::browser_incompatible;
         result.failure = "browser version probe failed";
         const auto detail = one_line(
             sanitize_subprocess_output(version_process.stderr_output));
@@ -604,11 +672,13 @@ BrowserProbeResult probe_browser(
             : version_process.stderr_output;
     if (!parse_browser_version(version_output, result.product,
                                result.version, result.major_version)) {
+        result.failure_kind = BrowserProbeFailure::browser_incompatible;
         result.failure = "browser version output was not recognized";
         return result;
     }
     result.product = sanitize_subprocess_output(std::move(result.product));
     if (result.major_version < options.minimum_major) {
+        result.failure_kind = BrowserProbeFailure::browser_incompatible;
         result.failure = "browser is too old (found "
             + std::to_string(result.major_version) + ", need "
             + std::to_string(options.minimum_major) + " or newer)";
@@ -617,12 +687,43 @@ BrowserProbeResult probe_browser(
 
     const auto node = resolve_node(options.node_executable);
     if (!node || !is_executable_file(*node)) {
+        result.failure_kind = BrowserProbeFailure::node_unavailable;
         result.failure =
             "Node.js was not found; browser capture needs Node.js 22 or newer";
         return result;
     }
+    platform::ProcessOptions node_version_options;
+    node_version_options.timeout_ms = std::min(options.probe_timeout_ms, 5000);
+    node_version_options.max_output_bytes = 64 * 1024;
+    auto node_version_process = platform::ChildProcess::run(
+        node->string(), {"--version"}, node_version_options);
+    if (node_version_process.timed_out ||
+        node_version_process.exit_code != 0) {
+        result.failure_kind = BrowserProbeFailure::node_incompatible;
+        result.failure = "Node.js version probe failed";
+        return result;
+    }
+    const auto node_version_output =
+        !node_version_process.stdout_output.empty()
+            ? node_version_process.stdout_output
+            : node_version_process.stderr_output;
+    std::string node_version;
+    int node_major = 0;
+    if (!parse_node_version(node_version_output, node_version, node_major)) {
+        result.failure_kind = BrowserProbeFailure::node_incompatible;
+        result.failure = "Node.js version output was not recognized";
+        return result;
+    }
+    if (node_major < kMinimumNodeMajor) {
+        result.failure_kind = BrowserProbeFailure::node_incompatible;
+        result.failure = "Node.js is too old (found " + node_version +
+            ", need 22 or newer)";
+        return result;
+    }
     const auto script = resolve_capture_script(options.capture_script);
     if (!script || !fs::is_regular_file(*script)) {
+        result.failure_kind =
+            BrowserProbeFailure::capture_runtime_unavailable;
         result.failure = "browser capture script was not found";
         return result;
     }
@@ -630,6 +731,8 @@ BrowserProbeResult probe_browser(
     std::string temp_error;
     auto profile = make_temp_directory("pulp-browser-probe", temp_error);
     if (!profile) {
+        result.failure_kind =
+            BrowserProbeFailure::capture_capability_unavailable;
         result.failure = temp_error;
         return result;
     }
@@ -651,10 +754,14 @@ BrowserProbeResult probe_browser(
     process.stderr_output =
         sanitize_subprocess_output(std::move(process.stderr_output));
     if (process.timed_out) {
+        result.failure_kind =
+            BrowserProbeFailure::capture_capability_unavailable;
         result.failure = "browser CDP capability probe timed out";
         return result;
     }
     if (process.exit_code != 0) {
+        result.failure_kind =
+            BrowserProbeFailure::capture_capability_unavailable;
         result.failure = "browser does not provide the required headless/CDP "
                          "capture capabilities";
         const auto detail = one_line(process.stderr_output);
@@ -663,6 +770,7 @@ BrowserProbeResult probe_browser(
     }
 
     result.compatible = true;
+    result.failure_kind = BrowserProbeFailure::none;
     return result;
 }
 
@@ -692,24 +800,39 @@ BrowserDiscoveryResult discover_browser(
         return result;
     }
 
-    result.diagnostic = Diagnostic{
-        "browser-unavailable",
-        "No compatible Google Chrome or Chromium installation was found.",
-        "browser-discovery"};
+    result.diagnostic = discovery_diagnostic(result.probes);
     return result;
 }
 
 std::string browser_unavailable_human(
     const BrowserDiscoveryResult& discovery) {
     std::ostringstream out;
-    out << "Faithful HTML import needs Google Chrome or Chromium at import "
-           "time.\n"
-        << "Install Google Chrome: " << kChromeDownloadUrl << "\n\n"
-        << "Pulp launches it with a temporary isolated profile to evaluate "
-           "layout and make\n"
-        << "the reference image. Chrome is not embedded in your generated "
-           "plugin.\n"
-        << "Use --offline for the lower-fidelity static/runtime fallback.";
+    const auto& code = discovery.diagnostic.code;
+    if (code == "node-unavailable" || code == "node-incompatible") {
+        out << discovery.diagnostic.message << "\n"
+            << "Install or update Node.js: " << kNodeDownloadUrl << "\n\n"
+            << "Node.js launches the isolated browser-capture helper at import "
+               "time only.\n"
+            << "It is not embedded in your generated plugin.\n"
+            << "Use --offline for the lower-fidelity static/runtime fallback.";
+    } else if (code == "capture-runtime-unavailable") {
+        out << discovery.diagnostic.message << "\n"
+            << "Repair the Pulp installation with: pulp upgrade\n\n"
+            << "The versioned browser-capture runtime must be installed beside "
+               "pulp-import-design.\n"
+            << "Use --offline for the lower-fidelity static/runtime fallback.";
+    } else {
+        out << discovery.diagnostic.message << "\n"
+            << (code == "browser-incompatible"
+                    ? "Install or update Google Chrome: "
+                    : "Install Google Chrome: ")
+            << kChromeDownloadUrl << "\n\n"
+            << "Pulp launches it with a temporary isolated profile to evaluate "
+               "layout and make\n"
+            << "the reference image. Chrome is not embedded in your generated "
+               "plugin.\n"
+            << "Use --offline for the lower-fidelity static/runtime fallback.";
+    }
     if (!discovery.probes.empty()) {
         out << "\n\nChecked:";
         for (const auto& probe : discovery.probes) {
@@ -724,16 +847,32 @@ std::string browser_unavailable_human(
 
 std::string browser_unavailable_json(
     const BrowserDiscoveryResult& discovery) {
+    const auto& code = discovery.diagnostic.code;
+    std::string_view install_url;
+    std::string_view remediation = "install-browser";
+    if (code == "node-unavailable" || code == "node-incompatible") {
+        install_url = kNodeDownloadUrl;
+        remediation = "install-node-22";
+    } else if (code == "capture-runtime-unavailable") {
+        remediation = "pulp-upgrade";
+    } else {
+        install_url = kChromeDownloadUrl;
+        remediation = code == "browser-incompatible"
+            ? "update-browser"
+            : "install-browser";
+    }
     std::ostringstream out;
     out << "{"
-        << "\"code\":\"browser-unavailable\","
+        << "\"code\":\""
+        << json_escape(code.empty() ? "browser-unavailable" : code) << "\","
         << "\"message\":\""
         << json_escape(discovery.diagnostic.message.empty()
                            ? "No compatible Google Chrome or Chromium "
                              "installation was found."
                            : discovery.diagnostic.message)
         << "\","
-        << "\"install_url\":\"" << kChromeDownloadUrl << "\","
+        << "\"install_url\":\"" << install_url << "\","
+        << "\"remediation\":\"" << remediation << "\","
         << "\"offline_flag\":\"--offline\","
         << "\"probes\":[";
     for (std::size_t i = 0; i < discovery.probes.size(); ++i) {

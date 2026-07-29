@@ -276,6 +276,113 @@ TEST_CASE("missing browser guidance is actionable and explains its narrow use",
     CHECK(json.find("\"origin\":\"explicit\"") != std::string::npos);
 }
 
+TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryResult discovery;
+    discovery.diagnostic = {
+        "node-incompatible",
+        "The installed Node.js is too old; faithful HTML import needs Node.js "
+        "22 or newer.",
+        "runtime-discovery",
+    };
+    discovery.probes.push_back({
+        {"/Applications/Google Chrome",
+         capture::BrowserOrigin::explicit_override},
+        false,
+        "Google Chrome",
+        "123.0.0.0",
+        123,
+        "Node.js is too old (found 20.0.0, need 22 or newer)",
+        capture::BrowserProbeFailure::node_incompatible,
+    });
+
+    auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("nodejs.org/en/download") != std::string::npos);
+    CHECK(human.find("Install Google Chrome") == std::string::npos);
+    auto json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find("\"code\":\"node-incompatible\"") != std::string::npos);
+    CHECK(json.find("\"remediation\":\"install-node-22\"")
+          != std::string::npos);
+
+    discovery.diagnostic = {
+        "capture-runtime-unavailable",
+        "The Pulp browser-capture runtime is missing or incomplete.",
+        "runtime-discovery",
+    };
+    discovery.probes[0].failure_kind =
+        capture::BrowserProbeFailure::capture_runtime_unavailable;
+    discovery.probes[0].failure = "browser capture script was not found";
+    human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("pulp upgrade") != std::string::npos);
+    CHECK(human.find("Install Google Chrome") == std::string::npos);
+    json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find("\"code\":\"capture-runtime-unavailable\"")
+          != std::string::npos);
+    CHECK(json.find("\"remediation\":\"pulp-upgrade\"")
+          != std::string::npos);
+}
+
+#ifndef _WIN32
+TEST_CASE("browser probe distinguishes missing and old Node from Chrome",
+          "[import-design][browser-capture]") {
+    TempTree tree("node-prerequisites");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'Google Chrome 123.0.0.0'\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto capture_script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.capture_script = capture_script;
+    options.include_default_system_candidates = false;
+
+    SECTION("missing Node") {
+        options.node_executable = tree.root() / "missing-node";
+        const auto discovery = capture::discover_browser(options);
+        REQUIRE_FALSE(discovery.ok());
+        CHECK(discovery.diagnostic.code == "node-unavailable");
+        REQUIRE(discovery.probes.size() == 1);
+        CHECK(discovery.probes[0].failure_kind ==
+              capture::BrowserProbeFailure::node_unavailable);
+    }
+
+    SECTION("old Node") {
+        const auto node = tree.write(
+            "old-node",
+            "#!/bin/sh\n"
+            "echo 'v20.11.1'\n");
+        fs::permissions(
+            node,
+            fs::perms::owner_read | fs::perms::owner_write |
+                fs::perms::owner_exec);
+        options.node_executable = node;
+        const auto discovery = capture::discover_browser(options);
+        REQUIRE_FALSE(discovery.ok());
+        CHECK(discovery.diagnostic.code == "node-incompatible");
+        REQUIRE(discovery.probes.size() == 1);
+        CHECK(discovery.probes[0].failure.find("found 20.11.1")
+              != std::string::npos);
+    }
+
+    SECTION("missing capture runtime") {
+        options.node_executable =
+            fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+        options.capture_script = tree.root() / "missing-capture.mjs";
+        const auto discovery = capture::discover_browser(options);
+        REQUIRE_FALSE(discovery.ok());
+        CHECK(discovery.diagnostic.code == "capture-runtime-unavailable");
+        REQUIRE(discovery.probes.size() == 1);
+        CHECK(discovery.probes[0].failure_kind ==
+              capture::BrowserProbeFailure::capture_runtime_unavailable);
+    }
+}
+#endif
+
 TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
           "[import-design][browser-capture]") {
     TempTree tree("argv");

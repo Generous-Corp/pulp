@@ -32,6 +32,10 @@ bool write_file(const fs::path& path, std::string_view contents) {
 int main(int argc, char** argv) {
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) args.emplace_back(argv[i]);
+    if (args.size() == 1 && args[0] == "--version") {
+        std::cout << "v22.0.0\n";
+        return 0;
+    }
     if (args.size() < 2) return 64;
 
     // argv[0] is the capture script passed to the configured Node executable.

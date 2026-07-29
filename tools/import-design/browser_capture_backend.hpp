@@ -35,6 +35,16 @@ struct BrowserCandidate {
     BrowserOrigin origin = BrowserOrigin::system;
 };
 
+enum class BrowserProbeFailure {
+    none,
+    browser_unavailable,
+    browser_incompatible,
+    node_unavailable,
+    node_incompatible,
+    capture_runtime_unavailable,
+    capture_capability_unavailable,
+};
+
 struct BrowserProbeResult {
     BrowserCandidate candidate;
     bool compatible = false;
@@ -42,6 +52,7 @@ struct BrowserProbeResult {
     std::string version;
     int major_version = 0;
     std::string failure;
+    BrowserProbeFailure failure_kind = BrowserProbeFailure::none;
 };
 
 struct BrowserInstallation {
