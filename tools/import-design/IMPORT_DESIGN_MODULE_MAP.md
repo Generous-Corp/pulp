@@ -18,7 +18,9 @@ capture/validation/evidence transaction, `browser_html_import` owns Chromium
 orchestration policy, `browser_capture_backend` owns native discovery and
 subprocess admission, `browser_capture/browser_process.mjs` owns the isolated
 Chromium lifecycle, `browser_capture/security.mjs` owns the in-browser network
-and input policy, and `browser_capture_ir` owns
+and input policy, `browser_capture/interaction_plan.mjs` owns the bounded
+public plan schema, `browser_capture/interaction_executor.mjs` owns CDP action
+execution, and `browser_capture_ir` owns
 protocol-to-DesignIR lowering. `html_project_stager` owns the generic contained
 dependency graph and staging limits, while provider-specific dynamic dependency
 discovery belongs in provider modules such as `claude_html_dependencies`.

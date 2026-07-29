@@ -138,6 +138,74 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions = tree.root / "interactions.json";
+    std::optional<fs::path> observed;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            observed = capture_request.browser_interactions;
+            return id::BrowserHtmlNotApplicable{};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("non-browser input must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("non-browser input must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "not html", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+    REQUIRE(observed);
+    CHECK(*observed == *request.browser_interactions);
+}
+
+TEST_CASE("browser interactions cannot select the offline parser",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.offline = true;
+    request.browser_interactions = tree.root / "interactions.json";
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [](const id::BrowserHtmlImportRequest&, std::string_view) {
+            return id::BrowserHtmlLegacyFallback{"generic-html"};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("offline input must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("offline input must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+}
+
 TEST_CASE("browser import session preserves non-capture result policy",
           "[import-design][browser-capture][session]") {
     std::ostringstream diagnostics;

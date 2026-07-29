@@ -97,6 +97,20 @@ awaits it after the initial layout observation window and fails the import if
 it rejects. This is optional; sources without the contract use bounded
 DOM/network/compositor settling.
 
+To import a secondary screen instead of the landing state, describe the route
+with a bounded interaction plan:
+
+```bash
+pulp import-design --file prototype.html \
+  --browser-interactions patch-composer.json
+```
+
+The `pulp-browser-interactions-v1` JSON plan supports `click`, `type`,
+`wait-for`, and `wait-ms`. Prefer `wait-for` with a visible selector after a
+click; strings in hidden or inert DOM are not proof that a screen rendered.
+Each completed action is recorded in `interaction-report.json`, with typed text
+hashed rather than copied. Plans cannot execute arbitrary JavaScript.
+
 Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
 JavaScript, and C++ artifacts do not embed or require them.
 
@@ -313,6 +327,12 @@ example requests convenient render/diff copies beside the primary output.
 `--from claude` remains accepted for compatibility but is not required.
 External browser requests remain denied unless the reviewed source requires an
 explicit `--allow-browser-network` retry.
+
+When the desired Claude screen is not the landing state, add
+`--browser-interactions <plan.json>` using the bounded
+`pulp-browser-interactions-v1` schema described above. Do not infer success
+from strings found in the HTML or DOM snapshot; require a `wait-for` action on
+a selector that is actually visible.
 
 The older static/QuickJS parser remains available through `--offline` for
 diagnostics and environments without Chromium. Its optional

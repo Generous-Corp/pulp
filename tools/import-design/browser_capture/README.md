@@ -29,6 +29,14 @@ Successful output is:
   tokens.json
 ```
 
+`--interactions <plan.json>` optionally reaches one deterministic secondary
+state before the same-frame evidence capture. Plans use
+`pulp-browser-interactions-v1` and contain only bounded `click`, `type`,
+`wait-for`, and `wait-ms` actions. The helper records selectors and hashes typed
+text in `interaction-report.json`; it does not persist typed plaintext. See
+`interaction_plan_protocol.json` for the exact schema. With no plan, capture
+retains its initial-state behavior and output set.
+
 `capture.json` conforms to `capture_protocol.json`. The DOM snapshot is kept as
 a sidecar because it can be large; the envelope references it by relative path.
 `tokens.json` preserves active light / no-preference computed CSS custom
@@ -50,9 +58,6 @@ launches, and every fetched response is content-hashed in the capture envelope.
 Failures are nonzero and write `capture-error.json` when an output directory is
 available. The helper never selects a lower-fidelity importer.
 
-Capture currently records the prototype's settled initial state. Reaching
-secondary screens belongs in a versioned, declarative interaction plan (for
-example: click a selector, type bounded text, wait for a selector), with each
-action recorded in the evidence envelope. Do not add arbitrary JavaScript
-evaluation as a CLI escape hatch: it would weaken the source/evidence boundary
-and make captures difficult to reproduce or audit.
+Arbitrary JavaScript evaluation is intentionally not a CLI escape hatch: it
+would weaken the source/evidence boundary and make captures difficult to
+reproduce or audit.
