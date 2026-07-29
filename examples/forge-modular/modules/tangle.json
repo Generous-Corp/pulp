@@ -1,0 +1,221 @@
+{
+  "modules": [
+    {
+      "slug": "TANGLE",
+      "name": "TANGLE",
+      "description": "Chaos source: three coupled CV outputs \u2014 stepped, lagged and drifting \u2014 that stay related but never repeat.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Noise"
+      ],
+      "hp": 10,
+      "params": [
+        {
+          "id": 0,
+          "ident": "RATE_PARAM",
+          "name": "Rate",
+          "label": "RATE",
+          "unit": " Hz",
+          "min_value": -4.0,
+          "max_value": 4.0,
+          "default_value": 1.0,
+          "kind": "Knob",
+          "x_mm": 10.2,
+          "y_mm": 30.0,
+          "display_base": 2.0,
+          "display_multiplier": 2.0
+        },
+        {
+          "id": 1,
+          "ident": "CHAOS_PARAM",
+          "name": "Chaos",
+          "label": "CHAOS",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.85,
+          "kind": "Knob",
+          "x_mm": 25.4,
+          "y_mm": 30.0
+        },
+        {
+          "id": 2,
+          "ident": "SPREAD_PARAM",
+          "name": "Spread",
+          "label": "SPRD",
+          "unit": "",
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "default_value": 0.5,
+          "kind": "Knob",
+          "x_mm": 40.6,
+          "y_mm": 30.0
+        },
+        {
+          "id": 3,
+          "ident": "RATE_CV_PARAM",
+          "name": "Rate CV amount",
+          "label": "R.CV",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 10.2,
+          "y_mm": 52.0
+        },
+        {
+          "id": 4,
+          "ident": "CHAOS_CV_PARAM",
+          "name": "Chaos CV amount",
+          "label": "C.CV",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 25.4,
+          "y_mm": 52.0
+        },
+        {
+          "id": 5,
+          "ident": "SPREAD_CV_PARAM",
+          "name": "Spread CV amount",
+          "label": "S.CV",
+          "unit": "",
+          "min_value": -1.0,
+          "max_value": 1.0,
+          "default_value": 0.0,
+          "kind": "Trimpot",
+          "x_mm": 40.6,
+          "y_mm": 52.0
+        },
+        {
+          "id": 6,
+          "ident": "SLEW_PARAM",
+          "name": "Glide",
+          "label": "GLIDE",
+          "unit": " ms",
+          "min_value": 0.0,
+          "max_value": 500.0,
+          "default_value": 60.0,
+          "kind": "Knob",
+          "x_mm": 25.4,
+          "y_mm": 72.0
+        }
+      ],
+      "inputs": [
+        {
+          "id": 0,
+          "ident": "RATE_CV_INPUT",
+          "name": "Rate CV",
+          "label": "RATE",
+          "role": "Cv",
+          "x_mm": 10.2,
+          "y_mm": 94.0,
+          "normal_volts": 5.0
+        },
+        {
+          "id": 1,
+          "ident": "CHAOS_CV_INPUT",
+          "name": "Chaos CV",
+          "label": "CHAOS",
+          "role": "Cv",
+          "x_mm": 25.4,
+          "y_mm": 94.0,
+          "normal_to": "RATE_CV_INPUT"
+        },
+        {
+          "id": 2,
+          "ident": "SPREAD_CV_INPUT",
+          "name": "Spread CV",
+          "label": "SPRD",
+          "role": "Cv",
+          "x_mm": 40.6,
+          "y_mm": 94.0,
+          "normal_to": "CHAOS_CV_INPUT"
+        },
+        {
+          "id": 3,
+          "ident": "CLK_INPUT",
+          "name": "Clock",
+          "label": "CLK",
+          "role": "Clock",
+          "x_mm": 4.6,
+          "y_mm": 113.0
+        },
+        {
+          "id": 4,
+          "ident": "RST_INPUT",
+          "name": "Reset",
+          "label": "RST",
+          "role": "Trigger",
+          "x_mm": 15.0,
+          "y_mm": 113.0
+        }
+      ],
+      "outputs": [
+        {
+          "id": 0,
+          "ident": "X_OUTPUT",
+          "name": "X \u2014 stepped chaos",
+          "label": "X",
+          "role": "Cv",
+          "x_mm": 25.4,
+          "y_mm": 113.0
+        },
+        {
+          "id": 1,
+          "ident": "Y_OUTPUT",
+          "name": "Y \u2014 coupled orbit",
+          "label": "Y",
+          "role": "Cv",
+          "x_mm": 35.8,
+          "y_mm": 113.0
+        },
+        {
+          "id": 2,
+          "ident": "Z_OUTPUT",
+          "name": "Z \u2014 smooth drift",
+          "label": "Z",
+          "role": "Cv",
+          "x_mm": 46.2,
+          "y_mm": 113.0
+        }
+      ],
+      "lights": [
+        {
+          "id": 0,
+          "ident": "X_LIGHT",
+          "name": "X level",
+          "label": "",
+          "x_mm": 25.4,
+          "y_mm": 120.5,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 1,
+          "ident": "Y_LIGHT",
+          "name": "Y level",
+          "label": "",
+          "x_mm": 35.8,
+          "y_mm": 120.5,
+          "color": "green",
+          "size": "small"
+        },
+        {
+          "id": 2,
+          "ident": "Z_LIGHT",
+          "name": "Z level",
+          "label": "",
+          "x_mm": 46.2,
+          "y_mm": 120.5,
+          "color": "green",
+          "size": "small"
+        }
+      ]
+    }
+  ]
+}

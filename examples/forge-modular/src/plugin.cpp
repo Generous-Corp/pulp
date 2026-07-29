@@ -32,4 +32,6 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelSANDH);
     p->addModel(modelFOLD);
     p->addModel(modelDUALAD);
+    p->addModel(modelTANGLE);
+    p->addModel(modelSIXMIX);
 }

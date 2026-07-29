@@ -32,3 +32,5 @@ extern rack::plugin::Model* modelKICK;
 extern rack::plugin::Model* modelSANDH;
 extern rack::plugin::Model* modelFOLD;
 extern rack::plugin::Model* modelDUALAD;
+extern rack::plugin::Model* modelTANGLE;
+extern rack::plugin::Model* modelSIXMIX;

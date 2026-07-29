@@ -186,11 +186,30 @@
       ]
     },
     {
+      "slug": "SIXMIX",
+      "name": "SIXMIX",
+      "description": "Six-channel mono mixer with per-channel level, CV-controlled master level",
+      "tags": [
+        "Mixer",
+        "Utility"
+      ]
+    },
+    {
       "slug": "STEPS",
       "name": "STEPS",
       "description": "8-step CV sequencer with per-step level, clock, reset, gate and end-of-cycle",
       "tags": [
         "Sequencer"
+      ]
+    },
+    {
+      "slug": "TANGLE",
+      "name": "TANGLE",
+      "description": "Chaos source: three coupled CV outputs \u2014 stepped, lagged and drifting \u2014 that stay related but never repeat.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Noise"
       ]
     }
   ]

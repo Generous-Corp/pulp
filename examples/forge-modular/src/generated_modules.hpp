@@ -864,6 +864,65 @@ inline void place_SANDH(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(10.160f, 118.000f)), m, SANDHLayout::HOLD_LIGHT));
 }
 
+// ── SIXMIX (12HP) ──────────────────────────────────────
+struct SIXMIXLayout {
+    static constexpr int kHp = 12;
+    enum ParamId { CH1_PARAM, CH2_PARAM, CH3_PARAM, CH4_PARAM, CH5_PARAM, CH6_PARAM, MASTER_PARAM, PARAMS_LEN };
+    enum InputId { IN1_INPUT, IN2_INPUT, IN3_INPUT, IN4_INPUT, IN5_INPUT, IN6_INPUT, MCV_INPUT, INPUTS_LEN };
+    enum OutputId { MIX_OUTPUT, OUTPUTS_LEN };
+    enum LightId { LVL_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_SIXMIX(rack::engine::Module* m) {
+    m->config(SIXMIXLayout::PARAMS_LEN, SIXMIXLayout::INPUTS_LEN, SIXMIXLayout::OUTPUTS_LEN, SIXMIXLayout::LIGHTS_LEN);
+    m->configParam(SIXMIXLayout::CH1_PARAM, 0.0f, 2.0f, 1.0f, "Channel 1 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::CH2_PARAM, 0.0f, 2.0f, 1.0f, "Channel 2 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::CH3_PARAM, 0.0f, 2.0f, 1.0f, "Channel 3 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::CH4_PARAM, 0.0f, 2.0f, 1.0f, "Channel 4 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::CH5_PARAM, 0.0f, 2.0f, 1.0f, "Channel 5 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::CH6_PARAM, 0.0f, 2.0f, 1.0f, "Channel 6 level", "x", 0.0f, 1.0f);
+    m->configParam(SIXMIXLayout::MASTER_PARAM, 0.0f, 2.0f, 1.0f, "Master level", "x", 0.0f, 1.0f);
+    m->configInput(SIXMIXLayout::IN1_INPUT, "Channel 1 in");
+    m->configInput(SIXMIXLayout::IN2_INPUT, "Channel 2 in");
+    m->configInput(SIXMIXLayout::IN3_INPUT, "Channel 3 in");
+    m->configInput(SIXMIXLayout::IN4_INPUT, "Channel 4 in");
+    m->configInput(SIXMIXLayout::IN5_INPUT, "Channel 5 in");
+    m->configInput(SIXMIXLayout::IN6_INPUT, "Channel 6 in");
+    m->configInput(SIXMIXLayout::MCV_INPUT, "Master level CV (normalled to 10.0V)");
+    m->configOutput(SIXMIXLayout::MIX_OUTPUT, "Mix out");
+    m->configLight(SIXMIXLayout::LVL_LIGHT, "Output level");
+}
+
+/// MCV_INPUT with its declared normal applied.
+inline float read_SIXMIX_MCV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[SIXMIXLayout::MCV_INPUT].getNormalPolyVoltage(10.0f, c);
+}
+
+inline void place_SIXMIX(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 32.000f)), m, SIXMIXLayout::CH1_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 32.000f)), m, SIXMIXLayout::CH2_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 50.000f)), m, SIXMIXLayout::CH3_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 50.000f)), m, SIXMIXLayout::CH4_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 68.000f)), m, SIXMIXLayout::CH5_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 68.000f)), m, SIXMIXLayout::CH6_PARAM));
+    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(30.480f, 94.000f)), m, SIXMIXLayout::MASTER_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 32.000f)), m, SIXMIXLayout::IN1_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 32.000f)), m, SIXMIXLayout::IN2_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 50.000f)), m, SIXMIXLayout::IN3_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 50.000f)), m, SIXMIXLayout::IN4_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 68.000f)), m, SIXMIXLayout::IN5_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 68.000f)), m, SIXMIXLayout::IN6_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 110.000f)), m, SIXMIXLayout::MCV_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(51.000f, 110.000f)), m, SIXMIXLayout::MIX_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(30.480f, 110.000f)), m, SIXMIXLayout::LVL_LIGHT));
+}
+
 // ── STEPS (12HP) ───────────────────────────────────────
 struct STEPSLayout {
     static constexpr int kHp = 12;
@@ -940,6 +999,83 @@ inline void place_STEPS(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(23.200f, 64.000f)), m, STEPSLayout::STEP6_LIGHT));
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(36.800f, 64.000f)), m, STEPSLayout::STEP7_LIGHT));
     w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(50.400f, 64.000f)), m, STEPSLayout::STEP8_LIGHT));
+}
+
+// ── TANGLE (10HP) ──────────────────────────────────────
+struct TANGLELayout {
+    static constexpr int kHp = 10;
+    enum ParamId { RATE_PARAM, CHAOS_PARAM, SPREAD_PARAM, RATE_CV_PARAM, CHAOS_CV_PARAM, SPREAD_CV_PARAM, SLEW_PARAM, PARAMS_LEN };
+    enum InputId { RATE_CV_INPUT, CHAOS_CV_INPUT, SPREAD_CV_INPUT, CLK_INPUT, RST_INPUT, INPUTS_LEN };
+    enum OutputId { X_OUTPUT, Y_OUTPUT, Z_OUTPUT, OUTPUTS_LEN };
+    enum LightId { X_LIGHT = 0, Y_LIGHT = 1, Z_LIGHT = 2, LIGHTS_LEN = 3 };
+};
+
+inline void config_TANGLE(rack::engine::Module* m) {
+    m->config(TANGLELayout::PARAMS_LEN, TANGLELayout::INPUTS_LEN, TANGLELayout::OUTPUTS_LEN, TANGLELayout::LIGHTS_LEN);
+    m->configParam(TANGLELayout::RATE_PARAM, -4.0f, 4.0f, 1.0f, "Rate", " Hz", 2.0f, 2.0f);
+    m->configParam(TANGLELayout::CHAOS_PARAM, 0.0f, 1.0f, 0.85f, "Chaos", "", 0.0f, 1.0f);
+    m->configParam(TANGLELayout::SPREAD_PARAM, 0.0f, 1.0f, 0.5f, "Spread", "", 0.0f, 1.0f);
+    m->configParam(TANGLELayout::RATE_CV_PARAM, -1.0f, 1.0f, 0.0f, "Rate CV amount", "", 0.0f, 1.0f);
+    m->configParam(TANGLELayout::CHAOS_CV_PARAM, -1.0f, 1.0f, 0.0f, "Chaos CV amount", "", 0.0f, 1.0f);
+    m->configParam(TANGLELayout::SPREAD_CV_PARAM, -1.0f, 1.0f, 0.0f, "Spread CV amount", "", 0.0f, 1.0f);
+    m->configParam(TANGLELayout::SLEW_PARAM, 0.0f, 500.0f, 60.0f, "Glide", " ms", 0.0f, 1.0f);
+    m->configInput(TANGLELayout::RATE_CV_INPUT, "Rate CV (normalled to 5.0V)");
+    m->configInput(TANGLELayout::CHAOS_CV_INPUT, "Chaos CV (normalled from RATE_CV_INPUT)");
+    m->configInput(TANGLELayout::SPREAD_CV_INPUT, "Spread CV (normalled from CHAOS_CV_INPUT)");
+    m->configInput(TANGLELayout::CLK_INPUT, "Clock");
+    m->configInput(TANGLELayout::RST_INPUT, "Reset");
+    m->configOutput(TANGLELayout::X_OUTPUT, "X — stepped chaos");
+    m->configOutput(TANGLELayout::Y_OUTPUT, "Y — coupled orbit");
+    m->configOutput(TANGLELayout::Z_OUTPUT, "Z — smooth drift");
+    m->configLight(TANGLELayout::X_LIGHT, "X level");
+    m->configLight(TANGLELayout::Y_LIGHT, "Y level");
+    m->configLight(TANGLELayout::Z_LIGHT, "Z level");
+}
+
+/// RATE_CV_INPUT with its declared normal applied.
+inline float read_TANGLE_RATE_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[TANGLELayout::RATE_CV_INPUT].getNormalPolyVoltage(5.0f, c);
+}
+
+/// CHAOS_CV_INPUT with its declared normal applied.
+inline float read_TANGLE_CHAOS_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[TANGLELayout::CHAOS_CV_INPUT].isConnected()
+        ? m->inputs[TANGLELayout::CHAOS_CV_INPUT].getPolyVoltage(c)
+        : m->inputs[TANGLELayout::RATE_CV_INPUT].getPolyVoltage(c);
+}
+
+/// SPREAD_CV_INPUT with its declared normal applied.
+inline float read_TANGLE_SPREAD_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[TANGLELayout::SPREAD_CV_INPUT].isConnected()
+        ? m->inputs[TANGLELayout::SPREAD_CV_INPUT].getPolyVoltage(c)
+        : m->inputs[TANGLELayout::CHAOS_CV_INPUT].getPolyVoltage(c);
+}
+
+inline void place_TANGLE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(10.200f, 30.000f)), m, TANGLELayout::RATE_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(25.400f, 30.000f)), m, TANGLELayout::CHAOS_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(40.600f, 30.000f)), m, TANGLELayout::SPREAD_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(10.200f, 52.000f)), m, TANGLELayout::RATE_CV_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(25.400f, 52.000f)), m, TANGLELayout::CHAOS_CV_PARAM));
+    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(40.600f, 52.000f)), m, TANGLELayout::SPREAD_CV_PARAM));
+    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(25.400f, 72.000f)), m, TANGLELayout::SLEW_PARAM));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.200f, 94.000f)), m, TANGLELayout::RATE_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(25.400f, 94.000f)), m, TANGLELayout::CHAOS_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(40.600f, 94.000f)), m, TANGLELayout::SPREAD_CV_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(4.600f, 113.000f)), m, TANGLELayout::CLK_INPUT));
+    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.000f, 113.000f)), m, TANGLELayout::RST_INPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(25.400f, 113.000f)), m, TANGLELayout::X_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(35.800f, 113.000f)), m, TANGLELayout::Y_OUTPUT));
+    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(46.200f, 113.000f)), m, TANGLELayout::Z_OUTPUT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(25.400f, 120.500f)), m, TANGLELayout::X_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(35.800f, 120.500f)), m, TANGLELayout::Y_LIGHT));
+    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(46.200f, 120.500f)), m, TANGLELayout::Z_LIGHT));
 }
 
 }  // namespace forge_modular
