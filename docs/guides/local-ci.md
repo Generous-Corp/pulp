@@ -1282,12 +1282,6 @@ Both paths satisfy the branch-protection-required `macos` /
 advisory `linux` / advisory `windows` alias gates because the alias
 jobs read each matrix leg's outcome via the GitHub API.
 
-The Linux leg probes the runner with `vulkaninfo --summary` before CMake
-configure. When no usable Vulkan implementation is available, it configures
-with `PULP_ENABLE_GPU=OFF` instead of running Dawn against an unusable backend.
-This keeps the CPU fallback coverage registered; runners with working Vulkan
-continue to exercise the GPU path.
-
 ### Tagging a new test as slow
 
 Add `LABELS slow` either to a single test's `set_tests_properties`, or

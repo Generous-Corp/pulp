@@ -474,7 +474,7 @@ TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {
         worst = std::max(worst, std::abs(static_cast<double>(out_f[static_cast<std::size_t>(i)]) -
                                          out_d[static_cast<std::size_t>(i)]));
     INFO("worst float-vs-double sample difference " << amplitude_db(worst) << " dBFS");
-    // GCC's float cascade rounds differently from the double reference, but
+    // The x86 float cascade rounds differently from the double reference, but
     // the observed delta must remain below about half a signed 16-bit PCM step.
     REQUIRE(amplitude_db(worst) < -96.0);
 }

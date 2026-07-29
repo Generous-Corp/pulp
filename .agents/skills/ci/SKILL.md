@@ -123,14 +123,6 @@ it is, the exclusion regressed. The `example-validation` lane is **not yet in
 `required_status_checks`**; promote it once it is green on a real `examples/**`
 run.
 
-### Linux GPU coverage is capability-gated before configure
-
-The Linux leg installs `vulkan-tools` and runs `vulkaninfo --summary` before
-CMake configure. If the probe cannot find a usable Vulkan implementation, the
-leg configures with `PULP_ENABLE_GPU=OFF`. Do not replace this with CTest name
-exclusions: the GPU-off configuration keeps CPU fallback coverage registered,
-while Linux runners with working Vulkan continue to exercise the GPU path.
-
 ### Gotcha: a broken example goes green on `main` and breaks the RELEASE build
 
 Because the required gate builds `PULP_BUILD_EXAMPLES=OFF` and only `release-cli`
