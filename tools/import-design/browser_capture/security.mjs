@@ -2,7 +2,9 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import path from "node:path";
 
 const MIME_TYPES = new Map([
@@ -205,18 +207,143 @@ export async function serveDenyProxy() {
   };
 }
 
+function isPublicIpv4(address) {
+  const octets = address.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((value) =>
+    !Number.isInteger(value) || value < 0 || value > 255)) {
+    return false;
+  }
+  const [a, b, c] = octets;
+  return a !== 0 && a !== 10 && a !== 127 && a < 224 &&
+    !(a === 100 && b >= 64 && b <= 127) &&
+    !(a === 169 && b === 254) &&
+    !(a === 172 && b >= 16 && b <= 31) &&
+    !(a === 192 && b === 0 && (c === 0 || c === 2)) &&
+    !(a === 192 && b === 168) &&
+    !(a === 192 && b === 88 && c === 99) &&
+    !(a === 198 && (b === 18 || b === 19)) &&
+    !(a === 198 && b === 51 && c === 100) &&
+    !(a === 203 && b === 0 && c === 113);
+}
+
+function isPublicIpv6(address) {
+  const normalized = address.toLowerCase().split("%", 1)[0];
+  if (normalized.startsWith("::ffff:")) {
+    return isPublicIpv4(normalized.slice("::ffff:".length));
+  }
+  return normalized !== "::" && normalized !== "::1" &&
+    !normalized.startsWith("64:ff9b:") &&
+    !normalized.startsWith("100:") &&
+    !normalized.startsWith("2001:0:") &&
+    !normalized.startsWith("2001:2:") &&
+    !normalized.startsWith("2001:10:") &&
+    !normalized.startsWith("2001:20:") &&
+    !normalized.startsWith("fc") && !normalized.startsWith("fd") &&
+    !normalized.startsWith("fe8") && !normalized.startsWith("fe9") &&
+    !normalized.startsWith("fea") && !normalized.startsWith("feb") &&
+    !normalized.startsWith("ff") &&
+    !normalized.startsWith("2001:db8:") &&
+    !normalized.startsWith("2002:");
+}
+
+export function isPublicAddress(address) {
+  const family = isIP(address);
+  if (family === 4) return isPublicIpv4(address);
+  if (family === 6) return isPublicIpv6(address);
+  return false;
+}
+
+function addressHostname(hostname) {
+  return hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+}
+
+export function normalizeDeclaredHttpsOrigins(candidates) {
+  const origins = new Set();
+  for (const candidate of candidates) {
+    let url;
+    try {
+      url = new URL(candidate);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "https:" || url.username || url.password)
+      continue;
+    const hostname = addressHostname(url.hostname);
+    if (isIP(hostname) && !isPublicAddress(hostname))
+      continue;
+    origins.add(url.origin);
+  }
+  return [...origins].sort();
+}
+
+export async function resolvePublicHttpsOrigins(origins) {
+  const resolved = new Map();
+  for (const origin of origins) {
+    const url = new URL(origin);
+    if (url.protocol !== "https:")
+      throw new Error(`network allowlist rejected non-HTTPS origin ${origin}`);
+    const hostname = addressHostname(url.hostname);
+    const addresses = isIP(hostname)
+      ? [{ address: hostname, family: isIP(hostname) }]
+      : await lookup(hostname, { all: true, verbatim: true });
+    if (!addresses.length ||
+        addresses.some(({ address }) => !isPublicAddress(address))) {
+      throw new Error(
+        `network allowlist origin ${url.origin} resolved to a non-public address`);
+    }
+    // Pin one vetted address for this capture. Redirects remain subject to the
+    // exact-origin Fetch guard below, and MAP * ~NOTFOUND prevents Chromium
+    // from resolving an undeclared host behind the guard.
+    const preferred =
+      addresses.find(({ family }) => family === 4) ?? addresses[0];
+    resolved.set(url.origin, {
+      hostname,
+      address: preferred.address,
+    });
+  }
+  return resolved;
+}
+
+export function hostResolverRules(resolvedOrigins) {
+  const rules = [];
+  const hosts = new Map();
+  for (const { hostname, address } of resolvedOrigins.values()) {
+    const previous = hosts.get(hostname);
+    if (previous && previous !== address) {
+      throw new Error(`network allowlist resolved ${hostname} inconsistently`);
+    }
+    hosts.set(hostname, address);
+  }
+  for (const [hostname, address] of [...hosts].sort()) {
+    rules.push(`MAP ${hostname} ${address}`);
+  }
+  rules.push("MAP * ~NOTFOUND", "EXCLUDE 127.0.0.1");
+  return rules.join(", ");
+}
+
+function externalResourceUrl(value) {
+  const url = new URL(value);
+  return url.origin;
+}
+
 export function installNetworkGuard(
-    cdp, allowedOrigin, allowNetwork, privatePrefix = "") {
+    cdp, allowedOrigin, allowedExternalOrigins = [], privatePrefix = "") {
   const blocked = [];
+  const external = [];
+  const allowed = new Set(allowedExternalOrigins);
+  const pendingProvenance = new Set();
+  const responses = new Map();
+  let provenanceError = null;
   cdp.on("Fetch.requestPaused", async ({ requestId, request }) => {
     try {
       const url = new URL(request.url);
       const local = url.origin === allowedOrigin;
       const embedded = url.protocol === "data:" || url.protocol === "blob:" ||
         url.protocol === "about:";
-      const externalAllowed = allowNetwork &&
-        (url.protocol === "http:" || url.protocol === "https:" ||
-         url.protocol === "ws:" || url.protocol === "wss:");
+      const externalAllowed =
+        url.protocol === "https:" && allowed.has(url.origin);
       if (local || embedded || externalAllowed) {
         const localRootRelative =
           local && privatePrefix &&
@@ -246,19 +373,69 @@ export function installNetworkGuard(
       });
     }
   });
-  if (!allowNetwork) {
-    cdp.on("Network.webSocketCreated", ({ url }) => {
-      blocked.push({
-        url: sanitizedUrl(url),
-        reason: "blockedByClient",
-      });
+  cdp.on("Network.webSocketCreated", ({ url }) => {
+    blocked.push({
+      url: sanitizedUrl(url),
+      reason: "blockedByClient",
     });
-  }
+  });
+  cdp.on("Network.responseReceived", ({ requestId, response }) => {
+    let url;
+    try {
+      url = new URL(response.url);
+    } catch {
+      return;
+    }
+    if (url.protocol !== "https:" || !allowed.has(url.origin))
+      return;
+    responses.set(requestId, {
+      url: externalResourceUrl(response.url),
+      origin: url.origin,
+      status: response.status,
+      mime_type: response.mimeType || "",
+    });
+  });
+  cdp.on("Network.loadingFinished", ({ requestId }) => {
+    const response = responses.get(requestId);
+    responses.delete(requestId);
+    if (!response) return;
+    const pending = (async () => {
+      try {
+        const body = await cdp.call(
+          "Network.getResponseBody", { requestId });
+        const bytes = body.base64Encoded
+          ? Buffer.from(body.body, "base64")
+          : Buffer.from(body.body);
+        external.push({
+          ...response,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          size_bytes: bytes.length,
+        });
+      } catch (cause) {
+        provenanceError = new Error(
+          `could not content-hash allowed external resource ${response.url}`,
+          { cause });
+        provenanceError.code = "capture-network-provenance-incomplete";
+      }
+    })();
+    pendingProvenance.add(pending);
+    pending.then(
+      () => pendingProvenance.delete(pending),
+      () => pendingProvenance.delete(pending));
+  });
   return {
     blocked,
+    external,
+    awaitProvenance: async () => {
+      await Promise.all([...pendingProvenance]);
+      if (provenanceError) throw provenanceError;
+      external.sort((left, right) =>
+        left.url.localeCompare(right.url) ||
+        left.sha256.localeCompare(right.sha256));
+    },
     enable: async () => {
       await cdp.call("Network.setBlockedURLs", {
-        urls: allowNetwork ? [] : ["ws://*", "wss://*"],
+        urls: ["ws://*", "wss://*"],
       });
       await cdp.call("Fetch.enable", {
         patterns: [{ urlPattern: "*" }],

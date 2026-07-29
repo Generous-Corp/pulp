@@ -2293,7 +2293,7 @@ int main(int argc, char* argv[]) {
     auto source = parse_design_source(source_str);
     if (!source) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
-        std::cerr << "Valid sources: fig, figma, figma-plugin, stitch, v0, pencil, claude, designmd, jsx\n";
+        std::cerr << "Valid sources: fig, figma, figma-plugin, stitch, v0, pencil, claude, html, designmd, jsx\n";
         return 1;
     }
 
@@ -2565,6 +2565,12 @@ int main(int argc, char* argv[]) {
                     } else {
                         ir = parse_claude_html(content);
                     }
+                    break;
+                case DesignSource::html:
+                    // Explicit --offline uses the bounded static HTML parser.
+                    // Normal HTML imports are intercepted by the browser lane.
+                    ir = parse_stitch_html(content);
+                    ir.source = DesignSource::html;
                     break;
                 case DesignSource::designmd: {
                     // DESIGN.md is a system spec, not a screen — parse the

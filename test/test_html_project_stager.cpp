@@ -68,6 +68,19 @@ TEST_CASE("HTML staging copies only the explicit contained dependency graph",
     CHECK_FALSE(fs::exists(staged.root / "unrelated-secret.txt"));
 }
 
+TEST_CASE("HTML staging enforces the per-file limit on the entry itself",
+          "[import-design][browser-capture][staging]") {
+    TempTree tree;
+    const auto entry = tree.root / "oversized.html";
+    tree.write("oversized.html", "<!doctype html>");
+    fs::resize_file(entry, 32ull * 1024ull * 1024ull + 1);
+
+    const auto staged = stage_html_project(entry, "<!doctype html>");
+
+    CHECK_FALSE(staged);
+    CHECK(staged.error == "HTML entry exceeds capture staging limits");
+}
+
 TEST_CASE("HTML staging never follows parent traversal",
           "[import-design][browser-capture][staging]") {
     TempTree tree;
@@ -95,6 +108,36 @@ TEST_CASE("HTML staging treats root-relative URLs as project-root dependencies",
     INFO(staged.error);
     REQUIRE(staged);
     CHECK(fs::exists(staged.root / "assets/app.js"));
+}
+
+TEST_CASE("HTML staging copies every local responsive image candidate",
+          "[import-design][browser-capture][staging]") {
+    TempTree tree;
+    const auto source =
+        R"(<picture><source srcset="images/a.webp 1x, images/b.webp 2x">)"
+        R"(<img src="images/fallback.png" )"
+        R"(srcset="images/c.png 320w, /images/d.png 640w"></picture>)";
+    tree.write("index.html", source);
+    for (const auto* image : {
+             "images/a.webp",
+             "images/b.webp",
+             "images/c.png",
+             "images/d.png",
+             "images/fallback.png"}) {
+        tree.write(image, image);
+    }
+
+    auto staged = stage_html_project(
+        tree.root / "index.html",
+        source);
+
+    INFO(staged.error);
+    REQUIRE(staged);
+    CHECK(fs::exists(staged.root / "images/a.webp"));
+    CHECK(fs::exists(staged.root / "images/b.webp"));
+    CHECK(fs::exists(staged.root / "images/c.png"));
+    CHECK(fs::exists(staged.root / "images/d.png"));
+    CHECK(fs::exists(staged.root / "images/fallback.png"));
 }
 
 TEST_CASE("HTML staging preserves nested root-relative dependency semantics",

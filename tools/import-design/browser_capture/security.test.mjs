@@ -19,7 +19,10 @@ import test from "node:test";
 import {
   authorizeInput,
   browserEnvironment,
+  hostResolverRules,
   installNetworkGuard,
+  isPublicAddress,
+  normalizeDeclaredHttpsOrigins,
   sanitizeCaptureError,
   sanitizeSnapshot,
   serveAuthorizedRoot,
@@ -261,7 +264,7 @@ test("browser environment forwards only the capture allowlist", () => {
   });
 });
 
-test("network guard blocks external URLs unless explicitly enabled",
+test("network guard allows only exact reviewed HTTPS origins",
   async () => {
     const listeners = new Map();
     const calls = [];
@@ -276,7 +279,7 @@ test("network guard blocks external URLs unless explicitly enabled",
     const guard = installNetworkGuard(
       cdp,
       "http://127.0.0.1:1234",
-      false,
+      ["https://cdn.example.com"],
       "http://127.0.0.1:1234/token/");
     await guard.enable();
     assert.deepEqual(calls.shift(), {
@@ -297,6 +300,10 @@ test("network guard blocks external URLs unless explicitly enabled",
       request: { url: "http://127.0.0.1:1234/assets/app.js?v=1" },
     });
     await listeners.get("Fetch.requestPaused")({
+      requestId: "allowed",
+      request: { url: "https://cdn.example.com/icons.js?v=1" },
+    });
+    await listeners.get("Fetch.requestPaused")({
       requestId: "external",
       request: { url: "https://example.com/private?q=secret" },
     });
@@ -311,7 +318,8 @@ test("network guard blocks external URLs unless explicitly enabled",
         url: "http://127.0.0.1:1234/token/assets/app.js?v=1",
       },
     });
-    assert.equal(calls[2].method, "Fetch.failRequest");
+    assert.equal(calls[2].method, "Fetch.continueRequest");
+    assert.equal(calls[3].method, "Fetch.failRequest");
     assert.deepEqual(guard.blocked, [
       {
         url: "https://example.com",
@@ -322,6 +330,128 @@ test("network guard blocks external URLs unless explicitly enabled",
         reason: "blockedByClient",
       },
     ]);
+  });
+
+test("declared origin policy rejects private and non-HTTPS endpoints", () => {
+  assert.deepEqual(normalizeDeclaredHttpsOrigins([
+    "https://cdn.example.com/a.js?token=secret",
+    "https://CDN.example.com:443/other.js",
+    "http://cdn.example.com/insecure.js",
+    "wss://cdn.example.com/socket",
+    "https://127.0.0.1/private",
+    "https://169.254.169.254/latest/meta-data",
+    "https://[::1]/private",
+    "https://user:password@cdn.example.com/secret",
+  ]), ["https://cdn.example.com"]);
+
+  for (const address of [
+    "127.0.0.1",
+    "10.0.0.1",
+    "100.64.0.1",
+    "169.254.169.254",
+    "172.16.0.1",
+    "192.168.0.1",
+    "198.51.100.1",
+    "203.0.113.1",
+    "::1",
+    "::ffff:127.0.0.1",
+    "64:ff9b::7f00:1",
+    "100::1",
+    "2001:db8::1",
+    "2002:7f00:1::",
+    "fd00::1",
+    "fe80::1",
+  ]) {
+    assert.equal(isPublicAddress(address), false, address);
+  }
+  assert.equal(isPublicAddress("1.1.1.1"), true);
+  assert.equal(isPublicAddress("2606:4700:4700::1111"), true);
+});
+
+test("host resolver rules pin reviewed hosts and deny every other lookup", () => {
+  const resolved = new Map([
+    ["https://cdn.example.com", {
+      hostname: "cdn.example.com",
+      address: "203.1.2.3",
+    }],
+  ]);
+  assert.equal(
+    hostResolverRules(resolved),
+    "MAP cdn.example.com 203.1.2.3, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1");
+});
+
+test("allowed external responses record content-addressed provenance",
+  async () => {
+    const listeners = new Map();
+    const cdp = {
+      on(method, listener) {
+        listeners.set(method, listener);
+      },
+      async call(method) {
+        if (method === "Network.getResponseBody") {
+          return {
+            body: Buffer.from("reviewed dependency").toString("base64"),
+            base64Encoded: true,
+          };
+        }
+      },
+    };
+    const guard = installNetworkGuard(
+      cdp,
+      "http://127.0.0.1:1234",
+      ["https://cdn.example.com"]);
+    listeners.get("Network.responseReceived")({
+      requestId: "dependency",
+      response: {
+        url: "https://cdn.example.com/icons.js?cache=ignored",
+        status: 200,
+        mimeType: "text/javascript",
+      },
+    });
+    listeners.get("Network.loadingFinished")({ requestId: "dependency" });
+    await guard.awaitProvenance();
+    assert.deepEqual(guard.external, [{
+      url: "https://cdn.example.com",
+      origin: "https://cdn.example.com",
+      status: 200,
+      mime_type: "text/javascript",
+      sha256:
+        "708298514230905ddc2a9bbb833a7950a18b46b5191280effff2206421e90c6b",
+      size_bytes: 19,
+    }]);
+  });
+
+test("capture fails closed when an allowed response cannot be hashed",
+  async () => {
+    const listeners = new Map();
+    const cdp = {
+      on(method, listener) {
+        listeners.set(method, listener);
+      },
+      async call(method) {
+        if (method === "Network.getResponseBody")
+          throw new Error("body evicted");
+      },
+    };
+    const guard = installNetworkGuard(
+      cdp,
+      "http://127.0.0.1:1234",
+      ["https://cdn.example.com"]);
+    listeners.get("Network.responseReceived")({
+      requestId: "dependency",
+      response: {
+        url: "https://cdn.example.com/icons.js?secret=redacted",
+        status: 200,
+        mimeType: "text/javascript",
+      },
+    });
+    listeners.get("Network.loadingFinished")({ requestId: "dependency" });
+    await assert.rejects(
+      guard.awaitProvenance(),
+      (error) =>
+        error.code === "capture-network-provenance-incomplete" &&
+        !error.message.includes("secret="));
+    assert.deepEqual(guard.external, []);
   });
 
 test("failed browser launch still removes the ephemeral profile", {

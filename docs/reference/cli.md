@@ -1423,8 +1423,9 @@ file error.
 **Status**: partial
 
 Import designs from local Figma `.fig` files, Figma REST/file JSON, the Pulp
-Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google DESIGN.md
-source files into generated Pulp UI code.
+Figma plugin, Stitch, v0, Pencil, Claude Design, generic runnable HTML, React
+JSX, or Google DESIGN.md source files into generated Pulp UI code. Runnable
+HTML auto-detects its source, so `--from` is optional for that lane.
 
 ```bash
 pulp import-design --from fig --file design.fig --outline
@@ -1437,12 +1438,14 @@ pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --output ui.js
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`,
+`pencil`, `claude`, `html`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1474,6 +1477,9 @@ exit codes, diagnostics, and current limitations).
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
+| `--browser <path>` | Use this Chromium/Chrome executable for browser-solved HTML import instead of system discovery. |
+| `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
+| `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
 | `--asset-timeout-ms <ms>` | Per-request network asset timeout. |
 | `--asset-hash <uri=sha256>` | Expected content hash for an asset URI; may be repeated. |

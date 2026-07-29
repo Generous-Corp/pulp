@@ -16,6 +16,7 @@ void print_usage() {
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
     std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
+    std::cout << "  html     Generic runnable HTML evaluated in isolated Chromium\n";
     std::cout << "  designmd Google DESIGN.md design-system spec (tokens only)\n";
     std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
     std::cout << "Options:\n";
@@ -48,7 +49,8 @@ void print_usage() {
     std::cout << "  --allow-network-fetch\n";
     std::cout << "                    Allow DesignIR asset-manifest HTTP fetches at import time\n";
     std::cout << "  --allow-browser-network\n";
-    std::cout << "                    Permit external requests while Chromium evaluates HTML\n";
+    std::cout << "                    Permit source-declared public HTTPS origins while Chromium\n";
+    std::cout << "                    evaluates HTML; private/local and WebSocket access stays blocked\n";
     std::cout << "  --browser <path>  Chromium/Chrome executable for browser-solved HTML import\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";

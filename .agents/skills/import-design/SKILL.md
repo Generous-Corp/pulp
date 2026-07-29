@@ -1109,7 +1109,11 @@ Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
 3. If Pencil MCP is available (mcp__pencil__*), offer to read the current editor state
-4. If the user mentions Claude Design or hands over a manually-exported HTML file from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — Anthropic has no public API; manual file export is the supported path, and Spectr's `editor.html` mapping is the precedent)
+4. If the user mentions Claude Design or hands over exported HTML, pass the
+   file directly with no `--from` flag. The CLI fingerprints Claude bundle
+   shapes versus generic HTML, assigns honest source provenance, and routes
+   both through the same Chromium evaluator. Anthropic has no public design
+   import API; manual file export remains the supported handoff.
 5. If the user provides a file path or URL, use that directly
 6. If none of the above, ask the user for a source and file
 
@@ -3233,8 +3237,14 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   remain pixels; never replace them with Pulp's silver/vector fallback.
 - External browser requests are denied by default. If the export depends on a
   CDN runtime and the health gate reports `capture-source-unresolved`, review
-  the listed URLs and retry with `--allow-browser-network`. Local relative
-  assets are served from the input folder without this opt-in.
+  the listed URLs and retry with `--allow-browser-network`. The opt-in permits
+  only public HTTPS origins declared by the source; private/local destinations,
+  WebSockets, and undeclared redirects remain blocked, and successful response
+  content is hashed into capture provenance. Local relative assets are served
+  from the input folder without this opt-in.
+- If authored async initialization has a real completion boundary, the page
+  may expose `globalThis.__pulpCaptureReady` as a Promise or function returning
+  one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated

@@ -688,6 +688,19 @@ TEST_CASE("late evidence failure restores primary, tokens, and required assets",
     CHECK_FALSE(fs::exists(
         request.output_file.parent_path() / "assets/reference.png"));
     CHECK(tree.read(durable / "unowned.txt") == "race");
+
+    std::error_code cleanup_error;
+    fs::remove_all(durable, cleanup_error);
+    REQUIRE_FALSE(cleanup_error);
+    diagnostics.str({});
+    diagnostics.clear();
+
+    REQUIRE(session.publish(diagnostics));
+    CHECK(tree.read(request.output_file) == "new-primary");
+    CHECK(tree.read(w3c_tokens) == "new-tokens");
+    CHECK(tree.read(
+        request.output_file.parent_path() / "assets/reference.png")
+          == "new-asset");
 }
 
 TEST_CASE("browser output transaction rejects non-file primary destinations",
@@ -809,17 +822,24 @@ TEST_CASE("browser CLI detection and direct inference preserve CLI disposition",
     SECTION("normalized HTML and HTM paths infer the browser source") {
         std::string source;
         CHECK(id::infer_browser_html_source_cli(html, source));
-        CHECK(source == "claude");
+        CHECK(source == "html");
 
         source.clear();
         CHECK(id::infer_browser_html_source_cli(
             tree.root / "legacy.HTM", source));
-        CHECK(source == "claude");
+        CHECK(source == "html");
 
         const auto extensionless = tree.root / "export";
         tree.write(extensionless, "  <!doctype html><main>screen</main>");
         source.clear();
         CHECK(id::infer_browser_html_source_cli(extensionless, source));
+        CHECK(source == "html");
+
+        const auto claude = tree.root / "component.dc.html";
+        tree.write(claude,
+                   R"(<script type="text/x-dc">export default {}</script>)");
+        source.clear();
+        CHECK(id::infer_browser_html_source_cli(claude, source));
         CHECK(source == "claude");
 
         source = "stitch";

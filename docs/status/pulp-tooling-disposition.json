@@ -1916,7 +1916,7 @@
           {
             "name": "--from",
             "kind": "option",
-            "required": true
+            "required": false
           },
           {
             "name": "--outline",
@@ -1960,6 +1960,18 @@
           },
           {
             "name": "--allow-network-fetch",
+            "kind": "flag"
+          },
+          {
+            "name": "--browser",
+            "kind": "option"
+          },
+          {
+            "name": "--offline",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-browser-network",
             "kind": "flag"
           },
           {

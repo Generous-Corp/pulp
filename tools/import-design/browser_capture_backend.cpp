@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_backend.hpp"
+#include "browser_capture_diagnostics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,10 +29,6 @@ namespace pulp::import_design::browser_capture {
 
 namespace {
 
-constexpr std::string_view kChromeDownloadUrl =
-    "https://www.google.com/chrome/";
-constexpr std::string_view kNodeDownloadUrl =
-    "https://nodejs.org/en/download";
 constexpr int kMinimumNodeMajor = 22;
 constexpr int kLauncherCleanupGraceMs = 5000;
 
@@ -41,6 +38,43 @@ int outer_process_timeout(int runtime_timeout_ms) {
         return std::numeric_limits<int>::max();
     }
     return runtime_timeout_ms + kLauncherCleanupGraceMs;
+}
+
+std::vector<std::string> declared_https_origins(const fs::path& staged_root) {
+    // These candidates are authority, not discovery: the explicit network
+    // opt-in may only reach origins literally present in the reviewed staged
+    // document. The Node policy canonicalizes them to exact HTTPS origins.
+    static const std::regex pattern(
+        R"(https://(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::[0-9]{1,5})?)",
+        std::regex::ECMAScript | std::regex::icase);
+    std::set<std::string> unique;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(staged_root, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        std::ifstream stream(it->path(), std::ios::binary);
+        if (!stream) continue;
+        const std::string source{
+            std::istreambuf_iterator<char>(stream),
+            std::istreambuf_iterator<char>()};
+        for (auto match = std::sregex_iterator(
+                 source.begin(), source.end(), pattern);
+             match != std::sregex_iterator(); ++match) {
+            const auto match_end = static_cast<std::size_t>(
+                match->position() + match->length());
+            // A regex prefix of https://user:password@host must not become an
+            // authority candidate or leak credentials into child argv.
+            if (match_end < source.size() &&
+                (source[match_end] == ':' || source[match_end] == '@')) {
+                continue;
+            }
+            unique.insert(match->str());
+        }
+    }
+    return {unique.begin(), unique.end()};
 }
 
 std::string trim_copy(std::string value) {
@@ -105,50 +139,24 @@ std::optional<std::string> capture_error_code(std::string_view stderr_text) {
     return std::string(candidate);
 }
 
-std::string json_escape(std::string_view value) {
-    std::string out;
-    out.reserve(value.size() + 16);
-    for (const unsigned char c : value) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (c < 0x20) {
-                    constexpr char kHex[] = "0123456789abcdef";
-                    out += "\\u00";
-                    out.push_back(kHex[(c >> 4) & 0xf]);
-                    out.push_back(kHex[c & 0xf]);
-                } else {
-                    out.push_back(static_cast<char>(c));
-                }
-        }
-    }
-    return out;
-}
-
 fs::path default_managed_root() {
     if (const char* pulp_home = std::getenv("PULP_HOME");
         pulp_home && *pulp_home) {
-        return fs::path(pulp_home) / "tools" / "browser-capture";
+        return fs::path(pulp_home) / "tools" / "chrome-for-testing";
     }
 #ifdef _WIN32
     if (const char* local_app_data = std::getenv("LOCALAPPDATA");
         local_app_data && *local_app_data) {
         return fs::path(local_app_data) / "Pulp" / "tools"
-            / "browser-capture";
+            / "chrome-for-testing";
     }
 #else
     if (const char* home = std::getenv("HOME"); home && *home) {
-        return fs::path(home) / ".pulp" / "tools" / "browser-capture";
+        return fs::path(home) / ".pulp" / "tools" / "chrome-for-testing";
     }
 #endif
     return fs::temp_directory_path() / "pulp" / "tools"
-        / "browser-capture";
+        / "chrome-for-testing";
 }
 
 std::optional<fs::path> resolve_node(
@@ -199,10 +207,6 @@ std::optional<fs::path> resolve_capture_script(
             if (fs::is_regular_file(sibling, ec) && !ec) return sibling;
         }
     }
-    const auto managed =
-        default_managed_root() / "capture.mjs";
-    std::error_code ec;
-    if (fs::is_regular_file(managed, ec) && !ec) return managed;
 #ifdef PULP_BROWSER_CAPTURE_SCRIPT
     return fs::path(PULP_BROWSER_CAPTURE_SCRIPT);
 #else
@@ -372,6 +376,18 @@ std::optional<TempDirectory> make_temp_directory(
             + std::to_string(seed) + "-" + std::to_string(attempt);
         const auto candidate = base / name;
         if (fs::create_directory(candidate, ec)) {
+#ifndef _WIN32
+            fs::permissions(candidate, fs::perms::owner_all,
+                            fs::perm_options::replace, ec);
+            if (ec) {
+                std::error_code cleanup_error;
+                fs::remove_all(candidate, cleanup_error);
+                error =
+                    "could not restrict temporary browser profile permissions: "
+                    + ec.message();
+                return std::nullopt;
+            }
+#endif
             return TempDirectory{candidate};
         }
         if (ec && ec != std::errc::file_exists) {
@@ -513,9 +529,9 @@ void write_capture_error(const fs::path& output_directory,
     if (!out) return;
     out << "{\n"
         << "  \"schema\": \"pulp-browser-capture-error-v1\",\n"
-        << "  \"code\": \"" << json_escape(diagnostic.code) << "\",\n"
-        << "  \"phase\": \"" << json_escape(diagnostic.phase) << "\",\n"
-        << "  \"message\": \"" << json_escape(diagnostic.message)
+        << "  \"code\": \"" << detail::json_escape(diagnostic.code) << "\",\n"
+        << "  \"phase\": \"" << detail::json_escape(diagnostic.phase) << "\",\n"
+        << "  \"message\": \"" << detail::json_escape(diagnostic.message)
         << "\"\n"
         << "}\n";
 }
@@ -804,96 +820,6 @@ BrowserDiscoveryResult discover_browser(
     return result;
 }
 
-std::string browser_unavailable_human(
-    const BrowserDiscoveryResult& discovery) {
-    std::ostringstream out;
-    const auto& code = discovery.diagnostic.code;
-    if (code == "node-unavailable" || code == "node-incompatible") {
-        out << discovery.diagnostic.message << "\n"
-            << "Install or update Node.js: " << kNodeDownloadUrl << "\n\n"
-            << "Node.js launches the isolated browser-capture helper at import "
-               "time only.\n"
-            << "It is not embedded in your generated plugin.\n"
-            << "Use --offline for the lower-fidelity static/runtime fallback.";
-    } else if (code == "capture-runtime-unavailable") {
-        out << discovery.diagnostic.message << "\n"
-            << "Repair the Pulp installation with: pulp upgrade\n\n"
-            << "The versioned browser-capture runtime must be installed beside "
-               "pulp-import-design.\n"
-            << "Use --offline for the lower-fidelity static/runtime fallback.";
-    } else {
-        out << discovery.diagnostic.message << "\n"
-            << (code == "browser-incompatible"
-                    ? "Install or update Google Chrome: "
-                    : "Install Google Chrome: ")
-            << kChromeDownloadUrl << "\n\n"
-            << "Pulp launches it with a temporary isolated profile to evaluate "
-               "layout and make\n"
-            << "the reference image. Chrome is not embedded in your generated "
-               "plugin.\n"
-            << "Use --offline for the lower-fidelity static/runtime fallback.";
-    }
-    if (!discovery.probes.empty()) {
-        out << "\n\nChecked:";
-        for (const auto& probe : discovery.probes) {
-            out << "\n  " << browser_origin_name(probe.candidate.origin)
-                << ": " << probe.candidate.executable.string()
-                << " — "
-                << (probe.failure.empty() ? "incompatible" : probe.failure);
-        }
-    }
-    return out.str();
-}
-
-std::string browser_unavailable_json(
-    const BrowserDiscoveryResult& discovery) {
-    const auto& code = discovery.diagnostic.code;
-    std::string_view install_url;
-    std::string_view remediation = "install-browser";
-    if (code == "node-unavailable" || code == "node-incompatible") {
-        install_url = kNodeDownloadUrl;
-        remediation = "install-node-22";
-    } else if (code == "capture-runtime-unavailable") {
-        remediation = "pulp-upgrade";
-    } else {
-        install_url = kChromeDownloadUrl;
-        remediation = code == "browser-incompatible"
-            ? "update-browser"
-            : "install-browser";
-    }
-    std::ostringstream out;
-    out << "{"
-        << "\"code\":\""
-        << json_escape(code.empty() ? "browser-unavailable" : code) << "\","
-        << "\"message\":\""
-        << json_escape(discovery.diagnostic.message.empty()
-                           ? "No compatible Google Chrome or Chromium "
-                             "installation was found."
-                           : discovery.diagnostic.message)
-        << "\","
-        << "\"install_url\":\"" << install_url << "\","
-        << "\"remediation\":\"" << remediation << "\","
-        << "\"offline_flag\":\"--offline\","
-        << "\"probes\":[";
-    for (std::size_t i = 0; i < discovery.probes.size(); ++i) {
-        if (i != 0) out << ",";
-        const auto& probe = discovery.probes[i];
-        out << "{"
-            << "\"origin\":\""
-            << browser_origin_name(probe.candidate.origin) << "\","
-            << "\"path\":\""
-            << json_escape(probe.candidate.executable.string()) << "\","
-            << "\"compatible\":"
-            << (probe.compatible ? "true" : "false") << ","
-            << "\"product\":\"" << json_escape(probe.product) << "\","
-            << "\"version\":\"" << json_escape(probe.version) << "\","
-            << "\"failure\":\"" << json_escape(probe.failure) << "\""
-            << "}";
-    }
-    out << "]}";
-    return out.str();
-}
-
 CaptureResult capture_document(
     const BrowserInstallation& browser,
     const CaptureRequest& request) {
@@ -974,6 +900,12 @@ CaptureResult capture_document(
         "--dpr", std::to_string(request.device_scale_factor),
         "--timeout-ms", std::to_string(request.timeout_ms)};
     if (request.allow_network) args.push_back("--allow-network");
+    if (request.allow_network) {
+        for (const auto& origin : declared_https_origins(canonical_root)) {
+            args.push_back("--declared-network-origin");
+            args.push_back(origin);
+        }
+    }
 
     platform::ProcessOptions process_options;
     // Keep the outer process deadline behind the capture runtime's deadline so

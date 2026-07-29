@@ -387,7 +387,15 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
           "[import-design][browser-capture]") {
     TempTree tree("argv");
     const auto script = tree.write("capture script ' $().mjs", "// fixture");
-    const auto request = fixture_request(tree, script);
+    auto request = fixture_request(tree, script);
+    request.allow_network = true;
+    tree.write(
+        "authorized root ' $()/nested/runtime.js",
+        "const font = 'https://fonts.example.org/css?family=Inter';");
+    std::ofstream(request.input_file)
+        << R"(<script src="https://cdn.example.com/icons.js"></script>)"
+        << R"(<link href="https://fonts.example.net/font.woff2">)"
+        << R"(<img src="https://user:supersecret@private.example/pixel">)";
 
     const auto result =
         capture::capture_document(fixture_browser(), request);
@@ -403,6 +411,16 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     CHECK(contains_line(args, output.string()));
     CHECK(contains_line(args, "Fixture Chromium"));
     CHECK(contains_line(args, "123.4.5.6"));
+    CHECK(contains_line(args, "--allow-network"));
+    CHECK(contains_line(args, "--declared-network-origin"));
+    CHECK(contains_line(args, "https://cdn.example.com"));
+    CHECK(contains_line(args, "https://fonts.example.net"));
+    CHECK(contains_line(args, "https://fonts.example.org"));
+    CHECK_FALSE(contains_line(args, "https://cdn.example.com/icons.js"));
+    CHECK_FALSE(contains_line(args, "https://fonts.example.net/font.woff2"));
+    CHECK(std::none_of(args.begin(), args.end(), [](const auto& argument) {
+        return argument.find("supersecret") != std::string::npos;
+    }));
 
     auto profile = read_file(output / "profile-path.txt");
     CHECK_FALSE(profile.empty());

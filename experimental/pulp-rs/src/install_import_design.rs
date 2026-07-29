@@ -15,10 +15,13 @@ use crate::error::{CliError, Result};
 
 pub(super) const BROWSER_CAPTURE_ARCHIVE_DIR: &str = "browser_capture";
 const BROWSER_CAPTURE_PROTOCOL_DIR: &str = "browser_capture-v1";
-pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 7] = [
+pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 10] = [
+    "browser_process.mjs",
     "capture.mjs",
     "health.mjs",
     "lifecycle.mjs",
+    "network_dependencies.mjs",
+    "renderers.mjs",
     "security.mjs",
     "semantics.mjs",
     "settle.mjs",
@@ -255,6 +258,19 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn runtime_file_list_matches_import_design_manifest() {
+        let manifest = include_str!(
+            "../../../tools/import-design/browser_capture/runtime_manifest.txt"
+        );
+        let names: Vec<_> = manifest
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect();
+        assert_eq!(names, BROWSER_CAPTURE_RUNTIME_FILES);
     }
 
     fn has_transaction(install_dir: &Path) -> bool {

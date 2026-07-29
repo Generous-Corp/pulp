@@ -21,6 +21,8 @@ bool contains(std::string_view haystack, std::string_view needle) {
 }
 
 bool begins_with_html_markup(std::string_view value) {
+    constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF", 3};
+    if (value.starts_with(kUtf8Bom)) value.remove_prefix(kUtf8Bom.size());
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string_view::npos) return false;
     value.remove_prefix(first);
@@ -28,7 +30,10 @@ bool begins_with_html_markup(std::string_view value) {
            value.starts_with("<html") ||
            value.starts_with("<head") ||
            value.starts_with("<body") ||
-           value.starts_with("<script");
+           value.starts_with("<script") ||
+           value.starts_with("<main") ||
+           value.starts_with("<div") ||
+           value.starts_with("<svg");
 }
 
 }  // namespace

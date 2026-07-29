@@ -343,9 +343,8 @@ bool BrowserCapturedImport::EvidenceTransaction::commit(
         return true;
     }
     auto publications = published_artifacts;
-    for (auto& [source, destination] : primary_artifacts) {
-        publications.push_back(
-            {std::move(source), std::move(destination), false});
+    for (const auto& [source, destination] : primary_artifacts) {
+        publications.push_back({source, destination, false});
     }
 
     struct PublishedFile {
@@ -778,7 +777,10 @@ std::optional<int> run_browser_detect_cli(
         classify_html_intake(input_file, content.str());
     if (!intake.use_browser) return std::nullopt;
 
-    std::cout << "detected source: claude\n";
+    std::cout << "detected source: "
+              << (intake.shape == HtmlExportShape::generic_html
+                      ? "html" : "claude")
+              << "\n";
     std::cout << "  format-version: "
               << html_export_shape_name(intake.shape) << "\n";
     std::cout << "  parser-version: browser-capture-v1\n";
@@ -800,19 +802,15 @@ bool infer_browser_html_source_cli(
     const fs::path& input_file,
     std::string& source) {
     if (!source.empty() || input_file.empty()) return false;
-    bool runnable_html = looks_like_html_path(input_file);
-    if (!runnable_html) {
-        constexpr std::size_t kInferenceBytes = 512 * 1024;
-        std::ifstream input(input_file, std::ios::binary);
-        std::string prefix(kInferenceBytes, '\0');
-        input.read(prefix.data(),
-                   static_cast<std::streamsize>(prefix.size()));
-        prefix.resize(static_cast<std::size_t>(input.gcount()));
-        runnable_html =
-            classify_html_intake(input_file, prefix).use_browser;
-    }
-    if (!runnable_html) return false;
-    source = "claude";
+    constexpr std::size_t kInferenceBytes = 512 * 1024;
+    std::ifstream input(input_file, std::ios::binary);
+    std::string prefix(kInferenceBytes, '\0');
+    input.read(prefix.data(),
+               static_cast<std::streamsize>(prefix.size()));
+    prefix.resize(static_cast<std::size_t>(input.gcount()));
+    const auto intake = classify_html_intake(input_file, prefix);
+    if (!intake.use_browser) return false;
+    source = intake.shape == HtmlExportShape::generic_html ? "html" : "claude";
     std::cout
         << "Detected runnable HTML; using the browser-solved import lane.\n";
     return true;

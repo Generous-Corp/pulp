@@ -38,6 +38,7 @@ BrowserHtmlImportResult import_browser_html(
     // serialized DesignIR or JSX can legitimately contain "<script" strings;
     // re-sniffing those here would steal them from their named parser.
     if (request.source != pulp::view::DesignSource::claude &&
+        request.source != pulp::view::DesignSource::html &&
         request.source != pulp::view::DesignSource::stitch) {
         return BrowserHtmlNotApplicable{};
     }
@@ -149,7 +150,9 @@ BrowserHtmlImportResult import_browser_html(
     auto lowered = lower_browser_capture_to_ir(
         captured.capture.artifacts->envelope,
         {.source = request.source,
-         .source_file = request.input_file.string()});
+         // The staged capture envelope carries a safe entry basename. Do not
+         // serialize the importing machine's absolute path into portable IR.
+         .source_file = {}});
     if (!lowered) {
         return BrowserHtmlFailure{
             3,

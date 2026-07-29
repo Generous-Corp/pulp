@@ -1,37 +1,49 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 import {
   mkdir,
-  mkdtemp,
   readFile,
-  readdir,
   rm,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import {
   authorizeInput,
-  browserEnvironment,
+  hostResolverRules,
   installNetworkGuard,
+  normalizeDeclaredHttpsOrigins,
+  resolvePublicHttpsOrigins,
   sanitizeCaptureError,
   sanitizeSnapshot,
   serveAuthorizedRoot,
   serveDenyProxy,
 } from "./security.mjs";
 import {
+  createEmptyProfile,
+  launchBrowser,
+  pageTarget,
+  terminateBrowser,
+} from "./browser_process.mjs";
+import {
   captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
+  installDynamicWorkTracker,
   MAX_LOGICAL_CAPTURE_DIMENSION,
   measureDocumentExtent,
   validateCaptureDimensions,
   waitForStable,
 } from "./settle.mjs";
+import {
+  awaitExplicitReadiness,
+  finalizeKnownRenderers,
+} from "./renderers.mjs";
+import {
+  expandAuditedProviderDependencies,
+} from "./network_dependencies.mjs";
 import {
   COMPUTED_STYLES,
   evaluateSemantics,
@@ -47,21 +59,29 @@ function parseArguments(argv) {
   const command = argv[0] ?? "";
   const values = new Map();
   const flags = new Set();
+  const multiValues = new Map();
   for (let index = 1; index < argv.length; index++) {
     const token = argv[index];
     if (!token.startsWith("--")) {
       throw new Error(`unexpected argument: ${token}`);
     }
-    if (token === "--allow-network") {
-      flags.add(token);
+    if (token === "--allow-network" || token === "--allow-browser-network") {
+      flags.add("--allow-network");
       continue;
     }
     if (index + 1 >= argv.length) {
       throw new Error(`missing value for ${token}`);
     }
-    values.set(token, argv[++index]);
+    const value = argv[++index];
+    if (token === "--declared-network-origin") {
+      const existing = multiValues.get(token) ?? [];
+      existing.push(value);
+      multiValues.set(token, existing);
+    } else {
+      values.set(token, value);
+    }
   }
-  return { command, values, flags };
+  return { command, values, flags, multiValues };
 }
 
 function required(values, name) {
@@ -193,171 +213,6 @@ class Cdp {
   }
 }
 
-async function waitForDevToolsPort(profileDir, child, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  const activePortFile = path.join(profileDir, "DevToolsActivePort");
-  let lastError = "";
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`browser exited before CDP was ready (${child.exitCode})`);
-    }
-    try {
-      const content = await readFile(activePortFile, "utf8");
-      const [port, endpoint] = content.trim().split(/\r?\n/);
-      if (/^[0-9]+$/.test(port) && endpoint) {
-        return { port: Number(port), endpoint };
-      }
-    } catch (error) {
-      lastError = String(error);
-    }
-    await delay(50);
-  }
-  throw new Error(`timed out waiting for browser CDP endpoint: ${lastError}`);
-}
-
-async function terminateBrowser(child) {
-  if (!child || child.exitCode !== null) return;
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  if (process.platform === "win32") {
-    // Node's child.kill() maps to TerminateProcess on Windows and reaches only
-    // the browser parent. taskkill /T closes Chromium's renderer/GPU process
-    // tree as well, so the profile can be removed before the launcher exits.
-    const treeKill = spawn(
-      "taskkill.exe",
-      ["/pid", String(child.pid), "/T", "/F"],
-      { stdio: "ignore", windowsHide: true });
-    const treeKillFinished = new Promise((resolve) => {
-      treeKill.once("error", resolve);
-      treeKill.once("exit", resolve);
-    });
-    await Promise.race([treeKillFinished, delay(1500)]);
-    if (treeKill.exitCode === null) {
-      try {
-        treeKill.kill("SIGKILL");
-      } catch {
-        // The taskkill helper may have exited between the check and signal.
-      }
-    }
-    if (child.exitCode === null) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // taskkill may have reaped the browser between the state check and kill.
-      }
-    }
-    await Promise.race([exited, delay(1000)]);
-    return;
-  }
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      return;
-    }
-  }
-  await Promise.race([exited, delay(1500)]);
-  if (child.exitCode !== null) return;
-  try {
-    process.kill(-child.pid, "SIGKILL");
-  } catch {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // The process may have exited between the state check and signal.
-    }
-  }
-  await Promise.race([exited, delay(1000)]);
-}
-
-async function createEmptyProfile(profileArg) {
-  const profileDir = profileArg ||
-    await mkdtemp(path.join(os.tmpdir(), "pulp-browser-capture-"));
-  await mkdir(profileDir, { recursive: true });
-  const entries = await readdir(profileDir);
-  if (entries.length !== 0) {
-    throw new Error("refusing to use a non-empty browser profile directory");
-  }
-  return profileDir;
-}
-
-async function launchBrowser(
-  browserPath, profileDir, timeoutMs, onSpawn = () => {},
-  extraArgs = []) {
-  const args = [
-    "--headless=new",
-    "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profileDir}`,
-    "--disable-background-networking",
-    "--disable-background-timer-throttling",
-    "--disable-breakpad",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-component-update",
-    "--disable-default-apps",
-    "--disable-domain-reliability",
-    "--disable-extensions",
-    "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints,Translate",
-    "--disable-renderer-backgrounding",
-    "--disable-sync",
-    "--enable-automation",
-    "--force-color-profile=srgb",
-    "--hide-scrollbars",
-    "--lang=en-US",
-    "--metrics-recording-only",
-    "--no-default-browser-check",
-    "--no-first-run",
-    "--password-store=basic",
-    "--use-mock-keychain",
-    ...extraArgs,
-    "about:blank",
-  ];
-  const child = spawn(browserPath, args, {
-    detached: process.platform !== "win32",
-    env: browserEnvironment(),
-    stdio: ["ignore", "ignore", "pipe"],
-    windowsHide: true,
-  });
-  onSpawn(child);
-  let stderr = "";
-  child.stderr.on("data", (chunk) => {
-    if (stderr.length < 256 * 1024) stderr += String(chunk);
-  });
-  child.once("error", (error) => {
-    // Node's spawn error string embeds the complete executable path. Preserve
-    // the actionable error code without persisting host-private paths.
-    stderr += `\nbrowser launch failed (${error?.code ?? "spawn-error"})`;
-  });
-  try {
-    const endpoint = await waitForDevToolsPort(profileDir, child, timeoutMs);
-    return { child, endpoint, stderr: () => stderr };
-  } catch (error) {
-    await terminateBrowser(child);
-    error.message += stderr ? `: ${stderr.trim().slice(0, 1000)}` : "";
-    throw error;
-  }
-}
-
-async function pageTarget(port, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = "";
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-      if (response.ok) {
-        const targets = await response.json();
-        const page = targets.find((target) => target.type === "page");
-        if (page?.webSocketDebuggerUrl) return page;
-      }
-    } catch (error) {
-      lastError = String(error);
-    }
-    await delay(50);
-  }
-  throw new Error(`browser exposed no page target: ${lastError}`);
-}
-
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -401,6 +256,20 @@ async function configurePage(cdp, width, height, dpr) {
       { name: "prefers-color-scheme", value: "light" },
       { name: "prefers-reduced-motion", value: "no-preference" },
     ],
+  });
+  await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      globalThis.__pulpCaptureMutationEpoch = 0;
+      globalThis.__pulpCaptureMutationObserver = new MutationObserver(() => {
+        globalThis.__pulpCaptureMutationEpoch += 1;
+      });
+      globalThis.__pulpCaptureMutationObserver.observe(document, {
+        attributes: true,
+        characterData: true,
+        childList: true,
+        subtree: true
+      });
+    })()`,
   });
   try {
     await cdp.call("Browser.setDownloadBehavior", { behavior: "deny" });
@@ -491,6 +360,15 @@ async function runCapture(options) {
   const timeoutMs = positiveInteger(
     options.values, "--timeout-ms", 60000);
   const allowNetwork = options.flags.has("--allow-network");
+  const declaredNetworkOrigins =
+    options.multiValues.get("--declared-network-origin") ?? [];
+  const allowedExternalOrigins = allowNetwork
+    ? expandAuditedProviderDependencies(
+        normalizeDeclaredHttpsOrigins(declaredNetworkOrigins))
+    : [];
+  const resolvedExternalOrigins = allowNetwork
+    ? await resolvePublicHttpsOrigins(allowedExternalOrigins)
+    : new Map();
   const authorized = await authorizeInput(rootPath, inputPath);
   const sourceBytes = await readFile(authorized.input);
   const profileDir = await createEmptyProfile(
@@ -528,7 +406,7 @@ async function runCapture(options) {
   try {
     server = await serveAuthorizedRoot(
       authorized.root, authorized.relativeEntry);
-    if (!allowNetwork) {
+    if (!allowNetwork || resolvedExternalOrigins.size === 0) {
       denyProxy = await serveDenyProxy();
     }
     phase = "browser-launch";
@@ -545,16 +423,22 @@ async function runCapture(options) {
             `--proxy-server=${denyProxy.url}`,
             `--proxy-bypass-list=<-loopback>;${server.origin}`,
           ]
-        : []);
+        : [
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            `--host-resolver-rules=${
+              hostResolverRules(resolvedExternalOrigins)}`,
+          ]);
     const target = await pageTarget(launched.endpoint.port, timeoutMs);
     cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs);
     await cdp.open();
 
     phase = "page-configuration";
     await configurePage(cdp, initialWidth, initialHeight, dpr);
+    await installDynamicWorkTracker(cdp);
     const healthMonitor = installCaptureHealthMonitor(cdp);
     const networkGuard = installNetworkGuard(
-      cdp, server.origin, allowNetwork, server.privatePrefix);
+      cdp, server.origin, allowedExternalOrigins, server.privatePrefix);
     await networkGuard.enable();
     const pendingNetwork = new Set();
     cdp.on("Network.requestWillBeSent", ({ requestId }) => {
@@ -580,6 +464,15 @@ async function runCapture(options) {
     phase = "page-settle";
     await disableMotion(cdp);
     const firstSettle = await waitForStable(cdp, {
+      networkIdle: () => pendingNetwork.size === 0,
+      // Runnable design frameworks can briefly plateau before their
+      // dynamically-loaded render helpers commit. Observe a full readiness
+      // window before running completion hooks or freezing the page.
+      minimumElapsedMs: 1000,
+    });
+    const readiness = await awaitExplicitReadiness(cdp);
+    const rendererHooks = await finalizeKnownRenderers(cdp);
+    const rendererSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
     });
     // Keep the viewport that authored the responsive layout. Resizing it to the
@@ -719,10 +612,11 @@ async function runCapture(options) {
     const tokenReport = await evaluateDesignTokens(cdp);
     const captureHealth = await verifyCaptureHealth(
       cdp, snapshot, healthMonitor, networkGuard.blocked);
+    await networkGuard.awaitProvenance();
     // Compositor-backed pages can need several post-freeze presentation
-    // boundaries even after DOM/timer motion is paused. Keep the proof strict
-    // (two byte-identical frames) while allowing a bounded tail for that
-    // pipeline to drain.
+    // boundaries even after DOM/timer motion is paused. Always observe the
+    // complete bounded horizon, then require a byte-identical trailing run;
+    // an early A,A plateau must not hide a later B,B presentation.
     const screenshotBytes =
       await captureStableScreenshot(cdp, screenshotOptions);
     if (!screenshotBytes) {
@@ -790,19 +684,24 @@ async function runCapture(options) {
         reduced_motion: false,
         settle: {
           rounds:
-            firstSettle.rounds + widthSettle.rounds + heightSettle.rounds,
+            firstSettle.rounds + rendererSettle.rounds +
+            widthSettle.rounds + heightSettle.rounds,
           stable_rounds:
-            firstSettle.stableRounds + widthSettle.stableRounds +
-            heightSettle.stableRounds,
+            firstSettle.stableRounds + rendererSettle.stableRounds +
+            widthSettle.stableRounds + heightSettle.stableRounds,
           elapsed_ms:
-            firstSettle.elapsedMs + widthSettle.elapsedMs +
-            heightSettle.elapsedMs,
+            firstSettle.elapsedMs + rendererSettle.elapsedMs +
+            widthSettle.elapsedMs + heightSettle.elapsedMs,
         },
         network: {
-          external_allowed: allowNetwork,
+          external_allowed: allowedExternalOrigins.length > 0,
+          allowed_origins: allowedExternalOrigins,
+          external_resources: networkGuard.external,
           blocked_requests: networkGuard.blocked,
         },
         health: captureHealth,
+        readiness,
+        renderer_hooks: rendererHooks,
       },
       documents: [{
         id: "document:0",

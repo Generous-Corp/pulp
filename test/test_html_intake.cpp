@@ -42,6 +42,13 @@ TEST_CASE("HTML intake chooses one browser evaluator across Claude export shapes
         REQUIRE(decision.shape == HtmlExportShape::generic_html);
     }
 
+    SECTION("extensionless HTML recognizes common roots after a UTF-8 BOM") {
+        const auto decision = classify_html_intake(
+            "screen", "\xEF\xBB\xBF  <main>Hello</main>");
+        REQUIRE(decision.use_browser);
+        REQUIRE(decision.shape == HtmlExportShape::generic_html);
+    }
+
     SECTION("HTML extension matching is case-insensitive and includes htm") {
         REQUIRE(classify_html_intake("SCREEN.HTML", "<main>Hello</main>")
                     .use_browser);

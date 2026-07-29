@@ -15,13 +15,20 @@ Runnable-HTML classification and execution have now been extracted:
 `html_intake` owns shape diagnostics, `browser_import_session` owns downstream
 capture adoption and publication, `browser_import_cli` owns the
 capture/validation/evidence transaction, `browser_html_import` owns Chromium
-orchestration policy, `browser_capture_backend` owns
-discovery/process/security, and `browser_capture_ir` owns
+orchestration policy, `browser_capture_backend` owns native discovery and
+subprocess admission, `browser_capture/browser_process.mjs` owns the isolated
+Chromium lifecycle, `browser_capture/security.mjs` owns the in-browser network
+and input policy, and `browser_capture_ir` owns
 protocol-to-DesignIR lowering. `html_project_stager` owns the generic contained
 dependency graph and staging limits, while provider-specific dynamic dependency
 discovery belongs in provider modules such as `claude_html_dependencies`.
 Keep those boundaries intact; the static parser is an explicit fallback, not
 another automatic decision branch.
+
+The native backend remains close to the 1k-LOC review threshold. The managed
+Chrome-for-Testing follow-up should extract browser discovery/probing and share
+one secure temporary-workspace RAII utility with `browser_capture_workspace`;
+do not grow the backend with download, configuration, or installer policy.
 
 CLI help output is also extracted: `import_design_cli_help.{hpp,cpp}` owns the
 byte-stable usage text, while `pulp_import_design.cpp` only decides when to
@@ -143,6 +150,10 @@ validation or debug reporting.
   or illustration fills.
 - Generated bridge/source identity (`setAnchor`, source locations, tweak/lock
   contracts) belongs to codegen or inspector modules, not to the CLI facade.
+- Browser capture interaction must use a versioned declarative action plan with
+  bounded click/type/wait operations and evidence for every action. Keep it out
+  of browser discovery and process launch, and do not expose arbitrary
+  JavaScript evaluation as an importer CLI option.
 
 ## Test Anchors
 

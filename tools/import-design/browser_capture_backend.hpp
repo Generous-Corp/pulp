@@ -76,8 +76,8 @@ struct BrowserDiscoveryOptions {
     // environment lookup, which keeps tests and hermetic callers deterministic.
     std::optional<std::string> environment_override;
 
-    // Defaults to PULP_HOME/tools/browser-capture or the platform-equivalent
-    // Pulp tool root.
+    // Defaults to PULP_HOME/tools/chrome-for-testing or the
+    // platform-equivalent Pulp tool root.
     std::optional<fs::path> managed_root;
 
     // These candidates are considered before the platform defaults. Set

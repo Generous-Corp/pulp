@@ -8,6 +8,9 @@ The C++ launcher in `browser_capture_backend.{hpp,cpp}` is the supported entry
 point. It discovers and probes a compatible browser, creates a fresh temporary
 profile, and invokes `capture.mjs` through Pulp's argv-safe `ChildProcess`.
 `capture.mjs` uses only Node.js built-ins and requires Node.js 22 or newer.
+The public CLI opt-in is `--allow-browser-network`; the helper also accepts that
+spelling when invoked directly by importer developers, while the launcher uses
+its internal `--allow-network` spelling.
 
 The caller supplies an `input_file` inside an authorized `staged_root`. The
 helper serves that root from a random tokenized loopback URL, so relative
@@ -37,5 +40,19 @@ that follow-up rather than pretending a computed default is multi-theme.
 Loopback ports, random tokens, browser executable paths, and host filesystem
 paths are not recorded in the envelope.
 
+With explicit network access, the launcher admits only public HTTPS origins
+declared by the bounded staged source graph. Provider-owned secondary origins
+must also be present in the audited dependency registry; currently this covers
+Google Fonts stylesheet responses loading font bytes from `fonts.gstatic.com`.
+All admitted hosts are resolved to public addresses and pinned before Chromium
+launches, and every fetched response is content-hashed in the capture envelope.
+
 Failures are nonzero and write `capture-error.json` when an output directory is
 available. The helper never selects a lower-fidelity importer.
+
+Capture currently records the prototype's settled initial state. Reaching
+secondary screens belongs in a versioned, declarative interaction plan (for
+example: click a selector, type bounded text, wait for a selector), with each
+action recorded in the evidence envelope. Do not add arbitrary JavaScript
+evaluation as a CLI escape hatch: it would weaken the source/evidence boundary
+and make captures difficult to reproduce or audit.

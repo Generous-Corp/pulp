@@ -52,7 +52,8 @@ const SAMPLE_EXPRESSION = `(() => {
     height: Math.max(root?.scrollHeight || 0, body?.scrollHeight || 0),
     visible,
     geometry,
-    textLength
+    textLength,
+    mutationEpoch: globalThis.__pulpCaptureMutationEpoch || 0
   });
 })()`;
 
@@ -103,6 +104,76 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+const DYNAMIC_WORK_TRACKER_EXPRESSION = `(() => {
+  const timeouts = new Set();
+  const intervals = new Set();
+  const frames = new Set();
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeClearTimeout = window.clearTimeout.bind(window);
+  const nativeSetInterval = window.setInterval.bind(window);
+  const nativeClearInterval = window.clearInterval.bind(window);
+  const nativeRequestAnimationFrame =
+    window.requestAnimationFrame.bind(window);
+  const nativeCancelAnimationFrame =
+    window.cancelAnimationFrame.bind(window);
+  window.setTimeout = (callback, ...args) => {
+    let handle;
+    const trackedCallback = (...callbackArgs) => {
+      timeouts.delete(handle);
+      if (typeof callback === "function")
+        return callback(...callbackArgs);
+      return (0, eval)(String(callback));
+    };
+    handle = nativeSetTimeout(trackedCallback, ...args);
+    timeouts.add(handle);
+    return handle;
+  };
+  window.clearTimeout = (handle) => {
+    timeouts.delete(handle);
+    return nativeClearTimeout(handle);
+  };
+  window.setInterval = (...args) => {
+    const handle = nativeSetInterval(...args);
+    intervals.add(handle);
+    return handle;
+  };
+  window.clearInterval = (handle) => {
+    intervals.delete(handle);
+    return nativeClearInterval(handle);
+  };
+  window.requestAnimationFrame = (callback) => {
+    let handle;
+    handle = nativeRequestAnimationFrame((timestamp) => {
+      frames.delete(handle);
+      callback(timestamp);
+    });
+    frames.add(handle);
+    return handle;
+  };
+  window.cancelAnimationFrame = (handle) => {
+    frames.delete(handle);
+    return nativeCancelAnimationFrame(handle);
+  };
+  Object.defineProperty(window, "__pulpFreezeDynamicWork", {
+    configurable: false,
+    enumerable: false,
+    value: () => {
+      for (const handle of timeouts) nativeClearTimeout(handle);
+      for (const handle of intervals) nativeClearInterval(handle);
+      for (const handle of frames) nativeCancelAnimationFrame(handle);
+      timeouts.clear();
+      intervals.clear();
+      frames.clear();
+    },
+  });
+})()`;
+
+export async function installDynamicWorkTracker(cdp) {
+  await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: DYNAMIC_WORK_TRACKER_EXPRESSION,
+  });
+}
+
 async function animationFrames(cdp, count) {
   await cdp.call("Runtime.evaluate", {
     expression: `new Promise(resolve => {
@@ -141,10 +212,14 @@ export async function disableMotion(cdp) {
 
 export async function freezeDynamicTime(cdp) {
   await cdp.call("Runtime.evaluate", {
-    // One already-scheduled callback may still run, but its attempt to queue
-    // the next frame reaches this no-op. Let that final presentation boundary
-    // pass before pausing timers/virtual time.
+    // Stop tracked page work, then reject any scheduling after the freeze.
+    // Let the final presentation boundary pass before pausing virtual time.
     expression: `(() => {
+      window.__pulpFreezeDynamicWork?.();
+      window.setTimeout = () => 0;
+      window.clearTimeout = () => {};
+      window.setInterval = () => 0;
+      window.clearInterval = () => {};
       window.requestAnimationFrame = () => 0;
       window.cancelAnimationFrame = () => {};
       return true;
@@ -158,23 +233,27 @@ export async function freezeDynamicTime(cdp) {
 }
 
 export async function captureStableScreenshot(
-  cdp, screenshotOptions, maximumAttempts = 12, intervalMs = 16) {
+  cdp, screenshotOptions, maximumAttempts = 32, intervalMs = 16,
+  requiredTrailingFrames = 3) {
   let previous;
+  let trailingFrames = 0;
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
     const screenshot =
       await cdp.call("Page.captureScreenshot", screenshotOptions);
     const current = Buffer.from(screenshot.data, "base64");
-    if (previous?.equals(current)) return current;
+    trailingFrames =
+      previous?.equals(current) ? trailingFrames + 1 : 1;
     previous = current;
     if (attempt + 1 < maximumAttempts) await delay(intervalMs);
   }
-  return undefined;
+  return trailingFrames >= requiredTrailingFrames ? previous : undefined;
 }
 
 export async function waitForStable(cdp, options = {}) {
   const stableRoundsRequired = options.stableRounds ?? 3;
   const maximumRounds = options.maximumRounds ?? 50;
   const intervalMs = options.intervalMs ?? 100;
+  const minimumElapsedMs = options.minimumElapsedMs ?? 0;
   const networkIdle = options.networkIdle ?? (() => true);
   const started = Date.now();
 
@@ -205,7 +284,8 @@ export async function waitForStable(cdp, options = {}) {
     if (ready && sample === previous) stableRounds += 1;
     else stableRounds = 0;
     previous = sample;
-    if (stableRounds >= stableRoundsRequired) break;
+    if (stableRounds >= stableRoundsRequired &&
+        Date.now() - started >= minimumElapsedMs) break;
     await delay(intervalMs);
   }
   if (stableRounds < stableRoundsRequired) {

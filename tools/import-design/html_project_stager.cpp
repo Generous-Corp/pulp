@@ -87,6 +87,9 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
     static const std::regex kScannableReference{
         R"(<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']|<link\b[^>]*\bhref\s*=\s*["']([^"']+)["']|@import\s+(?:url\(\s*)?["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
         std::regex::icase};
+    static const std::regex kSrcset{
+        R"(\bsrcset\s*=\s*["']([^"']+)["'])",
+        std::regex::icase};
     std::vector<DependencyReference> result;
     const std::string text(content);
     auto append = [&](std::string value, bool scan_as_text) {
@@ -110,6 +113,16 @@ std::vector<DependencyReference> referenced_paths(std::string_view content) {
             if (!(*it)[group].matched) continue;
             append((*it)[group].str(), false);
             break;
+        }
+    }
+    for (std::sregex_iterator it(text.begin(), text.end(), kSrcset), end;
+         it != end; ++it) {
+        std::istringstream candidates((*it)[1].str());
+        for (std::string candidate; std::getline(candidates, candidate, ',');) {
+            std::istringstream fields(candidate);
+            std::string url;
+            fields >> url;
+            if (!url.empty()) append(std::move(url), false);
         }
     }
     for (std::sregex_iterator it(
@@ -164,6 +177,13 @@ StagedHtmlProject stage_html_project(
         result.error = "could not resolve HTML entry for staging";
         return result;
     }
+    const auto entry_bytes = fs::file_size(source_entry, ec);
+    if (ec || entry_bytes > kMaximumFileBytes ||
+        entry_bytes > kMaximumDependencyBytes) {
+        result.error =
+            "HTML entry exceeds capture staging limits";
+        return result;
+    }
     const auto source_root = source_entry.parent_path();
     result.root = result.workspace->root() / "project";
     fs::create_directory(result.root, ec);
@@ -183,8 +203,7 @@ StagedHtmlProject stage_html_project(
     pending.emplace_back(fs::path{}, std::string(input_content));
     std::set<fs::path> visited;
     std::set<fs::path> scanned;
-    std::uintmax_t total_bytes = fs::file_size(source_entry, ec);
-    if (ec) total_bytes = input_content.size();
+    std::uintmax_t total_bytes = entry_bytes;
 
     while (!pending.empty()) {
         auto [base, content] = std::move(pending.front());

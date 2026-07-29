@@ -1564,6 +1564,7 @@ static const char* design_source_id(DesignSource source) {
         case DesignSource::v0:       return "v0";
         case DesignSource::pencil:   return "pencil";
         case DesignSource::claude:   return "claude";
+        case DesignSource::html:     return "html";
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";

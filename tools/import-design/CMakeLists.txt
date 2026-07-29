@@ -4,7 +4,8 @@
 # be linked into the test target without dragging the full pulp::view pipeline
 # along.
 add_library(pulp-browser-capture-backend STATIC
-    browser_capture_backend.cpp)
+    browser_capture_backend.cpp
+    browser_capture_diagnostics.cpp)
 add_library(pulp::browser-capture-backend ALIAS
     pulp-browser-capture-backend)
 target_include_directories(pulp-browser-capture-backend PUBLIC
@@ -52,14 +53,14 @@ target_link_libraries(pulp-import-design PRIVATE
     pulp::state
     pulp::platform)
 
-set(_pulp_browser_capture_runtime_files
-    browser_capture/capture.mjs
-    browser_capture/health.mjs
-    browser_capture/lifecycle.mjs
-    browser_capture/security.mjs
-    browser_capture/semantics.mjs
-    browser_capture/settle.mjs
-    browser_capture/tokens.mjs)
+file(STRINGS
+    "${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/runtime_manifest.txt"
+    _pulp_browser_capture_runtime_names)
+set(_pulp_browser_capture_runtime_files)
+foreach(_runtime_name IN LISTS _pulp_browser_capture_runtime_names)
+    list(APPEND _pulp_browser_capture_runtime_files
+        "browser_capture/${_runtime_name}")
+endforeach()
 add_custom_target(pulp-browser-capture-runtime
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_FILE_DIR:pulp-import-design>/browser_capture-v1"

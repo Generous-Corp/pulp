@@ -52,9 +52,18 @@ captured source evidence rather than being misrepresented as global tokens.
 
 Local relative assets load from the input folder. External requests are denied
 by default. If the health report identifies a reviewed CDN dependency, retry
-with `--allow-browser-network`. Use `--browser <path>` for a nonstandard
-Chrome/Chromium installation. `--offline` explicitly selects the older partial
-static/QuickJS fallback and may lose layout or runtime content.
+with `--allow-browser-network`. That consent is limited to public HTTPS origins
+declared by the source; loopback, private/link-local addresses, WebSockets, and
+undeclared redirect origins remain blocked. Successful external response
+content is hashed into capture provenance. Use `--browser <path>` for a
+nonstandard Chrome/Chromium installation. `--offline` explicitly selects the
+older partial static/QuickJS fallback and may lose layout or runtime content.
+
+Runnable sources with asynchronous initialization may expose
+`globalThis.__pulpCaptureReady` as a Promise or a function returning one. Pulp
+awaits it after the initial layout observation window and fails the import if
+it rejects. This is optional; sources without the contract use bounded
+DOM/network/compositor settling.
 
 Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
 JavaScript, and C++ artifacts do not embed or require them.

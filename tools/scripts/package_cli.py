@@ -362,9 +362,14 @@ def main() -> int:
                 args.import_design_binary, stage, import_name, is_windows)
             files.append(staged_import)
             names.append(import_name)
-            runtime_names = (
-                "capture.mjs", "health.mjs", "lifecycle.mjs", "security.mjs",
-                "semantics.mjs", "settle.mjs", "tokens.mjs",
+            runtime_manifest = (
+                Path(__file__).resolve().parents[1]
+                / "import-design" / "browser_capture" / "runtime_manifest.txt"
+            )
+            runtime_names = tuple(
+                line.strip()
+                for line in runtime_manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
             )
             for runtime_name in runtime_names:
                 runtime_file = args.import_design_runtime_dir / runtime_name
