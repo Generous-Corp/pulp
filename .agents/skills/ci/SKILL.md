@@ -520,6 +520,50 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
+## Codecov "missing lines" is usually a leg that never uploaded
+
+When Codecov shows fewer lines than the repo has, look for a coverage leg
+that produced **no report at all** before suspecting the ignore list or the
+flag/component config. The failure is quiet by construction:
+
+- The build fails, so no instrumented binary is linked and no
+  `coverage.cobertura.xml` is written.
+- The upload step still runs. The Codecov CLI logs
+  `Some files were not found` and returns **200** — `fail_ci_if_error` is
+  `false`, so nothing turns red there.
+- `after_n_builds` (4) then waits forever for an upload that will never
+  arrive, so the report stays *incomplete* rather than visibly broken.
+
+So the symptom appears in Codecov's UI while the cause is a compile error in
+a workflow log. Check per-OS legs first:
+
+```sh
+gh run list --repo Generous-Corp/pulp --workflow coverage.yml --branch main --limit 10 \
+  --json conclusion,headSha,createdAt
+# then, on a failing run, find the step that actually failed:
+gh api repos/Generous-Corp/pulp/actions/runs/<id>/jobs \
+  --jq '.jobs[] | select(.conclusion=="failure") | "\(.name) :: \([.steps[]|select(.conclusion=="failure")|.name]|join(", "))"'
+```
+
+Concretely (2026-07-29): the Linux leg was missing `libfontconfig1-dev`.
+Skia's `SkFontMgr_fontconfig.h` includes `<fontconfig/fontconfig.h>`, so
+`core/canvas/src/sdf_atlas.cpp` failed to compile and the build exited 2.
+
+**The underlying hazard is that thirteen workflows hand-maintain the same
+Linux apt list with no shared source.** They drift silently, and a drift only
+surfaces when some workflow happens to compile the translation unit that needs
+the missing package. When adding a Linux dependency, grep the whole
+`.github/workflows/` tree rather than editing the one lane in front of you:
+
+```sh
+grep -ln "libxkbcommon-dev" .github/workflows/*.yml   # every lane carrying the list
+grep -L "libfontconfig1-dev" $(grep -ln "libxkbcommon-dev" .github/workflows/*.yml)
+```
+
+A run being `cancelled` on `main` is different and usually benign: coverage
+sets `cancel-in-progress: false`, and GitHub queues only ONE run per group, so
+a burst of merges replaces the queued run and only the latest head runs.
+
 ## GitHub workflow gotchas
 
 - **A cache-save step gated on `github.event_name != 'pull_request' &&
