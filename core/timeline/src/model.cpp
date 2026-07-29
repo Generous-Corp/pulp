@@ -335,12 +335,15 @@ bool valid_playback_properties(ClipPlaybackProperties playback, std::uint64_t du
     return playback.fade_in_duration <= duration && playback.fade_out_duration <= duration;
 }
 
-bool valid_time_conform(TimeConform time_conform) noexcept {
+bool valid_time_conform(TimeConform time_conform, ClipTimeAnchor anchor,
+                        const ClipContent& content) noexcept {
     switch (time_conform) {
         case TimeConform::None:
+            return true;
         case TimeConform::Resample:
         case TimeConform::Stretch:
-            return true;
+            return anchor == ClipTimeAnchor::Musical &&
+                   std::holds_alternative<MediaRef>(content);
     }
     return false;
 }
@@ -355,7 +358,7 @@ runtime::Result<Clip, ModelError> Clip::create(ItemId id, timebase::TickPosition
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
     if (!valid_playback_properties(playback, static_cast<std::uint64_t>(duration.value)))
         return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
-    if (!valid_time_conform(time_conform))
+    if (!valid_time_conform(time_conform, ClipTimeAnchor::Musical, content))
         return fail<Clip>(ModelErrorCode::InvalidTimeConform, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||
@@ -391,7 +394,7 @@ runtime::Result<Clip, ModelError> Clip::create_absolute(ItemId id, timebase::Sam
         return fail<Clip>(ModelErrorCode::InvalidDuration, id);
     if (!valid_playback_properties(playback, sample_count))
         return fail<Clip>(ModelErrorCode::InvalidClipPlaybackProperties, id);
-    if (!valid_time_conform(time_conform))
+    if (!valid_time_conform(time_conform, ClipTimeAnchor::Absolute, content))
         return fail<Clip>(ModelErrorCode::InvalidTimeConform, id);
     if (const auto* media = std::get_if<MediaRef>(&content)) {
         if (!media->asset_id.valid() || media->source_start.value < 0 || media->frame_count == 0 ||

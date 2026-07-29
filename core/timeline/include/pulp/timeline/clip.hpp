@@ -154,9 +154,9 @@ struct SequenceRef {
 /// Time domain in which a clip's placement remains anchored.
 enum class ClipTimeAnchor : std::uint8_t { Musical, Absolute };
 
-/// Authored policy for adapting a media clip when its musical duration and
-/// source duration differ. This records document intent; playback support is
-/// provided separately.
+/// Authored policy for adapting a musical media clip when its duration and
+/// source duration differ. Non-default intent is invalid for absolute clips
+/// and non-media content. Playback support is provided separately.
 enum class TimeConform : std::uint8_t {
     None,
     Resample,
@@ -394,7 +394,8 @@ class Clip {
   public:
     /// Creates a musical clip in canonical ticks.
     ///
-    /// Validates identity, positive duration, content, and playback controls.
+    /// Validates identity, positive duration, content, playback controls, and
+    /// that non-default time-conform intent is attached only to media content.
     static runtime::Result<Clip, ModelError> create(ItemId id, timebase::TickPosition start,
                                                     timebase::TickDuration duration,
                                                     ClipContent content,
@@ -403,6 +404,7 @@ class Clip {
     /// Creates an absolute clip in samples at `sample_rate`.
     ///
     /// Validates identity, positive duration, rate, content, and playback controls.
+    /// Absolute clips accept only TimeConform::None.
     static runtime::Result<Clip, ModelError>
     create_absolute(ItemId id, timebase::SamplePosition start, std::uint64_t sample_count,
                     timebase::RationalRate sample_rate, ClipContent content,
@@ -438,7 +440,8 @@ class Clip {
     /// Returns a snapshot with validated replacement gain and fades.
     runtime::Result<Clip, ModelError>
     with_playback_properties(ClipPlaybackProperties playback) const;
-    /// Returns a snapshot with validated time-conform intent.
+    /// Returns a snapshot with validated time-conform intent. Non-default intent
+    /// requires a musical MediaRef clip.
     runtime::Result<Clip, ModelError> with_time_conform(TimeConform time_conform) const;
     /// Returns the authored gain and fade controls.
     ClipPlaybackProperties playback_properties() const noexcept;
