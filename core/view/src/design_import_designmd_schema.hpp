@@ -8,6 +8,8 @@
 
 namespace pulp::view {
 
+inline constexpr int kDesignMdMaxTokenNestingDepth = 20;
+
 /// Parse and validate frontmatter features that describe the DESIGN.md schema
 /// rather than producing Pulp tokens.
 void apply_designmd_frontmatter_schema(const YAML::Node& root,

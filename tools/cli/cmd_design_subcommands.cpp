@@ -35,6 +35,45 @@
 
 namespace pulp::cli::design {
 
+namespace {
+
+constexpr int kDesignMdParseErrorExitCode = 3;
+
+bool has_designmd_parse_error(const pulp::view::DesignMdParseResult& parsed) {
+    return std::any_of(parsed.diagnostics.begin(), parsed.diagnostics.end(),
+                       [](const auto& diagnostic) {
+                           return diagnostic.severity ==
+                                  pulp::view::DesignMdSeverity::error;
+                       });
+}
+
+void print_designmd_diagnostics(
+    const std::vector<pulp::view::DesignMdDiagnostic>& diagnostics) {
+    for (const auto& diagnostic : diagnostics) {
+        const char* severity =
+            diagnostic.severity == pulp::view::DesignMdSeverity::error ? "error" :
+            diagnostic.severity == pulp::view::DesignMdSeverity::warning ? "warning" :
+            "info";
+        std::cerr << "[" << severity << "] " << diagnostic.code
+                  << " at "
+                  << (diagnostic.path.empty() ? "<root>" : diagnostic.path);
+        if (diagnostic.line > 0) {
+            std::cerr << " (line " << diagnostic.line << ":"
+                      << diagnostic.column << ")";
+        }
+        std::cerr << ": " << diagnostic.message << "\n";
+    }
+}
+
+bool reject_designmd_parse_errors(
+    const pulp::view::DesignMdParseResult& parsed) {
+    if (!has_designmd_parse_error(parsed)) return false;
+    print_designmd_diagnostics(parsed.diagnostics);
+    return true;
+}
+
+} // namespace
+
 std::string read_text_file(const fs::path& p) {
     std::ifstream f(p);
     if (!f.is_open()) return {};
@@ -73,36 +112,39 @@ bool write_text_file(const fs::path& p, const std::string& content) {
 
 // Build the design manifest from the standard source options: an explicit
 // DESIGN.md or Theme JSON, else the built-in Ink & Signal system. Prints an
-// error and returns false on an unreadable or tokenless source. Shared by
-// `pulp design compile` and `pulp design lint-adherence`.
-bool build_source_manifest(const fs::path& design_md, const fs::path& theme_json,
-                           bool dark, pulp::design::DesignManifest& out) {
+// error and returns its CLI exit code on an unreadable, invalid, or tokenless
+// source. Shared by `pulp design compile` and `pulp design lint-adherence`.
+int build_source_manifest(const fs::path& design_md, const fs::path& theme_json,
+                          bool dark, pulp::design::DesignManifest& out) {
     const std::string appearance = dark ? "dark" : "light";
     if (!design_md.empty()) {
         auto text = read_text_file(design_md);
-        if (text.empty()) { std::cerr << "Error: cannot read " << design_md << "\n"; return false; }
+        if (text.empty()) { std::cerr << "Error: cannot read " << design_md << "\n"; return 1; }
         auto parsed = pulp::view::parse_designmd(text);
+        if (reject_designmd_parse_errors(parsed)) {
+            return kDesignMdParseErrorExitCode;
+        }
         auto theme = pulp::view::ir_tokens_to_theme(parsed.ir.tokens);
         if (theme.colors.empty() && theme.dimensions.empty() && theme.strings.empty()) {
             std::cerr << "Error: no tokens parsed from " << design_md << "\n";
-            return false;
+            return 1;
         }
         out = pulp::design::compile_design_manifest(
             theme, pulp::design::catalog(), design_md.filename().string(), appearance);
-        return true;
+        return 0;
     }
     if (!theme_json.empty()) {
         auto theme = pulp::view::Theme::load_from_file(theme_json.string());
         if (theme.colors.empty() && theme.dimensions.empty() && theme.strings.empty()) {
             std::cerr << "Error: no tokens read from " << theme_json << "\n";
-            return false;
+            return 1;
         }
         out = pulp::design::compile_design_manifest(
             theme, pulp::design::catalog(), theme_json.filename().string(), appearance);
-        return true;
+        return 0;
     }
     out = pulp::design::compile_ink_signal_manifest(dark);
-    return true;
+    return 0;
 }
 
 // `pulp design lint <DESIGN.md>` — runs the seven Google design.md
@@ -119,6 +161,9 @@ int run_lint(const std::vector<std::string>& rest) {
         return 1;
     }
     auto parsed = pulp::view::parse_designmd(text);
+    if (reject_designmd_parse_errors(parsed)) {
+        return kDesignMdParseErrorExitCode;
+    }
     auto findings = pulp::view::lint_designmd(parsed);
     int errors = 0;
     for (const auto& d : findings) {
@@ -150,6 +195,13 @@ int run_diff(const std::vector<std::string>& rest) {
     }
     auto before = pulp::view::parse_designmd(before_text);
     auto after  = pulp::view::parse_designmd(after_text);
+    const bool before_invalid = has_designmd_parse_error(before);
+    const bool after_invalid = has_designmd_parse_error(after);
+    if (before_invalid || after_invalid) {
+        if (before_invalid) print_designmd_diagnostics(before.diagnostics);
+        if (after_invalid) print_designmd_diagnostics(after.diagnostics);
+        return kDesignMdParseErrorExitCode;
+    }
     auto diff = pulp::view::diff_designmd(before, after);
     auto report = [](const char* group, const pulp::view::DesignMdTokenDiff& d) {
         std::cout << group << ": +" << d.added.size()
@@ -236,7 +288,11 @@ int run_compile(const std::vector<std::string>& rest) {
     const Emit emit = only_json ? Emit::json : only_prompt ? Emit::prompt : Emit::both;
 
     pulp::design::DesignManifest manifest;
-    if (!build_source_manifest(design_md, theme_json, dark, manifest)) return 1;
+    if (const int status =
+            build_source_manifest(design_md, theme_json, dark, manifest);
+        status != 0) {
+        return status;
+    }
 
     const std::string json = pulp::design::manifest_to_json(manifest);
     const std::string prompt = pulp::design::emit_binding_prompt(manifest);
@@ -349,8 +405,10 @@ int run_lint_adherence(const std::vector<std::string>& rest) {
             std::cerr << "Error: no tokens in " << manifest_file << "\n";
             return 1;
         }
-    } else if (!build_source_manifest(design_md, theme_json, dark, manifest)) {
-        return 1;
+    } else if (const int status =
+                   build_source_manifest(design_md, theme_json, dark, manifest);
+               status != 0) {
+        return status;
     }
 
     const auto findings = pulp::design::lint_adherence(js, manifest);

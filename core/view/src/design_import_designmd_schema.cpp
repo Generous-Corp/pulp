@@ -11,8 +11,6 @@
 namespace pulp::view {
 namespace {
 
-constexpr int kMaxTokenNestingDepth = 20;
-
 int yaml_line(const YAML::Node& node) {
     return node && node.Mark().line >= 0 ? node.Mark().line + 1 : 0;
 }
@@ -44,7 +42,7 @@ void collect_leaf_paths(const YAML::Node& node,
                         const std::string& category,
                         std::vector<std::pair<std::string, YAML::Node>>& leaves,
                         DesignMdParseResult& result) {
-    if (depth > kMaxTokenNestingDepth) {
+    if (depth > kDesignMdMaxTokenNestingDepth) {
         result.diagnostics.push_back(diagnostic(
             DesignMdSeverity::error, "token-nesting-depth",
             category + "." + path, node,

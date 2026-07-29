@@ -170,6 +170,14 @@ target_include_directories(pulp-cli PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Tests are declared before the desktop-only CLI subdirectory. Attach the
+# DESIGN.md shell-out suite now that the real CLI target exists.
+if(TARGET pulp-test-cli-designmd-subcommands)
+    add_dependencies(pulp-test-cli-designmd-subcommands pulp-cli)
+    target_compile_definitions(pulp-test-cli-designmd-subcommands PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+
 # RPATH so the installed binary can find shared libraries (e.g.,
 # libwgpu_native.dylib / libwgpu_native.so) inside its install prefix.
 # Without this the installed CLI crashes immediately on launch with

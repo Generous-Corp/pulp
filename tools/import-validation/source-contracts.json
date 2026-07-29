@@ -254,10 +254,13 @@
         ],
         "roundtrip_script": "tools/import-validation/designmd-roundtrip.sh",
         "test_targets": [
-          "pulp-test-design-import-designmd"
+          "pulp-test-design-import-designmd",
+          "pulp-test-cli-designmd-subcommands"
         ],
         "test_files": [
-          "test/test_design_import_designmd.cpp"
+          "test/test_design_import_designmd.cpp",
+          "test/test_design_import_designmd_040.cpp",
+          "test/test_cli_designmd_subcommands.cpp"
         ],
         "test_tags": [
           "[view][import][designmd]"

@@ -99,6 +99,7 @@ std::optional<float> parse_dimension(const std::string& raw) {
     if (!std::isfinite(value)) return std::nullopt;
     std::string unit = m[2].matched ? m[2].str() : "px";
     if (unit == "em" || unit == "rem") value *= 16.0f; // canonical 1rem == 16px
+    if (!std::isfinite(value)) return std::nullopt;
     return value;
 }
 
@@ -263,7 +264,9 @@ int yaml_line(const YAML::Node& node, int fallback) {
 // DESIGN.md permits nested declarations; validation caps them at 20 levels.
 void walk_color_node(const std::string& path,
                      const YAML::Node& node,
-                     DesignMdParseResult& result) {
+                     DesignMdParseResult& result,
+                     int depth) {
+    if (depth > kDesignMdMaxTokenNestingDepth) return;
     if (node.IsScalar()) {
         std::string value = node.as<std::string>("");
         if (is_token_reference(value) || looks_like_css_color(value)) {
@@ -280,7 +283,7 @@ void walk_color_node(const std::string& path,
             std::string key = sub->first.as<std::string>("");
             if (key.empty()) continue;
             walk_color_node(path.empty() ? key : path + "." + key,
-                            sub->second, result);
+                            sub->second, result, depth + 1);
         }
     }
 }
@@ -291,7 +294,7 @@ void walk_colors_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string name = it->first.as<std::string>("");
         if (name.empty()) continue;
-        walk_color_node(name, it->second, result);
+        walk_color_node(name, it->second, result, 1);
     }
 }
 
@@ -323,7 +326,9 @@ void walk_typography_map(const YAML::Node& node,
 void walk_dimension_node(const std::string& prefix,
                          const std::string& subpath,
                          const YAML::Node& node,
-                         DesignMdParseResult& result) {
+                         DesignMdParseResult& result,
+                         int depth) {
+    if (depth > kDesignMdMaxTokenNestingDepth) return;
     if (node.IsScalar()) {
         std::string raw = node.as<std::string>("");
         std::string token_name = prefix + "-" + subpath;
@@ -340,7 +345,7 @@ void walk_dimension_node(const std::string& prefix,
             if (key.empty()) continue;
             walk_dimension_node(prefix,
                                 subpath.empty() ? key : subpath + "." + key,
-                                sub->second, result);
+                                sub->second, result, depth + 1);
         }
     }
 }
@@ -352,7 +357,7 @@ void walk_dimension_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string key = it->first.as<std::string>("");
         if (key.empty()) continue;
-        walk_dimension_node(prefix, key, it->second, result);
+        walk_dimension_node(prefix, key, it->second, result, 1);
     }
 }
 
@@ -364,7 +369,9 @@ void walk_dimension_map(const YAML::Node& node,
 // matching `walk_dimension_node`.
 void walk_shadow_node(const std::string& subpath,
                       const YAML::Node& node,
-                      DesignMdParseResult& result) {
+                      DesignMdParseResult& result,
+                      int depth) {
+    if (depth > kDesignMdMaxTokenNestingDepth) return;
     if (node.IsScalar()) {
         result.ir.tokens.strings.emplace("shadow-" + subpath, node.as<std::string>(""));
     } else if (node.IsMap()) {
@@ -372,7 +379,7 @@ void walk_shadow_node(const std::string& subpath,
             std::string key = sub->first.as<std::string>("");
             if (key.empty()) continue;
             walk_shadow_node(subpath.empty() ? key : subpath + "." + key,
-                             sub->second, result);
+                             sub->second, result, depth + 1);
         }
     }
 }
@@ -383,7 +390,7 @@ void walk_shadow_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string key = it->first.as<std::string>("");
         if (key.empty()) continue;
-        walk_shadow_node(key, it->second, result);
+        walk_shadow_node(key, it->second, result, 1);
     }
 }
 
@@ -752,10 +759,6 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     if (root["version"])     result.ir.tokens.strings.emplace("version",     root["version"].as<std::string>(""));
 
     apply_designmd_frontmatter_schema(root, result);
-    if (std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
-                    [](const auto& d) { return d.code == "token-nesting-depth"; })) {
-        return finalize_result(std::move(result));
-    }
 
     walk_colors_map(root["colors"],       result);
     walk_typography_map(root["typography"], result);
