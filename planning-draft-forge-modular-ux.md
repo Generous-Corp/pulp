@@ -783,3 +783,36 @@ applied to what this product actually generates.
 Forge's Sequential/Parallel generation mode has no meaning here for modules,
 since there is only one call. It may earn its place later if a patch turn that
 needs a new module runs both roles at once.
+
+---
+
+## 13. Shipping as a DAW plugin, and choosing a target
+
+Forge Modular ships as a plugin as well as an app, so a module or patch can be
+made without leaving the sequencer. Forge already proves the shape — one shell,
+`main.cpp` for standalone and `vst3_entry.cpp` for a plugin — so this is the
+same pattern rather than a new architecture.
+
+**Audio effect, in AU, VST3 and CLAP.** The reasoning, and what would change
+it, is in `DECISIONS.md`; the short version is that Rack Pro wants the
+instrument slot, an insert puts both windows on one track, and `MidiEffect`
+would be more honest but is Logic-shaped.
+
+**A thin client, not a second engine.** Generating a module spawns `claude` and
+runs `clang++`, and Logic sandboxes AUs out-of-process, which may block
+spawning a compiler from inside a plugin. So the app or a small helper does the
+work and the plugin is the same chat UI talking to it. One implementation, no
+sandbox exposure, and a plugin small enough to sit in a session beside real
+instruments. The sandbox constraint should be verified before the shape is
+committed to.
+
+**Where output goes is decided by context** — in a DAW, the Rack Pro instance
+beside us; standalone, standalone Rack. `tools/rack/target.py` implements the
+detection and, importantly, reports what can actually be *done* with each
+target rather than only naming one.
+
+The asymmetry it exists to express: standalone Rack can be launched and handed
+a patch; a Rack Pro plugin instance can be neither, because no plugin can
+instantiate another or tell its host to open a file. From a DAW we prepare and
+report; the last step is the user's. A button that silently does nothing would
+be worse than saying so.
