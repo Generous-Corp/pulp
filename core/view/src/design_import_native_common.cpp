@@ -1224,6 +1224,52 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 // A helper rather than six more fallbacks, because the bug is that the
 // knowledge lived at a call site: the eighth paint site added later would have
 // repeated it.
+/// The blur radius out of a CSS filter list, in px.
+///
+/// Only `blur()` is read. A filter list may carry brightness, saturate and the
+/// rest; those need a real filter chain and lowering them to a blur radius
+/// would be a lie. Returning nothing for them leaves the node unfiltered rather
+/// than wrongly blurred.
+static std::optional<float> css_blur_radius(const std::string& filter) {
+    const auto open = filter.find("blur(");
+    if (open == std::string::npos) return std::nullopt;
+    const auto close = filter.find(')', open);
+    if (close == std::string::npos) return std::nullopt;
+    const auto inner = filter.substr(open + 5, close - open - 5);
+    try {
+        const float radius = std::stof(inner);  // stof stops at the unit
+        if (!(radius > 0.0f)) return std::nullopt;
+        return radius;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+static std::optional<canvas::Canvas::BlendMode> css_blend_mode(
+    const std::string& keyword) {
+    using BlendMode = canvas::Canvas::BlendMode;
+    static const std::unordered_map<std::string, BlendMode> kModes{
+        {"normal", BlendMode::normal},
+        {"multiply", BlendMode::multiply},
+        {"screen", BlendMode::screen},
+        {"overlay", BlendMode::overlay},
+        {"darken", BlendMode::darken},
+        {"lighten", BlendMode::lighten},
+        {"color-dodge", BlendMode::color_dodge},
+        {"color-burn", BlendMode::color_burn},
+        {"hard-light", BlendMode::hard_light},
+        {"soft-light", BlendMode::soft_light},
+        {"difference", BlendMode::difference},
+        {"exclusion", BlendMode::exclusion},
+        {"hue", BlendMode::hue},
+        {"saturation", BlendMode::saturation},
+        {"color", BlendMode::color},
+        {"luminosity", BlendMode::luminosity},
+    };
+    const auto it = kModes.find(keyword);
+    return it == kModes.end() ? std::nullopt : std::optional<BlendMode>(it->second);
+}
+
 static std::optional<Color> parse_any_css_color(const std::string& value) {
     if (auto color = parse_hex_color(value)) return color;
     if (value.rfind("rgb", 0) == 0 || value.rfind("hsl", 0) == 0 || value == "transparent")
@@ -1260,6 +1306,27 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_opacity(*style.opacity);
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
+
+    // Filters, backdrop filters and blend modes. The JS lane already parses
+    // these — web-compat-style-decl-paint.js pulls the blur radius out and
+    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
+    // native tree did not, so the same document rendered soft through one lane
+    // and hard-edged through the other. An atmospheric design lives or dies on
+    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    if (style.filter) {
+        if (const auto radius = css_blur_radius(*style.filter))
+            view.set_filter_blur(*radius);
+    }
+    if (style.backdrop_filter) {
+        if (const auto radius = css_blur_radius(*style.backdrop_filter))
+            view.set_backdrop_blur(*radius);
+    }
+    if (style.mix_blend_mode) {
+        if (const auto mode = css_blend_mode(*style.mix_blend_mode))
+            view.set_mix_blend_mode(*mode);
+    }
+    if (style.clip_path)
+        view.set_clip_path(*style.clip_path);
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
     // the source stroke as border_color/border_width, but the stroke is already
     // baked into the raster. Drawing it again paints a spurious box outline —
