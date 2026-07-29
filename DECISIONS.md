@@ -149,3 +149,28 @@ a gate that makes judgements will make them badly.
 
 **Would change our mind:** evidence that generated modules routinely pick a
 technically-valid but poor class, in a pattern specific enough to name.
+
+## Our own component graphics, not Rack's
+
+Rack's widget *machinery* is ours to build on -- `SvgKnob` knows how to rotate
+to a value, `SvgPort` how a cable attaches -- and the plugin licence exception
+covers exactly that. Its **graphics are CC BY-NC 4.0**, which is a different
+thing entirely: a module drawn with them carries a non-commercial condition on
+its artwork, inherited by whoever builds one and never mentioned to them.
+
+Every component turned out to be artwork, lights included -- those load
+`res/ComponentLibrary/TinyLight.svg` rather than being drawn in code, which is
+easy to miss and would have left the obligation in place while looking solved.
+
+So the machinery is subclassed and pointed at our own drawings. The footprints
+match what the layout validator already enforces, so replacing the art cannot
+quietly change what fits on a panel. The secondary benefit is that our modules
+are now recognisable on sight instead of looking like everyone else's.
+
+The current drawings are functional rather than finished -- a designer should
+still take a pass -- but the licensing question is settled independently of how
+they end up looking, and a guard refuses the whole Rack component library by
+name so it cannot come back by accident.
+
+**Would change our mind:** VCV relicensing the component library, which would
+make the machinery-plus-art path simpler than maintaining our own.

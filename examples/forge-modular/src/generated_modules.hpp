@@ -6,6 +6,8 @@
 
 #include <rack.hpp>
 
+#include "forge_components.hpp"
+
 #include <algorithm>
 
 namespace forge_modular {
@@ -42,20 +44,20 @@ inline int channels_VCO(const rack::engine::Module* m) {
 inline void place_VCO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
-    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(20.320f, 30.000f)), m, VCOLayout::FREQ_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.800f, 52.000f)), m, VCOLayout::FINE_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(28.840f, 52.000f)), m, VCOLayout::PW_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(28.840f, 68.000f)), m, VCOLayout::FM_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 84.000f)), m, VCOLayout::VOCT_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.840f, 84.000f)), m, VCOLayout::FM_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11.800f, 102.000f)), m, VCOLayout::SAW_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.840f, 102.000f)), m, VCOLayout::PULSE_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(11.800f, 118.000f)), m, VCOLayout::TRI_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.840f, 118.000f)), m, VCOLayout::SINE_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobLarge>(mm2px(Vec(20.320f, 30.000f)), m, VCOLayout::FREQ_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 52.000f)), m, VCOLayout::FINE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.840f, 52.000f)), m, VCOLayout::PW_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(28.840f, 68.000f)), m, VCOLayout::FM_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 84.000f)), m, VCOLayout::VOCT_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.840f, 84.000f)), m, VCOLayout::FM_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 102.000f)), m, VCOLayout::SAW_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.840f, 102.000f)), m, VCOLayout::PULSE_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 118.000f)), m, VCOLayout::TRI_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.840f, 118.000f)), m, VCOLayout::SINE_OUTPUT));
 }
 
 // ── VCF (8HP) ─────────────────────────────────────────
@@ -87,17 +89,17 @@ inline int channels_VCF(const rack::engine::Module* m) {
 inline void place_VCF(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
-    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(20.320f, 30.000f)), m, VCFLayout::CUTOFF_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.786f, 56.000f)), m, VCFLayout::RES_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(28.854f, 56.000f)), m, VCFLayout::CVAMT_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.854f, 76.000f)), m, VCFLayout::CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.786f, 98.000f)), m, VCFLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.854f, 98.000f)), m, VCFLayout::LP_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.854f, 116.000f)), m, VCFLayout::HP_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobLarge>(mm2px(Vec(20.320f, 30.000f)), m, VCFLayout::CUTOFF_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.786f, 56.000f)), m, VCFLayout::RES_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(28.854f, 56.000f)), m, VCFLayout::CVAMT_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.854f, 76.000f)), m, VCFLayout::CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.786f, 98.000f)), m, VCFLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.854f, 98.000f)), m, VCFLayout::LP_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.854f, 116.000f)), m, VCFLayout::HP_OUTPUT));
 }
 
 // ── VCA (3HP) ─────────────────────────────────────────
@@ -126,12 +128,12 @@ inline int channels_VCA(const rack::engine::Module* m) {
 inline void place_VCA(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 28.000f)), m, VCALayout::LEVEL_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 55.000f)), m, VCALayout::CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 80.000f)), m, VCALayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 108.000f)), m, VCALayout::OUT_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(7.620f, 28.000f)), m, VCALayout::LEVEL_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 55.000f)), m, VCALayout::CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 80.000f)), m, VCALayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 108.000f)), m, VCALayout::OUT_OUTPUT));
 }
 
 // ── ENV (6HP) ─────────────────────────────────────────
@@ -158,18 +160,18 @@ inline void config_ENV(rack::engine::Module* m) {
 inline void place_ENV(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 26.000f)), m, ENVLayout::ATTACK_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 45.000f)), m, ENVLayout::DECAY_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 64.000f)), m, ENVLayout::SUSTAIN_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 83.000f)), m, ENVLayout::RELEASE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.144f, 102.000f)), m, ENVLayout::GATE_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 102.000f)), m, ENVLayout::ENV_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 118.000f)), m, ENVLayout::INV_OUTPUT));
-    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(9.144f, 118.000f)), m, ENVLayout::ENV_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(15.240f, 26.000f)), m, ENVLayout::ATTACK_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(15.240f, 45.000f)), m, ENVLayout::DECAY_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(15.240f, 64.000f)), m, ENVLayout::SUSTAIN_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(15.240f, 83.000f)), m, ENVLayout::RELEASE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.144f, 102.000f)), m, ENVLayout::GATE_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.336f, 102.000f)), m, ENVLayout::ENV_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.336f, 118.000f)), m, ENVLayout::INV_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeMediumLight<GreenLight>>(mm2px(Vec(9.144f, 118.000f)), m, ENVLayout::ENV_LIGHT));
 }
 
 // ── LFO (6HP) ─────────────────────────────────────────
@@ -193,15 +195,15 @@ inline void config_LFO(rack::engine::Module* m) {
 inline void place_LFO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 30.000f)), m, LFOLayout::RATE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.240f, 66.000f)), m, LFOLayout::RESET_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(9.144f, 95.000f)), m, LFOLayout::TRI_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.336f, 95.000f)), m, LFOLayout::SQR_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(15.240f, 117.000f)), m, LFOLayout::SIN_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 30.000f)), m, LFOLayout::RATE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(15.240f, 66.000f)), m, LFOLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(9.144f, 95.000f)), m, LFOLayout::TRI_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.336f, 95.000f)), m, LFOLayout::SQR_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.240f, 117.000f)), m, LFOLayout::SIN_OUTPUT));
 }
 
 // ── EUCLID (6HP) ──────────────────────────────────────
@@ -230,17 +232,17 @@ inline void config_EUCLID(rack::engine::Module* m) {
 inline void place_EUCLID(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.144f, 28.000f)), m, EUCLIDLayout::LENGTH_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.336f, 28.000f)), m, EUCLIDLayout::FILL_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(15.240f, 52.000f)), m, EUCLIDLayout::ROTATE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.144f, 78.000f)), m, EUCLIDLayout::CLOCK_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(21.336f, 78.000f)), m, EUCLIDLayout::RESET_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(15.240f, 110.000f)), m, EUCLIDLayout::GATE_OUTPUT));
-    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(15.240f, 93.000f)), m, EUCLIDLayout::STEP_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(9.144f, 28.000f)), m, EUCLIDLayout::LENGTH_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(21.336f, 28.000f)), m, EUCLIDLayout::FILL_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(15.240f, 52.000f)), m, EUCLIDLayout::ROTATE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.144f, 78.000f)), m, EUCLIDLayout::CLOCK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(21.336f, 78.000f)), m, EUCLIDLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.240f, 110.000f)), m, EUCLIDLayout::GATE_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeMediumLight<GreenLight>>(mm2px(Vec(15.240f, 93.000f)), m, EUCLIDLayout::STEP_LIGHT));
 }
 
 // ── SEQ (12HP) ─────────────────────────────────────────
@@ -271,22 +273,22 @@ inline void config_SEQ(rack::engine::Module* m) {
 inline void place_SEQ(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 28.000f)), m, SEQLayout::STEP1_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 46.000f)), m, SEQLayout::STEP2_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 64.000f)), m, SEQLayout::STEP3_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(17.069f, 82.000f)), m, SEQLayout::STEP4_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 28.000f)), m, SEQLayout::STEP5_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 46.000f)), m, SEQLayout::STEP6_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 64.000f)), m, SEQLayout::STEP7_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(43.891f, 82.000f)), m, SEQLayout::STEP8_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.973f, 108.000f)), m, SEQLayout::CLOCK_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.774f, 108.000f)), m, SEQLayout::RESET_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(37.186f, 108.000f)), m, SEQLayout::CV_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(49.987f, 108.000f)), m, SEQLayout::GATE_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(17.069f, 28.000f)), m, SEQLayout::STEP1_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(17.069f, 46.000f)), m, SEQLayout::STEP2_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(17.069f, 64.000f)), m, SEQLayout::STEP3_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(17.069f, 82.000f)), m, SEQLayout::STEP4_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(43.891f, 28.000f)), m, SEQLayout::STEP5_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(43.891f, 46.000f)), m, SEQLayout::STEP6_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(43.891f, 64.000f)), m, SEQLayout::STEP7_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(43.891f, 82.000f)), m, SEQLayout::STEP8_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.973f, 108.000f)), m, SEQLayout::CLOCK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(23.774f, 108.000f)), m, SEQLayout::RESET_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(37.186f, 108.000f)), m, SEQLayout::CV_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(49.987f, 108.000f)), m, SEQLayout::GATE_OUTPUT));
 }
 
 // ── MIX (12HP) ─────────────────────────────────────────
@@ -350,29 +352,29 @@ inline float read_MIX_CV4_INPUT(rack::engine::Module* m, int c) {
 inline void place_MIX(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
-    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(9.600f, 42.000f)), m, MIXLayout::LVL1_PARAM));
-    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(23.200f, 42.000f)), m, MIXLayout::LVL2_PARAM));
-    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(36.800f, 42.000f)), m, MIXLayout::LVL3_PARAM));
-    w->addParam(createParamCentered<VCVLightSlider<WhiteLight>>(mm2px(Vec(50.400f, 42.000f)), m, MIXLayout::LVL4_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(13.000f, 108.000f)), m, MIXLayout::MASTER_PARAM));
-    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(30.500f, 108.000f)), m, MIXLayout::MODE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.600f, 72.000f)), m, MIXLayout::IN1_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.200f, 72.000f)), m, MIXLayout::IN2_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(36.800f, 72.000f)), m, MIXLayout::IN3_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(50.400f, 72.000f)), m, MIXLayout::IN4_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.600f, 84.000f)), m, MIXLayout::CV1_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(23.200f, 84.000f)), m, MIXLayout::CV2_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(36.800f, 84.000f)), m, MIXLayout::CV3_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(50.400f, 84.000f)), m, MIXLayout::CV4_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(48.000f, 108.000f)), m, MIXLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(9.600f, 60.000f)), m, MIXLayout::LVL1_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(23.200f, 60.000f)), m, MIXLayout::LVL2_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(36.800f, 60.000f)), m, MIXLayout::LVL3_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(50.400f, 60.000f)), m, MIXLayout::LVL4_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeSlider>(mm2px(Vec(9.600f, 42.000f)), m, MIXLayout::LVL1_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSlider>(mm2px(Vec(23.200f, 42.000f)), m, MIXLayout::LVL2_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSlider>(mm2px(Vec(36.800f, 42.000f)), m, MIXLayout::LVL3_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSlider>(mm2px(Vec(50.400f, 42.000f)), m, MIXLayout::LVL4_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(13.000f, 108.000f)), m, MIXLayout::MASTER_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSwitchThree>(mm2px(Vec(30.500f, 108.000f)), m, MIXLayout::MODE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.600f, 72.000f)), m, MIXLayout::IN1_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(23.200f, 72.000f)), m, MIXLayout::IN2_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(36.800f, 72.000f)), m, MIXLayout::IN3_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(50.400f, 72.000f)), m, MIXLayout::IN4_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.600f, 84.000f)), m, MIXLayout::CV1_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(23.200f, 84.000f)), m, MIXLayout::CV2_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(36.800f, 84.000f)), m, MIXLayout::CV3_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(50.400f, 84.000f)), m, MIXLayout::CV4_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(48.000f, 108.000f)), m, MIXLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenRedLight>>(mm2px(Vec(9.600f, 60.000f)), m, MIXLayout::LVL1_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenRedLight>>(mm2px(Vec(23.200f, 60.000f)), m, MIXLayout::LVL2_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenRedLight>>(mm2px(Vec(36.800f, 60.000f)), m, MIXLayout::LVL3_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenRedLight>>(mm2px(Vec(50.400f, 60.000f)), m, MIXLayout::LVL4_LIGHT));
 }
 
 // ── ATT (3HP) ─────────────────────────────────────────
@@ -395,12 +397,12 @@ inline void config_ATT(rack::engine::Module* m) {
 inline void place_ATT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 28.000f)), m, ATTLayout::AMT_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(7.620f, 55.000f)), m, ATTLayout::OFFSET_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, ATTLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 110.000f)), m, ATTLayout::OUT_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(7.620f, 28.000f)), m, ATTLayout::AMT_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(7.620f, 55.000f)), m, ATTLayout::OFFSET_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 84.000f)), m, ATTLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 110.000f)), m, ATTLayout::OUT_OUTPUT));
 }
 
 // ── MULT (3HP) ────────────────────────────────────────
@@ -423,12 +425,12 @@ inline void config_MULT(rack::engine::Module* m) {
 inline void place_MULT(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(7.620f, 34.000f)), m, MULTLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 62.000f)), m, MULTLayout::OUT1_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 84.000f)), m, MULTLayout::OUT2_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 34.000f)), m, MULTLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 62.000f)), m, MULTLayout::OUT1_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 84.000f)), m, MULTLayout::OUT2_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(7.620f, 106.000f)), m, MULTLayout::OUT3_OUTPUT));
 }
 
 // ── ATTEN (2HP) ───────────────────────────────────────
@@ -462,12 +464,12 @@ inline float read_ATTEN_IN_INPUT(rack::engine::Module* m, int c) {
 inline void place_ATTEN(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(5.080f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(5.080f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(5.080f, 30.000f)), m, ATTENLayout::ATT_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.080f, 60.000f)), m, ATTENLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(5.080f, 90.000f)), m, ATTENLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5.080f, 108.000f)), m, ATTENLayout::LVL_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(5.080f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(5.080f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(5.080f, 30.000f)), m, ATTENLayout::ATT_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(5.080f, 60.000f)), m, ATTENLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(5.080f, 90.000f)), m, ATTENLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(5.080f, 108.000f)), m, ATTENLayout::LVL_LIGHT));
 }
 
 // ── CARTOG (4HP) ──────────────────────────────────────
@@ -488,12 +490,12 @@ inline void config_CARTOG(rack::engine::Module* m) {
 inline void place_CARTOG(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 126.153f))));
-    w->addParam(createParamCentered<VCVLightLatch<MediumSimpleLight<WhiteLight>>>(mm2px(Vec(10.160f, 40.000f)), m, CARTOGLayout::SCAN_PARAM));
-    w->addChild(createLightCentered<MediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeButton>(mm2px(Vec(10.160f, 40.000f)), m, CARTOGLayout::SCAN_PARAM));
+    w->addChild(createLightCentered<forge_modular::ForgeMediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
 }
 
 // ── DUALAD (10HP) ──────────────────────────────────────
@@ -544,28 +546,28 @@ inline float read_DUALAD_B_TIME_CV_INPUT(rack::engine::Module* m, int c) {
 inline void place_DUALAD(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.900f, 30.000f)), m, DUALADLayout::A_ATK_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.900f, 50.000f)), m, DUALADLayout::A_DEC_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12.900f, 68.000f)), m, DUALADLayout::A_CURVE_PARAM));
-    w->addParam(createParamCentered<CKSS>(mm2px(Vec(12.900f, 83.000f)), m, DUALADLayout::A_LOOP_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(37.900f, 30.000f)), m, DUALADLayout::B_ATK_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(37.900f, 50.000f)), m, DUALADLayout::B_DEC_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(37.900f, 68.000f)), m, DUALADLayout::B_CURVE_PARAM));
-    w->addParam(createParamCentered<CKSS>(mm2px(Vec(37.900f, 83.000f)), m, DUALADLayout::B_LOOP_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(6.900f, 102.000f)), m, DUALADLayout::A_TRIG_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(18.900f, 102.000f)), m, DUALADLayout::A_TIME_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(31.900f, 102.000f)), m, DUALADLayout::B_TRIG_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(43.900f, 102.000f)), m, DUALADLayout::B_TIME_CV_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(6.900f, 116.000f)), m, DUALADLayout::A_EOC_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(18.900f, 116.000f)), m, DUALADLayout::A_ENV_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(31.900f, 116.000f)), m, DUALADLayout::B_EOC_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(43.900f, 116.000f)), m, DUALADLayout::B_ENV_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(12.900f, 91.000f)), m, DUALADLayout::A_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(37.900f, 91.000f)), m, DUALADLayout::B_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(12.900f, 30.000f)), m, DUALADLayout::A_ATK_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(12.900f, 50.000f)), m, DUALADLayout::A_DEC_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(12.900f, 68.000f)), m, DUALADLayout::A_CURVE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeToggle>(mm2px(Vec(12.900f, 83.000f)), m, DUALADLayout::A_LOOP_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(37.900f, 30.000f)), m, DUALADLayout::B_ATK_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(37.900f, 50.000f)), m, DUALADLayout::B_DEC_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(37.900f, 68.000f)), m, DUALADLayout::B_CURVE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeToggle>(mm2px(Vec(37.900f, 83.000f)), m, DUALADLayout::B_LOOP_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(6.900f, 102.000f)), m, DUALADLayout::A_TRIG_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(18.900f, 102.000f)), m, DUALADLayout::A_TIME_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(31.900f, 102.000f)), m, DUALADLayout::B_TRIG_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(43.900f, 102.000f)), m, DUALADLayout::B_TIME_CV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(6.900f, 116.000f)), m, DUALADLayout::A_EOC_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(18.900f, 116.000f)), m, DUALADLayout::A_ENV_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(31.900f, 116.000f)), m, DUALADLayout::B_EOC_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(43.900f, 116.000f)), m, DUALADLayout::B_ENV_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(12.900f, 91.000f)), m, DUALADLayout::A_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(37.900f, 91.000f)), m, DUALADLayout::B_LIGHT));
 }
 
 // ── DUALATN (6HP) ─────────────────────────────────────
@@ -604,20 +606,20 @@ inline float read_DUALATN_B_IN_INPUT(rack::engine::Module* m, int c) {
 inline void place_DUALATN(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.000f, 30.000f)), m, DUALATNLayout::A_ATT_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.500f, 30.000f)), m, DUALATNLayout::A_OFF_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(9.000f, 74.000f)), m, DUALATNLayout::B_ATT_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(21.500f, 74.000f)), m, DUALATNLayout::B_OFF_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 46.000f)), m, DUALATNLayout::A_IN_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 90.000f)), m, DUALATNLayout::B_IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 46.000f)), m, DUALATNLayout::A_OUT_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 90.000f)), m, DUALATNLayout::B_OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 58.000f)), m, DUALATNLayout::A_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(15.240f, 102.000f)), m, DUALATNLayout::B_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(9.000f, 30.000f)), m, DUALATNLayout::A_ATT_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(21.500f, 30.000f)), m, DUALATNLayout::A_OFF_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(9.000f, 74.000f)), m, DUALATNLayout::B_ATT_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(21.500f, 74.000f)), m, DUALATNLayout::B_OFF_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 46.000f)), m, DUALATNLayout::A_IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 90.000f)), m, DUALATNLayout::B_IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 46.000f)), m, DUALATNLayout::A_OUT_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 90.000f)), m, DUALATNLayout::B_OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(15.240f, 58.000f)), m, DUALATNLayout::A_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(15.240f, 102.000f)), m, DUALATNLayout::B_LIGHT));
 }
 
 // ── FOLD (8HP) ────────────────────────────────────────
@@ -660,21 +662,21 @@ inline float read_FOLD_SYM_CV_INPUT(rack::engine::Module* m, int c) {
 inline void place_FOLD(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.800f, 30.000f)), m, FOLDLayout::DRIVE_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(28.800f, 30.000f)), m, FOLDLayout::SYM_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(11.800f, 52.000f)), m, FOLDLayout::DRIVE_CV_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(28.800f, 52.000f)), m, FOLDLayout::SYM_CV_PARAM));
-    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(11.800f, 86.000f)), m, FOLDLayout::SHAPE_PARAM));
-    w->addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(28.800f, 86.000f)), m, FOLDLayout::LEVEL_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 68.000f)), m, FOLDLayout::DRIVE_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.800f, 68.000f)), m, FOLDLayout::SYM_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 104.000f)), m, FOLDLayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.800f, 104.000f)), m, FOLDLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(20.320f, 104.000f)), m, FOLDLayout::FOLD_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 30.000f)), m, FOLDLayout::DRIVE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.800f, 30.000f)), m, FOLDLayout::SYM_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(11.800f, 52.000f)), m, FOLDLayout::DRIVE_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(28.800f, 52.000f)), m, FOLDLayout::SYM_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSwitchThree>(mm2px(Vec(11.800f, 86.000f)), m, FOLDLayout::SHAPE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobSmall>(mm2px(Vec(28.800f, 86.000f)), m, FOLDLayout::LEVEL_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 68.000f)), m, FOLDLayout::DRIVE_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 68.000f)), m, FOLDLayout::SYM_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 104.000f)), m, FOLDLayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 104.000f)), m, FOLDLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(20.320f, 104.000f)), m, FOLDLayout::FOLD_LIGHT));
 }
 
 // ── FOURPOLE (8HP) ────────────────────────────────────
@@ -709,20 +711,20 @@ inline int channels_FOURPOLE(const rack::engine::Module* m) {
 inline void place_FOURPOLE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(33.020f, 126.153f))));
-    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(20.320f, 32.000f)), m, FOURPOLELayout::CUTOFF_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(11.800f, 58.000f)), m, FOURPOLELayout::RES_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(28.800f, 58.000f)), m, FOURPOLELayout::DRIVE_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(11.800f, 77.000f)), m, FOURPOLELayout::FM_PARAM));
-    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(28.800f, 77.000f)), m, FOURPOLELayout::VOICE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 93.000f)), m, FOURPOLELayout::VOCT_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(28.800f, 93.000f)), m, FOURPOLELayout::FM_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(11.800f, 112.000f)), m, FOURPOLELayout::IN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(28.800f, 112.000f)), m, FOURPOLELayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(28.800f, 120.500f)), m, FOURPOLELayout::LVL_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobLarge>(mm2px(Vec(20.320f, 32.000f)), m, FOURPOLELayout::CUTOFF_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 58.000f)), m, FOURPOLELayout::RES_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.800f, 58.000f)), m, FOURPOLELayout::DRIVE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(11.800f, 77.000f)), m, FOURPOLELayout::FM_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSwitchThree>(mm2px(Vec(28.800f, 77.000f)), m, FOURPOLELayout::VOICE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 93.000f)), m, FOURPOLELayout::VOCT_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 93.000f)), m, FOURPOLELayout::FM_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 112.000f)), m, FOURPOLELayout::IN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 112.000f)), m, FOURPOLELayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(28.800f, 120.500f)), m, FOURPOLELayout::LVL_LIGHT));
 }
 
 // ── KICK (6HP) ────────────────────────────────────────
@@ -756,20 +758,20 @@ inline float read_KICK_ACCENT_INPUT(rack::engine::Module* m, int c) {
 inline void place_KICK(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 27.000f)), m, KICKLayout::TUNE_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(8.500f, 47.000f)), m, KICKLayout::DECAY_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 47.000f)), m, KICKLayout::CLICK_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(8.500f, 65.000f)), m, KICKLayout::SWEEP_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(22.000f, 65.000f)), m, KICKLayout::TUNECV_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.500f, 83.000f)), m, KICKLayout::TRIG_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(22.000f, 83.000f)), m, KICKLayout::TUNECV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.500f, 101.000f)), m, KICKLayout::ACCENT_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(22.000f, 101.000f)), m, KICKLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<RedLight>>(mm2px(Vec(15.240f, 113.000f)), m, KICKLayout::HIT_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 27.000f)), m, KICKLayout::TUNE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(8.500f, 47.000f)), m, KICKLayout::DECAY_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(22.000f, 47.000f)), m, KICKLayout::CLICK_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(8.500f, 65.000f)), m, KICKLayout::SWEEP_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(22.000f, 65.000f)), m, KICKLayout::TUNECV_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(8.500f, 83.000f)), m, KICKLayout::TRIG_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(22.000f, 83.000f)), m, KICKLayout::TUNECV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(8.500f, 101.000f)), m, KICKLayout::ACCENT_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(22.000f, 101.000f)), m, KICKLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(15.240f, 113.000f)), m, KICKLayout::HIT_LIGHT));
 }
 
 // ── MORPHLFO (6HP) ────────────────────────────────────
@@ -808,20 +810,20 @@ inline float read_MORPHLFO_SHAPE_CV_INPUT(rack::engine::Module* m, int c) {
 inline void place_MORPHLFO(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(22.860f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 30.000f)), m, MORPHLFOLayout::RATE_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(15.240f, 50.000f)), m, MORPHLFOLayout::SHAPE_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(9.000f, 68.000f)), m, MORPHLFOLayout::RATE_CV_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(21.500f, 68.000f)), m, MORPHLFOLayout::SHAPE_CV_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 84.000f)), m, MORPHLFOLayout::RATE_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(21.500f, 84.000f)), m, MORPHLFOLayout::SHAPE_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 100.000f)), m, MORPHLFOLayout::RST_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 100.000f)), m, MORPHLFOLayout::UNI_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(21.500f, 116.000f)), m, MORPHLFOLayout::OUT_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.000f, 116.000f)), m, MORPHLFOLayout::LFO_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 30.000f)), m, MORPHLFOLayout::RATE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 50.000f)), m, MORPHLFOLayout::SHAPE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(9.000f, 68.000f)), m, MORPHLFOLayout::RATE_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(21.500f, 68.000f)), m, MORPHLFOLayout::SHAPE_CV_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 84.000f)), m, MORPHLFOLayout::RATE_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 84.000f)), m, MORPHLFOLayout::SHAPE_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 100.000f)), m, MORPHLFOLayout::RST_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 100.000f)), m, MORPHLFOLayout::UNI_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 116.000f)), m, MORPHLFOLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(9.000f, 116.000f)), m, MORPHLFOLayout::LFO_LIGHT));
 }
 
 // ── SANDH (4HP) ───────────────────────────────────────
@@ -849,19 +851,19 @@ inline void config_SANDH(rack::engine::Module* m) {
 inline void place_SANDH(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(12.700f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(10.160f, 30.000f)), m, SANDHLayout::SLEW_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(5.600f, 50.000f)), m, SANDHLayout::SLEWCV_PARAM));
-    w->addParam(createParamCentered<CKSS>(mm2px(Vec(14.720f, 50.000f)), m, SANDHLayout::CURVE_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.600f, 70.000f)), m, SANDHLayout::CLK_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(14.720f, 70.000f)), m, SANDHLayout::IN_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.160f, 88.000f)), m, SANDHLayout::SCV_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(5.600f, 106.000f)), m, SANDHLayout::OUT_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(14.720f, 106.000f)), m, SANDHLayout::NOISE_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(10.160f, 118.000f)), m, SANDHLayout::HOLD_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(10.160f, 30.000f)), m, SANDHLayout::SLEW_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(5.600f, 50.000f)), m, SANDHLayout::SLEWCV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeToggle>(mm2px(Vec(14.720f, 50.000f)), m, SANDHLayout::CURVE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(5.600f, 70.000f)), m, SANDHLayout::CLK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(14.720f, 70.000f)), m, SANDHLayout::IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.160f, 88.000f)), m, SANDHLayout::SCV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(5.600f, 106.000f)), m, SANDHLayout::OUT_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(14.720f, 106.000f)), m, SANDHLayout::NOISE_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(10.160f, 118.000f)), m, SANDHLayout::HOLD_LIGHT));
 }
 
 // ── SIXMIX (12HP) ──────────────────────────────────────
@@ -901,26 +903,26 @@ inline float read_SIXMIX_MCV_INPUT(rack::engine::Module* m, int c) {
 inline void place_SIXMIX(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 32.000f)), m, SIXMIXLayout::CH1_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 32.000f)), m, SIXMIXLayout::CH2_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 50.000f)), m, SIXMIXLayout::CH3_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 50.000f)), m, SIXMIXLayout::CH4_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(22.000f, 68.000f)), m, SIXMIXLayout::CH5_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(51.000f, 68.000f)), m, SIXMIXLayout::CH6_PARAM));
-    w->addParam(createParamCentered<RoundBigBlackKnob>(mm2px(Vec(30.480f, 94.000f)), m, SIXMIXLayout::MASTER_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 32.000f)), m, SIXMIXLayout::IN1_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 32.000f)), m, SIXMIXLayout::IN2_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 50.000f)), m, SIXMIXLayout::IN3_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 50.000f)), m, SIXMIXLayout::IN4_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 68.000f)), m, SIXMIXLayout::IN5_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(38.000f, 68.000f)), m, SIXMIXLayout::IN6_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(9.000f, 110.000f)), m, SIXMIXLayout::MCV_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(51.000f, 110.000f)), m, SIXMIXLayout::MIX_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(30.480f, 110.000f)), m, SIXMIXLayout::LVL_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(22.000f, 32.000f)), m, SIXMIXLayout::CH1_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(51.000f, 32.000f)), m, SIXMIXLayout::CH2_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(22.000f, 50.000f)), m, SIXMIXLayout::CH3_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(51.000f, 50.000f)), m, SIXMIXLayout::CH4_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(22.000f, 68.000f)), m, SIXMIXLayout::CH5_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(51.000f, 68.000f)), m, SIXMIXLayout::CH6_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobLarge>(mm2px(Vec(30.480f, 94.000f)), m, SIXMIXLayout::MASTER_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 32.000f)), m, SIXMIXLayout::IN1_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(38.000f, 32.000f)), m, SIXMIXLayout::IN2_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 50.000f)), m, SIXMIXLayout::IN3_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(38.000f, 50.000f)), m, SIXMIXLayout::IN4_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 68.000f)), m, SIXMIXLayout::IN5_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(38.000f, 68.000f)), m, SIXMIXLayout::IN6_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 110.000f)), m, SIXMIXLayout::MCV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(51.000f, 110.000f)), m, SIXMIXLayout::MIX_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(30.480f, 110.000f)), m, SIXMIXLayout::LVL_LIGHT));
 }
 
 // ── STEPS (12HP) ───────────────────────────────────────
@@ -970,35 +972,35 @@ inline float read_STEPS_LEN_INPUT(rack::engine::Module* m, int c) {
 inline void place_STEPS(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(53.340f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(9.600f, 34.000f)), m, STEPSLayout::STEP1_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(23.200f, 34.000f)), m, STEPSLayout::STEP2_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(36.800f, 34.000f)), m, STEPSLayout::STEP3_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(50.400f, 34.000f)), m, STEPSLayout::STEP4_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(9.600f, 56.000f)), m, STEPSLayout::STEP5_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(23.200f, 56.000f)), m, STEPSLayout::STEP6_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(36.800f, 56.000f)), m, STEPSLayout::STEP7_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(50.400f, 56.000f)), m, STEPSLayout::STEP8_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12.000f, 84.000f)), m, STEPSLayout::LENGTH_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(30.480f, 84.000f)), m, STEPSLayout::GATE_PARAM));
-    w->addParam(createParamCentered<CKSSThree>(mm2px(Vec(48.500f, 84.000f)), m, STEPSLayout::DIR_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(5.600f, 110.000f)), m, STEPSLayout::CLK_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.400f, 110.000f)), m, STEPSLayout::RST_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(25.200f, 110.000f)), m, STEPSLayout::LEN_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(35.000f, 110.000f)), m, STEPSLayout::CV_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(44.800f, 110.000f)), m, STEPSLayout::GATE_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(54.600f, 110.000f)), m, STEPSLayout::EOC_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.600f, 42.000f)), m, STEPSLayout::STEP1_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(23.200f, 42.000f)), m, STEPSLayout::STEP2_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(36.800f, 42.000f)), m, STEPSLayout::STEP3_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(50.400f, 42.000f)), m, STEPSLayout::STEP4_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(9.600f, 64.000f)), m, STEPSLayout::STEP5_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(23.200f, 64.000f)), m, STEPSLayout::STEP6_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(36.800f, 64.000f)), m, STEPSLayout::STEP7_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(50.400f, 64.000f)), m, STEPSLayout::STEP8_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(53.340f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(9.600f, 34.000f)), m, STEPSLayout::STEP1_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(23.200f, 34.000f)), m, STEPSLayout::STEP2_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(36.800f, 34.000f)), m, STEPSLayout::STEP3_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(50.400f, 34.000f)), m, STEPSLayout::STEP4_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(9.600f, 56.000f)), m, STEPSLayout::STEP5_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(23.200f, 56.000f)), m, STEPSLayout::STEP6_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(36.800f, 56.000f)), m, STEPSLayout::STEP7_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(50.400f, 56.000f)), m, STEPSLayout::STEP8_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(12.000f, 84.000f)), m, STEPSLayout::LENGTH_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(30.480f, 84.000f)), m, STEPSLayout::GATE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSwitchThree>(mm2px(Vec(48.500f, 84.000f)), m, STEPSLayout::DIR_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(5.600f, 110.000f)), m, STEPSLayout::CLK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(15.400f, 110.000f)), m, STEPSLayout::RST_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(25.200f, 110.000f)), m, STEPSLayout::LEN_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(35.000f, 110.000f)), m, STEPSLayout::CV_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(44.800f, 110.000f)), m, STEPSLayout::GATE_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(54.600f, 110.000f)), m, STEPSLayout::EOC_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(9.600f, 42.000f)), m, STEPSLayout::STEP1_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(23.200f, 42.000f)), m, STEPSLayout::STEP2_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(36.800f, 42.000f)), m, STEPSLayout::STEP3_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(50.400f, 42.000f)), m, STEPSLayout::STEP4_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(9.600f, 64.000f)), m, STEPSLayout::STEP5_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(23.200f, 64.000f)), m, STEPSLayout::STEP6_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(36.800f, 64.000f)), m, STEPSLayout::STEP7_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(50.400f, 64.000f)), m, STEPSLayout::STEP8_LIGHT));
 }
 
 // ── TANGLE (10HP) ──────────────────────────────────────
@@ -1054,28 +1056,28 @@ inline float read_TANGLE_SPREAD_CV_INPUT(rack::engine::Module* m, int c) {
 inline void place_TANGLE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     using namespace rack;
     using namespace rack::componentlibrary;
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(7.620f, 126.153f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 2.54f))));
-    w->addChild(createWidgetCentered<ScrewSilver>(mm2px(Vec(43.180f, 126.153f))));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(10.200f, 30.000f)), m, TANGLELayout::RATE_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(25.400f, 30.000f)), m, TANGLELayout::CHAOS_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(40.600f, 30.000f)), m, TANGLELayout::SPREAD_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(10.200f, 52.000f)), m, TANGLELayout::RATE_CV_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(25.400f, 52.000f)), m, TANGLELayout::CHAOS_CV_PARAM));
-    w->addParam(createParamCentered<Trimpot>(mm2px(Vec(40.600f, 52.000f)), m, TANGLELayout::SPREAD_CV_PARAM));
-    w->addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(25.400f, 72.000f)), m, TANGLELayout::SLEW_PARAM));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10.200f, 94.000f)), m, TANGLELayout::RATE_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(25.400f, 94.000f)), m, TANGLELayout::CHAOS_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(40.600f, 94.000f)), m, TANGLELayout::SPREAD_CV_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(4.600f, 113.000f)), m, TANGLELayout::CLK_INPUT));
-    w->addInput(createInputCentered<PJ301MPort>(mm2px(Vec(15.000f, 113.000f)), m, TANGLELayout::RST_INPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(25.400f, 113.000f)), m, TANGLELayout::X_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(35.800f, 113.000f)), m, TANGLELayout::Y_OUTPUT));
-    w->addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(46.200f, 113.000f)), m, TANGLELayout::Z_OUTPUT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(25.400f, 120.500f)), m, TANGLELayout::X_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(35.800f, 120.500f)), m, TANGLELayout::Y_LIGHT));
-    w->addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(46.200f, 120.500f)), m, TANGLELayout::Z_LIGHT));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(10.200f, 30.000f)), m, TANGLELayout::RATE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(25.400f, 30.000f)), m, TANGLELayout::CHAOS_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(40.600f, 30.000f)), m, TANGLELayout::SPREAD_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(10.200f, 52.000f)), m, TANGLELayout::RATE_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(25.400f, 52.000f)), m, TANGLELayout::CHAOS_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(40.600f, 52.000f)), m, TANGLELayout::SPREAD_CV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(25.400f, 72.000f)), m, TANGLELayout::SLEW_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.200f, 94.000f)), m, TANGLELayout::RATE_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(25.400f, 94.000f)), m, TANGLELayout::CHAOS_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(40.600f, 94.000f)), m, TANGLELayout::SPREAD_CV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(4.600f, 113.000f)), m, TANGLELayout::CLK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(15.000f, 113.000f)), m, TANGLELayout::RST_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(25.400f, 113.000f)), m, TANGLELayout::X_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(35.800f, 113.000f)), m, TANGLELayout::Y_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(46.200f, 113.000f)), m, TANGLELayout::Z_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(25.400f, 120.500f)), m, TANGLELayout::X_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(35.800f, 120.500f)), m, TANGLELayout::Y_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(46.200f, 120.500f)), m, TANGLELayout::Z_LIGHT));
 }
 
 }  // namespace forge_modular
