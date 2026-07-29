@@ -57,10 +57,13 @@ node <browser_capture>/capture.mjs capture \
   --initial-width 1330 --initial-height 900 --dpr 2 --allow-network
 ```
 
-(The helper is on `feature/browser-solved-html-import-20260728` at
-`tools/import-design/browser_capture/`. Its blocked-network error tells you to
-use `--allow-browser-network`, which **does not exist** — the flag is
-`--allow-network`. Worth fixing upstream.)
+Use **`pulp import-design`**, not `capture.mjs` directly. Both spellings of the
+network flag are accepted now. Initial-state capture works; multi-screen
+capture is coming as deterministic CDP actions (click / type / wait) against
+Pulp's own isolated Chrome profile. **Do not inject scripts into the prototype
+or fight the shared Chrome profile** — that was tried here, twelve attempts
+across four strategies, two distinct images. Reach for an isolated DevTools
+session only if a secondary-screen reference is immediately necessary.
 
 Missing from `examples/forge-modular/app/ui/main.js`, all present in the
 render: the **left icon rail**; the **top bar** with the `MODULE · 12 HP` chip
