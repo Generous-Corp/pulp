@@ -129,6 +129,7 @@
 // The change guard is not an optimisation detail that can be dropped: without
 // it, holding a knob still would still redesign twenty bands per sample.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/additive_bank.hpp>
@@ -331,6 +332,25 @@ inline CustomNodeType make_additive_bank_node(Voice voice = Voice::organ,
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"additive_bank", "Additive Bank", "A sinusoidal partial bank for harmonic organ and inharmonic bell voices.",
+            {{"voice", "Voice", "Selects the harmonic or modal voice construction.",
+              {{"organ", "Organ", 0}, {"bell", "Bell", 1}}}},
+            {{"organ", kOrganTypeId, {{"voice", "organ"}}},
+             {"bell", kBellTypeId, {{"voice", "bell"}}}},
+            {{"fundamental_hz", kFundamentalHz, "Fundamental", "Hz", "Sets the bank's fundamental pitch.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"partial_count", kPartialCount, "Partials", "", "Sets the active oscillator count.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"inharmonicity", kInharmonicity, "Inharmonicity", "", "Stretches organ partials away from the harmonic series.", ForgeParamKind::continuous, ForgeParamCurve::linear, {}, {"organ"}},
+             {"spectral_tilt", kSpectralTilt, "Spectral Tilt", "dB/oct", "Tilts level across the partial spectrum.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"master_gain_db", kMasterGainDb, "Master Gain", "dB", "Sets bank output level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"envelope_mode", kEnvelopeMode, "Envelope Mode", "", "Selects shared or per-partial envelopes.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"shared", "Shared", 0}, {"per_partial", "Per Partial", 1}}},
+             {"retrigger_phase", kRetrigPhase, "Retrigger Phase", "", "Selects phase behavior when the voice retriggers.", ForgeParamKind::stepped, ForgeParamCurve::linear,
+              {{"free", "Free Running", 0}, {"reset", "Reset", 1}, {"alternating", "Alternating", 2}}},
+             {"attack_ms", kAttackMs, "Attack", "ms", "Sets voice attack time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"release_ms", kReleaseMs, "Release", "ms", "Sets voice release time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"detune_cents", kDetuneCents, "Detune", "cent", "Spreads partial tuning.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
 }  // namespace additive
 
 // ── The channel vocoder ───────────────────────────────────────────────────
@@ -420,6 +440,16 @@ inline float vocoder_worst_case_gain(double sample_rate = 48000.0) {
     const double bank = Voc::kOutputHeadroomTrim * Voc::kWorstCaseGain;
     const double trim = std::pow(10.0, Voc::kOutputTrimMaxDb / 20.0);
     return static_cast<float>((bank + highpass_l1) * trim);
+}
+
+/// Sample-rate-independent ceiling for registries whose metadata cannot vary
+/// with the host rate. The high-pass L1 term approaches (but never exceeds) 2
+/// as the sample rate rises, so this is the supremum of
+/// `vocoder_worst_case_gain(sample_rate)` over every positive sample rate.
+inline float vocoder_all_sample_rates_worst_case_gain() {
+    const double bank = Voc::kOutputHeadroomTrim * Voc::kWorstCaseGain;
+    const double trim = std::pow(10.0, Voc::kOutputTrimMaxDb / 20.0);
+    return static_cast<float>((bank + 2.0) * trim);
 }
 
 /// Two inputs, one output. See this file's header for why the ports are plain
@@ -539,6 +569,27 @@ inline CustomNodeType make_vocoder_node() {
     return t;
 }
 
+inline ForgeNodeDescriptor descriptor() {
+    return {"vocoder", "Vocoder", "A multiband vocoder with external or internal carrier and formant controls.",
+            {}, {{"default", kTypeId}},
+            {{"band_count", kBandCount, "Bands", "", "Sets the analysis and synthesis band count.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"freq_lo_hz", kFreqLoHz, "Low Frequency", "Hz", "Sets the lowest vocoder band.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"freq_hi_hz", kFreqHiHz, "High Frequency", "Hz", "Sets the highest vocoder band.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"carrier_source", kCarrierSource, "Carrier Source", "", "Selects external input or the internal oscillator.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"external", "External", 0}, {"internal", "Internal", 1}}},
+             {"internal_wave", kInternalWave, "Internal Wave", "", "Selects the internal carrier waveform.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"saw", "Saw", 0}, {"pulse", "Pulse", 1}}},
+             {"internal_pulse_width", kInternalPw, "Pulse Width", "%", "Sets internal pulse-carrier duty.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"carrier_pitch_hz", kCarrierPitchHz, "Carrier Pitch", "Hz", "Sets internal carrier pitch.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"noise_mix", kNoiseMix, "Noise", "%", "Adds noise to the carrier.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"attack_ms", kAttackMs, "Attack", "ms", "Sets band-envelope attack.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"release_ms", kReleaseMs, "Release", "ms", "Sets band-envelope release.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"unvoiced_sensitivity", kUnvoicedSens, "Unvoiced Sensitivity", "", "Detects unvoiced consonants.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"sibilance_mix", kSibilanceMix, "Sibilance", "%", "Restores high-frequency consonant energy.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"formant_shift_st", kFormantShiftSt, "Formant Shift", "st", "Moves the analysis formants.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"formant_freeze", kFormantFreeze, "Formant Freeze", "", "Holds the current analysis envelopes.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+             {"output_trim_db", kOutputTrimDb, "Output Trim", "dB", "Trims vocoder output.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"dry_wet", kDryWet, "Mix", "%", "Blends dry and vocoded signals.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
+}
+
 }  // namespace vocoder
 
 namespace cyclic {
@@ -608,6 +659,18 @@ inline CustomNodeType make_cyclic_stretch_node(Regime regime = Regime::short_fra
         e.process(in.channel_ptr(0), out.channel_ptr(0), n);
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"cyclic_stretch", "Cyclic Stretch", "A cyclic capture-and-repeat stretcher with short and long latency regimes.",
+            {{"regime", "Regime", "Selects the fixed capture and latency regime.", {{"short", "Short", 0}, {"long", "Long", 1}}}},
+            {{"short", kShortTypeId, {{"regime", "short"}}},
+             {"long", kLongTypeId, {{"regime", "long"}}}},
+            {{"stretch", kStretch, "Stretch", "x", "Sets the cyclic time-stretch ratio.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"capture_ms", kCaptureMs, "Capture", "ms", "Sets captured slice duration.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"crossfade_shape", kCrossfadeShape, "Crossfade Shape", "", "Shapes overlap between cyclic slices.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mix_pct", kMixPct, "Mix", "%", "Blends dry and stretched signals.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"output_db", kOutputDb, "Output", "dB", "Trims output level.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 } // namespace cyclic
 
@@ -684,6 +747,21 @@ inline CustomNodeType make_granular_node() {
         e.process(in.channel_ptr(0), out.channel_ptr(0), out.channel_ptr(1), n);
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {"granular_live", "Granular Live", "A live-input granular processor with density, position, pitch, pan, and timing spray.",
+            {}, {{"default", kTypeId}},
+            {{"density_hz", kDensityHz, "Density", "Hz", "Sets grain launch rate.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"grain_ms", kGrainMs, "Grain Size", "ms", "Sets grain duration.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"position", kPosition, "Position", "%", "Sets read position in the live history.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"position_spray_ms", kPositionSprayMs, "Position Spray", "ms", "Randomizes grain read position.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"pitch_st", kPitchSt, "Pitch", "st", "Transposes grains.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"pitch_spray_st", kPitchSpraySt, "Pitch Spray", "st", "Randomizes grain pitch.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"pan_spray", kPanSpray, "Pan Spray", "%", "Randomizes stereo placement.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"jitter", kJitter, "Jitter", "%", "Randomizes grain launch timing.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"level_db", kLevelDb, "Level", "dB", "Sets grain output level.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"mix", kMix, "Mix", "%", "Blends dry and granular signals.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 } // namespace granular
 

@@ -807,6 +807,24 @@ commands:
             description: "Regenerate docs/status/dsp-capabilities.json"
     docs: reference/cli.md#dsp
 
+  - name: forge
+    status: experimental
+    summary: Export the Forge-facing semantic DSP catalog with numeric ranges and defaults joined from baked nodes at runtime.
+    subcommands:
+      - name: catalog export
+        summary: Emit, validate, or regenerate the selected SDK's machine-readable Forge catalog.
+        args:
+          - name: --json
+            kind: flag
+            description: Emit the joined catalog JSON to stdout.
+          - name: --check
+            kind: flag
+            description: Fail when docs/status/forge-catalog.json differs from the runtime projection.
+          - name: --write
+            kind: flag
+            description: Regenerate docs/status/forge-catalog.json.
+    docs: reference/cli.md#forge
+
   - name: minos
     status: experimental
     summary: Minimum-OS tooling. Reports the lowest OS a build needs, derived from the artifact itself (the MAX minimum among everything linked in). `measure` reads one binary; `sweep` rebuilds every downstream consumer against one installed SDK and compares each project's floor to the SDK floor; `update` bumps every consumer's SDK pin; `publish-runbook` prints the republish steps. Wraps `tools/scripts/measure_min_os.py`, `tools/scripts/sdk_consumer_sweep.py`, and `tools/scripts/sdk_consumer_update.py`.

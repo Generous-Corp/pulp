@@ -13,8 +13,9 @@
 ///
 /// A `ValueChannelSet` gives those values names. The processor declares them
 /// once, publishes into them from `process()` through the same lock-free
-/// `MeterSource` / `ScalarSource` / `VectorSource` channels a view already
-/// binds to, and a UI — native or scripted — asks for them by name.
+/// `MeterSource` / `ScalarSource` / `VectorSource` / `EventSource` channels a
+/// view already binds to, and a UI — native or scripted — asks for them by
+/// name.
 ///
 /// **This is in-process visualization, not observability.** The data goes from
 /// the audio thread to the UI at frame rate and never leaves the machine.
@@ -45,14 +46,7 @@ enum class ValueChannelShape {
     scalar,  ///< one number per publish (gain reduction, envelope level)
     meter,   ///< a multi-channel `MeterFrame` (peak/RMS per channel)
     vector,  ///< a block of samples for a scope-style display
-    /// Reserved, not yet declarable. A per-block list of `(frame_index, value)`
-    /// pairs for things that HAPPEN rather than things that ARE — a grain
-    /// trigger, a note onset. A vector channel cannot express these: it has no
-    /// way to distinguish "the value was 0.0" from "nothing happened", which
-    /// pushes authors into sentinel values that then have to be un-picked
-    /// downstream. Reserved here so discovery and lint do not churn when it
-    /// lands; declaring it is rejected until then.
-    events,
+    events,  ///< a per-block list of `ValueEvent` occurrences
 };
 
 /// What a channel is, for discovery and for a UI lint to check names against.
@@ -63,7 +57,8 @@ struct ValueChannelInfo {
     /// The value a bound view falls back to when the channel goes stale — the
     /// writer stopped, usually because transport stopped. 0 dB for gain
     /// reduction, silence for a meter. Without it a meter freezes at its last
-    /// reading and reads as a stuck plugin.
+    /// reading and reads as a stuck plugin. Event channels do not synthesize a
+    /// fallback occurrence, so their discovery value remains 0 and is ignored.
     float neutral = 0.0f;
 };
 
@@ -87,7 +82,6 @@ public:
         empty_name,
         duplicate_name,
         reserved_character,  ///< contains ':', reserved for the "value:" JS prefix
-        shape_not_implemented,  ///< `events`, reserved but not yet declarable
     };
 
     /// Declare a scalar channel. Returns nullptr on refusal; `error` receives
@@ -100,6 +94,9 @@ public:
     /// Declare a block channel for a scope-style display.
     VectorSource* declare_vector(std::string name, std::string unit = {},
                                  float neutral = 0.0f, DeclareError* error = nullptr);
+    /// Declare occurrences carrying frame offsets and values.
+    EventSource* declare_events(std::string name, std::string unit = {},
+                                DeclareError* error = nullptr);
 
     /// Look up a declared channel by its exact name. Returns nullptr when the
     /// name is absent OR was declared with a different shape — never creates.
@@ -107,6 +104,7 @@ public:
     ScalarSource* scalar(std::string_view name) const;
     MeterSource* meter(std::string_view name) const;
     VectorSource* vector(std::string_view name) const;
+    EventSource* events(std::string_view name) const;
 
     /// Every declared channel, in declaration order. This is what discovery and
     /// a UI lint read.
@@ -125,6 +123,7 @@ private:
         std::unique_ptr<ScalarSource> scalar;
         std::unique_ptr<MeterSource> meter;
         std::unique_ptr<VectorSource> vector;
+        std::unique_ptr<EventSource> events;
     };
 
     /// Shared declaration checks; returns nullptr and sets `error` on refusal.

@@ -96,6 +96,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Browse local documentation",
     },
     Entry {
+        name: "forge",
+        summary: "Export Forge catalog integration data",
+    },
+    Entry {
         name: "clean",
         summary: "Remove build directory",
     },

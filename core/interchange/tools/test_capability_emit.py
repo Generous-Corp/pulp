@@ -39,6 +39,8 @@ def expect_error(directory: Path, message: str) -> None:
 
 
 def write(directory: Path, name: str, payload: dict) -> None:
+    if name != "concepts.json" and "format" in payload and "ordinal" not in payload:
+        payload = payload | {"ordinal": 0}
     (directory / name).write_text(json.dumps(payload))
 
 
@@ -59,6 +61,7 @@ def minimal(directory: Path) -> None:
         "fmt.json",
         {
             "format": "fmt",
+            "ordinal": 0,
             "enumerator": "Fmt",
             "display_name": "Fmt",
             "writer": False,
@@ -138,6 +141,52 @@ def test_undeclared_rows_become_refusals() -> None:
         check(
             "{ImportLevel::Full, \"\", \"\"}, // clip.note" in tables,
             "a declared import row must generate its level",
+        )
+
+
+def test_format_order_comes_from_ordinals() -> None:
+    """Filename order must not become the installed Format ABI."""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        minimal(root)
+        (root / "fmt.json").unlink()
+        common = {
+            "writer": False,
+            "import": {},
+            "export": {},
+        }
+        write(
+            root,
+            "z-first.json",
+            common
+            | {
+                "format": "first",
+                "ordinal": 0,
+                "enumerator": "First",
+                "display_name": "First",
+            },
+        )
+        write(
+            root,
+            "a-second.json",
+            common
+            | {
+                "format": "second",
+                "ordinal": 1,
+                "enumerator": "Second",
+                "display_name": "Second",
+            },
+        )
+        concepts = emit.load_concepts(root)
+        formats = emit.load_formats(root, {c["id"] for c in concepts})
+        check(
+            [fmt["format"] for fmt in formats] == ["first", "second"],
+            "format order must follow ordinals rather than filenames",
+        )
+        tables = emit.emit_tables(concepts, formats)
+        check(
+            tables.index("First = 0") < tables.index("Second = 1"),
+            "emitted Format ABI must follow ordinals",
         )
 
 
@@ -302,6 +351,48 @@ def test_validation_rejects_dishonest_data() -> None:
             mutate(root)
             expect_error(root, message)
 
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        minimal(root)
+        write(
+            root,
+            "other.json",
+            {
+                "format": "other",
+                "ordinal": 0,
+                "enumerator": "Other",
+                "display_name": "Other",
+                "writer": False,
+                "import": {},
+                "export": {},
+            },
+        )
+        expect_error(root, "duplicate format ordinal")
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        minimal(root)
+        data = json.loads((root / "fmt.json").read_text())
+        data.pop("ordinal")
+        (root / "fmt.json").write_text(json.dumps(data))
+        expect_error(root, "missing format ordinal")
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        minimal(root)
+        data = json.loads((root / "fmt.json").read_text())
+        data["ordinal"] = 1
+        write(root, "other.json", data | {"enumerator": "Other"})
+        expect_error(root, "duplicate stable format id")
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        minimal(root)
+        data = json.loads((root / "fmt.json").read_text())
+        data["ordinal"] = 1
+        write(root, "fmt.json", data)
+        expect_error(root, "format ordinal gap")
+
     # No format files at all is an operational error, not an empty matrix.
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
@@ -322,6 +413,7 @@ def main() -> int:
     test_enumerator_naming()
     test_projections_are_complete()
     test_undeclared_rows_become_refusals()
+    test_format_order_comes_from_ordinals()
     test_validation_rejects_dishonest_data()
     test_committed_data_loads()
 

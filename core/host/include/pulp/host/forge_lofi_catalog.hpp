@@ -1436,3 +1436,5 @@ inline CustomNodeType make_phaser_node() {
 
 
 }  // namespace pulp::host::forge_lofi
+
+#include <pulp/host/detail/forge_lofi_catalog_descriptor.hpp>

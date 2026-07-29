@@ -1008,6 +1008,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **ASan, TSan, and UBSan use `PULP_SANITIZER=<kind>`; ASan's
+  example-bundle build does too.** Do not replace the named options with raw
+  `CMAKE_*_FLAGS`: the option owns the compiler/linker flags and explicitly
+  marks compiler-injected sanitizer runtimes as test-only for
+  bundle-relocatability validation. Installed-SDK consumer fixtures propagate
+  the matching runtime requirement because instrumented static libraries retain
+  those references. Ordinary release bundles do not set the option, so the
+  shipping guard remains strict.
 - **UBSan is pinned to `macos-26`, not `macos-15`.** Xcode 16.4's Apple
   Clang/libc++ combination reported invalid `std::__shared_weak_count` vptrs
   while destroying ordinary persistent timeline trees, even though the same
@@ -4205,6 +4213,18 @@ gh workflow run release-cli.yml --ref main \
 
 The workflow file comes from main (fixed), the source tree comes from the tag (correct content), and the overlay step picks up post-tag script fixes automatically. `release-reconcile.yml` will also do this for you automatically within 30 minutes, and closes its incident once the assets land. This was the fix for the four-day stall on v0.95.0..v0.97.0 caused by a skia-builder chrome/m144 zip layout drift (`Release/<arch>/libskia.a` instead of `Release/libskia.a`). The fetch script flattens the arch subdir; regression coverage lives in `tools/scripts/test_fetch_skia_for_release.py`, with workflow-condition coverage in `tools/scripts/test_release_workflow_test_step.py`.
 
+**Linux ARM64 is covered nightly, not per-PR.** pulp ships a `linux-arm64`
+artifact, but every Linux lane that gates is x64 — the per-PR check is
+`Linux (x64)` by name and by resolver default (`--github-hosted-label
+ubuntu-latest`). ARM64 was previously covered only *incidentally*, by
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` routing that lane to self-hosted ARM64 VMs
+while still reporting as `Linux (x64)`. That lane was retired (2 slots, 4.6h
+median waits, runs left queued for already-merged PRs), so the nightly gained
+an explicit `linux-arm64` job on GitHub's free `ubuntu-24.04-arm` runners with
+its own tracking issue and artifact name. If you re-point a Linux lane at
+self-hosted runners, do NOT rely on it for ARM64 coverage under an x64 name —
+name the lane for what it builds.
+
 **Nightly cross-platform check (`.github/workflows/cross-platform-check.yml`):** Pulp's team develops and tests on macOS; Linux, Windows, and Android are advisory "tell us if it breaks" signal, and per-PR CI has been slimmed so those legs no longer run on every PR. This scheduled workflow is the backstop. It runs nightly (`cron: '17 7 * * *'` — odd minute, off-peak; also `workflow_dispatch` for manual bisect) and builds + tests **Linux** (`ubuntu-latest`), **Windows** (`windows-latest`), and **Android** (NDK build on `ubuntu-latest`) as three independent jobs with `fail-fast: false` so one platform breaking never masks the others — catching ALL cross-platform breakage in one pass is the point. GitHub-hosted runners only: it must never consume the scarce self-hosted macOS capacity. A final `tracking-issues` job (`needs:` all three, `if: always()`) maintains **one tracking issue PER platform**, keyed by the EXACT titles `Cross-platform Linux check is broken` / `Cross-platform Windows check is broken` / `Cross-platform Android check is broken`. It reuses `auto-release-watchdog.yml`'s find-or-create / edit / reopen / close gh-api pattern: a failed platform job opens (or reopens + edits) its issue; a passing one closes its open issue. De-dup is by `gh issue list --search "in:title <title>" --state all` matching the exact title — never a fresh issue per night. Created issues carry `bug`, `ci`, `cross-platform`, and `platform:linux`/`platform:windows`/`platform:android` labels, and the body includes the run URL, tip SHA, per-job results, artifact name, and the commit range since the last green run (derived from the Actions API) so a regression can be bisected within a night's batch. Distinct from `nightly-full-build.yml`, which does the full macOS `make all` to catch test targets PR CI never compiles; this workflow is the *non-macOS* coverage PR CI no longer provides. If you slim or restore a per-PR advisory platform leg, keep this nightly in sync — it is the only thing keeping cross-platform debt visible.
 
 **Gotcha — `shell: cmd` step exit code is the LAST command's errorlevel.** Under `shell: cmd` GitHub Actions uses `cmd.exe` semantics: the step exit code is the errorlevel of the *last* program run, not the first failing one. The Windows ctest step writes to `test-windows.log` for artifact upload, then `type`s it into the run log — if `type` (always errorlevel 0) ran last, a real `ctest` failure was masked and the job went green, so the nightly tracking-issue logic never fired for genuine Windows breakage (codex P1 on pulp#2536). Fix: capture `set CTEST_RC=%ERRORLEVEL%` on the line *immediately* after `ctest` (before `type` overwrites `%ERRORLEVEL%`), then `exit /b %CTEST_RC%` as the final command. Same trap applies to any multi-command `shell: cmd` block where a non-final command is the one that can fail — capture-and-`exit /b`, or make the fallible command last. Note `build.yml`'s Windows test step is *not* affected: it runs `ctest` as the last command, so its errorlevel propagates naturally.
@@ -5322,3 +5342,11 @@ Measuring the cost is worth doing before assuming a required lane is expensive:
 this gate's p90 (41 min) sits below the macOS lane's median (47 min), so it
 usually finishes inside the required lane's shadow and adds nothing to
 time-to-merge.
+
+## `gates.sh` resolves paths from `$ROOT`, not `$REPO_ROOT`
+
+Adding a check to `tools/scripts/gates.sh` and reaching for `$REPO_ROOT` fails
+with `unbound variable` under `set -u`, and the failure looks like the new gate
+itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
+the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
+Pass the same value through to a script that takes a root argument.

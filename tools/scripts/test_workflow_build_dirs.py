@@ -126,13 +126,30 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertNotIn("cmake --build build ", text)
         self.assertNotIn("ctest --test-dir build ", text)
 
+    def test_jobs_use_canonical_sanitizer_configuration(self) -> None:
+        """Named options own flags and test-only bundle-runtime classification."""
+        text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
+        asan = text.split("  asan:", 1)[1].split("  tsan:", 1)[0]
+        tsan = text.split("  tsan:", 1)[1].split("  ubsan:", 1)[0]
+        ubsan = text.split("  ubsan:", 1)[1].split("  rtsan:", 1)[0]
+
+        self.assertEqual(asan.count("-DPULP_SANITIZER=address"), 2)
+        self.assertEqual(tsan.count("-DPULP_SANITIZER=thread"), 1)
+        self.assertEqual(ubsan.count("-DPULP_SANITIZER=undefined"), 1)
+        for job in (asan, tsan, ubsan):
+            self.assertNotIn("-DCMAKE_CXX_FLAGS=", job)
+            self.assertNotIn("-DCMAKE_C_FLAGS=", job)
+            self.assertNotIn("-DCMAKE_OBJCXX_FLAGS=", job)
+            self.assertNotIn("-DCMAKE_EXE_LINKER_FLAGS=", job)
+            self.assertNotIn("-DCMAKE_SHARED_LINKER_FLAGS=", job)
+
     def test_ubsan_optimizes_instrumented_dsp_certifications(self) -> None:
         """UBSan keeps symbols without running production-scale DSP at O0."""
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
         ubsan = text.split("  ubsan:", 1)[1].split("  rtsan:", 1)[0]
 
         self.assertIn("-DCMAKE_BUILD_TYPE=RelWithDebInfo", ubsan)
-        self.assertIn("-fsanitize=undefined -fno-sanitize-recover=all", ubsan)
+        self.assertIn("-DPULP_SANITIZER=undefined", ubsan)
         self.assertNotIn("-DCMAKE_BUILD_TYPE=Debug", ubsan)
 
     def test_tsan_selects_network_reader_thread_suites(self) -> None:

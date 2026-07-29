@@ -5,6 +5,8 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/runtime/log.hpp>
+#include "yoga_measurement_internal.hpp"
 #include <yoga/Yoga.h>
 #include <vector>
 #include <algorithm>
@@ -367,15 +369,34 @@ static void apply_position_style(YGNodeRef node, const View& view) {
     }
 }
 
+static YogaMeasurement checked_yoga_measurement(const View& view, float width, float height) {
+    const auto measured = sanitize_yoga_measurement(width, height);
+    if (!measured.rejected_non_finite) return measured;
+
+    const auto& id = view.id();
+    const auto& anchor = view.anchor_id();
+    pulp::runtime::log_error(
+        "Yoga measure rejected non-finite dimension for node={} id='{}' anchor='{}': "
+        "width={} height={}",
+        static_cast<const void*>(&view), id.empty() ? "<unset>" : id,
+        anchor.empty() ? "<unset>" : anchor, width, height);
+    return measured;
+}
+
 // Measure callback for widgets with intrinsic size
 static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode widthMode,
                             float height, YGMeasureMode heightMode) {
-    (void) widthMode;
-    (void) heightMode;
     auto* view = static_cast<View*>(YGNodeGetContext(node));
-    float w = view->intrinsic_width();
-    float h = view->intrinsic_height();
-    if (w <= 0) w = width;
+    const auto intrinsic = checked_yoga_measurement(
+        *view, view->intrinsic_width(), view->intrinsic_height());
+    float w = intrinsic.width;
+    float h = intrinsic.height;
+
+    // Yoga represents an unconstrained measure input as NaN with
+    // YGMeasureModeUndefined. A widthless intrinsic leaf must report zero
+    // width, not echo that NaN back as its measured width. Constrained
+    // AtMost/Exactly inputs keep the historical fill-the-slot behavior.
+    w = resolve_yoga_measure_dimension(w, width, widthMode != YGMeasureModeUndefined);
 
     // Label-specific width-aware height. When a
     // multi-line Label is laid out in a bounded-width parent, the
@@ -390,8 +411,13 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
         if (wrapped > h) h = wrapped;
     }
 
-    if (h <= 0) h = height;
-    return {w, h};
+    h = resolve_yoga_measure_dimension(h, height, heightMode != YGMeasureModeUndefined);
+
+    // Catch any non-finite value introduced after intrinsic measurement (for
+    // example by width-aware text shaping or a malformed Yoga constraint)
+    // while the originating View identity is still available.
+    const auto measured = checked_yoga_measurement(*view, w, h);
+    return {measured.width, measured.height};
 }
 
 // Baseline callback for text-bearing nodes. Yoga's `align-items: baseline`
@@ -573,15 +599,22 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     bool has_managed_children = !children.empty() && view.layout_mode() != LayoutMode::grid &&
                                 !view.owns_child_layout();
 
-    if (!has_managed_children && (view.intrinsic_width() > 0 || view.intrinsic_height() > 0)) {
-        YGNodeSetMeasureFunc(node, yoga_measure);
-        // Wire Yoga's baseline channel for text-bearing leaves so flex
-        // containers can honor
-        // `align-items: baseline`. Today only Labels report a real
-        // baseline; non-Label leaves fall through to Yoga's default in
-        // yoga_baseline().
-        if (dynamic_cast<const Label*>(&view)) {
-            YGNodeSetBaselineFunc(node, yoga_baseline);
+    if (!has_managed_children) {
+        const auto intrinsic = sanitize_yoga_measurement(
+            view.intrinsic_width(), view.intrinsic_height());
+        if (intrinsic.width > 0 || intrinsic.height > 0 || intrinsic.rejected_non_finite) {
+            // Invalid intrinsic values must still enter the callback so the
+            // originating View is diagnosed rather than silently treated as a
+            // zero-sized non-measurable leaf.
+            YGNodeSetMeasureFunc(node, yoga_measure);
+            // Wire Yoga's baseline channel for text-bearing leaves so flex
+            // containers can honor
+            // `align-items: baseline`. Today only Labels report a real
+            // baseline; non-Label leaves fall through to Yoga's default in
+            // yoga_baseline().
+            if (dynamic_cast<const Label*>(&view)) {
+                YGNodeSetBaselineFunc(node, yoga_baseline);
+            }
         }
     }
 

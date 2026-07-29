@@ -681,6 +681,13 @@ not to `PulpWebUi.cmake`, and `view.cpp` — already in the wasm list — refere
 UI module link-failed and blocked the queue. Whoever adds a `core/view/**` or `core/canvas/**`
 `.cpp` must mirror it into `PulpWebUi.cmake` in the same change, or the whole PR queue wedges.
 
+This includes small internal policy/helper TUs, not only visible widget or renderer splits.
+`yoga_layout.cpp` was refactored to call `yoga_measurement_internal.cpp`; native view-core and
+all native tests stayed green, but the required WebCLAP build failed at `wasm-ld` with undefined
+`sanitize_yoga_measurement` / `resolve_yoga_measure_dimension` until the helper was added to
+`_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
+source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
+
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
 compiles** (`core/view/CMakeLists.txt`, `core/canvas/…`) rather than adding files piecemeal —

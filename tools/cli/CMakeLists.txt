@@ -39,6 +39,7 @@ add_custom_command(
 
 add_executable(pulp-cli
     pulp_cli.cpp
+    atomic_text_file.cpp
     cli_common.cpp
     cli_delegate.cpp
     shell_quote.cpp
@@ -54,6 +55,7 @@ add_executable(pulp-cli
     cmd_config.cpp
     cmd_coverage.cpp
     cmd_dsp.cpp
+    cmd_forge.cpp
     cmd_create.cpp
     cmd_minos.cpp
     cmd_macos.cpp
@@ -246,6 +248,18 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-help PROPERTIES
         PASS_REGULAR_EXPRESSION "pulp .* Pulp audio plugin framework CLI")
+
+    add_test(NAME cli-forge-catalog-json
+        COMMAND pulp-cli forge catalog export --json
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-forge-catalog-json PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"schema\": \"pulp.forge-catalog.v1\"")
+
+    add_test(NAME cli-forge-catalog-check
+        COMMAND pulp-cli forge catalog export --check
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-forge-catalog-check PROPERTIES
+        PASS_REGULAR_EXPRESSION "Forge catalog snapshot is current")
 
     add_test(NAME cli-doctor
         COMMAND pulp-cli doctor

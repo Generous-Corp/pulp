@@ -56,6 +56,10 @@ endif()
 string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
 string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
 
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _consumer_configure_args
+        "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
 if(_consumer_cxx_flags)
     list(APPEND _consumer_configure_args
         "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
@@ -101,6 +105,28 @@ endif()
 execute_process(COMMAND "${_executable}" RESULT_VARIABLE _run_result)
 if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
+endif()
+
+set(_smf_executable
+    "${_consumer_build}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_smf_executable}")
+    set(_smf_executable
+        "${_consumer_build}/${_producer_config}/pulp-smf-interchange-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_smf_executable}" RESULT_VARIABLE _smf_run_result)
+if(NOT _smf_run_result EQUAL 0)
+    message(FATAL_ERROR "SMF interchange SDK consumer exited ${_smf_run_result}")
+endif()
+
+set(_daw_export_executable
+    "${_consumer_build}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_daw_export_executable}")
+    set(_daw_export_executable
+        "${_consumer_build}/${_producer_config}/pulp-dawproject-export-sdk-consumer${_executable_suffix}")
+endif()
+execute_process(COMMAND "${_daw_export_executable}" RESULT_VARIABLE _daw_export_run_result)
+if(NOT _daw_export_run_result EQUAL 0)
+    message(FATAL_ERROR "DAWproject exporter SDK consumer exited ${_daw_export_run_result}")
 endif()
 
 # The cookbook walks the authoring surface end to end -- transaction commit,

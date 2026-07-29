@@ -41,6 +41,7 @@
 // baked against it. That is a migration with its own compatibility story, not a
 // side effect of adding nodes.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/envelope.hpp>
@@ -727,6 +728,100 @@ inline CustomNodeType make_mod_env_node() {
             }
         };
     return t;
+}
+
+inline ForgeNodeDescriptor mod_lfo_descriptor() {
+    return {
+        "mod_lfo", "Modulation LFO",
+        "A unipolar modulation oscillator with shaped, random, delayed, faded, and repeating cycles.",
+        {}, {{"default", kModLfoTypeId}},
+        {
+            {"rate_hz", kModLfoRateHz, "Rate", "Hz", "Sets the oscillator rate.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"depth", kModLfoDepth, "Depth", "%", "Scales the modulation output.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"wave", kModLfoWave, "Wave", "", "Selects the base waveform.",
+             ForgeParamKind::stepped, ForgeParamCurve::linear,
+             {{"sine", "Sine", 0}, {"triangle", "Triangle", 1}, {"saw_up", "Saw Up", 2},
+              {"saw_down", "Saw Down", 3}, {"square", "Square", 4},
+              {"sample_hold", "Sample and Hold", 5}, {"smooth_random", "Smooth Random", 6}}},
+            {"pulse_width", kModLfoPulseWidth, "Pulse Width", "%", "Sets square-wave duty.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"random_blend", kModLfoRandomBlend, "Random Blend", "%", "Blends random motion into the cycle.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"delay_ms", kModLfoDelayMs, "Delay", "ms", "Delays modulation after trigger.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"fade_in_ms", kModLfoFadeInMs, "Fade In", "ms", "Fades modulation in.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"shape_morph", kModLfoShapeMorph, "Shape Morph", "", "Moves continuously through adjacent waveform shapes.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"morph_enabled", kModLfoMorphEnabled, "Morph", "", "Enables continuous shape morphing.",
+             ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+            {"triangle_bias", kModLfoTriangleBias, "Triangle Bias", "", "Skews the triangle rise and fall.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"random_segments", kModLfoRandomSegments, "Random Segments", "", "Sets the random waveform segment count.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"phase_degrees", kModLfoPhaseDegrees, "Phase", "deg", "Sets the cycle start phase.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"fade_out_ms", kModLfoFadeOutMs, "Fade Out", "ms", "Fades modulation out after its repeat lifecycle.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"fade_quadratic", kModLfoFadeQuadratic, "Fade Shape", "", "Selects linear or quadratic fades.",
+             ForgeParamKind::stepped, ForgeParamCurve::linear, {{"linear", "Linear", 0}, {"quadratic", "Quadratic", 1}}},
+            {"repeat_count", kModLfoRepeatCount, "Repeat Count", "", "Limits the number of cycles; zero repeats indefinitely.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+        }};
+}
+
+inline ForgeNodeDescriptor mod_lpg_descriptor() {
+    return {"mod_lpg", "Low-Pass Gate", "A vactrol-style gate coupling loudness, brightness, and natural decay.",
+            {}, {{"default", kModLpgTypeId}},
+            {
+                {"decay_ms", kModLpgDecayMs, "Decay", "ms", "Sets the vactrol release time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"colour", kModLpgColour, "Colour", "", "Balances amplitude and filtering character.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"droop", kModLpgDroop, "Droop", "", "Adds vactrol sag to the response.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"brightness_hz", kModLpgBrightnessHz, "Brightness", "Hz", "Sets the open-gate cutoff.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"struck", kModLpgStruck, "Struck", "", "Selects struck rather than continuously driven behavior.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+                {"rise_ms", kModLpgRiseMs, "Rise", "ms", "Sets the vactrol opening time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"darkness_hz", kModLpgDarknessHz, "Darkness", "Hz", "Sets the closed-gate cutoff.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+                {"strike_threshold", kModLpgStrikeThreshold, "Strike Threshold", "", "Sets the trigger threshold for struck mode.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+                {"refractory_ms", kModLpgRefractoryMs, "Refractory", "ms", "Sets the trigger re-arm time.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+            }};
+}
+
+inline ForgeNodeDescriptor mod_slew_descriptor() {
+    return {"mod_slew", "Slew Limiter", "Smooths a control signal with independent rising and falling times.",
+            {}, {{"default", kModSlewTypeId}},
+            {{"rise_ms", kModSlewRiseMs, "Rise", "ms", "Sets upward slew time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"fall_ms", kModSlewFallMs, "Fall", "ms", "Sets downward slew time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"curved", kModSlewCurved, "Curve", "", "Selects linear or curved slewing.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"linear", "Linear", 0}, {"curved", "Curved", 1}}}}};
+}
+
+inline ForgeNodeDescriptor mod_transient_descriptor() {
+    return {"mod_transient", "Transient Detector", "Produces a level-independent control signal from attacks in audio.",
+            {}, {{"default", kModTransientTypeId}},
+            {{"fast_ms", kModTransientFastMs, "Fast Time", "ms", "Sets the attack follower time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"slow_ms", kModTransientSlowMs, "Slow Time", "ms", "Sets the reference follower time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"sensitivity", kModTransientSensitivity, "Sensitivity", "", "Scales transient contrast.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"invert", kModTransientInvert, "Invert", "", "Inverts the transient control output.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}}}};
+}
+
+inline ForgeNodeDescriptor mod_env_descriptor() {
+    return {"mod_env", "Modulation Envelope", "A triggerable delay, attack, hold, and decay envelope with looping and velocity response.",
+            {}, {{"default", kModEnvTypeId}},
+            {{"attack_ms", kModEnvAttackMs, "Attack", "ms", "Sets attack time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"hold_ms", kModEnvHoldMs, "Hold", "ms", "Sets peak hold time.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"decay_ms", kModEnvDecayMs, "Decay", "ms", "Sets decay time.", ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+             {"curve", kModEnvCurve, "Curve", "", "Shapes attack and decay together.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"threshold", kModEnvThreshold, "Threshold", "", "Sets the trigger threshold.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"delay_ms", kModEnvDelayMs, "Delay", "ms", "Sets pre-attack delay.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"depth", kModEnvDepth, "Depth", "%", "Scales the envelope output.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"loop", kModEnvLoop, "Loop", "", "Enables envelope looping.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+             {"loop_count", kModEnvLoopCount, "Loop Count", "", "Limits loop repetitions; zero loops indefinitely.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"refractory_ms", kModEnvRefractoryMs, "Refractory", "ms", "Sets trigger re-arm time.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"velocity_sensitive", kModEnvVelocitySensitive, "Velocity", "", "Scales the peak from trigger strength.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+             {"independent_curves", kModEnvIndependentCurves, "Independent Curves", "", "Uses separate attack and decay shapes.", ForgeParamKind::stepped, ForgeParamCurve::linear, {{"off", "Off", 0}, {"on", "On", 1}}},
+             {"attack_curve", kModEnvAttackCurve, "Attack Curve", "", "Shapes attack when independent curves are enabled.", ForgeParamKind::continuous, ForgeParamCurve::linear},
+             {"decay_curve", kModEnvDecayCurve, "Decay Curve", "", "Shapes decay when independent curves are enabled.", ForgeParamKind::continuous, ForgeParamCurve::linear}}};
 }
 
 } // namespace pulp::host::forge_modulation

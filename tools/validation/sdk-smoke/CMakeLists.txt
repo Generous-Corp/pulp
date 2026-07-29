@@ -197,6 +197,41 @@ if(TARGET Pulp::host)
         Pulp::dsl Pulp::events Pulp::host Pulp::state)
 endif()
 
+# DESIGN.md parser export probe. yaml-cpp is intentionally absent from Pulp's
+# public headers, but the installed static view-core archive retains YAML
+# symbols. Link only Pulp::view-core here so its install interface must supply
+# that private implementation dependency, then run the executable so the proof
+# covers the parser rather than merely an unreferenced archive.
+if(TARGET Pulp::view-core)
+    get_target_property(_pulp_view_core_definitions
+        Pulp::view-core INTERFACE_COMPILE_DEFINITIONS)
+    if("PULP_HAS_DESIGN_IMPORT=1" IN_LIST _pulp_view_core_definitions)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp" [=[
+#include <pulp/view/design_sources.hpp>
+
+int main() {
+    const auto ir = pulp::view::parse_designmd_yaml(
+        "---\n"
+        "name: Installed SDK probe\n"
+        "colors:\n"
+        "  primary: \"#336699\"\n"
+        "---\n");
+    const auto primary = ir.tokens.colors.find("primary");
+    return primary != ir.tokens.colors.end() && primary->second == "#336699"
+        ? 0 : 1;
+}
+]=])
+        add_executable(PulpSDKSmokeDesignMdProbe
+            "${CMAKE_CURRENT_BINARY_DIR}/designmd_export_probe.cpp")
+        target_link_libraries(PulpSDKSmokeDesignMdProbe PRIVATE Pulp::view-core)
+        add_custom_command(TARGET PulpSDKSmokeDesignMdProbe POST_BUILD
+            COMMAND "$<TARGET_FILE:PulpSDKSmokeDesignMdProbe>"
+            COMMENT "Running installed-SDK DESIGN.md parser probe"
+            VERBATIM)
+    endif()
+    unset(_pulp_view_core_definitions)
+endif()
+
 # Source-bearing modal-spec parser export probe. The public header alone is not
 # enough: parse_modal_spec()/to_json() live in a separate archive, so force a
 # downstream link through the installed target.

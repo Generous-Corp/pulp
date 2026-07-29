@@ -33,6 +33,7 @@
 // knows what its latency is. Composing an external dry/wet mixer around an
 // `oversample_2x` saturator would comb.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/saturator.hpp>
@@ -68,49 +69,64 @@ struct SaturatorInstance {
 
 inline const char* saturator_type_id(Shape shape) {
     switch (shape) {
-        case Shape::atan_soft: return kAtanTypeId;
-        case Shape::cubic_soft: return kCubicTypeId;
-        case Shape::sinh_arc: return kSinhArcTypeId;
-        case Shape::tanh_soft:
-        default: return kTanhTypeId;
+    case Shape::atan_soft:
+        return kAtanTypeId;
+    case Shape::cubic_soft:
+        return kCubicTypeId;
+    case Shape::sinh_arc:
+        return kSinhArcTypeId;
+    case Shape::tanh_soft:
+    default:
+        return kTanhTypeId;
     }
 }
 
 inline const char* saturator_default_name(Shape shape) {
     switch (shape) {
-        case Shape::atan_soft: return "Saturator (Arctan)";
-        case Shape::cubic_soft: return "Saturator (Cubic)";
-        case Shape::sinh_arc: return "Saturator (Sinh-Arc)";
-        case Shape::tanh_soft:
-        default: return "Saturator (Tanh)";
+    case Shape::atan_soft:
+        return "Saturator (Arctan)";
+    case Shape::cubic_soft:
+        return "Saturator (Cubic)";
+    case Shape::sinh_arc:
+        return "Saturator (Sinh-Arc)";
+    case Shape::tanh_soft:
+    default:
+        return "Saturator (Tanh)";
     }
 }
 
 inline const char* alias_policy_id(AliasPolicy policy) noexcept {
     switch (policy) {
-        case AliasPolicy::oversample_2x: return "x2";
-        case AliasPolicy::off: return "off";
-        case AliasPolicy::adaa:
-        default: return "adaa";
+    case AliasPolicy::oversample_2x:
+        return "x2";
+    case AliasPolicy::off:
+        return "off";
+    case AliasPolicy::adaa:
+    default:
+        return "adaa";
     }
 }
 
 inline Shape normalized_shape(Shape shape) noexcept {
     switch (shape) {
-        case Shape::tanh_soft:
-        case Shape::atan_soft:
-        case Shape::cubic_soft:
-        case Shape::sinh_arc: return shape;
-        default: return Shape::tanh_soft;
+    case Shape::tanh_soft:
+    case Shape::atan_soft:
+    case Shape::cubic_soft:
+    case Shape::sinh_arc:
+        return shape;
+    default:
+        return Shape::tanh_soft;
     }
 }
 
 inline AliasPolicy normalized_alias_policy(AliasPolicy policy) noexcept {
     switch (policy) {
-        case AliasPolicy::adaa:
-        case AliasPolicy::oversample_2x:
-        case AliasPolicy::off: return policy;
-        default: return AliasPolicy::adaa;
+    case AliasPolicy::adaa:
+    case AliasPolicy::oversample_2x:
+    case AliasPolicy::off:
+        return policy;
+    default:
+        return AliasPolicy::adaa;
     }
 }
 
@@ -125,7 +141,7 @@ inline AliasPolicy normalized_alias_policy(AliasPolicy policy) noexcept {
 inline float saturator_worst_case_gain(Shape shape) {
     signal::Saturator probe;
     probe.set_shape(shape);
-    probe.set_bias(1.0);  // clamped per shape by the DSP
+    probe.set_bias(1.0); // clamped per shape by the DSP
     return static_cast<float>(probe.worst_case_gain());
 }
 
@@ -212,4 +228,114 @@ inline CustomNodeType make_saturator_node(Shape shape,
     return t;
 }
 
-}  // namespace pulp::host::saturator
+inline ForgeNodeDescriptor saturator_descriptor() {
+    return {
+        "saturator",
+        "Saturator",
+        "Memoryless waveshaping with four harmonic curves and a construction-time "
+        "anti-aliasing policy.",
+        {{"shape",
+          "Shape",
+          "Selects the fixed transfer curve and harmonic character.",
+          {{"tanh", "Tanh", 0.0f},
+           {"atan", "Arctan", 1.0f},
+           {"cubic", "Cubic", 2.0f},
+           {"sinh_arc", "Sinh-Arc", 3.0f}}},
+         {"alias_policy",
+          "Alias Policy",
+          "Selects antiderivative anti-aliasing, two-times oversampling, or the raw curve.",
+          {{"adaa", "ADAA", 0.0f}, {"x2", "2x Oversampling", 1.0f}, {"off", "Off", 2.0f}}}},
+        {{"tanh_adaa", "saturator.tanh", {{"shape", "tanh"}, {"alias_policy", "adaa"}}},
+         {"tanh_x2", "saturator.tanh.x2", {{"shape", "tanh"}, {"alias_policy", "x2"}}},
+         {"tanh_off", "saturator.tanh.off", {{"shape", "tanh"}, {"alias_policy", "off"}}},
+         {"atan_adaa", "saturator.atan", {{"shape", "atan"}, {"alias_policy", "adaa"}}},
+         {"atan_x2", "saturator.atan.x2", {{"shape", "atan"}, {"alias_policy", "x2"}}},
+         {"atan_off", "saturator.atan.off", {{"shape", "atan"}, {"alias_policy", "off"}}},
+         {"cubic_adaa", "saturator.cubic", {{"shape", "cubic"}, {"alias_policy", "adaa"}}},
+         {"cubic_x2", "saturator.cubic.x2", {{"shape", "cubic"}, {"alias_policy", "x2"}}},
+         {"cubic_off", "saturator.cubic.off", {{"shape", "cubic"}, {"alias_policy", "off"}}},
+         {"sinh_arc_adaa",
+          "saturator.sinh_arc",
+          {{"shape", "sinh_arc"}, {"alias_policy", "adaa"}}},
+         {"sinh_arc_x2",
+          "saturator.sinh_arc.x2",
+          {{"shape", "sinh_arc"}, {"alias_policy", "x2"}}},
+         {"sinh_arc_off",
+          "saturator.sinh_arc.off",
+          {{"shape", "sinh_arc"}, {"alias_policy", "off"}}}},
+        {{"drive_db",
+          kDriveDb,
+          "Drive",
+          "dB",
+          "Input gain applied before the transfer curve.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::linear,
+          {},
+          {}},
+         {"bias",
+          kBias,
+          "Bias",
+          "",
+          "Offsets the transfer curve to introduce asymmetric harmonics.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::linear,
+          {},
+          {}},
+         {"tone_pre_hz",
+          kTonePreHz,
+          "Pre Tone",
+          "Hz",
+          "Sets the pre-emphasis corner; zero disables the stage.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::logarithmic,
+          {},
+          {}},
+         {"mix",
+          kMix,
+          "Mix",
+          "%",
+          "Blends the latency-aligned dry and saturated signals.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::linear,
+          {},
+          {}},
+         {"output_trim_db",
+          kOutputTrimDb,
+          "Output Trim",
+          "dB",
+          "Applies gain after the wet/dry blend.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::linear,
+          {},
+          {}},
+         {"tone_tracking",
+          kToneTracking,
+          "Tone Tracking",
+          "",
+          "Makes the de-emphasis corner track the pre-emphasis corner.",
+          ForgeParamKind::stepped,
+          ForgeParamCurve::linear,
+          {{"off", "Off", 0.0f}, {"on", "On", 1.0f}},
+          {}},
+         {"tone_de_hz",
+          kToneDeHz,
+          "De-emphasis",
+          "Hz",
+          "Sets the independent post-shaper de-emphasis corner when tracking is off.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::logarithmic,
+          {},
+          {}},
+         {"pre_boost_db",
+          kPreBoostDb,
+          "Pre Boost",
+          "dB",
+          "Boosts the pre-emphasis stage before nonlinear shaping.",
+          ForgeParamKind::continuous,
+          ForgeParamCurve::linear,
+          {},
+          {}}},
+    };
+}
+
+} // namespace pulp::host::saturator
