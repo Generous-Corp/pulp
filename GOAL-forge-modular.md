@@ -190,3 +190,10 @@ whether Forge Modular should declare a real Bypass. `DECISIONS.md` currently
 answers no, deliberately. Log `params_count` under the validator before
 changing anything — `PulpGain` passes both flush tests and would regress
 silently.
+
+One more data point against the zero-parameter theory above: `param-set-events`
+**failed** rather than being skipped, and nine other tests did skip. A plugin
+exposing no parameters would be expected to skip it. So a parameter probably
+does exist and flush genuinely does not apply it. Confirm by reading
+`params_count` directly — a short host that dlopens the bundle and calls it is
+worth more here than another pass of reading the adapter.
