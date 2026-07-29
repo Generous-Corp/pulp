@@ -25,10 +25,11 @@ shipping editor uses modular native tokens, controls and panel layout:
 
 Continuous controls use Pulp's gesture-aware two-way parameter bindings.
 Segmented controls emit one-shot host gestures and hold scoped main-thread
-listeners. Host automation updates are marshalled through the StateStore, and
-the editor exposes `sync_from_store()` for the deliberately listener-silent
-preset/session deserialization path. Paint itself is side-effect free, so an
-unchanged editor reaches idle instead of scheduling another frame.
+listeners. Host automation updates are marshalled through the StateStore.
+Because preset/session deserialization deliberately restores state without
+listeners, the production paint boundary reconciles every control before
+drawing. Reconciliation uses silent, change-gated setters: a real restore can
+schedule one coalesced follow-up frame, while unchanged paints remain idle.
 
 The knob renderer always uses the authored dark body. Its inactive 270-degree
 track, character-coloured active arc, pointer and display text all derive from
