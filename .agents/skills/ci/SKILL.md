@@ -5334,3 +5334,11 @@ Measuring the cost is worth doing before assuming a required lane is expensive:
 this gate's p90 (41 min) sits below the macOS lane's median (47 min), so it
 usually finishes inside the required lane's shadow and adds nothing to
 time-to-merge.
+
+## `gates.sh` resolves paths from `$ROOT`, not `$REPO_ROOT`
+
+Adding a check to `tools/scripts/gates.sh` and reaching for `$REPO_ROOT` fails
+with `unbound variable` under `set -u`, and the failure looks like the new gate
+itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
+the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
+Pass the same value through to a script that takes a root argument.

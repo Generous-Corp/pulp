@@ -247,6 +247,26 @@ same installed-command model by default, so a Rust-only command still needs
 either a matching `pulp_<command>` MCP tool or an explicit
 `tools/scripts/cli_mcp_parity_baseline.json` reason.
 
+### `pulp forge catalog export` — selected-SDK semantic catalog
+
+This repo-maintenance command joins `ForgeNodeDescriptor` vocabulary to the
+constructed node's `CustomNodeBakedParam` ranges/defaults and emits
+`pulp.forge-catalog.v1` JSON. Descriptors must remain number-free; adding a
+range or default there creates a second authority and defeats the export.
+The JSON keeps one numeric contract per applicable concrete realization,
+explicit realization-axis settings, and realization-scoped named choices; do
+not collapse differing factory defaults/ranges into one representative row.
+
+`--json` is checkout-independent and prints the compiled projection. `--check`
+and `--write` operate on `docs/status/forge-catalog.json`; the install rules
+copy that checked snapshot to `share/pulp/forge-catalog.json`, which Forge reads
+from its selected SDK prefix. Keep `cmd_forge.cpp`,
+`forge_catalog_json.{hpp,cpp}`, `docs/status/cli-commands.yaml`,
+`docs/reference/cli.md`, the Rust help inventory, the installed artifact, and
+the hosting skill's descriptor contract aligned. The command intentionally has
+no MCP tool: agents consume the committed/installed artifact, so keep its
+`cli_only` parity reason current.
+
 ### 8. Decide: does this need an MCP tool?
 
 Every top-level CLI command is checked for MCP parity by

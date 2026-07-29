@@ -5,6 +5,7 @@
 // Port 0 is the audible signal and port 1 is the external detector/key. The
 // implementation is the shipped Compressor::process_with_sidechain path.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/compressor.hpp>
 
@@ -83,6 +84,39 @@ inline CustomNodeType make_sidechain_compressor_node() {
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {
+        "sidechain_compressor",
+        "Sidechain Compressor",
+        "A compressor whose gain reduction follows a separate external key signal.",
+        {},
+        {{"default", kTypeId}},
+        {
+            {"threshold_db", kThresholdDb, "Threshold", "dB",
+             "Key-signal level above which gain reduction begins.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"ratio", kRatio, "Ratio", ":1",
+             "Gain-reduction ratio above threshold.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"attack_ms", kAttackMs, "Attack", "ms",
+             "Time for compression to engage.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"release_ms", kReleaseMs, "Release", "ms",
+             "Time for compression to recover.", ForgeParamKind::continuous,
+             ForgeParamCurve::logarithmic},
+            {"knee_db", kKneeDb, "Knee", "dB",
+             "Width of the soft-knee transition.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"makeup_db", kMakeupDb, "Makeup", "dB",
+             "Output gain applied after compression.", ForgeParamKind::continuous,
+             ForgeParamCurve::linear},
+            {"key_hpf_hz", kKeyHpfHz, "Key HPF", "Hz",
+             "High-pass cutoff that reduces low-frequency key sensitivity; zero disables it.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+        },
+    };
 }
 
 inline float worst_case_gain() {

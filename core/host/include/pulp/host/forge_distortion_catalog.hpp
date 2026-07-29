@@ -27,6 +27,7 @@
 // cross-channel state, so a stereo instrument would be two independent copies —
 // which is what instancing two nodes already gives.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/distortion.hpp>
@@ -267,6 +268,72 @@ inline CustomNodeType make_distortion_node(Topology topology,
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor distortion_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "distortion";
+    d.label = "Distortion";
+    d.description = "Circuit-modeled diode distortion with selectable clipping topology and "
+                    "antialiasing quality.";
+    d.axes = {
+        {"topology",
+         "Topology",
+         "Whether the diode pair clips to ground or sits in an amplifier feedback loop.",
+         {{"to_ground", "To Ground", 0.0f}, {"in_loop", "In Loop", 1.0f}}},
+        {"oversampling",
+         "Oversampling",
+         "Antialiasing quality and its corresponding fixed latency.",
+         {{"x1", "1x", 1.0f}, {"x2", "2x", 2.0f}, {"x4", "4x", 4.0f}, {"x8", "8x", 8.0f}}},
+    };
+    d.realizations = {
+        {"to_ground_x1", kToGroundX1TypeId,
+         {{"topology", "to_ground"}, {"oversampling", "x1"}}},
+        {"to_ground_x2", kToGroundX2TypeId,
+         {{"topology", "to_ground"}, {"oversampling", "x2"}}},
+        {"to_ground_x4", kToGroundX4TypeId,
+         {{"topology", "to_ground"}, {"oversampling", "x4"}}},
+        {"to_ground_x8", kToGroundX8TypeId,
+         {{"topology", "to_ground"}, {"oversampling", "x8"}}},
+        {"in_loop_x1", kInLoopX1TypeId,
+         {{"topology", "in_loop"}, {"oversampling", "x1"}}},
+        {"in_loop_x2", kInLoopX2TypeId,
+         {{"topology", "in_loop"}, {"oversampling", "x2"}}},
+        {"in_loop_x4", kInLoopX4TypeId,
+         {{"topology", "in_loop"}, {"oversampling", "x4"}}},
+        {"in_loop_x8", kInLoopX8TypeId,
+         {{"topology", "in_loop"}, {"oversampling", "x8"}}},
+    };
+    d.params = {
+        {"drive_db", kDriveDb, "Drive", "dB", "Gain driving the diode clipper.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"symmetry", kSymmetry, "Symmetry", "",
+         "Offsets positive and negative clipping thresholds for asymmetric harmonics.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"diode_model",
+         kDiodeModel,
+         "Diode",
+         "",
+         "Diode material and its characteristic forward-voltage curve.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"silicon", "Silicon", 0.0f}, {"germanium", "Germanium", 1.0f}, {"led", "LED", 2.0f}}},
+        {"pre_tone_hz", kPreToneHz, "Pre Tone", "Hz",
+         "Tone-shaping frequency before the clipping stage.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"pre_gain_db", kPreGainDb, "Pre Gain", "dB",
+         "Input trim before the pre-tone and drive stages.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"post_tone_hz", kPostToneHz, "Post Tone", "Hz",
+         "Tone-shaping frequency after the clipping stage.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"tone_mix", kToneMix, "Tone Mix", "%",
+         "Blend between the pre- and post-clipping tone paths.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"output_db", kOutputDb, "Output", "dB", "Output trim after distortion and tone shaping.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+    };
+    return d;
 }
 
 /// The node's reported latency for a tier, as the composed oversampler reports

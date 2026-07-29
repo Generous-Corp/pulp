@@ -8,6 +8,7 @@
 // boundary in a dedicated header prevents the general lo-fi catalog from
 // becoming the owner of analog DSP policy.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/analog_vcf.hpp>
 
@@ -117,6 +118,44 @@ inline CustomNodeType make_analog_vcf_node(signal::AnalogVcf::Voicing voicing) {
             }
         };
     return type;
+}
+
+inline ForgeNodeDescriptor analog_vcf_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "analog_vcf";
+    d.label = "Analog VCF";
+    d.description = "Four analog-inspired voltage-controlled filter voicings with panel-style "
+                    "cutoff, resonance, modulation, and input drive.";
+    d.axes = {{"voicing",
+               "Voicing",
+               "Circuit family whose calibration, resonance, and saturation behavior "
+               "define the filter.",
+               {{"juno", "Juno", 0.0f},
+                {"jupiter", "Jupiter-8", 1.0f},
+                {"prophet5", "Prophet-5", 2.0f},
+                {"minimoog", "Minimoog", 3.0f}}}};
+    d.realizations = {
+        {"juno", kAnalogVcfJunoTypeId, {{"voicing", "juno"}}},
+        {"jupiter", kAnalogVcfJupiterTypeId, {{"voicing", "jupiter"}}},
+        {"prophet5", kAnalogVcfProphet5TypeId, {{"voicing", "prophet5"}}},
+        {"minimoog", kAnalogVcfMinimoogTypeId, {{"voicing", "minimoog"}}},
+    };
+    d.params = {
+        {"cutoff", kAnalogVcfCutoff, "Cutoff", "",
+         "Panel cutoff position after the selected voicing's calibrated frequency law.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"cutoff_mod", kAnalogVcfCutoffMod, "Cutoff Modulation", "oct",
+         "Musical pitch offset applied to the cutoff in octaves.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"resonance", kAnalogVcfResonance, "Resonance", "%",
+         "Emphasis at the cutoff, extending into self-oscillating behavior for the "
+         "selected circuit.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"drive_db", kAnalogVcfDriveDb, "Drive", "dB",
+         "Input drive into the filter's nonlinear stages.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+    };
+    return d;
 }
 
 }  // namespace pulp::host::forge_lofi

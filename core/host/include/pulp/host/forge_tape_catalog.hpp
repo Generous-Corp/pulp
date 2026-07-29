@@ -68,6 +68,7 @@
 // the number a reviewer actually wants instead, and it is asserted by the
 // suite rather than estimated.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 
@@ -353,6 +354,47 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
                         out.channel_ptr(1), n);
     };
     return t;
+}
+
+inline ForgeNodeDescriptor descriptor() {
+    return {
+        "tape_machine", "Tape Machine",
+        "Models open-reel and cassette recording paths with bias, saturation, wear, crosstalk, companding, and print-through.",
+        {{"archetype", "Archetype", "Selects the fixed machine lineage.",
+          {{"ampex", "Ampex-class Open Reel", 0},
+           {"studer", "Studer-class Open Reel", 1},
+           {"cassette", "Cassette Deck", 2}}}},
+        {{"ampex", kAmpexTypeId, {{"archetype", "ampex"}}},
+         {"studer", kStuderTypeId, {{"archetype", "studer"}}},
+         {"cassette", kCassetteTypeId, {{"archetype", "cassette"}}}},
+        {
+            {"eq_curve", kEqCurve, "EQ Curve", "", "Selects the recording equalization standard.",
+             ForgeParamKind::stepped, ForgeParamCurve::linear,
+             {{"nab", "NAB", static_cast<float>(Curve::nab), {"studer"}},
+              {"iec_ccir", "IEC/CCIR", static_cast<float>(Curve::iec_ccir), {"studer"}},
+              {"cassette_type_one", "Cassette Type One",
+               static_cast<float>(Curve::cassette_type1), {"cassette"}},
+              {"cassette_type_two", "Cassette Type Two",
+               static_cast<float>(Curve::cassette_type2), {"cassette"}}},
+             {"studer", "cassette"}},
+            {"bias", kBias, "Bias", "", "Moves tape bias below or above the calibrated point.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"drive", kDrive, "Drive", "%", "Sets record-level saturation.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"age", kAge, "Age", "%", "Adds wear, loss, and instability.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"crosstalk_db", kCrosstalkDb, "Crosstalk", "dB", "Sets channel bleed.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"companding", kCompanding, "Companding", "", "Enables the machine's encode/decode compression path.",
+             ForgeParamKind::stepped, ForgeParamCurve::linear,
+             {{"off", "Off", 0}, {"on", "On", 1}}},
+            {"print_through_db", kPrintThroughDb, "Print Through", "dB", "Sets magnetic echo level.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+            {"print_offset_ms", kPrintOffsetMs, "Print Offset", "ms", "Sets magnetic echo delay.",
+             ForgeParamKind::continuous, ForgeParamCurve::logarithmic},
+            {"mix", kMix, "Mix", "%", "Blends dry and tape paths.",
+             ForgeParamKind::continuous, ForgeParamCurve::linear},
+        }};
 }
 
 }  // namespace pulp::host::tape

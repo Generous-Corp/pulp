@@ -2190,6 +2190,31 @@ build their params from a spec table at construction time; those nodes are
 marked `baked_params_computed_at_runtime` instead of being reported as having
 no controls.
 
+### forge
+
+**Status**: experimental
+
+Exports the semantic Forge catalog as JSON without parsing Pulp's C++ headers:
+
+```bash
+pulp forge catalog export --json
+pulp forge catalog export --check
+pulp forge catalog export --write
+```
+
+Each node includes its stable key, label, description, finite realization axes,
+and concrete realizations with `type_id` plus explicit axis settings. Parameter
+vocabulary includes realization-scoped named choices and one numeric
+`min`/`max`/`default` contract per applicable realization. Those numbers are
+joined from every constructed baked node at export time; descriptors
+intentionally do not duplicate them.
+
+SDK installs carry the checked snapshot at
+`share/pulp/forge-catalog.json`. Forge should read that file from the selected
+SDK prefix so the vocabulary and numeric contract always match the SDK it
+builds against. `--check` fails if the committed snapshot is stale or if an
+expected semantic node is missing from the export.
+
 ### minos
 
 **Status**: experimental
