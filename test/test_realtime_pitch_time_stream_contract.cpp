@@ -117,6 +117,57 @@ TEST_CASE("RealtimePitchTimeProcessor rejects invalid prepared ratio bounds atom
     }
 }
 
+TEST_CASE("RealtimePitchTimeProcessor rejects unrepresentable prepared geometry atomically",
+          "[signal][pitch-time][streaming]") {
+    RealtimePitchTimeProcessor previously_prepared;
+    REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
+            == PitchTimePrepareStatus::prepared);
+    const int prepared_capacity = previously_prepared.output_free_space();
+
+    auto require_rejected_without_mutation = [&](RealtimePitchTimeConfig config,
+                                                 PitchTimePrepareStatus expected) {
+        RealtimePitchTimeProcessor fresh;
+        REQUIRE(fresh.prepare(kSampleRate, config) == expected);
+        REQUIRE(fresh.output_free_space() == 0);
+        REQUIRE(previously_prepared.prepare(kSampleRate, config) == expected);
+        REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+    };
+
+    auto pitch_hop_overflow = stream_config(256);
+    pitch_hop_overflow.mode = PitchTimeMode::realtime_pitch;
+    pitch_hop_overflow.max_pitch_semitones = 300.0f;
+    require_rejected_without_mutation(pitch_hop_overflow,
+                                      PitchTimePrepareStatus::unrepresentable_capacity);
+
+    auto stretch_capacity_overflow = stream_config(256);
+    stretch_capacity_overflow.max_time_ratio = std::numeric_limits<float>::max();
+    require_rejected_without_mutation(stretch_capacity_overflow,
+                                      PitchTimePrepareStatus::unrepresentable_capacity);
+
+    auto block_capacity_overflow = stream_config(std::numeric_limits<int>::max());
+    require_rejected_without_mutation(block_capacity_overflow,
+                                      PitchTimePrepareStatus::unrepresentable_capacity);
+
+    // The streaming ring fits, but the nested spectral engine's one-call backlog does not.
+    auto engine_ring_capacity_overflow = stream_config(600'000'000);
+    engine_ring_capacity_overflow.max_time_ratio = 1.0f;
+    require_rejected_without_mutation(engine_ring_capacity_overflow,
+                                      PitchTimePrepareStatus::unrepresentable_capacity);
+
+    const auto infinite_rate = stream_config(256);
+    RealtimePitchTimeProcessor fresh_rate;
+    REQUIRE(fresh_rate.prepare(std::numeric_limits<double>::infinity(), infinite_rate)
+            == PitchTimePrepareStatus::invalid_sample_rate);
+    REQUIRE(fresh_rate.output_free_space() == 0);
+    REQUIRE(previously_prepared.prepare(std::numeric_limits<double>::infinity(), infinite_rate)
+            == PitchTimePrepareStatus::invalid_sample_rate);
+    REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+
+    const float sample = 0.25f;
+    const float* source[] = {&sample};
+    REQUIRE(previously_prepared.feed(source, 1) == PitchTimeStreamFeedStatus::accepted);
+}
+
 TEST_CASE("RealtimePitchTimeProcessor partial EOF read preserves the real prefix",
           "[signal][pitch-time][streaming]") {
     RealtimePitchTimeProcessor exact;
