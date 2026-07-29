@@ -76,9 +76,73 @@ def from_portmap() -> list:
     return out
 
 
+def from_manifests() -> list:
+    """Our own modules, straight from the manifests that generated them.
+
+    The port map only knows what somebody has placed in a rack, and our own
+    modules are precisely the ones a Forge Modular user has not placed yet --
+    they were built seconds ago. Running the layout against a real patch showed
+    eight of nine modules falling back to a placeholder for exactly this
+    reason.
+
+    We do not need the scan for these: the manifest already carries every
+    port's position in millimetres, because that is what drew the panel. This
+    converts it to the same shape the contract uses, so ours are exact from
+    the moment they are generated.
+    """
+    import glob
+    mdir = os.path.normpath(os.path.join(HERE, "..", "..", "examples",
+                                         "forge-modular", "modules"))
+    res = os.path.normpath(os.path.join(mdir, "..", "res"))
+    hp_px, mm_px = 15.0, 75.0 / 25.4
+    out = []
+    for f in sorted(glob.glob(os.path.join(mdir, "*.json"))):
+        if os.path.basename(f).startswith("_"):
+            continue
+        try:
+            doc = json.load(open(f))
+        except Exception:
+            continue
+        for m in doc.get("modules", []):
+            slug = m.get("slug")
+            if not slug:
+                continue
+            w = int(m.get("hp", 0)) * hp_px
+            if w <= 0:
+                continue
+            ports = []
+            for kind, is_in in (("inputs", True), ("outputs", False)):
+                for p in m.get(kind, []) or []:
+                    ports.append({
+                        "index": p.get("id", 0),
+                        "dir": "in" if is_in else "out",
+                        "name": p.get("name") or p.get("label") or "",
+                        "x": round((p.get("x_mm", 0.0) * mm_px) / w, 4),
+                        "y": round(p.get("y_mm", 0.0) * mm_px, 1),
+                    })
+            png = os.path.join(res, slug + ".png")
+            out.append({
+                "slug": f"ForgeModular/{slug}",
+                "hp": int(m["hp"]),
+                "width": w,
+                "height": 380.0,
+                # Our panels are emitted as SVG; a PNG only exists if Rack has
+                # rendered one, so this is honest either way.
+                "image": png if os.path.exists(png) else None,
+                "mapped": bool(ports),
+                "ports": ports,
+            })
+    return out
+
+
 def geometry() -> dict:
     """The contract, versioned so a consumer can refuse a shape it predates."""
-    mods = from_portmap()
+    # Ours first, so a scan of an older build cannot overwrite geometry we
+    # derived from the manifest that actually drew the panel.
+    mods = from_manifests()
+    have = {m["slug"] for m in mods}
+    mods += [m for m in from_portmap() if m["slug"] not in have]
+    mods.sort(key=lambda m: m["slug"])
     return {
         "version": CONTRACT_VERSION,
         "modules": mods,
