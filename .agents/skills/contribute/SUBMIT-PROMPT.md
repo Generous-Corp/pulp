@@ -24,10 +24,11 @@ everything silently:
 2. Check the routing: does anything here belong in Forge rather than Pulp, or
    vice versa? Flag it if so.
 
-3. For every behaviour change, confirm a test covers it. For each such test,
-   revert the fix, rebuild, and show me the test failing — then restore. If you
-   cannot do that for one of them, say which and why. Do not skip this and do not
-   assert it without running it.
+3. For every behaviour change, confirm a test covers it. Where the fix can be
+   cleanly reverted on its own, revert it, rebuild, show me the test failing, and
+   restore. Where it cannot — an early commit that later ones build on — say so
+   and tell me when the failure was actually observed during development. Do not
+   assert "it fails without the fix" for a test where neither of those happened.
 
 4. Run: tools/scripts/contributor_check.sh <my test targets>
    Fix what it reports as FAIL. For anything it reports as SKIP, keep the exact
@@ -56,7 +57,9 @@ I built, say so before writing the handoff.
 - **"tell me what you find rather than fixing everything silently"** — the point
   is a change you can explain, not one an agent rewrote past you.
 - **Step 3 is the one that gets skipped.** Asserting a test would fail is not the
-  same as watching it fail, and the difference is where real bugs hide.
+  same as watching it fail, and the difference is where real bugs hide. It is
+  deliberately not absolute: on a stacked branch an early revert may not compile,
+  and a ritual that cannot always be performed gets faked rather than skipped.
 - **Step 5 is the review that keeps a contribution landable** — the difference
   between "works" and "a maintainer will merge it".
 - **"What I could not do" is the most valuable section.** A contribution that

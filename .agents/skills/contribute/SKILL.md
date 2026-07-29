@@ -53,7 +53,8 @@ does not help. Same for changelog entries: they are regenerated.
 ## 3. Build and test locally
 
 ```sh
-cmake -S . -B build-tests -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON
+cmake -S . -B build-tests -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON \
+  -DPULP_ENABLE_GPU=ON
 cmake --build build-tests -j"$(( $(sysctl -n hw.ncpu) / 2 ))" --target <your-test-targets>
 ctest --test-dir build-tests --output-on-failure -R "<pattern>"
 ```
@@ -65,6 +66,20 @@ A share of the cores, not all of them: a full-core build starves everything else
 on the machine, including whatever you are about to run the tests against. A
 lint (`build_parallelism_guard.py`) enforces this across the repo, so a whole-machine
 `-j$(sysctl -n hw.ncpu)` copied from anywhere will fail CI.
+
+Add `-DPULP_ENABLE_GPU=ON` for anything touching view, canvas, render, or an
+imported design — without it the GPU paths are not built and your tests may not
+exist. A first configure also fetches external SDKs (VST3, Skia prebuilts), so
+budget time for it and do not take the first run's duration as normal.
+
+**Python 3.11+ is worth installing before you start**, not after a gate confuses
+you — macOS ships 3.9, and several checks misreport on it:
+
+```sh
+brew install python@3.12 && python3.12 -m pip install --user diff-cover
+# then run the check under it:
+PYTHON=python3.12 tools/scripts/contributor_check.sh <targets>
+```
 
 **If your Mac exports `SDKROOT`** pointing at a CommandLineTools SDK, the build
 can fail on missing `std::jthread`. Pass an explicit modern SDK:
@@ -79,6 +94,10 @@ Then say so in the handoff — "confirmed failing without the fix" is the single
 most credible sentence you can write.
 
 "It compiles" and "CI was green" are not tests.
+
+**Register a new test in `test/cmake/<owner>_tests.cmake`, never in
+`test/CMakeLists.txt`.** The top-level file is a frozen include hub and adding a
+registration there trips the hotspot gate — the obvious place is the wrong one.
 
 ## 5. Run the contributor check
 
@@ -123,6 +142,38 @@ regenerate — `python3 tools/scripts/pulp_tooling_disposition.py --write`, whic
 needs PyYAML and then an explicit disposition for the new entry. `contributor_check.sh`
 does not catch this one; the `Vellum freeze` CI check does.
 
+### When a gate is genuinely not meant for your change
+
+Some gates are satisfied by a **commit trailer** stating why, not by contorting
+the change. This is a sanctioned, audited escape hatch — it lives in git history
+where a reviewer sees it — not a bypass:
+
+```
+Skill-Update: skip skill=<name> reason="..."
+Version-Bump: skip reason="..."
+Config-Doc: skip reason="..."
+```
+
+Put one on the tip commit, with a real reason. If you believe a path-based gate
+is firing on a file you barely touched, this is how you say so — and then the
+maintainer can agree or disagree with a specific claim rather than guessing.
+
+Do not reach for a trailer to silence a gate you simply have not addressed. "I
+added the test somewhere the gate does not look, here is where" is a reason. "It
+was failing" is not.
+
+### Comments: no issue numbers, no phase or PR breadcrumbs
+
+`docs_noise_lint` runs in the maintainer's pre-push and in CI, but **not** in
+`gates.sh` — so nothing you run locally will catch this, and agents write exactly
+what it forbids by default. In source comments and test tags, do not write
+`(Phase 2)`, `slice 3 of`, `fixes #1234`, or `[issue-NNN]`-style Catch2 tags.
+Write what the code does; the narrative belongs in the commit message.
+
+```sh
+git diff origin/main | grep -nE '^\+.*(//|#|\*).*(#[0-9]{3,}|[Pp]hase [0-9]|slice [0-9])'
+```
+
 ## 6. Structure — keep it landable
 
 Before handing off:
@@ -136,10 +187,13 @@ Before handing off:
 ## 7. Hand it off
 
 ### If you have write access
-Open the PR **first**, then push. `pull_request` workflows fire on
-`synchronize`, so pushing before the PR exists leaves required checks `MISSING`
-and the PR cannot merge. Use `gh pr create`. Do **not** run `shipyard pr` and do
-not arm auto-merge — that is the maintainer's call.
+Push the branch, then `gh pr create`. Do **not** run `shipyard pr`, and do not
+arm auto-merge — that is the maintainer's call.
+
+If the PR opens but required checks show `MISSING` rather than pending, the
+workflows did not dispatch; say so rather than waiting it out. (A PR opened by an
+app token does not auto-trigger `pull_request` workflows — the maintainer can
+dispatch them.)
 
 ### If you have READ access only (the common case)
 You cannot push a branch. Two good options:
@@ -171,6 +225,12 @@ Ship a short `README.md`/`HANDOFF.md` alongside the patches with:
    hosts not verified, anything judged by ear rather than measured
 6. **Recommendations** — anything you consider a starting point rather than a
    finished surface, and known rough edges in what you added
+7. **Provenance** — one line: that the work is yours and you are contributing it
+   under the repo's MIT license, and the origin of anything that is not yours
+   (adapted from a reference, generated, copied from another project — with its
+   license). Pulp is MIT and public; a maintainer cannot land code whose
+   licensing is unstated. `git commit -s` (`Signed-off-by`) is a fine way to say
+   the first half.
 
 That structure is what makes a contribution cheap to land. Sections 4 and 5
 matter most.

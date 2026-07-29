@@ -23,16 +23,19 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 BASE="${BASE:-origin/main}"
+# gates.sh honours PYTHON; honour it here too so `PYTHON=python3.12 …` means
+# one interpreter for the whole run rather than two disagreeing about the version.
+PYTHON="${PYTHON:-python3}"
+export PYTHON
 TARGETS=("$@")
 
 fail=0
-warn=0
 declare -a NOTES=()  # lines for the contributor's "what I could not do"
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32mok\033[0m    %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=1; }
-note() { printf '  \033[33mwarn\033[0m  %s\n' "$*"; warn=1; }
+note() { printf '  \033[33mwarn\033[0m  %s\n' "$*"; }
 skip() { printf '  \033[33mSKIP\033[0m  %s\n' "$*"; NOTES+=("$*"); }
 
 say "Contributor check — base: $BASE"
@@ -91,7 +94,6 @@ if [ "$SRC_CHANGED" -eq 1 ] && [ "$TEST_CHANGED" -eq 0 ]; then
 elif [ "$SRC_CHANGED" -eq 1 ]; then
     ok "source and tests both changed"
     note "confirm each new test FAILS without your fix — revert, rebuild, observe, restore"
-    warn=0  # the reminder above is guidance, not a defect
 else
     ok "no shipped-source changes"
 fi
@@ -132,7 +134,7 @@ say "4. Repo gates (fast, offline)"
 # genuine defect and fails, whatever Python is installed. Only a run whose
 # problems are ALL version artefacts is downgraded to "inconclusive".
 PY_OK=0
-python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null && PY_OK=1
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null && PY_OK=1
 
 # Gates known to misreport on Python < 3.11. Keep this list narrow — a gate
 # added here stops being enforced for every contributor on a stock Mac.
@@ -153,8 +155,19 @@ else
         if [ "$PY_OK" -eq 0 ] && [ -s /tmp/contrib-gates-problems.txt ]; then
             echo "        (further problems were suppressed as Python-version artefacts)"
         fi
+        # Path-keyed gates fire on files you barely touched. The repo's sanctioned
+        # answer is a trailer stating why, not contorting the change to satisfy a
+        # match — without this line the contributor is simply stuck at "Not ready".
+        if grep -qiE "compat|skill-sync|SKILL.md|config-doc" /tmp/contrib-gates-real.txt; then
+            echo ""
+            echo "        Some of these are PATH-keyed and may not be meant for your change."
+            echo "        Either satisfy them, or state why on the tip commit, e.g.:"
+            echo "            Skill-Update: skip skill=<name> reason=\"...\""
+            echo "            Config-Doc:   skip reason=\"...\""
+            echo "        Put the reason in the handoff too — the maintainer decides."
+        fi
     elif [ "$PY_OK" -eq 0 ]; then
-        skip "gates.sh inconclusive: python3 is $(python3 -V 2>&1 | awk '{print $2}'), and every"
+        skip "gates.sh inconclusive: $PYTHON is $("$PYTHON" -V 2>&1 | awk '{print $2}'), and every"
         echo "        reported problem is a known Python 3.11+ artefact:"
         head -4 /tmp/contrib-gates-problems.txt | sed 's/^/          /'
         echo "        Nothing here is attributable to your change, but install 3.11+ for a"
@@ -169,7 +182,34 @@ fi
 # The real gate is 75% ON THE DIFF (tools/scripts/coverage_config.json), not a
 # whole-repo percentage. Optional here: it needs a coverage build plus
 # diff-cover, and a contributor missing either should still be able to hand off.
-say "5. Diff coverage (target: 75% of changed lines)"
+say "5. Tests"
+# Checking that a test FILE changed is not the same as running it. Without this
+# the script could print "Ready to hand off" for a diff whose tests were never
+# built, which is the exact claim the repo says is not a test.
+if [ "${#TARGETS[@]:-0}" -eq 0 ]; then
+    skip "no test target given — this check ran NO tests; build and run yours, or say so"
+elif [ ! -d build-tests ] && [ ! -d build ]; then
+    skip "no build dir (build-tests/ or build/) — tests not built or run by this check"
+else
+    bdir=build-tests; [ -d "$bdir" ] || bdir=build
+    echo "  building + running: ${TARGETS[*]} (in $bdir)"
+    if cmake --build "$bdir" -j"$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / 2 ))" \
+            --target ${TARGETS[@]+"${TARGETS[@]}"} >/tmp/contrib-build.log 2>&1; then
+        if ctest --test-dir "$bdir" --output-on-failure \
+                 -R "$(printf '%s|' ${TARGETS[@]+"${TARGETS[@]}"} | sed 's/|$//')" \
+                 >/tmp/contrib-ctest.log 2>&1; then
+            ok "$(grep -oE '[0-9]+% tests passed[^)]*\)' /tmp/contrib-ctest.log | tail -1)"
+        else
+            bad "tests failed — see /tmp/contrib-ctest.log"
+            grep -A6 "The following tests FAILED" /tmp/contrib-ctest.log | head -8 | sed 's/^/        /'
+        fi
+    else
+        bad "build failed for ${TARGETS[*]} — see /tmp/contrib-build.log"
+        grep -iE "error:" /tmp/contrib-build.log | head -4 | sed 's/^/        /'
+    fi
+fi
+
+say "6. Diff coverage (target: 75% of changed lines)"
 # Only C/C++ sources produce coverage data. Running the coverage build for a
 # docs-, script-, or workflow-only diff costs many minutes and measures nothing —
 # and a check that appears to hang is a check people learn to interrupt.
@@ -181,7 +221,7 @@ for f in ${CHANGED[@]+"${CHANGED[@]}"}; do
 done
 if [ "$COVERABLE" -eq 0 ]; then
     ok "no C/C++ sources changed — coverage not applicable"
-elif ! command -v diff-cover >/dev/null 2>&1 && ! python3 -c "import diff_cover" >/dev/null 2>&1; then
+elif ! command -v diff-cover >/dev/null 2>&1 && ! "$PYTHON" -c "import diff_cover" >/dev/null 2>&1; then
     skip "diff-cover not installed — coverage not measured locally (maintainer CI enforces it)"
 elif [ ! -x tools/scripts/local_diff_cover.sh ]; then
     skip "tools/scripts/local_diff_cover.sh not present"

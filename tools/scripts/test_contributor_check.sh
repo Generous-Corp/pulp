@@ -138,7 +138,16 @@ else
     printf '  skip  version-artefact case (needs Python < 3.11 to be meaningful)\n'
 fi
 
-# 9. An identical branch has nothing to say.
+# 9. With no test target, the script must SAY it ran no tests. Printing "Ready to
+#    hand off" while having executed nothing is the loophole this closes.
+r="$(make_repo)"
+mkdir -p "$r/core/signal/src" "$r/test"
+printf 'int f() { return 1; }\n' > "$r/core/signal/src/thing.cpp"
+printf 'TEST_CASE("f") {}\n' > "$r/test/test_thing.cpp"
+git -C "$r" add -A >/dev/null && git -C "$r" commit -qm "src plus test"
+check "states plainly when it ran no tests" 0 "ran NO tests" "$r"
+
+# 10. An identical branch has nothing to say.
 r="$(make_repo)"
 check "exits cleanly with no changes" 0 "nothing to check" "$r"
 
