@@ -2,7 +2,7 @@
 """Generate timeline MCP tool definitions from the schema manifest.
 
 This is a deterministic projection of
-core/timeline/schema/timeline_schema.json into the fixed seven-operation MCP
+core/timeline/schema/timeline_schema.json into the fixed ten-operation MCP
 surface. The operation set is an engine API decision; its drift-sensitive type
 vocabularies come from the manifest:
 
@@ -81,6 +81,14 @@ def _interchange_concepts() -> list[str]:
     return names[1:]
 
 
+def _session_property() -> dict:
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": "Session identifier returned by pulp_timeline_project_open.",
+    }
+
+
 def _command_envelope(command_types: list[str]) -> dict:
     type_name_schema = {"type": "string", "not": {}}
     if command_types:
@@ -133,22 +141,42 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_command_apply",
             "description": (
-                "Apply an ordered list of typed timeline commands to a project. "
+                "Apply an ordered list of typed timeline commands to a project source or "
+                "open session. "
                 "The command vocabulary is the API; each command is a manifest-derived envelope."
             ),
             "inputSchema": _input_schema(
                 {
                     "project": _project_property(),
+                    "session_id": _session_property(),
                     "commands": {
                         "type": "array",
                         "minItems": 1,
                         "items": _command_envelope(command_types),
                     },
                 },
-                ["commands", "project"],
+                ["commands"],
             ),
             "x-pulp-operation": "command.apply",
             "x-pulp-command-types": command_types,
+        },
+        {
+            "name": "pulp_timeline_diff",
+            "description": "Return the precise dirty set produced by the latest edit in an open timeline session.",
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.diff",
+        },
+        {
+            "name": "pulp_timeline_undo",
+            "description": "Undo the newest closed edit group in an open timeline session.",
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.undo",
+        },
+        {
+            "name": "pulp_timeline_redo",
+            "description": "Redo the newest undone edit group in an open timeline session.",
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.redo",
         },
         {
             "name": "pulp_timeline_validate",
@@ -265,6 +293,11 @@ def generate(manifest: dict) -> str:
             ),
             "x-pulp-operation": "project.import",
         },
+    ]
+
+    tools[1]["inputSchema"]["oneOf"] = [
+        {"required": ["project"], "not": {"required": ["session_id"]}},
+        {"required": ["session_id"], "not": {"required": ["project"]}},
     ]
 
     document = {

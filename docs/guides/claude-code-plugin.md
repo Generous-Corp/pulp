@@ -106,7 +106,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Experimental inspector clients | `pulp_inspect_*`, `pulp_motion_*`, and live-session `pulp_trace_*` wrappers currently require a Pulp source checkout plus a custom host/test fixture that explicitly constructs the server. Normal and installed-user launches do not expose these RPCs. Offline trace query remains usable without an inspector session. |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
-| Timeline project editing, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
+| Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
@@ -146,9 +146,14 @@ The inspection/render/validate workflow is built into Pulp. Audio Quality Lab is
 only the richer advisory comparison step; its absence never blocks inspection or
 rendering and the compare tool returns an explicit install command.
 
-The seven timeline tools are generated from the committed timeline schema
-manifest. They accept a project path or inline canonical project JSON; command
-application accepts only the generated typed command envelopes. Use
+The ten timeline tools are generated from the committed timeline schema
+manifest. Seven retain stateless timeline-tool entry points; diff, undo, and
+redo are MCP-local `DocumentSession` operations with no `pulp seq` session
+subcommands.
+Opening a project returns a bounded in-process session identifier;
+pass it to command application, diff, undo, and redo to iterate without
+re-reading whole documents. Command application accepts only the generated
+typed command envelopes, and diff reports the engine's exact dirty set. Use
 `pulp_timeline_render` for deterministic Float32 WAV output, then optionally pass
 before/after renders to `pulp_audio_compare` for an advisory judgment. Export
 requires explicit consent for every reported lossy concept; its accepted-loss
