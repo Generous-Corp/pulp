@@ -108,7 +108,7 @@ test("executor records reproducible evidence without typed plaintext", async () 
 
   assert.equal(report.action_count, 4);
   assert.equal(report.actions[1].text_length, 13);
-  assert.match(report.actions[1].text_sha256, /^[0-9a-f]{64}$/);
+  assert.equal("text_sha256" in report.actions[1], false);
   assert.equal("text" in report.actions[1], false);
   assert.equal(JSON.stringify(report).includes("private draft"), false);
   assert.equal(settles, 2);

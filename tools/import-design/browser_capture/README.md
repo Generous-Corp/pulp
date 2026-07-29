@@ -32,10 +32,30 @@ Successful output is:
 `--interactions <plan.json>` optionally reaches one deterministic secondary
 state before the same-frame evidence capture. Plans use
 `pulp-browser-interactions-v1` and contain only bounded `click`, `type`,
-`wait-for`, and `wait-ms` actions. The helper records selectors and hashes typed
-text in `interaction-report.json`; it does not persist typed plaintext. See
+`wait-for`, and `wait-ms` actions. The helper records selectors and typed-text
+length in `interaction-report.json`; it persists neither typed plaintext nor a
+per-action text hash. Action timeouts remain inside the capture-wide
+`--timeout-ms` deadline and cannot extend it. See
 `interaction_plan_protocol.json` for the exact schema. With no plan, capture
 retains its initial-state behavior and output set.
+
+For a reproducible Forge Modular secondary-state proof, use
+`test/fixtures/browser_capture_forge_modular_mentions.json` with the source
+export and pixel validation:
+
+```bash
+pulp import-design \
+  --file /path/to/ForgeModular.dc.html \
+  --browser-interactions test/fixtures/browser_capture_forge_modular_mentions.json \
+  --allow-browser-network \
+  --emit ir-json \
+  --output /tmp/forge-modular-proof.json \
+  --validate \
+  --screenshot-backend skia
+```
+
+The captured and Skia-rendered frames must both show the module mention picker,
+and validation must report zero differing pixels.
 
 `capture.json` conforms to `capture_protocol.json`. The DOM snapshot is kept as
 a sidecar because it can be large; the envelope references it by relative path.
