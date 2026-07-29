@@ -23,7 +23,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "experimental/pulp-rs/src/help.rs":
                 "Connect to an explicitly hosted inspector fixture\n",
             "docs/reference/scripted-ui-inspector.md": "loopback only\n",
-            "docs/guides/coming-from-juce.md": "visual overlay only\n",
+            "docs/guides/coming-from-reference.md": "visual overlay only\n",
             ".claude/commands/inspect.md":
                 "unavailable in normal launches; explicitly wired custom fixture\n",
             "docs/agent-integrations.md":
@@ -106,6 +106,17 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         self.assertIn(
             "experimental/pulp-rs/src/help.rs retains stale claim",
+            " ".join(inspector_truth_check.check_root(root)),
+        )
+
+    def test_rejects_stale_migration_guide_claim(self) -> None:
+        root = self.make_root()
+        (root / "docs/guides/coming-from-reference.md").write_text(
+            "It also speaks JSON-RPC over a local TCP port\n",
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "docs/guides/coming-from-reference.md retains stale claim",
             " ".join(inspector_truth_check.check_root(root)),
         )
 

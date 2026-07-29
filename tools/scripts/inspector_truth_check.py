@@ -20,6 +20,10 @@ MCP_TOOL_RE = re.compile(
     r'"name":"(pulp_(?:inspect|motion|trace)_[^"]+)",'
     r'"description":"([^"]+)"'
 )
+MIGRATION_GUIDE_GLOB = "coming-from-*.md"
+MIGRATION_GUIDE_FORBIDDEN_CLAIMS = (
+    "It also speaks JSON-RPC over a local TCP port",
+)
 
 FORBIDDEN_CLAIMS = {
     "tools/cli/cmd_inspect.cpp": (
@@ -34,9 +38,6 @@ FORBIDDEN_CLAIMS = {
     ),
     "docs/reference/scripted-ui-inspector.md": (
         "binds all interfaces",
-    ),
-    "docs/guides/coming-from-juce.md": (
-        "It also speaks JSON-RPC over a local TCP port",
     ),
     ".claude/commands/inspect.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
@@ -120,6 +121,18 @@ def check_root(root: pathlib.Path) -> list[str]:
     for relative_path, claims in FORBIDDEN_CLAIMS.items():
         text = (root / relative_path).read_text(encoding="utf-8")
         for claim in claims:
+            if claim in text:
+                errors.append(f"{relative_path} retains stale claim: {claim}")
+
+    migration_guides = sorted(
+        (root / "docs/guides").glob(MIGRATION_GUIDE_GLOB)
+    )
+    if not migration_guides:
+        errors.append("inspector truth could not locate migration guides")
+    for path in migration_guides:
+        relative_path = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for claim in MIGRATION_GUIDE_FORBIDDEN_CLAIMS:
             if claim in text:
                 errors.append(f"{relative_path} retains stale claim: {claim}")
 
