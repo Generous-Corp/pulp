@@ -75,10 +75,116 @@ TEST_CASE("generate_pulp_cpp checkpoint artifact stays byte-exact",
     INFO("binding_manifest bytes=" << result.binding_manifest.size()
          << " sha256=" << binding_hash);
 
-    CHECK(result.header.size() == 385);
-    CHECK(header_hash == "22ab424522a62b3158bcbd503c2c2c371f58c50e94dfc447053dab328cbbf31e");
-    CHECK(result.source.size() == 5276);
-    CHECK(source_hash == "0b59c5851ff3837b81cbc106c18532e81fe56d62d54dbd60b084fc5141d7d72b");
+    CHECK(result.header.size() == 494);
+    CHECK(header_hash == "53c5ce7b1e23e25eb0616b132485ca3ef46df0e85c6d1a56fc06114e512a3ffc");
+    CHECK(result.source.size() == 5611);
+    CHECK(source_hash == "b6f12f893e22fb1c4422e482843b337b0138d69a82e466746e401cb958b25b02");
     CHECK(result.binding_manifest.size() == 413);
     CHECK(binding_hash == "1afbdd18d296b7d27a0b72f42c106e485cc7640a02771b51267c5c66e71d95a5");
+}
+
+TEST_CASE("generate_pulp_cpp emits the public layout and visual-style surface",
+          "[view][import][cpp-codegen][parity]") {
+    DesignIR ir;
+    ir.source = DesignSource::jsx;
+    ir.root.type = "frame";
+    ir.root.name = "Styled Grid";
+    ir.root.layout.display = "grid";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.gap = 3.0f;
+    ir.root.layout.row_gap = 4.0f;
+    ir.root.layout.column_gap = 5.0f;
+    ir.root.layout.padding_top = 6.0f;
+    ir.root.layout.padding_right = 7.0f;
+    ir.root.layout.padding_bottom = 8.0f;
+    ir.root.layout.padding_left = 9.0f;
+    ir.root.layout.margin_top = 10.0f;
+    ir.root.layout.margin_right = 11.0f;
+    ir.root.layout.margin_bottom = 12.0f;
+    ir.root.layout.margin_left = 13.0f;
+    ir.root.layout.flex_grow = 1.0f;
+    ir.root.layout.flex_shrink = 0.5f;
+    ir.root.layout.flex_basis = "25%";
+    ir.root.layout.order = 2;
+    ir.root.layout.wrap = true;
+    ir.root.layout.aspect_ratio = 1.5f;
+    ir.root.layout.align_self = "center";
+    ir.root.layout.align_content = "space-evenly";
+    ir.root.layout.grid_template_columns = "1fr 2fr";
+    ir.root.layout.grid_template_rows = "auto 40px";
+    ir.root.attributes["pulpGridTemplateColumns"] = "2fr 1fr";
+    ir.root.attributes["pulpGridTemplateRows"] = "20px auto";
+
+    auto& style = ir.root.style;
+    style.background_color = "#102030";
+    style.background_gradient = "linear-gradient(90deg, #000, #fff)";
+    style.background_repeat = "repeat-x";
+    style.background_size = "cover";
+    style.object_fit = "contain";
+    style.color = "#f0e0d0";
+    style.opacity = 0.75f;
+    style.border_radius = 14.0f;
+    style.border_color = "#112233";
+    style.border_top_color = "#223344";
+    style.border_right_color = "#334455";
+    style.border_bottom_color = "#445566";
+    style.border_left_color = "#556677";
+    style.border_width = 1.0f;
+    style.border_top_width = 2.0f;
+    style.border_right_width = 3.0f;
+    style.border_bottom_width = 4.0f;
+    style.border_left_width = 5.0f;
+    style.border_top_left_radius = 6.0f;
+    style.border_top_right_radius = 7.0f;
+    style.border_bottom_right_radius = 8.0f;
+    style.border_bottom_left_radius = 9.0f;
+    style.font_family = "Inter";
+    style.font_size = 16.0f;
+    style.font_weight = 600;
+    style.letter_spacing = 0.5f;
+    style.text_align = "center";
+    style.overflow = "scroll";
+    style.position = "absolute";
+    style.top = 1.0f;
+    style.right = 2.0f;
+    style.bottom = 3.0f;
+    style.left = 4.0f;
+    style.z_index = 5;
+    style.width = 320.0f;
+    style.height = 180.0f;
+    style.min_width = 120.0f;
+    style.min_height = 80.0f;
+    style.max_width = 640.0f;
+    style.max_height = 360.0f;
+
+    IRNode label;
+    label.type = "text";
+    label.name = "Styled Label";
+    label.text_content = "Public exporter surface";
+    label.layout.grid_column = "1 / span 2";
+    label.layout.grid_row = "2 / 4";
+    label.layout.width_mode = SizingMode::hug;
+    label.layout.height_mode = SizingMode::fill;
+    label.style.font_family = "Mono";
+    label.style.font_size = 13.0f;
+    label.style.font_weight = 700;
+    label.style.font_style = "italic";
+    label.style.letter_spacing = 1.0f;
+    label.style.line_height = 18.0f;
+    label.style.text_align = "right";
+    label.style.color = "#abcdef";
+    label.style.text_transform = "uppercase";
+    label.style.text_decoration = "underline";
+    label.style.white_space = "normal";
+    ir.root.children.push_back(std::move(label));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    CHECK(result.source.find("GridStyle::parse_template(\"2fr 1fr\")") != std::string::npos);
+    CHECK(result.source.find("grid_column_end = 3") != std::string::npos);
+    CHECK(result.source.find("set_corner_radius_br(8.0f)") != std::string::npos);
+    CHECK(result.source.find("set_position(pulp::view::View::Position::absolute)") != std::string::npos);
+    CHECK(result.source.find("set_text_transform(pulp::view::Label::TextTransform::uppercase)") !=
+          std::string::npos);
+    CHECK(result.source.find("set_text_decoration(pulp::view::Label::TextDecoration::underline)") !=
+          std::string::npos);
 }

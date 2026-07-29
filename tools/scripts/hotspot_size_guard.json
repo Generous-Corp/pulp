@@ -147,7 +147,7 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 113,
+      "max_loc": 122,
       "note": "DesignIR C++ codegen facade after binding, support, style, and tree emission moved into focused companion translation units"
     },
     {
