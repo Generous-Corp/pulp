@@ -12,6 +12,7 @@
 #include <pulp/format/ara.hpp>
 #include <pulp/format/param_processing.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/view/view.hpp>
 
@@ -1567,4 +1568,43 @@ TEST_CASE("Parameter processing helpers are allocation-free after setup",
     REQUIRE(calls == 3);
     REQUIRE(allocation_count == 0);
     REQUIRE(allocated_bytes == 0);
+}
+
+TEST_CASE("value_channels() defaults to null and costs the vtable nothing",
+          "[format][processor][node-abi][value-channel]") {
+    // The default must be null: every processor written before this virtual
+    // existed declares no channels, and the framework must then run nothing on
+    // its behalf. "Zero cost when undeclared" is this return value, not a
+    // per-block branch somewhere else.
+    struct Bare : pulp::format::Processor {
+        pulp::format::PluginDescriptor descriptor() const override { return {}; }
+        void define_parameters(pulp::state::StateStore&) override {}
+        void prepare(const pulp::format::PrepareContext&) override {}
+        void process(pulp::audio::BufferView<float>&,
+                     const pulp::audio::BufferView<const float>&,
+                     pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                     const pulp::format::ProcessContext&) override {}
+    };
+    Bare bare;
+    CHECK(bare.value_channels() == nullptr);
+
+    // No sizeof assertion here on purpose. `Processor` already has virtuals, so
+    // appending one cannot grow the object — the vptr is present either way,
+    // and that is a language guarantee rather than something a runtime check
+    // establishes. What WOULD move sizeof is adding a data member, which this
+    // change does not do (the channel set is owned by the subclass, reached
+    // through the virtual). Pinning the literal size instead would be brittle:
+    // it is 4560 bytes here because of the f64 fallback scratch arrays, and
+    // that figure differs by platform, so the check would fail in CI on Linux
+    // and Windows while proving nothing the node_abi_gate does not already
+    // enforce.
+
+    // An overriding processor is reachable through the base pointer.
+    struct WithChannels : Bare {
+        pulp::view::ValueChannelSet set;
+        pulp::view::ValueChannelSet* value_channels() override { return &set; }
+    };
+    WithChannels declared;
+    pulp::format::Processor& as_base = declared;
+    CHECK(as_base.value_channels() == &declared.set);
 }

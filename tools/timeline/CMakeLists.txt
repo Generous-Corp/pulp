@@ -22,3 +22,14 @@ target_link_libraries(pulp-tool-timeline
         pulp::audio
         pulp::runtime
 )
+
+# Reference-clock sync soak capture (TL-18). Generates a
+# `pulp.timeline-sync-soak-trace.v1` trace against a SYNTHETIC reference whose
+# drift is injected at a known rate, so the engine-side half of the soak needs
+# no hardware and reproduces byte-for-byte. It covers the engine's chase math;
+# a physical cable, real interface jitter, and driver buffering still need a rig.
+if(PROJECT_IS_TOP_LEVEL)
+    add_executable(pulp-sync-soak-capture sync_soak_capture.cpp)
+    target_link_libraries(pulp-sync-soak-capture PRIVATE pulp::playback pulp::timebase pulp::midi)
+    target_include_directories(pulp-sync-soak-capture PRIVATE ${choc_SOURCE_DIR})
+endif()

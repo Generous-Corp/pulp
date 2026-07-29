@@ -1074,12 +1074,33 @@ ubuntu-latest, and runs `shipyard release-bot hook run`, which reads
 So there are TWO Shipyard versions that matter, and they drift independently: the
 one on each fleet Mac (`tools/shipyard.toml` + `install-shipyard.sh`), and the one
 THIS workflow installs. If the workflow's pin is older than a config key it must
-honour, it silently ignores the key. Concretely: `push_mode = "pr"` needs
-v0.78.0; a stale `post-tag-sync.yml` pin at 0.70.0 reverted to a direct push to
-`main` that the merge-queue ruleset refuses — defeating the config change and the
-fleet upgrade both. Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml`
-pin whenever a post-tag-hook feature depends on it. (Durable fix is for
-`hook install` to pin from `tools/shipyard.toml` — a Shipyard-side change.)
+honour, it silently ignores the key. A stale pin at 0.70.0 reverted to a direct
+push to `main` that the merge-queue ruleset refuses — defeating the config change
+and the fleet upgrade both.
+
+**The `push_mode = "pr"` floor is v0.79.0, NOT v0.78.0.** This distinction is
+subtle and it cost nine unmergeable PRs. 0.78.0 honours `push_mode` far enough to
+*open* the PR, so the pin looks correct and the branch appears — but the commit is
+still stamped `docs: regenerate changelog for <tag> [skip ci]`. That marker is
+right for the direct-push path it was written for and **fatal on the PR path**:
+Actions skips every workflow, so the PR never obtains the required checks branch
+protection demands, so it can never merge, and the next release opens another one.
+They stacked from v0.751.0 to v0.759.0 and blocked the release pipeline, surfacing
+as a run of `release: stuck — fix/feat merged without bump` issues rather than as
+anything pointing at the changelog PRs. Shipyard split the two subjects in 0.79.0
+(`release_bot_commit_subject`: `pr` omits the marker, direct keeps it).
+
+Diagnosing this class: a PR whose required checks read **`MISSING`** (not
+pending, not failing — absent) is almost always a workflow that never dispatched.
+Check the tip commit for `[skip ci]` first, then whether the PR was opened by an
+App token — GitHub does not dispatch `pull_request` workflows for App-token
+actions, and neither `workflow_dispatch` (its runs do not attach to the PR as
+checks) nor close/reopen from an App token will fix that. A commit pushed from a
+**user** identity does.
+
+Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml` pin whenever a
+post-tag-hook feature depends on it. (Durable fix is for `hook install` to pin
+from `tools/shipyard.toml` — a Shipyard-side change.)
 
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
@@ -2903,6 +2924,58 @@ If you see the "Nightly full build is broken" tracker, a refactor broke
 a test target PR CI never compiles. Download the `nightly-full-build-logs`
 artifact for the full failure list.
 
+## Webhook endpoint watchdog (`webhook-endpoint-watchdog.yml`)
+
+Shipyard's daemons receive GitHub events over Tailscale Funnel on the
+self-hosted Macs. A dead receiver is **indistinguishable from a quiet one**
+unless somebody reads delivery history, which is why pulp's macbook webhook
+sat returning `502` for **41 days** unnoticed: the Tailscale node had
+re-registered as `…-pro-1` while the hook still pointed at `…-pro`, whose node
+had gone offline. Every event-driven behaviour on that host was silently dead
+the whole time.
+
+This watchdog closes that hole on the same find-or-create / reopen / close
+tracker pattern as the two above. It runs on a 30-minute schedule **in GitHub
+Actions, deliberately not on the hosts** — a host-local check cannot report
+that its own host is unreachable, so GitHub is the only vantage point that can
+observe "I cannot reach this endpoint."
+
+It flags an active hook when every sampled delivery failed, when no success
+falls inside the grace window, or when there are no deliveries at all. It does
+**not** flag a hook that fails only *some* event types: that endpoint is alive
+and the cause is a payload-decode bug in the receiver — a different fix. Today
+`workflow_job` and `check_suite` return `200` while `workflow_run` and
+`check_run` return `400` across both repos, which is exactly that separate bug.
+
+Reading webhooks is admin-scoped, so it prefers `RELEASE_BOT_TOKEN` and falls
+back to `GITHUB_TOKEN`; an unreadable API opens the tracker saying so rather
+than reporting healthy.
+
+**Do not hand-edit a hook URL to fix a stale endpoint.** Shipyard's registrar
+owns hook lifecycle (`src/registrar.rs`) and patches or re-creates hooks for the
+repos the daemon is started with, recording them in
+`daemon/registrations.json`. The durable repair is:
+
+```sh
+shipyard daemon refresh --repo <owner>/<repo> --repo <owner>/<other-repo>
+```
+
+Two things that bite:
+
+- **Registration needs a verified tunnel.** `refresh` restarts the tunnel, so
+  status immediately afterwards reports `tunnel=inactive · repos=—`. That is
+  normal; give it a minute. Re-running `refresh` to "fix" it restarts the tunnel
+  again and resets the clock — wait instead of retrying.
+- **The registrar only manages hooks it created.** A hook it does not track (an
+  older registration, or one from a renamed node) is left behind as an orphan
+  pointing at a dead host — the 502 source, and the thing this watchdog reports.
+  After a repair, list `repos/<repo>/hooks` and delete any URL that is not a
+  daemon's current tunnel URL.
+
+Check what a daemon actually serves with `shipyard daemon status` (it prints the
+live tunnel URL plus `repos=…`). A daemon registered for a *different* repo
+answers the request and ignores the events, which looks healthy from the outside.
+
 ### Linting workflow files locally
 
 `actionlint` is **slow on Pulp's large workflows** — it shells out to
@@ -3912,12 +3985,58 @@ up" by weakening the check or by writing a `pulp-only` disposition you cannot
 justify; the rationale field is the artifact that makes a later ingest decision
 possible. `docs/contracts/vellum-extraction-freeze.md` is the contract.
 
+**If `Vellum freeze` passes but `Trusted base executor` fails, the PR is just
+behind `main`.** The two jobs run the same check, so disagreement is a base-
+resolution artifact, never a content problem. The trusted gate evaluates the
+**merge result** (`refs/pull/N/merge`) for this reason: `base.sha` is the
+base-branch *tip*, so diffing it against the raw branch head reports every file
+that landed on `main` after you forked as *deleted by your PR* — and an outbox
+event someone else added then trips `Vellum outbox events are append-only;
+modify/delete/rename is forbidden` against an author who deleted nothing. Merge
+`main` into the branch and it clears. A genuinely conflicted PR has no merge ref
+and is reported as such, rather than as a freeze violation.
+
 The `pull_request_target` + `statuses: write` shape on the trusted gate is
 intentional and safe as written: it checks out `base.sha` with
 `persist-credentials: false`, executes **only** base-checkout scripts, and adds
 the PR head as a worktree that is read as data and never executed. Preserve all
 three properties when editing that workflow — running anything out of
 `$proposed_tree` would hand a fork PR the Vellum reader credentials.
+
+### `merge_group` belongs ONLY on workflows that produce a required context
+
+A queue entry re-runs every workflow that declares `merge_group:`, and with
+`max_entries_to_build: 1` the queue validates one batch at a time — so any
+workflow on `merge_group` whose contexts are **not** required sets the drain
+rate while being unable to affect the merge decision. Nine workflows once fired
+per entry when only five could gate; two of the extras (`Validate examples
+(macOS)`, `GPU audio proof (macOS, real WebGPU)`) claimed a self-hosted macOS
+runner each, competing with the required `macos` gate for the same three-Mac
+pool. Symptom: 87 queued runs against 9 in progress, studio runners idle, head
+entry's runs all stuck `queued`. Adding Macs cannot fix that.
+
+The invariant, in both directions:
+
+- **On `merge_group` ⇔ one of the workflow's job names is a required context.**
+  Adding it elsewhere throttles the queue for no gating value.
+- **Never remove `merge_group` from a workflow whose context IS required** — a
+  required check that never reports on a merge group leaves entries unresolvable
+  and wedges the queue permanently. That is strictly worse than slow.
+
+Check before editing a trigger, and trust neither the comments nor this list:
+
+```sh
+ghapp api repos/Generous-Corp/pulp/branches/main/protection \
+  --jq '.required_status_checks.contexts[]'
+```
+
+Three workflows carried comments asserting they ran a "required" check on merge
+groups when none of their job names was required — that drift is what made the
+queue slow, so re-verify rather than believing the comment.
+
+Dropping `merge_group` costs no PR-time signal: those workflows keep
+`pull_request` and still run on every PR. They just stop re-running against a
+merged result they cannot gate.
 
 ### Install consumer smoke (`install-consumer-smoke.yml`)
 
@@ -5174,3 +5293,32 @@ The general lesson for this skill: when a change is Windows-affecting, a green
 retained REAPER VM (see the `hosting` skill and the consumer repo's
 `WINDOWS_REAPER_QEMU.md`) has Visual Studio Build Tools and answers over SSH,
 which is enough for a target build without any GUI.
+
+## A path-filtered check CANNOT be made required (it wedges every PR that misses the paths)
+
+A workflow with `on.pull_request.paths` does not merely skip on an unrelated PR
+— it never REPORTS its check at all. That is invisible while the check is
+advisory, and it wedges the repo the moment the check is added to branch
+protection: GitHub blocks the PR indefinitely waiting for a context that will
+never arrive. There is no failure to click into, so it presents as queue lag
+rather than as a misconfiguration, which is what makes it expensive to
+diagnose.
+
+`gcc-compile-gate.yml` was in exactly this shape while the decision to make the
+Linux verdict binding was already taken. Adding the context as-is would have
+permanently stalled every docs-only, test-only and tooling-only PR.
+
+**Before adding ANY check to branch protection, confirm it reports on a PR that
+touches none of its paths.** Observe it — the failure mode is silent, so
+reasoning about it is not enough.
+
+The fix is to move the filter inside the job: trigger on every PR, decide in a
+first step whether the diff is relevant, and guard the expensive steps on that
+output. Compare against the **merge base**, not the previous commit, or a PR
+that edits the covered paths and then pushes an unrelated fixup will skip the
+work it needs.
+
+Measuring the cost is worth doing before assuming a required lane is expensive:
+this gate's p90 (41 min) sits below the macOS lane's median (47 min), so it
+usually finishes inside the required lane's shadow and adds nothing to
+time-to-merge.

@@ -28,10 +28,11 @@ on:
       - "tools/cmake/PulpGpuWasm.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"
-  # Run the required `WAMv2 + WebCLAP (Linux, headless Chrome)` check on queued
-  # merge groups so a merge queue on `main` can land PRs. `merge_group` does not
-  # honour the `paths` filter above, so this fires on every group.
-  merge_group:
+  # Deliberately NOT run on `merge_group` — see header-self-contained.yml for the
+  # full rationale. Neither `WAMv2 + WebCLAP (Linux, headless Chrome)` nor
+  # `GPU audio proof (macOS, real WebGPU)` is a required context, and the latter
+  # claimed a self-hosted macOS runner on every queue entry — starving the
+  # required `macos` gate with work that could not affect the merge decision.
   workflow_dispatch:
 
 concurrency:

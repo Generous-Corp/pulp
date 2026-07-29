@@ -886,6 +886,18 @@ ensure_shared_git_source_with_retry "Yoga" "https://github.com/facebook/yoga.git
 ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2.git" \
     "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
 
+# three.js is by far the largest FetchContent source (~2.2 GB of history). Left
+# unseeded it clones per BUILD DIRECTORY, not per machine, so every worktree
+# re-pays the download and the disk. Seeding it here is what makes
+# pulp_register_fetchcontent_source(threejs …) in PulpDependencies.cmake resolve
+# to the shared cache instead. Keep this ref equal to the GIT_TAG there —
+# test_setup_source_cache.sh fails if they drift, because a mismatched cache
+# directory name is a SILENT miss: the cache is populated, CMake ignores it, and
+# the clone happens anyway.
+ensure_shared_git_source_with_retry "three.js" "https://github.com/mrdoob/three.js.git" \
+    "077dd13c0e869d9f3dbe55875686f920367de457" \
+    "$(fetchcontent_cache_dir_name "threejs" "077dd13c0e869d9f3dbe55875686f920367de457")"
+
 # VST3 SDK
 # MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships
 # pluginterfaces under "Steinberg VST3 License OR GPLv3", which Pulp may not

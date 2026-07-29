@@ -18,6 +18,7 @@ namespace pulp::view {
 enum class BindingTarget : std::uint8_t {
     value,  ///< the widget's primary value (Knob, Fader, RangeSlider, Toggle, ProgressBar)
     meter,  ///< a Meter's level
+    scope,  ///< a block of samples for a SpectrumView / WaveformView
 };
 
 /// The outcome of one `bindWidgetToParam` / `bindMeter` call.
@@ -30,6 +31,9 @@ enum class BindingOutcome : std::uint8_t {
     null_widget,          ///< the id maps to a null view
     incompatible_widget,  ///< the widget cannot accept this target (e.g. a meter on a Knob)
     unknown_param,        ///< the store declares no parameter with that name
+    /// A `value:<name>` source named no channel the processor declares — or the
+    /// processor declares none at all, e.g. a UI bound against the wrong build.
+    unknown_value_channel,
 };
 
 /// True for the three outcomes that produced a live binding.

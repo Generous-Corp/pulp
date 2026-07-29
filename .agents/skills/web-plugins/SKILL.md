@@ -46,6 +46,16 @@ contain `pulp-build*` or `pulp-preamble*`, and must carry a
 and `pulp-advisory-gpu` label. Do not add that advisory label to a required
 runner, and do not use Orchard.
 
+That isolation was being defeated by the workflow's trigger list, not by its
+runner selector: `web-plugins.yml` also ran on `merge_group`, so
+`GPU audio proof (macOS, real WebGPU)` claimed a macOS runner on **every merge-
+queue entry** while gating nothing — GitHub validates one merge group at a time,
+so that competed directly with the required `macos` gate for the same Mac pool.
+The workflow now runs on `pull_request` only. Capacity isolation is a claim about
+*when* a job runs as much as *where*: an advisory job must not appear on
+`merge_group`, because nothing there is advisory in effect — it either gates the
+merge or it just slows the queue down.
+
 `examples/web-demos/gpu-audio/` runs SuperConvolver's convolution as a **WGSL
 compute shader on the browser's real WebGPU device**. Do not repeat the old line
 that this is impossible or unstarted. But be equally precise about its shape,

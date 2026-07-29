@@ -17,6 +17,9 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <thread>
+#include <chrono>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -706,4 +709,922 @@ TEST_CASE("a fully bound UI reports nothing unreachable",
         CHECK(is_bound(attempt.outcome));
     }
     CHECK(bridge.unbound_params().empty());
+}
+
+// ── Parameter metadata reaches JavaScript ────────────────────────────────────
+//
+// Before these, a scripted UI got a normalized float and a name. Everything a
+// control actually needs — the real range, the unit, the curve, the default —
+// had to be retyped in JS, where it silently drifts from define_parameters().
+// These read the same pulp::state::param_json payload the inspector uses.
+
+namespace {
+
+// Evaluate `expr` in the bridge's engine and return it as JSON text, so a test
+// asserts on what a UI script would actually observe.
+std::string eval_json(ScriptEngine& engine, const std::string& expr) {
+    return engine.evaluate("JSON.stringify(" + expr + ")").toString();
+}
+
+void add_rich_params(StateStore& store) {
+    ParamInfo cutoff{};
+    cutoff.id = 10;
+    cutoff.name = "Cutoff";
+    cutoff.unit = "Hz";
+    cutoff.range = {.min = 20.0f, .max = 20000.0f, .default_value = 1000.0f};
+    store.add_parameter(cutoff);
+
+    ParamInfo mode{};
+    mode.id = 11;
+    mode.name = "Mode";
+    mode.kind = ParamKind::Enum;
+    mode.value_labels = {"Low", "Band", "High"};
+    mode.range = {.min = 0.0f, .max = 2.0f, .default_value = 0.0f, .step = 1.0f};
+    store.add_parameter(mode);
+}
+
+} // namespace
+
+TEST_CASE("getParamMetadata gives a script the real range, unit and default",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    const auto json = eval_json(engine, "getParamMetadata('Cutoff')");
+    INFO("payload: " << json);
+    CHECK(json.find("\"min\":20") != std::string::npos);
+    CHECK(json.find("\"max\":20000") != std::string::npos);
+    CHECK(json.find("\"default\":1000") != std::string::npos);
+    CHECK(json.find("\"unit\":\"Hz\"") != std::string::npos);
+
+    // An enum carries the author's labels, so a script can build a real picker
+    // instead of a numeric slider.
+    const auto mode = eval_json(engine, "getParamMetadata('Mode')");
+    INFO("payload: " << mode);
+    CHECK(mode.find("\"kind\":\"enum\"") != std::string::npos);
+    CHECK(mode.find("\"Band\"") != std::string::npos);
+
+    // An unknown name is undefined, not an empty object — a script must be able
+    // to tell "no such parameter" from "a parameter with nothing in it".
+    CHECK(eval_json(engine, "getParamMetadata('nope') === undefined") == "true");
+}
+
+TEST_CASE("formatParamValue matches what the host displays",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(engine.evaluate("formatParamValue('Cutoff', 440)").toString() == "440 Hz");
+    // The normalized flag denormalizes first, so a widget holding 0..1 can ask
+    // for display text without doing range maths in JS.
+    CHECK(engine.evaluate("formatParamValue('Cutoff', 0, true)").toString() == "20 Hz");
+    // An enum reads as its label, not its index.
+    CHECK(engine.evaluate("formatParamValue('Mode', 1)").toString() == "Band");
+    CHECK(eval_json(engine, "formatParamValue('nope', 1) === undefined") == "true");
+}
+
+TEST_CASE("parseParamValue reports failure instead of yielding a silent zero",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440').ok") == "true");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440').value") == "440");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','440 Hz').value") == "440");
+
+    // THE point of the ok flag: a click-to-type field must not store 0 because
+    // the user typed nonsense.
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','banana').ok") == "false");
+    CHECK(eval_json(engine, "parseParamValue('Cutoff','').ok") == "false");
+
+    // A label round-trips for an enum.
+    CHECK(eval_json(engine, "parseParamValue('Mode','High').ok") == "true");
+    CHECK(eval_json(engine, "parseParamValue('Mode','High').value") == "2");
+
+    CHECK(eval_json(engine, "parseParamValue('nope','1') === undefined") == "true");
+}
+
+TEST_CASE("format and parse round-trip through the bridge",
+          "[view][bridge][state-binding][param-metadata]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    // The pair only earns its place if a UI can render a value, let the user
+    // edit the text, and read the same number back.
+    const auto ok = eval_json(engine,
+        "(function(){"
+        "  var vals=[20,440,1000,20000];"
+        "  for (var i=0;i<vals.length;i++){"
+        "    var t=formatParamValue('Cutoff', vals[i]);"
+        "    var r=parseParamValue('Cutoff', t);"
+        "    if(!r.ok || Math.abs(r.value-vals[i]) > Math.max(1, vals[i]*0.01)) return false;"
+        "  }"
+        "  return true;"
+        "})()");
+    CHECK(ok == "true");
+}
+
+// ── onParamChanged / offParamChanged ──────────────────────────────────
+//
+// Push notification of param movement, delivered async on the frame tick.
+// The contract these pin: subscribing is not itself a change, delivery is
+// coalesced to one callback per subscription per frame, it is origin-blind
+// (a host write and this UI's own setParam look identical), and a handler
+// that writes its own param terminates instead of recursing.
+
+namespace {
+
+// Drive one host frame. service_frame_callbacks is what the FrameClock calls,
+// so a test that pumps this is exercising the real delivery path rather than
+// reaching into service_param_subscriptions directly.
+void tick(WidgetBridge& bridge) { bridge.service_frame_callbacks(); }
+
+// Subscribe and record every payload into a global array the test reads back.
+constexpr const char* kRecorder = R"(
+    var seen = [];
+    var sub = onParamChanged('Cutoff', function (p) { seen.push(p); });
+)";
+
+} // namespace
+
+TEST_CASE("onParamChanged returns a handle, and 0 for an unknown param",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("");
+
+    CHECK(eval_json(engine, "onParamChanged('Cutoff', function () {}) > 0") == "true");
+    CHECK(eval_json(engine, "onParamChanged('nope', function () {})") == "0");
+    CHECK(eval_json(engine, "onParamChanged('', function () {})") == "0");
+    // Only the real param produced a subscription.
+    CHECK(bridge.param_subscription_count() == 1);
+}
+
+TEST_CASE("subscribing does not itself fire a change",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // Several frames with no store write must stay silent — otherwise every
+    // subscriber would have to filter a synthetic change that never happened.
+    tick(bridge);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "0");
+}
+
+TEST_CASE("a store write is delivered on the next frame with the full payload",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    store.set_value(10, 5000.0f);
+    // Nothing is delivered until the frame tick — that is what keeps JS off
+    // the writer's thread.
+    CHECK(eval_json(engine, "seen.length") == "0");
+
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    const auto payload = eval_json(engine, "seen[0]");
+    INFO("payload: " << payload);
+    CHECK(payload.find("\"name\":\"Cutoff\"") != std::string::npos);
+    CHECK(payload.find("\"value\":5000") != std::string::npos);
+    // normalized and modulated ride along so JS never re-derives skew math.
+    CHECK(payload.find("\"normalized\":") != std::string::npos);
+    CHECK(payload.find("\"modulated\":") != std::string::npos);
+}
+
+TEST_CASE("many writes between frames coalesce into one callback",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // An automation sweep: 100 writes inside one frame. A push-per-write
+    // design would cross into JS 100 times.
+    for (int i = 1; i <= 100; ++i) store.set_value(10, 1000.0f + static_cast<float>(i));
+    tick(bridge);
+
+    CHECK(eval_json(engine, "seen.length") == "1");
+    // The one callback reports the value getParam would have returned.
+    CHECK(eval_json(engine, "seen[0].value") == "1100");
+
+    // A frame with no further write stays silent.
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}
+
+TEST_CASE("delivery is origin-blind: a JS setParam reports like a host write",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // The UI writes its own param. A design that suppressed self-writes would
+    // silently break a UI whose source of truth is the store.
+    engine.evaluate("setParam('Cutoff', 0.5)");
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    // ...and a native/host-side write is reported the same way.
+    store.set_value(10, 9000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "2");
+}
+
+TEST_CASE("offParamChanged stops delivery and reports whether it removed one",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    REQUIRE(eval_json(engine, "seen.length") == "1");
+
+    CHECK(eval_json(engine, "offParamChanged(sub)") == "true");
+    CHECK(bridge.param_subscription_count() == 0);
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");  // no new delivery
+
+    // Unsubscribing twice is not an error — a view tearing down should be able
+    // to call this unconditionally.
+    CHECK(eval_json(engine, "offParamChanged(sub)") == "false");
+    CHECK(eval_json(engine, "offParamChanged(0)") == "false");
+}
+
+TEST_CASE("subscription ids are never reused, so a stale off cannot cancel a live one",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var seen = [];
+        var first = onParamChanged('Cutoff', function () {});
+        offParamChanged(first);
+        var second = onParamChanged('Cutoff', function (p) { seen.push(p); });
+    )");
+
+    // If ids were slot indices, `second` would equal `first` and the stale
+    // handle below would cancel a live subscription.
+    CHECK(eval_json(engine, "second !== first") == "true");
+    CHECK(eval_json(engine, "offParamChanged(first)") == "false");
+    REQUIRE(bridge.param_subscription_count() == 1);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}
+
+TEST_CASE("a handler that writes its own param terminates instead of recursing",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // Clamping a param from its own change handler is a reasonable thing to
+    // write. The value is snapshotted once per frame, so the handler's own
+    // write surfaces as an ordinary change on the next frame — the loop
+    // settles instead of recursing.
+    bridge.load_script(R"(
+        var calls = 0;
+        onParamChanged('Cutoff', function (p) {
+            calls++;
+            if (p.value > 8000) setParam('Cutoff', 0.5);
+        });
+    )");
+
+    store.set_value(10, 12000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");
+
+    // Frame 2 observes the handler's own corrective write; frame 3 is quiet.
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "2");
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "2");
+}
+
+TEST_CASE("modulation movement is reported even when the base value is static",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // A CLAP host can move the modulated value while the base is untouched.
+    // A UI drawing the modulated position has to see that, so `modulated` is
+    // part of the change signal, not just part of the payload.
+    store.set_mod_offset(10, 0.25f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");  // static again
+}
+
+TEST_CASE("a throwing handler does not stop delivery to other subscriptions",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var good = 0;
+        onParamChanged('Cutoff', function () { throw new Error('boom'); });
+        onParamChanged('Cutoff', function () { good++; });
+    )");
+    REQUIRE(bridge.param_subscription_count() == 2);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    // __dispatch__ contains the exception, so one bad handler cannot silence
+    // its neighbour or unwind the frame loop.
+    CHECK(eval_json(engine, "good") == "1");
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "good") == "2");
+}
+
+TEST_CASE("a handler may unsubscribe itself mid-dispatch",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // "Fire once, then stop" — ordinary to write, and it mutates the very
+    // container the servicing loop is walking.
+    bridge.load_script(R"(
+        var calls = 0;
+        var once = onParamChanged('Cutoff', function () {
+            calls++;
+            offParamChanged(once);
+        });
+        var other = 0;
+        onParamChanged('Cutoff', function () { other++; });
+    )");
+    REQUIRE(bridge.param_subscription_count() == 2);
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");
+    // The neighbour still gets this frame's change: cancelling one subscription
+    // must not truncate the pass.
+    CHECK(eval_json(engine, "other") == "1");
+    CHECK(bridge.param_subscription_count() == 1);
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "calls") == "1");   // stayed unsubscribed
+    CHECK(eval_json(engine, "other") == "2");
+}
+
+TEST_CASE("a handler may subscribe from inside a dispatch",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    // Growing the vector mid-pass can reallocate it, so this is the case that
+    // catches a servicing loop holding a reference across the dispatch.
+    bridge.load_script(R"(
+        var late = 0;
+        var added = false;
+        onParamChanged('Cutoff', function () {
+            if (added) return;
+            added = true;
+            for (var i = 0; i < 8; i++) onParamChanged('Cutoff', function () { late++; });
+        });
+    )");
+
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    // The new subscriptions exist but are seeded at the current value, so they
+    // do not retroactively fire for the change that created them.
+    CHECK(bridge.param_subscription_count() == 9);
+    CHECK(eval_json(engine, "late") == "0");
+
+    store.set_value(10, 6000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "late") == "8");
+}
+
+TEST_CASE("a NaN param value does not dispatch every frame",
+          "[view][bridge][state-binding][param-change]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_rich_params(store);
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(kRecorder);
+
+    // NaN never compares equal to itself, so an unguarded change test would
+    // report a change on every single frame for as long as the value stays NaN.
+    store.set_value(10, std::numeric_limits<float>::quiet_NaN());
+    tick(bridge);
+    tick(bridge);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "0");
+
+    // Recovering to a real value reports normally.
+    store.set_value(10, 5000.0f);
+    tick(bridge);
+    CHECK(eval_json(engine, "seen.length") == "1");
+}
+
+// ── {fromParam: true} — metadata-derived transforms ───────────────────
+//
+// Opt-in. The two gaps it closes: a RangeSlider maps the store's normalized
+// value linearly onto its own range, which is wrong whenever the param is
+// skewed; and a dB meter has to hand-copy ParamRange.min/max that the param
+// already declares.
+
+namespace {
+
+// A skewed 20 Hz..20 kHz range whose normalized midpoint sits at 1 kHz — the
+// classic filter-cutoff shape, and the case where normalized and real-linear
+// disagree most visibly.
+void add_skewed_cutoff(StateStore& store) {
+    ParamInfo p{};
+    p.id = 20;
+    p.name = "Cutoff";
+    p.unit = "Hz";
+    p.range = ParamRange::with_center(20.0f, 20000.0f, 1000.0f);
+    p.range.default_value = 1000.0f;
+    store.add_parameter(p);
+}
+
+} // namespace
+
+TEST_CASE("fromParam makes a RangeSlider skew-correct in real units",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createRangeSlider('plain');
+        createRangeSlider('derived');
+        bindWidgetToParam('plain', 'Cutoff');
+        bindWidgetToParam('derived', 'Cutoff', { fromParam: true });
+    )");
+    auto* plain = dynamic_cast<RangeSlider*>(bridge.widget("plain"));
+    auto* derived = dynamic_cast<RangeSlider*>(bridge.widget("derived"));
+    REQUIRE(plain != nullptr);
+    REQUIRE(derived != nullptr);
+    plain->set_min(20.0f);
+    plain->set_max(20000.0f);
+    derived->set_min(20.0f);
+    derived->set_max(20000.0f);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+
+    // The derived slider reads back the real value it is bound to.
+    REQUIRE_THAT(derived->value(), WithinAbs(1000.0f, 1.0f));
+    // The plain binding puts a 1 kHz cutoff near the middle of the travel,
+    // because the normalized value is curved — this is the bug being fixed,
+    // pinned so a future change to the default path is visible.
+    REQUIRE_THAT(plain->value(), WithinAbs(20.0f + 0.5f * (20000.0f - 20.0f), 200.0f));
+    CHECK(plain->value() > derived->value() * 5.0f);
+}
+
+TEST_CASE("fromParam derives a meter's range instead of hand-copied dbMin/dbMax",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    store.add_parameter({.id = 21, .name = "Level", .unit = "dB",
+                         .range = {.min = -60.0f, .max = 0.0f}});
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createMeter('hand');
+        createMeter('derived');
+        bindMeter('hand', 'Level', { db: true, dbMin: -60, dbMax: 0 });
+        bindMeter('derived', 'Level', { fromParam: true });
+    )");
+    auto* hand = dynamic_cast<Meter*>(bridge.widget("hand"));
+    auto* derived = dynamic_cast<Meter*>(bridge.widget("derived"));
+    REQUIRE(hand != nullptr);
+    REQUIRE(derived != nullptr);
+
+    store.set_value(21, -30.0f);
+    bridge.service_param_bindings();
+    // Derivation reproduces the hand-written transform exactly — that
+    // equivalence is the whole point, minus the duplicated constants.
+    REQUIRE_THAT(derived->display_rms(), WithinAbs(hand->display_rms(), 1e-5f));
+    REQUIRE_THAT(derived->display_rms(), WithinAbs(0.5f, 1e-3f));
+}
+
+TEST_CASE("the bare two-arg bind is untouched by the fromParam work",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // A knob is a normalized surface: its position should track the host's
+    // automation curve, so the bare call must keep pushing get_normalized and
+    // fromParam must deliberately NOT re-map it.
+    bridge.load_script(R"(
+        createKnob('bare');
+        createKnob('asked');
+        bindWidgetToParam('bare', 'Cutoff');
+        bindWidgetToParam('asked', 'Cutoff', { fromParam: true });
+    )");
+    auto* bare = dynamic_cast<Knob*>(bridge.widget("bare"));
+    auto* asked = dynamic_cast<Knob*>(bridge.widget("asked"));
+    REQUIRE(bare != nullptr);
+    REQUIRE(asked != nullptr);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+    // with_center puts 1 kHz at the normalized midpoint.
+    REQUIRE_THAT(bare->value(), WithinAbs(0.5f, 1e-3f));
+    REQUIRE_THAT(asked->value(), WithinAbs(bare->value(), 1e-6f));
+}
+
+TEST_CASE("an explicit db range still wins over fromParam",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    store.add_parameter({.id = 21, .name = "Level", .unit = "dB",
+                         .range = {.min = -60.0f, .max = 0.0f}});
+    WidgetBridge bridge(engine, root, store);
+
+    // Passing a full explicit db transform alongside fromParam is the author
+    // overriding the derivation on purpose; silently replacing what they wrote
+    // would be the wrong call. (dbMin/dbMax without `db: true` is inert in this
+    // API — the mapping is off — so a real override names all three.)
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'Level', { fromParam: true, db: true, dbMin: -30, dbMax: 0 });
+    )");
+    auto* m = dynamic_cast<Meter*>(bridge.widget("m"));
+    REQUIRE(m != nullptr);
+
+    store.set_value(21, -15.0f);
+    bridge.service_param_bindings();
+    // Halfway up the EXPLICIT -30..0 window, not the param's -60..0.
+    REQUIRE_THAT(m->display_rms(), WithinAbs(0.5f, 1e-3f));
+}
+
+TEST_CASE("fromParam still derives when the widget is created after the bind",
+          "[view][bridge][state-binding][from-param]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_skewed_cutoff(store);
+    WidgetBridge bridge(engine, root, store);
+
+    // Binding before the view exists is explicitly supported, so derivation
+    // cannot happen at bind time — it has to wait for the widget.
+    bridge.load_script(R"(
+        bindWidgetToParam('later', 'Cutoff', { fromParam: true });
+        createRangeSlider('later');
+    )");
+    auto* later = dynamic_cast<RangeSlider*>(bridge.widget("later"));
+    REQUIRE(later != nullptr);
+    later->set_min(20.0f);
+    later->set_max(20000.0f);
+
+    store.set_value(20, 1000.0f);
+    bridge.service_param_bindings();
+    REQUIRE_THAT(later->value(), WithinAbs(1000.0f, 1.0f));
+}
+
+// ── value: channel bindings ───────────────────────────────────────────
+//
+// `bindMeter(id, "value:<name>")` binds a widget to a value the processor
+// PUBLISHES rather than a parameter. Before this, a meter could only show a
+// level if the processor wrote it into a parameter — so gain reduction and
+// envelope displays had to be hand-rolled per plugin.
+
+namespace {
+
+MeterFrame mono_frame(float rms) {
+    MeterFrame f{};
+    f.channels = 1;
+    f.rms[0] = rms;
+    f.peak[0] = rms;
+    return f;
+}
+
+} // namespace
+
+TEST_CASE("a meter binds to a published value channel, not a parameter",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* gr = channels.declare_meter("gr_db");
+    REQUIRE(gr != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('gr');
+        bindMeter('gr', 'value:gr_db');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("gr"));
+    REQUIRE(meter != nullptr);
+
+    // The publish side is what an audio thread would do.
+    gr->publish(mono_frame(0.25f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.25f, 1e-5f));
+
+    gr->publish(mono_frame(0.75f));
+    bridge.service_param_bindings();
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.75f, 1e-5f));
+}
+
+TEST_CASE("an undeclared value channel fails loudly rather than silently",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    channels.declare_meter("gr_db");
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'value:nope');
+    )");
+
+    REQUIRE(bridge.param_binding_count() == 0);
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 1);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    CHECK_FALSE(is_bound(attempts[0].outcome));
+}
+
+TEST_CASE("value: and parameter names are separate namespaces",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);  // declares a param called "gain"
+
+    ValueChannelSet channels;  // declares NO channel called "gain"
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('a');
+        createMeter('b');
+        bindMeter('a', 'value:gain');
+        bindMeter('b', 'gain');
+    )");
+
+    // `value:gain` must NOT fall back to the same-named parameter — resolving
+    // across namespaces would bind a meter to the wrong source and look fine.
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 2);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    // The bare name still resolves as a parameter, unchanged.
+    CHECK(is_bound(attempts[1].outcome));
+    CHECK(bridge.param_binding_count() == 1);
+}
+
+TEST_CASE("value: binds fail cleanly when the processor declares no channels",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    // No set attached at all — the default for every processor that does not
+    // override value_channels(). This must not crash or bind.
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createMeter('m');
+        bindMeter('m', 'value:anything');
+    )");
+
+    CHECK(bridge.param_binding_count() == 0);
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 1);
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+}
+
+// ── bindScope + staleness ─────────────────────────────────────────────
+
+TEST_CASE("bindScope pushes a vector channel into a SpectrumView",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    auto* env = channels.declare_vector("env");
+    REQUIRE(env != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createSpectrum('scope');
+        bindScope('scope', 'value:env');
+    )");
+    REQUIRE(bridge.param_binding_count() == 1);
+
+    const float block[4] = {-6.0f, -12.0f, -18.0f, -24.0f};
+    env->publish(block, 4);
+    bridge.service_param_bindings();
+    // The block reached the view: binding a scope is a whole-block push, not a
+    // scalar one, so this is the path that would silently do nothing if the
+    // scope target fell through to the value/meter branch.
+    CHECK(bridge.binding_attempts().back().outcome == BindingOutcome::ok);
+}
+
+TEST_CASE("a scope cannot bind to a meter channel, or to a parameter",
+          "[view][bridge][state-binding][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);  // has a param named "gain"
+
+    ValueChannelSet channels;
+    channels.declare_meter("level");  // a METER channel, not a vector
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createSpectrum('a');
+        createSpectrum('b');
+        bindScope('a', 'value:level');
+        bindScope('b', 'gain');
+    )");
+
+    const auto& attempts = bridge.binding_attempts();
+    REQUIRE(attempts.size() == 2);
+    // Wrong SHAPE is a miss, not a coercion — rendering a meter as a spectrum
+    // would draw a plausible picture of the wrong thing.
+    CHECK(attempts[0].outcome == BindingOutcome::unknown_value_channel);
+    // And a scope has no parameter equivalent at all.
+    CHECK(attempts[1].outcome == BindingOutcome::unknown_value_channel);
+    CHECK(bridge.param_binding_count() == 0);
+}
+
+TEST_CASE("a meter holds a static-but-live reading, and decays once publishing stops",
+          "[view][bridge][state-binding][value-channel][staleness]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+
+    ValueChannelSet channels;
+    // neutral = 0: a gain-reduction meter rests at "no reduction".
+    auto* gr = channels.declare_meter("gr", "dB", 0.0f);
+    REQUIRE(gr != nullptr);
+
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createMeter('gr');
+        bindMeter('gr', 'value:gr');
+    )");
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("gr"));
+    REQUIRE(meter != nullptr);
+
+    // A compressor holding steady reduction publishes the SAME value every
+    // block. Value-equality staleness would wrongly decay this; the publish
+    // counter keeps it alive.
+    for (int i = 0; i < 5; ++i) {
+        gr->publish(mono_frame(0.6f));
+        bridge.service_param_bindings();
+    }
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
+
+    // Now the writer stops. Still fresh immediately after.
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.6f, 1e-5f));
+
+    // ...and decays to neutral once the stale window has elapsed.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.0f, 1e-5f));
+
+    // A fresh publish revives it.
+    gr->publish(mono_frame(0.4f));
+    bridge.service_param_bindings();
+    CHECK_THAT(meter->display_rms(), WithinAbs(0.4f, 1e-5f));
 }

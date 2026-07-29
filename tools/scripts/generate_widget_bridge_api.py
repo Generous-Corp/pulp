@@ -72,7 +72,11 @@ DOC_CATEGORY_NOTES = {
 }
 
 CAPABILITY_ORDER = ["exec", "clipboard", "filesystem", "storage", "ai", "runtime_import", "network"]
-CALLABLE_KINDS = {"function", "promise_function"}
+# preamble_function is a public JS global defined in the bridge preamble rather
+# than registered natively: CHOC's NativeFunction cannot carry a JSValue, so any
+# API taking a callback must be a JS shim over a native primitive. It is still a
+# callable the UI author sees, so it types and documents like one.
+CALLABLE_KINDS = {"function", "promise_function", "preamble_function"}
 
 
 @dataclass(frozen=True)
@@ -82,11 +86,6 @@ class ManifestRow:
     kind: str
     source: str
     jsx: str = ""
-
-
-JS_PREAMBLE_ROWS = [
-    ManifestRow("on", "events", "function", "core/view/src/widget_bridge.cpp", "event:names"),
-]
 
 
 TYPE_PREAMBLE = """export {};
@@ -509,7 +508,7 @@ def read_manifest(root: Path) -> list[ManifestRow]:
 
 
 def api_rows(root: Path) -> list[ManifestRow]:
-    return read_manifest(root) + JS_PREAMBLE_ROWS
+    return read_manifest(root)
 
 
 def read_capability_wire_names(root: Path) -> dict[str, str]:
