@@ -20,7 +20,7 @@
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
-TEST_CASE("SpectralFrameEngine geometry validator catches 32-bit backing overflow",
+TEST_CASE("SpectralFrameEngine geometry validator catches target-byte overflows",
           "[signal][spectral-frame-engine][capacity]") {
     SpectralFrameEngineConfig config;
     config.fft_size = 1024;
@@ -29,17 +29,32 @@ TEST_CASE("SpectralFrameEngine geometry validator catches 32-bit backing overflo
     config.max_block = 200'000'000;
     config.max_synthesis_hop = 257; // ratio 1 plus the pitch/time hop guard sample
 
-    const auto wide = checked_spectral_frame_engine_geometry(
+    const auto wide = checked_spectral_frame_engine_geometry<float>(
         config, std::numeric_limits<std::uint64_t>::max());
     REQUIRE(wide.has_value());
     REQUIRE(wide->ring_size == 536'870'912);
     REQUIRE(wide->output_ring_elements == 4'294'967'296ULL);
 
-    constexpr std::uint64_t wasm32_max_elements =
+    constexpr std::uint64_t wasm32_max_bytes =
         std::numeric_limits<std::uint32_t>::max();
-    constexpr std::uint64_t outer_ring_elements = 8ULL * 268'435'456ULL;
-    STATIC_REQUIRE(outer_ring_elements <= wasm32_max_elements);
-    REQUIRE_FALSE(checked_spectral_frame_engine_geometry(config, wasm32_max_elements));
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<float>(config,
+                                                                 wasm32_max_bytes));
+
+    config.max_block = 100'000'000;
+    const auto count_fits_but_bytes_do_not = checked_spectral_frame_engine_geometry<float>(
+        config, std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(count_fits_but_bytes_do_not.has_value());
+    REQUIRE(count_fits_but_bytes_do_not->ring_size == 268'435'456);
+    REQUIRE(count_fits_but_bytes_do_not->output_ring_elements == 2'147'483'648ULL);
+    REQUIRE(count_fits_but_bytes_do_not->output_ring_elements <= wasm32_max_bytes);
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<float>(config,
+                                                                 wasm32_max_bytes));
+
+    const auto float_output_bytes =
+        count_fits_but_bytes_do_not->output_ring_elements * sizeof(float);
+    REQUIRE(checked_spectral_frame_engine_geometry<float>(config, float_output_bytes));
+    REQUIRE_FALSE(checked_spectral_frame_engine_geometry<double>(config,
+                                                                  float_output_bytes));
 }
 
 // ── allocation sentinel ─────────────────────────────────────────────────────

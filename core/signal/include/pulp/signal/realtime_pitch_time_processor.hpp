@@ -121,6 +121,193 @@ struct RealtimePitchTimeConfig {
     int analysis_hop = 0;
 };
 
+inline constexpr int kRealtimePitchTimeMaximumChannels = 64;
+
+template <typename SampleType>
+struct RealtimePitchTimePreparedGeometry {
+    SpectralFrameEngineConfig engine_config;
+    int fft_size = 0;
+    int analysis_hop = 0;
+    int ring_size = 0;
+    std::uint64_t stretch_ring_elements = 0;
+    std::uint64_t drain_elements = 0;
+    std::uint64_t finalize_zero_elements = 0;
+};
+
+/// Pure admission pass: derives all geometry and proves every prepare-time
+/// allocation against a target byte-address limit without changing processor state.
+template <typename SampleType>
+PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
+    const RealtimePitchTimeConfig& config,
+    double max_pitch_ratio,
+    std::uint64_t requested_max_bytes,
+    RealtimePitchTimePreparedGeometry<SampleType>& prepared) noexcept {
+    const auto target_max_bytes = std::min(requested_max_bytes, kTargetAddressMaximumBytes);
+    const bool quality = config.quality == PitchTimeQuality::quality;
+    int fft_size = quality ? 4096 : 1024;
+    int analysis_hop = quality ? 512 : 256;
+    const bool has_spectral_geometry_override =
+        config.fft_size != 0 || config.analysis_hop != 0;
+    if (has_spectral_geometry_override) {
+        if (!is_valid_spectral_frame_geometry(config.fft_size, config.analysis_hop)
+            || (config.fft_size % config.analysis_hop) != 0)
+            return PitchTimePrepareStatus::invalid_spectral_geometry;
+        fft_size = config.fft_size;
+        analysis_hop = config.analysis_hop;
+    }
+
+    const double max_stretch = config.mode == PitchTimeMode::time_stretch
+        ? static_cast<double>(config.max_time_ratio)
+        : max_pitch_ratio;
+    const double synthesis_hop =
+        std::ceil(max_stretch * static_cast<double>(analysis_hop)) + 1.0;
+    if (!std::isfinite(synthesis_hop)
+        || synthesis_hop > static_cast<double>(std::numeric_limits<int>::max()))
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+
+    RealtimePitchTimePreparedGeometry<SampleType> candidate;
+    candidate.fft_size = fft_size;
+    candidate.analysis_hop = analysis_hop;
+    candidate.engine_config.fft_size = fft_size;
+    candidate.engine_config.analysis_hop = analysis_hop;
+    candidate.engine_config.channels = config.channels;
+    candidate.engine_config.max_block = std::max(config.max_block, analysis_hop);
+    candidate.engine_config.max_synthesis_hop = static_cast<int>(synthesis_hop);
+    if (!checked_spectral_frame_engine_geometry<SampleType>(candidate.engine_config,
+                                                            target_max_bytes))
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+
+    const std::int64_t span_base = static_cast<std::int64_t>(fft_size)
+                                 + 2 * static_cast<std::int64_t>(analysis_hop)
+                                 + candidate.engine_config.max_block;
+    const long double span = static_cast<long double>(span_base)
+                                 * static_cast<long double>(std::max(max_stretch, 1.0))
+                             + static_cast<long double>(fft_size) + 64.0L;
+    if (!std::isfinite(span)
+        || span > static_cast<long double>(kSpectralFrameEngineMaximumRingSize))
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+    std::uint64_t ring_size = 1;
+    const auto required_ring_size = static_cast<std::uint64_t>(std::ceil(span));
+    while (ring_size < required_ring_size) ring_size <<= 1u;
+    candidate.ring_size = static_cast<int>(ring_size);
+
+    const auto channels = static_cast<std::uint64_t>(config.channels);
+    const auto synthesis_hop_elements =
+        static_cast<std::uint64_t>(candidate.engine_config.max_synthesis_hop);
+    const auto engine_block_elements =
+        static_cast<std::uint64_t>(candidate.engine_config.max_block);
+    std::uint64_t channel_hop_elements = 0;
+    if (!checked_capacity_product(channels, ring_size,
+                                  std::numeric_limits<std::uint64_t>::max(),
+                                  candidate.stretch_ring_elements)
+        || !checked_capacity_product(channels, synthesis_hop_elements,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     channel_hop_elements)
+        || !checked_capacity_product(channel_hop_elements, 4u,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     candidate.drain_elements)
+        || !checked_capacity_product(channels, engine_block_elements,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     candidate.finalize_zero_elements)
+        || !checked_allocation_bytes<SampleType>(candidate.stretch_ring_elements,
+                                                 target_max_bytes)
+        || !checked_allocation_bytes<SampleType>(candidate.drain_elements,
+                                                 target_max_bytes)
+        || !checked_allocation_bytes<SampleType>(candidate.finalize_zero_elements,
+                                                 target_max_bytes)
+        || !checked_allocation_bytes<SampleType*>(channels, target_max_bytes) // drain ptrs
+        || !checked_allocation_bytes<SampleType*>(channels,
+                                                  target_max_bytes)) // finalize ptrs
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+
+    const auto bins = static_cast<std::uint64_t>(fft_size / 2 + 1);
+    std::uint64_t channel_bins = 0;
+    std::uint64_t capture_bins = 0;
+    std::uint64_t channel_capture_bins = 0;
+    constexpr std::uint64_t capture_depth = 8;
+    if (!checked_capacity_product(channels, bins,
+                                  std::numeric_limits<std::uint64_t>::max(), channel_bins)
+        || !checked_capacity_product(capture_depth, bins,
+                                     std::numeric_limits<std::uint64_t>::max(), capture_bins)
+        || !checked_capacity_product(channels, capture_bins,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     channel_capture_bins))
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+
+    const bool coordinator_and_transient_fit =
+        checked_allocation_bytes<double>(bins, target_max_bytes) // previous phase
+        && checked_allocation_bytes<double>(bins, target_max_bytes) // synthesis phase
+        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // reference magnitude
+        && checked_allocation_bytes<double>(bins, target_max_bytes) // reference phase
+        && checked_allocation_bytes<int>(bins, target_max_bytes) // peak indices
+        && checked_allocation_bytes<SampleType>(bins, target_max_bytes); // transient history
+    const bool freeze_fit =
+        checked_allocation_bytes<SampleType>(channel_capture_bins,
+                                             target_max_bytes) // captured magnitudes
+        && checked_allocation_bytes<double>(capture_bins,
+                                            target_max_bytes) // reference phases
+        && checked_allocation_bytes<SampleType>(channel_bins,
+                                                target_max_bytes) // held magnitudes
+        && checked_allocation_bytes<double>(channel_bins,
+                                            target_max_bytes) // held phases
+        && checked_allocation_bytes<double>(bins, target_max_bytes); // instantaneous freq
+    const bool envelope_fit =
+        checked_allocation_bytes<SampleType>(bins, target_max_bytes) // log magnitude
+        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // envelope
+        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // smoothing input
+        && checked_allocation_bytes<std::complex<SampleType>>(
+            static_cast<std::uint64_t>(fft_size), target_max_bytes); // cepstrum
+    // The envelope's second FftT has identical typed storage to the engine FFT,
+    // which the canonical SFE validator above has already admitted independently.
+    if (!coordinator_and_transient_fit || !freeze_fit || !envelope_fit)
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+
+    if (config.noise_morphing) {
+        const std::uint64_t time_median = quality ? 7u : 5u;
+        const std::uint64_t freq_median = quality ? 11u : 7u;
+        std::uint64_t stn_history_elements = 0;
+        if (!checked_capacity_product(time_median, bins,
+                                      std::numeric_limits<std::uint64_t>::max(),
+                                      stn_history_elements))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        const bool stn_fit =
+            checked_allocation_bytes<SampleType>(stn_history_elements, target_max_bytes)
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // sines mask
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // transient mask
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // noise mask
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // harmonic
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // percussive
+            && checked_allocation_bytes<SampleType>(time_median,
+                                                    target_max_bytes) // time window
+            && checked_allocation_bytes<SampleType>(freq_median,
+                                                    target_max_bytes); // frequency window
+        const bool noise_morph_fit =
+            checked_allocation_bytes<NoiseMorpherT<SampleType>>(channels,
+                                                               target_max_bytes)
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // morpher env A
+            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // morpher env B
+            && checked_allocation_bytes<SampleType>(bins,
+                                                    target_max_bytes) // magnitude scratch
+            && checked_allocation_bytes<SampleType>(channel_bins,
+                                                    target_max_bytes) // channel envelopes
+            && checked_allocation_bytes<std::complex<SampleType>>(
+                bins, target_max_bytes); // noise spectrum
+        if (!stn_fit || !noise_morph_fit)
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+    }
+
+    if (config.sinc_resampling) {
+        constexpr std::uint64_t taps = 32;
+        constexpr std::uint64_t table_elements = 513 * taps;
+        if (!checked_allocation_bytes<SampleType>(table_elements, target_max_bytes)
+            || !checked_allocation_bytes<SampleType>(taps, target_max_bytes))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+    }
+
+    prepared = candidate;
+    return PitchTimePrepareStatus::prepared;
+}
+
 template <typename SampleType = float>
 class RealtimePitchTimeProcessorT {
 public:
@@ -131,11 +318,15 @@ public:
     /// not audio-thread safe. After prepare(), process(), feed(),
     /// read_stretched(), reset(), control setters, and accessors are
     /// allocation-free for blocks no larger than config.max_block and the
-    /// prepared channel count.
-    PitchTimePrepareStatus prepare(double sample_rate, const RealtimePitchTimeConfig& config) {
+    /// prepared channel count. target_max_bytes defaults to the native address
+    /// limit and may be lowered to validate a narrower deployment target.
+    PitchTimePrepareStatus prepare(
+        double sample_rate,
+        const RealtimePitchTimeConfig& config,
+        std::uint64_t target_max_bytes = kTargetAddressMaximumBytes) {
         if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
             return PitchTimePrepareStatus::invalid_sample_rate;
-        if (config.channels < 1 || config.channels > kMaxChannels)
+        if (config.channels < 1 || config.channels > kRealtimePitchTimeMaximumChannels)
             return PitchTimePrepareStatus::invalid_channel_count;
         if (config.max_block <= 0) return PitchTimePrepareStatus::invalid_max_block;
         if (config.mode == PitchTimeMode::time_stretch
@@ -147,79 +338,17 @@ public:
             || !std::isfinite(max_pitch_ratio))
             return PitchTimePrepareStatus::invalid_max_pitch_semitones;
 
+        RealtimePitchTimePreparedGeometry<SampleType> geometry;
+        const auto geometry_status = checked_realtime_pitch_time_prepared_geometry(
+            config, max_pitch_ratio, target_max_bytes, geometry);
+        if (geometry_status != PitchTimePrepareStatus::prepared) return geometry_status;
         const bool quality = config.quality == PitchTimeQuality::quality;
-        int prepared_fft_size = quality ? 4096 : 1024;
-        int prepared_analysis_hop = quality ? 512 : 256;
-        // Offline geometry override (material-adaptive window/overlap). Only
-        // present when either value is nonzero; the realtime path leaves both 0.
-        const bool has_spectral_geometry_override =
-            config.fft_size != 0 || config.analysis_hop != 0;
-        if (has_spectral_geometry_override) {
-            if (!is_valid_spectral_frame_geometry(config.fft_size, config.analysis_hop)
-                || (config.fft_size % config.analysis_hop) != 0)
-                return PitchTimePrepareStatus::invalid_spectral_geometry;
-            prepared_fft_size = config.fft_size;
-            prepared_analysis_hop = config.analysis_hop;
-        }
-
-        const double max_stretch =
-            config.mode == PitchTimeMode::time_stretch
-                ? static_cast<double>(config.max_time_ratio)
-                : max_pitch_ratio;
-        const double synthesis_hop =
-            std::ceil(max_stretch * static_cast<double>(prepared_analysis_hop)) + 1.0;
-        if (!std::isfinite(synthesis_hop)
-            || synthesis_hop > static_cast<double>(std::numeric_limits<int>::max()))
-            return PitchTimePrepareStatus::unrepresentable_capacity;
-        const int prepared_max_synthesis_hop = static_cast<int>(synthesis_hop);
-        const int prepared_engine_max_block = std::max(config.max_block, prepared_analysis_hop);
-
-        const std::int64_t span_base = static_cast<std::int64_t>(prepared_fft_size)
-                                     + 2 * static_cast<std::int64_t>(prepared_analysis_hop)
-                                     + static_cast<std::int64_t>(prepared_engine_max_block);
-        const long double span = static_cast<long double>(span_base)
-                                     * static_cast<long double>(std::max(max_stretch, 1.0))
-                                 + static_cast<long double>(prepared_fft_size) + 64.0L;
-        if (!std::isfinite(span)
-            || span > static_cast<long double>(kSpectralFrameEngineMaximumRingSize))
-            return PitchTimePrepareStatus::unrepresentable_capacity;
-        std::uint64_t prepared_ring_size = 1;
-        const auto required_ring_size = static_cast<std::uint64_t>(std::ceil(span));
-        while (prepared_ring_size < required_ring_size) prepared_ring_size <<= 1u;
-
-        const auto size_product_fits = [](std::size_t lhs, std::size_t rhs) {
-            return lhs == 0 || rhs <= std::numeric_limits<std::size_t>::max() / lhs;
-        };
-        const auto channels = static_cast<std::size_t>(config.channels);
-        const auto ring_samples = static_cast<std::size_t>(prepared_ring_size);
-        const auto synthesis_hop_samples =
-            static_cast<std::size_t>(prepared_max_synthesis_hop);
-        const auto engine_block_samples = static_cast<std::size_t>(prepared_engine_max_block);
-        if (!size_product_fits(channels, ring_samples)
-            || !size_product_fits(channels, synthesis_hop_samples))
-            return PitchTimePrepareStatus::unrepresentable_capacity;
-        const auto prepared_stretch_ring_samples = channels * ring_samples;
-        const auto prepared_channel_hop_samples = channels * synthesis_hop_samples;
-        if (!size_product_fits(prepared_channel_hop_samples, 4u)
-            || !size_product_fits(channels, engine_block_samples))
-            return PitchTimePrepareStatus::unrepresentable_capacity;
-        const auto prepared_drain_samples = prepared_channel_hop_samples * 4u;
-        const auto prepared_finalize_zero_samples = channels * engine_block_samples;
-
-        SpectralFrameEngineConfig engine_config;
-        engine_config.fft_size = prepared_fft_size;
-        engine_config.analysis_hop = prepared_analysis_hop;
-        engine_config.channels = config.channels;
-        engine_config.max_block = prepared_engine_max_block;
-        engine_config.max_synthesis_hop = prepared_max_synthesis_hop;
-        if (!checked_spectral_frame_engine_geometry(engine_config))
-            return PitchTimePrepareStatus::unrepresentable_capacity;
 
         config_ = config;
         sample_rate_ = sample_rate;
-        fft_size_ = prepared_fft_size;
-        analysis_hop_ = prepared_analysis_hop;
-        engine_.prepare(engine_config);
+        fft_size_ = geometry.fft_size;
+        analysis_hop_ = geometry.analysis_hop;
+        engine_.prepare(geometry.engine_config);
 
         coordinator_.prepare(fft_size_, config.channels);
 
@@ -249,19 +378,22 @@ public:
 
         // Stretched-stream ring: must span the read-to-write gap
         // (latency * ratio) plus one engine drain burst and one block.
-        ring_size_ = static_cast<int>(prepared_ring_size);
+        ring_size_ = geometry.ring_size;
         ring_mask_ = ring_size_ - 1;
-        stretch_ring_.assign(prepared_stretch_ring_samples, SampleType{0});
+        stretch_ring_.assign(static_cast<std::size_t>(geometry.stretch_ring_elements),
+                             SampleType{0});
 
-        drain_buf_.assign(prepared_drain_samples, SampleType{0});
+        drain_buf_.assign(static_cast<std::size_t>(geometry.drain_elements), SampleType{0});
         drain_ptrs_.resize(static_cast<size_t>(config.channels));
-        finalize_zero_buf_.assign(prepared_finalize_zero_samples, SampleType{0});
+        finalize_zero_buf_.assign(static_cast<std::size_t>(geometry.finalize_zero_elements),
+                                  SampleType{0});
         finalize_zero_ptrs_.resize(static_cast<size_t>(config.channels));
         for (int ch = 0; ch < config.channels; ++ch)
             finalize_zero_ptrs_[static_cast<size_t>(ch)] =
                 finalize_zero_buf_.data()
-                + static_cast<size_t>(ch) * static_cast<size_t>(engine_config.max_block);
-        max_synthesis_hop_ = engine_config.max_synthesis_hop;
+                + static_cast<size_t>(ch)
+                    * static_cast<size_t>(geometry.engine_config.max_block);
+        max_synthesis_hop_ = geometry.engine_config.max_synthesis_hop;
 
         // Noise-morphing front end: STN decomposition over the spectrum
         // plus one NoiseMorpher per channel. The STN mask is computed from
@@ -765,8 +897,7 @@ private:
     std::vector<SampleType*> drain_ptrs_;
     std::vector<SampleType> finalize_zero_buf_;
     std::vector<const SampleType*> finalize_zero_ptrs_;
-    static constexpr int kMaxChannels = 64;
-    const SampleType* in_ptrs_scratch_[kMaxChannels] = {};
+    const SampleType* in_ptrs_scratch_[kRealtimePitchTimeMaximumChannels] = {};
 
     double synth_accum_ = 0.0;
     std::int64_t synth_accum_int_ = 0;
