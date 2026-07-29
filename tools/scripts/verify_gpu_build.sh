@@ -82,14 +82,17 @@ if [[ -z "$pulp_view_core_a" ]]; then
 else
   echo "  pulp-view-core: $pulp_view_core_a"
   # Skia presence: look for SkSurface symbols
-  if nm "$pulp_view_core_a" 2>/dev/null | grep -qE 'SkSurface'; then
+  # Consume the full nm stream. With pipefail, grep -q exits on the first
+  # match, gives nm SIGPIPE, and turns a valid archive into exit 141.
+  if nm "$pulp_view_core_a" 2>/dev/null | grep -E 'SkSurface' >/dev/null; then
     grn "  ✓ Skia symbols present (SkSurface)"
   else
     red "  FAIL: libpulp-view-core.a has no Skia symbols (SDK shipped without GPU — #1817)"
     fail=1
   fi
   # Graphite presence: look for skgpu::graphite symbols
-  if nm "$pulp_view_core_a" 2>/dev/null | grep -qE 'skgpu.*graphite|graphite.*Resource'; then
+  if nm "$pulp_view_core_a" 2>/dev/null |
+      grep -E 'skgpu.*graphite|graphite.*Resource' >/dev/null; then
     grn "  ✓ Graphite symbols present (skgpu::graphite)"
   else
     yel "  WARN: libpulp-view-core.a has no Graphite symbols — GPU path may be unavailable on this lane"
@@ -104,7 +107,14 @@ if [[ -n "$CONSUMER_BIN" ]]; then
     red "  FAIL: consumer binary not found"; fail=1
   else
     # arm64 check (we only ship arm64 native bridge for macOS at the moment)
-    arch="$(file "$CONSUMER_BIN" | grep -oE 'arm64|x86_64' | head -1)"
+    file_description="$(file "$CONSUMER_BIN")"
+    if [[ "$file_description" == *arm64* ]]; then
+      arch="arm64"
+    elif [[ "$file_description" == *x86_64* ]]; then
+      arch="x86_64"
+    else
+      arch="unknown"
+    fi
     if [[ "$arch" == "arm64" ]]; then
       grn "  ✓ arch: arm64"
     else
@@ -112,7 +122,8 @@ if [[ -n "$CONSUMER_BIN" ]]; then
       warn=1
     fi
     # Skia/Graphite linked through (static link from pulp-view)
-    if nm "$CONSUMER_BIN" 2>/dev/null | grep -qE 'graphite|SkGraphic'; then
+    if nm "$CONSUMER_BIN" 2>/dev/null |
+        grep -E 'graphite|SkGraphic' >/dev/null; then
       grn "  ✓ Graphite linked through into consumer"
     else
       red "  FAIL: consumer does not contain Graphite symbols (would mean WebView/CG-only fallback)"
@@ -123,7 +134,8 @@ if [[ -n "$CONSUMER_BIN" ]]; then
     # is opt-in via PULP_VERIFY_NATIVE_SYMBOL env var so non-bridge consumers
     # don't fail.
     if [[ -n "${PULP_VERIFY_NATIVE_SYMBOL:-}" ]]; then
-      if nm "$CONSUMER_BIN" 2>/dev/null | grep -qE "$PULP_VERIFY_NATIVE_SYMBOL"; then
+      if nm "$CONSUMER_BIN" 2>/dev/null |
+          grep -E "$PULP_VERIFY_NATIVE_SYMBOL" >/dev/null; then
         grn "  ✓ Native-bridge symbol '$PULP_VERIFY_NATIVE_SYMBOL' present"
       else
         red "  FAIL: PULP_VERIFY_NATIVE_SYMBOL='$PULP_VERIFY_NATIVE_SYMBOL' not found in consumer"
