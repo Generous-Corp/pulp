@@ -46,10 +46,8 @@ concurrency:
 permissions:
   contents: read         # read checked-in ruleset JSON
   pull-requests: write   # post/update the drift comment on PRs
-  administration: read   # read rulesets AND classic branch protection
-  # Note: both live surfaces below need `administration: read` on the token. If
-  # either returns 403, grant that scope in repo settings or swap GH_TOKEN for a
-  # PAT/RELEASE_BOT_TOKEN with admin:read. A 403 is reported as "unreadable",
+  # GitHub Actions does not expose an `administration` permission key. If either
+  # live surface below returns 403, the workflow reports it as "unreadable",
   # never silently as "no contexts required".
 
 jobs:

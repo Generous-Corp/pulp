@@ -332,6 +332,8 @@ jobs:
         #     linux-arm64, when backfilling older tags.
         #   - tools/scripts/package_cli.py: release packaging/rpath fixes,
         #     including macOS ad-hoc re-signing after install_name_tool rewrites.
+        #   - tools/scripts/resign_macos_release_tree.py: install-time signature
+        #     repair is safe and required for every backfilled Darwin SDK.
         #
         # Do NOT wholesale-overlay tools/cli/CMakeLists.txt. That file's
         # source list drifts as CLI features land on main, and an older tag may
@@ -343,6 +345,7 @@ jobs:
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               tools/scripts/package_cli.py \
+              tools/scripts/resign_macos_release_tree.py \
               core/canvas/CMakeLists.txt \
               tools/deps/manifest.json \
               ; do
@@ -386,6 +389,27 @@ jobs:
           path.write_text(text, encoding="utf-8")
           print("Patched tools/cli/CMakeLists.txt with the fontconfig tail-link block")
           PY
+
+      # A normal post-contract tag carries these files itself. An old tag or an
+      # explicit old source_ref does not; fetch the current verifier as a
+      # compatibility engine only when absent. Its matrix floor makes a
+      # pre-contract source an explicit skip rather than an accidental pass.
+      - name: Ensure release-content verifier helpers exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          for path in \
+              tools/scripts/release_artifact_contents.py \
+              tools/scripts/release_product_matrix.json \
+              tools/scripts/resign_macos_release_tree.py \
+              ; do
+            if [ ! -f "$path" ]; then
+              url="https://raw.githubusercontent.com/${repo}/main/${path}"
+              echo "Fetching missing release helper from ${url}"
+              curl -fsSL "$url" -o "$path"
+            fi
+          done
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -729,6 +753,14 @@ jobs:
           cmake --install build-sdk --prefix sdk-staging --config Release
           test -f sdk-staging/lib/libpulp-view.a
           test -f sdk-staging/lib/libpulp-view-core.a
+          # CMake rewrites install RPATHs while copying executables into the SDK.
+          # On Mach-O that invalidates the build-time code signature. Re-sign the
+          # installed bytes (not the source build outputs), then verify strictly;
+          # v0.759.0 shipped an SDK pulp-cpp with an invalid signature because
+          # only the standalone CLI archive was re-signed after its rewrite.
+          if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
+            python3 tools/scripts/resign_macos_release_tree.py sdk-staging
+          fi
           python3 - <<'PY'
           import os
           from pathlib import Path
@@ -777,6 +809,35 @@ jobs:
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk
         shell: pwsh
+
+      - name: Verify release archive product matrix (Unix)
+        if: runner.os != 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          signature_args=()
+          if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
+            signature_args+=(--native-signatures)
+          fi
+          python3 tools/scripts/release_artifact_contents.py . \
+            --platform "${{ matrix.platform }}" \
+            --version "${RELEASE_TAG#v}" \
+            "${signature_args[@]}"
+
+      - name: Verify release archive product matrix (Windows)
+        if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          python tools/scripts/release_artifact_contents.py . `
+            --platform "${{ matrix.platform }}" `
+            --version $version
 
       # Carry the floor from the exact checkout that produced each macOS
       # artifact. A workflow_dispatch backfill may build an old tag while the
@@ -1239,6 +1300,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           set -euo pipefail
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
@@ -1345,6 +1407,23 @@ jobs:
 
           rm -rf release-assets && mkdir -p release-assets
           gh release download "${TAG}" --repo "${REPO}" --dir release-assets --clobber
+
+          # Inspect the bytes downloaded back from the release draft, not the
+          # build directories. Correct outer filenames/checksums are insufficient:
+          # an archive can still contain a stale vanished target, omit a plugin
+          # format, carry the wrong version, or lose an executable bit.
+          matrix=tools/scripts/release_product_matrix.json
+          matrix_ref="$TAG"
+          if [ -n "$SOURCE_REF" ]; then
+            git fetch --no-tags origin "$SOURCE_REF"
+            matrix_ref=FETCH_HEAD
+          fi
+          if git cat-file -e "${matrix_ref}:${matrix}" 2>/dev/null; then
+            git show "${matrix_ref}:${matrix}" > "$RUNNER_TEMP/release_product_matrix.json"
+            matrix="$RUNNER_TEMP/release_product_matrix.json"
+          fi
+          python3 tools/scripts/release_artifact_contents.py release-assets \
+            --all-platforms --version "${TAG#v}" --matrix "$matrix"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do
