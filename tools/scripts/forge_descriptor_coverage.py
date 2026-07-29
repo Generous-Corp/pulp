@@ -24,26 +24,22 @@ INDEX = HOST_INCLUDE / "forge_catalog_index.hpp"
 
 # Packs not yet carrying descriptor(). Shrinks as families migrate; never grows.
 # A new pack must ship descriptors rather than be added here.
-PENDING = {
-    "forge_analog_vcf_catalog.hpp",
-    "forge_character_delay_catalog.hpp",
-    "forge_distortion_catalog.hpp",
-    "forge_drum_catalog.hpp",
-    "forge_dynamics_catalog.hpp",
-    "forge_effect_modulation_catalog.hpp",
-    "forge_fdn_reverb_catalog.hpp",
-    "forge_lofi_catalog.hpp",
-    "forge_modulation_catalog.hpp",
-    "forge_pitch_catalog.hpp",
-    "forge_saturator_catalog.hpp",
-    "forge_sequencing_catalog.hpp",
-    "forge_space_catalog.hpp",
-    "forge_synthesis_catalog.hpp",
-    "forge_tape_catalog.hpp",
-}
+PENDING: set[str] = set()
 
 DESCRIPTOR_RE = re.compile(r"^\s*inline\s+ForgeNodeDescriptor\s+\w+\s*\(", re.M)
 INCLUDE_RE = re.compile(r'^\s*#include\s+<pulp/host/(forge_\w+\.hpp)>', re.M)
+
+
+def has_descriptors(root: Path, pack: str, text: str) -> bool:
+    if DESCRIPTOR_RE.search(text):
+        return True
+
+    descriptor_header = f"detail/{pack.removesuffix('_catalog.hpp')}_descriptors.hpp"
+    include = f"#include <pulp/host/{descriptor_header}>"
+    path = root / HOST_INCLUDE / descriptor_header
+    return include in text and path.exists() and DESCRIPTOR_RE.search(
+        path.read_text(encoding="utf-8")
+    ) is not None
 
 
 def indexed_packs(root: Path) -> list[str]:
@@ -75,7 +71,7 @@ def main() -> int:
             print(f"  indexed pack does not exist: {pack}", file=sys.stderr)
             missing.append(pack)
             continue
-        if DESCRIPTOR_RE.search(path.read_text(encoding="utf-8")):
+        if has_descriptors(root, pack, path.read_text(encoding="utf-8")):
             described.append(pack)
         elif pack in PENDING:
             pending.append(pack)

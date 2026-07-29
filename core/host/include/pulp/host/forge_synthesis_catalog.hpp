@@ -688,3 +688,5 @@ inline CustomNodeType make_granular_node() {
 } // namespace granular
 
 }  // namespace pulp::host::synthesis
+
+#include <pulp/host/detail/forge_synthesis_descriptors.hpp>

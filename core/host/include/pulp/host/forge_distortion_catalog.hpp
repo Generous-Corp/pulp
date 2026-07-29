@@ -27,6 +27,7 @@
 // cross-channel state, so a stereo instrument would be two independent copies —
 // which is what instancing two nodes already gives.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/distortion.hpp>
@@ -286,3 +287,5 @@ inline int distortion_latency_samples(OversampleTier tier, double sample_rate) {
 }
 
 }  // namespace pulp::host::distortion
+
+#include <pulp/host/detail/forge_distortion_descriptors.hpp>

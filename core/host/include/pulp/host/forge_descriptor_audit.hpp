@@ -28,6 +28,7 @@ enum class ForgeAuditFault {
     missing_choices,       ///< stepped, but no named states
     choices_on_continuous, ///< named states on a continuous sweep
     choice_out_of_range,   ///< a named state's value is outside the baked range
+    invalid_curve,         ///< the declared mapping is undefined for the baked range
     unknown_realization,   ///< a realization_mode naming no declared realization
     empty_field,           ///< key, label or description left blank
     no_realizations        ///< a node with no concrete realization to build

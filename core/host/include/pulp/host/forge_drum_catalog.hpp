@@ -12,3 +12,5 @@ inline CustomNodeType make_drum_node(EngineId id) {
 }
 
 } // namespace pulp::host::forge_drum
+
+#include <pulp/host/detail/forge_drum_descriptors.hpp>

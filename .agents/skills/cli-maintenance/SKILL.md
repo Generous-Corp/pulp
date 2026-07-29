@@ -263,14 +263,14 @@ Decision heuristics for "does this deserve MCP exposure":
 - Long-running watch/loop (dev, loop, run, host) → **NO**, baseline it.
 - Trivial Bash equivalent (clean, version, config) → **NO**, baseline it.
 - Interactive surface (design, ship) → **NO**, baseline it.
-- **Repo-maintenance gate whose output is a COMMITTED artifact** (`coverage`,
-  `dsp`) → **NO**, baseline it. These commands exist to fail CI when a
-  generated file drifts from its source. An agent that wants the data reads the
-  committed artifact — `docs/status/dsp-capabilities.json` — which is cheaper
-  and more reproducible than a tool call, and the tool call could not be trusted
-  for freshness anyway since it would report whatever the working tree happens
-  to say. Give the baseline reason in that shape: what the artifact is, and why
-  reading it beats invoking the command.
+- **Repo-maintenance or SDK-discovery command whose output is a committed or
+  generated installed artifact** (`coverage`, `dsp`, `forge`) → **NO**,
+  baseline it. These commands either fail CI when a generated file drifts or
+  reproduce an artifact tied to the installed SDK. An agent that wants the data
+  reads `docs/status/dsp-capabilities.json` or
+  `$PULP_SDK_DIR/share/pulp/forge-catalog.json`, which is cheaper and more
+  reproducible than a tool call. Give the baseline reason in that shape: what
+  the artifact is, and why reading it beats invoking the command.
 - Subcommand under an umbrella tool already present (audio, docs, inspect) → **NO**, baseline it (the umbrella's sub-tools cover the surface).
 - Trust-boundary workflows with many reviewable subcommands (kit/content) →
   **YES for the umbrella and explicit MCP sub-tools.** Keep `pulp kit` and

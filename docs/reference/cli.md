@@ -2190,6 +2190,29 @@ build their params from a spec table at construction time; those nodes are
 marked `baked_params_computed_at_runtime` instead of being reported as having
 no controls.
 
+### forge
+
+**Status**: experimental
+
+Export the complete Forge node catalog from the installed CLI:
+
+```bash
+pulp forge catalog export --json
+pulp forge catalog export --json --output forge-catalog.json
+```
+
+The versioned JSON contains every node key, label, description, finite
+construction axis, realization type ID, structured `axis_values` assignment,
+and parameter semantic contract.
+Numeric minimum, maximum, and default values are joined from every concrete
+host factory realization when the document is generated; they are not
+duplicated in descriptors. Each parameter's `numeric_contracts` array keys
+those values by `realization_mode`, preserving different factory defaults.
+
+SDK installs also provide the generated document at
+`share/pulp/forge-catalog.json`, so downstream tooling can discover the exact
+catalog for its pinned Pulp SDK without a source checkout.
+
 ### minos
 
 **Status**: experimental

@@ -14,13 +14,15 @@
 
 #include <pulp/state/parameter.hpp>
 
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace pulp::host {
 
-/// Whether a parameter sweeps continuously or selects among named states.
-enum class ForgeParamKind { continuous, stepped };
+/// Whether a parameter sweeps continuously, selects one named state, or ORs
+/// named bit values into a mask.
+enum class ForgeParamKind { continuous, stepped, bitmask };
 
 /// How a value maps to its control travel. A log parameter whose control is
 /// linear feels dead across most of its range.
@@ -30,10 +32,29 @@ enum class ForgeParamCurve { linear, logarithmic };
 /// axis. `token` is the stable machine key and must never change; `label` is
 /// presentation and may.
 struct ForgeParamChoice {
-    std::string_view token;
-    std::string_view label;
+    std::string token;
+    std::string label;
     float value = 0.0f;
+    /// Empty means the choice is valid for every realization where its
+    /// parameter exists. Otherwise consumers must offer it only for these
+    /// realization modes.
+    std::vector<std::string_view> realization_modes;
 };
+
+/// Numeric states for a genuinely integer-stepped parameter such as a stage
+/// count. The strings are owned because large finite ranges should not require
+/// hand-maintained string-literal tables beside their factory-owned bounds.
+inline std::vector<ForgeParamChoice> forge_integer_choices(int first, int last) {
+    std::vector<ForgeParamChoice> out;
+    if (last < first)
+        return out;
+    out.reserve(static_cast<std::size_t>(last - first + 1));
+    for (int value = first; value <= last; ++value) {
+        auto text = std::to_string(value);
+        out.push_back({text, std::move(text), static_cast<float>(value)});
+    }
+    return out;
+}
 
 struct ForgeParamDescriptor {
     /// Stable machine key, snake_case, unique within its node. Never change one
@@ -48,7 +69,8 @@ struct ForgeParamDescriptor {
     std::string_view description;
     ForgeParamKind kind = ForgeParamKind::continuous;
     ForgeParamCurve curve = ForgeParamCurve::linear;
-    /// Required and non-empty when `kind` is stepped; empty otherwise.
+    /// Required and non-empty for stepped and bitmask parameters. A stepped
+    /// parameter selects one value; a bitmask combines the named bit values.
     std::vector<ForgeParamChoice> choices;
     /// Empty means the parameter exists on every realization. Otherwise it
     /// exists only on the named ones — some families deliberately omit a
@@ -95,17 +117,29 @@ struct ForgeNodeDescriptor {
 inline const ForgeParamDescriptor* find_param(const ForgeNodeDescriptor& node,
                                               std::string_view key) noexcept {
     for (const auto& param : node.params)
-        if (param.key == key) return &param;
+        if (param.key == key)
+            return &param;
     return nullptr;
 }
 
 /// True when `param` applies to the named realization mode.
-inline bool param_applies(const ForgeParamDescriptor& param,
-                          std::string_view mode) noexcept {
-    if (param.realization_modes.empty()) return true;
+inline bool param_applies(const ForgeParamDescriptor& param, std::string_view mode) noexcept {
+    if (param.realization_modes.empty())
+        return true;
     for (const auto& allowed : param.realization_modes)
-        if (allowed == mode) return true;
+        if (allowed == mode)
+            return true;
     return false;
 }
 
-}  // namespace pulp::host
+/// True when `choice` is valid for the named realization mode.
+inline bool choice_applies(const ForgeParamChoice& choice, std::string_view mode) noexcept {
+    if (choice.realization_modes.empty())
+        return true;
+    for (const auto& allowed : choice.realization_modes)
+        if (allowed == mode)
+            return true;
+    return false;
+}
+
+} // namespace pulp::host

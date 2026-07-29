@@ -26,6 +26,7 @@
 // over 5 ms, so a finer read would be discarded, and a block-rate read would
 // make a knob sweep step audibly at large buffer sizes.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/fdn_reverb.hpp>
@@ -174,3 +175,5 @@ inline CustomNodeType make_fdn_reverb_node(fdn::Mode mode) {
 }
 
 }  // namespace pulp::host::forge_fdn
+
+#include <pulp/host/detail/forge_fdn_reverb_descriptors.hpp>

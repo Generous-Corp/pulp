@@ -688,3 +688,5 @@ inline CustomNodeType make_speaker_emulation_node() {
 } // namespace cabinet
 
 }  // namespace pulp::host::space
+
+#include <pulp/host/detail/forge_space_descriptors.hpp>

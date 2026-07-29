@@ -27,6 +27,7 @@
 // deliberate choice, because at five characters and 1.1 feedback the useful
 // dry/wet balance is a per-patch decision, not a fixed sum.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/character_delay.hpp>
@@ -186,3 +187,5 @@ inline CustomNodeType make_character_delay_node(Character character,
 }
 
 }  // namespace pulp::host::character_delay
+
+#include <pulp/host/detail/forge_character_delay_descriptors.hpp>

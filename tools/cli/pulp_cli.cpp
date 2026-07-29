@@ -43,6 +43,7 @@ static const Command commands[] = {
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
     {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
+    {"forge", "Export the Forge node catalog",          cmd_forge},
     {"clean",    "Remove build directory",                cmd_clean},
     {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},

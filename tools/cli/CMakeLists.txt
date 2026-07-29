@@ -54,6 +54,7 @@ add_executable(pulp-cli
     cmd_config.cpp
     cmd_coverage.cpp
     cmd_dsp.cpp
+    cmd_forge.cpp
     cmd_create.cpp
     cmd_minos.cpp
     cmd_macos.cpp
@@ -193,8 +194,42 @@ if(NOT _pulp_cli_install_bindir)
 endif()
 install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
+# Generate the exact Forge catalog document from the same linked factories and
+# semantic descriptors as the CLI. Downstream SDK consumers can therefore
+# inspect the catalog without a Pulp source checkout or a host process.
+set(_pulp_forge_catalog_json "${CMAKE_BINARY_DIR}/forge-catalog.json")
+add_custom_command(
+    OUTPUT "${_pulp_forge_catalog_json}"
+    COMMAND "$<TARGET_FILE:pulp-cli>" forge catalog export --json
+            --output "${_pulp_forge_catalog_json}"
+    DEPENDS pulp-cli
+    COMMENT "Generating installed Forge catalog descriptor document"
+    VERBATIM)
+add_custom_target(pulp-forge-catalog-export ALL
+    DEPENDS "${_pulp_forge_catalog_json}")
+
+# Generate directly from the just-built CLI during installation as well. SDK
+# packaging intentionally builds only the `pulp-cli` target, so an ALL-only
+# generated file is not guaranteed to exist before `cmake --install`.
+install(CODE [[
+    file(MAKE_DIRECTORY "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/pulp")
+    execute_process(
+        COMMAND "$<TARGET_FILE:pulp-cli>" forge catalog export --json
+                --output "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/share/pulp/forge-catalog.json"
+        RESULT_VARIABLE _pulp_forge_catalog_result)
+    if(NOT _pulp_forge_catalog_result EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to generate the installed Forge catalog descriptor document")
+    endif()
+]])
+
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
+    add_test(NAME cli-forge-catalog-export
+        COMMAND pulp-cli forge catalog export --json)
+    set_tests_properties(cli-forge-catalog-export PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"node_count\":78")
+
     add_executable(pulp-test-cli-au-info-plist
         ${CMAKE_SOURCE_DIR}/test/test_cli_au_info_plist.cpp
         au_info_plist.cpp)

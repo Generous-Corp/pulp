@@ -730,3 +730,5 @@ inline CustomNodeType make_mod_env_node() {
 }
 
 } // namespace pulp::host::forge_modulation
+
+#include <pulp/host/detail/forge_modulation_descriptors.hpp>

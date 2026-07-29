@@ -558,3 +558,5 @@ inline CustomNodeType make_diode_bridge_compressor_node(bool feedback = true, bo
 }  // namespace diode
 
 }  // namespace pulp::host::dynamics
+
+#include <pulp/host/detail/forge_dynamics_descriptors.hpp>

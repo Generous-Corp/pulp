@@ -8,6 +8,7 @@
 // boundary in a dedicated header prevents the general lo-fi catalog from
 // becoming the owner of analog DSP policy.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/analog_vcf.hpp>
 
@@ -120,3 +121,5 @@ inline CustomNodeType make_analog_vcf_node(signal::AnalogVcf::Voicing voicing) {
 }
 
 }  // namespace pulp::host::forge_lofi
+
+#include <pulp/host/detail/forge_analog_vcf_descriptors.hpp>

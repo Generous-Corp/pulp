@@ -2072,3 +2072,15 @@ as a descriptor for a control that was removed — the two ways a catalog goes
 quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
 half: every indexed pack either carries descriptors or sits in a `PENDING` list
 that may only shrink, so a newly indexed pack cannot land undescribed.
+
+The complete joined contract is available through
+`pulp forge catalog export --json`. The export includes every construction
+axis, realization type ID, and structured axis-value assignment, then joins
+each semantic parameter to every
+realization's factory-owned minimum, maximum, and default. Those numeric
+contracts are keyed by realization mode because construction variants may have
+different defaults. It fails closed on a missing node, a missing realization
+contract, an audit mismatch, or a duplicate realization type ID. Desktop SDK
+installs that build the CLI generate the same document at
+`share/pulp/forge-catalog.json`, which is the preferred source for downstream
+tooling pinned to an installed SDK.

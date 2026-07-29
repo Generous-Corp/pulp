@@ -452,3 +452,5 @@ inline int latency_samples(double sample_rate) {
 }  // namespace harmony
 
 }  // namespace pulp::host::pitch
+
+#include <pulp/host/detail/forge_pitch_descriptors.hpp>

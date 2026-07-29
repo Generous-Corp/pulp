@@ -21,6 +21,7 @@
     "dsp": "DSP capability registry \u2014 a repo-maintenance gate (collision + snapshot freshness) that agents consume as the committed docs/status/dsp-capabilities.json, not through a tool call",
     "export-tokens": "Variant of import-design; rarely used; one-shot Bash works",
     "fmt": "Wraps clang-format -i against .clang-format; agents shell out directly",
+    "forge": "Catalog export is consumed from the generated and installed share/pulp/forge-catalog.json artifact; the CLI regenerates that SDK contract without a source checkout",
     "harness": "Catalog-driven verifier; agents drive via Bash",
     "host": "Long-running synthetic-block runner; not RPC-shaped",
     "identity": "Identity-lock review surface; agents shell out so lockfile diffs remain explicit",

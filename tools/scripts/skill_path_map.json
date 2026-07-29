@@ -207,7 +207,8 @@
       "paths": [
         "core/host/**",
         "examples/plugin-host-demo/**",
-        "tools/cli/cmd_host.cpp"
+        "tools/cli/cmd_host.cpp",
+        "tools/cli/cmd_forge.cpp"
       ]
     },
     "import-design": {

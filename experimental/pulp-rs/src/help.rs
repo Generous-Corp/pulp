@@ -188,6 +188,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Local coverage tooling (diff-cover gate mirror)",
     },
     Entry {
+        name: "forge",
+        summary: "Export the Forge node catalog",
+    },
+    Entry {
         name: "macos",
         summary: "Per-PR macOS-runner retargeting (local/namespace/github-hosted)",
     },

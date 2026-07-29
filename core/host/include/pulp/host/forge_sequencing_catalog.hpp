@@ -791,3 +791,5 @@ inline CustomNodeType make_prob_gate_node(std::uint32_t seed = Prob::kProbSeed) 
 }  // namespace prob_gate
 
 }  // namespace pulp::host::sequencing
+
+#include <pulp/host/detail/forge_sequencing_descriptors.hpp>

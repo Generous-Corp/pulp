@@ -356,3 +356,5 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
 }
 
 }  // namespace pulp::host::tape
+
+#include <pulp/host/detail/forge_tape_descriptors.hpp>

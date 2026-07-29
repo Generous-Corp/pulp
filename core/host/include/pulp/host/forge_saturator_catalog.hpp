@@ -213,3 +213,5 @@ inline CustomNodeType make_saturator_node(Shape shape,
 }
 
 }  // namespace pulp::host::saturator
+
+#include <pulp/host/detail/forge_saturator_descriptors.hpp>
