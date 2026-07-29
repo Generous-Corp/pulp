@@ -81,6 +81,19 @@ foreach(_flag_var CXX_FLAGS C_FLAGS OBJCXX_FLAGS EXE_LINKER_FLAGS SHARED_LINKER_
     endif()
 endforeach()
 
+# The relocatability checker deliberately keeps compiler sanitizer runtimes
+# strict for shipping bundles and softens them only for explicitly marked
+# test-only sanitizer builds. Raw CMAKE_*_FLAGS carry the instrumentation into
+# this nested consumer, but not that identity, so propagate it when (and only
+# when) the inherited flags actually request a sanitizer.
+set(_parent_instrumentation_flags
+    "${PULP_PARENT_CXX_FLAGS} ${PULP_PARENT_C_FLAGS} "
+    "${PULP_PARENT_OBJCXX_FLAGS} ${PULP_PARENT_EXE_LINKER_FLAGS} "
+    "${PULP_PARENT_SHARED_LINKER_FLAGS}")
+if(_parent_instrumentation_flags MATCHES "(^|[ ;])-fsanitize=([^ ;]+)")
+    list(APPEND _configure_args "-DPULP_SANITIZER=${CMAKE_MATCH_2}")
+endif()
+
 # Match the sibling installed-SDK fixtures: a Debug producer (the sanitizer
 # lanes) is an acknowledged configuration, not a failure.
 if(_config_lower STREQUAL "debug")
