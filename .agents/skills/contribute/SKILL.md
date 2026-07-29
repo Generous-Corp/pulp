@@ -54,12 +54,17 @@ does not help. Same for changelog entries: they are regenerated.
 
 ```sh
 cmake -S . -B build-tests -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON
-cmake --build build-tests -j"$(sysctl -n hw.ncpu)" --target <your-test-targets>
+cmake --build build-tests -j"$(( $(sysctl -n hw.ncpu) / 2 ))" --target <your-test-targets>
 ctest --test-dir build-tests --output-on-failure -R "<pattern>"
 ```
 
 Release, not Debug — a Debug build of a GPU/JS UI is dramatically slower and
 will mislead you into thinking you caused a performance regression.
+
+A share of the cores, not all of them: a full-core build starves everything else
+on the machine, including whatever you are about to run the tests against. A
+lint (`build_parallelism_guard.py`) enforces this across the repo, so a whole-machine
+`-j$(sysctl -n hw.ncpu)` copied from anywhere will fail CI.
 
 **If your Mac exports `SDKROOT`** pointing at a CommandLineTools SDK, the build
 can fail on missing `std::jthread`. Pass an explicit modern SDK:
