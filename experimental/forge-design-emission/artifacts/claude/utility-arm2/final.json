@@ -1,0 +1,511 @@
+{
+  "design_language": {
+    "base": "custom",
+    "designmd": "---\nname: Vector Utility\nversion: \"1\"\ncolors:\n  primary: \"#10B6A3\"\n  surface: \"#101417\"\n  surface_raised: \"#192126\"\n  text: \"#F2F5F4\"\n  text_muted: \"#9AA8A5\"\n  accent: \"#16DAC2\"\ntypography:\n  body:\n    family: Inter\n    size: 12\nrounded:\n  panel: 12\nspacing:\n  unit: 8\n---\n# Vector Utility\n\nA clinical mastering utility on the Ink & Signal material: near-black ink surfaces, one raised card material for signal sections, and a single teal signal accent used only to mark structure (brand tick, section bars). No hero \u2014 five identical 56px controls sit in three signal-flow sections (INPUT, STEREO IMAGE, OUTPUT) so the eye scans left to right along the bus. Jost carries brand and section voice, Inter carries control labels, JetBrains Mono carries readouts. Depth is restrained to one soft top-left-lit drop per card.\n"
+  },
+  "layout": {
+    "archetype": "utility_grid",
+    "hero": "none",
+    "reason": "Hero-less uniform 56px controls in three signal-flow sections read as one clinical left-to-right bus."
+  },
+  "design": {
+    "id": "root",
+    "type": "frame",
+    "name": "Vector Utility",
+    "style": {
+      "width": 720,
+      "height": 320,
+      "background": "{colors.surface}"
+    },
+    "layout": {
+      "direction": "column",
+      "gap": 14,
+      "padding": 20
+    },
+    "children": [
+      {
+        "id": "header",
+        "type": "frame",
+        "name": "Header",
+        "layout": {
+          "direction": "row",
+          "justify": "between",
+          "align": "center"
+        },
+        "children": [
+          {
+            "id": "brand_row",
+            "type": "frame",
+            "layout": {
+              "direction": "row",
+              "gap": 8,
+              "align": "center"
+            },
+            "children": [
+              {
+                "id": "brand_tick",
+                "type": "frame",
+                "style": {
+                  "width": 8,
+                  "height": 8,
+                  "background": "{colors.accent}",
+                  "corner_radius": 2
+                }
+              },
+              {
+                "id": "brand_main",
+                "type": "text",
+                "text": "VECTOR",
+                "style": {
+                  "color": "{colors.text}",
+                  "font_size": 14,
+                  "font_weight": 700,
+                  "font_family": "Jost",
+                  "letter_spacing": 2
+                }
+              },
+              {
+                "id": "brand_sub",
+                "type": "text",
+                "text": "UTILITY",
+                "style": {
+                  "color": "{colors.text_muted}",
+                  "font_size": 14,
+                  "font_weight": 400,
+                  "font_family": "Jost",
+                  "letter_spacing": 2
+                }
+              }
+            ]
+          },
+          {
+            "id": "header_meta",
+            "type": "text",
+            "text": "MASTER BUS \u00b7 STEREO",
+            "style": {
+              "color": "{colors.text_muted}",
+              "font_size": 10,
+              "font_weight": 500,
+              "font_family": "JetBrains Mono",
+              "letter_spacing": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "divider",
+        "type": "frame",
+        "style": {
+          "width": 680,
+          "height": 1,
+          "background": "#FFFFFF12"
+        }
+      },
+      {
+        "id": "body",
+        "type": "frame",
+        "name": "Sections",
+        "layout": {
+          "direction": "row",
+          "gap": 12,
+          "grow": 1
+        },
+        "children": [
+          {
+            "id": "sec_in",
+            "type": "frame",
+            "name": "Input",
+            "style": {
+              "width": 150,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 12,
+              "border": {
+                "width": 1,
+                "color": "#FFFFFF12"
+              },
+              "shadow": {
+                "y": 2,
+                "blur": 6,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 12,
+              "padding": 14
+            },
+            "children": [
+              {
+                "id": "in_head",
+                "type": "frame",
+                "layout": {
+                  "direction": "row",
+                  "gap": 6,
+                  "align": "center"
+                },
+                "children": [
+                  {
+                    "id": "in_bar",
+                    "type": "frame",
+                    "style": {
+                      "width": 3,
+                      "height": 10,
+                      "background": "{colors.accent}",
+                      "corner_radius": 1
+                    }
+                  },
+                  {
+                    "id": "in_title",
+                    "type": "text",
+                    "text": "INPUT",
+                    "style": {
+                      "color": "{colors.text}",
+                      "font_size": 11,
+                      "font_weight": 600,
+                      "font_family": "Jost",
+                      "letter_spacing": 1.5
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "in_cellwrap",
+                "type": "frame",
+                "layout": {
+                  "direction": "column",
+                  "justify": "center",
+                  "align": "center",
+                  "grow": 1
+                },
+                "children": [
+                  {
+                    "id": "in_cell",
+                    "type": "frame",
+                    "layout": {
+                      "direction": "column",
+                      "gap": 8,
+                      "align": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "in_knob",
+                        "type": "frame",
+                        "style": {
+                          "width": 56,
+                          "height": 56
+                        },
+                        "control": {
+                          "bind": "input_gain",
+                          "widget": "knob",
+                          "label": "GAIN"
+                        }
+                      },
+                      {
+                        "id": "in_read",
+                        "type": "text",
+                        "text": "0.0 dB",
+                        "style": {
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 500,
+                          "font_family": "JetBrains Mono"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "sec_img",
+            "type": "frame",
+            "name": "Stereo Image",
+            "style": {
+              "background": "{colors.surface_raised}",
+              "corner_radius": 12,
+              "border": {
+                "width": 1,
+                "color": "#FFFFFF12"
+              },
+              "shadow": {
+                "y": 2,
+                "blur": 6,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 12,
+              "padding": 14,
+              "grow": 1
+            },
+            "children": [
+              {
+                "id": "img_head",
+                "type": "frame",
+                "layout": {
+                  "direction": "row",
+                  "gap": 6,
+                  "align": "center"
+                },
+                "children": [
+                  {
+                    "id": "img_bar",
+                    "type": "frame",
+                    "style": {
+                      "width": 3,
+                      "height": 10,
+                      "background": "{colors.accent}",
+                      "corner_radius": 1
+                    }
+                  },
+                  {
+                    "id": "img_title",
+                    "type": "text",
+                    "text": "STEREO IMAGE",
+                    "style": {
+                      "color": "{colors.text}",
+                      "font_size": 11,
+                      "font_weight": 600,
+                      "font_family": "Jost",
+                      "letter_spacing": 1.5
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "img_cells",
+                "type": "frame",
+                "layout": {
+                  "direction": "row",
+                  "gap": 12,
+                  "justify": "between",
+                  "align": "center",
+                  "grow": 1
+                },
+                "children": [
+                  {
+                    "id": "pan_cell",
+                    "type": "frame",
+                    "layout": {
+                      "direction": "column",
+                      "gap": 8,
+                      "align": "center",
+                      "grow": 1
+                    },
+                    "children": [
+                      {
+                        "id": "pan_knob",
+                        "type": "frame",
+                        "style": {
+                          "width": 56,
+                          "height": 56
+                        },
+                        "control": {
+                          "bind": "pan",
+                          "widget": "knob",
+                          "label": "PAN"
+                        }
+                      },
+                      {
+                        "id": "pan_read",
+                        "type": "text",
+                        "text": "C",
+                        "style": {
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 500,
+                          "font_family": "JetBrains Mono"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "width_cell",
+                    "type": "frame",
+                    "layout": {
+                      "direction": "column",
+                      "gap": 8,
+                      "align": "center",
+                      "grow": 1
+                    },
+                    "children": [
+                      {
+                        "id": "width_knob",
+                        "type": "frame",
+                        "style": {
+                          "width": 56,
+                          "height": 56
+                        },
+                        "control": {
+                          "bind": "width",
+                          "widget": "knob",
+                          "label": "WIDTH"
+                        }
+                      },
+                      {
+                        "id": "width_read",
+                        "type": "text",
+                        "text": "100%",
+                        "style": {
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 500,
+                          "font_family": "JetBrains Mono"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "pol_cell",
+                    "type": "frame",
+                    "layout": {
+                      "direction": "column",
+                      "gap": 8,
+                      "align": "center",
+                      "grow": 1
+                    },
+                    "children": [
+                      {
+                        "id": "pol_knob",
+                        "type": "frame",
+                        "style": {
+                          "width": 56,
+                          "height": 56
+                        },
+                        "control": {
+                          "bind": "polarity",
+                          "widget": "knob",
+                          "label": "POLARITY"
+                        }
+                      },
+                      {
+                        "id": "pol_read",
+                        "type": "text",
+                        "text": "NORM",
+                        "style": {
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 500,
+                          "font_family": "JetBrains Mono"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "sec_out",
+            "type": "frame",
+            "name": "Output",
+            "style": {
+              "width": 150,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 12,
+              "border": {
+                "width": 1,
+                "color": "#FFFFFF12"
+              },
+              "shadow": {
+                "y": 2,
+                "blur": 6,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 12,
+              "padding": 14
+            },
+            "children": [
+              {
+                "id": "out_head",
+                "type": "frame",
+                "layout": {
+                  "direction": "row",
+                  "gap": 6,
+                  "align": "center"
+                },
+                "children": [
+                  {
+                    "id": "out_bar",
+                    "type": "frame",
+                    "style": {
+                      "width": 3,
+                      "height": 10,
+                      "background": "{colors.accent}",
+                      "corner_radius": 1
+                    }
+                  },
+                  {
+                    "id": "out_title",
+                    "type": "text",
+                    "text": "OUTPUT",
+                    "style": {
+                      "color": "{colors.text}",
+                      "font_size": 11,
+                      "font_weight": 600,
+                      "font_family": "Jost",
+                      "letter_spacing": 1.5
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "out_cellwrap",
+                "type": "frame",
+                "layout": {
+                  "direction": "column",
+                  "justify": "center",
+                  "align": "center",
+                  "grow": 1
+                },
+                "children": [
+                  {
+                    "id": "out_cell",
+                    "type": "frame",
+                    "layout": {
+                      "direction": "column",
+                      "gap": 8,
+                      "align": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "out_knob",
+                        "type": "frame",
+                        "style": {
+                          "width": 56,
+                          "height": 56
+                        },
+                        "control": {
+                          "bind": "output_gain",
+                          "widget": "knob",
+                          "label": "GAIN"
+                        }
+                      },
+                      {
+                        "id": "out_read",
+                        "type": "text",
+                        "text": "0.0 dB",
+                        "style": {
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 500,
+                          "font_family": "JetBrains Mono"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "notes": "Uniform 56px controls; hierarchy comes from section rhythm and the single teal structural accent, not size."
+}

@@ -1,0 +1,58 @@
+You are authoring one constrained Forge panel for a controlled experiment.
+Concept: Atlas Bus Compressor. A hero-led stereo bus compressor: authoritative, tactile, modern analog, with THRESHOLD as the unmistakable center of gravity.
+Allowed archetype(s): feature_frame, hero_knob. layout.hero must be one of the macros, never makeup/mix/output.
+Macros, each bound exactly once: threshold, ratio, attack, release, makeup, mix.
+
+
+Return raw JSON: one object, no fence, no prose, in this exact top-level order:
+{"design_language":{"base":"<id|custom>","designmd":"<complete text>"},
+ "layout":{"archetype":"<allowed>","hero":"<macro|none>","reason":"<one line>"},
+ "design":<root node>,"notes":"<optional one line>"}
+
+Node profile (unknown fields fail):
+- node: id, type, name?, text?, style?, layout?, control?, children?
+- id matches [a-z][a-z0-9_]{0,31}, unique. type is frame|text|ellipse.
+- text nodes require non-empty text.
+- style: width, height (unquoted px numbers), background, gradient,
+  corner_radius, border:{width,color}, shadow:{y,blur,color}, color, font_size,
+  font_weight, font_family, letter_spacing.
+- layout: direction row|column, gap, padding (one number or four-number array),
+  align start|center|end, justify start|center|end|between, grow.
+- control: bind (one listed macro), widget knob|fader, label optional.
+- children array. Flex only: never x/y/absolute/grid/canvas/display nodes.
+- Colors are #RRGGBB/#RRGGBBAA or {colors.TOKEN}; gradients use
+  linear-gradient(to bottom|right, ...) only.
+- Fonts: Jost, Inter, JetBrains Mono. No meter vocabulary; chrome supplies it.
+
+Hard limits: <=120 nodes, depth <=8, <=24 children; root fixed 360x240..1600x1000;
+every listed macro bound exactly once; every control >=40x40; text >=10px
+(readouts >=12); <=8 distinct raw hex colors; <=1 shadow/node; gradient <=256
+chars and <=6 stops. Every control must have explicit width and height.
+
+DESIGN.md must be a complete YAML-frontmatter document embedded as a JSON string:
+---
+name: <name>
+version: "1"
+colors:
+  primary: "#RRGGBB"
+  surface: "#RRGGBB"
+  surface_raised: "#RRGGBB"
+  text: "#RRGGBB"
+  text_muted: "#RRGGBB"
+  accent: "#RRGGBB"
+typography:
+  body:
+    family: Inter
+    size: 12
+rounded:
+  panel: 12
+spacing:
+  unit: 8
+---
+# <name>
+All {colors.*} references in the design must exist in that colors map.
+
+
+Before answering, silently self-check JSON validity, allowed fields, unique ids,
+all macro bindings, root/control/text dimensions, token resolution, and limits.
+Return only the JSON object.

@@ -1,0 +1,21 @@
+2026-07-29T01:38:34.093039Z ERROR codex_models_manager::cache: failed to load models cache: EOF while parsing a value at line 1 column 0
+real 67.89
+user 2.67
+sys 2.62
+           208994304  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               84312  page reclaims
+                1764  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 648  messages sent
+                7219  messages received
+                  46  signals received
+                5152  voluntary context switches
+               67336  involuntary context switches
+          6160846771  instructions retired
+          5022685834  cycles elapsed
+           103320168  peak memory footprint

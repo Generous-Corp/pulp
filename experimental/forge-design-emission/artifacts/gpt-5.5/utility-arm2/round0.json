@@ -1,0 +1,812 @@
+{
+  "design_language": {
+    "base": "ink_signal",
+    "designmd": "---\nname: Vector Utility\nversion: \"1\"\ncolors:\n  primary: \"#16DAC2\"\n  surface: \"#101417\"\n  surface_raised: \"#192126\"\n  text: \"#F2F5F4\"\n  text_muted: \"#9AA8A5\"\n  accent: \"#10B6A3\"\ntypography:\n  body:\n    family: Inter\n    size: 12\nrounded:\n  panel: 12\nspacing:\n  unit: 8\n---\n# Vector Utility\nA clinical utility-grid language for compact mastering controls. Dark ink surfaces, restrained raised panels, and one teal signal accent establish hierarchy without a hero. Typography separates brand, section labels, control labels, and numeric readouts with Inter for interface text and JetBrains Mono for values. Negative space and vertical section rhythm make input, vector shaping, and output relationships fast to scan."
+  },
+  "layout": {
+    "archetype": "utility_grid",
+    "hero": "none",
+    "reason": "A hero-less utility grid groups input, vector shaping, polarity, and output into evenly weighted signal-flow sections."
+  },
+  "design": {
+    "id": "root",
+    "type": "frame",
+    "name": "Vector Utility Panel",
+    "style": {
+      "width": 760,
+      "height": 420,
+      "background": "{colors.surface}",
+      "corner_radius": 12,
+      "border": {
+        "width": 1,
+        "color": "{colors.surface_raised}"
+      }
+    },
+    "layout": {
+      "direction": "column",
+      "gap": 18,
+      "padding": [
+        18,
+        20,
+        20,
+        20
+      ],
+      "align": "start",
+      "justify": "start"
+    },
+    "children": [
+      {
+        "id": "header",
+        "type": "frame",
+        "style": {
+          "width": 720,
+          "height": 42,
+          "background": "{colors.surface}"
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 16,
+          "padding": 0,
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "brand_stack",
+            "type": "frame",
+            "style": {
+              "width": 260,
+              "height": 42,
+              "background": "{colors.surface}"
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 2,
+              "padding": 0,
+              "align": "start",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "brand",
+                "type": "text",
+                "text": "VECTOR UTILITY",
+                "style": {
+                  "width": 220,
+                  "height": 18,
+                  "color": "{colors.text}",
+                  "font_size": 14,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "subtitle",
+                "type": "text",
+                "text": "GAIN  PAN  WIDTH  POLARITY  OUTPUT",
+                "style": {
+                  "width": 260,
+                  "height": 14,
+                  "color": "{colors.text_muted}",
+                  "font_size": 10,
+                  "font_weight": 500,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "header_rule",
+            "type": "frame",
+            "style": {
+              "width": 210,
+              "height": 2,
+              "background": "{colors.primary}",
+              "corner_radius": 1
+            }
+          },
+          {
+            "id": "status",
+            "type": "text",
+            "text": "MASTER BUS",
+            "style": {
+              "width": 110,
+              "height": 16,
+              "color": "{colors.text_muted}",
+              "font_size": 11,
+              "font_weight": 600,
+              "font_family": "Inter",
+              "letter_spacing": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "body",
+        "type": "frame",
+        "style": {
+          "width": 720,
+          "height": 320,
+          "background": "{colors.surface}"
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 16,
+          "padding": 0,
+          "align": "start",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "input_section",
+            "type": "frame",
+            "style": {
+              "width": 150,
+              "height": 320,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 10,
+              "border": {
+                "width": 1,
+                "color": "{colors.accent}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 14,
+              "padding": [
+                14,
+                14,
+                14,
+                14
+              ],
+              "align": "center",
+              "justify": "start"
+            },
+            "children": [
+              {
+                "id": "input_title",
+                "type": "text",
+                "text": "INPUT",
+                "style": {
+                  "width": 118,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "input_control",
+                "type": "frame",
+                "name": "Input Gain",
+                "style": {
+                  "width": 56,
+                  "height": 168,
+                  "background": "{colors.surface}",
+                  "corner_radius": 8,
+                  "border": {
+                    "width": 1,
+                    "color": "{colors.primary}"
+                  }
+                },
+                "control": {
+                  "bind": "input_gain",
+                  "widget": "fader",
+                  "label": "Input"
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 8,
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "input_cap",
+                    "type": "frame",
+                    "style": {
+                      "width": 36,
+                      "height": 32,
+                      "background": "{colors.primary}",
+                      "corner_radius": 6
+                    }
+                  },
+                  {
+                    "id": "input_track",
+                    "type": "frame",
+                    "style": {
+                      "width": 8,
+                      "height": 80,
+                      "background": "{colors.accent}",
+                      "corner_radius": 4
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "input_readout",
+                "type": "text",
+                "text": "+0.0 dB",
+                "style": {
+                  "width": 86,
+                  "height": 18,
+                  "color": "{colors.text}",
+                  "font_size": 13,
+                  "font_weight": 600,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "vector_section",
+            "type": "frame",
+            "style": {
+              "width": 374,
+              "height": 320,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 10,
+              "border": {
+                "width": 1,
+                "color": "{colors.surface_raised}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 14,
+              "padding": [
+                14,
+                16,
+                14,
+                16
+              ],
+              "align": "start",
+              "justify": "start"
+            },
+            "children": [
+              {
+                "id": "vector_top",
+                "type": "frame",
+                "style": {
+                  "width": 342,
+                  "height": 28,
+                  "background": "{colors.surface_raised}"
+                },
+                "layout": {
+                  "direction": "row",
+                  "gap": 8,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "vector_title",
+                    "type": "text",
+                    "text": "VECTOR",
+                    "style": {
+                      "width": 100,
+                      "height": 16,
+                      "color": "{colors.text_muted}",
+                      "font_size": 11,
+                      "font_weight": 700,
+                      "font_family": "Inter",
+                      "letter_spacing": 0
+                    }
+                  },
+                  {
+                    "id": "vector_line",
+                    "type": "frame",
+                    "style": {
+                      "width": 156,
+                      "height": 2,
+                      "background": "{colors.accent}",
+                      "corner_radius": 1
+                    }
+                  },
+                  {
+                    "id": "vector_mode",
+                    "type": "text",
+                    "text": "LINKED",
+                    "style": {
+                      "width": 64,
+                      "height": 16,
+                      "color": "{colors.primary}",
+                      "font_size": 11,
+                      "font_weight": 600,
+                      "font_family": "JetBrains Mono",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control_row",
+                "type": "frame",
+                "style": {
+                  "width": 342,
+                  "height": 154,
+                  "background": "{colors.surface_raised}"
+                },
+                "layout": {
+                  "direction": "row",
+                  "gap": 18,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "pan_block",
+                    "type": "frame",
+                    "style": {
+                      "width": 96,
+                      "height": 154,
+                      "background": "{colors.surface}",
+                      "corner_radius": 8,
+                      "border": {
+                        "width": 1,
+                        "color": "{colors.surface_raised}"
+                      }
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 10,
+                      "padding": [
+                        12,
+                        10,
+                        10,
+                        10
+                      ],
+                      "align": "center",
+                      "justify": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "pan_label",
+                        "type": "text",
+                        "text": "PAN",
+                        "style": {
+                          "width": 54,
+                          "height": 14,
+                          "color": "{colors.text_muted}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "pan_control",
+                        "type": "ellipse",
+                        "name": "Pan",
+                        "style": {
+                          "width": 72,
+                          "height": 72,
+                          "background": "{colors.surface_raised}",
+                          "border": {
+                            "width": 2,
+                            "color": "{colors.primary}"
+                          }
+                        },
+                        "control": {
+                          "bind": "pan",
+                          "widget": "knob",
+                          "label": "Pan"
+                        }
+                      },
+                      {
+                        "id": "pan_readout",
+                        "type": "text",
+                        "text": "C",
+                        "style": {
+                          "width": 54,
+                          "height": 18,
+                          "color": "{colors.text}",
+                          "font_size": 13,
+                          "font_weight": 600,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "width_block",
+                    "type": "frame",
+                    "style": {
+                      "width": 96,
+                      "height": 154,
+                      "background": "{colors.surface}",
+                      "corner_radius": 8,
+                      "border": {
+                        "width": 1,
+                        "color": "{colors.surface_raised}"
+                      }
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 10,
+                      "padding": [
+                        12,
+                        10,
+                        10,
+                        10
+                      ],
+                      "align": "center",
+                      "justify": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "width_label",
+                        "type": "text",
+                        "text": "WIDTH",
+                        "style": {
+                          "width": 54,
+                          "height": 14,
+                          "color": "{colors.text_muted}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "width_control",
+                        "type": "ellipse",
+                        "name": "Width",
+                        "style": {
+                          "width": 72,
+                          "height": 72,
+                          "background": "{colors.surface_raised}",
+                          "border": {
+                            "width": 2,
+                            "color": "{colors.primary}"
+                          }
+                        },
+                        "control": {
+                          "bind": "width",
+                          "widget": "knob",
+                          "label": "Width"
+                        }
+                      },
+                      {
+                        "id": "width_readout",
+                        "type": "text",
+                        "text": "100%",
+                        "style": {
+                          "width": 54,
+                          "height": 18,
+                          "color": "{colors.text}",
+                          "font_size": 13,
+                          "font_weight": 600,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "polarity_block",
+                    "type": "frame",
+                    "style": {
+                      "width": 96,
+                      "height": 154,
+                      "background": "{colors.surface}",
+                      "corner_radius": 8,
+                      "border": {
+                        "width": 1,
+                        "color": "{colors.surface_raised}"
+                      }
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 10,
+                      "padding": [
+                        12,
+                        10,
+                        10,
+                        10
+                      ],
+                      "align": "center",
+                      "justify": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "polarity_label",
+                        "type": "text",
+                        "text": "POLARITY",
+                        "style": {
+                          "width": 70,
+                          "height": 14,
+                          "color": "{colors.text_muted}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "polarity_control",
+                        "type": "ellipse",
+                        "name": "Polarity",
+                        "style": {
+                          "width": 72,
+                          "height": 72,
+                          "background": "{colors.surface_raised}",
+                          "border": {
+                            "width": 2,
+                            "color": "{colors.accent}"
+                          }
+                        },
+                        "control": {
+                          "bind": "polarity",
+                          "widget": "knob",
+                          "label": "Polarity"
+                        }
+                      },
+                      {
+                        "id": "polarity_readout",
+                        "type": "text",
+                        "text": "0 deg",
+                        "style": {
+                          "width": 54,
+                          "height": 18,
+                          "color": "{colors.text}",
+                          "font_size": 13,
+                          "font_weight": 600,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "vector_foot",
+                "type": "frame",
+                "style": {
+                  "width": 342,
+                  "height": 82,
+                  "background": "{colors.surface}",
+                  "corner_radius": 8
+                },
+                "layout": {
+                  "direction": "row",
+                  "gap": 12,
+                  "padding": [
+                    12,
+                    14,
+                    12,
+                    14
+                  ],
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "axis_a",
+                    "type": "frame",
+                    "style": {
+                      "width": 88,
+                      "height": 42,
+                      "background": "{colors.surface_raised}",
+                      "corner_radius": 6
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 2,
+                      "padding": 6,
+                      "align": "start",
+                      "justify": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "axis_a_label",
+                        "type": "text",
+                        "text": "CENTER",
+                        "style": {
+                          "width": 62,
+                          "height": 13,
+                          "color": "{colors.text_muted}",
+                          "font_size": 10,
+                          "font_weight": 600,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "axis_a_val",
+                        "type": "text",
+                        "text": "LOCK",
+                        "style": {
+                          "width": 54,
+                          "height": 15,
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 600,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "axis_b",
+                    "type": "frame",
+                    "style": {
+                      "width": 88,
+                      "height": 42,
+                      "background": "{colors.surface_raised}",
+                      "corner_radius": 6
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 2,
+                      "padding": 6,
+                      "align": "start",
+                      "justify": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "axis_b_label",
+                        "type": "text",
+                        "text": "SIDE",
+                        "style": {
+                          "width": 62,
+                          "height": 13,
+                          "color": "{colors.text_muted}",
+                          "font_size": 10,
+                          "font_weight": 600,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "axis_b_val",
+                        "type": "text",
+                        "text": "TRIM",
+                        "style": {
+                          "width": 54,
+                          "height": 15,
+                          "color": "{colors.text}",
+                          "font_size": 12,
+                          "font_weight": 600,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "axis_mark",
+                    "type": "frame",
+                    "style": {
+                      "width": 92,
+                      "height": 6,
+                      "background": "{colors.primary}",
+                      "corner_radius": 3
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "output_section",
+            "type": "frame",
+            "style": {
+              "width": 150,
+              "height": 320,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 10,
+              "border": {
+                "width": 1,
+                "color": "{colors.primary}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 14,
+              "padding": [
+                14,
+                14,
+                14,
+                14
+              ],
+              "align": "center",
+              "justify": "start"
+            },
+            "children": [
+              {
+                "id": "output_title",
+                "type": "text",
+                "text": "OUTPUT",
+                "style": {
+                  "width": 118,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "output_control",
+                "type": "frame",
+                "name": "Output Gain",
+                "style": {
+                  "width": 56,
+                  "height": 168,
+                  "background": "{colors.surface}",
+                  "corner_radius": 8,
+                  "border": {
+                    "width": 1,
+                    "color": "{colors.primary}"
+                  }
+                },
+                "control": {
+                  "bind": "output_gain",
+                  "widget": "fader",
+                  "label": "Output"
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 8,
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "output_cap",
+                    "type": "frame",
+                    "style": {
+                      "width": 36,
+                      "height": 32,
+                      "background": "{colors.primary}",
+                      "corner_radius": 6
+                    }
+                  },
+                  {
+                    "id": "output_track",
+                    "type": "frame",
+                    "style": {
+                      "width": 8,
+                      "height": 80,
+                      "background": "{colors.accent}",
+                      "corner_radius": 4
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "output_readout",
+                "type": "text",
+                "text": "-0.2 dB",
+                "style": {
+                  "width": 86,
+                  "height": 18,
+                  "color": "{colors.text}",
+                  "font_size": 13,
+                  "font_weight": 600,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "notes": "Hero-less utility rhythm with input and output faders bracketing the vector control group."
+}

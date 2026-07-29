@@ -1,0 +1,8 @@
+{
+  "id": "utility",
+  "name": "Vector Utility",
+  "brief": "A compact mastering utility for gain, pan, width, polarity, and output. Clinical, fast to scan, deliberately hero-less.",
+  "archetypes": ["utility_grid"],
+  "hero_required": false,
+  "macros": ["input_gain", "pan", "width", "polarity", "output_gain"]
+}

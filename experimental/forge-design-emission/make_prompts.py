@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Create reproducible arm prompts from the three concept manifests."""
+
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).parent
+
+PROFILE = r"""
+Return raw JSON: one object, no fence, no prose, in this exact top-level order:
+{"design_language":{"base":"<id|custom>","designmd":"<complete text>"},
+ "layout":{"archetype":"<allowed>","hero":"<macro|none>","reason":"<one line>"},
+ "design":<root node>,"notes":"<optional one line>"}
+
+Node profile (unknown fields fail):
+- node: id, type, name?, text?, style?, layout?, control?, children?
+- id matches [a-z][a-z0-9_]{0,31}, unique. type is frame|text|ellipse.
+- text nodes require non-empty text.
+- style: width, height (unquoted px numbers), background, gradient,
+  corner_radius, border:{width,color}, shadow:{y,blur,color}, color, font_size,
+  font_weight, font_family, letter_spacing.
+- layout: direction row|column, gap, padding (one number or four-number array),
+  align start|center|end, justify start|center|end|between, grow.
+- control: bind (one listed macro), widget knob|fader, label optional.
+- children array. Flex only: never x/y/absolute/grid/canvas/display nodes.
+- Colors are #RRGGBB/#RRGGBBAA or {colors.TOKEN}; gradients use
+  linear-gradient(to bottom|right, ...) only.
+- Fonts: Jost, Inter, JetBrains Mono. No meter vocabulary; chrome supplies it.
+
+Hard limits: <=120 nodes, depth <=8, <=24 children; root fixed 360x240..1600x1000;
+every listed macro bound exactly once; every control >=40x40; text >=10px
+(readouts >=12); <=8 distinct raw hex colors; <=1 shadow/node; gradient <=256
+chars and <=6 stops. Every control must have explicit width and height.
+
+DESIGN.md must be a complete YAML-frontmatter document embedded as a JSON string:
+---
+name: <name>
+version: "1"
+colors:
+  primary: "#RRGGBB"
+  surface: "#RRGGBB"
+  surface_raised: "#RRGGBB"
+  text: "#RRGGBB"
+  text_muted: "#RRGGBB"
+  accent: "#RRGGBB"
+typography:
+  body:
+    family: Inter
+    size: 12
+rounded:
+  panel: 12
+spacing:
+  unit: 8
+---
+# <name>
+All {colors.*} references in the design must exist in that colors map.
+"""
+
+CRAFT = r"""
+Additional craft arm — begin from the shipped Ink & Signal design language:
+surface #101417, raised #192126, text #F2F5F4, muted #9AA8A5, signal teal
+#16DAC2, deep teal #10B6A3. You may override these when the concept demands it,
+but keep a disciplined 3-6 color system.
+
+Compose, do not make a generic equal-knob grid. Establish a clear visual
+hierarchy, use negative space, group signal-flow relationships, and make the
+chosen archetype visible in topology. A hero control is 1.4-2.5x the median
+control width. Satellites are subordinate. Hero-less panels use intentional
+uniformity and strong section rhythm. Use one coherent material idea, one
+accent, restrained depth, top-left light, and typography that clearly separates
+brand, section, control label, and readout. Decoration must explain hierarchy.
+"""
+
+
+def prompt(concept, arm):
+    allowed = ", ".join(concept["archetypes"])
+    hero = "one of the macros, never makeup/mix/output" if concept["hero_required"] else '"none"'
+    return f"""You are authoring one constrained Forge panel for a controlled experiment.
+Concept: {concept['name']}. {concept['brief']}
+Allowed archetype(s): {allowed}. layout.hero must be {hero}.
+Macros, each bound exactly once: {", ".join(concept["macros"])}.
+
+{PROFILE}
+{CRAFT if arm == 2 else ""}
+Before answering, silently self-check JSON validity, allowed fields, unique ids,
+all macro bindings, root/control/text dimensions, token resolution, and limits.
+Return only the JSON object."""
+
+
+def main():
+    out = ROOT / "prompts"
+    out.mkdir(exist_ok=True)
+    for path in sorted((ROOT / "concepts").glob("*.json")):
+        concept = json.loads(path.read_text())
+        for arm in (1, 2):
+            (out / f"{concept['id']}-arm{arm}.txt").write_text(prompt(concept, arm) + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,77 @@
+{
+  "schema": "pulp-screenshot-runtime-trace-v1",
+  "reference_frame": {
+    "coordinate_space": "root-view-css-points",
+    "origin": "top-left",
+    "root_size": {
+      "width": 760,
+      "height": 440
+    },
+    "document_body_id": "__root__",
+    "document_body_bounds": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0,
+      "left": 0
+    }
+  },
+  "callback_count": 0,
+  "callbacks": [],
+  "native_registered_count": 0,
+  "native_registered": [],
+  "window_listeners": [],
+  "document_listeners": [],
+  "add_event_listener_log_count": 0,
+  "add_event_listener_log": [],
+  "dispatch_hits": null,
+  "native_element_count": 2,
+  "native_bounds_count": 2,
+  "native_bounds": [
+    {
+      "id": "__docRoot__",
+      "tag": "html",
+      "user_id": "",
+      "class_name": "",
+      "text": "",
+      "native_created": true,
+      "attributes": {},
+      "bounds_source": "getLayoutRect",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "ancestor_chain": []
+    },
+    {
+      "id": "__root__",
+      "tag": "div",
+      "user_id": "",
+      "class_name": "",
+      "text": "",
+      "native_created": true,
+      "attributes": {},
+      "bounds_source": "getLayoutRect",
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "ancestor_chain": []
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "compressor",
+  "name": "Atlas Bus Compressor",
+  "brief": "A hero-led stereo bus compressor: authoritative, tactile, modern analog, with THRESHOLD as the unmistakable center of gravity.",
+  "archetypes": ["feature_frame", "hero_knob"],
+  "hero_required": true,
+  "macros": ["threshold", "ratio", "attack", "release", "makeup", "mix"]
+}

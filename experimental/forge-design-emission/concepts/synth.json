@@ -1,0 +1,8 @@
+{
+  "id": "synth",
+  "name": "Lattice Poly Synth",
+  "brief": "A multi-section polyphonic synth with clearly distinct OSC, FILTER, ENV, and MOTION regions; peer sections, dense but calm.",
+  "archetypes": ["voice_panel"],
+  "hero_required": false,
+  "macros": ["osc_shape", "osc_detune", "cutoff", "resonance", "attack", "decay", "sustain", "release", "lfo_rate", "lfo_depth"]
+}

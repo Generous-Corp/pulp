@@ -1,0 +1,31 @@
+{
+  "layers": {
+    "L0": true,
+    "L1": false,
+    "L2": false,
+    "L3": false,
+    "L4": false,
+    "L5-python": true
+  },
+  "diagnostics": [
+    {
+      "layer": "L1",
+      "path": "osc_grid_a",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    }
+  ],
+  "node_count": 60,
+  "raw_hex_count": 0,
+  "bind_counts": {
+    "osc_shape": 1,
+    "osc_detune": 1,
+    "cutoff": 1,
+    "resonance": 1,
+    "attack": 1,
+    "decay": 1,
+    "sustain": 1,
+    "release": 1,
+    "lfo_rate": 1,
+    "lfo_depth": 1
+  }
+}

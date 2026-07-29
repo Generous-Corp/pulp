@@ -1,0 +1,786 @@
+You are authoring one constrained Forge panel for a controlled experiment.
+Concept: Atlas Bus Compressor. A hero-led stereo bus compressor: authoritative, tactile, modern analog, with THRESHOLD as the unmistakable center of gravity.
+Allowed archetype(s): feature_frame, hero_knob. layout.hero must be one of the macros, never makeup/mix/output.
+Macros, each bound exactly once: threshold, ratio, attack, release, makeup, mix.
+
+
+Return raw JSON: one object, no fence, no prose, in this exact top-level order:
+{"design_language":{"base":"<id|custom>","designmd":"<complete text>"},
+ "layout":{"archetype":"<allowed>","hero":"<macro|none>","reason":"<one line>"},
+ "design":<root node>,"notes":"<optional one line>"}
+
+Node profile (unknown fields fail):
+- node: id, type, name?, text?, style?, layout?, control?, children?
+- id matches [a-z][a-z0-9_]{0,31}, unique. type is frame|text|ellipse.
+- text nodes require non-empty text.
+- style: width, height (unquoted px numbers), background, gradient,
+  corner_radius, border:{width,color}, shadow:{y,blur,color}, color, font_size,
+  font_weight, font_family, letter_spacing.
+- layout: direction row|column, gap, padding (one number or four-number array),
+  align start|center|end, justify start|center|end|between, grow.
+- control: bind (one listed macro), widget knob|fader, label optional.
+- children array. Flex only: never x/y/absolute/grid/canvas/display nodes.
+- Colors are #RRGGBB/#RRGGBBAA or {colors.TOKEN}; gradients use
+  linear-gradient(to bottom|right, ...) only.
+- Fonts: Jost, Inter, JetBrains Mono. No meter vocabulary; chrome supplies it.
+
+Hard limits: <=120 nodes, depth <=8, <=24 children; root fixed 360x240..1600x1000;
+every listed macro bound exactly once; every control >=40x40; text >=10px
+(readouts >=12); <=8 distinct raw hex colors; <=1 shadow/node; gradient <=256
+chars and <=6 stops. Every control must have explicit width and height.
+
+DESIGN.md must be a complete YAML-frontmatter document embedded as a JSON string:
+---
+name: <name>
+version: "1"
+colors:
+  primary: "#RRGGBB"
+  surface: "#RRGGBB"
+  surface_raised: "#RRGGBB"
+  text: "#RRGGBB"
+  text_muted: "#RRGGBB"
+  accent: "#RRGGBB"
+typography:
+  body:
+    family: Inter
+    size: 12
+rounded:
+  panel: 12
+spacing:
+  unit: 8
+---
+# <name>
+All {colors.*} references in the design must exist in that colors map.
+
+
+Additional craft arm — begin from the shipped Ink & Signal design language:
+surface #101417, raised #192126, text #F2F5F4, muted #9AA8A5, signal teal
+#16DAC2, deep teal #10B6A3. You may override these when the concept demands it,
+but keep a disciplined 3-6 color system.
+
+Compose, do not make a generic equal-knob grid. Establish a clear visual
+hierarchy, use negative space, group signal-flow relationships, and make the
+chosen archetype visible in topology. A hero control is 1.4-2.5x the median
+control width. Satellites are subordinate. Hero-less panels use intentional
+uniformity and strong section rhythm. Use one coherent material idea, one
+accent, restrained depth, top-left light, and typography that clearly separates
+brand, section, control label, and readout. Decoration must explain hierarchy.
+
+Before answering, silently self-check JSON validity, allowed fields, unique ids,
+all macro bindings, root/control/text dimensions, token resolution, and limits.
+Return only the JSON object.
+
+
+REPAIR ROUND 1 OF 2.
+Your previous object failed the validator. Return the COMPLETE corrected object,
+again raw JSON only. Preserve good composition; change only what diagnostics
+require. In this profile `background` is a solid color/token only. Put any
+`linear-gradient(...)` string in the sibling `gradient` field and use a solid
+token in `background`.
+
+Diagnostics:
+[
+  {
+    "layer": "L1",
+    "path": "main",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "threshold_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  }
+]
+
+Previous object:
+{
+  "design_language": {
+    "base": "ink_signal",
+    "designmd": "---\nname: Atlas Bus Compressor\nversion: \"1\"\ncolors:\n  primary: \"#10B6A3\"\n  surface: \"#101417\"\n  surface_raised: \"#192126\"\n  text: \"#F2F5F4\"\n  text_muted: \"#9AA8A5\"\n  accent: \"#16DAC2\"\ntypography:\n  body:\n    family: Inter\n    size: 12\nrounded:\n  panel: 12\nspacing:\n  unit: 8\n---\n# Atlas Bus Compressor\nA controlled Ink & Signal panel language for a modern stereo bus compressor: dark machined surfaces, disciplined teal signal emphasis, restrained top-left depth, and typography that separates brand, section labels, control labels, and numeric readouts. Threshold is the tactile center of gravity; related timing, blend, and level controls orbit it in subordinate groups."
+  },
+  "layout": {
+    "archetype": "hero_knob",
+    "hero": "threshold",
+    "reason": "Threshold anchors the center as a large tactile hero knob with smaller signal-flow satellites grouped left and right."
+  },
+  "design": {
+    "id": "root",
+    "type": "frame",
+    "name": "Atlas Bus Compressor",
+    "style": {
+      "width": 760,
+      "height": 420,
+      "background": "{colors.surface}",
+      "corner_radius": 12,
+      "border": {
+        "width": 1,
+        "color": "{colors.primary}"
+      },
+      "shadow": {
+        "y": 18,
+        "blur": 42,
+        "color": "#00000055"
+      }
+    },
+    "layout": {
+      "direction": "column",
+      "gap": 18,
+      "padding": [
+        22,
+        24,
+        22,
+        24
+      ],
+      "align": "center",
+      "justify": "between"
+    },
+    "children": [
+      {
+        "id": "topbar",
+        "type": "frame",
+        "style": {
+          "width": 712,
+          "height": 54,
+          "background": "{colors.surface}"
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 16,
+          "padding": 0,
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "brandblock",
+            "type": "frame",
+            "style": {
+              "width": 300,
+              "height": 54,
+              "background": "{colors.surface}"
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 2,
+              "padding": 0,
+              "align": "start",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "brand",
+                "type": "text",
+                "text": "ATLAS",
+                "style": {
+                  "width": 140,
+                  "height": 22,
+                  "color": "{colors.text}",
+                  "font_size": 20,
+                  "font_weight": 700,
+                  "font_family": "Jost",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "subtitle",
+                "type": "text",
+                "text": "BUS COMPRESSOR",
+                "style": {
+                  "width": 190,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 600,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "signal_strip",
+            "type": "frame",
+            "style": {
+              "width": 206,
+              "height": 10,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 5
+            },
+            "layout": {
+              "direction": "row",
+              "gap": 4,
+              "padding": 2,
+              "align": "center",
+              "justify": "start"
+            },
+            "children": [
+              {
+                "id": "sig_a",
+                "type": "frame",
+                "style": {
+                  "width": 46,
+                  "height": 6,
+                  "background": "{colors.primary}",
+                  "corner_radius": 3
+                }
+              },
+              {
+                "id": "sig_b",
+                "type": "frame",
+                "style": {
+                  "width": 70,
+                  "height": 6,
+                  "background": "{colors.accent}",
+                  "corner_radius": 3
+                }
+              },
+              {
+                "id": "sig_c",
+                "type": "frame",
+                "style": {
+                  "width": 34,
+                  "height": 6,
+                  "background": "{colors.text_muted}",
+                  "corner_radius": 3
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "main",
+        "type": "frame",
+        "style": {
+          "width": 712,
+          "height": 276,
+          "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.surface})",
+          "corner_radius": 10,
+          "border": {
+            "width": 1,
+            "color": "{colors.primary}"
+          }
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 24,
+          "padding": [
+            22,
+            24,
+            22,
+            24
+          ],
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "time_group",
+            "type": "frame",
+            "style": {
+              "width": 168,
+              "height": 222,
+              "background": "{colors.surface}",
+              "corner_radius": 8,
+              "border": {
+                "width": 1,
+                "color": "{colors.surface_raised}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 15,
+              "padding": 14,
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "time_title",
+                "type": "text",
+                "text": "TIME",
+                "style": {
+                  "width": 120,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "attack_cell",
+                "type": "frame",
+                "style": {
+                  "width": 132,
+                  "height": 82,
+                  "background": "{colors.surface}"
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 6,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "attack_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 62,
+                      "height": 62,
+                      "background": "{colors.surface_raised}",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.text_muted}"
+                      }
+                    },
+                    "control": {
+                      "bind": "attack",
+                      "widget": "knob",
+                      "label": "Attack"
+                    }
+                  },
+                  {
+                    "id": "attack_label",
+                    "type": "text",
+                    "text": "ATTACK",
+                    "style": {
+                      "width": 76,
+                      "height": 14,
+                      "color": "{colors.text}",
+                      "font_size": 10,
+                      "font_weight": 700,
+                      "font_family": "Inter",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "release_cell",
+                "type": "frame",
+                "style": {
+                  "width": 132,
+                  "height": 82,
+                  "background": "{colors.surface}"
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 6,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "release_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 62,
+                      "height": 62,
+                      "background": "{colors.surface_raised}",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.text_muted}"
+                      }
+                    },
+                    "control": {
+                      "bind": "release",
+                      "widget": "knob",
+                      "label": "Release"
+                    }
+                  },
+                  {
+                    "id": "release_label",
+                    "type": "text",
+                    "text": "RELEASE",
+                    "style": {
+                      "width": 78,
+                      "height": 14,
+                      "color": "{colors.text}",
+                      "font_size": 10,
+                      "font_weight": 700,
+                      "font_family": "Inter",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "hero_zone",
+            "type": "frame",
+            "style": {
+              "width": 250,
+              "height": 238,
+              "background": "{colors.surface}",
+              "corner_radius": 10,
+              "border": {
+                "width": 1,
+                "color": "{colors.accent}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 10,
+              "padding": [
+                14,
+                12,
+                14,
+                12
+              ],
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "hero_label",
+                "type": "text",
+                "text": "THRESHOLD",
+                "style": {
+                  "width": 150,
+                  "height": 18,
+                  "color": "{colors.accent}",
+                  "font_size": 13,
+                  "font_weight": 800,
+                  "font_family": "Jost",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "threshold_knob",
+                "type": "ellipse",
+                "style": {
+                  "width": 150,
+                  "height": 150,
+                  "background": "linear-gradient(to bottom, {colors.accent}, {colors.primary}, {colors.surface_raised})",
+                  "border": {
+                    "width": 3,
+                    "color": "{colors.text}"
+                  }
+                },
+                "control": {
+                  "bind": "threshold",
+                  "widget": "knob",
+                  "label": "Threshold"
+                }
+              },
+              {
+                "id": "threshold_read",
+                "type": "text",
+                "text": "-14 DB",
+                "style": {
+                  "width": 86,
+                  "height": 22,
+                  "color": "{colors.text}",
+                  "font_size": 16,
+                  "font_weight": 700,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "shape_group",
+            "type": "frame",
+            "style": {
+              "width": 198,
+              "height": 222,
+              "background": "{colors.surface}",
+              "corner_radius": 8,
+              "border": {
+                "width": 1,
+                "color": "{colors.surface_raised}"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 13,
+              "padding": 14,
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "shape_title",
+                "type": "text",
+                "text": "SHAPE",
+                "style": {
+                  "width": 128,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "ratio_row",
+                "type": "frame",
+                "style": {
+                  "width": 156,
+                  "height": 70,
+                  "background": "{colors.surface}"
+                },
+                "layout": {
+                  "direction": "row",
+                  "gap": 14,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "ratio_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 66,
+                      "height": 66,
+                      "background": "{colors.surface_raised}",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.accent}"
+                      }
+                    },
+                    "control": {
+                      "bind": "ratio",
+                      "widget": "knob",
+                      "label": "Ratio"
+                    }
+                  },
+                  {
+                    "id": "ratio_texts",
+                    "type": "frame",
+                    "style": {
+                      "width": 70,
+                      "height": 48,
+                      "background": "{colors.surface}"
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 2,
+                      "padding": 0,
+                      "align": "start",
+                      "justify": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "ratio_label",
+                        "type": "text",
+                        "text": "RATIO",
+                        "style": {
+                          "width": 62,
+                          "height": 14,
+                          "color": "{colors.text}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      },
+                      {
+                        "id": "ratio_read",
+                        "type": "text",
+                        "text": "4:1",
+                        "style": {
+                          "width": 50,
+                          "height": 18,
+                          "color": "{colors.text_muted}",
+                          "font_size": 13,
+                          "font_weight": 700,
+                          "font_family": "JetBrains Mono",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "blend_row",
+                "type": "frame",
+                "style": {
+                  "width": 156,
+                  "height": 82,
+                  "background": "{colors.surface}"
+                },
+                "layout": {
+                  "direction": "row",
+                  "gap": 16,
+                  "padding": 0,
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "makeup_cell",
+                    "type": "frame",
+                    "style": {
+                      "width": 70,
+                      "height": 82,
+                      "background": "{colors.surface}"
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 6,
+                      "padding": 0,
+                      "align": "center",
+                      "justify": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "makeup_knob",
+                        "type": "ellipse",
+                        "style": {
+                          "width": 58,
+                          "height": 58,
+                          "background": "{colors.surface_raised}",
+                          "border": {
+                            "width": 2,
+                            "color": "{colors.text_muted}"
+                          }
+                        },
+                        "control": {
+                          "bind": "makeup",
+                          "widget": "knob",
+                          "label": "Makeup"
+                        }
+                      },
+                      {
+                        "id": "makeup_label",
+                        "type": "text",
+                        "text": "MAKEUP",
+                        "style": {
+                          "width": 64,
+                          "height": 14,
+                          "color": "{colors.text}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "mix_cell",
+                    "type": "frame",
+                    "style": {
+                      "width": 70,
+                      "height": 82,
+                      "background": "{colors.surface}"
+                    },
+                    "layout": {
+                      "direction": "column",
+                      "gap": 6,
+                      "padding": 0,
+                      "align": "center",
+                      "justify": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "mix_knob",
+                        "type": "ellipse",
+                        "style": {
+                          "width": 58,
+                          "height": 58,
+                          "background": "{colors.surface_raised}",
+                          "border": {
+                            "width": 2,
+                            "color": "{colors.text_muted}"
+                          }
+                        },
+                        "control": {
+                          "bind": "mix",
+                          "widget": "knob",
+                          "label": "Mix"
+                        }
+                      },
+                      {
+                        "id": "mix_label",
+                        "type": "text",
+                        "text": "MIX",
+                        "style": {
+                          "width": 42,
+                          "height": 14,
+                          "color": "{colors.text}",
+                          "font_size": 10,
+                          "font_weight": 700,
+                          "font_family": "Inter",
+                          "letter_spacing": 0
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "footer",
+        "type": "frame",
+        "style": {
+          "width": 712,
+          "height": 32,
+          "background": "{colors.surface}"
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 10,
+          "padding": 0,
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "footer_left",
+            "type": "text",
+            "text": "STEREO LINK",
+            "style": {
+              "width": 110,
+              "height": 16,
+              "color": "{colors.text_muted}",
+              "font_size": 11,
+              "font_weight": 600,
+              "font_family": "Inter",
+              "letter_spacing": 0
+            }
+          },
+          {
+            "id": "footer_line",
+            "type": "frame",
+            "style": {
+              "width": 452,
+              "height": 2,
+              "background": "{colors.surface_raised}",
+              "corner_radius": 1
+            }
+          },
+          {
+            "id": "footer_right",
+            "type": "text",
+            "text": "INK & SIGNAL",
+            "style": {
+              "width": 110,
+              "height": 16,
+              "color": "{colors.text_muted}",
+              "font_size": 11,
+              "font_weight": 600,
+              "font_family": "Inter",
+              "letter_spacing": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "notes": "Hero threshold is 2.3x the satellite knob width, with time controls left and tone/blend controls right."
+}

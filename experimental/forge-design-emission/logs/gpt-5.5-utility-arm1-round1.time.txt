@@ -1,0 +1,21 @@
+2026-07-29T01:43:07.033891Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+real 43.24
+user 2.90
+sys 3.06
+           207142912  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               87248  page reclaims
+                 522  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 619  messages sent
+                6787  messages received
+                  46  signals received
+                 806  voluntary context switches
+               95948  involuntary context switches
+          7625907595  instructions retired
+          7999165979  cycles elapsed
+           105285720  peak memory footprint

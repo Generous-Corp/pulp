@@ -1,0 +1,652 @@
+{
+  "artifacts_attempted": 12,
+  "renders": 12,
+  "pass_rates": {
+    "L0": {
+      "single_shot": 12,
+      "final": 12,
+      "attempted": 12
+    },
+    "L1": {
+      "single_shot": 7,
+      "final": 12,
+      "attempted": 12
+    },
+    "L2": {
+      "single_shot": 7,
+      "final": 12,
+      "attempted": 12
+    },
+    "L3": {
+      "single_shot": 7,
+      "final": 12,
+      "attempted": 12
+    },
+    "L4": {
+      "single_shot": 7,
+      "final": 12,
+      "attempted": 12
+    }
+  },
+  "rows": [
+    {
+      "provider": "claude",
+      "concept": "compressor",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 30,
+      "width": 760,
+      "height": 440
+    },
+    {
+      "provider": "claude",
+      "concept": "compressor",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 42,
+      "width": 960,
+      "height": 600
+    },
+    {
+      "provider": "claude",
+      "concept": "synth",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 35,
+      "width": 1120,
+      "height": 560
+    },
+    {
+      "provider": "claude",
+      "concept": "synth",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 64,
+      "width": 1112,
+      "height": 408
+    },
+    {
+      "provider": "claude",
+      "concept": "utility",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 25,
+      "width": 760,
+      "height": 248
+    },
+    {
+      "provider": "claude",
+      "concept": "utility",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 39,
+      "width": 720,
+      "height": 320
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "compressor",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": false,
+        "L2": false,
+        "L3": false,
+        "L4": false,
+        "L5-python": true
+      },
+      "repair_rounds": 1,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 35,
+      "width": 960,
+      "height": 560
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "compressor",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": false,
+        "L2": false,
+        "L3": false,
+        "L4": false,
+        "L5-python": true
+      },
+      "repair_rounds": 1,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 40,
+      "width": 760,
+      "height": 420
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "synth",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": false,
+        "L2": false,
+        "L3": false,
+        "L4": false,
+        "L5-python": true
+      },
+      "repair_rounds": 1,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 60,
+      "width": 720,
+      "height": 480
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "synth",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": false,
+        "L2": false,
+        "L3": false,
+        "L4": false,
+        "L5-python": true
+      },
+      "repair_rounds": 1,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 96,
+      "width": 920,
+      "height": 560
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "utility",
+      "arm": 1,
+      "single_shot": {
+        "L0": true,
+        "L1": false,
+        "L2": false,
+        "L3": false,
+        "L4": false,
+        "L5-python": true
+      },
+      "repair_rounds": 1,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 28,
+      "width": 720,
+      "height": 400
+    },
+    {
+      "provider": "gpt-5.5",
+      "concept": "utility",
+      "arm": 2,
+      "single_shot": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "repair_rounds": 0,
+      "final": {
+        "L0": true,
+        "L1": true,
+        "L2": true,
+        "L3": true,
+        "L4": true,
+        "L5-python": true
+      },
+      "node_count": 46,
+      "width": 760,
+      "height": 420
+    }
+  ],
+  "blind_picks": {
+    "compressor": {
+      "concept": "stereo bus compressor plugin panel",
+      "ranking": [
+        "D",
+        "A",
+        "C",
+        "B"
+      ],
+      "scores": {
+        "A": 72,
+        "B": 43,
+        "C": 58,
+        "D": 80
+      },
+      "beats_floor": [
+        "A",
+        "D"
+      ],
+      "reaches_ceiling": [],
+      "best_reason": "D has the strongest hierarchy and craft: clear title/header, dominant threshold control, coherent grouped dynamics/output sections, legible values, restrained spacing, and a believable compressor-focused layout without obvious clipping.",
+      "defects": {
+        "A": [
+          "Bottom mix strip is clipped/partially off-canvas",
+          "Right-side controls feel disconnected from main threshold area",
+          "Hierarchy is clean but sparse and somewhat unfinished",
+          "Some labels/values are small relative to available space"
+        ],
+        "B": [
+          "White frame/card treatment fights the dark compressor aesthetic",
+          "Multiple controls appear cramped or inconsistently inset",
+          "Tiny knob labels overlap visually inside white boxes",
+          "Bottom makeup strip is clipped off-canvas",
+          "Hierarchy is noisy and less coherent"
+        ],
+        "C": [
+          "Central threshold area is clear but surrounding modules feel boxy and uneven",
+          "Some labels are very small and low contrast",
+          "Top-right meter is decorative but weakly integrated",
+          "Bottom stereo link/ink text reads like unfinished placeholders",
+          "Control spacing is serviceable but not polished"
+        ],
+        "D": [
+          "Does not approach the aspirational visual richness of the Halo reference",
+          "Main threshold glow is a bit heavy compared with otherwise restrained styling",
+          "Right panels are competent but slightly generic",
+          "Large empty space could be used more intentionally"
+        ]
+      },
+      "decoded_ranking": [
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "D",
+          "score": 80
+        },
+        {
+          "provider": "claude",
+          "arm": 1,
+          "label": "A",
+          "score": 72
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 2,
+          "label": "C",
+          "score": 58
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 1,
+          "label": "B",
+          "score": 43
+        }
+      ],
+      "decoded_beats_floor": [
+        {
+          "provider": "claude",
+          "arm": 1,
+          "label": "A"
+        },
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "D"
+        }
+      ]
+    },
+    "synth": {
+      "concept": "Lattice Poly synth panel",
+      "ranking": [
+        "B",
+        "A",
+        "D",
+        "C"
+      ],
+      "scores": {
+        "A": 66,
+        "B": 74,
+        "C": 48,
+        "D": 61
+      },
+      "beats_floor": [
+        "A",
+        "B",
+        "D"
+      ],
+      "reaches_ceiling": [],
+      "best_reason": "B has the strongest synth-specific structure, clearest module hierarchy, useful parameter grouping, and the most intentional control/value presentation, despite visible left-edge clipping.",
+      "defects": {
+        "A": [
+          "Left-edge ADSR labels are clipped/overflowing",
+          "Cards feel boxy and underdeveloped versus synth concept",
+          "Envelope section is sparse and visually imbalanced",
+          "Hierarchy is competent but flat"
+        ],
+        "B": [
+          "Severe left-edge clipping on vertical controls",
+          "Some labels and value placement feel cramped",
+          "Right-side panels are heavier than left-side modules",
+          "Craft is good but not near Halo-level polish"
+        ],
+        "C": [
+          "Multiple left-edge labels and controls are clipped",
+          "Dense layout with poor breathing room",
+          "Large knobs crowd the panel and weaken hierarchy",
+          "Top navigation/header appears misaligned and partially blocked",
+          "Legibility is inconsistent"
+        ],
+        "D": [
+          "Bottom half is mostly empty, making composition feel unfinished",
+          "Left ADSR labels are clipped",
+          "Module cards are overly sparse",
+          "Concept fit is generic and lacks synth richness",
+          "Hierarchy is clean but too minimal"
+        ]
+      },
+      "decoded_ranking": [
+        {
+          "provider": "gpt-5.5",
+          "arm": 2,
+          "label": "B",
+          "score": 74
+        },
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "A",
+          "score": 66
+        },
+        {
+          "provider": "claude",
+          "arm": 1,
+          "label": "D",
+          "score": 61
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 1,
+          "label": "C",
+          "score": 48
+        }
+      ],
+      "decoded_beats_floor": [
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "A"
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 2,
+          "label": "B"
+        },
+        {
+          "provider": "claude",
+          "arm": 1,
+          "label": "D"
+        }
+      ]
+    },
+    "utility": {
+      "concept": "utility",
+      "ranking": [
+        "B",
+        "A",
+        "D",
+        "C"
+      ],
+      "scores": {
+        "A": 63,
+        "B": 76,
+        "C": 28,
+        "D": 49
+      },
+      "beats_floor": [
+        "B"
+      ],
+      "reaches_ceiling": [],
+      "best_reason": "B has the clearest utility-panel structure, strongest hierarchy, readable labels/values, and the most coherent grouping of input, stereo image, and output without clipping.",
+      "defects": {
+        "A": [
+          "overly sparse repeated cards",
+          "weak value feedback",
+          "small low-contrast secondary labels",
+          "less clear utility grouping"
+        ],
+        "B": [
+          "still flat compared with ceiling",
+          "knobs are visually repetitive",
+          "large empty panel areas",
+          "limited premium detail"
+        ],
+        "C": [
+          "severe clipping at top and bottom",
+          "controls cropped/partially missing",
+          "visual hierarchy is broken",
+          "background and labels overlap awkwardly",
+          "poor craft"
+        ],
+        "D": [
+          "left-side vertical controls clip/overflow",
+          "bottom content feels cut off",
+          "center panel is busy and uneven",
+          "mixed alignment and spacing",
+          "unclear control relationships"
+        ]
+      },
+      "decoded_ranking": [
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "B",
+          "score": 76
+        },
+        {
+          "provider": "claude",
+          "arm": 1,
+          "label": "A",
+          "score": 63
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 2,
+          "label": "D",
+          "score": 49
+        },
+        {
+          "provider": "gpt-5.5",
+          "arm": 1,
+          "label": "C",
+          "score": 28
+        }
+      ],
+      "decoded_beats_floor": [
+        {
+          "provider": "claude",
+          "arm": 2,
+          "label": "B"
+        }
+      ]
+    }
+  },
+  "variance": {
+    "compressor": {
+      "mean_pairwise_pixel_mad": 0.2603,
+      "pairwise_pixel_mad": {
+        "claude-arm1 vs claude-arm2": 0.0534,
+        "claude-arm1 vs gpt-5.5-arm1": 0.3736,
+        "claude-arm1 vs gpt-5.5-arm2": 0.203,
+        "claude-arm2 vs gpt-5.5-arm1": 0.3857,
+        "claude-arm2 vs gpt-5.5-arm2": 0.1877,
+        "gpt-5.5-arm1 vs gpt-5.5-arm2": 0.3586
+      },
+      "size_variants": 4,
+      "node_count_range": [
+        30,
+        42
+      ]
+    },
+    "synth": {
+      "mean_pairwise_pixel_mad": 0.0566,
+      "pairwise_pixel_mad": {
+        "claude-arm1 vs claude-arm2": 0.0355,
+        "claude-arm1 vs gpt-5.5-arm1": 0.0655,
+        "claude-arm1 vs gpt-5.5-arm2": 0.0476,
+        "claude-arm2 vs gpt-5.5-arm1": 0.0724,
+        "claude-arm2 vs gpt-5.5-arm2": 0.0467,
+        "gpt-5.5-arm1 vs gpt-5.5-arm2": 0.0717
+      },
+      "size_variants": 4,
+      "node_count_range": [
+        35,
+        96
+      ]
+    },
+    "utility": {
+      "mean_pairwise_pixel_mad": 0.0621,
+      "pairwise_pixel_mad": {
+        "claude-arm1 vs claude-arm2": 0.0358,
+        "claude-arm1 vs gpt-5.5-arm1": 0.076,
+        "claude-arm1 vs gpt-5.5-arm2": 0.0489,
+        "claude-arm2 vs gpt-5.5-arm1": 0.0841,
+        "claude-arm2 vs gpt-5.5-arm2": 0.0505,
+        "gpt-5.5-arm1 vs gpt-5.5-arm2": 0.0774
+      },
+      "size_variants": 4,
+      "node_count_range": [
+        25,
+        46
+      ]
+    }
+  },
+  "repair": {
+    "needed": 5,
+    "converged_round1": 5,
+    "needed_round2": 0,
+    "cluster": "style.background contained linear-gradient; use style.gradient"
+  }
+}

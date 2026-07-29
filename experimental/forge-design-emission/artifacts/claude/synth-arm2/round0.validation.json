@@ -1,0 +1,25 @@
+{
+  "layers": {
+    "L0": true,
+    "L1": true,
+    "L2": true,
+    "L3": true,
+    "L4": true,
+    "L5-python": true
+  },
+  "diagnostics": [],
+  "node_count": 64,
+  "raw_hex_count": 2,
+  "bind_counts": {
+    "osc_shape": 1,
+    "osc_detune": 1,
+    "cutoff": 1,
+    "resonance": 1,
+    "attack": 1,
+    "decay": 1,
+    "sustain": 1,
+    "release": 1,
+    "lfo_rate": 1,
+    "lfo_depth": 1
+  }
+}

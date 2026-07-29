@@ -1,0 +1,56 @@
+{
+  "compressor": {
+    "A": {
+      "provider": "claude",
+      "arm": 1
+    },
+    "B": {
+      "provider": "gpt-5.5",
+      "arm": 1
+    },
+    "C": {
+      "provider": "gpt-5.5",
+      "arm": 2
+    },
+    "D": {
+      "provider": "claude",
+      "arm": 2
+    }
+  },
+  "synth": {
+    "A": {
+      "provider": "claude",
+      "arm": 2
+    },
+    "B": {
+      "provider": "gpt-5.5",
+      "arm": 2
+    },
+    "C": {
+      "provider": "gpt-5.5",
+      "arm": 1
+    },
+    "D": {
+      "provider": "claude",
+      "arm": 1
+    }
+  },
+  "utility": {
+    "A": {
+      "provider": "claude",
+      "arm": 1
+    },
+    "B": {
+      "provider": "claude",
+      "arm": 2
+    },
+    "C": {
+      "provider": "gpt-5.5",
+      "arm": 1
+    },
+    "D": {
+      "provider": "gpt-5.5",
+      "arm": 2
+    }
+  }
+}

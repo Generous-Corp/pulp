@@ -1,0 +1,32 @@
+{
+  "layers": {
+    "L0": true,
+    "L1": false,
+    "L2": false,
+    "L3": false,
+    "L4": false,
+    "L5-python": true
+  },
+  "diagnostics": [
+    {
+      "layer": "L1",
+      "path": "main",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "threshold_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    }
+  ],
+  "node_count": 40,
+  "raw_hex_count": 0,
+  "bind_counts": {
+    "attack": 1,
+    "release": 1,
+    "threshold": 1,
+    "ratio": 1,
+    "makeup": 1,
+    "mix": 1
+  }
+}

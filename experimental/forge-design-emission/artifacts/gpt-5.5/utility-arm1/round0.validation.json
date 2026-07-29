@@ -1,0 +1,31 @@
+{
+  "layers": {
+    "L0": true,
+    "L1": false,
+    "L2": false,
+    "L3": false,
+    "L4": false,
+    "L5-python": true
+  },
+  "diagnostics": [
+    {
+      "layer": "L1",
+      "path": "input_ctl",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "output_ctl",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    }
+  ],
+  "node_count": 28,
+  "raw_hex_count": 0,
+  "bind_counts": {
+    "input_gain": 1,
+    "pan": 1,
+    "width": 1,
+    "polarity": 1,
+    "output_gain": 1
+  }
+}

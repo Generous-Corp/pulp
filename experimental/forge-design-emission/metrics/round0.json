@@ -1,0 +1,265 @@
+[
+  {
+    "provider": "claude",
+    "case": "compressor-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "claude",
+    "case": "compressor-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "claude",
+    "case": "synth-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "claude",
+    "case": "synth-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "claude",
+    "case": "utility-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "claude",
+    "case": "utility-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "compressor-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": false,
+      "L2": false,
+      "L3": false,
+      "L4": false,
+      "L5-python": true
+    },
+    "diagnostics": [
+      {
+        "layer": "L1",
+        "path": "top_bar",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "main_area",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "ratio_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "attack_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "hero_stage",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "threshold_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "release_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "mix_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "bottom_bar",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "makeup_fader",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      }
+    ]
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "compressor-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": false,
+      "L2": false,
+      "L3": false,
+      "L4": false,
+      "L5-python": true
+    },
+    "diagnostics": [
+      {
+        "layer": "L1",
+        "path": "main",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "threshold_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      }
+    ]
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "synth-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": false,
+      "L2": false,
+      "L3": false,
+      "L4": false,
+      "L5-python": true
+    },
+    "diagnostics": [
+      {
+        "layer": "L1",
+        "path": "osc_grid_a",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      }
+    ]
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "synth-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": false,
+      "L2": false,
+      "L3": false,
+      "L4": false,
+      "L5-python": true
+    },
+    "diagnostics": [
+      {
+        "layer": "L1",
+        "path": "shape_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "cutoff_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "rate_knob",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      }
+    ]
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "utility-arm1",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": false,
+      "L2": false,
+      "L3": false,
+      "L4": false,
+      "L5-python": true
+    },
+    "diagnostics": [
+      {
+        "layer": "L1",
+        "path": "input_ctl",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      },
+      {
+        "layer": "L1",
+        "path": "output_ctl",
+        "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+      }
+    ]
+  },
+  {
+    "provider": "gpt-5.5",
+    "case": "utility-arm2",
+    "round": 0,
+    "layers": {
+      "L0": true,
+      "L1": true,
+      "L2": true,
+      "L3": true,
+      "L4": true,
+      "L5-python": true
+    },
+    "diagnostics": []
+  }
+]

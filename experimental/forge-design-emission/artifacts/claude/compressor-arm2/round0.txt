@@ -1,0 +1,45 @@
+{"design_language":{"base":"custom","designmd":"---\nname: Atlas Bus Compressor\nversion: \"1\"\ncolors:\n  primary: \"#16DAC2\"\n  surface: \"#101417\"\n  surface_raised: \"#192126\"\n  text: \"#F2F5F4\"\n  text_muted: \"#9AA8A5\"\n  accent: \"#10B6A3\"\ntypography:\n  body:\n    family: Inter\n    size: 12\nrounded:\n  panel: 12\nspacing:\n  unit: 8\n---\n# Atlas Bus Compressor\nInk & Signal, weighted for authority. One material idea: matte graphite panels\nover near-black ink, controls turned from a single dark-metal gradient, light\nfrom the top-left. One accent: signal teal, spent only where the instrument\nspeaks — the hero ring and its readout. Depth is restrained: a recessed well\nseats the hero, raised satellite panels sit one step above the surface.\nType roles: Jost for brand and section voices (tracked uppercase), Inter for\ncontrol labels, JetBrains Mono for every numeric readout. Hierarchy is\ntopological before it is decorative: THRESHOLD is the center of gravity at\nroughly twice satellite scale; DYNAMICS (ratio, attack, release) and OUTPUT\n(makeup, mix) follow the signal flow left to right."},
+"layout":{"archetype":"hero_knob","hero":"threshold","reason":"Threshold is the compressor's decision point, so it earns the single oversized seat while timing and output controls orbit as grouped satellites."},
+"design":{"id":"root","type":"frame","name":"Atlas Bus Compressor","style":{"width":960,"height":600,"background":"{colors.surface}","corner_radius":16},"layout":{"direction":"column","gap":18,"padding":28},"children":[
+{"id":"header","type":"frame","layout":{"direction":"row","align":"center","justify":"between"},"children":[
+{"id":"brand_block","type":"frame","layout":{"direction":"row","gap":10,"align":"end"},"children":[
+{"id":"brand","type":"text","text":"ATLAS","style":{"color":"{colors.text}","font_size":22,"font_weight":700,"font_family":"Jost","letter_spacing":4}},
+{"id":"model","type":"text","text":"BUS COMPRESSOR","style":{"color":"{colors.text_muted}","font_size":12,"font_weight":600,"font_family":"Jost","letter_spacing":2}}]},
+{"id":"format_pill","type":"frame","style":{"corner_radius":10,"border":{"width":1,"color":"#2A343A"}},"layout":{"direction":"row","align":"center","padding":[4,12,4,12]},"children":[
+{"id":"format_text","type":"text","text":"STEREO BUS","style":{"color":"{colors.text_muted}","font_size":10,"font_weight":600,"font_family":"Inter","letter_spacing":2}}]}]},
+{"id":"rule","type":"frame","style":{"width":904,"height":1,"background":"#2A343A"}},
+{"id":"main","type":"frame","layout":{"direction":"row","gap":26,"align":"center","grow":1},"children":[
+{"id":"hero_section","type":"frame","layout":{"direction":"column","align":"center","justify":"center","gap":14,"grow":1},"children":[
+{"id":"hero_title","type":"text","text":"THRESHOLD","style":{"color":"{colors.text}","font_size":14,"font_weight":700,"font_family":"Jost","letter_spacing":4}},
+{"id":"hero_well","type":"frame","style":{"width":208,"height":208,"background":"#0B0F11","corner_radius":104,"border":{"width":1,"color":"#2A343A"},"shadow":{"y":0,"blur":26,"color":"#16DAC24D"}},"layout":{"direction":"column","align":"center","justify":"center"},"children":[
+{"id":"hero_knob","type":"frame","style":{"width":176,"height":176,"corner_radius":88,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":2,"color":"{colors.primary}"},"shadow":{"y":8,"blur":20,"color":"#00000066"}},"control":{"bind":"threshold","widget":"knob","label":"Threshold"}}]},
+{"id":"hero_readout","type":"text","text":"-18.0 dB","style":{"color":"{colors.primary}","font_size":20,"font_weight":600,"font_family":"JetBrains Mono"}},
+{"id":"hero_caption","type":"text","text":"STEREO PROGRAM BUS","style":{"color":"{colors.text_muted}","font_size":10,"font_weight":600,"font_family":"Inter","letter_spacing":3}}]},
+{"id":"stack","type":"frame","layout":{"direction":"column","gap":16,"justify":"center"},"children":[
+{"id":"dyn_panel","type":"frame","style":{"background":"{colors.surface_raised}","corner_radius":14,"shadow":{"y":2,"blur":10,"color":"#00000066"}},"layout":{"direction":"column","gap":14,"padding":18},"children":[
+{"id":"dyn_title","type":"text","text":"DYNAMICS","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":700,"font_family":"Jost","letter_spacing":3}},
+{"id":"dyn_row","type":"frame","layout":{"direction":"row","gap":20},"children":[
+{"id":"ratio_unit","type":"frame","layout":{"direction":"column","align":"center","gap":8},"children":[
+{"id":"ratio_knob","type":"frame","style":{"width":84,"height":84,"corner_radius":42,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":1,"color":"#2A343A"}},"control":{"bind":"ratio","widget":"knob","label":"Ratio"}},
+{"id":"ratio_label","type":"text","text":"RATIO","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":600,"font_family":"Inter","letter_spacing":2}},
+{"id":"ratio_value","type":"text","text":"4.0 : 1","style":{"color":"{colors.text}","font_size":12,"font_family":"JetBrains Mono"}}]},
+{"id":"attack_unit","type":"frame","layout":{"direction":"column","align":"center","gap":8},"children":[
+{"id":"attack_knob","type":"frame","style":{"width":84,"height":84,"corner_radius":42,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":1,"color":"#2A343A"}},"control":{"bind":"attack","widget":"knob","label":"Attack"}},
+{"id":"attack_label","type":"text","text":"ATTACK","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":600,"font_family":"Inter","letter_spacing":2}},
+{"id":"attack_value","type":"text","text":"10 ms","style":{"color":"{colors.text}","font_size":12,"font_family":"JetBrains Mono"}}]},
+{"id":"release_unit","type":"frame","layout":{"direction":"column","align":"center","gap":8},"children":[
+{"id":"release_knob","type":"frame","style":{"width":84,"height":84,"corner_radius":42,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":1,"color":"#2A343A"}},"control":{"bind":"release","widget":"knob","label":"Release"}},
+{"id":"release_label","type":"text","text":"RELEASE","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":600,"font_family":"Inter","letter_spacing":2}},
+{"id":"release_value","type":"text","text":"AUTO","style":{"color":"{colors.text}","font_size":12,"font_family":"JetBrains Mono"}}]}]}]},
+{"id":"out_panel","type":"frame","style":{"background":"{colors.surface_raised}","corner_radius":14,"shadow":{"y":2,"blur":10,"color":"#00000066"}},"layout":{"direction":"column","gap":14,"padding":18},"children":[
+{"id":"out_title","type":"text","text":"OUTPUT","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":700,"font_family":"Jost","letter_spacing":3}},
+{"id":"out_row","type":"frame","layout":{"direction":"row","gap":20},"children":[
+{"id":"makeup_unit","type":"frame","layout":{"direction":"column","align":"center","gap":8},"children":[
+{"id":"makeup_knob","type":"frame","style":{"width":84,"height":84,"corner_radius":42,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":1,"color":"#2A343A"}},"control":{"bind":"makeup","widget":"knob","label":"Makeup"}},
+{"id":"makeup_label","type":"text","text":"MAKEUP","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":600,"font_family":"Inter","letter_spacing":2}},
+{"id":"makeup_value","type":"text","text":"+4.0 dB","style":{"color":"{colors.text}","font_size":12,"font_family":"JetBrains Mono"}}]},
+{"id":"mix_unit","type":"frame","layout":{"direction":"column","align":"center","gap":8},"children":[
+{"id":"mix_knob","type":"frame","style":{"width":84,"height":84,"corner_radius":42,"gradient":"linear-gradient(to bottom, #232D33, #161D21)","border":{"width":1,"color":"#2A343A"}},"control":{"bind":"mix","widget":"knob","label":"Mix"}},
+{"id":"mix_label","type":"text","text":"MIX","style":{"color":"{colors.text_muted}","font_size":11,"font_weight":600,"font_family":"Inter","letter_spacing":2}},
+{"id":"mix_value","type":"text","text":"100 %","style":{"color":"{colors.text}","font_size":12,"font_family":"JetBrains Mono"}}]}]}]}]}]}]},
+"notes":"Hero threshold at 176px (2.1x the 84px satellite median), teal spent only on the hero ring and readout, panels follow threshold-to-dynamics-to-output signal flow."}

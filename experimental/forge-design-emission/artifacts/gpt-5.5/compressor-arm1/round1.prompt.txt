@@ -1,0 +1,821 @@
+You are authoring one constrained Forge panel for a controlled experiment.
+Concept: Atlas Bus Compressor. A hero-led stereo bus compressor: authoritative, tactile, modern analog, with THRESHOLD as the unmistakable center of gravity.
+Allowed archetype(s): feature_frame, hero_knob. layout.hero must be one of the macros, never makeup/mix/output.
+Macros, each bound exactly once: threshold, ratio, attack, release, makeup, mix.
+
+
+Return raw JSON: one object, no fence, no prose, in this exact top-level order:
+{"design_language":{"base":"<id|custom>","designmd":"<complete text>"},
+ "layout":{"archetype":"<allowed>","hero":"<macro|none>","reason":"<one line>"},
+ "design":<root node>,"notes":"<optional one line>"}
+
+Node profile (unknown fields fail):
+- node: id, type, name?, text?, style?, layout?, control?, children?
+- id matches [a-z][a-z0-9_]{0,31}, unique. type is frame|text|ellipse.
+- text nodes require non-empty text.
+- style: width, height (unquoted px numbers), background, gradient,
+  corner_radius, border:{width,color}, shadow:{y,blur,color}, color, font_size,
+  font_weight, font_family, letter_spacing.
+- layout: direction row|column, gap, padding (one number or four-number array),
+  align start|center|end, justify start|center|end|between, grow.
+- control: bind (one listed macro), widget knob|fader, label optional.
+- children array. Flex only: never x/y/absolute/grid/canvas/display nodes.
+- Colors are #RRGGBB/#RRGGBBAA or {colors.TOKEN}; gradients use
+  linear-gradient(to bottom|right, ...) only.
+- Fonts: Jost, Inter, JetBrains Mono. No meter vocabulary; chrome supplies it.
+
+Hard limits: <=120 nodes, depth <=8, <=24 children; root fixed 360x240..1600x1000;
+every listed macro bound exactly once; every control >=40x40; text >=10px
+(readouts >=12); <=8 distinct raw hex colors; <=1 shadow/node; gradient <=256
+chars and <=6 stops. Every control must have explicit width and height.
+
+DESIGN.md must be a complete YAML-frontmatter document embedded as a JSON string:
+---
+name: <name>
+version: "1"
+colors:
+  primary: "#RRGGBB"
+  surface: "#RRGGBB"
+  surface_raised: "#RRGGBB"
+  text: "#RRGGBB"
+  text_muted: "#RRGGBB"
+  accent: "#RRGGBB"
+typography:
+  body:
+    family: Inter
+    size: 12
+rounded:
+  panel: 12
+spacing:
+  unit: 8
+---
+# <name>
+All {colors.*} references in the design must exist in that colors map.
+
+
+Before answering, silently self-check JSON validity, allowed fields, unique ids,
+all macro bindings, root/control/text dimensions, token resolution, and limits.
+Return only the JSON object.
+
+
+REPAIR ROUND 1 OF 2.
+Your previous object failed the validator. Return the COMPLETE corrected object,
+again raw JSON only. Preserve good composition; change only what diagnostics
+require. In this profile `background` is a solid color/token only. Put any
+`linear-gradient(...)` string in the sibling `gradient` field and use a solid
+token in `background`.
+
+Diagnostics:
+[
+  {
+    "layer": "L1",
+    "path": "top_bar",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "main_area",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "ratio_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "attack_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "hero_stage",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "threshold_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "release_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "mix_knob",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "bottom_bar",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  },
+  {
+    "layer": "L1",
+    "path": "makeup_fader",
+    "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+  }
+]
+
+Previous object:
+{
+  "design_language": {
+    "base": "custom",
+    "designmd": "---\nname: Atlas Bus Compressor\nversion: \"1\"\ncolors:\n  primary: \"#15181B\"\n  surface: \"#20252A\"\n  surface_raised: \"#2D3338\"\n  text: \"#F1ECE2\"\n  text_muted: \"#A8AAA6\"\n  accent: \"#D3A04D\"\ntypography:\n  body:\n    family: Inter\n    size: 12\nrounded:\n  panel: 12\nspacing:\n  unit: 8\n---\n# Atlas Bus Compressor\nA tactile, modern analog bus compressor language with a commanding central threshold control, restrained machining, warm amber focus, and compact stereo mastering ergonomics."
+  },
+  "layout": {
+    "archetype": "hero_knob",
+    "hero": "threshold",
+    "reason": "THRESHOLD is oversized, centered, and visually framed as the compressor's primary action."
+  },
+  "design": {
+    "id": "atlas_panel",
+    "type": "frame",
+    "name": "Atlas Bus Compressor",
+    "style": {
+      "width": 960,
+      "height": 560,
+      "background": "{colors.primary}",
+      "corner_radius": 12,
+      "border": {
+        "width": 1,
+        "color": "{colors.accent}"
+      },
+      "shadow": {
+        "y": 8,
+        "blur": 24,
+        "color": "#00000066"
+      }
+    },
+    "layout": {
+      "direction": "column",
+      "gap": 18,
+      "padding": [
+        24,
+        28,
+        24,
+        28
+      ],
+      "align": "center",
+      "justify": "between"
+    },
+    "children": [
+      {
+        "id": "top_bar",
+        "type": "frame",
+        "style": {
+          "width": 904,
+          "height": 62,
+          "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.surface})",
+          "corner_radius": 8,
+          "border": {
+            "width": 1,
+            "color": "#00000066"
+          }
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 16,
+          "padding": [
+            12,
+            16,
+            12,
+            16
+          ],
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "brand_block",
+            "type": "frame",
+            "style": {
+              "width": 360,
+              "height": 38,
+              "background": "{colors.surface}",
+              "corner_radius": 6
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 2,
+              "padding": 0,
+              "align": "start",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "brand",
+                "type": "text",
+                "text": "ATLAS",
+                "style": {
+                  "width": 160,
+                  "height": 22,
+                  "color": "{colors.text}",
+                  "font_size": 20,
+                  "font_weight": 700,
+                  "font_family": "Jost",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "subtitle",
+                "type": "text",
+                "text": "BUS COMPRESSOR",
+                "style": {
+                  "width": 210,
+                  "height": 14,
+                  "color": "{colors.text_muted}",
+                  "font_size": 11,
+                  "font_weight": 600,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "status_strip",
+            "type": "frame",
+            "style": {
+              "width": 252,
+              "height": 36,
+              "background": "{colors.primary}",
+              "corner_radius": 6,
+              "border": {
+                "width": 1,
+                "color": "{colors.surface_raised}"
+              }
+            },
+            "layout": {
+              "direction": "row",
+              "gap": 10,
+              "padding": [
+                6,
+                10,
+                6,
+                10
+              ],
+              "align": "center",
+              "justify": "between"
+            },
+            "children": [
+              {
+                "id": "mode_a",
+                "type": "text",
+                "text": "STEREO",
+                "style": {
+                  "width": 64,
+                  "height": 16,
+                  "color": "{colors.accent}",
+                  "font_size": 12,
+                  "font_weight": 700,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "mode_b",
+                "type": "text",
+                "text": "BUS",
+                "style": {
+                  "width": 38,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 12,
+                  "font_weight": 600,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "mode_c",
+                "type": "text",
+                "text": "ANALOG",
+                "style": {
+                  "width": 62,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 12,
+                  "font_weight": 600,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "main_area",
+        "type": "frame",
+        "style": {
+          "width": 904,
+          "height": 330,
+          "background": "linear-gradient(to bottom, {colors.surface}, {colors.primary})",
+          "corner_radius": 12,
+          "border": {
+            "width": 1,
+            "color": "{colors.surface_raised}"
+          }
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 26,
+          "padding": [
+            22,
+            24,
+            22,
+            24
+          ],
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "left_stack",
+            "type": "frame",
+            "style": {
+              "width": 214,
+              "height": 276,
+              "background": "{colors.surface}",
+              "corner_radius": 8,
+              "border": {
+                "width": 1,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 18,
+              "padding": [
+                18,
+                16,
+                18,
+                16
+              ],
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "ratio_group",
+                "type": "frame",
+                "style": {
+                  "width": 174,
+                  "height": 104,
+                  "background": "{colors.primary}",
+                  "corner_radius": 8
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 10,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "ratio_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 72,
+                      "height": 72,
+                      "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.primary})",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.accent}"
+                      }
+                    },
+                    "control": {
+                      "bind": "ratio",
+                      "widget": "knob",
+                      "label": "Ratio"
+                    }
+                  },
+                  {
+                    "id": "ratio_label",
+                    "type": "text",
+                    "text": "RATIO",
+                    "style": {
+                      "width": 70,
+                      "height": 14,
+                      "color": "{colors.text_muted}",
+                      "font_size": 11,
+                      "font_weight": 700,
+                      "font_family": "JetBrains Mono",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "attack_group",
+                "type": "frame",
+                "style": {
+                  "width": 174,
+                  "height": 104,
+                  "background": "{colors.primary}",
+                  "corner_radius": 8
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 10,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "attack_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 72,
+                      "height": 72,
+                      "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.primary})",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.text_muted}"
+                      }
+                    },
+                    "control": {
+                      "bind": "attack",
+                      "widget": "knob",
+                      "label": "Attack"
+                    }
+                  },
+                  {
+                    "id": "attack_label",
+                    "type": "text",
+                    "text": "ATTACK",
+                    "style": {
+                      "width": 70,
+                      "height": 14,
+                      "color": "{colors.text_muted}",
+                      "font_size": 11,
+                      "font_weight": 700,
+                      "font_family": "JetBrains Mono",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "hero_stage",
+            "type": "frame",
+            "style": {
+              "width": 360,
+              "height": 286,
+              "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.surface}, {colors.primary})",
+              "corner_radius": 12,
+              "border": {
+                "width": 1,
+                "color": "{colors.accent}"
+              },
+              "shadow": {
+                "y": 6,
+                "blur": 18,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 12,
+              "padding": [
+                18,
+                18,
+                18,
+                18
+              ],
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "hero_title",
+                "type": "text",
+                "text": "THRESHOLD",
+                "style": {
+                  "width": 230,
+                  "height": 28,
+                  "color": "{colors.text}",
+                  "font_size": 24,
+                  "font_weight": 700,
+                  "font_family": "Jost",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "threshold_knob",
+                "type": "ellipse",
+                "style": {
+                  "width": 186,
+                  "height": 186,
+                  "background": "linear-gradient(to bottom, {colors.accent}, {colors.surface_raised}, {colors.primary})",
+                  "border": {
+                    "width": 4,
+                    "color": "{colors.text}"
+                  }
+                },
+                "control": {
+                  "bind": "threshold",
+                  "widget": "knob",
+                  "label": "Threshold"
+                }
+              },
+              {
+                "id": "hero_readout",
+                "type": "text",
+                "text": "CENTER DRIVE",
+                "style": {
+                  "width": 142,
+                  "height": 18,
+                  "color": "{colors.accent}",
+                  "font_size": 12,
+                  "font_weight": 700,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "right_stack",
+            "type": "frame",
+            "style": {
+              "width": 214,
+              "height": 276,
+              "background": "{colors.surface}",
+              "corner_radius": 8,
+              "border": {
+                "width": 1,
+                "color": "#00000066"
+              }
+            },
+            "layout": {
+              "direction": "column",
+              "gap": 18,
+              "padding": [
+                18,
+                16,
+                18,
+                16
+              ],
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "release_group",
+                "type": "frame",
+                "style": {
+                  "width": 174,
+                  "height": 104,
+                  "background": "{colors.primary}",
+                  "corner_radius": 8
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 10,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "release_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 72,
+                      "height": 72,
+                      "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.primary})",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.text_muted}"
+                      }
+                    },
+                    "control": {
+                      "bind": "release",
+                      "widget": "knob",
+                      "label": "Release"
+                    }
+                  },
+                  {
+                    "id": "release_label",
+                    "type": "text",
+                    "text": "RELEASE",
+                    "style": {
+                      "width": 76,
+                      "height": 14,
+                      "color": "{colors.text_muted}",
+                      "font_size": 11,
+                      "font_weight": 700,
+                      "font_family": "JetBrains Mono",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "mix_group",
+                "type": "frame",
+                "style": {
+                  "width": 174,
+                  "height": 104,
+                  "background": "{colors.primary}",
+                  "corner_radius": 8
+                },
+                "layout": {
+                  "direction": "column",
+                  "gap": 8,
+                  "padding": 10,
+                  "align": "center",
+                  "justify": "center"
+                },
+                "children": [
+                  {
+                    "id": "mix_knob",
+                    "type": "ellipse",
+                    "style": {
+                      "width": 72,
+                      "height": 72,
+                      "background": "linear-gradient(to bottom, {colors.surface_raised}, {colors.primary})",
+                      "border": {
+                        "width": 2,
+                        "color": "{colors.accent}"
+                      }
+                    },
+                    "control": {
+                      "bind": "mix",
+                      "widget": "knob",
+                      "label": "Mix"
+                    }
+                  },
+                  {
+                    "id": "mix_label",
+                    "type": "text",
+                    "text": "MIX",
+                    "style": {
+                      "width": 40,
+                      "height": 14,
+                      "color": "{colors.text_muted}",
+                      "font_size": 11,
+                      "font_weight": 700,
+                      "font_family": "JetBrains Mono",
+                      "letter_spacing": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "bottom_bar",
+        "type": "frame",
+        "style": {
+          "width": 904,
+          "height": 88,
+          "background": "linear-gradient(to bottom, {colors.surface}, {colors.surface_raised})",
+          "corner_radius": 8,
+          "border": {
+            "width": 1,
+            "color": "#00000066"
+          }
+        },
+        "layout": {
+          "direction": "row",
+          "gap": 18,
+          "padding": [
+            14,
+            18,
+            14,
+            18
+          ],
+          "align": "center",
+          "justify": "between"
+        },
+        "children": [
+          {
+            "id": "makeup_block",
+            "type": "frame",
+            "style": {
+              "width": 260,
+              "height": 58,
+              "background": "{colors.primary}",
+              "corner_radius": 6
+            },
+            "layout": {
+              "direction": "row",
+              "gap": 14,
+              "padding": [
+                8,
+                12,
+                8,
+                12
+              ],
+              "align": "center",
+              "justify": "start"
+            },
+            "children": [
+              {
+                "id": "makeup_fader",
+                "type": "frame",
+                "style": {
+                  "width": 120,
+                  "height": 44,
+                  "background": "linear-gradient(to right, {colors.surface}, {colors.accent})",
+                  "corner_radius": 6,
+                  "border": {
+                    "width": 1,
+                    "color": "{colors.text_muted}"
+                  }
+                },
+                "control": {
+                  "bind": "makeup",
+                  "widget": "fader",
+                  "label": "Makeup"
+                }
+              },
+              {
+                "id": "makeup_label",
+                "type": "text",
+                "text": "MAKEUP",
+                "style": {
+                  "width": 68,
+                  "height": 18,
+                  "color": "{colors.text}",
+                  "font_size": 13,
+                  "font_weight": 700,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          },
+          {
+            "id": "serial_plate",
+            "type": "frame",
+            "style": {
+              "width": 320,
+              "height": 44,
+              "background": "{colors.primary}",
+              "corner_radius": 6,
+              "border": {
+                "width": 1,
+                "color": "{colors.surface_raised}"
+              }
+            },
+            "layout": {
+              "direction": "row",
+              "gap": 12,
+              "padding": [
+                8,
+                12,
+                8,
+                12
+              ],
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "plate_text",
+                "type": "text",
+                "text": "MODERN ANALOG STEREO BUS",
+                "style": {
+                  "width": 218,
+                  "height": 16,
+                  "color": "{colors.text_muted}",
+                  "font_size": 12,
+                  "font_weight": 600,
+                  "font_family": "Inter",
+                  "letter_spacing": 0
+                }
+              },
+              {
+                "id": "plate_mark",
+                "type": "text",
+                "text": "A1",
+                "style": {
+                  "width": 24,
+                  "height": 16,
+                  "color": "{colors.accent}",
+                  "font_size": 12,
+                  "font_weight": 800,
+                  "font_family": "JetBrains Mono",
+                  "letter_spacing": 0
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "notes": "Six macros are each bound once; threshold is the hero control."
+}

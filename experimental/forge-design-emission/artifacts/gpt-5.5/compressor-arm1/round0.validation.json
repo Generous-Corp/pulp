@@ -1,0 +1,72 @@
+{
+  "layers": {
+    "L0": true,
+    "L1": false,
+    "L2": false,
+    "L3": false,
+    "L4": false,
+    "L5-python": true
+  },
+  "diagnostics": [
+    {
+      "layer": "L1",
+      "path": "top_bar",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "main_area",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "ratio_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "attack_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "hero_stage",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "threshold_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "release_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "mix_knob",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "bottom_bar",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    },
+    {
+      "layer": "L1",
+      "path": "makeup_fader",
+      "message": "style.background must be #RRGGBB, #RRGGBBAA or token"
+    }
+  ],
+  "node_count": 35,
+  "raw_hex_count": 0,
+  "bind_counts": {
+    "ratio": 1,
+    "attack": 1,
+    "threshold": 1,
+    "release": 1,
+    "mix": 1,
+    "makeup": 1
+  }
+}
