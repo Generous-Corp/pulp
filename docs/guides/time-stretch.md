@@ -40,7 +40,9 @@ eng.process(in_ptrs, in_frames, out_ptrs, out_frames, o);
 `RealtimePitchTimeProcessor` in `time_stretch` mode owns a bounded pull stream.
 Check the `PitchTimePrepareStatus` returned by `prepare()`; invalid sample rates,
 channel counts, and non-positive `max_block` capacities are rejected before the
-processor is used.
+processor is used. A time-stretch capacity must also have a finite
+`max_time_ratio >= 1`; pitch bounds must be finite, non-negative, and produce a
+finite derived ratio.
 `feed()` accepts a complete input block or returns typed backpressure without
 consuming it. Use `output_free_space()` only as scheduling information; the
 `feed()` result is authoritative because one analysis boundary can publish a
