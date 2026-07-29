@@ -75,6 +75,25 @@ The structural error underneath: **the home screen has no chat/preview split.**
 That is a second screen, reached after building. The current implementation
 collapses the two, which is why nothing lines up.
 
+## Capturing the other screens — what does not work
+
+Every screen lives in the DOM at once and is switched by visibility, not by
+mounting. Two consequences, both of which cost a pass here:
+
+- **A DOM snapshot cannot tell you which screen is showing.** All four headings
+  ("What should the module do?", "What should the rack do?", "Wiring",
+  "Building") are present in every capture, so text search reports success for a
+  click that did nothing. Only the pixels are evidence.
+- **Injected click scripts did not switch mode.** Twelve attempts across four
+  strategies -- `.click()` on the label, a full pointer sequence, walking the
+  ancestor chain, pressing the nearest clickable ancestor -- produced two
+  distinct images between them, and the second was only a hover ring.
+
+The promising route, untried: since every screen is already rendered, force the
+visibility directly rather than simulating input. Failing that, drive a real
+browser over CDP. The chrome-devtools MCP refuses to attach while a browser
+holds its profile, so it needs `--isolated` or a separate `userDataDir`.
+
 ## The work
 
 1. **Rebuild `ui/main.js` to the render, 1:1.** Screenshot the standalone with
