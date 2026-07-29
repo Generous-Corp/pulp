@@ -445,6 +445,43 @@ void DelayChoice::on_mouse_down(view::Point position) {
     store_->end_gesture(id_);
 }
 
+bool DelayChoice::set_selected_index(int index) {
+    const auto* info = store_->info(id_);
+    if (!info || labels_.empty())
+        return false;
+    const int bounded =
+        std::clamp(index, 0, static_cast<int>(labels_.size()) - 1);
+    if (bounded == selected_index())
+        return false;
+    const float step = info->range.step > 0.0f ? info->range.step : 1.0f;
+    const float raw = info->range.min + static_cast<float>(bounded) * step;
+    store_->begin_gesture(id_);
+    store_->set_value(id_, raw);
+    store_->end_gesture(id_);
+    return true;
+}
+
+bool DelayChoice::on_key_event(const view::KeyEvent& event) {
+    if (!event.is_down || labels_.empty())
+        return false;
+
+    const int selected = selected_index();
+    switch (event.key) {
+    case view::KeyCode::left:
+    case view::KeyCode::up:
+        return set_selected_index(selected - 1);
+    case view::KeyCode::right:
+    case view::KeyCode::down:
+        return set_selected_index(selected + 1);
+    case view::KeyCode::home:
+        return set_selected_index(0);
+    case view::KeyCode::end_:
+        return set_selected_index(static_cast<int>(labels_.size()) - 1);
+    default:
+        return false;
+    }
+}
+
 void DelayChoice::on_focus_changed(bool gained) {
     view::View::on_focus_changed(gained);
     request_repaint();

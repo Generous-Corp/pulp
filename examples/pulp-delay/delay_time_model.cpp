@@ -1,5 +1,9 @@
 #include "delay_time_model.hpp"
 
+#include "delay_params.hpp"
+
+#include <pulp/state/store.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -80,6 +84,24 @@ EffectiveDelayTimes DelayTimeModel::derive(const DelayTimeInputs& inputs) noexce
     result.right_uses_ratio = false;
     result.right_ratio = result.right_ms / result.left_ms;
     return result;
+}
+
+DelayTimeInputs delay_time_inputs_from_store(const state::StateStore& store,
+                                              double tempo_bpm) noexcept {
+    return {
+        .time_ms = store.get_value(kTime),
+        .sync = store.get_value(kSync) >= 0.5f,
+        .division = division_index_from_param(store.get_value(kDivision)),
+        .link = store.get_value(kLink) >= 0.5f,
+        .offset_mode = offset_mode_from_param(store.get_value(kOffsetMode)),
+        .time_offset = store.get_value(kTimeOffset),
+        .offset_ms = store.get_value(kOffsetMs),
+        .time_right_ms = store.get_value(kTimeRight),
+        .division_right =
+            division_index_from_param(store.get_value(kDivisionRight)),
+        .routing = routing_from_param(store.get_value(kRouting)),
+        .tempo_bpm = tempo_bpm,
+    };
 }
 
 } // namespace pulp::examples::delay

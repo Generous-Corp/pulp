@@ -108,11 +108,13 @@ class DelayChoice final : public view::View, public DelayParameterControl {
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(view::Point position) override;
+    bool on_key_event(const view::KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
     bool wants_mouse_input() const override { return true; }
     void layout_children() override {}
 
   private:
+    bool set_selected_index(int index);
     bool sync_access_value();
 
     state::StateStore* store_ = nullptr;

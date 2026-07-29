@@ -15,22 +15,6 @@ namespace {
 using paint_detail::text;
 using paint_detail::with_alpha;
 
-DelayTimeInputs time_inputs_from_store(const state::StateStore& store) noexcept {
-    return {
-        .time_ms = store.get_value(kTime),
-        .sync = store.get_value(kSync) >= 0.5f,
-        .division = division_index_from_param(store.get_value(kDivision)),
-        .link = store.get_value(kLink) >= 0.5f,
-        .offset_mode = offset_mode_from_param(store.get_value(kOffsetMode)),
-        .time_offset = store.get_value(kTimeOffset),
-        .offset_ms = store.get_value(kOffsetMs),
-        .time_right_ms = store.get_value(kTimeRight),
-        .division_right = division_index_from_param(store.get_value(kDivisionRight)),
-        .routing = routing_from_param(store.get_value(kRouting)),
-        .tempo_bpm = DelayTimeModel::kFallbackTempoBpm,
-    };
-}
-
 class HeaderView final : public view::View {
   public:
     explicit HeaderView(const CharacterPalette& palette) : palette_(&palette) {}
@@ -261,7 +245,8 @@ class PulpDelayEditor::EffectiveRightTimeView final : public view::View {
     }
 
     std::string display_text() const {
-        const auto inputs = time_inputs_from_store(*store_);
+        const auto inputs = delay_time_inputs_from_store(
+            *store_, DelayTimeModel::kFallbackTempoBpm);
         if (inputs.routing == Routing::ping_pong) {
             if (inputs.sync)
                 return "RIGHT = LEFT · HOST SYNC";
@@ -558,7 +543,8 @@ void PulpDelayEditor::set_control_present(state::ParamID id, bool present) {
 }
 
 void PulpDelayEditor::update_timing_presentation() {
-    const auto inputs = time_inputs_from_store(*store_);
+    const auto inputs = delay_time_inputs_from_store(
+        *store_, DelayTimeModel::kFallbackTempoBpm);
     const auto branch = DelayTimeModel::right_timing_branch(inputs);
     const bool ping_pong = branch == RightTimingBranch::ping_pong;
     const bool linked_ratio = branch == RightTimingBranch::linked_ratio;

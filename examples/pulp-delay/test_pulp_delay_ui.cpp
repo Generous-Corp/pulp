@@ -164,6 +164,64 @@ TEST_CASE("Pulp Delay character palette matches the four authored HTML accents",
     REQUIRE(CharacterPalette::accent_for(Character::tape).b8() == 0x35);
 }
 
+TEST_CASE("Pulp Delay choices support keyboard selection with host gestures",
+          "[pulp-delay][ui][keyboard][accessibility]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    store.set_value(kCharacter, static_cast<float>(Character::vintage));
+    auto root = build_pulp_delay_editor(store);
+    auto& editor = as_delay_editor(root);
+    auto* choice = dynamic_cast<DelayChoice*>(editor.control_for(kCharacter));
+    REQUIRE(choice != nullptr);
+
+    std::vector<std::pair<std::string, state::ParamID>> gestures;
+    store.set_gesture_callbacks(
+        [&](state::ParamID id) { gestures.emplace_back("begin", id); },
+        [&](state::ParamID id) { gestures.emplace_back("end", id); });
+    std::vector<float> values;
+    const auto value_listener = store.add_listener(
+        [&](state::ParamID id, float value) {
+            if (id == kCharacter)
+                values.push_back(value);
+        },
+        state::ListenerThread::Main);
+
+    const auto press = [](view::KeyCode key) {
+        view::KeyEvent event;
+        event.key = key;
+        return event;
+    };
+    REQUIRE(choice->on_key_event(press(view::KeyCode::right)));
+    REQUIRE(choice->selected_index() == static_cast<int>(Character::tape));
+    REQUIRE(choice->access_value() == "TAPE");
+    REQUIRE(choice->on_key_event(press(view::KeyCode::up)));
+    REQUIRE(choice->selected_index() == static_cast<int>(Character::vintage));
+    REQUIRE(choice->on_key_event(press(view::KeyCode::home)));
+    REQUIRE(choice->selected_index() == static_cast<int>(Character::clean));
+    REQUIRE_FALSE(choice->on_key_event(press(view::KeyCode::left)));
+    REQUIRE(choice->on_key_event(press(view::KeyCode::end_)));
+    REQUIRE(choice->selected_index() == static_cast<int>(Character::bbd));
+    REQUIRE(choice->access_value() == "BBD");
+
+    REQUIRE_FALSE(choice->on_key_event(press(view::KeyCode::enter)));
+    REQUIRE_FALSE(choice->on_key_event(press(view::KeyCode::space)));
+    auto release = press(view::KeyCode::left);
+    release.is_down = false;
+    REQUIRE_FALSE(choice->on_key_event(release));
+
+    REQUIRE(values == std::vector<float>{2.0f, 1.0f, 0.0f, 3.0f});
+    REQUIRE(gestures == std::vector<std::pair<std::string, state::ParamID>>{
+                            {"begin", kCharacter},
+                            {"end", kCharacter},
+                            {"begin", kCharacter},
+                            {"end", kCharacter},
+                            {"begin", kCharacter},
+                            {"end", kCharacter},
+                            {"begin", kCharacter},
+                            {"end", kCharacter}});
+    REQUIRE(store.open_gesture_count() == 0);
+}
+
 TEST_CASE("Pulp Delay character accent propagates globally without recoloring Reverse",
           "[pulp-delay][ui][palette][propagation]") {
     constexpr std::array characters{

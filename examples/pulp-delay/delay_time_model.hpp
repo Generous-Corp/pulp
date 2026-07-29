@@ -2,6 +2,10 @@
 
 #include "delay_types.hpp"
 
+namespace pulp::state {
+class StateStore;
+}
+
 namespace pulp::examples::delay {
 
 struct DelayTimeInputs {
@@ -42,5 +46,8 @@ class DelayTimeModel {
     static RightTimingBranch right_timing_branch(const DelayTimeInputs& inputs) noexcept;
     static EffectiveDelayTimes derive(const DelayTimeInputs& inputs) noexcept;
 };
+
+DelayTimeInputs delay_time_inputs_from_store(const state::StateStore& store,
+                                              double tempo_bpm) noexcept;
 
 } // namespace pulp::examples::delay
