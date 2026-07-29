@@ -1998,7 +1998,7 @@ commands:
 
   - name: seq
     status: experimental
-    summary: Open, validate, explain, and transactionally edit canonical timeline project JSON.
+    summary: Open, validate, explain, transactionally edit, import, and export canonical timeline projects.
     subcommands:
       - name: schema
         summary: Emit the registry-derived timeline JSON Schema manifest
@@ -2027,6 +2027,37 @@ commands:
             required: true
           - name: --out
             kind: option
+      - name: export
+        summary: Export a canonical project into a new SMF or unpacked DAWproject artifact directory
+        args:
+          - name: project
+            kind: positional
+            required: true
+          - name: --format
+            kind: option
+            required: true
+            description: "smf or dawproject"
+          - name: --out
+            kind: option
+            required: true
+            description: New artifact directory; existing paths are never overwritten
+          - name: --accept-loss
+            kind: option
+            description: Repeat once for each exact loss concept reported by export planning
+      - name: import
+        summary: Import an SMF file or unpacked DAWproject project.xml into a new canonical project directory
+        args:
+          - name: input
+            kind: positional
+            required: true
+          - name: --format
+            kind: option
+            required: true
+            description: "smf or dawproject"
+          - name: --out
+            kind: option
+            required: true
+            description: New artifact directory; existing paths are never overwritten
     docs: reference/cli.md#seq
 
   - name: render

@@ -305,3 +305,102 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
                     " --out " + quote(moved_project) + " > " + quote(command_result_path)) == 2);
     REQUIRE_FALSE(std::filesystem::exists(moved_project));
 }
+
+TEST_CASE("timeline CLI interchange requires exact consent and publishes new directories") {
+    TempDirectory temp;
+    const auto cli = quote(PULP_CLI_BIN);
+    const auto project = temp.path() / "minimal.json";
+    write_text(
+        project,
+        R"json({"data":{"assets":[],"id":"1","name":"fixture","next_item_id":"3","root_sequence_id":"2","sequences":[{"data":{"absolute_duration":null,"id":"2","musical_duration":"0","name":"root","tracks":[]},"type_name":"pulp.timeline.sequence","version":1}]},"type_name":"pulp.timeline.project","version":1})json");
+    const auto exported = temp.path() / "exported";
+    const auto export_command =
+        cli + " seq export " + quote(project) + " --format smf --out " + quote(exported);
+    REQUIRE(run_cli(export_command + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::is_regular_file(exported / "project.mid"));
+    REQUIRE(std::filesystem::is_regular_file(exported / "pulp-loss-manifest.json"));
+
+    write_text(exported / "sentinel.txt", "preserve");
+    REQUIRE(run_cli(export_command + " > /dev/null 2>&1") == 1);
+    REQUIRE(read_text(exported / "sentinel.txt") == "preserve");
+
+    const auto unknown = temp.path() / "unknown";
+    REQUIRE(run_cli(cli + " seq export " + quote(project) + " --format smf --out " +
+                    quote(unknown) + " --accept-loss clip.telepathy > /dev/null 2>&1") == 2);
+    REQUIRE_FALSE(std::filesystem::exists(unknown));
+
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(24, 0.5f)};
+    const auto source_path = temp.path() / "lossy-source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto lossy_project = temp.path() / "lossy-project.json";
+    write_text(lossy_project, project_json(source_path));
+    const auto partially_consented = temp.path() / "partially-consented";
+    REQUIRE(run_cli(cli + " seq export " + quote(lossy_project) + " --format smf --out " +
+                    quote(partially_consented) + " --accept-loss clip.absolute > /dev/null 2>&1") ==
+            1);
+    REQUIRE_FALSE(std::filesystem::exists(partially_consented));
+
+    const auto imported = temp.path() / "imported";
+    REQUIRE(run_cli(cli + " seq import " + quote(exported / "project.mid") +
+                    " --format smf --out " + quote(imported) + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::is_regular_file(imported / "project.json"));
+
+    const auto unpacked = temp.path() / "unpacked-dawproject";
+    REQUIRE(std::filesystem::create_directories(unpacked / "audio"));
+    audio::AudioFileData daw_media;
+    daw_media.sample_rate = 44'100;
+    daw_media.channels = {std::vector<float>(88'200, 0.25f), std::vector<float>(88'200, -0.25f)};
+    const auto daw_media_path = unpacked / "audio/bass.wav";
+    REQUIRE(audio::write_wav_file(daw_media_path.string(), daw_media, audio::WavBitDepth::Float32));
+    write_text(
+        unpacked / "project.xml",
+        R"xml(<Project version="1.0"><Structure><Track contentType="audio" id="bass" name="Bass"/></Structure><Arrangement><Lanes timeUnit="beats"><Lanes track="bass"><Clips><Clip time="0" duration="4"><Audio channels="2" duration="2" sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement></Project>)xml");
+    const auto daw_import = temp.path() / "daw-import";
+    REQUIRE(run_cli(cli + " seq import " + quote(unpacked / "project.xml") +
+                    " --format dawproject --out " + quote(daw_import) + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::is_regular_file(daw_import / "project.json"));
+    REQUIRE(file_hash(daw_import / "audio/bass.wav") == file_hash(daw_media_path));
+
+    const auto daw_export = temp.path() / "daw-export";
+    REQUIRE(run_cli(cli + " seq export " + quote(daw_import / "project.json") +
+                    " --format dawproject --out " + quote(daw_export) + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::is_regular_file(daw_export / "project.xml"));
+    REQUIRE(std::filesystem::is_regular_file(daw_export / "pulp-loss-manifest.json"));
+    // The DAWproject writer prefixes the imported package-relative asset name
+    // with its container media root; assert that the exact path referenced by
+    // project.xml is materialized alongside it.
+    REQUIRE(file_hash(daw_export / "audio/audio/bass.wav") == file_hash(daw_media_path));
+
+    const auto daw_roundtrip = temp.path() / "daw-roundtrip";
+    REQUIRE(run_cli(cli + " seq import " + quote(daw_export / "project.xml") +
+                    " --format dawproject --out " + quote(daw_roundtrip) + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::is_regular_file(daw_roundtrip / "project.json"));
+    REQUIRE(file_hash(daw_roundtrip / "audio/audio/bass.wav") == file_hash(daw_media_path));
+
+    // A legal media path can still collide with the canonical project member.
+    // This reaches the post-staging failure path and proves its private sibling
+    // directory is removed instead of leaking a partial import.
+    const auto collision_input = temp.path() / "collision-input";
+    REQUIRE(std::filesystem::create_directory(collision_input));
+    REQUIRE(audio::write_wav_file((collision_input / "project.json").string(), daw_media,
+                                  audio::WavBitDepth::Float32));
+    write_text(
+        collision_input / "project.xml",
+        R"xml(<Project version="1.0"><Structure><Track contentType="audio" id="bass" name="Bass"/></Structure><Arrangement><Lanes timeUnit="beats"><Lanes track="bass"><Clips><Clip time="0" duration="4"><Audio channels="2" duration="2" sampleRate="44100"><File path="project.json"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement></Project>)xml");
+    const auto collision_output = temp.path() / "daw-collision-output";
+    REQUIRE(run_cli(cli + " seq import " + quote(collision_input / "project.xml") +
+                    " --format dawproject --out " + quote(collision_output) +
+                    " > /dev/null 2>&1") == 1);
+    REQUIRE_FALSE(std::filesystem::exists(collision_output));
+    for (const auto& entry : std::filesystem::directory_iterator(temp.path()))
+        REQUIRE(entry.path().filename().string().find(".daw-collision-output.pulp-staging-") != 0);
+
+    const auto xml = temp.path() / "renamed.xml";
+    write_text(xml, "<Project version=\"1.0\"/>");
+    const auto dishonest = temp.path() / "dishonest";
+    REQUIRE(run_cli(cli + " seq import " + quote(xml) + " --format dawproject --out " +
+                    quote(dishonest) + " > /dev/null 2>&1") == 2);
+    REQUIRE_FALSE(std::filesystem::exists(dishonest));
+}

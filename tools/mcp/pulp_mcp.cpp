@@ -91,6 +91,8 @@ using pulp_mcp::handle_timeline_command_apply;
 using pulp_mcp::handle_timeline_validate;
 using pulp_mcp::handle_timeline_explain;
 using pulp_mcp::handle_timeline_render;
+using pulp_mcp::handle_timeline_export;
+using pulp_mcp::handle_timeline_import;
 using pulp_mcp::handle_inspect_pending_requests;
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
@@ -319,6 +321,8 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == pulp_mcp::kTimelineMcpToolNames[2]) result = handle_timeline_validate(args_json);
         else if (name == pulp_mcp::kTimelineMcpToolNames[3]) result = handle_timeline_explain(args_json);
         else if (name == pulp_mcp::kTimelineMcpToolNames[4]) result = handle_timeline_render(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[5]) result = handle_timeline_export(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[6]) result = handle_timeline_import(args_json);
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();

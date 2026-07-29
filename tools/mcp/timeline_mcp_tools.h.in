@@ -11,12 +11,14 @@ inline constexpr std::string_view kTimelineMcpToolsDocument =
 inline constexpr std::string_view kTimelineMcpToolsArray =
     R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_ARRAY@)PULPTL";
 
-inline constexpr std::array<std::string_view, 5> kTimelineMcpToolNames{
+inline constexpr std::array<std::string_view, 7> kTimelineMcpToolNames{
     "@PULP_TIMELINE_MCP_TOOL_NAME_0@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_1@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_2@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_3@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_4@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_5@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_6@",
 };
 
 } // namespace pulp_mcp

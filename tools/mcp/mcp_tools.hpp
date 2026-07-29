@@ -52,6 +52,8 @@ std::string handle_timeline_command_apply(const std::string& params_json);
 std::string handle_timeline_validate(const std::string& params_json);
 std::string handle_timeline_explain(const std::string& params_json);
 std::string handle_timeline_render(const std::string& params_json);
+std::string handle_timeline_export(const std::string& params_json);
+std::string handle_timeline_import(const std::string& params_json);
 std::string handle_inspect_pending_requests(const std::string& params_json);
 
 }  // namespace pulp_mcp

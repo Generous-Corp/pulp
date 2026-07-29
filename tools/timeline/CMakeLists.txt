@@ -3,6 +3,7 @@ add_library(pulp::tool-timeline ALIAS pulp-tool-timeline)
 
 target_sources(pulp-tool-timeline PRIVATE
     src/timeline_agent.cpp
+    src/timeline_interchange.cpp
     src/timeline_output.cpp
     src/timeline_playback.cpp
     src/timeline_project_loader.cpp
@@ -21,6 +22,10 @@ target_link_libraries(pulp-tool-timeline
         pulp::timeline
         pulp::audio
         pulp::runtime
+        pulp::interchange
+        pulp::smf-interchange
+        pulp::dawproject-import
+        pulp::dawproject-export
 )
 
 # Reference-clock sync soak capture (TL-18). Generates a

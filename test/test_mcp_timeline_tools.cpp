@@ -2,12 +2,14 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/interchange/export_plan.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -496,6 +498,235 @@ TEST_CASE("timeline agent renders two journal variants and receives a typed comp
     REQUIRE(verdict.find("reference and candidate are required") == std::string::npos);
     REQUIRE(verdict.find("must be WAV paths, not options") == std::string::npos);
     REQUIRE(verdict.find("not in a Pulp project") == std::string::npos);
+}
+
+TEST_CASE("timeline MCP export and import publish new directories atomically",
+          "[mcp][tools][timeline][interchange]") {
+    TempDir temp;
+    const std::string project =
+        R"json({"data":{"assets":[],"id":"1","name":"fixture","next_item_id":"3","root_sequence_id":"2","sequences":[{"data":{"absolute_duration":null,"id":"2","musical_duration":"0","name":"root","tracks":[]},"type_name":"pulp.timeline.sequence","version":1}]},"type_name":"pulp.timeline.project","version":1})json";
+    const auto exported = temp.path / "smf-export";
+    const auto export_args =
+        "{\"format\":\"smf\",\"output\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(exported)) +
+        ",\"project\":" + pulp::timeline::quote_json_string(project) + "}";
+
+    require_contains(handle_timeline_export(export_args), R"JSON("ok":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(exported / "project.mid"));
+    REQUIRE(std::filesystem::is_regular_file(exported / "pulp-loss-manifest.json"));
+
+    {
+        std::ofstream sentinel(exported / "sentinel.txt", std::ios::binary);
+        REQUIRE(sentinel);
+        sentinel << "preserve";
+    }
+    require_contains(handle_timeline_export(export_args), R"JSON("isError":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(exported / "sentinel.txt"));
+
+    auto unknown_args = export_args;
+    unknown_args.pop_back();
+    unknown_args += ",\"accepted_losses\":[\"clip.telepathy\"]}";
+    require_contains(handle_timeline_export(unknown_args), "unknown loss concept");
+
+    const auto imported = temp.path / "smf-import";
+    const auto import_args =
+        "{\"format\":\"smf\",\"input\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(exported / "project.mid")) +
+        ",\"output\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(imported)) +
+        "}";
+    require_contains(handle_timeline_import(import_args), R"JSON("ok":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(imported / "project.json"));
+
+    const auto malformed = temp.path / "malformed.mid";
+    {
+        std::ofstream stream(malformed, std::ios::binary);
+        REQUIRE(stream);
+        stream << "not midi";
+    }
+    const auto failed_output = temp.path / "failed-import";
+    const auto malformed_args =
+        "{\"format\":\"smf\",\"input\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(malformed)) +
+        ",\"output\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(failed_output)) +
+        "}";
+    require_contains(handle_timeline_import(malformed_args), R"JSON("isError":true)JSON");
+    REQUIRE_FALSE(std::filesystem::exists(failed_output));
+
+    // Exercise the media-bearing DAWproject path through the same MCP boundary.
+    // This proves the unpacked project.xml contract, sibling-media sealing, and
+    // the writer's media-duration metadata as one externally visible round trip.
+    const auto unpacked = temp.path / "unpacked-dawproject";
+    REQUIRE(std::filesystem::create_directories(unpacked / "audio"));
+    pulp::audio::AudioFileData daw_media;
+    daw_media.sample_rate = 44'100;
+    daw_media.channels = {std::vector<float>(44'100, 0.25f)};
+    const auto daw_media_path = unpacked / "audio/source.wav";
+    REQUIRE(pulp::audio::write_wav_file(daw_media_path.string(), daw_media,
+                                        pulp::audio::WavBitDepth::Float32));
+    {
+        std::ofstream stream(unpacked / "project.xml", std::ios::binary);
+        REQUIRE(stream);
+        stream << R"xml(<Project version="1.0"><Structure><Track contentType="audio" id="audio" name="Audio"/></Structure><Arrangement><Lanes timeUnit="beats"><Lanes track="audio"><Clips><Clip time="0" duration="4"><Audio channels="1" duration="1" sampleRate="44100"><File path="audio/source.wav"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement></Project>)xml";
+    }
+    const auto daw_imported = temp.path / "daw-imported";
+    const auto daw_import_args =
+        "{\"format\":\"dawproject\",\"input\":" +
+        pulp::timeline::quote_json_string(pulp::tools::timeline::filesystem_path_to_utf8(
+            unpacked / "project.xml")) +
+        ",\"output\":" + pulp::timeline::quote_json_string(
+                                   pulp::tools::timeline::filesystem_path_to_utf8(daw_imported)) +
+        "}";
+    require_contains(handle_timeline_import(daw_import_args), R"JSON("ok":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(daw_imported / "project.json"));
+    REQUIRE(std::filesystem::is_regular_file(daw_imported / "audio/source.wav"));
+
+    const auto daw_exported = temp.path / "daw-exported";
+    const auto daw_export_args =
+        "{\"accepted_losses\":[\"media.provenance\",\"media.provenance\"],"
+        "\"format\":\"dawproject\",\"output\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(daw_exported)) +
+        ",\"project\":" + pulp::timeline::quote_json_string(
+                                   pulp::tools::timeline::filesystem_path_to_utf8(
+                                       daw_imported / "project.json")) +
+        "}";
+    require_contains(handle_timeline_export(daw_export_args), R"JSON("ok":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(daw_exported / "project.xml"));
+    REQUIRE(std::filesystem::is_regular_file(daw_exported / "audio/audio/source.wav"));
+    std::ifstream exported_xml_stream(daw_exported / "project.xml", std::ios::binary);
+    REQUIRE(exported_xml_stream);
+    const std::string exported_xml{std::istreambuf_iterator<char>(exported_xml_stream),
+                                   std::istreambuf_iterator<char>()};
+    REQUIRE(exported_xml.find("duration=\"1\"") != std::string::npos);
+}
+
+TEST_CASE("timeline MCP interchange rejects malformed boundaries without publishing",
+          "[mcp][tools][timeline][interchange]") {
+    TempDir temp;
+
+    require_contains(handle_timeline_export("{"), "arguments must be valid JSON");
+    require_contains(handle_timeline_import("{"), "arguments must be valid JSON");
+    require_contains(handle_timeline_export(
+                         R"json({"accepted_losses":{},"format":"smf","output":"unused","project":"{}"})json"),
+                     "accepted_losses must be an array");
+    require_contains(handle_timeline_export(
+                         R"json({"accepted_losses":[7],"format":"smf","output":"unused","project":"{}"})json"),
+                     "every accepted_losses entry must be a concept id");
+    require_contains(handle_timeline_export(
+                         R"json({"accepted_losses":[""],"format":"smf","output":"unused","project":"{}"})json"),
+                     "every accepted_losses entry must be a concept id");
+
+    const auto invalid_export = pulp::tools::timeline::export_project(
+        pulp::tools::timeline::ProjectSource::inline_json("{}"), "unknown",
+        temp.path / "invalid-export");
+    REQUIRE(invalid_export.exit_code == 2);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "invalid-export"));
+
+    const auto malformed_project = pulp::tools::timeline::export_project(
+        pulp::tools::timeline::ProjectSource::inline_json("{}"), "smf",
+        temp.path / "malformed-project");
+    REQUIRE(malformed_project.exit_code == 1);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "malformed-project"));
+
+    const auto renamed_xml = temp.path / "renamed.xml";
+    {
+        std::ofstream stream(renamed_xml, std::ios::binary);
+        REQUIRE(stream);
+        stream << R"xml(<Project version="1.0"/>)xml";
+    }
+    const auto dishonest = pulp::tools::timeline::import_project(
+        renamed_xml, "dawproject", temp.path / "dishonest");
+    REQUIRE(dishonest.exit_code == 2);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "dishonest"));
+
+    const auto missing_input = temp.path / "missing" / "project.xml";
+    const auto missing = pulp::tools::timeline::import_project(
+        missing_input, "dawproject", temp.path / "missing-output");
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "missing-output"));
+
+    const auto malformed_directory = temp.path / "malformed-dawproject";
+    REQUIRE(std::filesystem::create_directory(malformed_directory));
+    {
+        std::ofstream stream(malformed_directory / "project.xml", std::ios::binary);
+        REQUIRE(stream);
+        stream << "not xml";
+    }
+    const auto malformed = pulp::tools::timeline::import_project(
+        malformed_directory / "project.xml", "dawproject", temp.path / "malformed-output");
+    REQUIRE(malformed.exit_code == 1);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "malformed-output"));
+
+    const auto existing_output = temp.path / "existing-output";
+    REQUIRE(std::filesystem::create_directory(existing_output));
+    const auto refused = pulp::tools::timeline::import_project(
+        temp.path / "does-not-matter.mid", "unknown", existing_output);
+    REQUIRE(refused.exit_code == 2);
+}
+
+TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget",
+          "[mcp][tools][timeline][interchange]") {
+    using namespace pulp::timeline;
+    TempDir temp;
+
+    pulp::audio::AudioFileData first_audio;
+    first_audio.sample_rate = 48'000;
+    first_audio.channels = {std::vector<float>(32, 0.25f)};
+    pulp::audio::AudioFileData second_audio = first_audio;
+    second_audio.channels[0][0] = -0.25f;
+    const auto first_path = temp.path / "first.wav";
+    const auto second_path = temp.path / "second.wav";
+    REQUIRE(pulp::audio::write_wav_file(first_path.string(), first_audio,
+                                        pulp::audio::WavBitDepth::Float32));
+    REQUIRE(pulp::audio::write_wav_file(second_path.string(), second_audio,
+                                        pulp::audio::WavBitDepth::Float32));
+
+    const auto hash_file = [](const std::filesystem::path& path) {
+        std::ifstream stream(path, std::ios::binary);
+        REQUIRE(stream);
+        const std::string bytes{std::istreambuf_iterator<char>(stream),
+                                std::istreambuf_iterator<char>()};
+        auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
+        REQUIRE(hash);
+        return *hash;
+    };
+    constexpr auto duration = pulp::timebase::TickDuration{pulp::timebase::kTicksPerQuarter};
+    auto first_clip = require_timeline_result(
+        Clip::create({4}, {0}, duration, MediaRef{{5}, {0}, 32}));
+    auto second_clip = require_timeline_result(
+        Clip::create({6}, {duration.value}, duration, MediaRef{{7}, {0}, 32}));
+    auto track = require_timeline_result(
+        Track::create({3}, "two assets", {first_clip, second_clip}));
+    auto sequence = require_timeline_result(Sequence::create(
+        {2}, "root", pulp::timebase::TickDuration{2 * duration.value}, {track}));
+    MediaAsset first{{5}, "first.wav", 32, {48'000, 1}, hash_file(first_path),
+                     AssetStoragePolicy::External,
+                     {{AssetLocatorKind::ExternalUri, first_path.string()}}, {}, {}};
+    MediaAsset second{{7}, "second.wav", 32, {48'000, 1}, hash_file(second_path),
+                      AssetStoragePolicy::External,
+                      {{AssetLocatorKind::ExternalUri, second_path.string()}}, {}, {}};
+    auto project = require_timeline_result(
+        Project::create(ProjectInput{{1}, "budget", 8, {2}, {first, second}, {sequence}}));
+    pulp::tools::timeline::detail::LoadedProject loaded{std::move(project), temp.path};
+
+    const auto first_bytes = std::filesystem::file_size(first_path);
+    const auto second_bytes = std::filesystem::file_size(second_path);
+    pulp::interchange::ExportArtifacts refused;
+    REQUIRE_FALSE(pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, refused, std::max(first_bytes, second_bytes)));
+    REQUIRE(refused.artifacts.empty());
+
+    pulp::interchange::ExportArtifacts accepted;
+    REQUIRE(pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, accepted, first_bytes + second_bytes));
+    REQUIRE(accepted.artifacts.size() == 2);
 }
 
 } // namespace

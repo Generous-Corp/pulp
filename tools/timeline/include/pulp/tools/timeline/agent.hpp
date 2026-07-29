@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::tools::timeline {
 
@@ -63,6 +64,25 @@ OperationResult validate(const ProjectSource& project);
 OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
                        std::uint32_t sample_rate = 48'000);
+
+/// Export a canonical project through the consent-gated interchange planner.
+///
+/// `format` is `smf` or `dawproject`. `output_directory` must not exist. Every
+/// model concept the selected format loses must be named individually in
+/// `accepted_losses`; unknown names and blanket consent are rejected. Success
+/// atomically publishes the whole artifact directory.
+OperationResult export_project(const ProjectSource& project, std::string_view format,
+                               const std::filesystem::path& output_directory,
+                               const std::vector<std::string>& accepted_losses = {});
+
+/// Import a foreign timeline file into a new canonical project directory.
+///
+/// SMF input is one file. DAWproject input is the unpacked `project.xml` file;
+/// referenced sibling media is sealed and copied into the published directory.
+/// `output_directory` must not exist and is published atomically with
+/// `project.json` plus any imported sibling media.
+OperationResult import_project(const std::filesystem::path& input, std::string_view format,
+                               const std::filesystem::path& output_directory);
 
 /// Convenience overloads that auto-detect canonical inline JSON versus a path.
 OperationResult project_open(std::string_view project);

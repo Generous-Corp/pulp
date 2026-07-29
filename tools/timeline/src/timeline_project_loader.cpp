@@ -202,6 +202,34 @@ load_assets(const LoadedProject& project,
 
 } // namespace
 
+std::optional<std::vector<std::uint8_t>>
+read_verified_asset_bytes(const LoadedProject& project, const pulp::timeline::MediaAsset& asset,
+                          std::uint64_t max_bytes) {
+    std::error_code package_base_error;
+    const auto canonical_package_base = fs::canonical(project.base_directory, package_base_error);
+    for (const auto& locator : asset.locators) {
+        if (locator.hint.empty())
+            continue;
+        std::optional<fs::path> candidate;
+        if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative) {
+            if (!package_base_error)
+                candidate = resolve_package_relative_asset(canonical_package_base, locator.hint);
+        } else {
+            candidate = resolve_external_asset(project.base_directory, locator.hint);
+        }
+        if (!candidate)
+            continue;
+        std::error_code error;
+        if (!fs::is_regular_file(*candidate, error))
+            continue;
+        auto bytes = read_file(*candidate, max_bytes);
+        if (!bytes || pulp::runtime::sha256_hex(*bytes) != asset.content_hash.to_hex())
+            continue;
+        return std::vector<std::uint8_t>(bytes->begin(), bytes->end());
+    }
+    return std::nullopt;
+}
+
 runtime::Result<std::unordered_set<std::uint64_t>,
                 playback::CompileError>
 reachable_assets(

@@ -13,9 +13,9 @@ file(READ
     PULP_TIMELINE_MCP_TOOLS_JSON)
 string(JSON PULP_TIMELINE_MCP_TOOL_COUNT
     LENGTH "${PULP_TIMELINE_MCP_TOOLS_JSON}" tools)
-if(NOT PULP_TIMELINE_MCP_TOOL_COUNT EQUAL 5)
+if(NOT PULP_TIMELINE_MCP_TOOL_COUNT EQUAL 7)
     message(FATAL_ERROR
-        "timeline_mcp_tools.json must define exactly five generated operations")
+        "timeline_mcp_tools.json must define exactly seven generated operations")
 endif()
 set(_PULP_TIMELINE_MCP_EXPECTED_NAMES
     pulp_timeline_project_open
@@ -23,8 +23,11 @@ set(_PULP_TIMELINE_MCP_EXPECTED_NAMES
     pulp_timeline_validate
     pulp_timeline_explain
     pulp_timeline_render)
+list(APPEND _PULP_TIMELINE_MCP_EXPECTED_NAMES
+    pulp_timeline_export
+    pulp_timeline_import)
 set(PULP_TIMELINE_MCP_TOOLS_ARRAY "")
-foreach(_index RANGE 0 4)
+foreach(_index RANGE 0 6)
     string(JSON _tool_name GET "${PULP_TIMELINE_MCP_TOOLS_JSON}" tools ${_index} name)
     list(GET _PULP_TIMELINE_MCP_EXPECTED_NAMES ${_index} _expected_name)
     if(NOT _tool_name STREQUAL _expected_name)

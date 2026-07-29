@@ -3100,6 +3100,52 @@
               }
             ],
             "subcommands": []
+          },
+          {
+            "name": "export",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--accept-loss",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "import",
+            "arguments": [
+              {
+                "name": "input",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
           }
         ]
       },

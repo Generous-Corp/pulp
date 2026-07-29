@@ -1567,6 +1567,12 @@ pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
 pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq export song.pulpseq.json --format smf --out song-smf \
+  [--accept-loss concept-id]...
+pulp seq export song.pulpseq.json --format dawproject --out song-dawproject \
+  [--accept-loss concept-id]...
+pulp seq import song.mid --format smf --out imported-song
+pulp seq import unpacked/project.xml --format dawproject --out imported-song
 ```
 
 `apply` accepts an array of typed command envelopes. It prints the committed
@@ -1574,6 +1580,27 @@ project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
 precondition conflicts, and empty command batches fail without publishing a
 partial edit.
+
+`export` first plans conversion against the selected format and stops unless
+every reported lossy concept has its own repeated `--accept-loss <concept-id>`
+argument. There is deliberately no force or accept-all switch: a newly
+introduced loss stops an unattended pipeline until that exact concept is
+reviewed. Unknown concept IDs are rejected.
+
+Import and export publish only to a new directory. The destination and even a
+symlink at that path must not already exist. Files are staged in a private
+sibling directory and the complete directory is atomically published; a
+failure removes the staging directory and never replaces an existing result.
+An SMF export contains `project.mid` plus the canonical interchange manifest.
+A DAWproject export is intentionally an unpacked interchange directory with
+`project.xml`, the canonical manifest, and referenced sibling media (for
+example under `audio/`), not a packaged `.dawproject` ZIP file.
+
+SMF import accepts a MIDI file. DAWproject import accepts an unpacked file
+named exactly `project.xml` and resolves only confined sibling media from its
+directory. Both create `project.json` in the new destination, plus sealed
+sibling media/artifacts where the import produced them. This is the honest
+current boundary; container packing and unpacking remain the caller's job.
 
 `explain` reports the compiled track plan, including clip IDs, note-event and
 audio-region counts, and automation presence. Plugin latency is a host-binding
@@ -1590,7 +1617,8 @@ compiler lowers today is produced in band, so tracks report `synchronous`.
 
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,
-validation, explanation, render, and the equivalent five-tool MCP flow.
+validation, explanation, render, import/export interchange, and the equivalent
+seven-tool MCP flow.
 
 ### render
 

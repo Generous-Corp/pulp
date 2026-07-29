@@ -72,6 +72,7 @@ add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
 target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
     pulp-mcp-core
     pulp::audio
+    pulp::interchange
     pulp::playback
     pulp::timeline
     pulp::tool-timeline

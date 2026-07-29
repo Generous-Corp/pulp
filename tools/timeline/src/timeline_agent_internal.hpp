@@ -12,6 +12,11 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <vector>
+
+namespace pulp::interchange {
+struct ExportArtifacts;
+}
 
 namespace pulp::audio {
 struct AudioFileData;
@@ -38,6 +43,14 @@ struct CompiledProject {
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
 load_project(const ProjectSource& source, const pulp::timeline::SchemaRegistry& registry);
+
+std::optional<std::vector<std::uint8_t>>
+read_verified_asset_bytes(const LoadedProject& project, const pulp::timeline::MediaAsset& asset,
+                          std::uint64_t max_bytes = kMaxAssetWorkingSetBytes);
+
+bool add_dawproject_media(const LoadedProject& loaded,
+                          pulp::interchange::ExportArtifacts& artifacts,
+                          std::uint64_t max_total_media_bytes = kMaxAssetWorkingSetBytes);
 
 runtime::Result<std::unordered_set<std::uint64_t>, playback::CompileError>
 reachable_assets(const pulp::timeline::Project& project,

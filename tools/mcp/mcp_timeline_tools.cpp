@@ -14,6 +14,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace pulp_mcp {
 namespace {
@@ -24,6 +25,9 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* commands = nullptr;
     const pulp::timeline::JsonValue* output = nullptr;
     const pulp::timeline::JsonValue* sample_rate = nullptr;
+    const pulp::timeline::JsonValue* input = nullptr;
+    const pulp::timeline::JsonValue* format = nullptr;
+    const pulp::timeline::JsonValue* accepted_losses = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -40,6 +44,9 @@ parse_timeline_arguments(const std::string& params_json) {
     result.commands = root.find("commands");
     result.output = root.find("output");
     result.sample_rate = root.find("sample_rate");
+    result.input = root.find("input");
+    result.format = root.find("format");
+    result.accepted_losses = root.find("accepted_losses");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -153,6 +160,46 @@ std::string handle_timeline_render(const std::string& params_json) {
     return timeline_result(pulp::tools::timeline::render(
         timeline_project_source(*project),
         pulp::tools::timeline::filesystem_path_from_utf8(*output), sample_rate.value()));
+}
+
+std::string handle_timeline_export(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* project = required_timeline_string(arguments.value().project);
+    const auto* format = required_timeline_string(arguments.value().format);
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (project == nullptr || format == nullptr || output == nullptr)
+        return timeline_argument_error("Error: project, format, and output are required");
+    std::vector<std::string> accepted_losses;
+    if (const auto* losses = arguments.value().accepted_losses) {
+        if (losses->kind != pulp::timeline::JsonValue::Kind::Array)
+            return timeline_argument_error("Error: accepted_losses must be an array");
+        accepted_losses.reserve(losses->array.size());
+        for (const auto& loss : losses->array) {
+            if (loss.kind != pulp::timeline::JsonValue::Kind::String || loss.scalar.empty())
+                return timeline_argument_error(
+                    "Error: every accepted_losses entry must be a concept id");
+            accepted_losses.push_back(loss.scalar);
+        }
+    }
+    return timeline_result(pulp::tools::timeline::export_project(
+        timeline_project_source(*project), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses));
+}
+
+std::string handle_timeline_import(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* input = required_timeline_string(arguments.value().input);
+    const auto* format = required_timeline_string(arguments.value().format);
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (input == nullptr || format == nullptr || output == nullptr)
+        return timeline_argument_error("Error: input, format, and output are required");
+    return timeline_result(pulp::tools::timeline::import_project(
+        pulp::tools::timeline::filesystem_path_from_utf8(*input), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output)));
 }
 
 } // namespace pulp_mcp
