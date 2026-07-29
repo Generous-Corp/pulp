@@ -59,6 +59,18 @@ class CoverageWorkflowTests(unittest.TestCase):
             self.watchdog,
         )
 
+    def test_watchdog_legacy_fallback_cannot_mask_new_transport_failure(self) -> None:
+        self.assertIn(
+            "repos/${REPO}/contents/.github/workflows/coverage.yml",
+            self.watchdog,
+        )
+        self.assertIn('-f ref="${head_sha}"', self.watchdog)
+        self.assertIn(
+            "&& ! grep -q 'receipt-name: codecov-upload-'",
+            self.watchdog,
+        )
+        self.assertIn('startswith("coverage-cobertura-")', self.watchdog)
+
     def test_all_coverage_call_sites_use_shared_action(self) -> None:
         expected = {
             "coverage.yml": 3,

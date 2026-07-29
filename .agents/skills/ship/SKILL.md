@@ -882,7 +882,8 @@ Keep the release SDK path aligned with the GitHub release workflow:
    `tools/ci/linux_build_deps.json`; do not copy an apt list into
    `release-cli.yml` or its PR gate. Manual backfills can check out a tag that
    predates the local action, so the workflow materializes the action, installer,
-   and manifest from main when they are absent before invoking it.
+   and manifest from the immutable workflow revision when they are absent
+   before invoking it.
 3. Before packaging, verify the staged SDK view-core archive still contains
    `WebViewPanel` and `make_webview_embedded_resource_fetcher`.
 

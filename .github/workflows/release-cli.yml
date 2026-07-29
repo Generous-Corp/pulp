@@ -272,6 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
+          workflow_sha='${{ github.workflow_sha }}'
           required=(
             .github/actions/install-linux-build-deps/action.yml
             tools/ci/install_linux_build_deps.py
@@ -280,7 +281,7 @@ jobs:
           for path in "${required[@]}"; do
             if [ ! -f "${path}" ]; then
               mkdir -p "$(dirname "${path}")"
-              curl -fsSL "https://raw.githubusercontent.com/${repo}/main/${path}" \
+              curl -fsSL "https://raw.githubusercontent.com/${repo}/${workflow_sha}/${path}" \
                 -o "${path}"
             fi
           done

@@ -75,7 +75,7 @@ jobs:
           runs_json="$(gh api -X GET \
             "repos/${REPO}/actions/workflows/coverage.yml/runs" \
             -f branch=main -f per_page=20 \
-            --jq '[.workflow_runs[] | {id, status, conclusion, created_at, updated_at, html_url}]')"
+            --jq '[.workflow_runs[] | {id, head_sha, status, conclusion, created_at, updated_at, html_url}]')"
 
           # The shared upload action emits a receipt only after the Codecov
           # action completes successfully. Main coverage is complete enough to
@@ -86,6 +86,8 @@ jobs:
             | jq -r '[.[] | select(.conclusion=="success")] | sort_by(.updated_at) | reverse | .[].id')"
           last_success_at=""
           for rid in ${succ_ids}; do
+            head_sha="$(printf '%s' "$runs_json" \
+              | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .head_sha')"
             receipts="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
               -f per_page=100 \
               --jq '[.artifacts[].name | select(startswith("codecov-upload-"))]' \
@@ -97,6 +99,29 @@ jobs:
                 | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .updated_at')"
               echo "Newest successful run with Linux + macOS Codecov receipts: ${rid} (${last_success_at})"
               break
+            fi
+
+            # Preserve the old watchdog contract during rollout, but only for
+            # a run whose own workflow predates upload receipts. New runs
+            # always contain the receipt-name marker, so their Cobertura
+            # artifact cannot mask a failed Codecov transport.
+            workflow_text=""
+            if workflow_text="$(gh api -X GET \
+                "repos/${REPO}/contents/.github/workflows/coverage.yml" \
+                -f ref="${head_sha}" --jq .content 2>/dev/null \
+                | tr -d '\n' | base64 --decode 2>/dev/null)" \
+                && [ -n "${workflow_text}" ] \
+                && ! grep -q 'receipt-name: codecov-upload-' <<< "${workflow_text}"; then
+              legacy_count="$(gh api -X GET "repos/${REPO}/actions/runs/${rid}/artifacts" \
+                -f per_page=100 \
+                --jq '[.artifacts[].name | select(startswith("coverage-cobertura-"))] | length' \
+                2>/dev/null || echo 0)"
+              if [ "${legacy_count:-0}" -gt 0 ]; then
+                last_success_at="$(printf '%s' "$runs_json" \
+                  | jq -r --arg id "${rid}" '.[] | select((.id|tostring)==$id) | .updated_at')"
+                echo "Newest pre-receipt run with legacy Cobertura proof: ${rid} (${last_success_at})"
+                break
+              fi
             fi
             echo "Run ${rid} lacks complete native Codecov receipts (linux=${has_linux}, macos=${has_macos}) — not counting it as fresh coverage."
           done
