@@ -19,7 +19,13 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <thread>
+
+#include <unistd.h>
 #include <string>
 #include <vector>
 
@@ -229,3 +235,107 @@ TEST_CASE("Random fills the composer instead of building",
 }
 
 
+
+// ── the real engine ──────────────────────────────────────────────────────────
+//
+// The tests above stop at the EngineClient boundary, which leaves the most
+// interesting question unanswered: does the real one actually run anything?
+// "The button path reaches patch.py" was claimed for a while on the strength of
+// reading the code. These drive the real SubprocessEngine, pointed by
+// FORGE_MODULAR_TOOLS at stub scripts that record how they were invoked, so the
+// spawn is genuine and only the generator is stood in for.
+
+namespace {
+
+/// A tools directory whose generate.py and patch.py record their arguments.
+struct StubTools {
+    std::filesystem::path dir;
+
+    StubTools() {
+        dir = std::filesystem::temp_directory_path() /
+              ("fm-stub-" + std::to_string(::getpid()));
+        std::filesystem::create_directories(dir);
+        write("generate.py", "module");
+        write("patch.py", "patch");
+    }
+    ~StubTools() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    void write(const char* name, const char* kind) {
+        std::ofstream f(dir / name);
+        // Record the kind and every argument, so the test can tell a module run
+        // from a patch run and check the prompt survived the shell quoting.
+        f << "import sys, os\n"
+          << "open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"
+          << " 'invoked.txt'), 'w').write('" << kind << "\\n' + '\\n'.join(sys.argv[1:]))\n";
+    }
+
+    /// Wait for the detached child. submit() returns immediately by design --
+    /// a generation outlives the click -- so the test has to wait rather than
+    /// assume, and must fail rather than hang if nothing ever appears.
+    std::string invocation(int timeout_ms = 5000) const {
+        const auto marker = dir / "invoked.txt";
+        for (int waited = 0; waited < timeout_ms; waited += 50) {
+            if (std::filesystem::exists(marker)) {
+                std::ifstream f(marker);
+                std::string out((std::istreambuf_iterator<char>(f)),
+                                std::istreambuf_iterator<char>());
+                if (!out.empty()) return out;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        return {};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("the real engine runs generate.py for a module",
+          "[forge-modular][engine]") {
+    StubTools tools;
+    ::setenv("FORGE_MODULAR_TOOLS", tools.dir.c_str(), 1);
+    auto engine = forge_modular::make_engine();
+    REQUIRE(engine != nullptr);
+    REQUIRE(engine->available());          // both scripts are present
+
+    engine->submit("a 12 hp wavefolder with drive and symmetry", false);
+
+    const auto seen = tools.invocation();
+    REQUIRE_FALSE(seen.empty());
+    CHECK(seen.find("module") == 0);
+    // The prompt has to survive shell quoting intact -- spaces and all.
+    CHECK(seen.find("a 12 hp wavefolder with drive and symmetry") != std::string::npos);
+    ::unsetenv("FORGE_MODULAR_TOOLS");
+}
+
+TEST_CASE("the real engine runs patch.py build for a patch",
+          "[forge-modular][engine]") {
+    StubTools tools;
+    ::setenv("FORGE_MODULAR_TOOLS", tools.dir.c_str(), 1);
+    auto engine = forge_modular::make_engine();
+    REQUIRE(engine != nullptr);
+
+    engine->submit("an ambient generative drone", true);
+
+    const auto seen = tools.invocation();
+    REQUIRE_FALSE(seen.empty());
+    CHECK(seen.find("patch") == 0);
+    // patch.py is subcommand-driven; without "build" it would inventory rather
+    // than generate, and quietly succeed at doing nothing.
+    CHECK(seen.find("build") != std::string::npos);
+    CHECK(seen.find("an ambient generative drone") != std::string::npos);
+    ::unsetenv("FORGE_MODULAR_TOOLS");
+}
+
+TEST_CASE("the real engine reports a tools directory that is not there",
+          "[forge-modular][engine]") {
+    // Not-installed has to be distinguishable from not-yet-running, or the UI
+    // shows a button that silently cannot work.
+    ::setenv("FORGE_MODULAR_TOOLS", "/nonexistent/forge-modular-tools", 1);
+    auto engine = forge_modular::make_engine();
+    REQUIRE(engine != nullptr);
+    CHECK_FALSE(engine->available());
+    ::unsetenv("FORGE_MODULAR_TOOLS");
+}
