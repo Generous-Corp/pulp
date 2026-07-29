@@ -117,6 +117,16 @@
       ]
     },
     {
+      "slug": "DIVIDELY",
+      "name": "DIV4",
+      "description": "Four independent clock dividers from one clock, with a shared reset.",
+      "tags": [
+        "Clock modulator",
+        "Quad",
+        "Utility"
+      ]
+    },
+    {
       "slug": "DUALAD",
       "name": "DUAL AD",
       "description": "Dual attack/decay envelope generator with variable curve, 1V/oct time CV, free-running loop mode and end-of-cycle triggers.",

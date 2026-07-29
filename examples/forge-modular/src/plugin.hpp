@@ -35,3 +35,4 @@ extern rack::plugin::Model* modelDUALAD;
 extern rack::plugin::Model* modelTANGLE;
 extern rack::plugin::Model* modelSIXMIX;
 extern rack::plugin::Model* modelOFFSETLY;
+extern rack::plugin::Model* modelDIVIDELY;

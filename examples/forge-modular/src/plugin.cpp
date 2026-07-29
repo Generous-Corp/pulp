@@ -35,4 +35,5 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelTANGLE);
     p->addModel(modelSIXMIX);
     p->addModel(modelOFFSETLY);
+    p->addModel(modelDIVIDELY);
 }

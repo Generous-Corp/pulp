@@ -498,6 +498,56 @@ inline void place_CARTOG(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeMediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
 }
 
+// ── DIVIDELY (4HP) ────────────────────────────────────
+struct DIVIDELYLayout {
+    static constexpr int kHp = 4;
+    enum ParamId { DIV1_PARAM, DIV2_PARAM, DIV3_PARAM, DIV4_PARAM, PARAMS_LEN };
+    enum InputId { CLK_INPUT, RST_INPUT, INPUTS_LEN };
+    enum OutputId { OUT1_OUTPUT, OUT2_OUTPUT, OUT3_OUTPUT, OUT4_OUTPUT, OUTPUTS_LEN };
+    enum LightId { DIV1_LIGHT = 0, DIV2_LIGHT = 1, DIV3_LIGHT = 2, DIV4_LIGHT = 3, LIGHTS_LEN = 4 };
+};
+
+inline void config_DIVIDELY(rack::engine::Module* m) {
+    m->config(DIVIDELYLayout::PARAMS_LEN, DIVIDELYLayout::INPUTS_LEN, DIVIDELYLayout::OUTPUTS_LEN, DIVIDELYLayout::LIGHTS_LEN);
+    m->configParam(DIVIDELYLayout::DIV1_PARAM, 1.0f, 32.0f, 2.0f, "Divide 1", "x", 0.0f, 1.0f);
+    m->configParam(DIVIDELYLayout::DIV2_PARAM, 1.0f, 32.0f, 4.0f, "Divide 2", "x", 0.0f, 1.0f);
+    m->configParam(DIVIDELYLayout::DIV3_PARAM, 1.0f, 32.0f, 8.0f, "Divide 3", "x", 0.0f, 1.0f);
+    m->configParam(DIVIDELYLayout::DIV4_PARAM, 1.0f, 32.0f, 16.0f, "Divide 4", "x", 0.0f, 1.0f);
+    m->configInput(DIVIDELYLayout::CLK_INPUT, "Clock");
+    m->configInput(DIVIDELYLayout::RST_INPUT, "Reset");
+    m->configOutput(DIVIDELYLayout::OUT1_OUTPUT, "Division 1 gate");
+    m->configOutput(DIVIDELYLayout::OUT2_OUTPUT, "Division 2 gate");
+    m->configOutput(DIVIDELYLayout::OUT3_OUTPUT, "Division 3 gate");
+    m->configOutput(DIVIDELYLayout::OUT4_OUTPUT, "Division 4 gate");
+    m->configLight(DIVIDELYLayout::DIV1_LIGHT, "Division 1 active");
+    m->configLight(DIVIDELYLayout::DIV2_LIGHT, "Division 2 active");
+    m->configLight(DIVIDELYLayout::DIV3_LIGHT, "Division 3 active");
+    m->configLight(DIVIDELYLayout::DIV4_LIGHT, "Division 4 active");
+}
+
+inline void place_DIVIDELY(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(6.000f, 28.000f)), m, DIVIDELYLayout::DIV1_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(14.320f, 28.000f)), m, DIVIDELYLayout::DIV2_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(6.000f, 44.000f)), m, DIVIDELYLayout::DIV3_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(14.320f, 44.000f)), m, DIVIDELYLayout::DIV4_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(5.200f, 62.000f)), m, DIVIDELYLayout::CLK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(15.120f, 62.000f)), m, DIVIDELYLayout::RST_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(5.200f, 90.000f)), m, DIVIDELYLayout::OUT1_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.120f, 90.000f)), m, DIVIDELYLayout::OUT2_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(5.200f, 108.000f)), m, DIVIDELYLayout::OUT3_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.120f, 108.000f)), m, DIVIDELYLayout::OUT4_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeTinyLight<GreenLight>>(mm2px(Vec(3.300f, 76.000f)), m, DIVIDELYLayout::DIV1_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeTinyLight<GreenLight>>(mm2px(Vec(7.900f, 76.000f)), m, DIVIDELYLayout::DIV2_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeTinyLight<GreenLight>>(mm2px(Vec(12.400f, 76.000f)), m, DIVIDELYLayout::DIV3_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeTinyLight<GreenLight>>(mm2px(Vec(17.000f, 76.000f)), m, DIVIDELYLayout::DIV4_LIGHT));
+}
+
 // ── DUALAD (10HP) ──────────────────────────────────────
 struct DUALADLayout {
     static constexpr int kHp = 10;

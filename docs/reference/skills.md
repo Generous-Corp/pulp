@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 55 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 56 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -49,6 +49,7 @@ for its complete, authoritative guidance.
 | `pr-batching` | Decide whether several finished branches ship as ONE PR or stay separate. |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
+| `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
 | `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |

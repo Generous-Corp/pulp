@@ -1559,6 +1559,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `packages` | Third-party audio package search, suggest, add, browse |
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
 | `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
+| `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
