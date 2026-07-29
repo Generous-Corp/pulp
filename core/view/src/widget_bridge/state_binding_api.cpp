@@ -12,6 +12,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include "api_registry.hpp"
 #include "bridge_dispatch.hpp"
 
@@ -20,11 +21,13 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -146,12 +149,27 @@ float WidgetBridge::BindingTransform::apply(float v) const {
     return out;
 }
 
+bool WidgetBridge::transform_requests_derivation(const choc::value::Value* v) {
+    if (!v || !v->isObject()) return false;
+    const auto& o = *v;
+    if (!o["fromParam"].getWithDefault<bool>(false)) return false;
+    // `fromParam` and an explicit db-family key are mutually exclusive: naming
+    // any of db/dbMin/dbMax means the author is describing the mapping
+    // themselves, and silently replacing what they wrote would be worse than
+    // ignoring the flag. (dbMin/dbMax without `db: true` is inert in this API —
+    // the mapping stays off — which is pre-existing behaviour, not a new trap.)
+    return !(o.hasObjectMember("db") || o.hasObjectMember("dbMin") ||
+             o.hasObjectMember("dbMax"));
+}
+
 // Parse the optional `{db, dbMin, dbMax, scale, offset, min, max, clamp}`
 // transform object handed to bindWidgetToParam / bindMeter. Absent OR `{}`
 // both yield the default: identity scale/offset with a [0,1] clamp (the value
 // domain every binding target shares — Knob/Fader/Meter are normalized and a
 // RangeSlider treats the result as a fraction of its own range). Provide `min`
 // / `max` to widen or narrow the clamp, or `clamp:false` to disable it.
+// `{fromParam: true}` fills db/dbMin/dbMax from the parameter instead — see
+// transform_requests_derivation above and derive_binding_transform below.
 WidgetBridge::BindingTransform WidgetBridge::parse_transform(const choc::value::Value* v) {
     BindingTransform t;
     if (!v || !v->isObject()) return t;
@@ -167,6 +185,17 @@ WidgetBridge::BindingTransform WidgetBridge::parse_transform(const choc::value::
     return t;
 }
 
+namespace {
+/// Returns the channel name for a `value:<name>` source, or empty for a plain
+/// parameter name.
+std::string_view value_channel_name(std::string_view source) {
+    constexpr std::string_view kPrefix = "value:";
+    if (source.size() <= kPrefix.size() || source.substr(0, kPrefix.size()) != kPrefix)
+        return {};
+    return source.substr(kPrefix.size());
+}
+} // namespace
+
 bool WidgetBridge::resolve_param_id(const std::string& name, state::ParamID& out) const {
     for (std::size_t i = 0; i < store_.param_count(); ++i) {
         const auto* info = &store_.all_params()[i];
@@ -178,11 +207,88 @@ bool WidgetBridge::resolve_param_id(const std::string& name, state::ParamID& out
     return false;
 }
 
+void WidgetBridge::derive_binding_transform(ParamBinding& b, View* w) {
+    b.derive_from_param = false;  // one shot, whatever we conclude below
+    const auto* info = store_.info(b.param_id);
+    if (info == nullptr) return;
+
+    // Only widgets that present the param in REAL units need a derived
+    // transform. A Knob/Fader/Toggle/ProgressBar is a [0,1] surface, and the
+    // store's normalized value is already the right thing to show there — it is
+    // the position the host's automation lane shows. Deriving for those would
+    // move the control off the host's curve, so `fromParam` deliberately
+    // leaves them alone.
+    const bool real_units = b.target == ParamBinding::Target::meter ||
+                            dynamic_cast<RangeSlider*>(w) != nullptr;
+    if (!real_units) return;
+
+    // Map the real value linearly across the param's own range. For a
+    // RangeSlider this is the fix for skew: the normalized value is curved, so
+    // treating it as a fraction of the slider's range put a 1 kHz cutoff at
+    // ~10 kHz on a 20 Hz..20 kHz range. For a dB meter it replaces hand-copied
+    // dbMin/dbMax with the range the parameter already declares.
+    b.transform.db = true;
+    b.transform.db_min = info->range.min;
+    b.transform.db_max = info->range.max;
+}
+
+
+/// How long a value channel may go without a publish before a bound view falls
+/// back to its neutral. Pulp meters already carry UI-side ballistics, so this
+/// only has to outlast a normal render gap, not smooth anything.
+constexpr auto kValueChannelStaleAfter = std::chrono::milliseconds(250);
+
+bool WidgetBridge::value_channel_is_stale(ParamBinding& b, std::uint32_t seq) {
+    const auto now = std::chrono::steady_clock::now();
+    if (seq != b.last_publish_seq) {
+        b.last_publish_seq = seq;
+        b.last_publish_at = now;
+        return false;
+    }
+    return now - b.last_publish_at > kValueChannelStaleAfter;
+}
+
+bool WidgetBridge::apply_scope_binding(ParamBinding& b, View* w) {
+    if (b.value_vector == nullptr) return false;
+    const bool stale = value_channel_is_stale(b, b.value_vector->publish_seq());
+    const auto frame = b.value_vector->read();
+    const int count = stale ? 0 : frame.count;
+    // A stale scope renders empty rather than holding the last block on screen,
+    // which would read as a frozen display of live audio.
+    if (auto* spectrum = dynamic_cast<SpectrumView*>(w)) {
+        spectrum->set_spectrum(frame.samples.data(), static_cast<size_t>(count));
+        return true;
+    }
+    if (auto* wave = dynamic_cast<WaveformView*>(w)) {
+        wave->set_data(frame.samples.data(), static_cast<size_t>(count));
+        return true;
+    }
+    return false;
+}
+
 bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
-    // dB transforms operate on the raw param value; everything else on the
-    // store's already-normalized [0,1] value (the 1:1 common case).
-    const float src = b.transform.db ? store_.get_value(b.param_id)
-                                     : store_.get_normalized(b.param_id);
+    if (b.derive_from_param) derive_binding_transform(b, w);
+
+    // A scope pushes a whole block, so it shares none of the scalar path below.
+    if (b.target == ParamBinding::Target::scope) return apply_scope_binding(b, w);
+
+    // Staleness: a value channel that has stopped PUBLISHING decays to its
+    // declared neutral, so a meter drops to rest when audio stops instead of
+    // freezing on its last reading. Watching the publish sequence rather than
+    // the value is what lets a genuinely static-but-live signal keep reading.
+    if (b.value_meter != nullptr && value_channel_is_stale(b, b.value_meter->publish_seq())) {
+        if (b.last_applied == b.neutral) return false;
+        b.last_applied = b.neutral;
+        if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(b.neutral, b.neutral);
+        return true;
+    }
+    // A value channel already publishes in the domain the widget wants, so the
+    // transform applies to it directly — there is no normalized/real split to
+    // choose between as there is for a parameter.
+    const float src = b.value_meter != nullptr
+                          ? b.value_meter->read().rms[0]
+                          : (b.transform.db ? store_.get_value(b.param_id)
+                                            : store_.get_normalized(b.param_id));
     const float target = b.transform.apply(src);
     if (std::isnan(target)) return false;  // never churn on a NaN source
 
@@ -254,6 +360,7 @@ std::size_t WidgetBridge::param_subscription_count() const noexcept {
         std::count_if(param_subscriptions_.begin(), param_subscriptions_.end(),
                       [](const ParamSubscription& s) { return s.id != 0; }));
 }
+
 
 void WidgetBridge::service_param_subscriptions() {
     if (param_subscriptions_.empty()) return;
@@ -340,6 +447,8 @@ const char* describe(BindingOutcome o) noexcept {
             return "bound, replacing this widget's previous binding";
         case BindingOutcome::empty_widget_id: return "widget id was empty";
         case BindingOutcome::empty_param_name: return "parameter name was empty";
+        case BindingOutcome::unknown_value_channel:
+            return "no value channel with that name is declared";
         case BindingOutcome::null_widget: return "widget id maps to a null view";
         case BindingOutcome::incompatible_widget:
             return "widget type cannot accept this binding target";
@@ -401,7 +510,10 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         // scripts may intentionally register bindings before creating views.
         View* const view = widget->second;
         const bool supported =
-            target == ParamBinding::Target::meter
+            target == ParamBinding::Target::scope
+                ? (dynamic_cast<SpectrumView*>(view) != nullptr ||
+                   dynamic_cast<WaveformView*>(view) != nullptr)
+            : target == ParamBinding::Target::meter
                 ? dynamic_cast<Meter*>(view) != nullptr
                 : dynamic_cast<Knob*>(view) != nullptr ||
                       dynamic_cast<Fader*>(view) != nullptr ||
@@ -411,14 +523,51 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         if (!supported) return fail(BindingOutcome::incompatible_widget);
     }
 
+    // A `value:<name>` source names one of the processor's declared value
+    // channels rather than a parameter. The prefix is mandatory and there is no
+    // fallback between the two namespaces on purpose: silently resolving a
+    // typo'd channel to a same-named param would bind a meter to the wrong
+    // thing and look like it worked.
+    MeterSource* value_meter = nullptr;
+    VectorSource* value_vector = nullptr;
+    float neutral = 0.0f;
     state::ParamID id = 0;
-    if (!resolve_param_id(param_name, id)) return fail(BindingOutcome::unknown_param);
+    if (const auto channel = value_channel_name(param_name); !channel.empty()) {
+        // Shape follows the target: a scope wants a vector channel, everything
+        // else a meter channel. A shape mismatch is a MISS, not a coercion —
+        // binding a scope to a meter would otherwise render a plausible wrong
+        // picture instead of reporting that the channel is the wrong kind.
+        if (value_channels_ != nullptr) {
+            if (target == ParamBinding::Target::scope)
+                value_vector = value_channels_->vector(channel);
+            else
+                value_meter = value_channels_->meter(channel);
+            for (const auto& info : value_channels_->infos()) {
+                if (info.name == channel) { neutral = info.neutral; break; }
+            }
+        }
+        if (value_meter == nullptr && value_vector == nullptr)
+            return fail(BindingOutcome::unknown_value_channel);
+    } else if (target == ParamBinding::Target::scope) {
+        // A scope has no parameter equivalent — there is no store shape that
+        // carries a block of samples.
+        return fail(BindingOutcome::unknown_value_channel);
+    } else if (!resolve_param_id(param_name, id)) {
+        return fail(BindingOutcome::unknown_param);
+    }
 
     ParamBinding binding;
     binding.widget_id = widget_id;
     binding.param_id = id;
+    binding.value_meter = value_meter;
+    binding.value_vector = value_vector;
+    binding.neutral = neutral;
+    if (value_meter) binding.last_publish_seq = value_meter->publish_seq();
+    if (value_vector) binding.last_publish_seq = value_vector->publish_seq();
+    binding.last_publish_at = std::chrono::steady_clock::now();
     binding.target = target;
     binding.transform = parse_transform(transform);
+    binding.derive_from_param = transform_requests_derivation(transform);
 
     // Re-binding a widget replaces the prior binding (a widget has one source).
     for (auto& existing : param_bindings_) {
@@ -615,6 +764,17 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
             self.add_param_binding(args.get<std::string>(0, ""),
                               args.get<std::string>(1, ""),
                               WidgetBridge::ParamBinding::Target::meter,
+                              args.numArgs > 2 ? args[2] : nullptr));
+    });
+
+    // bindScope(widgetId, "value:<name>") -> bind a SpectrumView / WaveformView
+    // to a vector value channel. Scope sources are value channels only: there is
+    // no parameter shape that carries a block of samples.
+    register_bridge_function(api, "bindScope", [&self](choc::javascript::ArgumentList args) {
+        return choc::value::createBool(
+            self.add_param_binding(args.get<std::string>(0, ""),
+                              args.get<std::string>(1, ""),
+                              WidgetBridge::ParamBinding::Target::scope,
                               args.numArgs > 2 ? args[2] : nullptr));
     });
 

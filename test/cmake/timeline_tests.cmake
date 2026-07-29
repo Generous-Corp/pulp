@@ -419,3 +419,6 @@ catch_discover_tests(pulp-test-timeline-phase1-examples)
 add_test(NAME timeline-api-docs-check-selftest
     COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_SOURCE_DIR}/tools/scripts/timeline_api_docs_check.py --self-test)
+
+# Engine-side half of the reference-clock sync soak, owned by this subsystem.
+include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")

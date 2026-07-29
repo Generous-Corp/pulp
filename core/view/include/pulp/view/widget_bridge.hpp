@@ -44,6 +44,9 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
+class ValueChannelSet;
+class MeterSource;
+class VectorSource;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -89,6 +92,15 @@ public:
 
     // Read-back accessor for diagnostics + tests.
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
+
+    /// Attach the hosting processor's named value channels, enabling
+    /// `bindMeter(id, "value:<name>")`. Non-owning; the set must outlive this
+    /// bridge. Set post-construction for the same reason as the GPU surface:
+    /// the bridge is built before the adapter has resolved the processor.
+    void set_value_channels(ValueChannelSet* channels) noexcept {
+        value_channels_ = channels;
+    }
+    ValueChannelSet* value_channels() const noexcept { return value_channels_; }
 
     // True iff a GpuSurface is attached AND its adapter reports
     // `native_bridge=true` (i.e. JS navigator.gpu / canvas.getContext('webgpu')
@@ -464,11 +476,27 @@ private:
         using Target = BindingTarget;
         std::string widget_id;
         state::ParamID param_id = 0;   ///< source param (resolved once at bind time)
+        /// Non-null when bound to a `value:<name>` channel instead of a param;
+        /// owned by the processor's ValueChannelSet, resolved once at bind.
+        MeterSource* value_meter = nullptr;
+        VectorSource* value_vector = nullptr;   ///< as above, for a scope target
+        /// Staleness tracking. A channel that stops PUBLISHING decays to its
+        /// declared neutral; one that publishes the same number forever does
+        /// not. Comparing values cannot distinguish those, so watch the
+        /// publish sequence instead (see PublishCounter).
+        std::uint32_t last_publish_seq = 0;
+        std::chrono::steady_clock::time_point last_publish_at{};
+        float neutral = 0.0f;
         Target target = Target::value;
         BindingTransform transform;
+        /// `{fromParam: true}`, not yet derived. Derivation needs the widget
+        /// type and a script may bind before creating the view, so it happens
+        /// on first apply — then clears. See derive_binding_transform.
+        bool derive_from_param = false;
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
+    ValueChannelSet* value_channels_ = nullptr;  ///< non-owning; see set_value_channels
     std::vector<ParamSubscription> param_subscriptions_;
     std::uint32_t next_param_subscription_id_ = 1;  ///< monotonic; never reused
     // True while service_param_subscriptions() is dispatching into JS, so an
@@ -490,6 +518,8 @@ private:
     // Parse the optional JS transform object (`{db,dbMin,dbMax,scale,offset,
     // min,max,clamp}`) into a BindingTransform. Null / non-object → identity.
     static BindingTransform parse_transform(const choc::value::Value* v);
+    /// `{fromParam: true}` with no explicit db/dbMin/dbMax overriding it.
+    static bool transform_requests_derivation(const choc::value::Value* v);
     // Resolve a param NAME to its id via the store. Returns false when the
     // store has no param with that name (the binding is then not registered).
     bool resolve_param_id(const std::string& name, state::ParamID& out) const;
@@ -522,6 +552,13 @@ private:
     // Writes the widget only when the transformed value changed since the last
     // frame; returns true on a change so the caller schedules one repaint.
     bool apply_param_binding(ParamBinding& binding, View* w);
+    /// Fill a `{fromParam: true}` transform from the param's declared range.
+    void derive_binding_transform(ParamBinding& binding, View* w);
+    /// Push a whole block to a SpectrumView / WaveformView.
+    bool apply_scope_binding(ParamBinding& binding, View* w);
+    /// True when the channel has not published for kValueChannelStaleAfter.
+    /// Updates the binding's sequence/timestamp as a side effect.
+    static bool value_channel_is_stale(ParamBinding& binding, std::uint32_t seq);
 
 public:
     /// Binding attempts in call order, bound or not (binding_diagnostics.hpp).

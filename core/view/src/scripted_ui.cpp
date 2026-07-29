@@ -1,4 +1,5 @@
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
 #include <chrono>
 #include <fstream>
@@ -35,6 +36,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , asset_roots_(std::move(options.asset_roots))
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
+    , value_channels_(options.value_channels)
 {
 }
 
@@ -211,6 +213,9 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         auto next_engine = make_engine();
         auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
                                                           gpu_surface_);
+        // Re-attach on every reload: the bridge is rebuilt, the channel set is
+        // owned by the processor and outlives it.
+        next_bridge->set_value_channels(value_channels_);
         next_bridge->set_asset_roots(asset_roots_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);

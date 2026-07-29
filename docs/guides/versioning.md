@@ -373,7 +373,7 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.78.0 — the merge queue made it load-bearing
+### Why the pin sits at v0.80.2 — the merge queue made it load-bearing
 
 The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
 **Shipyard's post-tag hook could no longer push.**
@@ -389,8 +389,29 @@ plus a silently stale CHANGELOG.
 
 Shipyard v0.78.0 adds `push_mode` to that hook. With `push_mode = "pr"` the hook
 opens a pull request instead of pushing, so the changelog lands *through* the
-queue like everything else. That is the setting Pulp uses, and it is why the pin
-cannot stay below v0.78.0 while the merge queue is enabled.
+queue like everything else. That is the setting Pulp uses.
+
+**But v0.78.0 is not sufficient — the floor is v0.79.0**, and the gap between
+those two versions cost nine unmergeable PRs on 2026-07-28. v0.78.0 honours
+`push_mode` far enough to *open* the PR, so the pin looks correct and the branch
+appears — but the commit is still subject
+`docs: regenerate changelog for <tag> [skip ci]`. That marker is right for the
+direct-push path it was written for and **fatal on the PR path**: GitHub Actions
+skips every workflow, so the PR never obtains the required checks branch
+protection demands, so it can never merge. The next release opens another one.
+They accumulated from v0.751.0 to v0.759.0 and stalled the release pipeline,
+visible only as a run of `release: stuck — fix/feat merged without bump` issues
+that pointed nowhere near the changelog PRs. Shipyard split the two subjects in
+v0.79.0 (`release_bot_commit_subject`: the `pr` path omits the marker).
+
+This class of mistake — pins that agree with each other but sit below what a
+config key needs — is now mechanically caught. `tools/scripts/check_shipyard_pin.py`
+validates equality across `tools/shipyard.toml` and every workflow's
+`SHIPYARD_VERSION`, **and** a `FEATURE_FLOORS` table asserting that an enabled
+config key's minimum version is met. It runs from `tools/scripts/gates.sh`, so
+both drifts fail before push rather than at the next release. Record a new floor
+there when you start depending on a version-gated behaviour, instead of writing
+it in a comment that goes stale — which is exactly what happened here.
 
 Keep the three in step — the pin, the installed binary on every fleet Mac, and
 `push_mode` — because a host still on an older Shipyard silently ignores

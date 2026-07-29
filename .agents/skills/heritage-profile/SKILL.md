@@ -152,6 +152,49 @@ will be driven with. A fixture prepared at 512 and processed with 2048 is out
 of contract, and the bus path now refuses that segment rather than corrupting
 the heap.
 
+## A wall-clock budget under a sanitizer measures the sanitizer
+
+The heritage shipping gates assert CPU budgets — a RATIO of chain time to a
+baseline. Sanitizer instrumentation does not tax the two halves equally (it
+costs the chain's extra work more than the baseline's), so the ratio drifts on
+an instrumented build and runner load, not the code, decides the verdict. The
+same gate passed on one PR and failed on another within an hour.
+
+`#if defined(NDEBUG)` does **not** protect you here: sanitizer builds are
+`RelWithDebInfo`, so NDEBUG is defined and the budget runs instrumented anyway.
+
+The pattern (established in `timeline_tests.cmake`, now also in
+`sampler_runtime_tests.cmake`): detect the sanitizer in CMake and pass a
+compile definition the test can see.
+
+```cmake
+set(PULP_HERITAGE_GATES_SANITIZED OFF)
+if(PULP_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "(^|[ ;])-fsanitize")
+    set(PULP_HERITAGE_GATES_SANITIZED ON)
+endif()
+# then, on the target:
+#   $<$<BOOL:${PULP_HERITAGE_GATES_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>
+```
+
+```cpp
+#if defined(NDEBUG) && !defined(PULP_TEST_WITH_SANITIZER)
+    REQUIRE(measured_ratio <= budget);
+#else
+    SUCCEED("… enforced by the uninstrumented Release configuration");
+#endif
+```
+
+**Guard the timing half only, never the whole test.** Excluding the test from
+sanitizer lanes by name or label drops the entire binary, losing genuine
+memory/UB coverage of these paths. Everything exact — validity, capacity, and
+frame bounds — should still run under instrumentation.
+
+When you add or change a budget assertion, verify **both** directions by
+preprocessing with each build's real flags from `compile_commands.json`: the
+budget code must be present in a plain Release build and absent under the
+sanitizer. A guard that silently disabled the budget everywhere would look just
+as green as a correct one.
+
 ## Copy-paste prompt
 
 For a ready-to-send prompt that asks another agent to perform this workflow,
