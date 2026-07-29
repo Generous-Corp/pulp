@@ -81,10 +81,12 @@ artifact is needed. Never modify canonical project JSON text directly.
   Track until a context-owned tempo/rate projection can compare them safely.
 - `TimeConform` is clip-level document intent: `None` is the default and keeps
   legacy behavior, `Resample` requests pitch-coupled varispeed, and `Stretch`
-  requests tempo-preserving stretch. Clip schema v2 persists the required
-  lowercase spelling; v1 loads as `None`, and v2→v1 refuses either non-default
-  value. Playback does not consume the intent yet, so do not claim an audible
-  behavior change from the model/persistence stage.
+  requests tempo-preserving stretch. Non-default intent is valid only on a
+  musical `MediaRef`; absolute clips and every non-media content alternative
+  fail with `InvalidTimeConform`. Clip schema v2 persists the required lowercase
+  spelling; v1 loads as `None`, and v2→v1 refuses either non-default value.
+  Playback does not consume the intent yet, so do not claim an audible behavior
+  change from the model/persistence stage.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another

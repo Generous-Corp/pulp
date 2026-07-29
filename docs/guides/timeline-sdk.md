@@ -282,8 +282,10 @@ musical clip's duration and its source-media duration differ:
 - `TimeConform::Stretch` requests tempo-preserving time stretch.
 
 Pass the intent as the final argument to `Clip::create()` or
-`Clip::create_absolute()`, or derive a new immutable snapshot with
-`with_time_conform()`. Clip schema v2 persists the required values as `none`,
+derive a new immutable snapshot with `with_time_conform()`. `Resample` and
+`Stretch` are valid only for musical clips whose content is a `MediaRef`;
+absolute clips and non-media content reject non-default intent with
+`InvalidTimeConform`. Clip schema v2 persists the required values as `none`,
 `resample`, and `stretch`; v1 clips load as `None`, and release downgrade to v1
 refuses an authored non-default value rather than discarding it.
 
