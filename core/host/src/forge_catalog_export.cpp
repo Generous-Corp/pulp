@@ -69,6 +69,7 @@ const std::vector<std::string_view>& expected_node_keys() {
         "mod_slew",
         "mod_transient",
         "mod_env",
+        "multiband_compressor",
         "whammy",
         "harmony_engine",
         "stage_seq",
@@ -77,6 +78,7 @@ const std::vector<std::string_view>& expected_node_keys() {
         "quantize_scale",
         "gate_logic",
         "prob_gate",
+        "sidechain_compressor",
         "convolution_reverb",
         "nonlin_ambience",
         "speaker_cabinet",
@@ -85,6 +87,7 @@ const std::vector<std::string_view>& expected_node_keys() {
         "cyclic_stretch",
         "granular_live",
         "tape_machine",
+        "wavetable_oscillator",
     };
     return keys;
 }
@@ -444,6 +447,11 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(sequencing::prob_gate::descriptor(),
         {realization("default", sequencing::prob_gate::make_prob_gate_node())});
 
+    add(multiband::descriptor(),
+        {realization("default", multiband::make_multiband_compressor_node())});
+    add(sidechain::descriptor(),
+        {realization("default", sidechain::make_sidechain_compressor_node())});
+
     add(space::convolution::descriptor(),
         {realization("default", space::convolution::catalog_probe_node())});
     add(space::nonlin_ambience::descriptor(),
@@ -482,6 +490,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
             realization("cassette",
                         tape::make_tape_machine_node(tape::Archetype::cassette_deck)),
         });
+
+    add(wavetable::descriptor(),
+        {realization("default", wavetable::make_wavetable_oscillator_node())});
 
     return nodes;
 }

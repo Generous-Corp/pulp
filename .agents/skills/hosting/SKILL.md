@@ -2089,7 +2089,7 @@ Two rules that are easy to get wrong:
 directions, so a node that gains a control with no descriptor fails as loudly
 as a descriptor for a control that was removed — the two ways a catalog goes
 quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
-half: its independent 74-key semantic manifest must agree with the 16-pack
+half: its independent 77-key semantic manifest must agree with the 19-pack
 index, descriptor sources, expected-node inventory, and explicit export
 registrations. There is no `PENDING` escape hatch, so a newly indexed pack
 cannot land undescribed.

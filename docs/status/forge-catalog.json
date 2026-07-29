@@ -1530,6 +1530,40 @@
       ]
     },
     {
+      "key": "multiband_compressor",
+      "label": "Multiband Compressor",
+      "description": "A two-band compressor with independent low- and high-band dynamics.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "multiband.compressor", "settings": {}}],
+      "parameters": [
+        {"key": "crossover_hz", "label": "Crossover", "unit": "Hz", "kind": "continuous", "curve": "logarithmic", "description": "Frequency that divides the low and high compression bands.", "choices": [], "contracts": [{"realization_mode": "default", "min": 80, "max": 8000, "default": 800}], "realization_modes": []},
+        {"key": "low_threshold_db", "label": "Low Threshold", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Level above which the low band is compressed.", "choices": [], "contracts": [{"realization_mode": "default", "min": -60, "max": 0, "default": -18}], "realization_modes": []},
+        {"key": "low_ratio", "label": "Low Ratio", "unit": ":1", "kind": "continuous", "curve": "logarithmic", "description": "Gain-reduction ratio for the low band.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 20, "default": 4}], "realization_modes": []},
+        {"key": "high_threshold_db", "label": "High Threshold", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Level above which the high band is compressed.", "choices": [], "contracts": [{"realization_mode": "default", "min": -60, "max": 0, "default": -18}], "realization_modes": []},
+        {"key": "high_ratio", "label": "High Ratio", "unit": ":1", "kind": "continuous", "curve": "logarithmic", "description": "Gain-reduction ratio for the high band.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 20, "default": 4}], "realization_modes": []},
+        {"key": "attack_ms", "label": "Attack", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Time for compression to engage in both bands.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0.100000001, "max": 100, "default": 10}], "realization_modes": []},
+        {"key": "release_ms", "label": "Release", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Time for compression to recover in both bands.", "choices": [], "contracts": [{"realization_mode": "default", "min": 10, "max": 1000, "default": 150}], "realization_modes": []},
+        {"key": "low_makeup_db", "label": "Low Makeup", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Output gain applied after low-band compression.", "choices": [], "contracts": [{"realization_mode": "default", "min": -24, "max": 12, "default": 0}], "realization_modes": []},
+        {"key": "high_makeup_db", "label": "High Makeup", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Output gain applied after high-band compression.", "choices": [], "contracts": [{"realization_mode": "default", "min": -24, "max": 12, "default": 0}], "realization_modes": []}
+      ]
+    },
+    {
+      "key": "sidechain_compressor",
+      "label": "Sidechain Compressor",
+      "description": "A compressor whose gain reduction follows a separate external key signal.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "sidechain.compressor", "settings": {}}],
+      "parameters": [
+        {"key": "threshold_db", "label": "Threshold", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Key-signal level above which gain reduction begins.", "choices": [], "contracts": [{"realization_mode": "default", "min": -60, "max": 0, "default": -18}], "realization_modes": []},
+        {"key": "ratio", "label": "Ratio", "unit": ":1", "kind": "continuous", "curve": "logarithmic", "description": "Gain-reduction ratio above threshold.", "choices": [], "contracts": [{"realization_mode": "default", "min": 1, "max": 20, "default": 4}], "realization_modes": []},
+        {"key": "attack_ms", "label": "Attack", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Time for compression to engage.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0.100000001, "max": 100, "default": 10}], "realization_modes": []},
+        {"key": "release_ms", "label": "Release", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Time for compression to recover.", "choices": [], "contracts": [{"realization_mode": "default", "min": 10, "max": 1000, "default": 150}], "realization_modes": []},
+        {"key": "knee_db", "label": "Knee", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Width of the soft-knee transition.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 24, "default": 6}], "realization_modes": []},
+        {"key": "makeup_db", "label": "Makeup", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Output gain applied after compression.", "choices": [], "contracts": [{"realization_mode": "default", "min": -24, "max": 12, "default": 0}], "realization_modes": []},
+        {"key": "key_hpf_hz", "label": "Key HPF", "unit": "Hz", "kind": "continuous", "curve": "linear", "description": "High-pass cutoff that reduces low-frequency key sensitivity; zero disables it.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 2000, "default": 0}], "realization_modes": []}
+      ]
+    },
+    {
       "key": "convolution_reverb",
       "label": "Convolution Reverb",
       "description": "Applies a supplied impulse response with stereo wet-path shaping.",
@@ -1690,6 +1724,18 @@
         {"key": "print_through_db", "label": "Print Through", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Sets magnetic echo level.", "choices": [], "contracts": [{"realization_mode": "ampex", "min": -80, "max": -38, "default": -70}, {"realization_mode": "studer", "min": -80, "max": -38, "default": -77.5}, {"realization_mode": "cassette", "min": -80, "max": -38, "default": -65}], "realization_modes": []},
         {"key": "print_offset_ms", "label": "Print Offset", "unit": "ms", "kind": "continuous", "curve": "logarithmic", "description": "Sets magnetic echo delay.", "choices": [], "contracts": [{"realization_mode": "ampex", "min": 200, "max": 2000, "default": 700}, {"realization_mode": "studer", "min": 200, "max": 2000, "default": 700}, {"realization_mode": "cassette", "min": 200, "max": 2000, "default": 700}], "realization_modes": []},
         {"key": "mix", "label": "Mix", "unit": "%", "kind": "continuous", "curve": "linear", "description": "Blends dry and tape paths.", "choices": [], "contracts": [{"realization_mode": "ampex", "min": 0, "max": 1, "default": 1}, {"realization_mode": "studer", "min": 0, "max": 1, "default": 1}, {"realization_mode": "cassette", "min": 0, "max": 1, "default": 1}], "realization_modes": []}
+      ]
+    },
+    {
+      "key": "wavetable_oscillator",
+      "label": "Wavetable Oscillator",
+      "description": "An oscillator that morphs continuously across sine, saw, square, and triangle tables.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "wavetable.oscillator", "settings": {}}],
+      "parameters": [
+        {"key": "frequency_hz", "label": "Frequency", "unit": "Hz", "kind": "continuous", "curve": "logarithmic", "description": "Oscillator frequency.", "choices": [], "contracts": [{"realization_mode": "default", "min": 20, "max": 20000, "default": 220}], "realization_modes": []},
+        {"key": "position", "label": "Position", "unit": "%", "kind": "continuous", "curve": "linear", "description": "Morph position across the wavetable bank.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 1, "default": 0}], "realization_modes": []},
+        {"key": "level_db", "label": "Level", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Oscillator output level.", "choices": [], "contracts": [{"realization_mode": "default", "min": -60, "max": 0, "default": -12}], "realization_modes": []}
       ]
     }
   ]

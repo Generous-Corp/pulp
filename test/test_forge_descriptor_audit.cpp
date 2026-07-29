@@ -258,7 +258,7 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(findings.empty());
-    REQUIRE(nodes.size() == 74);
+    REQUIRE(nodes.size() == 77);
 
     for (const auto& node : nodes) {
         INFO("node " << node.descriptor.key);

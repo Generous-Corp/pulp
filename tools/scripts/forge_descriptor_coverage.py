@@ -67,6 +67,8 @@ CATALOG = (
       "lofi_width", "lofi_phaser")),
     ("forge_modulation_catalog.hpp", "forge_modulation_catalog.hpp",
      ("mod_lfo", "mod_lpg", "mod_slew", "mod_transient", "mod_env")),
+    ("forge_multiband_catalog.hpp", "forge_multiband_catalog.hpp",
+     ("multiband_compressor",)),
     ("forge_pitch_catalog.hpp", "forge_pitch_catalog.hpp",
      ("whammy", "harmony_engine")),
     ("forge_saturator_catalog.hpp", "forge_saturator_catalog.hpp",
@@ -74,11 +76,15 @@ CATALOG = (
     ("forge_sequencing_catalog.hpp", "forge_sequencing_catalog.hpp",
      ("stage_seq", "cartesian_walk", "rungler", "quantize_scale", "gate_logic",
       "prob_gate")),
+    ("forge_sidechain_catalog.hpp", "forge_sidechain_catalog.hpp",
+     ("sidechain_compressor",)),
     ("forge_space_catalog.hpp", "forge_space_catalog.hpp",
      ("convolution_reverb", "nonlin_ambience", "speaker_cabinet")),
     ("forge_synthesis_catalog.hpp", "forge_synthesis_catalog.hpp",
      ("additive_bank", "vocoder", "cyclic_stretch", "granular_live")),
     ("forge_tape_catalog.hpp", "forge_tape_catalog.hpp", ("tape_machine",)),
+    ("forge_wavetable_catalog.hpp", "forge_wavetable_catalog.hpp",
+     ("wavetable_oscillator",)),
 )
 
 INCLUDE_RE = re.compile(
