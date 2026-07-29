@@ -31,6 +31,11 @@
       "note": "WidgetBridge GPU registrar split hotspot; lowered after removing the write-only native-buffer stubs"
     },
     {
+      "path": "core/view/CMakeLists.txt",
+      "max_loc": 434,
+      "note": "View target/link/platform policy hub after JS prelude generation, JS engine configuration, and declarative source ownership moved to focused core/view/cmake modules"
+    },
+    {
       "path": "tools/local-ci/local_ci.py",
       "max_loc": 81,
       "note": "legacy local CI runner (superseded by Shipyard, #120); ratcheted down after the file was gutted to a thin stub"
@@ -142,8 +147,8 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 1962,
-      "note": "DesignIR C++ codegen contract hotspot; +12 for interactive-element param_key emit + host-param routing enable (parity with make_faithful_svg_frame); hit-policy + image-sizing lowering now shared from design_import_native_common; shared IR helpers in design_ir_helpers.hpp"
+      "max_loc": 113,
+      "note": "DesignIR C++ codegen facade after binding, support, style, and tree emission moved into focused companion translation units"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",

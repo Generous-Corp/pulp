@@ -3,16 +3,16 @@
 //
 // Pulp lowers DesignIR through FOUR codegen surfaces:
 //
-//   js     core/view/src/design_codegen.cpp            (web-compat DOM + native-bridge JS)
-//   cpp    core/view/src/design_cpp_codegen.cpp        (native C++ source codegen)
-//   swift  core/view/src/design_swift_codegen.cpp      (SwiftUI codegen)
+//   js     core/view/src/design_codegen.cpp              (web-compat DOM + native-bridge JS)
+//   cpp    core/view/src/design_cpp_*_codegen.cpp        (native C++ source codegen)
+//   swift  core/view/src/design_swift_codegen.cpp        (SwiftUI codegen)
 //   native core/view/src/design_import_native_common.cpp (live-native View materialization)
 //
 // A typed `IRStyle`/`IRLayout` field can be lowered in one surface and
 // silently skipped in the others (real examples: `h_constraint`/`v_constraint`
 // lower only in the JS lane; `text_runs` skips cpp+native).
 // This test makes that gap loud: every lowerable field must either be
-// referenced by ALL FOUR surface files, or carry an explicit allowlist entry
+// referenced by ALL FOUR surfaces, or carry an explicit allowlist entry
 // below naming exactly which surfaces skip it and why. Adding a new IR field
 // to one lane without lowering it in the other three — or allowlisting the
 // partial — is a test failure, not a silent divergence.
@@ -25,7 +25,7 @@
 // Mechanism: the field list is parsed at runtime from the single source of
 // truth (`design_ir.hpp`'s IRStyle/IRLayout members), so a new field is picked
 // up automatically. "Referenced" means a member access of the field appears in
-// the surface file (`.field` or `->field`, whole identifier). That is a
+// the surface's aggregate source (`.field` or `->field`, whole identifier). That is a
 // necessary-not-sufficient signal — a surface could read a field and lower it
 // badly — but it is exactly the signal that catches the silent-skip failure
 // mode this guard exists for.
@@ -34,9 +34,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -51,16 +53,23 @@ namespace {
 // ── The four codegen surfaces ───────────────────────────────────────────────
 
 struct Surface {
-    std::string key;   // short name used in allowlist entries + messages
-    std::string path;  // repo-relative source path
+    std::string key;                // short name used in allowlist entries + messages
+    std::vector<std::string> paths; // repo-relative source paths owned by the surface
 };
 
 const std::vector<Surface>& surfaces() {
     static const std::vector<Surface> s = {
-        {"js", "core/view/src/design_codegen.cpp"},
-        {"cpp", "core/view/src/design_cpp_codegen.cpp"},
-        {"swift", "core/view/src/design_swift_codegen.cpp"},
-        {"native", "core/view/src/design_import_native_common.cpp"},
+        {"js", {"core/view/src/design_codegen.cpp"}},
+        {"cpp",
+         {
+             "core/view/src/design_cpp_codegen.cpp",
+             "core/view/src/design_cpp_binding_codegen.cpp",
+             "core/view/src/design_cpp_codegen_support.cpp",
+             "core/view/src/design_cpp_style_codegen.cpp",
+             "core/view/src/design_cpp_tree_codegen.cpp",
+         }},
+        {"swift", {"core/view/src/design_swift_codegen.cpp"}},
+        {"native", {"core/view/src/design_import_native_common.cpp"}},
     };
     return s;
 }
@@ -235,6 +244,37 @@ std::string read_file(const std::string& path) {
     return ss.str();
 }
 
+std::string read_surface_source(const std::string& root, const Surface& surface) {
+    std::string aggregate;
+    for (const auto& path : surface.paths) {
+        std::ifstream probe(root + path, std::ios::binary);
+        INFO("surface " << surface.key << " source is not readable: " << path);
+        REQUIRE(probe.good());
+        probe.close();
+        aggregate += read_file(root + path);
+        aggregate += '\n';
+    }
+    return aggregate;
+}
+
+void require_cpp_surface_matches_cmake(const std::string& root) {
+    const auto cmake = read_file(root + "core/view/cmake/PulpViewSources.cmake");
+    const std::regex source_pattern(R"((src/design_cpp_[A-Za-z0-9_]+\.cpp))");
+    std::set<std::string> registered;
+    for (std::sregex_iterator it(cmake.begin(), cmake.end(), source_pattern), end; it != end; ++it)
+        registered.insert("core/view/" + (*it)[1].str());
+
+    const auto& all_surfaces = surfaces();
+    const auto cpp = std::find_if(all_surfaces.begin(), all_surfaces.end(),
+                                  [](const Surface& surface) { return surface.key == "cpp"; });
+    REQUIRE(cpp != all_surfaces.end());
+    const std::set<std::string> guarded(cpp->paths.begin(), cpp->paths.end());
+
+    INFO("The C++ parity surface must exactly match the exporter sources registered "
+         "in core/view/cmake/PulpViewSources.cmake");
+    REQUIRE(guarded == registered);
+}
+
 /// Strip // and /* */ comments so commented-out code never counts as a
 /// reference and doc comments never confuse the header parser.
 std::string strip_comments(const std::string& src) {
@@ -369,6 +409,7 @@ std::string join(const std::set<std::string>& s) {
 TEST_CASE("every lowerable IR field reaches all four codegen surfaces or is allowlisted",
           "[view][import][parity]") {
     const std::string root = std::string(PULP_SRC_DIR) + "/";
+    require_cpp_surface_matches_cmake(root);
 
     // Field list: single source of truth is design_ir.hpp.
     const std::string header =
@@ -400,12 +441,12 @@ TEST_CASE("every lowerable IR field reaches all four codegen surfaces or is allo
         REQUIRE(layout_count >= 25);
     }
 
-    // Load the four surfaces (comment-stripped so commented-out lowering
-    // doesn't count as parity).
+    // Load each surface's aggregate source (comment-stripped so commented-out
+    // lowering doesn't count as parity).
     std::map<std::string, std::string> surface_src;
     for (const auto& s : surfaces()) {
-        surface_src[s.key] = strip_comments(read_file(root + s.path));
-        INFO("surface " << s.key << " (" << s.path << ") looks implausibly small");
+        surface_src[s.key] = strip_comments(read_surface_source(root, s));
+        INFO("surface " << s.key << " aggregate looks implausibly small");
         REQUIRE(surface_src[s.key].size() > 4096);
     }
 
@@ -468,7 +509,12 @@ TEST_CASE("every lowerable IR field reaches all four codegen surfaces or is allo
            << failures.size() << "):\n";
     for (const auto& f : failures) report << "  * " << f << "\n";
     report << "Surfaces: ";
-    for (const auto& s : surfaces()) report << s.key << "=" << s.path << " ";
+    for (const auto& s : surfaces()) {
+        report << s.key << "=[";
+        for (std::size_t i = 0; i < s.paths.size(); ++i)
+            report << (i == 0 ? "" : ",") << s.paths[i];
+        report << "] ";
+    }
     INFO(report.str());
     REQUIRE(failures.empty());
 }
