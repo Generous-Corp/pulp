@@ -329,6 +329,12 @@ if(UNIX)
     add_test(NAME ensure-signing-ready
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_ensure_signing_ready.sh)
     set_tests_properties(ensure-signing-ready PROPERTIES TIMEOUT 60)
+    # contributor_check.sh gates outside contributions on a plain Mac, so its
+    # own logic is the thing that must not rot. Builds throwaway git repos; no
+    # network, no build, no dependency on this checkout's state.
+    add_test(NAME contributor-check
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
+    set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
     add_test(NAME pulp-installer-mcp-contract
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
     # The suite drives the installer once per scenario, so its wall time tracks
