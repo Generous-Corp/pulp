@@ -33,6 +33,14 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 
 These packages are npm-installed for design-import tooling and validation. They are not bundled into Pulp's C++ runtime.
 
+Faithful runnable-HTML import can also invoke a user-installed Google Chrome or
+Chromium browser and Node.js 22. Pulp does not download, bundle, link, or
+redistribute either program. The importer launches Chromium with a temporary
+isolated profile, serves only the authorized input folder over tokenized
+loopback HTTP, denies external requests by default, captures the evaluated
+design, and then exits. Generated plugins and applications do not require
+Chrome, Chromium, or Node.
+
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |

@@ -303,10 +303,16 @@ struct IRTextRun {
 // materialization. `faithful_svg` means: render this node's own SVG export
 // (svg_asset_id) pixel-faithfully via DesignFrameView, and overlay native
 // interaction from `interactive_elements` (source-side semantics — NOT guessed
-// from the SVG). Per-node so faithful-vector and sprite nodes coexist.
+// from the SVG). `faithful_capture` is the browser-evaluated HTML lane: render
+// the captured raster named by capture_asset_id while separately carrying the
+// browser's evidence-ranked semantic report. Keeping it distinct from a normal
+// image makes the fidelity/interaction boundary explicit and prevents a
+// screenshot-backed import from masquerading as a fully-native reconstruction.
+// Per-node so faithful-vector, browser-capture, and native nodes can coexist.
 enum class NodeRenderMode {
     normal,
     faithful_svg,
+    faithful_capture,
 };
 
 // The kind of an interactive overlay on a faithful_svg node. Deliberately
@@ -511,12 +517,17 @@ struct IRNode {
 
     // ── Faithful-vector import ───────────────────────────────────────────
     /// How this node materializes. `faithful_svg` renders `svg_asset_id` via
-    /// DesignFrameView and overlays `interactive_elements`; `normal` keeps the
-    /// existing widget/sprite path. Per-node so the two lanes coexist.
+    /// DesignFrameView and overlays `interactive_elements`; `faithful_capture`
+    /// renders `capture_asset_id` as browser-solved visual backing; `normal`
+    /// keeps the existing widget/sprite path. Per-node so the lanes coexist.
     NodeRenderMode render_mode = NodeRenderMode::normal;
     /// Asset id (into IRAssetManifest) of this node's SVG export, when
     /// render_mode == faithful_svg. The asset's mime is image/svg+xml.
     std::optional<std::string> svg_asset_id;
+    /// Asset id (into IRAssetManifest) of the browser screenshot backing when
+    /// render_mode == faithful_capture. Kept separate from svg_asset_id so
+    /// consumers never infer the payload type from a generic render-mode flag.
+    std::optional<std::string> capture_asset_id;
     /// Source-identified interactive overlays for a faithful_svg render.
     /// Empty for `normal` nodes.
     std::vector<IRInteractiveElement> interactive_elements;

@@ -2,11 +2,17 @@
 # Alert when CLI commands change so the plugin stays in sync.
 # Runs as a PostToolUse hook on Edit|Write operations.
 
-FILE=$(echo "$TOOL_INPUT" | python3 -c "
+PAYLOAD="${TOOL_INPUT:-}"
+if [ -z "$PAYLOAD" ] && [ ! -t 0 ]; then
+    PAYLOAD="$(cat 2>/dev/null || true)"
+fi
+
+FILE=$(printf '%s' "$PAYLOAD" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
-    print(data.get('file_path', ''))
+    tool_input = data.get('tool_input', data)
+    print(tool_input.get('file_path', '') if isinstance(tool_input, dict) else '')
 except:
     pass
 " 2>/dev/null)

@@ -11,6 +11,24 @@ integrated `pulp` CLI. Keep the import-design detector self-contained; this map
 covers the remaining importer CLI surface and the helpers that still live in
 `pulp_import_design.cpp`.
 
+Runnable-HTML classification and execution have now been extracted:
+`html_intake` owns shape diagnostics, `browser_import_session` owns downstream
+capture adoption and publication, `browser_import_cli` owns the
+capture/validation/evidence transaction, `browser_html_import` owns Chromium
+orchestration policy, `browser_capture_backend` owns
+discovery/process/security, and `browser_capture_ir` owns
+protocol-to-DesignIR lowering. Keep those boundaries intact; the static parser
+is an explicit fallback, not another automatic decision branch.
+
+CLI help output is also extracted: `import_design_cli_help.{hpp,cpp}` owns the
+byte-stable usage text, while `pulp_import_design.cpp` only decides when to
+print it.
+
+`import_preparation_policy.hpp` owns the typed source-parsed versus
+browser-captured pass selection. Keep that policy out of the CLI facade; adding
+another intake authority should extend this boundary instead of scattering
+new boolean checks through `main()`.
+
 ## Current Source Regions
 
 | Region | Current lines | Ownership |
@@ -21,7 +39,7 @@ covers the remaining importer CLI surface and the helpers that still live in
 | Scoped temp dirs, URL/file input validation, curl fetch | `pulp_import_design.cpp:476` | Input I/O module. |
 | Diagnostic formatting, argument parsers, asset options | `pulp_import_design.cpp:614` | Diagnostics plus option helpers. |
 | C++/Swift output paths and token format dispatch | `pulp_import_design.cpp:768` | Output-path and token-export modules. |
-| Usage text | `pulp_import_design.cpp:858` | CLI facade. |
+| Usage text | `import_design_cli_help.cpp:7` | Extracted CLI help module. |
 | File read helper | `pulp_import_design.cpp:965` | Input I/O module. |
 | `.pulp.zip` sidecar lifecycle | `pulp_import_design.cpp:996` | ZIP sidecar/transaction module. |
 | Atomic text-file staging and rollback | `pulp_import_design.cpp:1269` | Atomic output module. |
@@ -56,6 +74,10 @@ data structs over pulling the entire CLI state into every module.
 | `import_design_output_paths` | JS/C++/Swift sidecar path resolution and no-clobber policy. | Parser or codegen logic. |
 | `import_design_tokens` | `--export-tokens`, token format validation, token-file writes. | UI scaffold generation. |
 | `import_design_detect_cli` | `--detect-only` / `--report-new-format` CLI wrapper and output. | Detection algorithms already in `import_detect`. |
+| `import_design_cli_help` | Byte-stable usage/help output. | Argument parsing, validation, or dispatch. |
+| `browser_import_session` | Browser-capture adoption, preparation policy, generated-output staging, and final publication. | Browser capture/validation mechanics or generated-output writes. |
+| `browser_import_cli` | Browser capture CLI diagnostics, settled canvas/reference propagation, portable-asset localization, DesignIR validation, and deferred evidence commit. | Browser discovery/subprocess implementation, parser dispatch, or generated output writes. |
+| `browser_html_import` | Runnable-HTML classification, capture orchestration, and lowering result. | CLI printing, generated output writes, browser subprocess implementation. |
 | `import_design_parse` | Source parser dispatch and parser-result normalization. | Source detection internals or code emit. |
 | `import_design_asset_enrichment` | Font/asset resolution, PNG metadata, sprite knobs, fader/meter skins, portable asset paths. | CLI argv parsing. |
 | `import_design_emit_baked` | IR JSON, C++, and SwiftUI output flows. | JS emit sidecars. |
@@ -63,7 +85,7 @@ data structs over pulling the entire CLI state into every module.
 | `import_design_claude_outputs` | Bridge scaffold, classnames/defaults sidecars, native-react hint. | Parser runtime. |
 | `import_design_validate` | Generated-JS validation render, reference diff, screenshot backend plumbing. | Faithful SVG proofing. |
 | `import_design_debug_report` | Debug JSON report assembly and write. | Parser or emit side effects. |
-| `pulp_import_design.cpp` | `main()`, usage text, high-level orchestration, final exit code policy. | Helper implementations once extracted. |
+| `pulp_import_design.cpp` | `main()`, high-level orchestration, help dispatch, final exit code policy. | Help text or helper implementations once extracted. |
 
 When adding new `.cpp` files, update `tools/import-design/CMakeLists.txt` for
 the `pulp-import-design` target. Add includes or target sources for tests only

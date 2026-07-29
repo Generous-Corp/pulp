@@ -188,9 +188,16 @@ reproduces the design; the others below do NOT and waste hours:
 - ❌ **Do NOT hand-write a C++ `paint()`** to mimic the design. It is never 1:1
   (SVG icons, gradients, shadows, pills) and is pure slop. The framework exists
   to render the design, not to re-draw it by hand.
-- ❌ **Do NOT use `--from claude` for layout.** On a standalone/bundled HTML it
-  falls back to regex *text* extraction ("0 widgets, N labels", ~58% and it even
-  scrapes CSS comments) — no CSS layout, no geometry.
+- For runnable HTML, including Claude project exports, `.dc.html` components,
+  standalone bundles, and ordinary HTML, use `pulp import-design --file
+  <path>`. The CLI auto-detects the shape and evaluates it with isolated
+  Chromium; do not choose a parser by filename or add `--execute-bundle`.
+  `--from claude` remains accepted but is no longer needed for HTML.
+  The result is a pixel-exact static default frame. Semantic evidence is
+  diagnostic; live browser interactions require a runtime bridge. Captured CSS
+  variables describe only the active light / no-preference computed mode, and
+  only values visible on `documentElement` or `body` are promoted as global
+  tokens; component-scoped values remain capture evidence.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
@@ -3215,9 +3222,26 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 
 **Claude Design (manual HTML export)**:
 - Anthropic Labs has no MCP / public API. The user runs Claude Design, exports the canvas as Standalone HTML (or "Send to Local Coding Agent"), and hands you the resulting file.
-- Run `pulp import-design --from claude --file <path>` — the parser delegates to the Stitch HTML pipeline and tags the IR as Claude. **This is the static path** — it sees only the loader-shell HTML wrapping the bundled React app (~9 elements: title, bundler placeholders, inline styles, the `<script>` blob).
-- Add `--execute-bundle` to invoke the **native-runtime path**: Pulp parses the JSON envelope, decodes the gzip+base64 asset map, evaluates the React + React-DOM + app payloads in a headless `ScriptEngine`, then walks the materialized DOM into the `DesignIR`. Falls back to the static path on any harness failure (engine error, walker output below the 9-node loader-shell floor, JS payload too large). Use this when the user's Claude export is a real bundled-React app and they need the actual editor tree, not just the shell.
-- The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (override path with `--bridge-output`, skip with `--no-bridge-scaffold`). The scaffold demonstrates registering `pulp::view::EditorBridge` handlers and attaching to a `WebViewPanel` (or future `JsRuntime`).
+- Run `pulp import-design --file <path>`. No `--from`, `--execute-bundle`, or
+  export-shape incantation is needed. Pulp distinguishes project bundles,
+  design components, standalone bundles, and generic HTML for diagnostics, but
+  all runnable HTML uses the same authoritative Chromium evaluator.
+- Chromium captures the settled visual at DPR 2, CSS custom-property tokens,
+  semantic candidates, and provenance. The portable DesignIR uses the captured
+  visual as a `faithful_capture` backing and Pulp immediately renders it through
+  Skia for browser-vs-DesignIR A/B validation. Authored controls and knob art
+  remain pixels; never replace them with Pulp's silver/vector fallback.
+- External browser requests are denied by default. If the export depends on a
+  CDN runtime and the health gate reports `capture-source-unresolved`, review
+  the listed URLs and retry with `--allow-browser-network`. Local relative
+  assets are served from the input folder without this opt-in.
+- If Chrome/Chromium is missing, install it from the URL printed by the CLI or
+  pass `--browser <path>`. `--offline` explicitly selects the legacy partial
+  static/QuickJS fallback. Chrome and Node are import-time tools only; generated
+  plugins do not embed or require either one.
+- The semantic report is evidence, not permission to promote visual controls.
+  Only explicit source contracts such as `data-pulp-role` may become native
+  interaction overlays in a later stage.
 
 **Inline `<script>` evaluation in `--execute-bundle`**: The harness evaluates inline `<script type="text/javascript">` (and untyped `<script>`) blocks AFTER the src-loaded payloads, then compiles + evaluates inline `<script type="text/babel">` (and `text/jsx`) blocks via the bundle's own Babel-standalone (looked up as `globalThis.Babel.transform`). After both, the harness dispatches a `readystatechange` → `DOMContentLoaded` → `readystatechange(complete)` → `window.load` sequence and pumps four message-loop / frame-callback cycles for async settling. This is what makes a real Spectr-style Claude bundle (where the actual React app lives in inline `text/babel` blocks, not src-loaded payloads) materialize beyond the 9-element shell. Per-script soft-fail matches the existing src-loaded payload pattern. Inline `application/json` (and other `*/json`) blocks are intentionally skipped — they're config blobs, not executable code.
 
@@ -4007,8 +4031,9 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
-pulp import-design --from claude --file design.html   # writes ui.js + tokens.json + classnames.json + bridge_handlers.cpp (static parser — loader-shell only)
-pulp import-design --from claude --file design.html --execute-bundle   # runs the bundled React app in QuickJS, walks the materialized DOM (#468)
+pulp import-design --file design.html                 # auto-detects HTML shape, Chromium → DesignIR → Skia A/B
+pulp import-design --file design.html --allow-browser-network  # reviewed opt-in for CDN-dependent exports
+pulp import-design --file design.html --offline       # explicit lower-fidelity fallback
 
 # With validation
 pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png

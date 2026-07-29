@@ -499,5 +499,7 @@ tools:
 # Entry points under the swept directories that are deliberately NOT registry
 # tools. Every exclusion needs a reason — "it's noise" is not one.
 exclude:
+  - path: tools/import-design/browser_capture/capture.mjs
+    reason: Internal browser-capture runtime launched only by pulp-import-design, not a standalone tool an agent should invoke.
   - path: tools/import-design/fig/testdata/make_synthetic_fig.mjs
     reason: Test-fixture generator for the fig decoder's own unit tests, not a tool an agent reaches for.

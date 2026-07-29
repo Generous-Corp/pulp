@@ -17,6 +17,9 @@
 #include "fig_lane.hpp"
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
+#include "browser_import_session.hpp"
+#include "browser_capture_limits.hpp"
+#include "import_design_cli_help.hpp"
 #include "render_artifact_path.hpp"
 #include "sprite_skins.hpp"
 #include <miniz.h>
@@ -735,166 +738,6 @@ SwiftOutputPaths resolve_swift_output_paths(const std::string& output_file) {
 }
 
 } // namespace
-
-static void print_usage() {
-    std::cout << "pulp import-design — Import designs from external tools into Pulp\n\n";
-    std::cout << "Usage:\n";
-    std::cout << "  pulp import-design --from <source> [options]\n\n";
-    std::cout << "Sources:\n";
-    std::cout << "  figma, figma-plugin  Figma JSON/normalized IR, or Pulp plugin envelope\n";
-    std::cout << "  fig      Local Figma .fig save file, decoded offline (no account/network)\n";
-    std::cout << "  stitch   Google Stitch screen HTML or normalized IR file\n";
-    std::cout << "  v0       v0.dev TSX/Tailwind output\n";
-    std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
-    std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
-    std::cout << "  designmd Google DESIGN.md design-system spec (tokens only)\n";
-    std::cout << "  jsx      Precompiled React JSX runtime bundle for live pass-through or baked snapshots\n\n";
-    std::cout << "Options:\n";
-    std::cout << "  --from <source>   Design source (required)\n";
-    std::cout << "  --file <path>     Input file path. Repeatable with --from figma-plugin:\n";
-    std::cout << "                    one already-exported envelope per state captures a\n";
-    std::cout << "                    multi-state design into one view. Order sets the frame\n";
-    std::cout << "                    index a \"swap <n>\" button targets (the first --file is\n";
-    std::cout << "                    frame 0).\n";
-    std::cout << "  --url <url>       URL that serves design JSON/HTML directly (e.g. a v0 share\n";
-    std::cout << "                    link). Fetched unauthenticated; a figma.com file URL does\n";
-    std::cout << "                    NOT work — see 'Importing from Figma' below.\n";
-    std::cout << "  --frame <name>    Frame/artboard to import (Figma; guid or name for --from fig).\n";
-    std::cout << "                    Repeatable: give it once per state to capture a multi-state\n";
-    std::cout << "                    design into one view. Order sets the frame index a \"swap <n>\"\n";
-    std::cout << "                    button targets (the first --frame is frame 0).\n";
-    std::cout << "  --page <name>     Restrict frame lookup to one page (--from fig)\n";
-    std::cout << "  --outline         List pages/frames of a .fig file and exit (--from fig)\n";
-    std::cout << "  --json            With --outline, emit the inventory as JSON\n";
-    std::cout << "  --screen <name>   Screen to import (Stitch)\n";
-    std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
-    std::cout << "  --emit {js|ir-json|cpp|swiftui}\n";
-    std::cout << "                    Primary artifact kind (built-in default: js). cpp and\n";
-    std::cout << "                    swiftui are baked-only; swiftui emits native SwiftUI\n";
-    std::cout << "                    (a View + PulpTheme.swift + binding manifest)\n";
-    std::cout << "  --mode {live|baked}\n";
-    std::cout << "                    Runtime model (built-in default: live; baked emits IR or C++ artifacts)\n";
-    std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
-    std::cout << "                    JSX baked snapshot policy (default: fail)\n";
-    std::cout << "  --allow-network-fetch\n";
-    std::cout << "                    Allow DesignIR asset-manifest HTTP fetches at import time\n";
-    std::cout << "  --asset-cache <path>\n";
-    std::cout << "                    Asset cache directory (default: PULP_IMPORT_ASSET_CACHE or user cache)\n";
-    std::cout << "  --asset-timeout-ms <ms>\n";
-    std::cout << "                    Per-request asset fetch timeout (default: 30000)\n";
-    std::cout << "  --asset-hash <uri=sha256>\n";
-    std::cout << "                    Expected asset content hash; may be repeated\n";
-    std::cout << "  --tokens <path>   Output token file (default: tokens.json; theme.css for css-variables)\n";
-    std::cout << "  --emit-w3c-tokens <path>\n";
-    std::cout << "                    Additionally write the imported tokens as a W3C Design\n";
-    std::cout << "                    Tokens (DTCG) document (\"-\" = stdout). Nested groups from\n";
-    std::cout << "                    \"/\" in token names; source provenance under $extensions.\n";
-    std::cout << "                    Additive — no other output changes.\n";
-    std::cout << "  --format {w3c|css-variables|tailwind|json-tailwind|css-tailwind}\n";
-    std::cout << "                    Token export format (default: w3c). css-variables emits CSS\n";
-    std::cout << "                    custom properties (.dark modes → @media prefers-color-scheme);\n";
-    std::cout << "                    tailwind variants currently require --from designmd\n";
-    std::cout << "  --dry-run         Show generated code without writing files\n";
-    std::cout << "  --no-tokens       Skip token extraction\n";
-    std::cout << "  --no-comments     Omit comments from generated code\n";
-    std::cout << "  --web-compat      Use DOM API instead of native Pulp API\n";
-    std::cout << "  --validate        Render generated JS and validate layout\n";
-    std::cout << "  --screenshot-backend {skia|coregraphics}\n";
-    std::cout << "                    Render backend for --validate (default: skia). Only the\n";
-    std::cout << "                    Skia backend composites file-backed images; coregraphics\n";
-    std::cout << "                    draws an image's filename placeholder (not faithful).\n";
-    std::cout << "  --knob-style {silver|sprite|auto|standard|default}\n";
-    std::cout << "  --fader-style {skin|skinned|default|plain}\n";
-    std::cout << "  --meter-style {skin|skinned|default|plain}\n";
-    std::cout << "  --strict-fidelity Fail (exit 4) if the import-time fidelity self-check\n";
-    std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
-    std::cout << "  --fidelity-report <file>  Write the run's fidelity findings as a JSON ledger\n";
-    std::cout << "                    (named taxonomy + per-kind counts) — a diffable contract\n";
-    std::cout << "  --dump-layout <file>  Write the laid-out view tree as JSON (implies\n";
-    std::cout << "                    --validate): per view its anchor, source node id, and\n";
-    std::cout << "                    absolute bounds in design px. Feed it to\n";
-    std::cout << "                    tools/import-design/layout_parity.py alongside the\n";
-    std::cout << "                    source's own solved rects (--from fig writes those to\n";
-    std::cout << "                    geometry.json) to diff placement per node.\n";
-    std::cout << "  --reference <png> Compare render against a reference screenshot\n";
-    std::cout << "  --diff <png>      Save visual diff image\n";
-    std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
-    std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
-    std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
-    std::cout << "  --fail-below <pct>      Exit nonzero (5) when --reference similarity is below\n";
-    std::cout << "                    <pct>, given as a percentage 0-100 (e.g. 85, not 0.85).\n";
-    std::cout << "                    Without this flag the similarity is advisory and the exit\n";
-    std::cout << "                    code is unchanged, at any similarity.\n";
-    std::cout << "  --recognition-manifest <path>\n";
-    std::cout << "                    User recognition manifest (flat library-manifest shape) mapping\n";
-    std::cout << "                    your OWN Figma component-set keys / name prefixes to Pulp control\n";
-    std::cout << "                    kinds; merged OVER the built-in Pulp Figma Library so the importer\n";
-    std::cout << "                    wires controls on third-party designs. figma / figma-plugin only.\n";
-    std::cout << "  --param-binding-manifest <path>\n";
-    std::cout << "                    JSON object mapping a Figma node id to a host-param key\n";
-    std::cout << "                    (e.g. {\"10:42\": \"filter.cutoff\"}). Binds DESCRIPTIVELY-named\n";
-    std::cout << "                    geometry controls (a knob layer named \"Cutoff\", not a\n";
-    std::cout << "                    param: sigil) by their stamped source_node_id. A layer-name\n";
-    std::cout << "                    sigil still wins; the manifest never overwrites one.\n";
-    std::cout << "  --render-size WxH Render dimensions (default: the design's canvas size)\n";
-    std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
-    std::cout << "                          only emitted for --from claude)\n";
-    std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
-    std::cout << "  --classnames <path>     Output classname → style map (default: classnames.json,\n";
-    std::cout << "                          only emitted for Claude static classname extraction)\n";
-    std::cout << "  --emit classnames       Legacy sidecar: force-emit classnames.json (claude)\n";
-    std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
-    std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
-    std::cout << "  --no-import-shortcuts   Skip keyboard shortcut auto-import (default: import)\n";
-    std::cout << "  --no-default-shortcuts  Skip platform-convention defaults (Settings=Cmd+,, etc.) (default: enabled)\n";
-    std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
-    std::cout << "                    walk the materialized DOM (--from claude only).\n";
-    std::cout << "                    Falls back to the static parser on any harness failure.\n";
-    std::cout << "  --export-tokens   Export a Pulp theme (from --file theme JSON, or the built-in\n";
-    std::cout << "                    dark theme when no input) in the --format token format.\n";
-    std::cout << "  --detect-only     Detect (source, format-version, parser-version) for\n";
-    std::cout << "                    --file or --directory <path> against compat.json without\n";
-    std::cout << "                    parsing. Prints match counts and confidence.\n";
-    std::cout << "  --directory <p>   Path to a directory export (alternative to --file).\n";
-    std::cout << "  --compat <path>   compat.json override (default: discover from cwd / repo root).\n";
-    std::cout << "  --report-new-format\n";
-    std::cout << "                    Emit a fingerprint-diff JSON suitable for hand-editing\n";
-    std::cout << "                    into a new compat.json[imports/<source>/detected-formats]\n";
-    std::cout << "                    entry. Implies --detect-only.\n";
-    std::cout << "  --help            Show this help\n\n";
-    std::cout << "Preferences:\n";
-    std::cout << "  Built-in default is --mode live --emit js (live runtime import).\n";
-    std::cout << "  Persistent defaults: pulp config set import_design.default_mode live|baked\n";
-    std::cout << "                       pulp config set import_design.default_emit js|ir-json|cpp\n";
-    std::cout << "  Environment overrides: PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT\n";
-    std::cout << "  Each CLI flag overrides its matching preference. If only default_mode=baked is set, default_emit\n";
-    std::cout << "  becomes ir-json unless explicitly configured.\n\n";
-    std::cout << "Importing from Figma:\n";
-    std::cout << "  There is no authenticated Figma fetch in this CLI, so a figma.com file URL\n";
-    std::cout << "  cannot be imported with --url. Use one of these lanes instead (local first):\n";
-    std::cout << "    1. Figma desktop MCP — get_design_context/get_metadata for inspection.\n";
-    std::cout << "    2. 'Design for Pulp' Figma desktop plugin — exports a .pulp.zip envelope;\n";
-    std::cout << "       import it with --from figma-plugin --file <export>.pulp.zip\n";
-    std::cout << "    3. --from fig --file design.fig — decodes a local .fig save file offline.\n";
-    std::cout << "    4. tools/import-design/figma_rest_export.py --token <pat> — headless/CI\n";
-    std::cout << "       fallback; hits the Figma REST API and emits the same envelope.\n\n";
-    std::cout << "Examples:\n";
-    std::cout << "  pulp import-design --from figma --file design.json\n";
-    std::cout << "  pulp import-design --from figma-plugin --file design.pulp.zip --frame 'Plugin UI'\n";
-    std::cout << "  pulp import-design --from stitch --file screen.html --screen 'Main'\n";
-    std::cout << "  pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output my-ui.js\n";
-    std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
-    std::cout << "  pulp import-design --from pencil --file design.json --validate --reference source.png\n";
-    std::cout << "  pulp import-design --from claude --file design.html\n";
-    std::cout << "  pulp import-design --from fig --file design.fig --outline\n";
-    std::cout << "  pulp import-design --from fig --file design.fig --frame 'Main' --output ui.js\n";
-    std::cout << "  pulp import-design --from figma-plugin --file typing.pulp.json --file piano.pulp.json --emit cpp --output kbd.cpp\n";
-    std::cout << "  pulp import-design --from figma --file design.json --format css-variables --tokens theme.css\n";
-    std::cout << "  pulp import-design --export-tokens --format css-variables   # built-in dark theme → theme.css\n";
-    std::cout << "  pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js\n";
-    std::cout << "  pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp\n";
-    std::cout << "  pulp import-design --from figma --file design.json --mode baked --emit swiftui --output ImportedPulpView.swift\n";
-}
 
 // ── Layout dump (--dump-layout) ─────────────────────────────────────────────
 //
@@ -1733,6 +1576,9 @@ struct CliOptions {
     bool runtime_mode_explicit = false;
     SnapshotSemantics snapshot_semantics = SnapshotSemantics::fail;
     bool allow_network_fetch = false;
+    bool allow_browser_network = false;
+    std::string browser_path;
+    bool offline = false;
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
     std::unordered_map<std::string, std::string> expected_asset_hashes;
@@ -1852,15 +1698,39 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
                 return 2;
             }
             opt.fail_below_pct = pct;
-        } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
-            // Parse WxH
-            std::string sz = argv[++i];
-            auto x = sz.find('x');
-            if (x != std::string::npos) {
-                opt.render_width = std::stoi(sz.substr(0, x));
-                opt.render_height = std::stoi(sz.substr(x + 1));
-                opt.render_size_explicit = true;
+        } else if (std::strcmp(argv[i], "--render-size") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --render-size requires WIDTHxHEIGHT\n";
+                return 2;
             }
+            const std::string size = argv[++i];
+            const auto separator = size.find('x');
+            std::size_t width_chars = 0;
+            std::size_t height_chars = 0;
+            try {
+                if (separator == std::string::npos) throw std::invalid_argument("separator");
+                opt.render_width =
+                    std::stoi(size.substr(0, separator), &width_chars);
+                opt.render_height =
+                    std::stoi(size.substr(separator + 1), &height_chars);
+            } catch (const std::exception&) {
+                width_chars = 0;
+                height_chars = 0;
+            }
+            if (separator == std::string::npos ||
+                width_chars != separator ||
+                height_chars != size.size() - separator - 1 ||
+                !pulp::import_design::browser_capture::
+                    viewport_within_capture_limits(
+                        opt.render_width, opt.render_height,
+                        pulp::import_design::browser_capture::
+                            kDefaultDeviceScaleFactor)) {
+                std::cerr
+                    << "Error: --render-size must be WIDTHxHEIGHT within "
+                       "8192px per axis and 64 megapixels at DPR 2\n";
+                return 2;
+            }
+            opt.render_size_explicit = true;
         } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
             std::string b = argv[++i];
             if (b == "skia") {
@@ -1967,6 +1837,16 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             }
         } else if (std::strcmp(argv[i], "--allow-network-fetch") == 0) {
             opt.allow_network_fetch = true;
+        } else if (std::strcmp(argv[i], "--allow-browser-network") == 0) {
+            opt.allow_browser_network = true;
+        } else if (std::strcmp(argv[i], "--browser") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --browser requires an executable path\n";
+                return 2;
+            }
+            opt.browser_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--offline") == 0) {
+            opt.offline = true;
         } else if (std::strcmp(argv[i], "--asset-cache") == 0 && i + 1 < argc) {
             opt.asset_cache_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--asset-timeout-ms") == 0) {
@@ -2002,17 +1882,9 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
         } else if (std::strcmp(argv[i], "--compat") == 0 && i + 1 < argc) {
             opt.compat_override = argv[++i];
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            print_usage();
+            pulp::import_design::print_usage();
             return 0;
         }
-    }
-
-    // --fail-below gates the --reference similarity, so without a reference it
-    // could never fire. Rejecting that up front keeps a CI gate from reading as
-    // enforced while silently passing everything.
-    if (opt.fail_below_pct >= 0.0f && opt.reference_image.empty()) {
-        std::cerr << "Error: --fail-below requires --reference <png> (nothing to compare against)\n";
-        return 2;
     }
 
     return std::nullopt;
@@ -2139,11 +2011,22 @@ int main(int argc, char* argv[]) {
     auto& runtime_mode_explicit = cli.runtime_mode_explicit;
     auto& snapshot_semantics = cli.snapshot_semantics;
     auto& allow_network_fetch = cli.allow_network_fetch;
+    auto& allow_browser_network = cli.allow_browser_network;
+    auto& browser_path = cli.browser_path;
+    auto& offline = cli.offline;
     auto& asset_timeout_ms = cli.asset_timeout_ms;
     auto& asset_cache_dir = cli.asset_cache_dir;
     auto& expected_asset_hashes = cli.expected_asset_hashes;
     auto& recognition_manifest_path = cli.recognition_manifest_path;
     auto& param_binding_manifest_path = cli.param_binding_manifest_path;
+
+    // Validate comparison-only flags before source detection or browser
+    // discovery. A missing optional runtime must not mask a malformed command,
+    // and --fail-below has no meaningful result without a reference image.
+    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+        std::cerr << "Error: --fail-below requires --reference\n";
+        return 2;
+    }
 
     DefaultSelection default_selection;
     if (!export_tokens_mode && !detect_only) {
@@ -2258,6 +2141,16 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error: path does not exist: " << scan_path << "\n";
             return 1;
         }
+        if (!report_new_format && fs::is_regular_file(scan_path)) {
+            const auto explicit_browser = browser_path.empty()
+                ? std::optional<fs::path>{}
+                : std::optional<fs::path>{browser_path};
+            if (auto browser_exit =
+                    pulp::import_design::run_browser_detect_cli(
+                        scan_path, explicit_browser)) {
+                return *browser_exit;
+            }
+        }
 
         // Resolve compat.json — explicit override > walk parents > cwd.
         fs::path compat_path;
@@ -2328,9 +2221,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    pulp::import_design::infer_browser_html_source_cli(
+        input_file, source_str);
     if (source_str.empty()) {
-        std::cerr << "Error: --from <source> is required\n";
-        print_usage();
+        std::cerr << "Error: could not infer the design source; pass --from <source>\n";
+        pulp::import_design::print_usage();
         return 1;
     }
 
@@ -2536,6 +2431,73 @@ int main(int argc, char* argv[]) {
     if (content.empty()) return 1;
     stage_timings.content_ready = StageTimings::Clock::now();
 
+    fs::path browser_primary_output = output_file;
+    std::vector<fs::path> browser_reserved_outputs{output_file};
+    if (artifact_emit == ArtifactEmit::cpp) {
+        const auto paths = resolve_cpp_output_paths(output_file);
+        browser_primary_output = paths.source;
+        browser_reserved_outputs.push_back(paths.header);
+        browser_reserved_outputs.push_back(paths.source);
+        browser_reserved_outputs.push_back(paths.binding_manifest);
+    } else if (artifact_emit == ArtifactEmit::js) {
+        browser_reserved_outputs.emplace_back(output_file + ".meta.json");
+    }
+    if (include_tokens) browser_reserved_outputs.emplace_back(tokens_file);
+    for (const auto* path : {
+             &w3c_tokens_output, &import_report_path,
+             &fidelity_report_path, &debug_output}) {
+        if (!path->empty() && *path != "-")
+            browser_reserved_outputs.emplace_back(*path);
+    }
+
+    auto browser_import =
+        pulp::import_design::run_browser_import_session(
+        {.input_file = input_file,
+         // Use the actual emitted artifact as the portability anchor. For
+         // directory/extensionless C++ output, this is
+         // <requested>/imported_ui.cpp rather than the raw CLI token.
+         .output_file = std::move(browser_primary_output),
+         .importer_executable = argv[0],
+         .browser_executable =
+             browser_path.empty()
+                 ? std::optional<fs::path>{}
+                 : std::optional<fs::path>{browser_path},
+         .source = *source,
+         .initial_width = render_size_explicit ? render_width : 1280,
+         .initial_height = render_size_explicit ? render_height : 800,
+         .reference_image = reference_image,
+         .diff_output = diff_output,
+         .reserved_output_paths = std::move(browser_reserved_outputs),
+         .fail_below_percent = fail_below_pct,
+         .screenshot_backend = screenshot_backend,
+         .offline = offline,
+         .allow_browser_network = allow_browser_network,
+         .dry_run = dry_run,
+         .supports_faithful_capture =
+             artifact_emit != ArtifactEmit::swiftui,
+         .validate = validate},
+        content);
+    if (const auto* failure =
+            std::get_if<pulp::import_design::BrowserImportFailure>(
+                &browser_import)) {
+        return failure->exit_code;
+    }
+    auto browser_import_session =
+        std::get<pulp::import_design::BrowserImportSession>(
+            std::move(browser_import));
+    const auto import_preparation =
+        browser_import_session.preparation_policy();
+    std::optional<DesignIR> browser_capture_ir;
+    if (auto capture =
+            browser_import_session.take_capture_adoption()) {
+        render_width = capture->render_width;
+        render_height = capture->render_height;
+        reference_image = std::move(capture->reference_image);
+        validate = false;
+        similarity_failed = capture->similarity_failed;
+        browser_capture_ir = std::move(capture->design_ir);
+    }
+
     if (*source == DesignSource::jsx
         && runtime_mode == RuntimeMode::live
         && artifact_emit == ArtifactEmit::js) {
@@ -2559,7 +2521,9 @@ int main(int argc, char* argv[]) {
     bool parsed_serialized_design_ir = false;
     std::string runtime_error;  // captures --execute-bundle fallback reason
     try {
-        if (runtime_mode == RuntimeMode::baked &&
+        if (browser_capture_ir) {
+            ir = std::move(*browser_capture_ir);
+        } else if (runtime_mode == RuntimeMode::baked &&
             (artifact_emit == ArtifactEmit::ir_json || artifact_emit == ArtifactEmit::cpp ||
              artifact_emit == ArtifactEmit::swiftui) &&
             !looks_like_figma_plugin_export(content) &&
@@ -2930,55 +2894,83 @@ int main(int argc, char* argv[]) {
         const auto w3c_json = pulp::view::to_w3c_tokens_json(ir.tokens) + "\n";
         if (w3c_tokens_output == "-") {
             std::cout << w3c_json;
-        } else if (!write_file(w3c_tokens_output, w3c_json)) {
-            std::cerr << "Error: cannot write W3C tokens to " << w3c_tokens_output << "\n";
-            return 1;
         } else {
-            std::cout << "Wrote " << w3c_tokens_output << " (W3C Design Tokens)\n";
+            const auto staged_w3c_output =
+                browser_import_session.stage_primary_output(
+                    w3c_tokens_output, std::cerr);
+            if (!staged_w3c_output) return 1;
+            if (!write_file(staged_w3c_output->string(), w3c_json)) {
+                std::cerr << "Error: cannot write W3C tokens to "
+                          << w3c_tokens_output << "\n";
+                return 1;
+            }
+            std::cout << (browser_import_session.has_capture()
+                              ? "Staged "
+                              : "Wrote ")
+                      << w3c_tokens_output << " (W3C Design Tokens)\n";
         }
     }
 
     if (artifact_emit == ArtifactEmit::ir_json) {
-        const auto asset_options = make_asset_options(input_file,
-                                                      input_url,
-                                                      allow_network_fetch,
-                                                      asset_timeout_ms,
-                                                      asset_cache_dir,
-                                                      expected_asset_hashes);
-        refresh_design_ir_asset_manifest(ir, asset_options);
-        print_asset_manifest_diagnostics(ir.asset_manifest);
-        if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+        if (import_preparation.refreshes_source_assets()) {
+            const auto asset_options = make_asset_options(
+                input_file, input_url, allow_network_fetch,
+                asset_timeout_ms, asset_cache_dir, expected_asset_hashes);
+            refresh_design_ir_asset_manifest(ir, asset_options);
+            print_asset_manifest_diagnostics(ir.asset_manifest);
+            if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+        }
+        if (!dry_run) {
+            std::string localization_error;
+            if (!pulp::import_design::localize_ir_assets(
+                    ir, output_file, &localization_error)) {
+                std::cerr << "Error: " << localization_error << "\n";
+                return 1;
+            }
+        }
 
         const auto ir_json = serialize_design_ir(ir);
         if (dry_run) {
             std::cout << ir_json << "\n";
-            return report_exit;
+            return similarity_failed ? 5 : report_exit;
         }
-        if (!write_file(output_file, ir_json)) return 1;
+        const auto staged_output =
+            browser_import_session.stage_primary_output(
+                output_file, std::cerr);
+        if (!staged_output ||
+            !write_file(staged_output->string(), ir_json)) {
+            return 1;
+        }
         if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
+        if (!browser_import_session.publish(std::cerr)) return 1;
         std::cout << "Wrote " << output_file << " (DesignIR v1, "
                   << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s")
                   << ")\n";
-        return report_exit;
+        return similarity_failed ? 5 : report_exit;
     }
 
     if (artifact_emit == ArtifactEmit::cpp) {
-        const auto asset_options = make_asset_options(input_file,
-                                                      input_url,
-                                                      allow_network_fetch,
-                                                      asset_timeout_ms,
-                                                      asset_cache_dir,
-                                                      expected_asset_hashes);
-        refresh_design_ir_asset_manifest(ir, asset_options);
-        print_asset_manifest_diagnostics(ir.asset_manifest);
-        if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
-        enrich_imported_image_asset_metadata(
-            ir,
-            ir.asset_manifest,
-            asset_options.base_directory.string());
-
         const auto paths = resolve_cpp_output_paths(output_file);
+        if (import_preparation.refreshes_source_assets()) {
+            const auto asset_options = make_asset_options(
+                input_file, input_url, allow_network_fetch,
+                asset_timeout_ms, asset_cache_dir, expected_asset_hashes);
+            refresh_design_ir_asset_manifest(ir, asset_options);
+            print_asset_manifest_diagnostics(ir.asset_manifest);
+            if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+            enrich_imported_image_asset_metadata(
+                ir, ir.asset_manifest,
+                asset_options.base_directory.string());
+        }
+        if (!dry_run) {
+            std::string localization_error;
+            if (!pulp::import_design::localize_ir_assets(
+                    ir, paths.source.string(), &localization_error)) {
+                std::cerr << "Error: " << localization_error << "\n";
+                return 1;
+            }
+        }
         CppExportOptions cpp_opts;
         cpp_opts.header_filename = paths.include_name;
         cpp_opts.include_comments = include_comments;
@@ -2993,17 +2985,30 @@ int main(int argc, char* argv[]) {
             std::cout << cpp.source;
             std::cout << "\n=== Generated Pulp C++ binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
             std::cout << cpp.binding_manifest;
-            return report_exit;   // honor --fail-on-unresolved on the cpp dry-run path
+            return similarity_failed ? 5 : report_exit;
         }
 
+        const auto staged_header =
+            browser_import_session.stage_primary_output(
+                paths.header, std::cerr);
+        const auto staged_source =
+            browser_import_session.stage_primary_output(
+                paths.source, std::cerr);
+        const auto staged_manifest =
+            browser_import_session.stage_primary_output(
+                paths.binding_manifest, std::cerr);
+        if (!staged_header || !staged_source || !staged_manifest) {
+            return 1;
+        }
         if (!write_files_atomically({
-                {paths.header.string(), cpp.header},
-                {paths.source.string(), cpp.source},
-                {paths.binding_manifest.string(), cpp.binding_manifest},
+                {staged_header->string(), cpp.header},
+                {staged_source->string(), cpp.source},
+                {staged_manifest->string(), cpp.binding_manifest},
             })) {
             return 1;
         }
         if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
+        if (!browser_import_session.publish(std::cerr)) return 1;
 
         const auto counts = count_design_ir_elements(ir.root);
 
@@ -3013,7 +3018,7 @@ int main(int argc, char* argv[]) {
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels, " << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s") << ")\n";
-        return report_exit;   // honor --fail-on-unresolved on the cpp write path
+        return similarity_failed ? 5 : report_exit;
     }
 
     if (artifact_emit == ArtifactEmit::swiftui) {
@@ -3103,7 +3108,7 @@ int main(int argc, char* argv[]) {
     // branching here.
     std::vector<DetectedShortcut> detected_shortcuts;
     DefaultShortcutScan default_scan;
-    if (import_shortcuts) {
+    if (import_shortcuts && import_preparation.runs_source_analysis()) {
         detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
 
         // Default shortcuts only fire when the developer's React source has a
@@ -3152,16 +3157,24 @@ int main(int argc, char* argv[]) {
     // hoists captured knob body art onto recognized knobs, resolves asset_ref →
     // absolute asset_path, stamps true PNG dims / opaque-core / asset-bleed
     // metadata, derives sampled fader+meter skins, and resolves bundled fonts.
-    pulp::import_design::resolve_sprite_skins(
-        ir, input_file, use_silver_knobs, skin_faders, skin_meters);
+    if (import_preparation.runs_source_analysis()) {
+        pulp::import_design::resolve_sprite_skins(
+            ir, input_file, use_silver_knobs, skin_faders, skin_meters);
+    }
 
     // Self-contained JS export: copy referenced assets to `<outdir>/assets/`
     // and rewrite the IR to output-relative paths BEFORE codegen, so the
     // emitted setImageSource/registerFont calls survive the decode scratch
     // dir's deletion. Skipped for --dry-run (must not write files) and for
     // baked emits (cpp/swiftui codegen does not consume asset paths).
-    if (!dry_run && artifact_emit == ArtifactEmit::js)
-        pulp::import_design::localize_ir_assets(ir, output_file);
+    if (!dry_run && artifact_emit == ArtifactEmit::js) {
+        std::string localization_error;
+        if (!pulp::import_design::localize_ir_assets(
+                ir, output_file, &localization_error)) {
+            std::cerr << "Error: " << localization_error << "\n";
+            return 1;
+        }
+    }
 
     std::vector<pulp::view::FidelityIssue> fidelity_issues;
     opts.fidelity_report = &fidelity_issues;
@@ -3203,7 +3216,7 @@ int main(int argc, char* argv[]) {
                              count_design_ir_elements(ir.root).nodes)
                       << "\n";
         }
-        return fidelity_failed ? 4 : 0;
+        return fidelity_failed ? 4 : (similarity_failed ? 5 : 0);
     }
 
     auto t_codegen = std::chrono::steady_clock::now();
@@ -3212,8 +3225,33 @@ int main(int argc, char* argv[]) {
     // there is no UI tree to scaffold, so skip the ui.js write entirely
     // and emit only tokens.json. Future work may add a `--with-scaffold`
     // flag once name-based widget detection is consistent across sources.
+    std::optional<fs::path> staged_tokens;
     if (*source != DesignSource::designmd) {
-        if (!write_file(output_file, js)) return 1;
+        const float root_width =
+            ir.root.style.width.value_or(0.0f);
+        const float root_height =
+            ir.root.style.height.value_or(0.0f);
+        const auto staged_output =
+            browser_import_session.stage_primary_output(
+                output_file, std::cerr);
+        if (!staged_output) return 1;
+        std::optional<fs::path> staged_meta;
+        if (root_width > 0.0f && root_height > 0.0f) {
+            staged_meta = browser_import_session.stage_primary_output(
+                fs::path(output_file).string() + ".meta.json",
+                std::cerr);
+            if (!staged_meta) return 1;
+        }
+        if (include_tokens &&
+            (!ir.tokens.colors.empty() ||
+             !ir.tokens.dimensions.empty() ||
+             !ir.tokens.strings.empty())) {
+            staged_tokens =
+                browser_import_session.stage_primary_output(
+                    tokens_file, std::cerr);
+            if (!staged_tokens) return 1;
+        }
+        if (!write_file(staged_output->string(), js)) return 1;
 
         // Emit a <output>.meta.json sidecar with the root frame's canvas
         // size + design source. Lets downstream renderers (pulp-screenshot,
@@ -3230,7 +3268,9 @@ int main(int argc, char* argv[]) {
                  << "  \"source\": \"" << design_source_name(*source) << "\",\n"
                  << "  \"script\": \"" << fs::path(output_file).filename().string() << "\"\n"
                  << "}\n";
-            (void)write_file(meta_path.string(), meta.str());
+            const auto meta_output =
+                staged_meta.value_or(meta_path);
+            if (!write_file(meta_output.string(), meta.str())) return 1;
         }
         if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     }
@@ -3242,7 +3282,10 @@ int main(int argc, char* argv[]) {
     if (*source == DesignSource::designmd) {
         std::cout << "DESIGN.md → tokens only (no ui.js; system spec, not screen)";
     } else {
-        std::cout << "Wrote " << output_file << " (" << counts.nodes << " elements: "
+        std::cout << (browser_import_session.has_capture()
+                          ? "Staged "
+                          : "Wrote ")
+                  << output_file << " (" << counts.nodes << " elements: "
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels";
     }
@@ -3263,7 +3306,9 @@ int main(int argc, char* argv[]) {
             auto theme = ir_tokens_to_theme(ir.tokens);
             body = export_theme_tokens(export_format, theme);
         }
-        if (write_file(tokens_file, body)) {
+        const auto tokens_output =
+            staged_tokens.value_or(fs::path(tokens_file));
+        if (write_file(tokens_output.string(), body)) {
             size_t token_count = ir.tokens.colors.size() + ir.tokens.dimensions.size() + ir.tokens.strings.size();
             std::cout << ", " << token_count << " tokens → " << tokens_file
                       << " (format=" << export_format << ")";
@@ -3279,7 +3324,8 @@ int main(int argc, char* argv[]) {
     // Bridge handler scaffold for Claude Design imports.
     // Only emitted for --from claude; other sources keep their existing
     // output shape unchanged.
-    if (*source == DesignSource::claude && emit_bridge_scaffold) {
+    if (*source == DesignSource::claude && emit_bridge_scaffold &&
+        import_preparation.emits_source_sidecars()) {
         const auto scaffold = render_claude_bridge_scaffold(output_file);
         if (write_file(bridge_output, scaffold)) {
             std::cout << "Wrote " << bridge_output
@@ -3293,7 +3339,8 @@ int main(int argc, char* argv[]) {
     // consume the file directly without a separate Node-side pass.
     // Only emitted for --from claude; default on, opt-out via
     // --no-emit-classnames.
-    if (*source == DesignSource::claude && emit_classnames) {
+    if (*source == DesignSource::claude && emit_classnames &&
+        import_preparation.emits_source_sidecars()) {
         auto rules = extract_claude_classnames(content);
         const auto classnames_json = serialize_claude_classnames(rules);
         if (write_file(classnames_output, classnames_json)) {
@@ -3355,7 +3402,9 @@ int main(int argc, char* argv[]) {
     // parser produces only a handful of elements AND the HTML looks
     // like a JS-bundler entry, the user almost certainly wanted to run
     // the bundle directly. Soft warning — we still wrote ui.js.
-    if (*source == DesignSource::claude && counts.nodes <= 12 &&
+    if (*source == DesignSource::claude &&
+        import_preparation.runs_source_analysis() &&
+        counts.nodes <= 12 &&
         looks_like_bundler_entry(content)) {
         std::cerr << "\n"
                   << "Note: this HTML looks like a JS-bundler entry "
@@ -3377,6 +3426,10 @@ int main(int argc, char* argv[]) {
     auto source_lower = std::string(design_source_name(*source));
     std::transform(source_lower.begin(), source_lower.end(), source_lower.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::replace_if(source_lower.begin(), source_lower.end(),
+        [](unsigned char c) {
+            return !std::isalnum(c) && c != '-' && c != '_';
+        }, '-');
 
     // ── Validation: render generated JS and compare with reference ──────
     if (validate) {
@@ -3638,6 +3691,10 @@ int main(int argc, char* argv[]) {
             std::cout << "\n" << report;
         }
     }
+
+    if (!browser_import_session.publish(std::cerr)) return 1;
+    if (browser_import_session.has_capture())
+        std::cout << "Published " << output_file << "\n";
 
     // Per-stage timing summary — printed only when the run is about to exit
     // successfully, so a failing import never ends on an upbeat check mark.

@@ -285,6 +285,10 @@ def main() -> int:
                    help="Optional pulp-cpp delegate binary (dual-binary tarball).")
     p.add_argument("--mcp-binary", required=False, type=Path, default=None,
                    help="Optional pulp-mcp server binary (#2067 — Claude plugin MCP).")
+    p.add_argument("--import-design-binary", required=False, type=Path, default=None,
+                   help="Optional pulp-import-design delegate binary.")
+    p.add_argument("--import-design-runtime-dir", required=False, type=Path, default=None,
+                   help="Browser-capture .mjs runtime directory bundled with import-design.")
     p.add_argument("--build-dir", required=True, type=Path)
     p.add_argument("--platform", required=True)
     p.add_argument("--out", required=True, type=Path)
@@ -298,6 +302,20 @@ def main() -> int:
         return 2
     if args.mcp_binary is not None and not args.mcp_binary.exists():
         print(f"FAIL: --mcp-binary not at {args.mcp_binary}", file=sys.stderr)
+        return 2
+    if args.import_design_binary is not None and not args.import_design_binary.exists():
+        print(f"FAIL: --import-design-binary not at {args.import_design_binary}",
+              file=sys.stderr)
+        return 2
+    if ((args.import_design_binary is None) !=
+            (args.import_design_runtime_dir is None)):
+        print("FAIL: import-design binary and runtime directory must be supplied together",
+              file=sys.stderr)
+        return 2
+    if (args.import_design_runtime_dir is not None and
+            not args.import_design_runtime_dir.is_dir()):
+        print(f"FAIL: --import-design-runtime-dir not at {args.import_design_runtime_dir}",
+              file=sys.stderr)
         return 2
 
     is_windows = args.platform.startswith("windows-")
@@ -337,6 +355,28 @@ def main() -> int:
             names.append(mcp_name)
             print(f"bundled: {args.mcp_binary} -> {mcp_name}", flush=True)
 
+        staged_import: Path | None = None
+        if args.import_design_binary is not None:
+            import_name = "pulp-import-design.exe" if is_windows else "pulp-import-design"
+            staged_import = stage_binary(
+                args.import_design_binary, stage, import_name, is_windows)
+            files.append(staged_import)
+            names.append(import_name)
+            runtime_names = (
+                "capture.mjs", "health.mjs", "lifecycle.mjs", "security.mjs",
+                "semantics.mjs", "settle.mjs", "tokens.mjs",
+            )
+            for runtime_name in runtime_names:
+                runtime_file = args.import_design_runtime_dir / runtime_name
+                if not runtime_file.is_file():
+                    print(f"FAIL: browser-capture runtime missing {runtime_file}",
+                          file=sys.stderr)
+                    return 2
+                files.append(runtime_file)
+                names.append(f"browser_capture/{runtime_name}")
+            print(f"bundled: {args.import_design_binary} -> {import_name} "
+                  "with browser_capture runtime", flush=True)
+
         wgpu = find_wgpu_lib(args.build_dir, args.platform)
         if wgpu is not None and wgpu.exists():
             staged_wgpu = stage / wgpu.name
@@ -373,6 +413,9 @@ def main() -> int:
             if staged_mcp is not None:
                 print("rewriting macOS rpath: pulp-mcp", flush=True)
                 fix_rpath_macos(staged_mcp)
+            if staged_import is not None:
+                print("rewriting macOS rpath: pulp-import-design", flush=True)
+                fix_rpath_macos(staged_import)
         elif is_linux:
             print("rewriting Linux rpath: pulp", flush=True)
             fix_rpath_linux(staged_bin)
@@ -382,6 +425,9 @@ def main() -> int:
             if staged_mcp is not None:
                 print("rewriting Linux rpath: pulp-mcp", flush=True)
                 fix_rpath_linux(staged_mcp)
+            if staged_import is not None:
+                print("rewriting Linux rpath: pulp-import-design", flush=True)
+                fix_rpath_linux(staged_import)
 
         if is_windows:
             write_zip(args.out, files, names)

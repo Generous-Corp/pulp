@@ -1,6 +1,63 @@
 # Design import tool and CLI test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Browser-solved HTML capture discovery, subprocess argv, cleanup, and artifact
+# freshness. The launcher fixture behaves like the configured Node executable,
+# so these tests exercise ChildProcess without depending on a real browser.
+add_executable(pulp-browser-capture-launcher-fixture
+    fixtures/browser_capture_launcher_fixture.cpp)
+add_executable(pulp-test-browser-capture-backend
+    test_browser_capture_backend.cpp)
+target_link_libraries(pulp-test-browser-capture-backend PRIVATE
+    pulp::browser-capture-backend
+    Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-browser-capture-backend PRIVATE
+    PULP_BROWSER_CAPTURE_FIXTURE_PATH="$<TARGET_FILE:pulp-browser-capture-launcher-fixture>")
+add_dependencies(pulp-test-browser-capture-backend
+    pulp-browser-capture-launcher-fixture)
+catch_discover_tests(pulp-test-browser-capture-backend
+    PROPERTIES LABELS "parser-import;browser-capture")
+
+# Dependency-free Node capture helpers: staged-root containment, tokenized
+# loopback serving, snapshot redaction, network policy, and profile cleanup.
+if(_PULP_NODE_FOR_TESTS)
+    file(GLOB _PULP_BROWSER_CAPTURE_NODE_TESTS CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.test.mjs)
+    add_test(NAME pulp-browser-capture-node-unit
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+                     ${_PULP_BROWSER_CAPTURE_NODE_TESTS})
+    set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
+        TIMEOUT 60
+        LABELS "parser-import;browser-capture;node")
+endif()
+
+# Pure capture-envelope lowering and HTML-shape dispatch. These stay separate
+# from the subprocess/backend target so protocol validation and intake policy
+# can be tested without launching Chromium.
+add_executable(pulp-test-browser-capture-import
+    test_browser_capture_ir.cpp
+    test_browser_import_cli.cpp
+    test_html_intake.cpp
+    test_html_project_stager.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_cli.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_import_session.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_ir.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_validation.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_html_import.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/html_project_stager.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp)
+target_include_directories(pulp-test-browser-capture-import PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/external/miniz)
+target_link_libraries(pulp-test-browser-capture-import PRIVATE
+    pulp::browser-capture-backend
+    pulp::view
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-browser-capture-import
+    PROPERTIES LABELS "parser-import;browser-capture")
+
 # Claude Design bundle envelope parser (base64+gzip JSON
 # envelope unpacking, template script-order resolution).
 add_executable(pulp-test-design-import-claude-bundle test_design_import_claude_bundle.cpp)

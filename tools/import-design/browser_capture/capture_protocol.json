@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.generouscorp.com/pulp/schemas/pulp-browser-capture-v1.json",
+  "title": "Pulp browser capture envelope",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "provenance",
+    "documents",
+    "assets",
+    "semantics",
+    "tokens",
+    "states",
+    "reference"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp-browser-capture-v1"
+    },
+    "version": {
+      "const": 1
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "capture_method",
+        "browser",
+        "source",
+        "viewport",
+        "locale",
+        "timezone",
+        "color_scheme",
+        "reduced_motion",
+        "settle",
+        "network"
+      ]
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "node_count",
+          "layout_count",
+          "paint_order",
+          "snapshot_asset"
+        ]
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "mime_type",
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "required": [
+        "schema",
+        "report",
+        "candidate_count",
+        "resolved_count",
+        "unresolved_count"
+      ]
+    },
+    "tokens": {
+      "type": "object",
+      "required": [
+        "schema",
+        "report",
+        "color_count",
+        "dimension_count",
+        "string_count"
+      ]
+    },
+    "states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "reference_asset_id"
+        ]
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "path",
+        "logical_width",
+        "logical_height",
+        "device_scale_factor"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

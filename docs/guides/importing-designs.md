@@ -24,6 +24,55 @@ pulp import-design --from pencil --file design.json --dry-run
 pulp export-tokens --tokens tokens.json
 ```
 
+### Runnable HTML and Claude Design
+
+For Claude project archives, `.dc.html` design components, standalone HTML, or
+ordinary runnable HTML, pass the file directly:
+
+```bash
+pulp import-design --file design.html
+```
+
+The CLI detects the export shape and uses one path: isolated Chromium evaluates
+the real DOM, CSS, fonts, canvas, SVG, and JavaScript; Pulp records a DPR-2
+reference plus CSS custom-property tokens and semantic evidence; DesignIR keeps
+that evaluated visual as a portable `faithful_capture`; and Skia immediately
+renders it for A/B comparison. The capture, render, and diff images are written
+beside the requested output. Authored controls—including custom knob artwork—
+remain authored pixels and are not replaced by Pulp widget skins.
+
+The default artifact is deliberately a **pixel-exact static frame**. Semantic
+evidence is captured for future reconstruction, but browser interactions do not
+become live Pulp controls unless a runtime bridge is added. Extracted CSS custom
+properties describe the active light / no-preference computed capture mode;
+they are not presented as a complete multi-theme authored token system.
+Only custom properties whose active computed value is visible on
+`documentElement` or `body` are promoted; component-scoped values remain in the
+captured source evidence rather than being misrepresented as global tokens.
+
+Local relative assets load from the input folder. External requests are denied
+by default. If the health report identifies a reviewed CDN dependency, retry
+with `--allow-browser-network`. Use `--browser <path>` for a nonstandard
+Chrome/Chromium installation. `--offline` explicitly selects the older partial
+static/QuickJS fallback and may lose layout or runtime content.
+
+Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
+JavaScript, and C++ artifacts do not embed or require them.
+
+Portable image paths are resolved by the runtime that opens the artifact.
+`ScriptedUiSession` anchors JavaScript assets to the generated script directory,
+and native DesignIR callers pass the document directory through
+`NativeMaterializeOptions::asset_base_directory`. Generated C++ exposes
+`build_imported_ui(asset_base_directory)` for production plugins and apps; pass
+the deployed resource directory there. Its zero-argument overload resolves
+beside the generated source and is a source-tree development convenience, not
+a deployment resource lookup.
+
+For browser-backed HTML, `--dry-run` is a diagnostic preview: its printed
+capture paths and absolute backing-image path are transient and disappear when
+the command exits. Run without `--dry-run` to publish a portable artifact and
+its verified evidence.
+
 ## How It Works
 
 The import pipeline has three layers:
@@ -33,6 +82,7 @@ Local Figma .fig file --.
 Figma REST/file JSON ----.
 Figma plugin .pulp.zip --|
 Stitch HTML / directory -|--> Normalized IR --> JS / DesignIR / baked native artifacts
+Runnable HTML ------------|    (Chromium-evaluated faithful capture)
 v0 / Figma Make TSX ----|
 Pencil/OpenPencil JSON --'
 

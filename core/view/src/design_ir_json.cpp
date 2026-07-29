@@ -25,6 +25,7 @@
 #include <map>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -52,11 +53,19 @@ static bool get_bool(const choc::value::ValueView& obj, const char* key, bool de
 }
 
 // ── Faithful-vector import enum<->id ────────────────────────────────────
-static NodeRenderMode render_mode_from_id(const std::string& s) {
-    return s == "faithful_svg" ? NodeRenderMode::faithful_svg : NodeRenderMode::normal;
+static std::optional<NodeRenderMode> render_mode_from_id(const std::string& s) {
+    if (s == "normal") return NodeRenderMode::normal;
+    if (s == "faithful_svg") return NodeRenderMode::faithful_svg;
+    if (s == "faithful_capture") return NodeRenderMode::faithful_capture;
+    return std::nullopt;
 }
 static const char* render_mode_id(NodeRenderMode m) {
-    return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
+    switch (m) {
+        case NodeRenderMode::faithful_svg: return "faithful_svg";
+        case NodeRenderMode::faithful_capture: return "faithful_capture";
+        case NodeRenderMode::normal: return "normal";
+    }
+    return "normal";
 }
 // Maps a wire `kind` string to an InteractiveElementKind. Unknown ids fall back
 // to `knob` for forward-compat, but set `*recognized = false` so the caller can
@@ -1039,13 +1048,24 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // ── Faithful-vector import: render mode + SVG asset + overlays ──
     for (const char* k : {"render_mode", "renderMode"}) {
         if (obj.hasObjectMember(k) && obj[k].isString()) {
-            node.render_mode = render_mode_from_id(get_string(obj, k));
+            const auto id = get_string(obj, k);
+            const auto mode = render_mode_from_id(id);
+            if (!mode)
+                throw std::invalid_argument(
+                    "unknown DesignIR render_mode: " + id);
+            node.render_mode = *mode;
             break;
         }
     }
     for (const char* k : {"svg_asset_id", "svgAssetId"}) {
         if (obj.hasObjectMember(k) && obj[k].isString()) {
             node.svg_asset_id = get_string(obj, k);
+            break;
+        }
+    }
+    for (const char* k : {"capture_asset_id", "captureAssetId"}) {
+        if (obj.hasObjectMember(k) && obj[k].isString()) {
+            node.capture_asset_id = get_string(obj, k);
             break;
         }
     }
@@ -1983,6 +2003,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
     if (node.render_mode != NodeRenderMode::normal)
         write_string_member(out, first, "render_mode", render_mode_id(node.render_mode));
     write_string_member(out, first, "svg_asset_id", node.svg_asset_id);
+    write_string_member(out, first, "capture_asset_id", node.capture_asset_id);
     if (!node.interactive_elements.empty()) {
         write_key(out, first, "interactive_elements");
         out << '[';

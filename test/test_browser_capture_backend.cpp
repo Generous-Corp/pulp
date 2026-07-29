@@ -1,0 +1,455 @@
+// SPDX-License-Identifier: MIT
+#include <catch2/catch_test_macros.hpp>
+
+#include "tools/import-design/browser_capture_backend.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace fs = std::filesystem;
+namespace capture = pulp::import_design::browser_capture;
+
+namespace {
+
+class TempTree {
+public:
+    explicit TempTree(std::string_view label) {
+        const auto nonce = std::chrono::steady_clock::now()
+                               .time_since_epoch()
+                               .count();
+        root_ = fs::temp_directory_path()
+            / (std::string("pulp-browser-capture-test-") + std::string(label)
+               + "-" + std::to_string(nonce));
+        fs::create_directories(root_);
+    }
+
+    ~TempTree() {
+        std::error_code ec;
+        fs::remove_all(root_, ec);
+    }
+
+    TempTree(const TempTree&) = delete;
+    TempTree& operator=(const TempTree&) = delete;
+
+    [[nodiscard]] const fs::path& root() const { return root_; }
+
+    fs::path write(std::string_view relative, std::string_view contents) const {
+        const auto path = root_ / fs::path(relative);
+        fs::create_directories(path.parent_path());
+        std::ofstream out(path, std::ios::binary);
+        REQUIRE(out);
+        out << contents;
+        REQUIRE(out.good());
+        return path;
+    }
+
+private:
+    fs::path root_;
+};
+
+std::string read_file(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in);
+    return {std::istreambuf_iterator<char>(in),
+            std::istreambuf_iterator<char>()};
+}
+
+std::vector<std::string> read_lines(const fs::path& path) {
+    std::istringstream input(read_file(path));
+    std::vector<std::string> lines;
+    for (std::string line; std::getline(input, line);) {
+        lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+bool contains_line(const std::vector<std::string>& lines,
+                   std::string_view value) {
+    return std::find(lines.begin(), lines.end(), value) != lines.end();
+}
+
+fs::path managed_browser_name() {
+#ifdef _WIN32
+    return "chrome.exe";
+#else
+    return "chrome";
+#endif
+}
+
+capture::BrowserInstallation fixture_browser() {
+    return {
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH),
+        capture::BrowserOrigin::system,
+        "Fixture Chromium",
+        "123.4.5.6",
+        123,
+    };
+}
+
+capture::CaptureRequest fixture_request(
+    const TempTree& tree, const fs::path& script) {
+    const auto staged = tree.root() / "authorized root ' $()";
+    fs::create_directories(staged / "nested");
+    const auto input = staged / "nested" / "Delay editor ' $().html";
+    std::ofstream(input) << "<main>Delay</main>";
+
+    capture::CaptureRequest request;
+    request.input_file = input;
+    request.staged_root = staged;
+    request.output_directory = tree.root() / "output ' $()";
+    request.node_executable =
+        fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    request.capture_script = script;
+    request.timeout_ms = 10000;
+    return request;
+}
+
+}  // namespace
+
+TEST_CASE("browser discovery honors explicit, environment, managed, then system",
+          "[import-design][browser-capture]") {
+    TempTree tree("discovery");
+    const auto managed =
+        tree.write((fs::path("managed/version/bin") / managed_browser_name())
+                       .generic_string(),
+                   "managed");
+    const auto system = tree.write("system-browser", "system");
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.managed_root = tree.root() / "managed";
+    options.system_candidates = {system};
+    options.include_default_system_candidates = false;
+
+    const auto ordered = capture::collect_browser_candidates(options);
+    REQUIRE(ordered.size() == 2);
+    CHECK(ordered[0].executable == managed);
+    CHECK(ordered[0].origin == capture::BrowserOrigin::managed);
+    CHECK(ordered[1].executable == system);
+    CHECK(ordered[1].origin == capture::BrowserOrigin::system);
+
+    SECTION("explicit override is authoritative") {
+        options.explicit_path = tree.root() / "explicit-browser";
+        options.environment_override = system.string();
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == *options.explicit_path);
+        CHECK(candidates[0].origin
+              == capture::BrowserOrigin::explicit_override);
+    }
+
+    SECTION("environment override is authoritative when explicit is absent") {
+        options.environment_override = system.string();
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == system);
+        CHECK(candidates[0].origin
+              == capture::BrowserOrigin::environment_override);
+    }
+}
+
+TEST_CASE("browser capture rejects unsafe viewport allocations before launch",
+          "[import-design][browser-capture]") {
+    TempTree tree("unsafe-viewport");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.initial_width = 8192;
+    request.initial_height = 8192;
+
+    capture::BrowserInstallation browser;
+    browser.executable = request.node_executable.value();
+    browser.product = "Chromium";
+    browser.version = "123.0.0.0";
+
+    const auto result = capture::capture_document(browser, request);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "invalid-capture-options");
+    CHECK(result.process.exit_code == -1);
+}
+
+TEST_CASE("browser discovery probes in order and never falls through an override",
+          "[import-design][browser-capture]") {
+    TempTree tree("probe-order");
+    const auto managed =
+        tree.write((fs::path("managed/bin") / managed_browser_name())
+                       .generic_string(),
+                   "managed");
+    const auto system = tree.write("system-browser", "system");
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.managed_root = tree.root() / "managed";
+    options.system_candidates = {system};
+    options.include_default_system_candidates = false;
+
+    std::vector<fs::path> probed;
+    auto discovery = capture::discover_browser(
+        options, [&](const capture::BrowserCandidate& candidate) {
+            probed.push_back(candidate.executable);
+            capture::BrowserProbeResult result;
+            result.compatible = true;
+            result.product = "Chromium";
+            result.version = "123.0.0.0";
+            result.major_version = 123;
+            return result;
+        });
+    REQUIRE(discovery.ok());
+    REQUIRE(probed.size() == 1);
+    CHECK(probed[0] == managed);
+    CHECK(discovery.selected->origin == capture::BrowserOrigin::managed);
+
+    options.explicit_path = tree.root() / "missing-explicit";
+    probed.clear();
+    discovery = capture::discover_browser(
+        options, [&](const capture::BrowserCandidate& candidate) {
+            probed.push_back(candidate.executable);
+            capture::BrowserProbeResult result;
+            result.failure = "not compatible";
+            return result;
+        });
+    CHECK_FALSE(discovery.ok());
+    REQUIRE(probed.size() == 1);
+    CHECK(probed[0] == *options.explicit_path);
+}
+
+#ifndef _WIN32
+TEST_CASE("browser version metadata redacts successful subprocess output",
+          "[import-design][browser-capture][security]") {
+    TempTree tree("version-redaction");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo \"Google Chrome path:/opt/acme secret/browser 123.0.0.0\" >&2\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    REQUIRE(result.compatible);
+    CHECK(result.product.find("/opt/acme") == std::string::npos);
+    CHECK(result.product.find("<local-path>") != std::string::npos);
+}
+#endif
+
+TEST_CASE("missing browser guidance is actionable and explains its narrow use",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryResult discovery;
+    discovery.diagnostic = {
+        "browser-unavailable",
+        "No compatible browser was found.",
+        "browser-discovery",
+    };
+    discovery.probes.push_back({
+        {"/not/a/browser", capture::BrowserOrigin::explicit_override},
+        false,
+        {},
+        {},
+        0,
+        "not executable",
+    });
+
+    const auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("https://www.google.com/chrome/") != std::string::npos);
+    CHECK(human.find("temporary isolated profile") != std::string::npos);
+    CHECK(human.find("not embedded") != std::string::npos);
+    CHECK(human.find("--offline") != std::string::npos);
+
+    const auto json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find("\"code\":\"browser-unavailable\"")
+          != std::string::npos);
+    CHECK(json.find("\"offline_flag\":\"--offline\"")
+          != std::string::npos);
+    CHECK(json.find("\"origin\":\"explicit\"") != std::string::npos);
+}
+
+TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
+          "[import-design][browser-capture]") {
+    TempTree tree("argv");
+    const auto script = tree.write("capture script ' $().mjs", "// fixture");
+    const auto request = fixture_request(tree, script);
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    INFO(result.diagnostic.message);
+    REQUIRE(result.ok());
+    REQUIRE(result.process.exit_code == 0);
+
+    const auto output = fs::canonical(request.output_directory);
+    const auto args = read_lines(output / "argv.txt");
+    CHECK(contains_line(args, script.string()));
+    CHECK(contains_line(args, fs::canonical(request.input_file).string()));
+    CHECK(contains_line(args, fs::canonical(request.staged_root).string()));
+    CHECK(contains_line(args, output.string()));
+    CHECK(contains_line(args, "Fixture Chromium"));
+    CHECK(contains_line(args, "123.4.5.6"));
+
+    auto profile = read_file(output / "profile-path.txt");
+    CHECK_FALSE(profile.empty());
+    CHECK_FALSE(fs::exists(profile));
+    CHECK(fs::exists(output / "capture.json"));
+    CHECK(fs::exists(output / "browser.png"));
+    CHECK(fs::exists(output / "semantic-report.json"));
+    CHECK(fs::exists(output / "dom-snapshot.json"));
+}
+
+TEST_CASE("capture preserves the runtime diagnostic code",
+          "[import-design][browser-capture]") {
+    TempTree tree("runtime-code");
+    const auto script =
+        tree.write("source-unresolved.mjs", "// fixture");
+    const auto result = capture::capture_document(
+        fixture_browser(), fixture_request(tree, script));
+
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "capture-source-unresolved");
+    CHECK(result.diagnostic.message.find("source produced no visible design")
+          != std::string::npos);
+}
+
+TEST_CASE("capture redacts raw subprocess stderr before returning it",
+          "[import-design][browser-capture][security]") {
+    TempTree tree("raw-stderr");
+    const auto script = tree.write("raw-stderr.mjs", "// fixture");
+    const auto result = capture::capture_document(
+        fixture_browser(), fixture_request(tree, script));
+
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.message.find("/opt/acme") == std::string::npos);
+    CHECK(result.process.stdout_output.find("Jane Doe") == std::string::npos);
+    CHECK(result.process.stdout_output.find("Private") == std::string::npos);
+    CHECK(result.process.stderr_output.find("/opt/acme") == std::string::npos);
+    CHECK(result.process.stderr_output.find("Jane Doe") == std::string::npos);
+    CHECK(result.process.stderr_output.find("Private") == std::string::npos);
+    CHECK(result.diagnostic.message.find("<local-path>") != std::string::npos);
+    CHECK(result.process.stderr_output.find("<local-path>")
+          != std::string::npos);
+}
+
+TEST_CASE("capture redacts successful subprocess stdout before returning it",
+          "[import-design][browser-capture][security]") {
+    TempTree tree("raw-stdout");
+    const auto script = tree.write("raw-stdout.mjs", "// fixture");
+    const auto result = capture::capture_document(
+        fixture_browser(), fixture_request(tree, script));
+
+    REQUIRE(result.ok());
+    CHECK(result.process.stdout_output.find("Jane Doe") == std::string::npos);
+    CHECK(result.process.stdout_output.find("Private") == std::string::npos);
+    CHECK(result.process.stdout_output.find("<local-path>")
+          != std::string::npos);
+}
+
+TEST_CASE("capture deadline leaves time for runtime-owned cleanup",
+          "[import-design][browser-capture][timeout]") {
+    TempTree tree("deadline-cleanup");
+    const auto script =
+        tree.write("deadline-cleanup.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.timeout_ms = 25;
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "browser-capture-timeout");
+    CHECK_FALSE(result.process.timed_out);
+    CHECK(result.process.exit_code == 124);
+    const auto output = fs::canonical(request.output_directory);
+    CHECK(fs::exists(output / "deadline-cleanup-finished"));
+    const auto profile = read_file(output / "profile-path.txt");
+    REQUIRE_FALSE(profile.empty());
+    CHECK_FALSE(fs::exists(profile));
+}
+
+TEST_CASE("capture clears known stale artifacts before validating fresh output",
+          "[import-design][browser-capture]") {
+    TempTree tree("stale");
+    const auto script = tree.write("omit-semantic.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    fs::create_directories(request.output_directory);
+    for (const auto name : {
+             "capture.json",
+             "browser.png",
+             "semantic-report.json",
+             "tokens.json",
+             "dom-snapshot.json",
+             "capture-error.json",
+         }) {
+        std::ofstream(request.output_directory / name) << "stale";
+    }
+    std::ofstream(request.output_directory / "keep.me") << "unrelated";
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "browser-capture-incomplete");
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "semantic-report.json"));
+    CHECK(fs::exists(request.output_directory / "capture-error.json"));
+    CHECK(read_file(request.output_directory / "keep.me") == "unrelated");
+}
+
+TEST_CASE("capture never accepts a stale token report",
+          "[import-design][browser-capture]") {
+    TempTree tree("stale-token");
+    const auto script = tree.write("omit-token.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    fs::create_directories(request.output_directory);
+    std::ofstream(request.output_directory / "tokens.json") << "stale";
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "browser-capture-incomplete");
+    CHECK(result.diagnostic.message.find("token report")
+          != std::string::npos);
+    CHECK_FALSE(fs::exists(request.output_directory / "tokens.json"));
+}
+
+TEST_CASE("capture reports an output error when a stale artifact cannot clear",
+          "[import-design][browser-capture]") {
+    TempTree tree("blocked-output");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    fs::create_directories(request.output_directory / "capture.json");
+    std::ofstream(request.output_directory / "capture.json" / "child")
+        << "blocks removal";
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "capture-output-error");
+    CHECK(result.diagnostic.message.find("capture.json")
+          != std::string::npos);
+    CHECK_FALSE(fs::exists(request.output_directory / "argv.txt"));
+}
+
+TEST_CASE("capture rejects an input outside the staged root",
+          "[import-design][browser-capture]") {
+    TempTree tree("containment");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.input_file = tree.write("outside.html", "<main>outside</main>");
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "invalid-capture-input");
+    CHECK(result.diagnostic.message.find("escapes") != std::string::npos);
+    CHECK(fs::exists(request.output_directory / "capture-error.json"));
+    CHECK_FALSE(fs::exists(request.output_directory / "capture.json"));
+}
