@@ -15,10 +15,13 @@ use crate::error::{CliError, Result};
 
 pub(super) const BROWSER_CAPTURE_ARCHIVE_DIR: &str = "browser_capture";
 const BROWSER_CAPTURE_PROTOCOL_DIR: &str = "browser_capture-v1";
-pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 10] = [
+pub(super) const BROWSER_CAPTURE_RUNTIME_FILES: [&str; 13] = [
     "browser_process.mjs",
     "capture.mjs",
     "health.mjs",
+    "interaction_executor.mjs",
+    "interaction_plan.mjs",
+    "interaction_plan_protocol.json",
     "lifecycle.mjs",
     "network_dependencies.mjs",
     "renderers.mjs",
