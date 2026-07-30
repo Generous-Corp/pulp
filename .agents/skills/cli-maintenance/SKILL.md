@@ -509,6 +509,15 @@ Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
 
+Config keys consumed by a C++ leaf command still require user-surface parity
+across `experimental/pulp-rs/src/config.rs`,
+`experimental/pulp-rs/src/cmd/config.rs`, and `tools/cli/cmd_config.cpp`.
+For example, browser-backed design import owns
+`import_design.browser=auto|managed|system`; its one-session override is
+`PULP_DESIGN_BROWSER_MODE`, while an explicit executable path remains a
+separate higher-precedence override. Update both help implementations and add
+validation tests when introducing a cross-language key.
+
 ### `pulp import` — framework-importer substrate
 
 `pulp import` (`tools/cli/cmd_import.cpp` + `import_run.{hpp,cpp}` +

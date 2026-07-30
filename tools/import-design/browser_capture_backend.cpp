@@ -139,26 +139,6 @@ std::optional<std::string> capture_error_code(std::string_view stderr_text) {
     return std::string(candidate);
 }
 
-fs::path default_managed_root() {
-    if (const char* pulp_home = std::getenv("PULP_HOME");
-        pulp_home && *pulp_home) {
-        return fs::path(pulp_home) / "tools" / "chrome-for-testing";
-    }
-#ifdef _WIN32
-    if (const char* local_app_data = std::getenv("LOCALAPPDATA");
-        local_app_data && *local_app_data) {
-        return fs::path(local_app_data) / "Pulp" / "tools"
-            / "chrome-for-testing";
-    }
-#else
-    if (const char* home = std::getenv("HOME"); home && *home) {
-        return fs::path(home) / ".pulp" / "tools" / "chrome-for-testing";
-    }
-#endif
-    return fs::temp_directory_path() / "pulp" / "tools"
-        / "chrome-for-testing";
-}
-
 std::optional<fs::path> resolve_node(
     const std::optional<fs::path>& override_path) {
     if (override_path && !override_path->empty()) return *override_path;
@@ -222,115 +202,6 @@ bool is_executable_file(const fs::path& path) {
 #else
     return ::access(path.c_str(), X_OK) == 0;
 #endif
-}
-
-std::string path_key(const fs::path& path) {
-    std::error_code ec;
-    auto absolute = fs::absolute(path, ec);
-    if (ec) absolute = path;
-    return absolute.lexically_normal().generic_string();
-}
-
-void append_candidate(std::vector<BrowserCandidate>& out,
-                      std::set<std::string>& seen,
-                      const fs::path& path,
-                      BrowserOrigin origin) {
-    if (path.empty()) return;
-    if (seen.insert(path_key(path)).second) {
-        out.push_back(BrowserCandidate{path, origin});
-    }
-}
-
-bool is_managed_browser_filename(std::string_view name) {
-#ifdef _WIN32
-    return name == "chrome.exe" || name == "chromium.exe";
-#else
-    return name == "chrome" || name == "chromium"
-        || name == "Google Chrome" || name == "Google Chrome for Testing";
-#endif
-}
-
-std::vector<fs::path> managed_browser_paths(const fs::path& root) {
-    std::vector<fs::path> paths;
-    std::error_code ec;
-    if (!fs::is_directory(root, ec) || ec) return paths;
-
-    fs::recursive_directory_iterator it{
-        root, fs::directory_options::skip_permission_denied, ec};
-    const fs::recursive_directory_iterator end;
-    std::size_t visited = 0;
-    while (!ec && it != end && visited < 4096) {
-        ++visited;
-        const auto& entry = *it;
-        if (entry.is_regular_file(ec) && !ec
-            && is_managed_browser_filename(
-                entry.path().filename().string())) {
-            paths.push_back(entry.path());
-        }
-        it.increment(ec);
-    }
-    std::sort(paths.begin(), paths.end());
-    return paths;
-}
-
-std::vector<fs::path> default_system_browser_paths() {
-    std::vector<fs::path> paths;
-#ifdef __APPLE__
-    paths.emplace_back(
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    paths.emplace_back(
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/"
-        "Google Chrome for Testing");
-    paths.emplace_back(
-        "/Applications/Chromium.app/Contents/MacOS/Chromium");
-    if (const char* home = std::getenv("HOME"); home && *home) {
-        const fs::path applications =
-            fs::path(home) / "Applications";
-        paths.push_back(
-            applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
-        paths.push_back(
-            applications
-            / "Google Chrome for Testing.app/Contents/MacOS/"
-              "Google Chrome for Testing");
-        paths.push_back(
-            applications / "Chromium.app/Contents/MacOS/Chromium");
-    }
-#elif defined(_WIN32)
-    auto append_from = [&](const char* variable, const fs::path& suffix) {
-        if (const char* value = std::getenv(variable); value && *value) {
-            paths.push_back(fs::path(value) / suffix);
-        }
-    };
-    append_from("PROGRAMFILES",
-                "Google/Chrome/Application/chrome.exe");
-    append_from("PROGRAMFILES(X86)",
-                "Google/Chrome/Application/chrome.exe");
-    append_from("LOCALAPPDATA",
-                "Google/Chrome/Application/chrome.exe");
-    append_from("LOCALAPPDATA",
-                "Google/Chrome for Testing/Application/chrome.exe");
-#else
-    paths.emplace_back("/usr/bin/google-chrome");
-    paths.emplace_back("/usr/bin/google-chrome-stable");
-    paths.emplace_back("/usr/bin/chromium");
-    paths.emplace_back("/usr/bin/chromium-browser");
-    paths.emplace_back("/snap/bin/chromium");
-#endif
-
-#ifdef _WIN32
-    constexpr std::string_view kNames[] = {
-        "chrome.exe", "chromium.exe"};
-#else
-    constexpr std::string_view kNames[] = {
-        "google-chrome", "google-chrome-stable", "chromium",
-        "chromium-browser"};
-#endif
-    for (const auto name : kNames) {
-        if (auto found = platform::find_on_path(std::string(name))) {
-            paths.push_back(*found);
-        }
-    }
-    return paths;
 }
 
 struct TempDirectory {
@@ -611,47 +482,6 @@ std::string browser_origin_name(BrowserOrigin origin) {
     return "system";
 }
 
-std::vector<BrowserCandidate>
-collect_browser_candidates(const BrowserDiscoveryOptions& options) {
-    std::vector<BrowserCandidate> candidates;
-    std::set<std::string> seen;
-
-    if (options.explicit_path && !options.explicit_path->empty()) {
-        append_candidate(candidates, seen, *options.explicit_path,
-                         BrowserOrigin::explicit_override);
-        return candidates;
-    }
-
-    std::string environment;
-    if (options.environment_override) {
-        environment = *options.environment_override;
-    } else if (const char* value = std::getenv("PULP_DESIGN_BROWSER");
-               value && *value) {
-        environment = value;
-    }
-    if (!environment.empty()) {
-        append_candidate(candidates, seen, environment,
-                         BrowserOrigin::environment_override);
-        return candidates;
-    }
-
-    const auto managed_root =
-        options.managed_root.value_or(default_managed_root());
-    for (const auto& path : managed_browser_paths(managed_root)) {
-        append_candidate(candidates, seen, path, BrowserOrigin::managed);
-    }
-
-    for (const auto& path : options.system_candidates) {
-        append_candidate(candidates, seen, path, BrowserOrigin::system);
-    }
-    if (options.include_default_system_candidates) {
-        for (const auto& path : default_system_browser_paths()) {
-            append_candidate(candidates, seen, path, BrowserOrigin::system);
-        }
-    }
-    return candidates;
-}
-
 BrowserProbeResult probe_browser(
     const BrowserCandidate& candidate,
     const BrowserDiscoveryOptions& options) {
@@ -794,7 +624,29 @@ BrowserDiscoveryResult discover_browser(
     const BrowserDiscoveryOptions& options,
     BrowserProbeFunction probe) {
     BrowserDiscoveryResult result;
+    const bool has_explicit =
+        options.explicit_path && !options.explicit_path->empty();
+    const bool has_path_environment =
+        options.environment_override
+            ? !options.environment_override->empty()
+            : (std::getenv("PULP_DESIGN_BROWSER") != nullptr &&
+               *std::getenv("PULP_DESIGN_BROWSER") != '\0');
+    const auto mode = resolve_browser_mode(options);
+    if (!has_explicit && !has_path_environment && !mode.mode) {
+        result.diagnostic = {
+            "browser-mode-invalid", mode.error, "browser-discovery"};
+        return result;
+    }
     auto candidates = collect_browser_candidates(options);
+    if (candidates.empty() && !has_explicit && !has_path_environment &&
+        mode.mode == BrowserMode::managed) {
+        result.diagnostic = {
+            "managed-browser-unavailable",
+            "Managed Chrome for Testing is selected but is not installed or "
+            "its current.json is invalid.",
+            "browser-discovery"};
+        return result;
+    }
     if (!probe) {
         probe = [&](const BrowserCandidate& candidate) {
             return probe_browser(candidate, options);

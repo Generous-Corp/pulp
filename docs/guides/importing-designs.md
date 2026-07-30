@@ -61,6 +61,36 @@ content is hashed into capture provenance. Use `--browser <path>` for a
 nonstandard Chrome/Chromium installation. `--offline` explicitly selects the
 older partial static/QuickJS fallback and may lose layout or runtime content.
 
+Browser selection is deterministic:
+
+1. `--browser <path>`
+2. `PULP_DESIGN_BROWSER=<path>`
+3. `PULP_DESIGN_BROWSER_MODE=auto|managed|system`, then
+   `import_design.browser` in `~/.pulp/config.toml`
+4. the explicitly installed managed Chrome for Testing
+5. system Chrome/Chromium
+
+The default `auto` mode therefore behaves exactly like system discovery until
+you explicitly install the managed browser:
+
+```bash
+pulp tool install chrome-for-testing
+pulp tool doctor chrome-for-testing --run
+pulp tool update chrome-for-testing
+pulp tool uninstall chrome-for-testing
+
+pulp config set import_design.browser auto     # managed if installed, else system
+pulp config set import_design.browser system   # never use the managed copy
+pulp config set import_design.browser managed  # require the managed copy
+```
+
+An import never downloads Chrome. The installer verifies a committed SHA-256
+pin, extracts the complete official archive transactionally under
+`$PULP_HOME/tools/chrome-for-testing/<version>/<platform>/`, and publishes the
+exact selection through `current.json`. Google currently publishes no Linux
+arm64 Chrome-for-Testing archive; on that host install system Chromium and use
+`system` mode or set `PULP_DESIGN_BROWSER` explicitly.
+
 Runnable sources with asynchronous initialization may expose
 `globalThis.__pulpCaptureReady` as a Promise or a function returning one. Pulp
 awaits it after the initial layout observation window and fails the import if

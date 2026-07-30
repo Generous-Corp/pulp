@@ -198,6 +198,13 @@ reproduces the design; the others below do NOT and waste hours:
   variables describe only the active light / no-preference computed mode, and
   only values visible on `documentElement` or `body` are promoted as global
   tokens; component-scoped values remain capture evidence.
+  Browser selection is automatic and deterministic: explicit `--browser`,
+  then `PULP_DESIGN_BROWSER`, then `PULP_DESIGN_BROWSER_MODE` /
+  `import_design.browser`, then an explicitly installed managed Chrome for
+  Testing, then system Chrome/Chromium. Imports never download a browser.
+  If system discovery is insufficient, run
+  `pulp tool install chrome-for-testing`; use
+  `pulp tool doctor chrome-for-testing --run` for diagnostics.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
@@ -4139,7 +4146,7 @@ NOT match `linear-gradient`); gradient stop-colour extraction must respect
 parens so `rgba(0, 0, 0, .5)` isn't truncated at its internal space;
 `parse_rgb_color` must reject partial numeric parses (`1px`) via the `std::stod`
 consumed-index check.
-- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"` and `import_design.default_emit = "js|ir-json|cpp|swiftui"`, set through `pulp config set import_design.default_mode ...` and `pulp config set import_design.default_emit ...`. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session, and direct CLI flags override the matching preference. If only `default_mode=baked` is set, `ir-json` is implied.
+- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"`, `import_design.default_emit = "js|ir-json|cpp|swiftui"`, and `import_design.browser = "auto|managed|system"`, set through `pulp config set`. `PULP_IMPORT_DESIGN_DEFAULT_MODE`, `PULP_IMPORT_DESIGN_DEFAULT_EMIT`, and `PULP_DESIGN_BROWSER_MODE` override config for one environment/session. Direct CLI flags win; `PULP_DESIGN_BROWSER` is the explicit browser-path override. If only `default_mode=baked` is set, `ir-json` is implied.
 - The standalone import helper and MCP status helper each have a small config reader for these defaults; keep them compatible with TOML single-quoted and double-quoted strings, matching the main CLI config reader.
 - Mental model: live/runtime import means "run the original app"; baked DesignIR means "save the materialized UI tree"; baked C++ means "compile that saved tree into native code". You can move live iteration -> baked IR -> baked C++; you cannot reconstruct live React from baked IR because hooks, closures, loops, and arbitrary JS logic were not preserved.
 - JSX baked snapshots accept both DOM-walked bundles and live/native bundles. Native bundles freeze through the `WidgetBridge` tree and record `snapshotSource=native-view`; generated baked C++ still constructs direct `View`/`Label` trees and should only require `pulp::view-core`.
