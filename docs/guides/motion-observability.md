@@ -50,8 +50,8 @@ regardless of which surface launched the trace.
 
 - **`pulp` CLI** — dedicated `pulp motion *` subcommands encode the reserved
   `Motion.*` client methods:
-  `record` / `stop` / `snapshot` / `list-traces` / `load-fixture` /
-  `scrub` / `play` / `pause` / `cost {enable|disable}`. Quick example
+  `record` / `stop` / `snapshot` / `list-traces` / `scrub` / `play` /
+  `pause` / `cost {enable|disable}`. Quick example
   They are not connected to a normal Pulp host. A custom test host is required:
   ```bash
   # Custom fixture starts and wires InspectorServer first.
@@ -64,8 +64,8 @@ regardless of which surface launched the trace.
   See the **CLI subcommands** section below for the full reference.
 - **`pulp-mcp` server** — the MCP server exposes an experimental
   `pulp_motion_*` wrapper set covering
-  every Motion.* inspector method (start_trace / stop_trace / snapshot /
-  list_traces / load_fixture / scrub_to / play / pause / enable_cost /
+  every remotely grantable Motion.* inspector method (start_trace /
+  stop_trace / snapshot / list_traces / scrub_to / play / pause / enable_cost /
   disable_cost).
   These wrappers need the same custom-host fixture. Example
   tools/call payload for the equivalent of the inspector-wire start_trace
@@ -123,10 +123,10 @@ paths see the dedicated sections below.
 ## CLI subcommands
 
 `pulp motion *` wraps the experimental `Motion.*` methods as terminal
-subcommands. Each one probes `127.0.0.1:9147`; without a custom fixture it
-exits because no normal Pulp launch owns that endpoint. `PULP_MOTION_SERVER`
-does not activate it. Override the client port with `--port N` or the
-`PULP_INSPECTOR_PORT` environment variable.
+subcommands. It selects an owner-private authenticated discovery record;
+without a custom fixture it exits because no normal Pulp launch owns an
+endpoint. `PULP_MOTION_SERVER` does not activate it. Use `--port N` or
+`PULP_INSPECTOR_PORT` only as an explicit discovery filter.
 
 | Command | Forwards to | Common use |
 |---|---|---|
@@ -134,7 +134,6 @@ does not activate it. Override the client port with `--port N` or the
 | `pulp motion stop [--trace-id N]` | `Motion.stopTrace` | Release the trace returned by `record`. |
 | `pulp motion snapshot` | `Motion.snapshot` | One-shot view of `tracing_enabled`, `firehose`, `active_traces`, `inspector_traces`, `emitted_events`, `cost_enabled`, `cost_samples_emitted`. |
 | `pulp motion list-traces` | `Motion.listTraces` | Enumerate inspector-owned trace IDs. |
-| `pulp motion load-fixture <PATH>` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
 | `pulp motion scrub <FRAME>` | `Motion.scrubTo` | Move the scrubber playhead to a given frame. |
 | `pulp motion play` | `Motion.play` | Resume scrubber playback from the playhead. |
 | `pulp motion pause` | `Motion.pause` | Pause scrubber playback. |
@@ -152,8 +151,7 @@ pulp motion record --view Card --fps 60 --out card-fade.jsonl
 # → trace started — trace_id=1
 # →   stop with: pulp motion stop --trace-id 1
 
-# Replay an existing captured fixture in the scrubber.
-pulp motion load-fixture test/motion/goldens/card-open.motion.jsonl
+# Replay after the explicitly owned test host loads the fixture in-process.
 pulp motion scrub 30
 pulp motion play
 
@@ -167,6 +165,10 @@ pulp motion snapshot --json | jq '.cost_samples_emitted'
 The CLI delegates each call to `pulp inspect --command Motion.<verb>
 --params <JSON>`. The MCP wrappers shell out through the same source-tree
 client. Raw `nc` is not compatible with the length-prefixed transport.
+`Motion.loadFixture` is not exposed by either client: its server-side path
+parameter is classified unavailable because inspector authority never includes
+filesystem access. Fixture tests must call the in-process motion fixture API
+from an explicitly owned test host.
 
 ## When to use it
 
@@ -397,7 +399,7 @@ Protocol requests:
 | `Motion.stopTrace` | `{trace_id}` | `{removed}` |
 | `Motion.snapshot` | `{}` | `{tracing_enabled, firehose, active_traces, inspector_traces, emitted_events}` |
 | `Motion.listTraces` | `{}` | `{trace_ids:[…]}` |
-| `Motion.loadFixture` | `{path}` | `{ok, event_count, max_frame, header:{version, policy, duration_scale}}` |
+| `Motion.loadFixture` | `{path}` | Unavailable over authenticated inspector sessions because server-side filesystem paths are outside inspector authority |
 | `Motion.scrubTo` | `{frame}` | `{playhead_frame, emitted_count}` (broadcasts Motion.start/.sample/.end with `"replay":true`) |
 | `Motion.play` | `{}` | `{playing, emitted_count, playhead_frame}` |
 | `Motion.pause` | `{}` | `{playing:false, playhead_frame}` |
@@ -407,9 +409,10 @@ to all connected clients as samples are emitted. Subscribing clients receive a
 clean stream for the trace they registered — concurrent unrelated animations
 do not bleed into the stream unless the firehose is on (see below).
 
-The timeline scrubber methods (`Motion.loadFixture` / `.scrubTo` / `.play` /
-`.pause`) load a `.motion.jsonl` fixture into memory and re-emit the prefix
-of events with `frame <= playhead` to the same event channel as live traces.
+An explicitly owned test host loads `.motion.jsonl` fixtures in-process before
+the remotely grantable timeline scrubber methods (`Motion.scrubTo` /
+`.play` / `.pause`) re-emit the prefix of events with `frame <= playhead` to
+the same event channel as live traces.
 Replayed events carry an additional `"replay":true` marker so clients can
 distinguish them from live coordinator events. The scrubber is passive — no
 clock is pumped, no animation runs live; this is sufficient for design review

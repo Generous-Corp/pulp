@@ -780,6 +780,52 @@ TEST_CASE("server stop releases leases before a session restart",
     CHECK_FALSE(acquired.is_error);
 }
 
+TEST_CASE("session restart serializes publication with heartbeat refresh",
+          "[inspect][client][restart][heartbeat][concurrency]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession first(
+        {"session-heartbeat-a", "instance-a", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorSession second(
+        {"session-heartbeat-b", "instance-b", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+
+    auto start = [&](InspectorSession& session) {
+        const auto token = generate_inspector_secret();
+        REQUIRE(token.has_value());
+        InspectorDiscoveryRecord record;
+        record.session_id = session.info().session_id;
+        record.instance_id = session.info().instance_id;
+        record.plugin_id = session.info().plugin_id;
+        InspectorServerConfig config{
+            &session, &publisher, record, *token};
+        config.heartbeat_interval = std::chrono::milliseconds(1);
+        REQUIRE(server.start_authenticated(std::move(config)));
+    };
+
+    for (int iteration = 0; iteration < 8; ++iteration) {
+        auto& expected = iteration % 2 == 0 ? first : second;
+        start(expected);
+        // The cleanup worker polls at 50 ms, so this crosses a refresh
+        // boundary before the next generation replaces the publication.
+        std::this_thread::sleep_for(std::chrono::milliseconds(55));
+        const auto records = reader.list();
+        REQUIRE(records.size() == 1);
+        CHECK(records.front().session_id == expected.info().session_id);
+        CHECK(records.front().instance_id == expected.info().instance_id);
+    }
+}
+
 TEST_CASE("server stop waits for an active request callback",
           "[inspect][client][teardown][concurrency]") {
     TemporaryDirectory temporary;

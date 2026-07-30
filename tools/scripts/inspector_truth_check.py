@@ -53,6 +53,7 @@ FORBIDDEN_CLAIMS = {
     "docs/reference/cli.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
         "same temp-file hint as `pulp inspect`",
+        "defaults to `9147`",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
@@ -60,16 +61,22 @@ FORBIDDEN_CLAIMS = {
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
+        '"name":"pulp_motion_load_fixture"',
     ),
     "docs/status/cli-commands.yaml": (
         "auto-discovery from a temp-file hint",
         "same temp-file auto-discovery as `pulp inspect`",
+        "defaults to 9147",
+    ),
+    "docs/guides/motion-observability.md": (
+        "probes `127.0.0.1:9147`",
     ),
     "experimental/pulp-rs/src/cmd/motion.rs": (
         "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
         ".arg(\"--port\")\n            .arg(port.to_string())",
         "use std::net::TcpStream;",
         "fn inspector_reachable(",
+        "PULP_MOTION_SERVER=1",
     ),
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",

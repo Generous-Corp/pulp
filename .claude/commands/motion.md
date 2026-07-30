@@ -15,7 +15,7 @@ inspector path is reserved but not wired into normal Pulp launches;
 | Just frames (no instrumentation) | **Visual analysis** | `python3 -m tools.motion.visual.analyze_sequence --frames-dir DIR` |
 | A `.motion.jsonl` fixture | **Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction to record | **Input record/replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture to scrub | **Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` |
+| An in-process fixture already loaded by its test host | **Timeline scrubber** | `Motion.scrubTo` |
 | "Which animation is expensive?" | **Cost attribution** | `Motion.enableCost` + `CostAttributor` |
 | SwiftUI / UIKit / AppKit code path | **Swift facade** (Path G) | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Compose / Android View code path | **Kotlin facade** (Path H) | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
@@ -37,7 +37,7 @@ pulp motion stop --trace-id 1
 # 4. Other handy verbs:
 pulp motion snapshot          # view tracing_enabled / active_traces / cost
 pulp motion list-traces       # enumerate inspector-owned trace IDs
-pulp motion load-fixture FOO.motion.jsonl && pulp motion scrub 30
+pulp motion scrub 30
 pulp motion cost enable       # opt in to per-frame cost samples
 ```
 

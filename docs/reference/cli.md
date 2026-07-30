@@ -1296,7 +1296,6 @@ pulp motion record --view Card --out card-fade.motion.jsonl
 pulp motion stop --trace-id 1
 pulp motion snapshot
 pulp motion list-traces
-pulp motion load-fixture card-fade.motion.jsonl
 pulp motion scrub 30
 pulp motion play
 pulp motion pause
@@ -1318,13 +1317,15 @@ Subcommands:
 | `stop [--trace-id N]` | `Motion.stopTrace` | Release an active trace. |
 | `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
 | `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `load-fixture PATH` | `Motion.loadFixture` | Load a `.motion.jsonl` fixture into the scrubber. |
 | `scrub FRAME` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
 | `play` / `pause` | `Motion.play` / `Motion.pause` | Control fixture playback. |
 | `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the session. |
 
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
+`Motion.loadFixture` is intentionally unavailable over an authenticated
+inspector because its server-side path parameter would grant filesystem
+authority. Load replay fixtures inside an explicitly owned test host instead.
 
 ### trace
 
@@ -1354,7 +1355,8 @@ pulp trace open /tmp/x.pftrace                    # serve on loopback + open in 
 
 Options:
 
-- `--port PORT` - inspector port; defaults to `9147` / `$PULP_INSPECTOR_PORT`
+- `--port PORT` - optional filter for owner-private authenticated discovery;
+  `$PULP_INSPECTOR_PORT` supplies the same explicit filter
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:

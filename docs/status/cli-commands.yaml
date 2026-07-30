@@ -1173,13 +1173,6 @@ commands:
         summary: Print tracing, active-trace, emitted-event, and cost-attribution state via `Motion.snapshot`
       - name: list-traces
         summary: List inspector-owned trace ids via `Motion.listTraces`
-      - name: load-fixture
-        summary: Load a `.motion.jsonl` fixture into the scrubber via `Motion.loadFixture`
-        args:
-          - name: path
-            kind: positional
-            required: true
-            description: Fixture path
       - name: scrub
         summary: Move the scrubber playhead to a frame via `Motion.scrubTo`
         args:
@@ -1207,7 +1200,7 @@ commands:
       - name: --port
         kind: option
         required: false
-        description: Inspector port; defaults to 9147 or `$PULP_INSPECTOR_PORT`
+        description: Optional owner-private authenticated discovery filter; `$PULP_INSPECTOR_PORT` supplies the same explicit filter
       - name: --json
         kind: flag
         required: false

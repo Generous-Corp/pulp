@@ -17,7 +17,6 @@
 //! | `stop  [--trace-id N]`          | `Motion.stopTrace`      |
 //! | `snapshot`                      | `Motion.snapshot`       |
 //! | `list-traces`                   | `Motion.listTraces`     |
-//! | `load-fixture <PATH>`           | `Motion.loadFixture`    |
 //! | `scrub <FRAME>`                 | `Motion.scrubTo`        |
 //! | `play`                          | `Motion.play`           |
 //! | `pause`                         | `Motion.pause`          |
@@ -38,13 +37,10 @@
 //!
 //! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
 //! filter. The C++ client performs authenticated ephemeral discovery and the
-//! real protocol connection is the only connection opened. If no session is available it
-//! prints a clear
-//! "no inspector running — start with `PULP_MOTION_SERVER=1
-//! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
-//! This catches the most common user mistake (forgetting to launch
-//! the host) without making the user wait for the C++ binary's own
-//! discovery + connect cycle to fail.
+//! real protocol connection is the only connection opened. If no session is
+//! available, the authenticated client reports that no live session was
+//! discovered and exits 1. No guessed-port probe or unimplemented launcher
+//! flag is involved.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -71,8 +67,6 @@ pub enum Sub {
     Snapshot,
     /// `pulp motion list-traces`.
     ListTraces,
-    /// `pulp motion load-fixture <PATH>`.
-    LoadFixture { path: PathBuf },
     /// `pulp motion scrub <FRAME>`.
     Scrub { frame: i64 },
     /// `pulp motion play`.
@@ -169,7 +163,12 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "stop" => parse_stop(&rest[1..]).map(|s| (s, globals)),
         "snapshot" => Ok((Sub::Snapshot, globals)),
         "list-traces" | "list" => Ok((Sub::ListTraces, globals)),
-        "load-fixture" => parse_load_fixture(&rest[1..]).map(|s| (s, globals)),
+        "load-fixture" => Err(CliError::BadUsage(
+            "pulp motion load-fixture is unavailable: Motion.loadFixture reads \
+             a server-side filesystem path and authenticated inspector policy \
+             rejects it"
+                .to_owned(),
+        )),
         "scrub" => parse_scrub(&rest[1..]).map(|s| (s, globals)),
         "play" => Ok((Sub::Play, globals)),
         "pause" => Ok((Sub::Pause, globals)),
@@ -268,17 +267,6 @@ fn parse_stop(args: &[String]) -> Result<Sub> {
     Ok(Sub::Stop { trace_id })
 }
 
-fn parse_load_fixture(args: &[String]) -> Result<Sub> {
-    let path = args.first().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp motion load-fixture: missing <PATH>".to_owned(),
-        )
-    })?;
-    Ok(Sub::LoadFixture {
-        path: PathBuf::from(path),
-    })
-}
-
 fn parse_scrub(args: &[String]) -> Result<Sub> {
     let frame_s = args.first().ok_or_else(|| {
         CliError::BadUsage("pulp motion scrub: missing <FRAME>".to_owned())
@@ -335,19 +323,6 @@ pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
         )),
         Sub::Snapshot => Some(("Motion.snapshot", "{}".to_owned())),
         Sub::ListTraces => Some(("Motion.listTraces", "{}".to_owned())),
-        Sub::LoadFixture { path } => {
-            // The inspector expects a JSON string; escape backslashes
-            // and quotes minimally so Windows paths and POSIX paths
-            // with spaces both survive the trip.
-            let escaped = path
-                .to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"");
-            Some((
-                "Motion.loadFixture",
-                format!("{{\"path\":\"{escaped}\"}}"),
-            ))
-        }
         Sub::Scrub { frame } => Some((
             "Motion.scrubTo",
             format!("{{\"frame\":{frame}}}"),
@@ -712,10 +687,6 @@ fn write_pretty(
         Sub::ListTraces => {
             writeln!(out, "{trimmed}")?;
         }
-        Sub::LoadFixture { path } => {
-            writeln!(out, "loaded fixture: {}", path.display())?;
-            writeln!(out, "  raw: {trimmed}")?;
-        }
         Sub::Scrub { frame } => {
             writeln!(out, "scrubbed to frame {frame}")?;
             writeln!(out, "  raw: {trimmed}")?;
@@ -764,10 +735,6 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  list-traces                   Motion.listTraces")?;
     writeln!(
         out,
-        "  load-fixture <PATH>           Load a .motion.jsonl fixture (Motion.loadFixture)"
-    )?;
-    writeln!(
-        out,
         "  scrub <FRAME>                 Move the scrubber playhead (Motion.scrubTo)"
     )?;
     writeln!(out, "  play                          Resume scrubber playback")?;
@@ -782,10 +749,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
         out,
         "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
     )?;
-    writeln!(
-        out,
-        "Example: PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &"
-    )?;
+    writeln!(out, "Example: # after a custom host constructs InspectorServer")?;
     writeln!(out, "         pulp motion record --view Card --out card-fade.jsonl")?;
     writeln!(out, "         pulp motion stop --trace-id 1")?;
     Ok(())
@@ -922,9 +886,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_load_fixture_requires_path() {
-        let err = parse(&s(&["load-fixture"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
+    fn load_fixture_is_explicitly_unavailable() {
+        let err = parse(&s(&["load-fixture", "/tmp/a.jsonl"])).unwrap_err();
+        assert!(
+            matches!(err, CliError::BadUsage(message)
+                if message.contains("unavailable")
+                    && message.contains("server-side filesystem path"))
+        );
     }
 
     #[test]
@@ -982,14 +950,6 @@ mod tests {
             "Motion.listTraces"
         );
         assert_eq!(
-            to_inspector_call(&Sub::LoadFixture {
-                path: PathBuf::from("/tmp/a.jsonl"),
-            })
-            .unwrap()
-            .0,
-            "Motion.loadFixture"
-        );
-        assert_eq!(
             to_inspector_call(&Sub::Scrub { frame: 5 }).unwrap().0,
             "Motion.scrubTo"
         );
@@ -1011,15 +971,6 @@ mod tests {
         let (_m, p) =
             to_inspector_call(&Sub::Stop { trace_id: None }).unwrap();
         assert_eq!(p, "{\"trace_id\":0}");
-    }
-
-    #[test]
-    fn to_inspector_call_load_fixture_escapes_path() {
-        let (_m, p) = to_inspector_call(&Sub::LoadFixture {
-            path: PathBuf::from("/tmp/a\"b.jsonl"),
-        })
-        .unwrap();
-        assert!(p.contains("\\\""), "expected escaped quote in {p}");
     }
 
     #[test]
