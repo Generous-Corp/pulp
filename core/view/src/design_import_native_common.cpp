@@ -1493,9 +1493,14 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
 // sprite disc is a body too.
 bool apply_designed_body_skin(View& control, const IRNode& node) {
     if (attr(node, "asset_path")) return false;  // captured art owns its skin
+    // A control lowered from a browser capture carries no body of its own: its
+    // body is the captured bitmap it sits on. It fails the has_body test below
+    // for the very reason it most needs this skin — without it the widget paints
+    // an opaque default body straight over the design it was placed on.
+    const bool body_is_the_capture = attr(node, "designed_body").value_or("") == "capture";
     const bool has_body = node.style.background_gradient || node.style.background_color ||
                           node.style.border_width || !node.style.box_shadow.empty();
-    if (!has_body) return false;
+    if (!has_body && !body_is_the_capture) return false;
 
     // Colours are resolved by the painter from the control's own theme, so a
     // design whose palette was projected reaches its ring without this having

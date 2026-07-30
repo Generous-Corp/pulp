@@ -273,7 +273,28 @@ int lower_semantic_controls(const fs::path& path,
         // IRNode::param_key does not exist; that field belongs to the
         // geometry-detected element struct, which is a different lane.
         control.attributes["binding"] = param;
-        control.audio_label = control.name;
+        // The body of this control is the captured bitmap beneath it, so it
+        // carries no background of its own and would otherwise fail the
+        // has-a-body test that selects the value-only skin -- and be painted
+        // over by an opaque default widget body.
+        control.attributes["designed_body"] = "capture";
+        // The caption is already in the capture. audio_label would draw a
+        // second copy on top of it; the name survives on the node for host
+        // parameter naming.
+        control.audio_label.clear();
+        // The design draws the control at a value; the widget must open at the
+        // same one or the panel changes the moment it loads. Declared, not
+        // inferred: the value lives in a CSS custom property the stylesheet
+        // reads, and which property that is differs per design system.
+        const auto declared_value = string_member(data, "value");
+        if (!declared_value.empty()) {
+            try {
+                control.audio_default = std::stof(declared_value);
+            } catch (const std::exception&) {
+                // A malformed value must not take the control down with it;
+                // the default stands and the design still renders.
+            }
+        }
         control.style.position = "absolute";
         control.style.left = static_cast<float>(number_member(box, "left", 0.0));
         control.style.top = static_cast<float>(number_member(box, "top", 0.0));
