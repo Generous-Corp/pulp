@@ -38,12 +38,19 @@ public:
     struct QueuedEvent {
         InspectorMessage message;
         std::uint64_t generation = 0;
+        std::size_t wire_bytes = 0;
+        bool lossy = false;
     };
 
     struct EventState {
+        static constexpr std::size_t max_pre_auth_events = 16;
+        static constexpr std::size_t max_pre_auth_bytes = 64u * 1024u;
+
         std::mutex mutex;
         std::condition_variable cv;
         detail::BoundedEventQueue<QueuedEvent> events{256};
+        std::deque<QueuedEvent> pre_auth_events;
+        std::size_t pre_auth_bytes = 0;
         EventHandler handler;
         std::thread::id callback_thread;
         std::uint64_t connection_generation = 0;
@@ -155,14 +162,36 @@ public:
         }
         const bool lossy = inspector_event_is_lossy(message.method);
         detail::EventQueuePushResult result;
+        bool notify_event = false;
         {
             std::lock_guard lock(event_state->mutex);
             if (generation != event_state->connection_generation)
                 return;
-            result = event_state->events.push(
-                QueuedEvent{std::move(message), generation}, lossy);
+            QueuedEvent event{
+                std::move(message), generation, text.size(), lossy};
+            if (!event_state->authenticated) {
+                if (event_state->pre_auth_events.size() >=
+                        EventState::max_pre_auth_events ||
+                    event.wire_bytes >
+                        EventState::max_pre_auth_bytes -
+                            event_state->pre_auth_bytes) {
+                    result = lossy
+                        ? detail::EventQueuePushResult::DroppedLossy
+                        : detail::EventQueuePushResult::ReliableOverflow;
+                } else {
+                    event_state->pre_auth_bytes += event.wire_bytes;
+                    event_state->pre_auth_events.push_back(
+                        std::move(event));
+                    result = detail::EventQueuePushResult::Queued;
+                }
+            } else {
+                result = event_state->events.push(
+                    std::move(event), lossy);
+                notify_event =
+                    result == detail::EventQueuePushResult::Queued;
+            }
         }
-        if (result == detail::EventQueuePushResult::Queued) {
+        if (notify_event) {
             event_state->cv.notify_one();
         } else if (result ==
                    detail::EventQueuePushResult::ReliableOverflow) {
@@ -177,6 +206,15 @@ public:
                 return;
             disconnected = true;
             mutually_authenticated = false;
+        }
+        {
+            std::lock_guard lock(event_state->mutex);
+            if (generation == event_state->connection_generation) {
+                event_state->authenticated = false;
+                event_state->events.clear();
+                event_state->pre_auth_events.clear();
+                event_state->pre_auth_bytes = 0;
+            }
         }
         cv.notify_all();
     }
@@ -205,6 +243,8 @@ public:
             event_state->connection_generation = generation;
             event_state->authenticated = false;
             event_state->events.clear();
+            event_state->pre_auth_events.clear();
+            event_state->pre_auth_bytes = 0;
         }
         if (clear_callbacks) {
             connection.set_on_text_message(
@@ -278,6 +318,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         std::lock_guard lock(impl_->event_state->mutex);
         impl_->event_state->connection_generation = generation;
         impl_->event_state->authenticated = false;
+        impl_->event_state->pre_auth_events.clear();
+        impl_->event_state->pre_auth_bytes = 0;
     }
     impl_->connection.set_on_text_message(
         [this, generation](std::string_view message) {
@@ -366,6 +408,13 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         std::lock_guard lock(impl_->event_state->mutex);
         if (impl_->event_state->connection_generation != generation)
             return false;
+        for (auto& event : impl_->event_state->pre_auth_events) {
+            const bool lossy = event.lossy;
+            (void)impl_->event_state->events.push(
+                std::move(event), lossy);
+        }
+        impl_->event_state->pre_auth_events.clear();
+        impl_->event_state->pre_auth_bytes = 0;
         impl_->event_state->authenticated = true;
     }
     impl_->event_state->cv.notify_all();

@@ -162,6 +162,7 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
     std::mutex clients_mutex;
     std::atomic<int> observed_events{0};
     std::atomic<bool> return_valid_server_proof{false};
+    std::atomic<bool> send_oversized_event{false};
     std::vector<std::shared_ptr<pulp::events::InterprocessConnection>>
         fake_clients;
     fake_server.on_client_connected =
@@ -179,7 +180,8 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
             }
             raw->set_on_text_message(
                 [raw, challenge = *challenge, &token,
-                 &return_valid_server_proof](std::string_view message) {
+                 &return_valid_server_proof,
+                 &send_oversized_event](std::string_view message) {
                     pulp::inspect::InspectorMessage request;
                     if (!pulp::inspect::decode_message(
                             std::string(message), request))
@@ -204,10 +206,15 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
                         }
                         server_proof = *generated;
                     }
+                    const auto event_params =
+                        send_oversized_event.load(
+                            std::memory_order_relaxed)
+                        ? std::string(R"({"padding":")") +
+                              std::string(70u * 1024u, 'x') + R"("})"
+                        : R"({"value":0.9})";
                     raw->send_message(pulp::inspect::encode_message(
                         pulp::inspect::make_event(
-                            "State.parameterChanged",
-                            R"({"value":0.9})")));
+                            "State.parameterChanged", event_params)));
                     raw->send_message(pulp::inspect::encode_message(
                         make_response(
                             request.id,
@@ -262,6 +269,11 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
     CHECK_FALSE(client.is_connected());
     CHECK(observed_events.load(std::memory_order_relaxed) == 0);
 
+    send_oversized_event.store(true, std::memory_order_relaxed);
+    CHECK_FALSE(client.connect(records.front(), reader));
+    CHECK(observed_events.load(std::memory_order_relaxed) == 0);
+
+    send_oversized_event.store(false, std::memory_order_relaxed);
     return_valid_server_proof.store(true, std::memory_order_relaxed);
     REQUIRE(client.connect(records.front(), reader));
     const auto event_deadline =
