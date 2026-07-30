@@ -284,6 +284,24 @@ class TestDrift(unittest.TestCase):
         f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "[not json"}, [])
         self.assertEqual(kinds(f, gate.ERROR), ["malformed"])
 
+    def test_a_declared_sentinel_is_off_not_malformed(self):
+        # A sentinel is a bare word by design, so it cannot parse as JSON. The
+        # live `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only` — the
+        # documented off switch — was therefore reported as an ERROR claiming
+        # `fromJSON()` would fail at dispatch. A standing error for an intended
+        # state is worse than no check: it teaches readers to skim the report,
+        # which is where the real drift hides.
+        c = contract([lane(variable="PULP_X_RUNS_ON_JSON")])
+        f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "local-only"}, [])
+        self.assertEqual(kinds(f, gate.ERROR), [])
+
+    def test_an_undeclared_bare_word_is_still_malformed(self):
+        # The escape must be the contract's declared vocabulary, not "any
+        # unparseable string" — otherwise a typo'd label set becomes silent.
+        c = contract([lane(variable="PULP_X_RUNS_ON_JSON")], sentinels=())
+        f = gate.check(c, runners(), {"PULP_X_RUNS_ON_JSON": "local-only"}, [])
+        self.assertEqual(kinds(f, gate.ERROR), ["malformed"])
+
 
 # ── GitHub-hosted lanes are allowlisted, not guessed ────────────────────
 
@@ -419,7 +437,16 @@ class TestShippedContract(unittest.TestCase):
         gate_lane = next(ln for ln in self.c.lanes
                          if ln.variable == "PULP_LOCAL_MACOS_RUNS_ON_JSON")
         self.assertEqual(gate_lane.severity, "required")
-        self.assertEqual(gate_lane.provisioning, "persistent")
+        # Ephemeral, not persistent. The gate runs on clean-per-job tartci VMs
+        # precisely so it cannot inherit a warm build dir from another branch —
+        # the reuse behind the 2026-06-07 SEGFAULT cluster, which `clean: false`
+        # on self-hosted makes the default for a persistent runner. Routing this
+        # lane back to the persistent Studios would reopen that class, so the
+        # assertion is on the property that protects the gate, not on whatever
+        # it happened to be provisioned by when this test was written.
+        self.assertEqual(gate_lane.provisioning, "ephemeral")
+        self.assertIn("pulp-build-vm", gate_lane.expect)
+        self.assertNotIn("pulp-build-studio", gate_lane.expect)
 
     def test_namespace_paid_overflow_is_contracted_unset(self):
         self.assertIn("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",

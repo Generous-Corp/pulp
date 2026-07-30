@@ -37,15 +37,15 @@
   "lanes": [
     {
       "variable": "PULP_LOCAL_MACOS_RUNS_ON_JSON",
-      "purpose": "The REQUIRED macOS gate. Every PR merge depends on this lane resolving.",
+      "purpose": "The REQUIRED macOS gate. Every PR merge depends on this lane resolving. Routed to ephemeral tartci VMs (`pulp-build-vm`), NOT the persistent `pulp-build-studio` runners: a VM is clean per job, so the gate cannot inherit a warm build dir from an unrelated branch. That reuse is what produced the 2026-06-07 random-SEGFAULT cluster across many PRs at once, and `build.yml` sets `clean: false` on self-hosted, so the persistent runners keep their dirs by design.",
       "expect": [
         "self-hosted",
         "macOS",
         "ARM64",
         "pulp-build",
-        "pulp-build-studio"
+        "pulp-build-vm"
       ],
-      "provisioning": "persistent",
+      "provisioning": "ephemeral",
       "severity": "required",
       "hosts": [
         "pulp-studio-01",
