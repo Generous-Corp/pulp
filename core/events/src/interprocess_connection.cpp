@@ -272,13 +272,13 @@ void InterprocessConnection::disconnect() {
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
     impl_->interrupt_blocking_io();
-    std::unique_lock write_lock(impl_->write_mutex);
     if (read_thread_.joinable()) {
         if (read_thread_.get_id() == std::this_thread::get_id())
             read_thread_.detach();
         else
             read_thread_.join();
     }
+    std::unique_lock write_lock(impl_->write_mutex);
     impl_->close();
     write_lock.unlock();
 

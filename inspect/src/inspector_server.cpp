@@ -278,6 +278,10 @@ public:
     }
 
     ~Impl() {
+        stop_cleanup();
+    }
+
+    void stop_cleanup() {
         {
             std::lock_guard lock(clients_mutex);
             stopping_cleanup = true;
@@ -337,6 +341,9 @@ InspectorServer::InspectorServer() : impl_(std::make_shared<Impl>()) {
 
 InspectorServer::~InspectorServer() {
     stop();
+    impl_->stop_cleanup();
+    impl_->owner = nullptr;
+    impl_->on_message = {};
 }
 
 bool InspectorServer::start_authenticated(InspectorServerConfig config) {
