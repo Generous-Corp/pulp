@@ -1587,3 +1587,97 @@ TEST_CASE("IPC disconnect callback may destroy its own connection",
         server.accepted->disconnect();
     server.stop();
 }
+
+TEST_CASE("IPC destruction waits for an in-flight disconnect callback",
+          "[events][ipc][socket][owner-lifetime][lifecycle]") {
+    CapturingServer server;
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    std::mutex callback_mutex;
+    std::condition_variable callback_cv;
+    bool callback_entered = false;
+    bool release_callback = false;
+
+    auto client = std::make_unique<InterprocessConnection>();
+    client->set_on_disconnected([&] {
+        std::unique_lock lock(callback_mutex);
+        callback_entered = true;
+        callback_cv.notify_all();
+        callback_cv.wait(lock, [&] { return release_callback; });
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    auto* raw_client = client.get();
+    std::thread disconnect_thread([&] { raw_client->disconnect(); });
+    bool entered = false;
+    {
+        std::unique_lock lock(callback_mutex);
+        entered = callback_cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return callback_entered; });
+    }
+    if (!entered) {
+        {
+            std::lock_guard lock(callback_mutex);
+            release_callback = true;
+        }
+        callback_cv.notify_all();
+        disconnect_thread.join();
+        if (server.accepted) server.accepted->disconnect();
+        server.stop();
+    }
+    REQUIRE(entered);
+
+    std::atomic<bool> destruction_started{false};
+    std::atomic<bool> destruction_finished{false};
+    std::thread destroy_thread(
+        [owned = std::move(client), &destruction_started,
+         &destruction_finished]() mutable {
+            destruction_started.store(true, std::memory_order_release);
+            owned.reset();
+            destruction_finished.store(true, std::memory_order_release);
+        });
+    const auto destruction_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!destruction_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < destruction_start_deadline) {
+        std::this_thread::yield();
+    }
+    const bool started =
+        destruction_started.load(std::memory_order_acquire);
+    if (!started) {
+        {
+            std::lock_guard lock(callback_mutex);
+            release_callback = true;
+        }
+        callback_cv.notify_all();
+        disconnect_thread.join();
+        destroy_thread.join();
+        if (server.accepted) server.accepted->disconnect();
+        server.stop();
+    }
+    REQUIRE(started);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_FALSE(destruction_finished.load(std::memory_order_acquire));
+
+    {
+        std::lock_guard lock(callback_mutex);
+        release_callback = true;
+    }
+    callback_cv.notify_all();
+
+    disconnect_thread.join();
+    destroy_thread.join();
+    CHECK(destruction_finished.load(std::memory_order_acquire));
+
+    if (server.accepted) server.accepted->disconnect();
+    server.stop();
+}
