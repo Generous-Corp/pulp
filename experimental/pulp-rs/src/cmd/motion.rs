@@ -28,17 +28,18 @@
 //! The inspector socket uses a 4-byte little-endian length-prefix
 //! frame (`core/events/src/interprocess_connection.cpp`), and the
 //! C++ `pulp inspect --command METHOD --params JSON` path already
-//! speaks it correctly, knows how to auto-discover the port via
-//! `/tmp/pulp-inspector-*.port`, and prints the parsed JSON
+//! speaks it correctly, knows how to select authenticated ephemeral
+//! discovery records, and prints the parsed JSON
 //! response. Re-implementing length-prefix framing + port discovery
 //! in Rust would duplicate logic that already lives in the inspect
 //! adapter. The shell-out is what the MCP wrapper does too.
 //!
 //! # Reachability gate (off-by-default ergonomics)
 //!
-//! Every verb runs a quick `TcpStream::connect` against
-//! `127.0.0.1:<port>` first (default 9147, override via
-//! `PULP_INSPECTOR_PORT`). If nothing is listening we print a clear
+//! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
+//! filter and gets a quick reachability probe. Without one, the C++ client
+//! performs authenticated ephemeral discovery. If no session is available it
+//! prints a clear
 //! "no inspector running — start with `PULP_MOTION_SERVER=1
 //! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
 //! This catches the most common user mistake (forgetting to launch
@@ -53,14 +54,7 @@ use std::time::Duration;
 
 use crate::error::{CliError, Result};
 
-/// Default inspector port — matches `inspect/src/inspector_server.cpp`
-/// `kDefaultPort`. The C++ side also honours `PULP_INSPECTOR_PORT`;
-/// we honor the same env var here so a non-default host stays
-/// reachable.
-pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;
-
-/// Env var that overrides [`DEFAULT_INSPECTOR_PORT`]. Same name the
-/// C++ inspector server reads on startup.
+/// Optional explicit discovery filter understood by the wrapper.
 pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 
 /// Parsed `pulp motion …` subcommand. One variant per verb; each
@@ -97,8 +91,8 @@ pub struct GlobalFlags {
     /// `--json` — emit raw inspector JSON instead of the
     /// pretty-printed default.
     pub json: bool,
-    /// Optional explicit port. Falls back to
-    /// `$PULP_INSPECTOR_PORT`, then [`DEFAULT_INSPECTOR_PORT`].
+    /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
+    /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
 }
 
@@ -152,9 +146,15 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             let v = args.get(i).ok_or_else(|| {
                 CliError::BadUsage("--port requires a value".to_owned())
             })?;
-            globals.port = Some(v.parse::<u16>().map_err(|_| {
+            let port = v.parse::<u16>().map_err(|_| {
                 CliError::BadUsage(format!("--port: invalid u16 value `{v}`"))
-            })?);
+            })?;
+            if port == 0 {
+                return Err(CliError::BadUsage(
+                    "--port must be between 1 and 65535".to_owned(),
+                ));
+            }
+            globals.port = Some(port);
         } else {
             rest.push(a.clone());
         }
@@ -485,9 +485,9 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // Reachability probe — fail fast with a clear message before
-        // the C++ binary's slower discovery+connect cycle would.
-        if !inspector_reachable(port) {
+        // An explicit port is only a discovery filter. With no filter, let
+        // the authenticated C++ client select the exact ephemeral session.
+        if port != 0 && !inspector_reachable(port) {
             return Err(CliError::Other(no_inspector_hint(port)));
         }
         let bin = resolve_inspect_binary().ok_or_else(|| {
@@ -498,10 +498,12 @@ impl InspectorTalker for SystemInspector {
                     .to_owned(),
             )
         })?;
-        let output = Command::new(&bin)
-            .arg("inspect")
-            .arg("--port")
-            .arg(port.to_string())
+        let mut command = Command::new(&bin);
+        command.arg("inspect");
+        if port != 0 {
+            command.arg("--port").arg(port.to_string());
+        }
+        let output = command
             .arg("--command")
             .arg(method)
             .arg("--params")
@@ -585,7 +587,8 @@ fn no_inspector_hint(port: u16) -> String {
     )
 }
 
-/// Resolve the effective port from CLI flags + env.
+/// Resolve the explicit port filter from CLI flags + env. Zero delegates
+/// selection to authenticated discovery.
 #[must_use]
 pub fn resolve_port(flags: &GlobalFlags) -> u16 {
     if let Some(p) = flags.port {
@@ -596,7 +599,7 @@ pub fn resolve_port(flags: &GlobalFlags) -> u16 {
             return p;
         }
     }
-    DEFAULT_INSPECTOR_PORT
+    0
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure
@@ -639,11 +642,19 @@ pub fn dispatch<T: InspectorTalker>(
     // delivers.
     if let Sub::Record(r) = sub {
         if let Some(ref out_path) = r.out {
-            writeln!(
-                out,
-                "# motion trace started; live event stream is on port {port}.",
-            )
-            .map_err(io_err)?;
+            if port == 0 {
+                writeln!(
+                    out,
+                    "# motion trace started on the authenticated inspector session.",
+                )
+                .map_err(io_err)?;
+            } else {
+                writeln!(
+                    out,
+                    "# motion trace started; live event stream is on port {port}.",
+                )
+                .map_err(io_err)?;
+            }
             writeln!(
                 out,
                 "# --out {} is a fixture HINT — the inspector wire does",
@@ -790,7 +801,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  --json                        Print the raw inspector JSON response")?;
     writeln!(
         out,
-        "  --port N                      Override the inspector port (default 9147 / $PULP_INSPECTOR_PORT)\n"
+        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
     )?;
     writeln!(
         out,
@@ -845,6 +856,12 @@ mod tests {
     #[test]
     fn parse_port_rejects_garbage() {
         let err = parse(&s(&["--port", "nope", "snapshot"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_port_rejects_zero() {
+        let err = parse(&s(&["--port", "0", "snapshot"])).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
@@ -1074,19 +1091,18 @@ mod tests {
     }
 
     #[test]
-    fn resolve_port_prefers_explicit_then_env_then_default() {
+    fn resolve_port_prefers_explicit_and_otherwise_auto_discovers() {
         // Explicit wins.
         let g = GlobalFlags {
             json: false,
             port: Some(1234),
         };
         assert_eq!(resolve_port(&g), 1234);
-        // Default applies when nothing is set.
+        // With no explicit filter, zero delegates to authenticated discovery.
         let g = GlobalFlags::default();
-        // Note: we don't unset `PULP_INSPECTOR_PORT` here — assume CI
-        // doesn't export it. The fallback chain is otherwise covered
-        // by the explicit-port branch above.
-        assert!(matches!(resolve_port(&g), 9147 | _));
+        if std::env::var_os(INSPECTOR_PORT_ENV).is_none() {
+            assert_eq!(resolve_port(&g), 0);
+        }
     }
 
     #[test]
@@ -1148,6 +1164,7 @@ mod tests {
         dispatch(&Sub::Snapshot, &GlobalFlags::default(), &t, &mut buf).unwrap();
         let calls = t.calls.borrow();
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, 0);
         assert_eq!(calls[0].1, "Motion.snapshot");
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("tracing_enabled"));

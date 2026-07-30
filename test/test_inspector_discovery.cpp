@@ -12,6 +12,12 @@
 
 #ifndef _WIN32
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/proc.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 #endif
 
 using namespace std::chrono_literals;
@@ -245,6 +251,74 @@ TEST_CASE("discovery rejects a stale record after process id reuse",
     InspectorDiscoveryReader reader(temporary.path);
     CHECK(reader.list().empty());
 }
+
+#ifdef __APPLE__
+TEST_CASE("discovery rejects a zombie publisher on macOS",
+          "[inspect][discovery][security][macos]") {
+    struct ZombieChild {
+        pid_t pid = -1;
+        ~ZombieChild() {
+            if (pid > 0) {
+                int status = 0;
+                (void)::waitpid(pid, &status, 0);
+            }
+        }
+    } child{::fork()};
+    REQUIRE(child.pid >= 0);
+    if (child.pid == 0)
+        ::_exit(0);
+
+    proc_bsdinfo child_info{};
+    bool observed_exited_child = false;
+    int child_info_bytes = 0;
+    for (int attempt = 0; attempt < 100 && !observed_exited_child; ++attempt) {
+        child_info_bytes =
+            proc_pidinfo(child.pid, PROC_PIDTBSDINFO, 0, &child_info,
+                         sizeof(child_info));
+        observed_exited_child =
+            child_info_bytes == 0 ||
+            (child_info_bytes == sizeof(child_info) &&
+             child_info.pbi_status == SZOMB);
+        if (!observed_exited_child)
+            std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(observed_exited_child);
+
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    REQUIRE(publisher.publish(fixture_record("zombie-process"), *token, 5s));
+    REQUIRE(publisher.record().has_value());
+
+    std::ifstream input(publisher.record()->record_path, std::ios::binary);
+    std::string json((std::istreambuf_iterator<char>(input)),
+                     std::istreambuf_iterator<char>());
+    const auto current_pid = std::to_string(publisher.record()->process_id);
+    const auto pid_key = json.find("\"pid\"");
+    REQUIRE(pid_key != std::string::npos);
+    const auto pid_position = json.find(current_pid, pid_key);
+    REQUIRE(pid_position != std::string::npos);
+    json.replace(pid_position, current_pid.size(), std::to_string(child.pid));
+
+    const auto current_start = publisher.record()->process_start_id;
+    const auto zombie_start = child_info_bytes == sizeof(child_info)
+        ? std::to_string(child_info.pbi_start_tvsec) + ":" +
+              std::to_string(child_info.pbi_start_tvusec)
+        : "0:0";
+    const auto start_position = json.find(current_start);
+    REQUIRE(start_position != std::string::npos);
+    json.replace(start_position, current_start.size(), zombie_start);
+
+    std::ofstream output(publisher.record()->record_path,
+                         std::ios::binary | std::ios::trunc);
+    REQUIRE(static_cast<bool>(output << json));
+    output.close();
+
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+}
+#endif
 
 #ifndef _WIN32
 TEST_CASE("discovery reader does not harden an insecure runtime directory",
