@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -14,6 +16,25 @@
 #endif
 
 namespace pulp::signal {
+
+/// Conservative policy charge for Accelerate's opaque float FFT setup. Apple
+/// does not expose its allocation size, so admission treats the setup as one
+/// allocation bounded at 64 bytes per transform point. Non-vDSP transforms do
+/// not own this allocation and therefore charge zero.
+inline constexpr std::uint64_t kVdspFftSetupChargeBytesPerPoint = 64;
+
+template <typename SampleType>
+inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
+                                             std::uint64_t target_max_bytes,
+                                             std::uint64_t& bytes) noexcept {
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>)
+        return checked_capacity_product(fft_size, kVdspFftSetupChargeBytesPerPoint,
+                                        target_max_bytes, bytes);
+#endif
+    bytes = 0;
+    return true;
+}
 
 // Radix-2 FFT — in-place, decimation-in-time.
 // Size must be a power of 2.

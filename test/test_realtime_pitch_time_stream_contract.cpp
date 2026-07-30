@@ -3,6 +3,7 @@
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -22,6 +23,96 @@ RealtimePitchTimeConfig stream_config(int max_block) {
     config.channels = 1;
     config.max_block = max_block;
     return config;
+}
+
+template <typename Element>
+constexpr std::uint64_t store_bytes(std::uint64_t elements) {
+    return elements * sizeof(Element);
+}
+
+struct RetainedChargeOracle {
+    std::uint64_t total = 0;
+    std::uint64_t platform_fft_setups = 0;
+    std::uint64_t morpher_env_a = 0;
+    std::uint64_t morpher_env_b = 0;
+    std::uint64_t magnitude_scratch = 0;
+};
+
+RetainedChargeOracle exact_owned_store_charge(
+    const RealtimePitchTimeConfig& config,
+    const RealtimePitchTimePreparedGeometry<float>& prepared) {
+    const auto engine = checked_spectral_frame_engine_geometry<float>(prepared.engine_config);
+    REQUIRE(engine);
+    const auto channels = static_cast<std::uint64_t>(config.channels);
+    const auto fft_size = static_cast<std::uint64_t>(prepared.fft_size);
+    const auto bins = fft_size / 2u + 1u;
+    const auto channel_bins = channels * bins;
+    const auto capture_bins = 8u * bins;
+
+    RetainedChargeOracle result;
+#if PULP_FFT_HAS_VDSP
+    result.platform_fft_setups =
+        2u * fft_size * kVdspFftSetupChargeBytesPerPoint;
+    const auto platform_split_buffers = 4u * store_bytes<float>(fft_size);
+#else
+    const std::uint64_t platform_split_buffers = 0;
+#endif
+
+    const std::array base_stores{
+        store_bytes<float>(engine->input_ring_elements),
+        store_bytes<float>(engine->output_ring_elements),
+        store_bytes<float>(engine->ring_size),
+        store_bytes<float>(fft_size), // engine window
+        store_bytes<float>(fft_size), // engine time scratch
+        store_bytes<std::complex<float>>(engine->frame_elements),
+        store_bytes<std::complex<float>>(fft_size), // engine frequency scratch
+        store_bytes<std::complex<float>*>(channels),
+        store_bytes<std::complex<double>>(fft_size / 2u), // engine twiddles
+        platform_split_buffers,
+        result.platform_fft_setups,
+        store_bytes<float>(prepared.stretch_ring_elements),
+        store_bytes<float>(prepared.drain_elements),
+        store_bytes<float>(prepared.finalize_zero_elements),
+        store_bytes<float*>(channels),
+        store_bytes<const float*>(channels),
+        3u * store_bytes<double>(bins), // coordinator phases
+        store_bytes<float>(bins), // coordinator reference magnitude
+        store_bytes<int>(bins), // coordinator peaks
+        store_bytes<float>(bins), // transient history
+        store_bytes<float>(channels * capture_bins),
+        store_bytes<double>(capture_bins),
+        store_bytes<float>(channel_bins),
+        store_bytes<double>(channel_bins),
+        store_bytes<double>(bins),
+        3u * store_bytes<float>(bins), // envelope scratch vectors
+        store_bytes<std::complex<float>>(fft_size), // envelope cepstrum
+        store_bytes<std::complex<double>>(fft_size / 2u), // envelope twiddles
+    };
+    for (const auto bytes : base_stores) result.total += bytes;
+
+    if (config.noise_morphing) {
+        const auto time_median = config.quality == PitchTimeQuality::quality ? 7u : 5u;
+        const auto freq_median = config.quality == PitchTimeQuality::quality ? 11u : 7u;
+        result.morpher_env_a = channels * store_bytes<float>(bins);
+        result.morpher_env_b = channels * store_bytes<float>(bins);
+        result.magnitude_scratch = store_bytes<float>(bins);
+        const std::array noise_stores{
+            store_bytes<float>(time_median * bins),
+            5u * store_bytes<float>(bins), // three masks plus harmonic/percussive
+            store_bytes<float>(time_median),
+            store_bytes<float>(freq_median),
+            store_bytes<NoiseMorpher>(channels),
+            result.morpher_env_a,
+            result.morpher_env_b,
+            result.magnitude_scratch,
+            store_bytes<float>(channel_bins),
+            store_bytes<std::complex<float>>(bins),
+        };
+        for (const auto bytes : noise_stores) result.total += bytes;
+    }
+    if (config.sinc_resampling)
+        result.total += store_bytes<float>(513u * 32u) + store_bytes<float>(32u);
+    return result;
 }
 
 std::vector<float> sine(double frequency, double amplitude, int frames) {
@@ -234,7 +325,13 @@ TEST_CASE("RealtimePitchTimeProcessor rejects target-byte capacity atomically",
     auto ordinary = stream_config(256);
     ordinary.max_time_ratio = 1.0f;
     ordinary.channels = 2;
+#if PULP_FFT_HAS_VDSP
+    // The opaque setup policy is the largest float allocation on Apple. The
+    // double path has no setup, but its freeze capture is 65,664 bytes.
+    constexpr std::uint64_t float_capacity_bytes = 64u * 1024u;
+#else
     constexpr std::uint64_t float_capacity_bytes = 8'208ULL * sizeof(float);
+#endif
     RealtimePitchTimeProcessor float_processor;
     REQUIRE(float_processor.prepare(kSampleRate, ordinary, float_capacity_bytes)
             == PitchTimePrepareStatus::prepared);
@@ -268,10 +365,26 @@ TEST_CASE("RealtimePitchTime prepared geometry reports every retained backing st
     base_config.channels = 1;
     base_config.max_time_ratio = 1.0f;
     const auto base = geometry(base_config);
+    const auto base_oracle = exact_owned_store_charge(base_config, base);
+    REQUIRE(base.retained_bytes == base_oracle.total);
+
+    std::uint64_t platform_setup_bytes = 1;
+    REQUIRE(checked_fft_platform_setup_bytes<float>(base.fft_size, UINT64_MAX,
+                                                    platform_setup_bytes));
+#if PULP_FFT_HAS_VDSP
+    REQUIRE(platform_setup_bytes == static_cast<std::uint64_t>(base.fft_size)
+                                         * kVdspFftSetupChargeBytesPerPoint);
+    REQUIRE(base_oracle.platform_fft_setups == 2u * platform_setup_bytes);
+    REQUIRE_FALSE(checked_fft_platform_setup_bytes<float>(
+        base.fft_size, platform_setup_bytes - 1, platform_setup_bytes));
+#else
+    REQUIRE(platform_setup_bytes == 0);
+#endif
 
     auto stereo_config = base_config;
     stereo_config.channels = 2;
     const auto stereo = geometry(stereo_config);
+    REQUIRE(stereo.retained_bytes == exact_owned_store_charge(stereo_config, stereo).total);
     REQUIRE(stereo.retained_bytes > base.retained_bytes);
 
     auto wider_block_config = stereo_config;
@@ -282,11 +395,17 @@ TEST_CASE("RealtimePitchTime prepared geometry reports every retained backing st
     auto noise_config = stereo_config;
     noise_config.noise_morphing = true;
     const auto noise = geometry(noise_config);
+    const auto noise_oracle = exact_owned_store_charge(noise_config, noise);
+    REQUIRE(noise.retained_bytes == noise_oracle.total);
+    REQUIRE(noise_oracle.morpher_env_a == noise_oracle.morpher_env_b);
+    REQUIRE(noise_oracle.magnitude_scratch ==
+            store_bytes<float>(static_cast<std::uint64_t>(noise.fft_size / 2 + 1)));
     REQUIRE(noise.retained_bytes > stereo.retained_bytes);
 
     auto sinc_config = stereo_config;
     sinc_config.sinc_resampling = true;
     const auto sinc = geometry(sinc_config);
+    REQUIRE(sinc.retained_bytes == exact_owned_store_charge(sinc_config, sinc).total);
     REQUIRE(sinc.retained_bytes > stereo.retained_bytes);
 
     // The retained charge is an aggregate, not a second address ceiling.
@@ -295,6 +414,19 @@ TEST_CASE("RealtimePitchTime prepared geometry reports every retained backing st
                 base_config, 1.0, 64u * 1024u, bounded)
             == PitchTimePrepareStatus::prepared);
     REQUIRE(bounded.retained_bytes > 64u * 1024u);
+
+    // Each NoiseMorpher owns its own env vector. Their aggregate may exceed
+    // the address ceiling even though every individual allocation fits it.
+    constexpr std::uint64_t env_bins = 513;
+    constexpr std::uint64_t morphers = 64;
+    constexpr std::uint64_t allocation_ceiling = 4u * 1024u;
+    std::uint64_t repeated_bytes = 0;
+    REQUIRE(checked_repeated_allocation_bytes<float>(
+        env_bins, morphers, allocation_ceiling, repeated_bytes));
+    REQUIRE(store_bytes<float>(env_bins) <= allocation_ceiling);
+    REQUIRE(repeated_bytes > allocation_ceiling);
+    REQUIRE_FALSE(checked_repeated_allocation_bytes<float>(
+        env_bins, morphers, store_bytes<float>(env_bins) - 1, repeated_bytes));
 }
 
 TEST_CASE("RealtimePitchTimeProcessor partial EOF read preserves the real prefix",
