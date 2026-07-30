@@ -303,6 +303,51 @@ TEST_CASE("authenticated client completes read and controlled mutation",
             .is_error);
 }
 
+TEST_CASE("oversized inspector responses return a bounded protocol error",
+          "[inspect][client][resource-limit]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    InspectorSession session(
+        {"session-large-response", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) {
+            return make_response(
+                request.id,
+                std::string(R"({"padding":")") +
+                    std::string(4096, 'x') + R"("})");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.max_message_bytes = 1024;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    const auto response = client.request(
+        "State.getParameters", "{}", std::chrono::milliseconds(100));
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "response_too_large");
+    CHECK(client.is_connected());
+    CHECK_FALSE(
+        client.request("Session.getCapabilities").is_error);
+}
+
 TEST_CASE("authenticated client rejects a challenge for another instance",
           "[inspect][client][authentication][instance]") {
     AuthenticatedFixture fixture;

@@ -40,6 +40,12 @@ class InspectorAuthVerifier {
 public:
     InspectorAuthVerifier(std::vector<std::uint8_t> token,
                           InspectorAuthChallenge challenge);
+    ~InspectorAuthVerifier();
+
+    InspectorAuthVerifier(const InspectorAuthVerifier&) = delete;
+    InspectorAuthVerifier& operator=(const InspectorAuthVerifier&) = delete;
+    InspectorAuthVerifier(InspectorAuthVerifier&&) = delete;
+    InspectorAuthVerifier& operator=(InspectorAuthVerifier&&) = delete;
 
     const InspectorAuthChallenge& challenge() const { return challenge_; }
     bool verify(std::string_view proof_hex);

@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/authentication.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include "bounded_event_queue.hpp"
@@ -20,6 +21,7 @@ namespace pulp::inspect {
 namespace {
 
 constexpr std::size_t kMaxJsonNestingDepth = 64;
+constexpr std::size_t kMinimumMessageBytes = 1024;
 
 bool json_nesting_is_bounded(std::string_view text) {
     std::size_t depth = 0;
@@ -128,6 +130,7 @@ public:
                 auto retained = connection;
                 lock.unlock();
                 if (retained && !retained->send_message(*message)) {
+                    retained->disconnect();
                     lock.lock();
                     stopping = true;
                     messages.clear();
@@ -174,6 +177,7 @@ public:
     std::chrono::steady_clock::time_point next_heartbeat{};
     std::chrono::milliseconds heartbeat_interval =
         std::chrono::seconds(10);
+    std::size_t max_message_bytes = 1024u * 1024u;
 
     class CallbackGuard {
     public:
@@ -405,6 +409,8 @@ public:
     int client_count();
     void on_message_received(const std::string& data,
                              events::InterprocessConnection* sender);
+    bool send_response(events::InterprocessConnection* sender,
+                       const InspectorMessage& response);
 };
 
 InspectorServer::InspectorServer() : impl_(std::make_shared<Impl>()) {
@@ -462,9 +468,10 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     }
     authentication_timeout =
         std::max(config.authentication_timeout, std::chrono::milliseconds(1));
-    server.set_max_message_bytes(
-        std::clamp<std::size_t>(config.max_message_bytes, 1,
-                                16u * 1024u * 1024u));
+    max_message_bytes = std::clamp<std::size_t>(
+        config.max_message_bytes, kMinimumMessageBytes,
+        16u * 1024u * 1024u);
+    server.set_max_message_bytes(max_message_bytes);
     server.set_write_timeout(std::chrono::seconds(3));
     server.set_frame_read_timeout(
         std::max(config.frame_read_timeout, std::chrono::milliseconds(1)));
@@ -620,7 +627,7 @@ void InspectorServer::Impl::stop_locked() {
             discovery->remove();
         discovery = nullptr;
         session = nullptr;
-        std::fill(token.begin(), token.end(), std::uint8_t{0});
+        pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();
     }
     port.store(0, std::memory_order_release);
@@ -676,14 +683,32 @@ int InspectorServer::Impl::client_count() {
         }));
 }
 
+bool InspectorServer::Impl::send_response(
+    events::InterprocessConnection* sender,
+    const InspectorMessage& response) {
+    auto payload = encode_message(response);
+    if (payload.size() > max_message_bytes) {
+        payload = encode_message(make_error(
+            response.id,
+            "Inspector response exceeds the message-size limit",
+            "response_too_large"));
+    }
+    if (payload.size() > max_message_bytes ||
+        !sender->send_message(payload)) {
+        sender->disconnect();
+        return false;
+    }
+    return true;
+}
+
 void InspectorServer::Impl::on_message_received(
     const std::string& data,
     events::InterprocessConnection* sender) {
     if (!json_nesting_is_bounded(data)) {
-        sender->send_message(encode_message(make_error(
+        send_response(sender, make_error(
             0,
             "Inspector message exceeds the JSON nesting limit",
-            "message_too_deep")));
+            "message_too_deep"));
         sender->disconnect();
         return;
     }
@@ -691,8 +716,7 @@ void InspectorServer::Impl::on_message_received(
     if (!decode_message(data, request)) {
         // Invalid JSON — send error
         auto err = make_error(0, "Invalid JSON message");
-        auto json = encode_message(err);
-        sender->send_message(json.data(), json.size());
+        send_response(sender, err);
         return;
     }
 
@@ -717,7 +741,7 @@ void InspectorServer::Impl::on_message_received(
                     request.id,
                     "Authenticate before issuing inspector requests",
                     "authentication_required");
-                sender->send_message(encode_message(response));
+                send_response(sender, response);
                 sender->disconnect();
                 return;
             }
@@ -745,26 +769,28 @@ void InspectorServer::Impl::on_message_received(
                     make_error(request.id,
                                "Inspector authentication failed",
                                "authentication_failed");
-                sender->send_message(encode_message(response));
+                send_response(sender, response);
                 sender->disconnect();
                 return;
             }
-            sender->send_message(
-                encode_message(make_response(
-                    request.id, R"({"authenticated":true})")));
+            send_response(
+                sender,
+                make_response(
+                    request.id, R"({"authenticated":true})"));
             return;
         }
 
         const auto response = session->handle(client_id, request);
         if (response.id != 0 || !response.method.empty())
-            sender->send_message(encode_message(response));
+            send_response(sender, response);
         return;
     }
 
-    sender->send_message(encode_message(
+    send_response(
+        sender,
         make_error(request.id,
                    "No authenticated inspector session is active",
-                   "session_inactive")));
+                   "session_inactive"));
 }
 
 } // namespace pulp::inspect

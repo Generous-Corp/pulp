@@ -98,6 +98,10 @@ InspectorAuthVerifier::InspectorAuthVerifier(
     : token_(std::move(token)),
       challenge_(std::move(challenge)) {}
 
+InspectorAuthVerifier::~InspectorAuthVerifier() {
+    pulp::runtime::secure_zero_memory(token_.data(), token_.size());
+}
+
 bool InspectorAuthVerifier::verify(std::string_view proof_hex) {
     if (consumed_)
         return false;
@@ -105,7 +109,7 @@ bool InspectorAuthVerifier::verify(std::string_view proof_hex) {
 
     const auto expected = make_inspector_auth_proof(token_, challenge_);
     const auto supplied = decode_hex(proof_hex);
-    std::fill(token_.begin(), token_.end(), std::uint8_t{0});
+    pulp::runtime::secure_zero_memory(token_.data(), token_.size());
     if (!expected || !supplied || supplied->size() != 32)
         return false;
     const auto expected_bytes = decode_hex(*expected);

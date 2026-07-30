@@ -25,6 +25,12 @@ namespace pulp::runtime {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+void secure_zero_memory(void* data, size_t size) noexcept {
+    auto* bytes = static_cast<volatile uint8_t*>(data);
+    while (size-- > 0)
+        *bytes++ = 0;
+}
+
 static std::string bytes_to_hex(const uint8_t* data, size_t size) {
     std::ostringstream ss;
     for (size_t i = 0; i < size; ++i)
