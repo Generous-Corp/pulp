@@ -102,6 +102,20 @@ TEST_CASE("tempo sync request and state validation fail closed", "[playback][tem
     std::int64_t invalid_block_end = 0;
     REQUIRE_FALSE(tempo_sync_block_end_host_time_micros(request, invalid_block_end));
 
+    request.output_host_time_micros = std::numeric_limits<std::int64_t>::max() - 100;
+    request.frame_count = 101;
+    request.sample_rate = 1'000'000.0;
+    REQUIRE_FALSE(tempo_sync_block_end_host_time_micros(request, invalid_block_end));
+    request.frame_count = 100;
+    REQUIRE(tempo_sync_block_end_host_time_micros(request, invalid_block_end));
+    REQUIRE(invalid_block_end == std::numeric_limits<std::int64_t>::max());
+
+    request.output_host_time_micros = 0;
+    request.frame_count = std::numeric_limits<std::uint32_t>::max();
+    request.sample_rate =
+        std::ldexp(static_cast<double>(request.frame_count) * 1'000'000.0, -63);
+    REQUIRE_FALSE(tempo_sync_block_end_host_time_micros(request, invalid_block_end));
+
     TempoSyncBlockState state;
     state.tempo_bpm = 128.0;
     state.beat_start = 3.0;

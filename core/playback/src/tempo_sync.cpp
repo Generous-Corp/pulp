@@ -18,10 +18,15 @@ bool tempo_sync_block_end_host_time_micros(const TempoSyncBlockRequest& request,
         return false;
 
     const auto rounded_duration = std::round(duration_micros);
-    const auto end = static_cast<long double>(request.output_host_time_micros) + rounded_duration;
-    if (end > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+    const auto maximum_duration_exclusive =
+        -static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    if (!(rounded_duration < maximum_duration_exclusive))
         return false;
-    block_end = request.output_host_time_micros + static_cast<std::int64_t>(rounded_duration);
+    const auto duration = static_cast<std::int64_t>(rounded_duration);
+    if (request.output_host_time_micros >
+        std::numeric_limits<std::int64_t>::max() - duration)
+        return false;
+    block_end = request.output_host_time_micros + duration;
     return true;
 }
 
