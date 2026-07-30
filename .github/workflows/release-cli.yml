@@ -1423,7 +1423,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
-          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           set -euo pipefail
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
@@ -1492,6 +1491,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
           # A manual dispatch is usually an OLD-tag backfill, so it must opt in
           # before it may claim the latest-release pointer.
           ALLOW_LATEST: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
@@ -1545,10 +1546,36 @@ jobs:
             git show "${matrix_ref}:${matrix}" > "$RUNNER_TEMP/release_product_matrix.json"
             matrix="$RUNNER_TEMP/release_product_matrix.json"
           fi
+          # The selected tag/source matrix remains authoritative for historical
+          # artifact membership, but it must not choose whether its own SDKs need
+          # positive provenance. Import only that policy boundary from the trusted
+          # current default branch and fail hard if it is unavailable.
+          authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${REPO}/contents/tools/scripts/release_product_matrix.json?ref=${DEFAULT_BRANCH}" \
+            >"$authoritative_matrix"
+          publication_matrix="$RUNNER_TEMP/publication-release-product-matrix.json"
+          python3 - "$matrix" "$authoritative_matrix" "$publication_matrix" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          selected_path, authoritative_path, output_path = map(Path, sys.argv[1:])
+          selected = json.loads(selected_path.read_text(encoding="utf-8"))
+          authoritative = json.loads(
+              authoritative_path.read_text(encoding="utf-8")
+          )
+          selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
+          output_path.write_text(
+              json.dumps(selected, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
           python3 tools/scripts/release_artifact_contents.py release-assets \
             --all-platforms --version "${TAG#v}" \
             --source-sha "$(git rev-parse "${TAG}^{commit}")" \
-            --matrix "$matrix"
+            --matrix "$publication_matrix"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do

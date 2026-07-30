@@ -662,6 +662,30 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
 
+    def test_release_finalizer_uses_authoritative_provenance_floor(self) -> None:
+        steps = self.workflow["jobs"]["release"]["steps"]
+        finalizer = next(
+            step
+            for step in steps
+            if step.get("name") == "Verify assets, generate SHA256SUMS, publish"
+        )
+        self.assertEqual(
+            finalizer["env"]["DEFAULT_BRANCH"],
+            "${{ github.event.repository.default_branch }}",
+        )
+        run_block = finalizer["run"]
+        self.assertIn(
+            "authoritative-release-product-matrix.json",
+            run_block,
+        )
+        self.assertIn(
+            'selected["sdk_provenance_floor"] = '
+            'authoritative["sdk_provenance_floor"]',
+            run_block,
+        )
+        self.assertIn('--matrix "$publication_matrix"', run_block)
+        self.assertNotIn('--matrix "$matrix"', run_block)
+
     def test_every_user_facing_asset_is_required_before_publish(self) -> None:
         for asset in self.REQUIRED_RELEASE_ASSETS:
             self.assertIn(asset, self.text)
