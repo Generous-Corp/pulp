@@ -1578,6 +1578,7 @@ struct CliOptions {
     bool allow_network_fetch = false;
     bool allow_browser_network = false;
     std::string browser_path;
+    std::string browser_interactions_path;
     bool offline = false;
     int asset_timeout_ms = 30000;
     std::string asset_cache_dir;
@@ -1845,6 +1846,13 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
                 return 2;
             }
             opt.browser_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--browser-interactions") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr
+                    << "Error: --browser-interactions requires a JSON file\n";
+                return 2;
+            }
+            opt.browser_interactions_path = argv[++i];
         } else if (std::strcmp(argv[i], "--offline") == 0) {
             opt.offline = true;
         } else if (std::strcmp(argv[i], "--asset-cache") == 0 && i + 1 < argc) {
@@ -2013,6 +2021,7 @@ int main(int argc, char* argv[]) {
     auto& allow_network_fetch = cli.allow_network_fetch;
     auto& allow_browser_network = cli.allow_browser_network;
     auto& browser_path = cli.browser_path;
+    auto& browser_interactions_path = cli.browser_interactions_path;
     auto& offline = cli.offline;
     auto& asset_timeout_ms = cli.asset_timeout_ms;
     auto& asset_cache_dir = cli.asset_cache_dir;
@@ -2462,6 +2471,10 @@ int main(int argc, char* argv[]) {
              browser_path.empty()
                  ? std::optional<fs::path>{}
                  : std::optional<fs::path>{browser_path},
+         .browser_interactions =
+             browser_interactions_path.empty()
+                 ? std::optional<fs::path>{}
+                 : std::optional<fs::path>{browser_interactions_path},
          .source = *source,
          .initial_width = render_size_explicit ? render_width : 1280,
          .initial_height = render_size_explicit ? render_height : 800,
