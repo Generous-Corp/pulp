@@ -185,6 +185,7 @@ public:
             }
             const auto challenge = make_inspector_auth_challenge(
                 owner->session_->info().session_id,
+                owner->session_->info().instance_id,
                 owner->session_->info().protocol_version);
             if (!challenge) {
                 raw->disconnect();
@@ -277,6 +278,9 @@ public:
                     "sessionId",
                     choc::value::createString(challenge->session_id));
                 params.addMember(
+                    "instanceId",
+                    choc::value::createString(challenge->instance_id));
+                params.addMember(
                     "protocolVersion",
                     choc::value::createString(challenge->protocol_version));
                 const auto event = make_event(
@@ -366,7 +370,10 @@ InspectorServer::~InspectorServer() {
 
 bool InspectorServer::start_authenticated(InspectorServerConfig config) {
     std::lock_guard transition_lock(transition_mutex_);
-    stop();
+    stop_requested_.store(false, std::memory_order_release);
+    stop_locked();
+    if (stop_requested_.load(std::memory_order_acquire))
+        return false;
     if (!config.session || !config.discovery ||
         config.token.size() != inspector_token_size ||
         config.record.session_id != config.session->info().session_id ||
@@ -391,19 +398,27 @@ bool InspectorServer::start_authenticated(InspectorServerConfig config) {
     }
     if (!impl_->server.start("127.0.0.1:0",
                              events::IpcTransport::Socket)) {
-        stop();
+        stop_locked();
+        return false;
+    }
+    if (stop_requested_.load(std::memory_order_acquire)) {
+        stop_locked();
         return false;
     }
     port_ = impl_->server.bound_port();
     if (port_ == 0) {
-        stop();
+        stop_locked();
         return false;
     }
     config.record.endpoint = "127.0.0.1:" + std::to_string(port_);
     config.record.protocol_version = session_->info().protocol_version;
     config.record.profile = session_->policy().profile();
     if (!discovery_->publish(config.record, token_)) {
-        stop();
+        stop_locked();
+        return false;
+    }
+    if (stop_requested_.load(std::memory_order_acquire)) {
+        stop_locked();
         return false;
     }
     {
@@ -420,6 +435,7 @@ bool InspectorServer::start_authenticated(InspectorServerConfig config) {
 }
 
 void InspectorServer::stop() {
+    stop_requested_.store(true, std::memory_order_release);
     std::unique_lock transition_lock(transition_mutex_, std::defer_lock);
     if (!transition_lock.try_lock()) {
         bool called_from_callback = false;
@@ -428,10 +444,27 @@ void InspectorServer::stop() {
             called_from_callback =
                 impl_->callback_threads.contains(std::this_thread::get_id());
         }
-        if (called_from_callback)
-            return;
-        transition_lock.lock();
+        if (called_from_callback) {
+            // A transition tearing down the current generation must wait for
+            // this callback, so blocking on its mutex would deadlock. Defer
+            // only in that interval. Otherwise keep trying until the
+            // transition completes, then perform the requested stop.
+            while (!transition_lock.try_lock()) {
+                if (transition_waiting_for_callbacks_.load(
+                        std::memory_order_acquire))
+                    return;
+                std::this_thread::yield();
+            }
+        } else {
+            transition_lock.lock();
+        }
     }
+    stop_locked();
+}
+
+void InspectorServer::stop_locked() {
+    transition_waiting_for_callbacks_.store(true,
+                                            std::memory_order_release);
     {
         std::lock_guard lock(impl_->clients_mutex);
         impl_->heartbeat = {};
@@ -477,6 +510,8 @@ void InspectorServer::stop() {
         });
         impl_->authentication.clear();
     }
+    transition_waiting_for_callbacks_.store(false,
+                                            std::memory_order_release);
     clients.clear();
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex_);

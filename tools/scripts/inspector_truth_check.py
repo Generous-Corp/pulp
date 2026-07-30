@@ -44,12 +44,15 @@ FORBIDDEN_CLAIMS = {
     ),
     ".claude/commands/inspect.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
+        "transitional port-file hint",
+        "without authenticated session identity",
     ),
     "docs/agent-integrations.md": (
         "`pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently",
     ),
     "docs/reference/cli.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
+        "same temp-file hint as `pulp inspect`",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
@@ -57,6 +60,10 @@ FORBIDDEN_CLAIMS = {
     ),
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
+    ),
+    "docs/status/cli-commands.yaml": (
+        "auto-discovery from a temp-file hint",
+        "same temp-file auto-discovery as `pulp inspect`",
     ),
 }
 

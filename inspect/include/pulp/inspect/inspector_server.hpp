@@ -7,6 +7,7 @@
 #include <pulp/inspect/session.hpp>
 #include <pulp/events/interprocess_connection.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -62,6 +63,9 @@ private:
         std::chrono::seconds(3);
     mutable std::mutex lifecycle_mutex_;
     mutable std::recursive_mutex transition_mutex_;
+    std::atomic<bool> stop_requested_{false};
+    std::atomic<bool> transition_waiting_for_callbacks_{false};
+    void stop_locked();
     void on_message_received(const std::string& data, events::InterprocessConnection* sender);
 };
 

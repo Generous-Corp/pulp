@@ -1096,6 +1096,14 @@ commands:
     status: experimental
     summary: Experimental client for a custom host/test fixture that explicitly starts an inspector server; normal Pulp launches do not.
     args:
+      - name: --session
+        kind: option
+        required: false
+        description: Select an exact live inspector session
+      - name: --instance
+        kind: option
+        required: false
+        description: Disambiguate an exact instance when a session ID is shared
       - name: --host
         kind: option
         required: false
@@ -1103,7 +1111,7 @@ commands:
       - name: --port
         kind: option
         required: false
-        description: Inspector port; defaults to auto-discovery from a temp-file hint
+        description: Filter owner-private authenticated discovery records by port
       - name: --command
         kind: option
         required: false
@@ -1129,7 +1137,7 @@ commands:
       - name: --port
         kind: option
         required: false
-        description: Inspector port; defaults to the same temp-file auto-discovery as `pulp inspect`
+        description: Inspector port; defaults to owner-private authenticated discovery
       - name: --json
         kind: flag
         required: false
