@@ -157,18 +157,18 @@
     },
     {
       "variable": "PULP_LOCAL_LINUX_RUNS_ON_JSON",
-      "purpose": "Linux build lane (advisory check), served by ephemeral Tart Linux VMs on the Mac Studio host.",
+      "purpose": "Linux build lane (advisory check) for build.yml's `Linux (x64)` leg, served by ephemeral Proxmox VMs on the macpro host. NATIVE x86_64 — the job is an x64 build, so the earlier ARM64/Tart plan for this lane would have changed its architecture rather than relocating it. Clones come from the `pulp-linux-golden` template (deps + prebuilt Skia + warm ccache baked in) and are destroyed per job.",
       "expect": [
         "self-hosted",
         "Linux",
-        "ARM64",
-        "pulp-build-linux",
-        "pulp-host-macstudio"
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
       ],
       "provisioning": "ephemeral",
       "severity": "advisory",
       "hosts": [
-        "macstudio"
+        "macpro"
       ]
     },
     {

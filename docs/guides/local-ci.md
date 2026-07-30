@@ -7,6 +7,54 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## The Linux x64 lane runs on macpro (Proxmox)
+
+`build.yml`'s `Linux (x64)` leg routes via `PULP_LOCAL_LINUX_RUNS_ON_JSON` to
+ephemeral Proxmox VMs on **macpro** — a Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t,
+31 GB) repurposed as a Linux CI host. Native x86_64, which the job requires: the
+lane's earlier ARM64/Tart declaration would have changed its architecture rather
+than relocating it, silently deleting the only x64 Linux coverage.
+
+```
+ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
+qm list                          # 9001 = pulp-linux-golden (template)
+systemctl status 'pulp-ephemeral-pool@*'
+journalctl -u 'pulp-ephemeral-pool@1' -f
+```
+
+**Golden + disposable clone.** Template `9001` carries the dependency set, prebuilt
+Skia (`external/skia-build/.../libskia.a`), and a warm ccache. Each job gets a
+linked clone (copy-on-write, ~28 s to boot), registers a `--ephemeral` runner, takes
+exactly one job, and the clone is destroyed. Nothing accumulates, so nothing needs
+cleaning — and the cache a job inherits cannot be poisoned by the job before it.
+This closes the reused-build-dir class outright, which matters because `build.yml`
+sets `clean: false` on self-hosted runners.
+
+Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
+what provisions the next clone. Add a slot by enabling `@3` — but check the governor
+first.
+
+**Resource governance**, mirroring the tiers in `CLAUDE.md`:
+
+- *Tier 0* — per-VM `cores=4 cpulimit=4 cpuunits=50 balloon=0`, hypervisor-enforced.
+  `cpuunits=50` is below the default so build VMs yield to the host; `balloon=0`
+  pins memory so a build is never squeezed mid-link.
+- *Tier 1* — `/usr/local/sbin/macpro-governor.sh` (`status` / `can-start-new`).
+  Reserves 2 threads + 4 GB for the hypervisor. **Memory is a hard limit; CPU allows
+  1.5x overcommit.** That asymmetry is deliberate: an OOM mid-link yields a
+  truncated object file that reads like a compiler bug, while CPU contention only
+  costs time. Every clone is admitted through it, so nothing can oversubscribe the
+  host.
+
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the leg returns to
+GitHub-hosted. `runs-on` has no automatic fallback, so if macpro is down or its pool
+is stopped, jobs routed here queue indefinitely rather than erroring — unset the
+variable rather than waiting.
+
+Registration uses a fine-grained PAT at
+`/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
+`Administration: read/write`, minting a single-use registration token per job.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
