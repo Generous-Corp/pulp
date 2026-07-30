@@ -60,8 +60,7 @@ function selectorProbeExpression(selector, operation) {
       ];
       return points.some(([x, y]) => {
         const hit = document.elementFromPoint(x, y);
-        return Boolean(hit && (element === hit || element.contains(hit) ||
-                               hit.contains(element)));
+        return Boolean(hit && (element === hit || element.contains(hit)));
       });
     };
     const visible = visualTreeVisible && rect.width > 0 && rect.height > 0;
@@ -107,8 +106,7 @@ function selectorProbeExpression(selector, operation) {
       return { ok: false, error: "target is disabled or ignores pointer events" };
     }
     const hit = document.elementFromPoint(x, y);
-    if (!hit || !(element === hit || element.contains(hit) ||
-                  hit.contains(element))) {
+    if (!hit || !(element === hit || element.contains(hit))) {
       return { ok: false, error: "target is covered by another rendered element" };
     }
     return { ok: true, x, y };

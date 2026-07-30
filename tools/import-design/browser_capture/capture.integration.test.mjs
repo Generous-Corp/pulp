@@ -202,9 +202,22 @@ test("real browser interactions capture a same-document secondary screen",
   <button id="open" onclick="setTimeout(() => {
     history.pushState({}, '', '#working');
     document.body.className = 'working';
+    const icon = document.createElement('i');
+    icon.dataset.lucide = 'check';
+    document.getElementById('working').append(icon);
   }, 100)">Open working screen</button>
 </section>
 <section id="working">WORKING SCREEN STRING EXISTS WHILE HIDDEN</section>
+<script>
+  globalThis.lucide = {
+    createIcons() {
+      for (const icon of document.querySelectorAll('i[data-lucide]')) {
+        icon.replaceWith(document.createElementNS(
+          'http://www.w3.org/2000/svg', 'svg'));
+      }
+    }
+  };
+</script>
 `);
       await writeFile(interactions, JSON.stringify({
         schema: "pulp-browser-interactions-v1",
@@ -253,6 +266,12 @@ test("real browser interactions capture a same-document secondary screen",
           .update(await readFile(
             path.join(output, "interaction-report.json")))
           .digest("hex"));
+      assert.deepEqual(envelope.provenance.renderer_hooks, [{
+        name: "lucide",
+        applied: true,
+        placeholders: 1,
+        remaining: 0,
+      }]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -283,6 +302,23 @@ test("real browser wait-for visible rejects invisible ancestors and overlays",
         target: `<div id="target" style="background:rgb(20,210,40)"></div>
           <div id="overlay"></div>`,
         mutation: "document.getElementById('overlay').remove()",
+        expected: ([red, green, blue]) =>
+          red < 40 && green > 190 && blue < 60,
+      },
+      {
+        name: "ancestor-pseudo-element",
+        style: `
+          #target-parent { position:relative }
+          #target-parent::after {
+            content:"";position:absolute;inset:0;background:#000;z-index:2
+          }
+          #target-parent.uncovered::after { display:none }
+        `,
+        target: `<div id="target-parent">
+          <div id="target" style="background:rgb(20,210,40)"></div>
+        </div>`,
+        mutation:
+          "document.getElementById('target-parent').classList.add('uncovered')",
         expected: ([red, green, blue]) =>
           red < 40 && green > 190 && blue < 60,
       },

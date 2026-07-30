@@ -483,8 +483,8 @@ async function runCapture(options) {
       // window before running completion hooks or freezing the page.
       minimumElapsedMs: 1000,
     });
-    const readiness = await awaitExplicitReadiness(cdp);
-    const rendererHooks = await finalizeKnownRenderers(cdp);
+    let readiness = await awaitExplicitReadiness(cdp);
+    let rendererHooks = await finalizeKnownRenderers(cdp);
     const rendererSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
     });
@@ -509,6 +509,8 @@ async function runCapture(options) {
           navigationGuard: interactionNavigationGuard,
           settle: settleAfterInteraction,
         });
+      readiness = await awaitExplicitReadiness(cdp);
+      rendererHooks = await finalizeKnownRenderers(cdp);
       await settleAfterInteraction();
       await interactionNavigationGuard.assertUnchanged();
       phase = "page-settle";
