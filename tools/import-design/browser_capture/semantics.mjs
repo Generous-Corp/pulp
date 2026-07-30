@@ -86,10 +86,43 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     }
     return result;
   };
+  // A design-system component states what it is in its class. A pulp-knob is a
+  // styled div whose drag handlers sit on an ancestor, so it has no native tag,
+  // no ARIA role and no inline handler -- every signal below walks past it, and
+  // a six-knob sampler imported as eleven candidates that were all buttons.
+  //
+  // NOTE: this whole region is inside the template literal returned by
+  // semanticExpression() and is evaluated IN THE PAGE. No backticks, and no
+  // backslash escapes: the template literal eats them, so a regex written with
+  // one arrives stripped. Splitting on a plain space is deliberate -- a class
+  // attribute is space separated and needs no escape.
+  const componentKinds = new Map([
+    ['pulp-knob', 'knob'], ['pulp-fader', 'fader'], ['pulp-slider', 'slider'],
+    ['pulp-range', 'range'], ['pulp-switch', 'toggle'], ['pulp-check', 'toggle'],
+    ['pulp-radio', 'radio'], ['pulp-stepper', 'stepper'],
+    ['pulp-numbox', 'number_input'], ['pulp-numfield', 'number_input'],
+    ['pulp-valedit', 'number_input'], ['pulp-meter', 'meter'],
+    ['pulp-barmeter', 'meter'], ['pulp-ledmeter', 'meter'],
+    ['pulp-spectrum', 'meter'], ['pulp-scope', 'meter'],
+    ['pulp-progress', 'meter'], ['pulp-tab', 'tab'],
+    ['pulp-combo', 'select'], ['pulp-select', 'select'],
+  ]);
+  const componentKind = element => {
+    try {
+      const raw = element && element.getAttribute ? element.getAttribute('class') : '';
+      if (!raw) return '';
+      const parts = String(raw).split(' ');
+      for (let i = 0; i < parts.length; i++) {
+        const hit = componentKinds.get(parts[i]);
+        if (hit) return hit;
+      }
+    } catch (e) { return ''; }
+    return '';
+  };
   const strongSignal = element => {
     const data = dataPulp(element);
     const role = (element.getAttribute('role') || '').toLowerCase();
-    return Object.keys(data).length > 0 || nativeKind(element) ||
+    return Object.keys(data).length > 0 || nativeKind(element) || componentKind(element) ||
       roleKinds.has(role) || element.hasAttribute('onclick') ||
       element.hasAttribute('onpointerdown') ||
       element.hasAttribute('onmousedown') ||
@@ -134,8 +167,12 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     const pointerRoot = interactiveCursor &&
       (!element.parentElement ||
        getComputedStyle(element.parentElement).cursor !== style.cursor);
+    // NOTE: this inline predicate -- not strongSignal() above, which only feeds
+    // strongAncestor -- is the actual admission gate. A recogniser added to the
+    // function alone has no effect; that cost one silent no-op round.
+    const component = componentKind(element);
     const strong = Object.keys(data).length > 0 || native || roleKind ||
-      hasEvent || snapshotClick;
+      component || hasEvent || snapshotClick;
     if (!strong && (!pointerRoot || strongAncestor(element))) continue;
 
     const evidence = [];
@@ -171,7 +208,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       evidence.push({ kind: 'cursor', value: 'pointer', strength: 'weak' });
     }
 
-    const kind = explicitKind || native || roleKind || 'unknown';
+    const kind = explicitKind || native || roleKind || component || 'unknown';
     const conflicts = [];
     if (explicitKind && native && explicitKind !== native) {
       conflicts.push('explicit kind differs from native element kind');
