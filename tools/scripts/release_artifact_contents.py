@@ -232,11 +232,21 @@ def cli_binary_members(
 def effective_cli_contract(
     matrix: ProductMatrix, version: str | None
 ) -> tuple[frozenset[str], frozenset[str]]:
+    # The declarative matrix follows current main, while backfills validate the
+    # payload that the requested tag could actually package.
+    if version is not None:
+        requested = version_tuple(version)
+        import_design_floor = version_tuple(IMPORT_DESIGN_CLI_FLOOR)
+        if requested < import_design_floor:
+            return LEGACY_CLI_BINARY_STEMS, frozenset()
+        if requested == import_design_floor:
+            return (
+                frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
+                PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            )
     if matrix.cli_contract_declared:
         return matrix.cli_binary_stems, matrix.common_cli_members
-    if version is not None and version_tuple(version) >= version_tuple(
-        IMPORT_DESIGN_CLI_FLOOR
-    ):
+    if version is not None:
         return (
             frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
             PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,

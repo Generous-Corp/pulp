@@ -288,6 +288,35 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "browser-capture runtime manifest and release product matrix drifted",
         )
 
+    def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
+        legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.763.0"),
+            legacy,
+        )
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.764.0"),
+            {
+                "pulp",
+                "pulp-cpp",
+                "pulp-import-design",
+                "pulp-mcp",
+                "libwgpu_native.dylib",
+                *rac.PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            },
+        )
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.765.0"),
+            {
+                "pulp",
+                "pulp-cpp",
+                "pulp-import-design",
+                "pulp-mcp",
+                "libwgpu_native.dylib",
+                *rac.DEFAULT_MATRIX.common_cli_members,
+            },
+        )
+
     def test_legacy_product_matrix_selects_versioned_cli_contract(self) -> None:
         legacy_doc = json.loads(
             rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
