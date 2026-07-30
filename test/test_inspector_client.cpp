@@ -150,6 +150,101 @@ TEST_CASE("authenticated client rejects a challenge for another instance",
     CHECK_FALSE(client.is_connected());
 }
 
+TEST_CASE("authenticated client rejects a reflected server proof",
+          "[inspect][client][authentication][mutual]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+
+    pulp::events::InterprocessConnectionServer fake_server;
+    std::mutex clients_mutex;
+    std::vector<std::shared_ptr<pulp::events::InterprocessConnection>>
+        fake_clients;
+    fake_server.on_client_connected =
+        [&](std::unique_ptr<pulp::events::InterprocessConnection> connection) {
+            auto client =
+                std::shared_ptr<pulp::events::InterprocessConnection>(
+                    std::move(connection));
+            auto* raw = client.get();
+            raw->set_on_text_message(
+                [raw](std::string_view message) {
+                    pulp::inspect::InspectorMessage request;
+                    if (!pulp::inspect::decode_message(
+                            std::string(message), request))
+                        return;
+                    std::string reflected_proof;
+                    try {
+                        const auto params =
+                            choc::json::parse(request.params_json);
+                        reflected_proof =
+                            std::string(params["proof"].getString());
+                    } catch (...) {
+                    }
+                    raw->send_message(pulp::inspect::encode_message(
+                        make_response(
+                            request.id,
+                            std::string(
+                                R"({"authenticated":true,"serverProof":")") +
+                                reflected_proof + R"("})")));
+                });
+            {
+                std::lock_guard lock(clients_mutex);
+                fake_clients.push_back(client);
+            }
+            const auto challenge =
+                pulp::inspect::make_inspector_auth_challenge(
+                    "mutual-session", "mutual-instance", "1");
+            if (!challenge) {
+                raw->disconnect();
+                return;
+            }
+            auto params = choc::value::createObject("");
+            params.addMember(
+                "scheme",
+                choc::value::createString(challenge->scheme));
+            params.addMember(
+                "nonce",
+                choc::value::createString(challenge->nonce_hex));
+            params.addMember(
+                "sessionId",
+                choc::value::createString(challenge->session_id));
+            params.addMember(
+                "instanceId",
+                choc::value::createString(challenge->instance_id));
+            params.addMember(
+                "protocolVersion",
+                choc::value::createString(challenge->protocol_version));
+            raw->send_message(pulp::inspect::encode_message(
+                pulp::inspect::make_event(
+                    "Session.authChallenge",
+                    choc::json::toString(params, false))));
+        };
+    REQUIRE(fake_server.start(
+        "127.0.0.1:0", pulp::events::IpcTransport::Socket));
+
+    InspectorDiscoveryRecord record;
+    record.session_id = "mutual-session";
+    record.instance_id = "mutual-instance";
+    record.plugin_id = "com.pulp.mutual-test";
+    record.endpoint =
+        "127.0.0.1:" + std::to_string(fake_server.bound_port());
+    REQUIRE(publisher.publish(record, *token));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    CHECK_FALSE(client.connect(records.front(), reader));
+    CHECK_FALSE(client.is_connected());
+
+    fake_server.stop();
+    std::lock_guard lock(clients_mutex);
+    for (const auto& fake_client : fake_clients)
+        fake_client->disconnect();
+    fake_clients.clear();
+}
+
 TEST_CASE("server broadcasts only registered events granted by policy",
           "[inspect][client][events][policy]") {
     AuthenticatedFixture fixture;
@@ -286,6 +381,63 @@ TEST_CASE("client reconnect discards queued events from the prior session",
     CHECK(client.is_connected());
     CHECK_FALSE(
         client.request("Session.getCapabilities").is_error);
+}
+
+TEST_CASE("stale event callback destruction closes the current connection",
+          "[inspect][client][events][generation][teardown]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool handler_entered = false;
+    bool release_handler = false;
+    bool destroyed = false;
+    auto client = std::make_unique<InspectorClient>();
+    client->set_event_handler([&](const auto&) {
+        {
+            std::unique_lock lock(mutex);
+            handler_entered = true;
+            cv.notify_all();
+            cv.wait_for(lock, std::chrono::seconds(2),
+                        [&] { return release_handler; });
+        }
+        client.reset();
+        {
+            std::lock_guard lock(mutex);
+            destroyed = true;
+        }
+        cv.notify_all();
+    });
+    REQUIRE(client->connect(records.front(), fixture.reader));
+    fixture.server.broadcast(pulp::inspect::make_event(
+        "State.parameterChanged", "{}"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1),
+                            [&] { return handler_entered; }));
+    }
+
+    client->disconnect();
+    REQUIRE(client->connect(records.front(), fixture.reader));
+    {
+        std::lock_guard lock(mutex);
+        release_handler = true;
+    }
+    cv.notify_all();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1),
+                            [&] { return destroyed; }));
+    }
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (fixture.server.client_count() != 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    CHECK(fixture.server.client_count() == 0);
 }
 
 TEST_CASE("response timeout fences may-have-applied requests",

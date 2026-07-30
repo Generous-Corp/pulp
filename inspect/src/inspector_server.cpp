@@ -608,7 +608,7 @@ void InspectorServer::Impl::on_message_received(
                 proof = std::string(params["proof"].getString());
             } catch (...) {
             }
-            bool accepted = false;
+            std::optional<std::string> server_proof;
             {
                 std::lock_guard lock(clients_mutex);
                 const auto found = clients.find(sender);
@@ -616,12 +616,14 @@ void InspectorServer::Impl::on_message_received(
                     found->second->verifier &&
                     std::chrono::steady_clock::now() <
                         found->second->deadline) {
-                    accepted = found->second->verifier->verify(proof);
+                    server_proof =
+                        found->second->verifier->authenticate(proof);
                     found->second->verifier.reset();
-                    found->second->authenticated = accepted;
+                    found->second->authenticated =
+                        server_proof.has_value();
                 }
             }
-            if (!accepted) {
+            if (!server_proof) {
                 const auto response =
                     make_error(request.id,
                                "Inspector authentication failed",
@@ -630,10 +632,16 @@ void InspectorServer::Impl::on_message_received(
                 sender->disconnect();
                 return;
             }
-            send_response(
-                sender,
-                make_response(
-                    request.id, R"({"authenticated":true})"));
+            auto result = choc::value::createObject("");
+            result.addMember("authenticated",
+                             choc::value::createBool(true));
+            result.addMember(
+                "serverProof",
+                choc::value::createString(*server_proof));
+            send_response(sender,
+                          make_response(
+                              request.id,
+                              choc::json::toString(result, false)));
             return;
         }
 

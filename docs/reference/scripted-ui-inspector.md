@@ -128,8 +128,8 @@ high-risk capability. Two consequences:
 - Evaluate/interrupt are **off by default** — a host must explicitly
   `set_runtime_eval_enabled(true)`, and should only do so for a trusted, local
   dev session. Read-only surfaces (logs, DOM, state) are unaffected.
-- The production TCP server binds loopback only and requires a fresh nonce/HMAC
-  proof using an owner-private per-session credential discovered through an
-  ephemeral record/token pair. Do not enable eval outside a controlled
-  custom-host fixture. Evaluation is serialized and never runs on the audio
-  thread.
+- The production TCP server binds loopback only and requires a fresh
+  nonce/HMAC proof in each direction, with role-separated transcripts using
+  an owner-private per-session credential discovered through an ephemeral
+  record/token pair. Do not enable eval outside a controlled custom-host
+  fixture. Evaluation is serialized and never runs on the audio thread.
