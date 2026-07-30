@@ -130,10 +130,15 @@ InspectorControllerLease::InspectorControllerLease(
       clock_(std::move(clock)) {}
 
 void InspectorControllerLease::expire_if_needed() {
-    if (!owner_.empty() && active_operations_ == 0 &&
-        clock_() >= expires_at_) {
-        owner_.clear();
-        release_pending_ = false;
+    if (!owner_.empty() && clock_() >= expires_at_) {
+        if (active_operations_ != 0) {
+            // Expiry fences admission immediately. Keep the identity only so
+            // the operations admitted before expiry can drain safely.
+            release_pending_ = true;
+        } else {
+            owner_.clear();
+            release_pending_ = false;
+        }
     }
 }
 

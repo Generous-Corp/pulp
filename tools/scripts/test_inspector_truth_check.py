@@ -32,6 +32,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "unavailable in normal launches; explicitly wired custom fixture\n",
             "docs/reference/cli.md":
                 "unavailable in normal launches; explicitly wired\n",
+            "docs/status/cli-commands.yaml":
+                "owner-private authenticated discovery\n",
             "tools/mcp/pulp_mcp.cpp":
                 '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
             "CMakeLists.txt":
@@ -130,6 +132,28 @@ class InspectorTruthCheckTests(unittest.TestCase):
         self.assertIn("transport is unauthenticated", errors)
         self.assertIn("port-file hint", errors)
         self.assertIn("lacks authenticated main-thread dispatch", errors)
+
+    def test_rejects_stale_discovery_claims_on_all_cli_surfaces(self) -> None:
+        root = self.make_root()
+        (root / ".claude/commands/inspect.md").write_text(
+            "unavailable in normal launches; explicitly wired custom fixture; "
+            "transitional port-file hint without authenticated session identity\n",
+            encoding="utf-8",
+        )
+        (root / "docs/reference/cli.md").write_text(
+            "unavailable in normal launches; explicitly wired; "
+            "same temp-file hint as `pulp inspect`\n",
+            encoding="utf-8",
+        )
+        (root / "docs/status/cli-commands.yaml").write_text(
+            "auto-discovery from a temp-file hint\n"
+            "same temp-file auto-discovery as `pulp inspect`\n",
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn(".claude/commands/inspect.md retains stale claim", errors)
+        self.assertIn("docs/reference/cli.md retains stale claim", errors)
+        self.assertIn("docs/status/cli-commands.yaml retains stale claim", errors)
 
     def test_rejects_stale_rust_help_claim(self) -> None:
         root = self.make_root()

@@ -130,6 +130,19 @@ TEST_CASE("authenticated client completes read and controlled mutation",
             .is_error);
 }
 
+TEST_CASE("authenticated client rejects a challenge for another instance",
+          "[inspect][client][authentication][instance]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+    auto mismatched = records.front();
+    mismatched.instance_id = "another-instance";
+
+    InspectorClient client;
+    CHECK_FALSE(client.connect(mismatched, fixture.reader));
+    CHECK_FALSE(client.is_connected());
+}
+
 TEST_CASE("server broadcasts only registered events granted by policy",
           "[inspect][client][events][policy]") {
     AuthenticatedFixture fixture;
@@ -444,6 +457,89 @@ TEST_CASE("concurrent callback stop requests do not deadlock",
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    CHECK(reader.list().empty());
+}
+
+TEST_CASE("callback stop cancels a concurrent authenticated restart",
+          "[inspect][client][teardown][restart][concurrency]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    InspectorServer server;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool allow_callback_stop = false;
+    InspectorSession session(
+        {"session-restart-fence", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            {
+                std::unique_lock lock(mutex);
+                entered = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return allow_callback_stop; });
+            }
+            server.stop();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+
+    std::atomic<bool> request_returned{false};
+    std::thread requester([&] {
+        (void)client.request("State.getParameters");
+        request_returned.store(true, std::memory_order_release);
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1),
+                            [&] { return entered; }));
+    }
+
+    const auto replacement_token = generate_inspector_secret();
+    REQUIRE(replacement_token.has_value());
+    std::atomic<bool> restart_result{true};
+    std::thread restarter([&] {
+        restart_result.store(
+            server.start_authenticated(InspectorServerConfig{
+                &session, &publisher, record, *replacement_token}),
+            std::memory_order_release);
+    });
+
+    const auto disconnect_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!request_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < disconnect_deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(request_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        allow_callback_stop = true;
+    }
+    cv.notify_all();
+
+    requester.join();
+    restarter.join();
+    CHECK_FALSE(restart_result.load(std::memory_order_acquire));
+    CHECK(server.port() == 0);
     CHECK(reader.list().empty());
 }
 

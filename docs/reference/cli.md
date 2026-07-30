@@ -1309,7 +1309,7 @@ pulp motion cost disable
 Options:
 
 - `--host HOST` - inspector host, defaulting to `127.0.0.1`
-- `--port PORT` - inspector port; defaults to auto-discovery from the same temp-file hint as `pulp inspect`
+- `--port PORT` - inspector port; defaults to owner-private authenticated discovery
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:

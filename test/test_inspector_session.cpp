@@ -235,9 +235,14 @@ TEST_CASE("controller lease handoff waits for an admitted mutation",
     }
 
     now += 101ms;
+    const auto expired_owner_mutation = session.handle(
+        "alpha", make_request(3, "State.setParameter"));
+    CHECK(expired_owner_mutation.is_error);
+    CHECK(expired_owner_mutation.error_code ==
+          "controller_lease_required");
     session.disconnect("alpha");
     const auto fenced = session.handle(
-        "beta", make_request(3, "Session.acquireController"));
+        "beta", make_request(4, "Session.acquireController"));
     CHECK(fenced.is_error);
     CHECK(fenced.error_code == "controller_lease_conflict");
 
@@ -250,7 +255,7 @@ TEST_CASE("controller lease handoff waits for an admitted mutation",
     CHECK_FALSE(mutation.is_error);
 
     const auto acquired = session.handle(
-        "beta", make_request(4, "Session.acquireController"));
+        "beta", make_request(5, "Session.acquireController"));
     CHECK_FALSE(acquired.is_error);
 }
 
@@ -302,6 +307,7 @@ TEST_CASE("inspector authentication binds a one-shot proof to session and protoc
         "pulp-inspector-hmac-sha256-v1",
         std::string(64, '1'),
         "session-1",
+        "instance-1",
         "1",
     };
     const auto proof = make_inspector_auth_proof(token, challenge);
@@ -316,6 +322,11 @@ TEST_CASE("inspector authentication binds a one-shot proof to session and protoc
     wrong_session.session_id = "session-2";
     InspectorAuthVerifier wrong_session_verifier(token, wrong_session);
     CHECK_FALSE(wrong_session_verifier.verify(*proof));
+
+    auto wrong_instance = challenge;
+    wrong_instance.instance_id = "instance-2";
+    InspectorAuthVerifier wrong_instance_verifier(token, wrong_instance);
+    CHECK_FALSE(wrong_instance_verifier.verify(*proof));
 
     auto wrong_protocol = challenge;
     wrong_protocol.protocol_version = "2";

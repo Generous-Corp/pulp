@@ -26,6 +26,6 @@ The inspector exposes:
 - Theme tokens and computed colors
 - Layout debug information
 
-Auto-discovery is a transitional port-file hint without authenticated session
-identity. Prefer an explicit loopback port for a controlled fixture. Do not use
-the current transport for privileged mutation or runtime evaluation.
+Auto-discovery reads owner-private ephemeral records and credentials, selects
+an exact session/instance, and authenticates with a per-connection nonce/HMAC
+proof. Mutations additionally require the session's controller lease.

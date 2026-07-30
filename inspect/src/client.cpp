@@ -108,6 +108,8 @@ public:
                         std::string(value["nonce"].getString());
                     parsed.session_id =
                         std::string(value["sessionId"].getString());
+                    parsed.instance_id =
+                        std::string(value["instanceId"].getString());
                     parsed.protocol_version =
                         std::string(value["protocolVersion"].getString());
                     challenge = std::move(parsed);
@@ -221,6 +223,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         challenge = *impl_->challenge;
     }
     if (challenge.session_id != record.session_id ||
+        challenge.instance_id != record.instance_id ||
         challenge.protocol_version != record.protocol_version) {
         impl_->connection.disconnect();
         return false;

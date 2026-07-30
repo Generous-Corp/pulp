@@ -16,6 +16,7 @@ struct InspectorAuthChallenge {
     std::string scheme = "pulp-inspector-hmac-sha256-v1";
     std::string nonce_hex;
     std::string session_id;
+    std::string instance_id;
     std::string protocol_version;
 };
 
@@ -24,6 +25,7 @@ std::optional<std::vector<std::uint8_t>> generate_inspector_secret();
 
 std::optional<InspectorAuthChallenge> make_inspector_auth_challenge(
     std::string session_id,
+    std::string instance_id,
     std::string protocol_version);
 
 /// Construct the versioned HMAC proof used by installed clients. The raw token
