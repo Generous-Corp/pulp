@@ -507,6 +507,10 @@ function button(id, parent, glyph, label, kind, width) {
     setFontWeight(id + "-label", 600);
     setTextColor(id + "-label", kind === "primary" ? C.onAccent : C.text);
     setFlex(id + "-label", "margin_left", 9);
+    // A label paints on its BASELINE by default, so flex-centring its box still
+    // leaves the glyphs sitting low against a 16px icon centred beside them.
+    // The row looks a pixel or two off and reads as sloppy rather than broken.
+    setVerticalAlign(id + "-label", "middle");
     decorative(id + "-label");
     return b;
 }
