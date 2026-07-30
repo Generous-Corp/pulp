@@ -256,6 +256,7 @@ private:
     BuildMonitor monitor_;
     bool watching_ = false;
     BuildOutcome reported_outcome_ = BuildOutcome::running;
+    int reported_stage_ = -2;
     bool standalone_ = false;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;

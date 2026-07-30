@@ -63,6 +63,33 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
     return BuildLine::Kind::progress;
 }
 
+int stage_of(const std::string& line) {
+    const auto lower = lowered(line);
+    if (contains(lower, "installed \xE2\x86\x92") || contains(lower, "installed ->") ||
+        contains(lower, "open it with"))
+        return 4;   // Installing
+    if (contains(lower, "behaviour verified") || contains(lower, "gate passed") ||
+        contains(lower, "gate failed") || contains(lower, "behavioural gate"))
+        return 3;   // Verifying
+    if (contains(lower, "compiled") || contains(lower, "compile failed"))
+        return 2;   // Building
+    if (contains(lower, "generated ") || contains(lower, "manifest") ||
+        contains(lower, "cpp:") || contains(lower, "panel"))
+        return 1;   // Writing files
+    if (contains(lower, "asking the model"))
+        return 0;   // Thinking
+    return -1;
+}
+
+int BuildMonitor::stage() const {
+    int furthest = -1;
+    for (const auto& l : lines_) {
+        const int s = stage_of(l.text);
+        if (s > furthest) furthest = s;
+    }
+    return furthest;
+}
+
 BuildOutcome BuildMonitor::outcome_of(const std::vector<BuildLine>& lines) {
     // A refusal beats a success: a run that installed something and then refused
     // the next step has still stopped, and reporting "done" would be a lie about

@@ -542,6 +542,7 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     if (c->mode() == forge::ForgeChrome::Mode::Home) {
         c->begin_new_session();
         reported_outcome_ = BuildOutcome::running;
+    reported_stage_ = -2;
         open_patch_.clear();
     }
 
@@ -649,6 +650,15 @@ void ForgeModularShell::on_poll() {
     // arrived a tick late -- and in a test that polls once, never.
     pump_build_log();
 
+    // Keep the stage card in step with what the generator is actually doing.
+    if (watching_) {
+        const int stage = monitor_.stage();
+        if (stage != reported_stage_) {
+            reported_stage_ = stage;
+            if (auto* c = chrome()) c->set_active_stage(stage);
+        }
+    }
+
     // Report the end of a run once. Left alone, the stage kept animating
     // "materializing…" under a transcript that had already printed
     // "gave up after 3 attempts" -- the screen contradicting itself.
@@ -696,6 +706,7 @@ void ForgeModularShell::watch_build_log(const std::string& path) {
     monitor_.watch(path);
     watching_ = true;
     reported_outcome_ = BuildOutcome::running;
+    reported_stage_ = -2;
 }
 
 int ForgeModularShell::pump_build_log() {

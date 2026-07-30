@@ -44,6 +44,13 @@ struct BuildLine {
     std::string text;
 };
 
+/// Which of the chrome's five stage chips a line implies, or -1.
+///
+/// Thinking / Writing files / Building / Verifying / Installing. Derived from
+/// the generator's own words so the card beside the transcript agrees with it
+/// rather than sitting grey through a whole run.
+int stage_of(const std::string& line);
+
 /// Reads a generator log as it grows.
 ///
 /// Polls rather than watches: a generation lasts minutes and a second's latency
@@ -73,6 +80,11 @@ public:
     /// when a run has stopped, the reason it stopped is the only thing a person
     /// needs, and burying it under "step 7 of 9" is how this failed before.
     std::string headline() const;
+
+    /// The furthest stage reached so far, or -1. Furthest rather than latest:
+    /// a retry re-runs earlier stages, and a card that walks backwards reads
+    /// as the build losing ground.
+    int stage() const;
 
 private:
     std::string path_;

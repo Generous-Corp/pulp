@@ -1823,3 +1823,35 @@ TEST_CASE("the stage stops saying 'materializing' when a build ends",
     chrome->begin_new_session();
     CHECK(caption().find("materializing") != std::string::npos);
 }
+
+TEST_CASE("the stage card follows the generator", "[phase7][stage]") {
+    // Reported from a screenshot: the run was visible in the transcript while
+    // the Thinking/Writing/Building/Verifying/Installing card beside it stayed
+    // grey for the whole build. The chips are driven by Forge's own generation
+    // loop, which never runs for a Rack prompt.
+    using forge_modular::stage_of;
+    CHECK(stage_of("  asking the model\xE2\x80\xA6") == 0);
+    CHECK(stage_of("  generated CLKDIV (3HP, 2 params)") == 1);
+    CHECK(stage_of("  manifest + panel validated") == 1);
+    CHECK(stage_of("  compiled") == 2);
+    CHECK(stage_of("  behaviour verified") == 3);
+    CHECK(stage_of("  behavioural gate failed:") == 3);
+    CHECK(stage_of("  installed \xE2\x86\x92 /Users/x/Rack2/plugins/y.vcvplugin") == 4);
+    CHECK(stage_of("something the generator has never said") == -1);
+
+    // Furthest, not latest: a retry re-runs earlier stages, and a card that
+    // walks backwards reads as the build losing ground.
+    forge_modular::BuildMonitor m;
+    const auto log = std::filesystem::temp_directory_path() / "fm-stage-card.log";
+    std::filesystem::remove(log);
+    m.watch(log.string());
+    { std::ofstream f(log);
+      f << "asking the model\ngenerated CLKDIV\ncompiled\n"; }
+    m.poll();
+    CHECK(m.stage() == 2);
+    { std::ofstream f(log, std::ios::app);
+      f << "behavioural gate failed:\nasking the model (retry 1)\n"; }
+    m.poll();
+    CHECK(m.stage() == 3);          // not back to 0
+    std::filesystem::remove(log);
+}
