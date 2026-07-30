@@ -6,6 +6,8 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "bounded_event_queue.hpp"
+
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
@@ -31,6 +33,8 @@ using pulp::inspect::make_request;
 using pulp::inspect::make_response;
 using pulp::inspect::make_event;
 using pulp::inspect::make_inspector_auth_proof;
+using pulp::inspect::detail::BoundedEventQueue;
+using pulp::inspect::detail::EventQueuePushResult;
 
 namespace {
 
@@ -52,6 +56,36 @@ InspectorPolicyConfig policy(InspectorProfile profile) {
 }
 
 } // namespace
+
+TEST_CASE("only telemetry stream events use lossy delivery",
+          "[inspect][session][events][backpressure]") {
+    CHECK(pulp::inspect::inspector_event_is_lossy("Audio.levels"));
+    CHECK(pulp::inspect::inspector_event_is_lossy("Motion.sample"));
+    CHECK_FALSE(
+        pulp::inspect::inspector_event_is_lossy("State.parameterChanged"));
+    CHECK_FALSE(
+        pulp::inspect::inspector_event_is_lossy("Console.messageAdded"));
+    CHECK_FALSE(
+        pulp::inspect::inspector_event_is_lossy("Performance.metrics"));
+    CHECK_FALSE(pulp::inspect::inspector_event_is_lossy("Unknown.event"));
+}
+
+TEST_CASE("bounded event queue evicts only lossy entries",
+          "[inspect][session][events][backpressure]") {
+    BoundedEventQueue<int> queue(2);
+    REQUIRE(queue.push(1, false) == EventQueuePushResult::Queued);
+    REQUIRE(queue.push(2, true) == EventQueuePushResult::Queued);
+    CHECK(queue.push(3, false) == EventQueuePushResult::Queued);
+    REQUIRE(queue.take_front() == 1);
+    REQUIRE(queue.take_front() == 3);
+
+    REQUIRE(queue.push(4, false) == EventQueuePushResult::Queued);
+    REQUIRE(queue.push(5, false) == EventQueuePushResult::Queued);
+    CHECK(queue.push(6, true) == EventQueuePushResult::DroppedLossy);
+    CHECK(queue.push(7, false) == EventQueuePushResult::ReliableOverflow);
+    REQUIRE(queue.take_front() == 4);
+    REQUIRE(queue.take_front() == 5);
+}
 
 TEST_CASE("InspectorAccessPolicy resolves named profiles against host availability",
           "[inspect][session][policy]") {

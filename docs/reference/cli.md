@@ -1335,7 +1335,9 @@ authority. Load replay fixtures inside an explicitly owned test host instead.
 
 The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
 not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
-require a Pulp source checkout plus a custom inspector fixture. Offline
+require a Pulp source checkout plus an explicitly owned host that constructs
+`InspectorServer`, wires `DomainHandler`, and publishes authenticated
+discovery. Offline
 `query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
 inspector session.
 

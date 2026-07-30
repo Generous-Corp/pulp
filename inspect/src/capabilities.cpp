@@ -156,4 +156,11 @@ bool capability_requires_controller_lease(InspectorCapability capability) {
            risk == InspectorCapabilityRisk::HighRisk;
 }
 
+bool inspector_event_is_lossy(std::string_view method) {
+    const auto* descriptor = find_inspector_method(method);
+    return descriptor &&
+           descriptor->kind == InspectorMethodKind::Event &&
+           descriptor->capability == InspectorCapability::TelemetryStream;
+}
+
 } // namespace pulp::inspect

@@ -3,6 +3,9 @@
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/authentication.hpp>
 #include <choc/text/choc_JSON.h>
+
+#include "bounded_event_queue.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -38,16 +41,18 @@ public:
             return result;
         }
 
-        void enqueue(std::string message) {
+        detail::EventQueuePushResult enqueue(std::string message,
+                                             bool lossy) {
+            detail::EventQueuePushResult result;
             {
                 std::lock_guard lock(mutex);
                 if (stopping)
-                    return;
-                if (messages.size() >= 32)
-                    messages.pop_front();
-                messages.push_back(std::move(message));
+                    return detail::EventQueuePushResult::DroppedLossy;
+                result = messages.push(std::move(message), lossy);
             }
-            cv.notify_one();
+            if (result == detail::EventQueuePushResult::Queued)
+                cv.notify_one();
+            return result;
         }
 
         void request_stop() {
@@ -85,11 +90,12 @@ public:
                 });
                 if (stopping)
                     break;
-                auto message = std::move(messages.front());
-                messages.pop_front();
+                auto message = messages.take_front();
+                if (!message)
+                    continue;
                 auto retained = connection;
                 lock.unlock();
-                if (retained && !retained->send_message(message)) {
+                if (retained && !retained->send_message(*message)) {
                     lock.lock();
                     stopping = true;
                     messages.clear();
@@ -102,7 +108,7 @@ public:
         std::shared_ptr<events::InterprocessConnection> connection;
         std::mutex mutex;
         std::condition_variable cv;
-        std::deque<std::string> messages;
+        detail::BoundedEventQueue<std::string> messages{32};
         std::thread worker;
         bool stopping = false;
     };
@@ -604,6 +610,7 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
     }
 
     auto json = encode_message(event);
+    std::vector<std::shared_ptr<events::InterprocessConnection>> overflowed;
     {
         std::lock_guard lock(clients_mutex);
         for (const auto& client : owned_clients) {
@@ -613,11 +620,17 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
                 if (const auto outbound =
                         outbound_clients.find(client.get());
                     outbound != outbound_clients.end()) {
-                    outbound->second->enqueue(json);
+                    if (outbound->second->enqueue(
+                            json, inspector_event_is_lossy(event.method)) ==
+                        detail::EventQueuePushResult::ReliableOverflow) {
+                        overflowed.push_back(client);
+                    }
                 }
             }
         }
     }
+    for (const auto& client : overflowed)
+        client->disconnect();
 }
 
 int InspectorServer::Impl::client_count() {

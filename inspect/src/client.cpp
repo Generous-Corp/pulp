@@ -5,6 +5,8 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "bounded_event_queue.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -36,7 +38,7 @@ public:
     struct EventState {
         std::mutex mutex;
         std::condition_variable cv;
-        std::deque<InspectorMessage> events;
+        detail::BoundedEventQueue<InspectorMessage> events{256};
         EventHandler handler;
         bool stopping = false;
     };
@@ -63,13 +65,14 @@ public:
                 });
                 if (state->stopping)
                     break;
-                auto event = std::move(state->events.front());
-                state->events.pop_front();
+                auto event = state->events.take_front();
+                if (!event)
+                    continue;
                 auto handler = state->handler;
                 lock.unlock();
                 if (handler) {
                     try {
-                        handler(event);
+                        handler(*event);
                     } catch (...) {
                     }
                 }
@@ -126,13 +129,18 @@ public:
                 return;
             }
         }
+        const bool lossy = inspector_event_is_lossy(message.method);
+        detail::EventQueuePushResult result;
         {
             std::lock_guard lock(event_state->mutex);
-            if (event_state->events.size() >= 256)
-                event_state->events.pop_front();
-            event_state->events.push_back(std::move(message));
+            result = event_state->events.push(std::move(message), lossy);
         }
-        event_state->cv.notify_one();
+        if (result == detail::EventQueuePushResult::Queued) {
+            event_state->cv.notify_one();
+        } else if (result ==
+                   detail::EventQueuePushResult::ReliableOverflow) {
+            connection.disconnect();
+        }
     }
 
     InspectorMessage wait_for_response(std::int64_t id,
