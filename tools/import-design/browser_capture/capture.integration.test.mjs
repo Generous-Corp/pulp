@@ -174,7 +174,7 @@ test("real browser capture waits through a delayed DOM commit",
     }
   });
 
-test("real browser interactions capture a rendered secondary screen",
+test("real browser interactions capture a same-document secondary screen",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
@@ -200,6 +200,7 @@ test("real browser interactions capture a rendered secondary screen",
 </style>
 <section id="landing">
   <button id="open" onclick="setTimeout(() => {
+    history.pushState({}, '', '#working');
     document.body.className = 'working';
   }, 100)">Open working screen</button>
 </section>

@@ -59,6 +59,19 @@ function actionTimeout(value, label) {
   return boundedInteger(value, label, 1, MAX_ACTION_TIMEOUT_MS);
 }
 
+function redactedPlanIdentity(actions) {
+  const redactedActions = actions.map((action) => {
+    if (action.action !== "type") return action;
+    const { text, ...publicAction } = action;
+    return { ...publicAction, text_length: text.length };
+  });
+  return createHash("sha256").update(JSON.stringify({
+    schema: INTERACTION_PLAN_SCHEMA,
+    version: 1,
+    actions: redactedActions,
+  })).digest("hex");
+}
+
 export function parseInteractionPlan(raw) {
   const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
   if (bytes.length === 0 || bytes.length > MAX_INTERACTION_PLAN_BYTES) {
@@ -127,7 +140,10 @@ export function parseInteractionPlan(raw) {
     schema: INTERACTION_PLAN_SCHEMA,
     version: 1,
     actions,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
+    // This durable identity deliberately excludes typed plaintext. Hashing the
+    // raw plan would let an observer recover low-entropy text by testing
+    // candidate plans against the published digest.
+    sha256: redactedPlanIdentity(actions),
   };
 }
 

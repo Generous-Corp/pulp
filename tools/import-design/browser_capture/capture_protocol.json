@@ -62,6 +62,7 @@
             },
             "plan_sha256": {
               "type": "string",
+              "description": "SHA-256 of the canonical plan with typed text replaced by its length",
               "pattern": "^[0-9a-f]{64}$"
             },
             "action_count": {

@@ -162,22 +162,11 @@ function navigationFailure() {
 export async function createMainFrameNavigationGuard(cdp) {
   const initialTree = await cdp.call("Page.getFrameTree");
   const initialFrame = initialTree?.frameTree?.frame;
-  if (!initialFrame?.id || typeof initialFrame.url !== "string") {
+  if (!initialFrame?.id || typeof initialFrame.loaderId !== "string") {
     throw navigationFailure();
   }
 
   let violation = false;
-  const rejectMainFrame = (frameId) => {
-    if (frameId !== initialFrame.id) return;
-    violation = true;
-    Promise.resolve(cdp.call("Page.stopLoading")).catch(() => {});
-  };
-  cdp.on("Page.frameRequestedNavigation", ({ frameId }) => {
-    rejectMainFrame(frameId);
-  });
-  cdp.on("Page.navigatedWithinDocument", ({ frameId }) => {
-    rejectMainFrame(frameId);
-  });
   cdp.on("Page.frameNavigated", ({ frame }) => {
     if (frame?.id === initialFrame.id || !frame?.parentId) {
       violation = true;
@@ -191,7 +180,7 @@ export async function createMainFrameNavigationGuard(cdp) {
       const currentTree = await cdp.call("Page.getFrameTree");
       const currentFrame = currentTree?.frameTree?.frame;
       if (violation || currentFrame?.id !== initialFrame.id ||
-          currentFrame?.url !== initialFrame.url) {
+          currentFrame?.loaderId !== initialFrame.loaderId) {
         throw navigationFailure();
       }
     },

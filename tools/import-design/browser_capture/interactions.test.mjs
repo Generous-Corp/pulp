@@ -141,6 +141,20 @@ test("executor records reproducible evidence without typed plaintext", async () 
     { text: "private draft" });
 });
 
+test("published plan identity redacts typed plaintext", () => {
+  const first = plan([
+    { action: "type", selector: "input", text: "1234" },
+  ]);
+  const candidate = plan([
+    { action: "type", selector: "input", text: "9876" },
+  ]);
+  const differentLength = plan([
+    { action: "type", selector: "input", text: "12345" },
+  ]);
+  assert.equal(first.sha256, candidate.sha256);
+  assert.notEqual(first.sha256, differentLength.sha256);
+});
+
 test("wait-for observes rendered state rather than snapshot strings", async () => {
   let probes = 0;
   const cdp = {
@@ -183,17 +197,18 @@ test("executor rejects a covered click target", async () => {
     /covered by another rendered element/);
 });
 
-test("main-frame navigation guard rejects navigation and ignores subframes",
+test("main-frame navigation guard allows same-document routing and ignores subframes",
   async () => {
     const listeners = new Map();
     const calls = [];
+    let currentUrl = "http://127.0.0.1/editor.html";
     const cdp = {
       async call(method) {
         calls.push(method);
         if (method === "Page.getFrameTree") {
           return {
             frameTree: {
-              frame: { id: "main", url: "http://127.0.0.1/editor.html" },
+              frame: { id: "main", loaderId: "loader-1", url: currentUrl },
             },
           };
         }
@@ -204,11 +219,15 @@ test("main-frame navigation guard rejects navigation and ignores subframes",
       },
     };
     const guard = await createMainFrameNavigationGuard(cdp);
-    listeners.get("Page.frameRequestedNavigation")({
-      frameId: "subframe",
+    listeners.get("Page.frameNavigated")({
+      frame: { id: "subframe", parentId: "main", loaderId: "sub-loader" },
     });
     await guard.assertUnchanged();
-    listeners.get("Page.navigatedWithinDocument")({ frameId: "main" });
+    currentUrl = "http://127.0.0.1/editor.html#/working";
+    await guard.assertUnchanged();
+    listeners.get("Page.frameNavigated")({
+      frame: { id: "main", loaderId: "loader-2", url: currentUrl },
+    });
     await assert.rejects(
       guard.assertUnchanged(),
       (error) => error.code ===

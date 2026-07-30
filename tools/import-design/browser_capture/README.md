@@ -34,7 +34,11 @@ state before the same-frame evidence capture. Plans use
 `pulp-browser-interactions-v1` and contain only bounded `click`, `type`,
 `wait-for`, and `wait-ms` actions. The helper records selectors and typed-text
 length in `interaction-report.json`; it persists neither typed plaintext nor a
-per-action text hash. Action timeouts remain inside the capture-wide
+per-action text hash. The published plan identity hashes a canonical redacted
+plan in which typed text is replaced by its length, so short private values
+cannot be recovered by hashing candidate plans. Same-document history and
+fragment routing are allowed; loading another document remains forbidden.
+Action timeouts remain inside the capture-wide
 `--timeout-ms` deadline and cannot extend it. See
 `interaction_plan_protocol.json` for the exact schema. With no plan, capture
 retains its initial-state behavior and output set.
