@@ -144,6 +144,11 @@
     "clip.media": {
       "level": "full"
     },
+    "clip.media-window": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"
+    },
     "tempo.single": {
       "level": "full"
     },

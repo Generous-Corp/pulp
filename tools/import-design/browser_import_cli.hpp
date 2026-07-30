@@ -24,6 +24,7 @@ struct BrowserImportCliRequest {
     std::filesystem::path output_file;
     std::filesystem::path importer_executable;
     std::optional<std::filesystem::path> browser_executable;
+    std::optional<std::filesystem::path> browser_interactions;
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     int initial_width = 1280;
     int initial_height = 800;

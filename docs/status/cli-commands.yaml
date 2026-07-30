@@ -1342,6 +1342,9 @@ commands:
       - name: --browser
         kind: option
         description: "Explicit Chromium/Chrome executable for browser-solved HTML import; overrides PULP_DESIGN_BROWSER, browser mode, managed Chrome for Testing, and system discovery"
+      - name: --browser-interactions
+        kind: option
+        description: "Versioned bounded click/type/wait JSON plan applied before browser evidence capture; defaults to the settled initial state"
       - name: --offline
         kind: flag
         description: "Explicitly use the lower-fidelity static HTML parser instead of Chromium"
@@ -1998,7 +2001,7 @@ commands:
 
   - name: seq
     status: experimental
-    summary: Open, validate, explain, and transactionally edit canonical timeline project JSON.
+    summary: Open, validate, explain, transactionally edit, import, and export canonical timeline projects.
     subcommands:
       - name: schema
         summary: Emit the registry-derived timeline JSON Schema manifest
@@ -2027,6 +2030,40 @@ commands:
             required: true
           - name: --out
             kind: option
+      - name: export
+        summary: Export a canonical project into a new SMF directory or standard .dawproject ZIP
+        args:
+          - name: project
+            kind: positional
+            required: true
+          - name: --format
+            kind: option
+            required: true
+            description: "smf or dawproject"
+          - name: --out
+            kind: option
+            required: false
+            description: New SMF directory or .dawproject file; existing paths are never overwritten
+          - name: --accept-loss
+            kind: option
+            description: Repeat once for each exact loss concept reported by export planning
+          - name: --plan
+            kind: flag
+            description: Return the canonical loss manifest without --out or --accept-loss; publishing requires --out
+      - name: import
+        summary: Import an SMF file or standard .dawproject ZIP into a new canonical project directory
+        args:
+          - name: input
+            kind: positional
+            required: true
+          - name: --format
+            kind: option
+            required: true
+            description: "smf or dawproject"
+          - name: --out
+            kind: option
+            required: true
+            description: New artifact directory; existing paths are never overwritten
     docs: reference/cli.md#seq
 
   - name: render

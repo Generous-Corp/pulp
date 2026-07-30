@@ -29,6 +29,44 @@ Successful output is:
   tokens.json
 ```
 
+`--interactions <plan.json>` optionally reaches one deterministic secondary
+state before the same-frame evidence capture. Plans use
+`pulp-browser-interactions-v1` and contain only bounded `click`, `type`,
+`wait-for`, and `wait-ms` actions. The helper records selectors and typed-text
+length in `interaction-report.json`; it persists neither typed plaintext nor a
+per-action text hash. The published plan identity hashes a canonical redacted
+plan in which typed text is replaced by its length, so short private values
+cannot be recovered by hashing candidate plans. Same-document history and
+fragment routing are allowed; loading another document or opening a popup
+remains forbidden. Typed text still becomes live rendered page state and may
+therefore appear in screenshots, DOM/semantic evidence, or tokens. Never put a
+password, credential, private draft, or other secret in an interaction plan.
+Sources with a distinct asynchronous boundary after the last action may expose
+`globalThis.__pulpInteractionReady` as a Promise or one-shot function; the
+initial `__pulpCaptureReady` contract is never invoked twice.
+Action timeouts remain inside the capture-wide
+`--timeout-ms` deadline and cannot extend it. See
+`interaction_plan_protocol.json` for the exact schema. With no plan, capture
+retains its initial-state behavior and output set.
+
+For a reproducible Forge Modular secondary-state proof, use
+`test/fixtures/browser_capture_forge_modular_mentions.json` with the source
+export and pixel validation:
+
+```bash
+pulp import-design \
+  --file /path/to/ForgeModular.dc.html \
+  --browser-interactions test/fixtures/browser_capture_forge_modular_mentions.json \
+  --allow-browser-network \
+  --emit ir-json \
+  --output /tmp/forge-modular-proof.json \
+  --validate \
+  --screenshot-backend skia
+```
+
+The captured and Skia-rendered frames must both show the module mention picker,
+and validation must report zero differing pixels.
+
 `capture.json` conforms to `capture_protocol.json`. The DOM snapshot is kept as
 a sidecar because it can be large; the envelope references it by relative path.
 `tokens.json` preserves active light / no-preference computed CSS custom
@@ -50,9 +88,6 @@ launches, and every fetched response is content-hashed in the capture envelope.
 Failures are nonzero and write `capture-error.json` when an output directory is
 available. The helper never selects a lower-fidelity importer.
 
-Capture currently records the prototype's settled initial state. Reaching
-secondary screens belongs in a versioned, declarative interaction plan (for
-example: click a selector, type bounded text, wait for a selector), with each
-action recorded in the evidence envelope. Do not add arbitrary JavaScript
-evaluation as a CLI escape hatch: it would weaken the source/evidence boundary
-and make captures difficult to reproduce or audit.
+Arbitrary JavaScript evaluation is intentionally not a CLI escape hatch: it
+would weaken the source/evidence boundary and make captures difficult to
+reproduce or audit.

@@ -122,6 +122,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // tempo.ramp
         {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
         {ImportLevel::None, "", ""}, // tempo.value-quantized
+        {ImportLevel::None, "", ""}, // clip.media-window
     },
     // smf
     {
@@ -173,6 +174,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", "continuous tempo ramps"}, // tempo.ramp
         {ImportLevel::None, "", ""}, // clip.note-velocity-quantized
         {ImportLevel::None, "", ""}, // tempo.value-quantized
+        {ImportLevel::None, "", ""}, // clip.media-window
     },
 };
 
@@ -227,6 +229,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map"}, // tempo.ramp
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.note-velocity-quantized
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.value-quantized
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
     },
     // smf
     {
@@ -278,6 +281,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "continuous tempo curves become discrete Set Tempo steps at the authored tempo points"}, // tempo.ramp
         {ExportLevel::Degrade, Concept::ClipNote, LossClass::Approximated, "16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity"}, // clip.note-velocity-quantized
         {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "tempo values are rounded to the nearest representable integer microseconds per quarter note"}, // tempo.value-quantized
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
     },
 };
 } // namespace detail

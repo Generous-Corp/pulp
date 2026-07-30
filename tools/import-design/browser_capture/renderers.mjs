@@ -20,16 +20,18 @@ const RENDERER_HOOKS = [
   },
 ];
 
-export async function awaitExplicitReadiness(cdp) {
+export async function awaitExplicitReadiness(
+  cdp, contract = "__pulpCaptureReady") {
   const evaluated = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
-      let ready = globalThis.__pulpCaptureReady;
+      const contract = ${JSON.stringify(contract)};
+      let ready = globalThis[contract];
       if (typeof ready === 'function') ready = ready();
       if (ready === undefined || ready === null) {
         return { contract: '', awaited: false };
       }
       await Promise.resolve(ready);
-      return { contract: '__pulpCaptureReady', awaited: true };
+      return { contract, awaited: true };
     })()`,
     awaitPromise: true,
     returnByValue: true,
@@ -63,4 +65,20 @@ export async function finalizeKnownRenderers(cdp) {
     if (result.applied) results.push({ name: hook.name, ...result });
   }
   return results;
+}
+
+export function mergeRendererHooks(...groups) {
+  const merged = new Map();
+  for (const hooks of groups) {
+    for (const hook of hooks) {
+      const prior = merged.get(hook.name);
+      merged.set(hook.name, prior
+        ? {
+            ...hook,
+            placeholders: prior.placeholders + hook.placeholders,
+          }
+        : { ...hook });
+    }
+  }
+  return [...merged.values()];
 }

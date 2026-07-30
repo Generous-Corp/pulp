@@ -74,11 +74,16 @@ def main() -> int:
     expected_names = [
         "pulp_timeline_project_open",
         "pulp_timeline_command_apply",
+        "pulp_timeline_diff",
+        "pulp_timeline_undo",
+        "pulp_timeline_redo",
         "pulp_timeline_validate",
         "pulp_timeline_explain",
         "pulp_timeline_render",
+        "pulp_timeline_export",
+        "pulp_timeline_import",
     ]
-    check("surface has exactly the five operations", [tool["name"] for tool in document["tools"]] == expected_names)
+    check("surface has exactly the ten operations", [tool["name"] for tool in document["tools"]] == expected_names)
     check(
         "every operation carries a closed object input schema",
         all(
@@ -138,6 +143,21 @@ def main() -> int:
         "command batches exclude empty transactions",
         command_apply["inputSchema"]["properties"]["commands"]["minItems"] == 1,
     )
+    check(
+        "command apply requires exactly one project source",
+        command_apply["inputSchema"]["oneOf"]
+        == [
+            {"required": ["project"], "not": {"required": ["session_id"]}},
+            {"required": ["session_id"], "not": {"required": ["project"]}},
+        ],
+    )
+    check(
+        "iteration operations require an open session",
+        all(
+            _tool(document, name)["inputSchema"]["required"] == ["session_id"]
+            for name in ["pulp_timeline_diff", "pulp_timeline_undo", "pulp_timeline_redo"]
+        ),
+    )
 
     no_commands = json.loads(
         gen.generate(
@@ -194,6 +214,60 @@ def main() -> int:
         == ["pulp.test.document"],
     )
     check("source manifest version is carried", grown["x-pulp-schema-manifest-version"] == 7)
+
+    export_tool = _tool(document, "pulp_timeline_export")
+    concept_authority = json.loads(gen.CONCEPTS.read_bytes())
+    expected_loss_concepts = [entry["id"] for entry in concept_authority["concepts"]][1:]
+    check(
+        "export loss consent enum is derived from the committed concept authority",
+        export_tool["x-pulp-loss-concepts"] == expected_loss_concepts
+        and export_tool["inputSchema"]["properties"]["accept_losses"]["items"]["enum"]
+        == expected_loss_concepts
+        and "unknown" not in expected_loss_concepts,
+    )
+    check(
+        "export consent is per-concept and has no blanket flag",
+        export_tool["inputSchema"]["properties"]["accept_losses"]["uniqueItems"] is True
+        and "force" not in export_tool["inputSchema"]["properties"],
+    )
+    check(
+        "export plan-only is an optional strict boolean",
+        export_tool["inputSchema"]["properties"]["plan_only"] == {
+            "type": "boolean",
+            "description": (
+                "Return the canonical loss manifest and required consent without "
+                "writing or publishing artifacts."
+            ),
+        }
+        and "plan_only" not in export_tool["inputSchema"]["required"]
+        and export_tool["inputSchema"]["required"] == ["format", "project"],
+    )
+    check(
+        "export schema separates outputless planning from publication",
+        export_tool["inputSchema"]["oneOf"]
+        == [
+            {
+                "properties": {"plan_only": {"const": True}},
+                "required": ["plan_only"],
+                "not": {
+                    "anyOf": [
+                        {"required": ["output"]},
+                        {"required": ["accept_losses"]},
+                    ]
+                },
+            },
+            {
+                "properties": {"plan_only": {"const": False}},
+                "required": ["output"],
+            },
+        ],
+    )
+    check(
+        "import documents the packaged DAWproject boundary",
+        ".dawproject ZIP" in _tool(document, "pulp_timeline_import")["description"]
+        and _tool(document, "pulp_timeline_import")["inputSchema"]["properties"]["format"]["enum"]
+        == ["dawproject", "smf"],
+    )
 
     check("gate passes for the committed artifact", _run_gate(_ARTIFACT) == 0)
     with tempfile.TemporaryDirectory() as tmp:
