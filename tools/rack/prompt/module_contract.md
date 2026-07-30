@@ -90,8 +90,14 @@ useful in isolation, and it is pervasive in real modules:
   placed just above a jack. The validator rejects `label 'IN' collides with widget X`. Give a
   light its own row, or move it beside the control rather than above it.
 - **Name length**: at 3 HP the name must be ≤ 4 characters. At 6 HP ≤ 8. Wider is freer.
-- Typical column x positions: 3 HP → centre only (7.62). 6 HP → 9.0 and 21.5.
+- Typical column x positions: 3 HP → centre only (7.62). 6 HP → 8.8 and 21.7.
   8 HP → 11.8 and 28.8. 12 HP → 4 columns at 9.6, 23.2, 36.8, 50.4.
+- **Check the arithmetic before using two columns.** A panel is `HP × 5.08` mm wide, and two
+  `Knob`s need 12.7 mm between centres (6.1 + 6.1 + 0.5). At 6 HP the panel is 30.48 mm, so
+  two mediums side by side fit only just — hence 8.8 and 21.7, which is 12.9 apart. Two
+  `KnobLarge` (9.2 each) need 18.9 mm and **do not fit at 6 HP at all**: use `KnobSmall`, or
+  stack the two controls in separate rows instead of side by side. Doing the subtraction is
+  cheaper than being rejected for it.
 
 **Rows**: controls sharing a y get one shared label baseline, so keep a row's controls the same
 `kind` where you can.
@@ -209,8 +215,14 @@ const int ch = forge_modular::channels_SLUG(this);
 outputs[L::OUT_OUTPUT].setChannels(ch);
 for (int c = 0; c < ch; ++c) { /* ...per-channel state... */ }
 
-// A normalled input — use the GENERATED accessor, never re-implement the normal
+// A NORMALLED input — use the GENERATED accessor, never re-implement the normal.
+// The accessor exists ONLY for inputs that declared a `normal`, and is named
+// read_<SLUG>_<PORT ID>_INPUT. Calling it for a plain input is a compile error:
+// nothing was generated for that port.
 float cv = forge_modular::read_SLUG_CV_INPUT(this, c);
+
+// A PLAIN input — read it straight from Rack. There is no generated accessor.
+float in = inputs[L::IN_INPUT].getPolyVoltage(c);
 
 // Lights: smooth them, or they strobe at audio rate
 lights[L::ACT_LIGHT].setBrightnessSmooth(x, args.sampleTime);

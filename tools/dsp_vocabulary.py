@@ -154,12 +154,28 @@ def public_methods(text: str, cls: str):
             continue
         args = re.sub(r"\s+", " ", args)
         out.append(f"{name}({args})" if args else f"{name}()")
+    # Control-flow keywords look like calls to a regex. Listing `if(rising)` as
+    # a method invites the model to call it.
+    kKeywords = ("if(", "for(", "while(", "switch(", "return(", "sizeof(")
+    out = [s for s in out if not s.startswith(kKeywords)]
     seen, uniq = set(), []
     for s in out:
         if s not in seen:
             seen.add(s)
             uniq.append(s)
-    return uniq[:7]
+
+    # The lifecycle methods FIRST, then the rest. A truncated list that drops
+    # prepare/reset/process is worse than a short one: the model cannot see the
+    # method it needs, so it invents a plausible name -- `discard_history` for
+    # what is actually `reset` -- and the run dies at the compiler after the
+    # model has been paid for. These four are the ones every per-sample class
+    # has and every generated module calls.
+    lifecycle = ("prepare(", "reset(", "process(", "set_immediate(")
+    first = [m for m in uniq if m.startswith(lifecycle)]
+    rest = [m for m in uniq if not m.startswith(lifecycle)]
+    # 14 rather than 7: the cap exists to keep the prompt readable, and half of
+    # these classes have more than seven methods worth knowing about.
+    return (first + rest)[:14]
 
 
 def scan():

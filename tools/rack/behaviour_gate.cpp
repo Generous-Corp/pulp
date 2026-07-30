@@ -109,7 +109,14 @@ float stimulus(const char* role, int i, float quiet_v) {
         return 5.f * std::sin(2.0 * M_PI * 110.0 * i / kSr);
     if (r == "Pitch")
         return 0.f;                    // C4
-    return quiet_v;                    // Cv and anything unrecognised
+    // A slow square around the quiet level, NOT a constant. Anything that
+    // processes CV over time -- slew, lag, portamento, glide, envelope
+    // followers -- produces an identical output for every setting when the
+    // input never moves, so its rise and fall knobs are reported inert while
+    // working perfectly in Rack. ~0.37 s halves: long enough for a slow slew
+    // to finish, short enough that the probe sees many edges.
+    const float swing = ((i / 16384) % 2) ? 2.5f : -2.5f;
+    return quiet_v + swing;            // Cv and anything unrecognised
 }
 
 /// Drive the module for a while and record every output.
