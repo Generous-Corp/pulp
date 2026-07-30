@@ -30,6 +30,30 @@ ghapp workflow run build.yml --ref <branch>
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
 active workstream rather than a background one.
+## The FetchContent cache had to point at a real path
+
+`build.yml` restored and saved three FetchContent paths and none of them ever
+populated — a different reason on each platform. On Linux the cached
+`~/.cache/Pulp/...` did not match CMake's lowercase `~/.cache/pulp/...`; on Windows
+the cached path carried an extra `Cache/` segment versus `$LOCALAPPDATA/Pulp/fc`;
+and off Windows the sources never left `<build>/_deps` anyway, because
+`pulp_configure_fetchcontent_base_dir` returns early unless `WIN32` (it is a
+MAX_PATH workaround for MSBuild, not a cache).
+
+The fix caches `<build>/_deps` — where FetchContent already writes — rather than
+relocating it. **Do not "improve" this by setting `FETCHCONTENT_BASE_DIR` to a
+path outside the build tree.** `PulpWclap.cmake` and `PulpWebUi.cmake` resolve
+CHOC from `<root>/build*/_deps/choc-src`; moving it produces
+`ERROR: configured CHOC source not found under build-macos/_deps` and fails the
+**required** macOS gate. That was tried and reverted.
+
+Worth it because three.js is a 2.2 GB git clone, fetched whenever
+`PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are both ON — the default on
+`pull_request` and `merge_group`. Measured on an ephemeral Linux runner with an
+otherwise identical tree: **414 s cold configure against 119 s warm**.
+
+If a dependency pin changes and a stale cache is suspected, the key includes
+`hashFiles('setup.sh')`; bump that or clear the Actions cache to force a refetch.
 
 ## Primary: Shipyard
 
