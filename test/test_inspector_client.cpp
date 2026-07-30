@@ -150,7 +150,7 @@ TEST_CASE("authenticated client rejects a challenge for another instance",
     CHECK_FALSE(client.is_connected());
 }
 
-TEST_CASE("authenticated client rejects a reflected server proof",
+TEST_CASE("mutual authentication rejects reflection and gates early events",
           "[inspect][client][authentication][mutual]") {
     TemporaryDirectory temporary;
     InspectorDiscoveryPublisher publisher(temporary.path);
@@ -160,7 +160,8 @@ TEST_CASE("authenticated client rejects a reflected server proof",
 
     pulp::events::InterprocessConnectionServer fake_server;
     std::mutex clients_mutex;
-    std::atomic<int> unauthenticated_events{0};
+    std::atomic<int> observed_events{0};
+    std::atomic<bool> return_valid_server_proof{false};
     std::vector<std::shared_ptr<pulp::events::InterprocessConnection>>
         fake_clients;
     fake_server.on_client_connected =
@@ -169,19 +170,39 @@ TEST_CASE("authenticated client rejects a reflected server proof",
                 std::shared_ptr<pulp::events::InterprocessConnection>(
                     std::move(connection));
             auto* raw = client.get();
+            const auto challenge =
+                pulp::inspect::make_inspector_auth_challenge(
+                    "mutual-session", "mutual-instance", "1");
+            if (!challenge) {
+                raw->disconnect();
+                return;
+            }
             raw->set_on_text_message(
-                [raw](std::string_view message) {
+                [raw, challenge = *challenge, &token,
+                 &return_valid_server_proof](std::string_view message) {
                     pulp::inspect::InspectorMessage request;
                     if (!pulp::inspect::decode_message(
                             std::string(message), request))
                         return;
-                    std::string reflected_proof;
+                    std::string client_proof;
                     try {
                         const auto params =
                             choc::json::parse(request.params_json);
-                        reflected_proof =
+                        client_proof =
                             std::string(params["proof"].getString());
                     } catch (...) {
+                    }
+                    std::string server_proof = client_proof;
+                    if (return_valid_server_proof.load(
+                            std::memory_order_relaxed)) {
+                        const auto generated =
+                            pulp::inspect::make_inspector_server_auth_proof(
+                                *token, challenge, client_proof);
+                        if (!generated) {
+                            raw->disconnect();
+                            return;
+                        }
+                        server_proof = *generated;
                     }
                     raw->send_message(pulp::inspect::encode_message(
                         pulp::inspect::make_event(
@@ -192,18 +213,11 @@ TEST_CASE("authenticated client rejects a reflected server proof",
                             request.id,
                             std::string(
                                 R"({"authenticated":true,"serverProof":")") +
-                                reflected_proof + R"("})")));
+                                server_proof + R"("})")));
                 });
             {
                 std::lock_guard lock(clients_mutex);
                 fake_clients.push_back(client);
-            }
-            const auto challenge =
-                pulp::inspect::make_inspector_auth_challenge(
-                    "mutual-session", "mutual-instance", "1");
-            if (!challenge) {
-                raw->disconnect();
-                return;
             }
             auto params = choc::value::createObject("");
             params.addMember(
@@ -241,12 +255,23 @@ TEST_CASE("authenticated client rejects a reflected server proof",
 
     InspectorClient client;
     client.set_event_handler([&](const auto&) {
-        unauthenticated_events.fetch_add(
+        observed_events.fetch_add(
             1, std::memory_order_relaxed);
     });
     CHECK_FALSE(client.connect(records.front(), reader));
     CHECK_FALSE(client.is_connected());
-    CHECK(unauthenticated_events.load(std::memory_order_relaxed) == 0);
+    CHECK(observed_events.load(std::memory_order_relaxed) == 0);
+
+    return_valid_server_proof.store(true, std::memory_order_relaxed);
+    REQUIRE(client.connect(records.front(), reader));
+    const auto event_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (observed_events.load(std::memory_order_relaxed) != 1 &&
+           std::chrono::steady_clock::now() < event_deadline) {
+        std::this_thread::yield();
+    }
+    CHECK(observed_events.load(std::memory_order_relaxed) == 1);
+    client.disconnect();
 
     fake_server.stop();
     std::lock_guard lock(clients_mutex);

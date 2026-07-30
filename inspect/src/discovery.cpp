@@ -70,6 +70,7 @@ void InspectorCredential::clear() noexcept {
 namespace {
 
 using Clock = std::chrono::system_clock;
+constexpr std::uintmax_t kMaxDiscoveryRecordBytes = 1024;
 
 struct SensitiveText {
     std::string value;
@@ -483,7 +484,7 @@ std::optional<std::string> read_private_text_file(
         return std::nullopt;
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
-    if (error || size > 1024)
+    if (error || size > kMaxDiscoveryRecordBytes)
         return std::nullopt;
     std::ifstream input(path, std::ios::binary);
     std::string contents(static_cast<std::size_t>(size), '\0');
@@ -801,6 +802,9 @@ bool InspectorDiscoveryPublisher::publish(
     record.record_path = runtime_directory_ / (file_stem + ".json");
     record.credential_path =
         runtime_directory_ / (file_stem + ".token");
+    const auto encoded_record = encode_record(record);
+    if (encoded_record.size() > kMaxDiscoveryRecordBytes)
+        return false;
     ownership_path_ = runtime_directory_ / (file_stem + ".lock");
     const auto ownership_id = pulp::runtime::secure_random_bytes(16);
     if (!ownership_id)
@@ -824,7 +828,7 @@ bool InspectorDiscoveryPublisher::publish(
         pulp::runtime::hex_encode(credential_)};
     if (!write_private_file_atomic(record.credential_path,
                                    encoded_credential.value) ||
-        !write_private_file_atomic(record.record_path, encode_record(record))) {
+        !write_private_file_atomic(record.record_path, encoded_record)) {
         std::error_code error;
         std::filesystem::remove(record.record_path, error);
         std::filesystem::remove(record.credential_path, error);

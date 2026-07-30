@@ -49,6 +49,7 @@ public:
         std::uint64_t connection_generation = 0;
         std::uint64_t callback_generation = 0;
         bool callback_active = false;
+        bool authenticated = false;
         bool stopping = false;
     };
 
@@ -72,7 +73,9 @@ public:
             std::unique_lock lock(state->mutex);
             while (!state->stopping) {
                 state->cv.wait(lock, [&] {
-                    return state->stopping || !state->events.empty();
+                    return state->stopping ||
+                           (state->authenticated &&
+                            !state->events.empty());
                 });
                 if (state->stopping)
                     break;
@@ -150,11 +153,6 @@ public:
                 return;
             }
         }
-        {
-            std::lock_guard lock(mutex);
-            if (!mutually_authenticated)
-                return;
-        }
         const bool lossy = inspector_event_is_lossy(message.method);
         detail::EventQueuePushResult result;
         {
@@ -205,6 +203,7 @@ public:
         {
             std::lock_guard lock(event_state->mutex);
             event_state->connection_generation = generation;
+            event_state->authenticated = false;
             event_state->events.clear();
         }
         if (clear_callbacks) {
@@ -278,6 +277,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     {
         std::lock_guard lock(impl_->event_state->mutex);
         impl_->event_state->connection_generation = generation;
+        impl_->event_state->authenticated = false;
     }
     impl_->connection.set_on_text_message(
         [this, generation](std::string_view message) {
@@ -290,8 +290,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         std::max(timeout, std::chrono::milliseconds(1)));
     if (!impl_->connection.connect(record.endpoint,
                                    events::IpcTransport::Socket)) {
-        std::lock_guard lock(impl_->mutex);
-        impl_->disconnected = true;
+        impl_->disconnect_current(false);
         return false;
     }
 
@@ -303,7 +302,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
             }) ||
             !impl_->challenge) {
             lock.unlock();
-            impl_->connection.disconnect();
+            impl_->disconnect_current(false);
             return false;
         }
         challenge = *impl_->challenge;
@@ -311,13 +310,13 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     if (challenge.session_id != record.session_id ||
         challenge.instance_id != record.instance_id ||
         challenge.protocol_version != record.protocol_version) {
-        impl_->connection.disconnect();
+        impl_->disconnect_current(false);
         return false;
     }
     const auto proof =
         make_inspector_auth_proof(token->bytes(), challenge);
     if (!proof) {
-        impl_->connection.disconnect();
+        impl_->disconnect_current(false);
         return false;
     }
     auto params = choc::value::createObject("");
@@ -335,12 +334,12 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
             std::lock_guard lock(impl_->mutex);
             impl_->in_flight.erase(authentication.id);
         }
-        impl_->connection.disconnect();
+        impl_->disconnect_current(false);
         return false;
     }
     const auto response = impl_->wait_for_response(1, timeout);
     if (response.is_error) {
-        impl_->connection.disconnect();
+        impl_->disconnect_current(false);
         return false;
     }
     std::string server_proof;
@@ -352,7 +351,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     }
     if (!verify_inspector_server_auth_proof(
             token->bytes(), challenge, *proof, server_proof)) {
-        impl_->connection.disconnect();
+        impl_->disconnect_current(false);
         return false;
     }
     {
@@ -363,6 +362,13 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         }
         impl_->mutually_authenticated = true;
     }
+    {
+        std::lock_guard lock(impl_->event_state->mutex);
+        if (impl_->event_state->connection_generation != generation)
+            return false;
+        impl_->event_state->authenticated = true;
+    }
+    impl_->event_state->cv.notify_all();
     return true;
 }
 
