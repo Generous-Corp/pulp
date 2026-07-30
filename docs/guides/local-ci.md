@@ -7,24 +7,27 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
-## The FetchContent cache had to be pointed at a real path
+## The FetchContent cache had to point at a real path
 
-`FetchContent` writes sources and subbuilds under `FETCHCONTENT_BASE_DIR`.
-`tools/cmake/PulpFetchContent.cmake` only redirects that on **Windows** — it is a
-MAX_PATH workaround for MSBuild, not a cache — so off Windows it defaulted to
-`<build>/_deps`, inside the build tree. That made it uncacheable and re-downloaded
-on every clean build, three.js alone being a 2.2 GB git clone.
+`build.yml` restored and saved three FetchContent paths and none of them ever
+populated — a different reason on each platform. On Linux the cached
+`~/.cache/Pulp/...` did not match CMake's lowercase `~/.cache/pulp/...`; on Windows
+the cached path carried an extra `Cache/` segment versus `$LOCALAPPDATA/Pulp/fc`;
+and off Windows the sources never left `<build>/_deps` anyway, because
+`pulp_configure_fetchcontent_base_dir` returns early unless `WIN32` (it is a
+MAX_PATH workaround for MSBuild, not a cache).
 
-`build.yml`'s cache steps were therefore saving nothing, and for a different reason
-per platform: on Linux the cached `~/.cache/Pulp/...` did not match CMake's
-lowercase `~/.cache/pulp/...`; on Windows the cached path carried an extra `Cache/`
-segment versus `$LOCALAPPDATA/Pulp/fc`; on macOS the path matched but the sources
-never left the build tree anyway.
+The fix caches `<build>/_deps` — where FetchContent already writes — rather than
+relocating it. **Do not "improve" this by setting `FETCHCONTENT_BASE_DIR` to a
+path outside the build tree.** `PulpWclap.cmake` and `PulpWebUi.cmake` resolve
+CHOC from `<root>/build*/_deps/choc-src`; moving it produces
+`ERROR: configured CHOC source not found under build-macos/_deps` and fails the
+**required** macOS gate. That was tried and reverted.
 
-The matrix build now pins `PULP_FETCHCONTENT_BASE_DIR` beside the workspace and
-caches exactly that, passing it to CMake off Windows (Windows keeps its short
-MAX_PATH-safe directory). Measured on an ephemeral Linux runner: **414 s cold
-configure against 119 s warm** — about 295 s per clean build.
+Worth it because three.js is a 2.2 GB git clone, fetched whenever
+`PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are both ON — the default on
+`pull_request` and `merge_group`. Measured on an ephemeral Linux runner with an
+otherwise identical tree: **414 s cold configure against 119 s warm**.
 
 If a dependency pin changes and a stale cache is suspected, the key includes
 `hashFiles('setup.sh')`; bump that or clear the Actions cache to force a refetch.
