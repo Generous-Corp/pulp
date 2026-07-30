@@ -51,6 +51,9 @@ TARGETS = {
     # come up on the Build screen -- where the Home coordinates land in the
     # transcript and every click reads as "nothing happened".
     "home":         (0.023, 0.18),
+    # The Module | Patch tabs above the composer.
+    "tab_module":   (0.455, 0.345),
+    "tab_patch":    (0.567, 0.345),
     "prompt":       (0.52, 0.48),
     "build":        (0.73, 0.53),
     "random":       (0.34, 0.53),
@@ -121,33 +124,52 @@ def point(target: str) -> tuple[int, int]:
 def on_home() -> bool:
     """True when the Home composer is showing.
 
-    Detected from the window rather than assumed: the hero heading only exists
-    on Home, and its absence is what tells us a click would land somewhere
-    else entirely."""
+    Detected from the COMPOSER, not the hero. The first version looked for
+    bright pixels in the upper middle, which the Build screen's preview stage
+    also has -- so it reported Home while the app sat on Build, and every
+    subsequent click landed in the transcript. Home is the only screen with the
+    accent Build button at this spot; the Build screen has a dark preview
+    there.
+    """
     shot("/tmp/drive-probe.png")
     try:
         from PIL import Image
-        im = Image.open("/tmp/drive-probe.png")
+        im = Image.open("/tmp/drive-probe.png").convert("RGB")
         x, y, w, h = window()
-        # The hero sits in the upper middle of the content area on Home; the
-        # Build screen has a dark preview stage there instead.
-        box = (int((x + w * 0.30) * 2), int((y + h * 0.20) * 2),
-               int((x + w * 0.70) * 2), int((y + h * 0.30) * 2))
-        crop = im.convert("L").crop(box)
-        # Bright text on a dark panel: Home's heading is large and white.
-        return max(crop.getdata()) > 200
+        bx, by = point("build")
+        # A small box centred on where the Build button would be, in capture
+        # pixels (the display is 2x).
+        box = (int((bx - 20) * 2), int((by - 8) * 2),
+               int((bx + 20) * 2), int((by + 8) * 2))
+        crop = im.crop(box)
+        # Forge's accent is a distinctive mint. Nothing on the Build screen is
+        # that colour at this position.
+        for r, g, b in crop.getdata():
+            if g > 170 and b > 140 and r < 130:
+                return True
+        return False
     except Exception:
         return False
 
 
 def ensure_home() -> None:
+    """Get to Home, and prove it -- or stop.
+
+    Clicks unconditionally rather than trusting the probe first: the app
+    restores its last session, so it can come up on Build, and a wrong answer
+    here means every later click lands somewhere harmless-looking and the run
+    reports 'Build did not reach the generator' when the truth is that Build was
+    never pressed.
+    """
     if on_home():
         return
     click("home")
-    time.sleep(1.0)
-    if not on_home():
-        sys.exit("could not get back to the Home screen — refusing to click "
-                 "blind on whatever is showing")
+    time.sleep(1.5)
+    if on_home():
+        return
+    sys.exit("could not reach the Home screen — the composer's Build button is "
+             "not where it should be. Refusing to click blind; a screenshot is "
+             "at /tmp/drive-probe.png")
 
 
 def click(target: str) -> None:
@@ -192,6 +214,11 @@ def verdict() -> int:
         print("FAIL: Forge's plugin pipeline ran — a Rack prompt reached the "
               "wrong generator")
         return 1
+    if st.get("expect") == "patch" and st["tail"]:
+        text = "\n".join(st["tail"])
+        if "AUDIO" in text or "MODULATION" in text or ".vcv" in text:
+            print("PASS: a patch was built")
+            return 0
     if not st["exists"] or st["bytes"] == 0:
         print("FAIL: the generator never wrote anything — Build did not reach it")
         return 1
@@ -249,9 +276,9 @@ def main(argv: list[str]) -> int:
         print(f"  compare {before} and {after}")
         return 0
 
-    if cmd == "build":
+    if cmd in ("build", "patch"):
         if len(argv) < 3:
-            sys.exit("build needs a prompt")
+            sys.exit(f"{cmd} needs a prompt")
         prompt = argv[2]
         focus()
         # Never start on top of a live run. Deleting the log of an in-flight
@@ -262,6 +289,11 @@ def main(argv: list[str]) -> int:
             sys.exit("a generation is already running — wait for it or "
                      "`pkill -f generate.py` first")
         ensure_home()
+        # Pick the artifact BEFORE typing. The tabs change what Build submits,
+        # and switching after a prompt is typed is how a patch request gets
+        # built as a module.
+        click("tab_patch" if cmd == "patch" else "tab_module")
+        time.sleep(0.8)
         # A fresh log, so the verdict describes THIS run and cannot inherit a
         # previous one's success.
         if os.path.exists(LOG):
@@ -278,7 +310,18 @@ def main(argv: list[str]) -> int:
         time.sleep(0.3)
         type_text(prompt)
         click("build")
-        time.sleep(10)
+        # Give the app a moment, then say plainly whether the CLICK worked
+        # rather than blaming the generator for never running.
+        for _ in range(20):
+            time.sleep(1)
+            if log_state()["bytes"] > 0 or generating():
+                break
+        else:
+            shot("/tmp/drive-build-nofire.png")
+            sys.exit("the Build click did not start a generation. The prompt "
+                     "was typed and the button was clicked, so the click "
+                     "landed somewhere that is not Build — see "
+                     "/tmp/drive-build-nofire.png")
         shot("/tmp/drive-build.png")
         return verdict()
 

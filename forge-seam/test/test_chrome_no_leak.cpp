@@ -2110,3 +2110,55 @@ TEST_CASE("Open in Rack never offers to open something unsafe",
 
     std::filesystem::remove(log);
 }
+
+TEST_CASE("a finished patch shows itself and can be opened", "[phase7][artifact]") {
+    // Reported from a patch build: the screen said "Built. Open it in Rack to
+    // play it", the button was absent, and the stage still showed the
+    // materializing skeleton. Two generators write two formats -- generate.py
+    // says  open it with: "<rack>" <patch>  and patch.py says
+    // built 8 modules, 10 cables -> <patch>  -- and only the first was read.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_standalone(true);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    const std::string real = "/tmp/ambient-drone.vcv";
+    if (!std::filesystem::exists(real)) {
+        WARN("no generated patch present; skipping");
+        return;
+    }
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-patchdone.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+    {
+        // patch.py's format, verbatim: an arrow and a bare path, no quotes.
+        std::ofstream f(log);
+        f << "  built 8 modules, 10 cables \xE2\x86\x92 " << real << "\n";
+    }
+    shell.on_poll();
+
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+    CHECK(shell.artifact_path() == real);      // the arrow format is read
+    CHECK(shell.open_in_rack().empty());       // and it can actually be opened
+
+    // The stage shows the patch rather than a skeleton that never resolves.
+    REQUIRE(chrome->stage_accessory() != nullptr);
+    CHECK(chrome->stage_accessory()->visible());
+    REQUIRE(shell.explanation() != nullptr);
+    CHECK(shell.explanation()->line_count() > 0);
+    REQUIRE(shell.rack_preview() != nullptr);
+    CHECK(shell.rack_preview()->modules().size() > 0);
+
+    std::filesystem::remove(log);
+}

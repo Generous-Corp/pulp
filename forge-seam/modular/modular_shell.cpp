@@ -621,6 +621,24 @@ std::string ForgeModularShell::artifact_path() const {
     // patch, spaces and all.
     for (const auto& line : monitor_.lines()) {
         if (line.text.find(".vcv") == std::string::npos) continue;
+
+        // Two generators, two formats. patch.py says
+        //   built 8 modules, 10 cables -> /tmp/forge-patch.vcv
+        // with no quoted binary, so the quote-anchored parse below finds
+        // nothing and the button never appears -- while the screen says
+        // "Built. Open it in Rack." Reading only one format is what made a
+        // patch build claim something it could not do.
+        const auto arrow = line.text.find("\xE2\x86\x92");
+        if (arrow != std::string::npos && line.text.rfind('"') == std::string::npos) {
+            auto path = line.text.substr(arrow + 3);
+            const auto first = path.find_first_not_of(" \t");
+            if (first == std::string::npos) continue;
+            const auto last = path.find_last_not_of(" \t\r\n");
+            path = path.substr(first, last - first + 1);
+            if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") return path;
+            continue;
+        }
+
         const auto quote = line.text.rfind('"');
         if (quote == std::string::npos) continue;
         auto path = line.text.substr(quote + 1);
@@ -740,11 +758,22 @@ void ForgeModularShell::on_poll() {
             // the stage for someone watching, the transcript for someone
             // coming back later.
             switch (outcome) {
-                case BuildOutcome::done:
-                    c->set_skeleton_caption("built \u00b7 open it in Rack");
+                case BuildOutcome::done: {
                     c->set_status_activity({});
-                    c->narrate("Built. Open it in Rack to play it.");
+                    // Show what was built. A finished patch that leaves the
+                    // materializing skeleton up has produced something the
+                    // user cannot see, and the preview is the whole reason
+                    // the stage exists.
+                    const auto artifact = artifact_path();
+                    const bool shown =
+                        !artifact.empty() && open_patch_file(artifact).empty();
+                    if (!shown) c->set_skeleton_caption("built");
+                    // Only offer to open it if there is something to open.
+                    c->narrate(artifact.empty()
+                                   ? std::string("Built.")
+                                   : std::string("Built. Open it in Rack to play it."));
                     break;
+                }
                 case BuildOutcome::refused:
                     c->set_skeleton_caption("stopped");
                     c->set_status_activity({});

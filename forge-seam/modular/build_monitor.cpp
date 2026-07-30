@@ -59,7 +59,13 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
     }
 
     if (contains(lower, "installed \xE2\x86\x92") || contains(lower, "installed ->") ||
-        contains(lower, "uses pulp dsp") || contains(lower, "open it with")) {
+        contains(lower, "uses pulp dsp") || contains(lower, "open it with") ||
+        // patch.py's finish line: "built 8 modules, 10 cables -> <path>". The
+        // two generators word success differently, and reading only the module
+        // one left every patch build stuck at "running" forever -- so the
+        // skeleton never resolved and Open in Rack never appeared, while the
+        // patch itself was sitting on disk.
+        (contains(lower, "built ") && contains(lower, " modules"))) {
         return BuildLine::Kind::success;
     }
 
