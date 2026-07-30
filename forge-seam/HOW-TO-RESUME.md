@@ -117,21 +117,23 @@ the guard doing exactly its job, on the one kind of leak that matters most.
 **This is a product bug, not a test bug.** A separate SKU must not put its
 artifacts in another product's shelf.
 
-**Fix:** set `FORGE_IDENTITY_STORAGE_DIRECTORY` for the Forge Modular target.
-It is already an `if(NOT DEFINED)` override in `cmake/ForgeIdentity.cmake`, so
-this is a one-line change in `modular/CMakeLists.txt` — the same mechanism that
-makes the product name configurable.
+**FIXED.** `brand::kStorageDirectory` is one generated constant shared by every
+target in a build, so it cannot be set per-product — but `ProjectStore` honours
+`FORGE_PROJECTS_DIR`, which can. `modular/main.cpp` points Forge Modular at
+`~/Library/Application Support/Forge Modular/projects` unless the environment
+already says otherwise.
 
-**And the guard needs to be hermetic.** It currently renders against whatever is
-in the shared store, so its baselines are only reproducible on a machine whose
-store has not changed. Point it at a temp storage directory for the duration of
-the run, or the next person will chase a "leak" that is really yesterday's
-projects.
+Verified: Forge's store held at 118 entries across a full Forge Modular run,
+where it previously grew.
 
-**Clean up before re-baselining:** those 121 directories are Forge Modular's, in
-Forge's store. Decide whether to move or delete them; do not just refresh the
-baseline over them, or Forge Instrument's baseline permanently encodes another
-product's data.
+**The guard is hermetic now too.** It renders against a private temp store, so a
+baseline means what it says rather than describing whatever was on disk that day.
+Proven by running it twice and getting the same digests. The baselines were
+regenerated under those conditions — that is why they changed.
+
+**Still to clean up:** the ~118 project directories in Forge's store include the
+ones Forge Modular wrote before the fix. Sorting them is a judgement call about
+which are genuinely Forge's, so it is left for a human.
 
 ## The two crashes have one root cause
 
@@ -153,9 +155,26 @@ difference that chrome depends on. It also explains the crash a human hit in
 `rebuild_marketplace_cards`: the same missing graph, reached through a different
 path.
 
+**Confirmed, not fixed.** Isolating the project store did not help — it still
+segfaults — which rules the store out and leaves `ensure_default_build()` as the
+cause.
+
+There is now a regression test for it: `"Forge Modular's view tree can be
+walked"`, tagged `[.crash]` so it is hidden by default and the suite stays
+honest rather than red. Run it deliberately:
+
+```
+./build/forge-test-chrome-no-leak "[.crash]"
+```
+
+It should pass the moment a default build exists.
+
 **Fix:** either install a minimal valid build so the contract the base class
 documents is honoured, or make the chrome tolerate a shell with no graph. The
-first is smaller and matches what the other three products do.
+first is smaller and matches what the other three products do — `ForgeFxShell`
+installs `make_default_lofi_build()`. Forge Modular has no DSP of its own, so
+somebody needs to decide what its "live graph" is: most likely the same
+pass-through its `process_audio()` already performs.
 
 ## Open: a crash in rebuild_marketplace_cards
 
