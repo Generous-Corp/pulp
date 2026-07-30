@@ -957,6 +957,12 @@ uses, or the golden warms a cache the real jobs never touch.
   `PULP_SDK_TARGETS` is assembled or consumed, keep the canonical literal
   `set` / `list(APPEND)` / `install(TARGETS ...)` forms or extend the
   fail-closed parser and its negative controls together.
+- **The release archive matrix must match every packaged CLI product.**
+  `cli_binary_stems` lists the shipped executables and `common_cli_members`
+  lists non-executable resources such as the import-design browser-capture
+  runtime. Keep those fields aligned with `package_cli.py` and
+  `tools/import-design/browser_capture/runtime_manifest.txt`; the verifier
+  rejects both missing and unexpected archive members.
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS

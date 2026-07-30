@@ -1072,9 +1072,16 @@ from the tag's source. Two safe options:
    The build-cli job overlays safe release-pipeline helper files from
    main automatically, so a backfill picks up post-tag fetch-script,
    packaging, manifest, and targeted CMake fixes even though the tag's
-   tree predates them. Leave `make_latest` false for old-tag backfills;
-   set it true only when backfilling the current newest tag after the
-   automatic tag-triggered run failed.
+   tree predates them. It also overlays the current
+   `release_artifact_contents.py` compatibility engine while retaining the
+   tag's own product matrix. CLI packaging and smoke checks include the
+   import-design binary/runtime only when that checkout built them; the
+   verifier uses the release version to distinguish the original
+   three-binary contract from the transitional `v0.764.0` import-design
+   payload, before newer matrices declare CLI members directly. Leave
+   `make_latest` false for old-tag backfills; set it true only when
+   backfilling the current newest tag after the automatic tag-triggered run
+   failed.
 
 2. **Cherry-pick fix + retag:** Only if the build itself needs to change.
    Pulp doesn't retag immutable releases — use option 1 unless the
