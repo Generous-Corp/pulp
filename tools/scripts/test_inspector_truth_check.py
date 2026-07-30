@@ -35,9 +35,11 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "docs/status/cli-commands.yaml":
                 "owner-private authenticated discovery\n",
             "experimental/pulp-rs/src/cmd/motion.rs":
-                "authenticated auto-discovery\n",
+                "authenticated auto-discovery; "
+                "must be an integer from 1 to 65535\n",
             "experimental/pulp-rs/src/cmd/trace.rs":
-                "authenticated auto-discovery\n",
+                "authenticated auto-discovery; "
+                "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":
                 "authenticated ephemeral discovery\n",
             "tools/mcp/pulp_mcp.cpp":
@@ -56,7 +58,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "pulp-test-inspector-stripped-artifact\n"
                 "check_inspector_stripped_artifact.cmake\n",
             "inspect/src/discovery.cpp":
-                "if (info.pbi_status == SZOMB)\n",
+                "if (info.pbi_status == SZOMB)\n"
+                "record && read_credential(*record).has_value()\n",
         }
         for relative, text in files.items():
             path = root / relative

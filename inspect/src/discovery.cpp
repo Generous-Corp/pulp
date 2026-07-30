@@ -650,8 +650,10 @@ std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
         if (filename.size() <= 5 ||
             filename.substr(filename.size() - 5) != ".json")
             continue;
-        if (auto record = decode_record(runtime_directory_, entry.path()))
+        if (auto record = decode_record(runtime_directory_, entry.path());
+            record && read_credential(*record).has_value()) {
             records.push_back(std::move(*record));
+        }
     }
     std::sort(records.begin(), records.end(), [](const auto& left,
                                                   const auto& right) {

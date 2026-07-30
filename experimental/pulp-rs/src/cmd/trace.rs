@@ -629,19 +629,30 @@ fn no_inspector_hint(port: u16) -> String {
     )
 }
 
-/// Resolve the explicit port filter from CLI flags + env. Zero delegates
-/// selection to authenticated discovery.
-#[must_use]
-pub fn resolve_port(flags: &GlobalFlags) -> u16 {
+fn resolve_port_value(
+    flags: &GlobalFlags,
+    configured: Option<&str>,
+) -> Result<u16> {
     if let Some(p) = flags.port {
-        return p;
+        return Ok(p);
     }
-    if let Ok(v) = std::env::var(INSPECTOR_PORT_ENV) {
-        if let Ok(p) = v.parse::<u16>() {
-            return p;
-        }
+    if let Some(value) = configured {
+        return match value.parse::<u16>() {
+            Ok(port) if port != 0 => Ok(port),
+            _ => Err(CliError::BadUsage(format!(
+                "${INSPECTOR_PORT_ENV} must be an integer from 1 to 65535; got `{value}`"
+            ))),
+        };
     }
-    0
+    Ok(0)
+}
+
+/// Resolve the explicit port filter from CLI flags + env. Zero delegates
+/// selection to authenticated discovery. A configured but invalid environment
+/// filter is an error rather than permission to select a different session.
+pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
+    let configured = std::env::var(INSPECTOR_PORT_ENV).ok();
+    resolve_port_value(flags, configured.as_deref())
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure glue
@@ -658,12 +669,8 @@ pub fn dispatch<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let port = resolve_port(flags);
     if matches!(sub, Sub::Help) {
         return print_help(out).map_err(io_err);
-    }
-    if matches!(sub, Sub::Doctor) {
-        return run_doctor(port, flags.json, talker, out);
     }
     if let Sub::Open(args) = sub {
         return run_open(args, flags.json, out);
@@ -683,6 +690,10 @@ pub fn dispatch<T: InspectorTalker>(
                 out,
             );
         }
+    }
+    let port = resolve_port(flags)?;
+    if matches!(sub, Sub::Doctor) {
+        return run_doctor(port, flags.json, talker, out);
     }
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This stays here so
@@ -1406,13 +1417,23 @@ mod tests {
             json: false,
             port: Some(1234),
         };
-        assert_eq!(resolve_port(&g), 1234);
+        assert_eq!(resolve_port_value(&g, Some("0")).unwrap(), 1234);
     }
 
     #[test]
     fn resolve_port_defaults_to_authenticated_discovery() {
-        if std::env::var_os(INSPECTOR_PORT_ENV).is_none() {
-            assert_eq!(resolve_port(&GlobalFlags::default()), 0);
+        assert_eq!(
+            resolve_port_value(&GlobalFlags::default(), None).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn resolve_port_rejects_invalid_environment_filters() {
+        let flags = GlobalFlags::default();
+        for value in ["0", "not-a-port", "65536", "-1"] {
+            let error = resolve_port_value(&flags, Some(value)).unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
         }
     }
 
