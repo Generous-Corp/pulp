@@ -210,6 +210,27 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
     return v;
 }
 
+void ForgeModularShell::watch_build_log(const std::string& path) {
+    monitor_.watch(path);
+}
+
+int ForgeModularShell::pump_build_log() {
+    const auto added = monitor_.poll();
+    auto* c = chrome();
+    if (!c) return static_cast<int>(added.size());
+
+    for (const auto& line : added) {
+        // A refusal and an error are the two a person must not miss, so they
+        // are the two the chat marks. A gate rejection is deliberately NOT an
+        // error: it is the pipeline working, and marking it red teaches people
+        // to ignore the colour.
+        const bool alarming = line.kind == BuildLine::Kind::refusal ||
+                              line.kind == BuildLine::Kind::error;
+        c->narrate(line.text, alarming);
+    }
+    return static_cast<int>(added.size());
+}
+
 void ForgeModularShell::offer_random() {
     // Fills the composer rather than building. A suggestion you cannot read
     // before committing to it is a dice roll, not a prompt.

@@ -1,8 +1,27 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..b17beb2 100644
+index 0863f43..8d598b7 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
-@@ -722,6 +722,14 @@ public:
+@@ -640,6 +640,18 @@ public:
+         return generation_turn_state_.has_active();
+     }
+     int chat_line_count() const { return chat_line_count_; }
++
++    /// Put one line of narration in the Build transcript.
++    ///
++    /// The seam a shell uses to report what its own generator is doing. Forge's
++    /// own products narrate through the agent loop, which owns the private
++    /// append path; a shell that drives an external tool has no loop to speak
++    /// through, and would otherwise have to build a second transcript beside
++    /// this one. `alarming` marks the two a person must not scroll past: a
++    /// refusal and a hard error.
++    void narrate(const std::string& text, bool alarming = false) {
++        append_agent_line(text, alarming);
++    }
+     // The text of every agent line shown on the chat rail, in order (tests:
+     // assert the user-facing rail stays calm — no raw parser/gate reject text).
+     const std::vector<std::string>& agent_lines() const { return agent_lines_; }
+@@ -722,6 +734,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -17,7 +36,7 @@ index 0863f43..b17beb2 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1171,6 +1179,7 @@ private:
+@@ -1171,6 +1191,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -25,98 +44,6 @@ index 0863f43..b17beb2 100644
      pulp::view::View* title_bar_ = nullptr;
      pulp::view::View* shell_body_ = nullptr;
      pulp::view::View* shell_rail_ = nullptr;
-diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
-index 528e598..2e8e820 100644
---- a/include/forge/fx_shell.hpp
-+++ b/include/forge/fx_shell.hpp
-@@ -1,5 +1,6 @@
- #pragma once
- 
-+#include "forge/brand.hpp"
- #include "forge/lofi_delay.hpp"
- #include "forge/gen/tempo_division.hpp"  // DeriveUnit, Division for derived macros
- #include "forge/param_map.hpp"
-@@ -166,6 +167,18 @@ public:
-     const pulp::format::reload::ProcessorHotSwapSlot& slot() const { return slot_; }
- 
-     // ── ForgeShell hooks (effect-specific DSP) ───────────────────────────────
-+    // The words the chrome shows for this product. These are exactly what
-+    // chrome.cpp's switch statements returned before the copy moved here.
-+    ChromeCopy chrome_copy() const override {
-+        return { .badge = std::string(brand::kProductNameUpper) + " FX",
-+                 .prompt_placeholder = "Build a lo-fi multi-fx plugin \u2014 reverb, delay, chorus. Nocturne, dreamy, a visualizer per effect.",
-+                 .followup_placeholder = "refine it \u2014 e.g. darker feedback tail",
-+                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
-+                             " \u00b7 AI PLUGIN FACTORY",
-+             .hero_title = "What do you want to build?",
-+             .default_build_title = "Lo-Fi Delay" };
-+    }
-+
-     bool has_build() const override { return slot_.has_active(); }
-     std::vector<MacroDesc> macro_descriptors() const override;
-     bool install_generated_bundle(
-diff --git a/include/forge/instrument_shell.hpp b/include/forge/instrument_shell.hpp
-index d4b60cd..3d2b611 100644
---- a/include/forge/instrument_shell.hpp
-+++ b/include/forge/instrument_shell.hpp
-@@ -24,6 +24,7 @@
- //    current value — the SAME contract the FX chrome + generated ui.js read, so
- //    an instrument inherits the art-directed believable UI automatically.
- 
-+#include "forge/brand.hpp"
- #include "forge/param_map.hpp"
- #include "forge/prepared_bank_exchange.hpp"
- #include "forge/shell.hpp"
-@@ -252,6 +253,18 @@ public:
-     }
- 
-     // ── ForgeShell hooks (instrument-specific DSP) ───────────────────────────
-+    // The words the chrome shows for this product. These are exactly what
-+    // chrome.cpp's switch statements returned before the copy moved here.
-+    ChromeCopy chrome_copy() const override {
-+        return { .badge = std::string(brand::kProductNameUpper) + " INST",
-+                 .prompt_placeholder = "a warm analog pad with a slow filter sweep\u2026",
-+                 .followup_placeholder = "refine it \u2014 e.g. faster attack, brighter tone",
-+                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
-+                             " \u00b7 AI PLUGIN FACTORY",
-+             .hero_title = "What do you want to build?",
-+             .default_build_title = "Subtractive Synth" };
-+    }
-+
-     bool has_build() const override { return true; }  // the poly engine always renders
-     std::vector<MacroDesc> macro_descriptors() const override;
-     bool install_generated_bundle(
-diff --git a/include/forge/midi_shell.hpp b/include/forge/midi_shell.hpp
-index 27f98d0..cdecceb 100644
---- a/include/forge/midi_shell.hpp
-+++ b/include/forge/midi_shell.hpp
-@@ -24,6 +24,7 @@
- //  * process() runs the chain over midi_in → midi_out, reading its macros from
- //    the BOUND state() each block (the instrument BUG-A discipline).
- 
-+#include "forge/brand.hpp"
- #include "forge/midi_transform.hpp"
- #include "forge/gen/midi_chain_loader.hpp"  // ResolvedMidiMacro
- #include "forge/param_map.hpp"
-@@ -79,6 +80,18 @@ public:
-                                  std::string& err);
- 
-     // ── ForgeShell hooks (MIDI-specific) ─────────────────────────────────────
-+    // The words the chrome shows for this product. These are exactly what
-+    // chrome.cpp's switch statements returned before the copy moved here.
-+    ChromeCopy chrome_copy() const override {
-+        return { .badge = std::string(brand::kProductNameUpper) + " MIDI",
-+                 .prompt_placeholder = "a scale-locked up-down arpeggiator\u2026",
-+                 .followup_placeholder = "refine it \u2014 e.g. swing the offbeats",
-+                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
-+                             " \u00b7 AI PLUGIN FACTORY",
-+             .hero_title = "What do you want to build?",
-+             .default_build_title = "Note Pass" };
-+    }
-+
-     bool has_build() const override { return true; }  // a chain is always installed
-     std::vector<MacroDesc> macro_descriptors() const override;
-     bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
 index c8101e1..c90737b 100644
 --- a/include/forge/shell.hpp

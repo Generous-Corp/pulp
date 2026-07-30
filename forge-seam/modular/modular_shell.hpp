@@ -15,6 +15,7 @@
 #include "forge/brand.hpp"
 #include "forge/shell.hpp"
 
+#include "forge/build_monitor.hpp"
 #include "forge/mention_overlay.hpp"
 
 #include <pulp/view/buttons.hpp>
@@ -67,6 +68,22 @@ public:
     /// The mention list, so the composer's keystrokes can reach it and a test
     /// can drive it without a window.
     MentionOverlay& mentions() { return mentions_; }
+
+    /// Start following a generator log and pushing what it says into the chat.
+    ///
+    /// Forge's Build screen already has the transcript; this only supplies the
+    /// lines. Nothing here rebuilds a chat that already exists.
+    void watch_build_log(const std::string& path);
+
+    /// Drain whatever the generator has written since the last call, appending
+    /// it to the chat. Called from a UI tick.
+    ///
+    /// Returns how many lines were added, so a test can assert the pump without
+    /// reading the view tree.
+    int pump_build_log();
+
+    BuildOutcome build_outcome() const { return monitor_.outcome(); }
+    const BuildMonitor& monitor() const { return monitor_; }
 
     /// What a host sees.
     ///
@@ -130,6 +147,7 @@ private:
     void offer_random();
 
     MentionOverlay mentions_;
+    BuildMonitor monitor_;
     std::string last_random_;
     std::size_t next_random_ = 0;
     pulp::view::TextButton* tab_module_ = nullptr;

@@ -595,3 +595,61 @@ TEST_CASE("Random fills the composer, and never repeats itself", "[seam]") {
     }
     CHECK(seen.size() > 1);              // not one value forever
 }
+
+TEST_CASE("what the generator says reaches the transcript", "[buildlog][seam]") {
+    // The failure this closes: a real capability refusal went to a log file
+    // nobody opens while the screen showed one unchanging word, and read to a
+    // human as a hang. The refusal has to arrive in the chat, marked.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    const auto log = std::filesystem::temp_directory_path() /
+                     "forge-modular-narration.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+
+    const int before = shell.chrome()->chat_line_count();
+
+    // Written in two goes, because a generation writes over minutes and the
+    // pump has to pick up the tail without repeating the head.
+    {
+        std::ofstream f(log);
+        f << "Planning a patch from your prompt\n"
+          << "Rejected at the behaviour gate: TONE defaults to the top of its range\n";
+    }
+    const int first = shell.pump_build_log();
+    CHECK(first == 2);
+    CHECK(shell.chrome()->chat_line_count() == before + 2);
+    // A gate rejection is the pipeline working, so the run is still running.
+    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::running);
+
+    {
+        std::ofstream f(log, std::ios::app);
+        f << "Asking the model again with that note\n"
+          << "Hold on -- this asks for something you don't have installed\n"
+          << "Install one in Rack's Library and I'll wire it\n";
+    }
+    const int second = shell.pump_build_log();
+    CHECK(second == 3);                                   // the tail only
+    CHECK(shell.chrome()->chat_line_count() == before + 5);
+    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::refused);
+    // The headline names what is missing, not the bare remedy.
+    CHECK(shell.monitor().headline().find("don't have installed") !=
+          std::string::npos);
+
+    // Nothing new to say means nothing new in the transcript: a pump on a UI
+    // tick must not re-append the log every frame.
+    CHECK(shell.pump_build_log() == 0);
+    CHECK(shell.chrome()->chat_line_count() == before + 5);
+
+    std::filesystem::remove(log);
+}
