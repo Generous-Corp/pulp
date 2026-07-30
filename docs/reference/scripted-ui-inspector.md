@@ -122,12 +122,14 @@ returns `attached:false`.
 ## Security
 
 Evaluate is remote code execution against the plugin UI's JS context, and the
-inspector transport is unauthenticated. Two consequences:
+authenticated inspector transport therefore treats it as a separately gated,
+high-risk capability. Two consequences:
 
 - Evaluate/interrupt are **off by default** — a host must explicitly
   `set_runtime_eval_enabled(true)`, and should only do so for a trusted, local
   dev session. Read-only surfaces (logs, DOM, state) are unaffected.
-- The TCP server binds loopback only, but it is currently unauthenticated and
-  uses a discoverable port-file hint. Do not enable eval outside a controlled
+- The production TCP server binds loopback only and requires a fresh nonce/HMAC
+  proof using an owner-private per-session credential discovered through an
+  ephemeral record/token pair. Do not enable eval outside a controlled
   custom-host fixture. Evaluation is serialized and never runs on the audio
   thread.

@@ -22,7 +22,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "Connect to an explicitly hosted inspector fixture\n",
             "experimental/pulp-rs/src/help.rs":
                 "Connect to an explicitly hosted inspector fixture\n",
-            "docs/reference/scripted-ui-inspector.md": "loopback only\n",
+            "docs/reference/scripted-ui-inspector.md":
+                "loopback only; nonce/HMAC proof; "
+                "owner-private per-session credential\n",
             "docs/guides/coming-from-reference.md": "visual overlay only\n",
             ".claude/commands/inspect.md":
                 "unavailable in normal launches; explicitly wired custom fixture\n",
@@ -98,6 +100,23 @@ class InspectorTruthCheckTests(unittest.TestCase):
         errors = " ".join(inspector_truth_check.check_root(root))
         self.assertIn("stale claim", errors)
         self.assertIn("source-checkout-only", errors)
+
+    def test_rejects_obsolete_unauthenticated_transport_claims(self) -> None:
+        root = self.make_root()
+        (root / "docs/reference/scripted-ui-inspector.md").write_text(
+            "inspector transport is unauthenticated and uses a port-file hint\n",
+            encoding="utf-8",
+        )
+        (root / "tools/mcp/pulp_mcp.cpp").write_text(
+            '"name":"pulp_inspect_set_param",'
+            '"description":"Experimental source-checkout client that lacks '
+            'authenticated main-thread dispatch"\n',
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn("transport is unauthenticated", errors)
+        self.assertIn("port-file hint", errors)
+        self.assertIn("lacks authenticated main-thread dispatch", errors)
 
     def test_rejects_stale_rust_help_claim(self) -> None:
         root = self.make_root()

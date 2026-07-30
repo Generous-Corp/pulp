@@ -187,6 +187,33 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
              fixture.seen[0].params_json == "{}"));
 }
 
+TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
+          "[cli][shellout][inspect][controller]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    InspectServerFixture fixture;
+    fixture.handler = [&](const InspectorMessage& request) {
+        return make_response(request.id, R"({"applied":true})");
+    };
+
+    auto result = run_pulp(
+        {"inspect",
+         "--port", fixture.port_string(),
+         "--command", "State.setParameter",
+         "--params", R"({"id":"gain","value":0.75})"},
+        10000);
+
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stderr_output.empty());
+    REQUIRE(compact_json_for_assertion(result.stdout_output)
+                .find(R"({"applied":true})") != std::string::npos);
+    REQUIRE(fixture.seen.size() == 1);
+    CHECK(fixture.seen.front().method == "State.setParameter");
+    CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
+          R"({"id":"gain","value":0.75})");
+}
+
 TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
           "[cli][shellout][inspect]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

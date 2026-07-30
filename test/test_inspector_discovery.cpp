@@ -84,7 +84,47 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
     publisher.remove();
     CHECK(reader.list().empty());
     CHECK_FALSE(std::filesystem::exists(
-        temporary.path / "session-one.token"));
+        temporary.path / "11-session-one-instance-1.token"));
+}
+
+TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
+          "[inspect][discovery][identity]") {
+    TemporaryDirectory temporary;
+    const auto first_token = generate_inspector_secret();
+    const auto second_token = generate_inspector_secret();
+    REQUIRE(first_token.has_value());
+    REQUIRE(second_token.has_value());
+
+    auto first_record = fixture_record("shared-session");
+    first_record.instance_id = "instance-a";
+    auto second_record = fixture_record("shared-session");
+    second_record.instance_id = "instance-b";
+    InspectorDiscoveryPublisher first(temporary.path);
+    InspectorDiscoveryPublisher second(temporary.path);
+    REQUIRE(first.publish(first_record, *first_token, 5s));
+    REQUIRE(second.publish(second_record, *second_token, 5s));
+
+    InspectorDiscoveryReader reader(temporary.path);
+    const auto records = reader.list();
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].record_path != records[1].record_path);
+    CHECK(records[0].credential_path != records[1].credential_path);
+    for (const auto& record : records) {
+        const auto credential = reader.read_credential(record);
+        REQUIRE(credential.has_value());
+        if (record.instance_id == "instance-a")
+            CHECK(*credential == *first_token);
+        else if (record.instance_id == "instance-b")
+            CHECK(*credential == *second_token);
+        else
+            FAIL("unexpected instance identity");
+    }
+
+    first.remove();
+    const auto remaining = reader.list();
+    REQUIRE(remaining.size() == 1);
+    CHECK(remaining.front().instance_id == "instance-b");
+    CHECK(reader.read_credential(remaining.front()) == second_token);
 }
 
 TEST_CASE("discovery rejects a stale record after process id reuse",

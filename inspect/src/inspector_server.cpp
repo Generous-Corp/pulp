@@ -321,6 +321,20 @@ void InspectorServer::stop() {
 }
 
 void InspectorServer::broadcast(const InspectorMessage& event) {
+    const auto* descriptor = find_inspector_method(event.method);
+    if (event.id != 0 || !descriptor ||
+        descriptor->kind != InspectorMethodKind::Event) {
+        return;
+    }
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex_);
+        if (!session_ ||
+            !session_->policy().is_available(descriptor->capability) ||
+            !session_->policy().is_granted(descriptor->capability)) {
+            return;
+        }
+    }
+
     auto json = encode_message(event);
     std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
     {

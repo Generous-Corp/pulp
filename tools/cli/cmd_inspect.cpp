@@ -188,6 +188,22 @@ int cmd_inspect(const std::vector<std::string>& args) {
               << " Connected to inspector\n";
 
     if (!command.empty()) {
+        const auto* descriptor = find_inspector_method(command);
+        const bool needs_controller =
+            descriptor &&
+            descriptor->kind == InspectorMethodKind::Request &&
+            capability_requires_controller_lease(descriptor->capability) &&
+            command != methods::kSessionAcquireController &&
+            command != methods::kSessionRenewController &&
+            command != methods::kSessionReleaseController;
+        if (needs_controller) {
+            const auto lease =
+                client.request(std::string(methods::kSessionAcquireController));
+            if (lease.is_error) {
+                print_error(lease);
+                return 1;
+            }
+        }
         const auto response = client.request(command, params);
         if (response.is_error) {
             print_error(response);
