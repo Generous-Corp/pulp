@@ -35,13 +35,16 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "docs/agent-integrations.md":
                 "unavailable in normal launches; explicitly wired custom fixture\n",
             "docs/reference/cli.md":
-                "unavailable in normal launches; explicitly wired\n",
+                "unavailable in normal launches; explicitly wired; "
+                "remote clients cannot select a filesystem path\n",
             "docs/status/cli-commands.yaml":
                 "owner-private authenticated discovery\n",
             "experimental/pulp-rs/src/cmd/motion.rs":
                 "authenticated auto-discovery\n",
             "experimental/pulp-rs/src/cmd/trace.rs":
-                "authenticated auto-discovery\n",
+                "authenticated auto-discovery\n"
+                "pulp trace start --out is unavailable\n"
+                "if !(1..=512).contains(&ring_mb)\n",
             "experimental/pulp-rs/src/cmd/inspector.rs":
                 "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":
@@ -55,7 +58,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "nonce/HMAC; owner-private per-session credential; "
                 "defense-in-depth\n",
             "tools/mcp/pulp_mcp.cpp":
-                '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
+                '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n'
+                '"minimum":1,"maximum":512\n'
+                "The host owns the trace destination.\n",
             "CMakeLists.txt":
                 "if(PULP_ENABLE_INSPECTOR)\n"
                 "    add_subdirectory(inspect)\n"
@@ -87,6 +92,10 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "std::chrono::steady_clock::duration::max()\n"
                 "std::chrono::steady_clock::time_point::max() - interval\n"
                 "!publisher_->refresh(ttl_)\n",
+            "inspect/src/trace_inspector.cpp":
+                "out_path is unavailable over the inspector\n"
+                "ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb\n"
+                "Tracing::start(categories, {}, ring_kb)\n",
         }
         for relative, text in files.items():
             path = root / relative
@@ -264,6 +273,22 @@ class InspectorTruthCheckTests(unittest.TestCase):
         errors = " ".join(inspector_truth_check.check_root(root))
         self.assertIn("main.rs retains stale claim: PULP_MOTION_SERVER=1", errors)
         self.assertIn("main.rs retains stale claim: PULP_TRACE_SERVER=1", errors)
+
+    def test_rejects_remote_trace_path_and_unbounded_ring_claims(self) -> None:
+        root = self.make_root()
+        (root / "docs/reference/cli.md").write_text(
+            "unavailable in normal launches; explicitly wired\n"
+            "pulp trace start --categories dsp,render --out /tmp/x.pftrace\n",
+            encoding="utf-8",
+        )
+        (root / "tools/mcp/pulp_mcp.cpp").write_text(
+            '"out_path":{"type":"string","description":"Explicit .pftrace output path"\n',
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn("docs/reference/cli.md retains stale claim", errors)
+        self.assertIn("tools/mcp/pulp_mcp.cpp retains stale claim", errors)
+        self.assertIn("omits required claim", errors)
 
     def test_rejects_stale_shipped_inspector_workflows(self) -> None:
         root = self.make_root()

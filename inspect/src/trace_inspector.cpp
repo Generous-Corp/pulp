@@ -14,6 +14,8 @@ namespace pulp::inspect {
 namespace {
 using pulp::runtime::Tracing;
 using pulp::runtime::kTracingEnabled;
+constexpr std::int64_t kMinTraceRingMb = 1;
+constexpr std::int64_t kMaxTraceRingMb = 512;
 }  // namespace
 
 bool TraceInspector::owns_method(const std::string& method) {
@@ -49,17 +51,38 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
             categories.emplace_back(arr[i].getString());
     }
 
-    std::string out_path;
-    if (params.isObject() && params.hasObjectMember("out_path"))
-        out_path = std::string(params["out_path"].getString());
+    if (params.isObject() && params.hasObjectMember("out_path")) {
+        return make_error(
+            req.id,
+            "Trace.startSession: out_path is unavailable over the inspector; "
+            "the host owns the trace destination",
+            "invalid_params");
+    }
 
     // The CLI sizes the ring in megabytes; Tracing takes kilobytes. Absent →
     // Tracing's own 80 MB default.
     std::uint32_t ring_kb = 80u * 1024u;
-    if (params.isObject() && params.hasObjectMember("ring_mb"))
-        ring_kb = static_cast<std::uint32_t>(params["ring_mb"].getInt64()) * 1024u;
+    if (params.isObject() && params.hasObjectMember("ring_mb")) {
+        const auto& ring = params["ring_mb"];
+        if (!ring.isInt32() && !ring.isInt64()) {
+            return make_error(
+                req.id,
+                "Trace.startSession: ring_mb must be an integer",
+                "invalid_params");
+        }
+        const auto ring_mb = ring.getInt64();
+        if (ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb) {
+            return make_error(
+                req.id,
+                "Trace.startSession: ring_mb must be between 1 and 512",
+                "invalid_params");
+        }
+        ring_kb = static_cast<std::uint32_t>(ring_mb) * 1024u;
+    }
 
-    const bool started = Tracing::start(categories, out_path, ring_kb);
+    // An authenticated peer can control capture, not host filesystem paths.
+    // Empty delegates the destination to host-owned trace configuration.
+    const bool started = Tracing::start(categories, {}, ring_kb);
 
     auto out = choc::value::createObject("");
     out.addMember("compiled_in", choc::value::createBool(kTracingEnabled));
@@ -71,8 +94,6 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
             "-DPULP_TRACING=ON to capture a trace."));
     } else {
         out.addMember("ok", choc::value::createBool(started));
-        if (!out_path.empty())
-            out.addMember("out_path", choc::value::createString(out_path));
     }
     return make_response(req.id, choc::json::toString(out, false));
 }

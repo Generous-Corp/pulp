@@ -2823,6 +2823,17 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     require_contains(start, "Error: not in a Pulp project");
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
+    const auto tools = handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})");
+    const auto trace_start = tools.find(R"("name":"pulp_trace_start")");
+    REQUIRE(trace_start != std::string::npos);
+    const auto trace_stop = tools.find(R"("name":"pulp_trace_stop")", trace_start);
+    REQUIRE(trace_stop != std::string::npos);
+    const auto trace_schema = tools.substr(
+        trace_start, trace_stop - trace_start);
+    require_contains(trace_schema, R"("minimum":1)");
+    require_contains(trace_schema, R"("maximum":512)");
+    REQUIRE(trace_schema.find(R"("out_path")") == std::string::npos);
+
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
                                           R"JSON({"sql":"select 1","format":"json"})JSON"));
     require_contains(query, "Error: not in a Pulp project");
