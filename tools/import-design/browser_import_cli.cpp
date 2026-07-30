@@ -59,6 +59,31 @@ fs::path normalized_destination(const fs::path& path) {
 #endif
 }
 
+bool validate_primary_output_destinations(
+    const BrowserImportCliRequest& request,
+    std::string& error) {
+    std::vector<fs::path> outputs = request.reserved_output_paths;
+    outputs.push_back(request.output_file);
+    std::vector<fs::path> inputs{request.input_file};
+    if (request.browser_interactions)
+        inputs.push_back(*request.browser_interactions);
+    if (!request.reference_image.empty())
+        inputs.emplace_back(request.reference_image);
+    for (const auto& output : outputs) {
+        if (output.empty()) continue;
+        const auto normalized_output = normalized_destination(output);
+        for (const auto& input : inputs) {
+            if (!input.empty() &&
+                normalized_output == normalized_destination(input)) {
+                error =
+                    "browser primary output collides with a protected input";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool path_contains(const fs::path& directory, const fs::path& candidate) {
     const auto base = normalized_destination(directory);
     const auto path = normalized_destination(candidate);
@@ -530,6 +555,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     const BrowserImportCliRequest& request,
     std::string_view content,
     const internal::BrowserImportCliOperations& operations) {
+    std::string primary_output_error;
+    if (!validate_primary_output_destinations(
+            request, primary_output_error)) {
+        std::cerr << "Error: " << primary_output_error << "\n";
+        return BrowserImportFailure{2};
+    }
     int render_width = request.initial_width;
     int render_height = request.initial_height;
     std::string reference_image = request.reference_image;

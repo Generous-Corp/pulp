@@ -72,9 +72,12 @@ For a secondary prototype screen, pass
 `pulp-browser-interactions-v1` document accepts only bounded `click`, `type`,
 `wait-for`, and `wait-ms` actions. Selectors and action results are saved in
 the capture evidence; typed text is represented only by its length, with
-neither plaintext nor a per-action text hash persisted. There is deliberately
-no arbitrary JavaScript action. Per-action selector timeouts remain bounded by
-the capture-wide timeout and cannot extend it. A `wait-for` action checks the
+neither plaintext nor a per-action text hash in the interaction report. Typed
+text remains rendered page state and may appear in screenshots, DOM/semantic
+evidence, or tokens, so plans must never contain secrets. There is deliberately
+no arbitrary JavaScript action, and popup pages are rejected. Per-action
+selector timeouts remain bounded by the capture-wide timeout and cannot extend
+it. A `wait-for` action checks the
 live rendered element state, so hidden
 or inert DOM content does not count merely because its strings exist in the
 document.

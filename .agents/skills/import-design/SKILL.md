@@ -3261,7 +3261,10 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
   script source do not prove which screen rendered. Capture records action
   results and typed-text length without retaining the text or a per-action
-  text hash. Never add an arbitrary JavaScript action.
+  text hash in the interaction report. Typed text remains live rendered state
+  and may appear in screenshot, DOM/semantic, or token evidence, so never put
+  passwords, credentials, private drafts, or other secrets in a plan. Popup
+  pages are rejected. Never add an arbitrary JavaScript action.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated

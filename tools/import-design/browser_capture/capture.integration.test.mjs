@@ -395,6 +395,56 @@ test("real browser interactions reject main-frame navigation",
     }
   });
 
+test("real browser interactions reject and close popup pages",
+  { timeout: 20000 }, async (context) => {
+    const browser = await installedBrowser();
+    if (!browser) {
+      context.skip("no compatible system browser is installed");
+      return;
+    }
+
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-popup-rejection-"));
+    const input = path.join(root, "prototype.html");
+    const interactions = path.join(root, "interactions.json");
+    const output = path.join(root, "capture");
+    const script = fileURLToPath(new URL("./capture.mjs", import.meta.url));
+    try {
+      await writeFile(input, `<!doctype html>
+<button id="popup" onclick="window.open('other.html', '_blank')">Popup</button>
+`);
+      await writeFile(path.join(root, "other.html"), "<main>POPUP PAGE</main>");
+      await writeFile(interactions, JSON.stringify({
+        schema: "pulp-browser-interactions-v1",
+        version: 1,
+        actions: [{ action: "click", selector: "#popup" }],
+      }));
+
+      await assert.rejects(execute(process.execPath, [
+        script,
+        "capture",
+        "--browser", browser,
+        "--input", input,
+        "--root", root,
+        "--output", output,
+        "--interactions", interactions,
+        "--initial-width", "160",
+        "--initial-height", "120",
+        "--dpr", "2",
+        "--timeout-ms", "15000",
+      ], { maxBuffer: 1024 * 1024 }), (error) =>
+        error.stderr.includes("browser-interaction-navigation-rejected"));
+      const diagnostic = JSON.parse(
+        await readFile(path.join(output, "capture-error.json"), "utf8"));
+      assert.equal(
+        diagnostic.code,
+        "browser-interaction-navigation-rejected");
+      await assert.rejects(access(path.join(output, "capture.json")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 test("real browser capture preserves WebGL through software composition",
   { timeout: 20000 }, async (context) => {
     const browser = await installedBrowser();

@@ -818,6 +818,44 @@ TEST_CASE("evidence commit rechecks aliases against the interaction plan",
     CHECK(tree.read(*request.browser_interactions) == "interaction-plan");
 }
 
+TEST_CASE("browser primary output cannot replace the interaction plan",
+          "[import-design][browser-capture][cli-adapter][transaction][security]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions =
+        tree.root / "interaction-plan.json";
+    request.output_file = *request.browser_interactions;
+    tree.write(*request.browser_interactions, "interaction-plan");
+    bool capture_called = false;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest&, std::string_view) {
+            capture_called = true;
+            return id::BrowserHtmlImportResult{};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("colliding primary output must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("colliding primary output must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+    CHECK_FALSE(capture_called);
+    CHECK(tree.read(*request.browser_interactions) == "interaction-plan");
+}
+
 TEST_CASE("late evidence failure restores primary, tokens, and required assets",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;

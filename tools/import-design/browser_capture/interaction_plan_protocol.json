@@ -31,7 +31,11 @@
             "properties": {
               "action": { "const": "type" },
               "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
-              "text": { "type": "string", "maxLength": 4096 },
+              "text": {
+                "type": "string",
+                "description": "Public prototype input only; rendered text may persist in capture evidence, so secrets are forbidden",
+                "maxLength": 4096
+              },
               "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
             },
             "additionalProperties": false

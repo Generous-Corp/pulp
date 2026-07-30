@@ -37,7 +37,10 @@ length in `interaction-report.json`; it persists neither typed plaintext nor a
 per-action text hash. The published plan identity hashes a canonical redacted
 plan in which typed text is replaced by its length, so short private values
 cannot be recovered by hashing candidate plans. Same-document history and
-fragment routing are allowed; loading another document remains forbidden.
+fragment routing are allowed; loading another document or opening a popup
+remains forbidden. Typed text still becomes live rendered page state and may
+therefore appear in screenshots, DOM/semantic evidence, or tokens. Never put a
+password, credential, private draft, or other secret in an interaction plan.
 Action timeouts remain inside the capture-wide
 `--timeout-ms` deadline and cannot extend it. See
 `interaction_plan_protocol.json` for the exact schema. With no plan, capture

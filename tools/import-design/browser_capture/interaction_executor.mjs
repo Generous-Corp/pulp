@@ -154,7 +154,7 @@ function publicActionEvidence(action) {
 
 function navigationFailure() {
   const error = new Error(
-    "main-frame navigation is forbidden while browser interactions run");
+    "main-frame navigation and popup pages are forbidden while browser interactions run");
   error.code = "browser-interaction-navigation-rejected";
   return error;
 }
@@ -167,6 +167,59 @@ export async function createMainFrameNavigationGuard(cdp) {
   }
 
   let violation = false;
+  const popupBlock = await cdp.call("Runtime.evaluate", {
+    expression: `(() => {
+      globalThis.__pulpInteractionPopupAttempted = false;
+      const reject = (event) => {
+        const path = typeof event.composedPath === "function"
+          ? event.composedPath()
+          : [];
+        const target = path.find((item) =>
+          item instanceof HTMLAnchorElement ||
+          item instanceof HTMLAreaElement ||
+          item instanceof HTMLFormElement);
+        const name = target?.target?.trim().toLowerCase() ?? "";
+        if (name && !["_self", "_top", "_parent"].includes(name)) {
+          globalThis.__pulpInteractionPopupAttempted = true;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      };
+      addEventListener("click", reject, true);
+      addEventListener("submit", reject, true);
+      globalThis.open = () => {
+        globalThis.__pulpInteractionPopupAttempted = true;
+        return null;
+      };
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  if (popupBlock.exceptionDetails ||
+      popupBlock.result?.value !== true) {
+    throw navigationFailure();
+  }
+  const rejectPopup = (targetInfo) => {
+    if (targetInfo?.type !== "page") return;
+    violation = true;
+    if (targetInfo.targetId) {
+      Promise.resolve(cdp.call("Target.closeTarget", {
+        targetId: targetInfo.targetId,
+      })).catch(() => {});
+    }
+  };
+  cdp.on("Page.windowOpen", () => {
+    violation = true;
+  });
+  cdp.on("Target.attachedToTarget", ({ targetInfo }) => {
+    rejectPopup(targetInfo);
+  });
+  await cdp.call("Target.setAutoAttach", {
+    autoAttach: true,
+    waitForDebuggerOnStart: false,
+    flatten: true,
+    filter: [{ type: "page", exclude: false }],
+  });
   cdp.on("Page.frameNavigated", ({ frame }) => {
     if (frame?.id === initialFrame.id || !frame?.parentId) {
       violation = true;
@@ -177,6 +230,9 @@ export async function createMainFrameNavigationGuard(cdp) {
   return {
     async assertUnchanged() {
       if (violation) throw navigationFailure();
+      const popupAttempted = await evaluate(
+        cdp, "Boolean(globalThis.__pulpInteractionPopupAttempted)");
+      if (popupAttempted) throw navigationFailure();
       const currentTree = await cdp.call("Page.getFrameTree");
       const currentFrame = currentTree?.frameTree?.frame;
       if (violation || currentFrame?.id !== initialFrame.id ||

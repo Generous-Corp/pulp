@@ -110,8 +110,11 @@ The `pulp-browser-interactions-v1` JSON plan supports `click`, `type`,
 click; strings in hidden or inert DOM are not proof that a screen rendered.
 Each completed action is recorded in `interaction-report.json`; typed text is
 represented only by its length, without plaintext or a per-action text hash.
-Plans cannot execute arbitrary JavaScript, and action timeouts cannot extend
-the capture-wide deadline.
+Typed text still becomes rendered prototype state and can appear in the
+screenshot, DOM/semantic evidence, or tokens. Never put passwords, credentials,
+private drafts, or other secrets in a plan. Plans cannot execute arbitrary
+JavaScript or open popup pages, and action timeouts cannot extend the
+capture-wide deadline.
 
 Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
 JavaScript, and C++ artifacts do not embed or require them.

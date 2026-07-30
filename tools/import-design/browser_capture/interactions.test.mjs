@@ -203,14 +203,17 @@ test("main-frame navigation guard allows same-document routing and ignores subfr
     const calls = [];
     let currentUrl = "http://127.0.0.1/editor.html";
     const cdp = {
-      async call(method) {
-        calls.push(method);
+      async call(method, params) {
+        calls.push({ method, params });
         if (method === "Page.getFrameTree") {
           return {
             frameTree: {
               frame: { id: "main", loaderId: "loader-1", url: currentUrl },
             },
           };
+        }
+        if (method === "Runtime.evaluate") {
+          return { result: { value: params.expression.startsWith("(() =>") } };
         }
         return {};
       },
@@ -232,5 +235,54 @@ test("main-frame navigation guard allows same-document routing and ignores subfr
       guard.assertUnchanged(),
       (error) => error.code ===
         "browser-interaction-navigation-rejected");
-    assert.equal(calls.includes("Page.stopLoading"), true);
+    assert.equal(
+      calls.some(({ method }) => method === "Page.stopLoading"), true);
+  });
+
+test("main-frame navigation guard closes popup pages before they run",
+  async () => {
+    const listeners = new Map();
+    const calls = [];
+    const cdp = {
+      async call(method, params) {
+        calls.push({ method, params });
+        if (method === "Page.getFrameTree") {
+          return {
+            frameTree: {
+              frame: {
+                id: "main",
+                loaderId: "loader-1",
+                url: "http://127.0.0.1/editor.html",
+              },
+            },
+          };
+        }
+        if (method === "Runtime.evaluate") {
+          return { result: { value: params.expression.startsWith("(() =>") } };
+        }
+        return {};
+      },
+      on(method, listener) {
+        listeners.set(method, listener);
+      },
+    };
+    const guard = await createMainFrameNavigationGuard(cdp);
+    assert.deepEqual(
+      calls.find(({ method }) => method === "Target.setAutoAttach").params,
+      {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+        filter: [{ type: "page", exclude: false }],
+      });
+    listeners.get("Target.attachedToTarget")({
+      targetInfo: { targetId: "popup-1", type: "page" },
+    });
+    await assert.rejects(
+      guard.assertUnchanged(),
+      (error) => error.code ===
+        "browser-interaction-navigation-rejected");
+    assert.deepEqual(
+      calls.find(({ method }) => method === "Target.closeTarget").params,
+      { targetId: "popup-1" });
   });

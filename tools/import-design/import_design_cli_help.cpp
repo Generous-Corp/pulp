@@ -54,6 +54,7 @@ void print_usage() {
     std::cout << "  --browser <path>  Chromium/Chrome executable for browser-solved HTML import\n";
     std::cout << "  --browser-interactions <json>\n";
     std::cout << "                    Apply a versioned bounded click/type/wait plan before capture\n";
+    std::cout << "                    Typed text may appear in capture evidence; never type secrets\n";
     std::cout << "  --offline         Explicitly use the legacy lower-fidelity HTML parser instead\n";
     std::cout << "                    of executing HTML in Chromium\n";
     std::cout << "  --asset-cache <path>\n";
