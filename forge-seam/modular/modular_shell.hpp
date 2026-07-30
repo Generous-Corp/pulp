@@ -181,6 +181,7 @@ private:
     PatchExplanation* explanation_ = nullptr;
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
+    std::vector<pulp::view::Label*> tab_labels_;
     void refresh_depth_tabs();
     std::string last_random_;
     std::size_t next_random_ = 0;

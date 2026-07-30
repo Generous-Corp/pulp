@@ -305,8 +305,11 @@ TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
     pulp::view::TextButton* patch_tab = nullptr;
     std::function<void(pulp::view::View&)> find = [&](pulp::view::View& v) {
         if (auto* b = dynamic_cast<pulp::view::TextButton*>(&v)) {
-            if (b->label() == "Module") module_tab = b;
-            if (b->label() == "Patch") patch_tab = b;
+            // Match the access label: the visible text lives on a child Label
+            // so its colour can be set per state, and the access label is what
+            // a screen reader reads out anyway.
+            if (b->access_label() == "Module") module_tab = b;
+            if (b->access_label() == "Patch") patch_tab = b;
         }
         for (std::size_t i = 0; i < v.child_count(); ++i) find(*v.child_at(i));
     };
@@ -315,11 +318,30 @@ TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
     REQUIRE(patch_tab != nullptr);
     REQUIRE(patch_tab->on_click);          // a tab with no handler is decoration
 
+    // The ACTIVE tab must be the one that looks active. This shipped
+    // backwards -- Module was selected while Patch wore the raised pill --
+    // and the old assertion never noticed because it only checked which
+    // artifact was set, never which tab looked chosen.
+    auto looks_active = [](pulp::view::TextButton* b) {
+        REQUIRE(b->child_count() >= 1);
+        auto* lbl = dynamic_cast<pulp::view::Label*>(b->child_at(0));
+        REQUIRE(lbl != nullptr);
+        return b->style() == pulp::view::TextButton::Style::secondary &&
+               lbl->text_color() == forge::design::color::text;
+    };
+
     CHECK(shell.artifact() == forge_modular::Artifact::module);
+    CHECK(looks_active(module_tab));
+    CHECK_FALSE(looks_active(patch_tab));
+    // And the quiet one must not wear the accent, which would read as chosen.
+    CHECK(dynamic_cast<pulp::view::Label*>(patch_tab->child_at(0))->text_color() !=
+          forge::design::color::accent);
     CHECK(shell.chrome_copy().hero_title == "What should the module do?");
     CHECK(shell.composer_row().right[1].label == "Build module");
 
     patch_tab->on_click();
+    CHECK(looks_active(patch_tab));
+    CHECK_FALSE(looks_active(module_tab));
     CHECK(shell.artifact() == forge_modular::Artifact::patch);
     CHECK(shell.chrome_copy().hero_title == "What should the patch do?");
     CHECK(shell.chrome_copy().badge == "PATCH");
@@ -327,6 +349,9 @@ TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
 
     module_tab->on_click();               // and back, so it is not one-way
     CHECK(shell.artifact() == forge_modular::Artifact::module);
+    CHECK(looks_active(module_tab));
+    CHECK_FALSE(looks_active(patch_tab));
+    // And the quiet one must not wear the accent, which would read as chosen.
     CHECK(shell.chrome_copy().hero_title == "What should the module do?");
     CHECK(shell.composer_row().right[1].label == "Build module");
 }

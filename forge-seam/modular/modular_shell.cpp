@@ -160,9 +160,25 @@ std::unique_ptr<View> ForgeModularShell::home_accessory() {
     tab_module_ = nullptr;
     tab_patch_ = nullptr;
 
+    tab_labels_.clear();
     const auto add_tab = [&](const char* label, Artifact which) -> TextButton* {
-        auto b = std::make_unique<TextButton>(label);
+        auto b = std::make_unique<TextButton>();
+        b->set_access_label(label);
         auto* ptr = b.get();
+        // The colour lives on a child label, as Forge's own toolbar buttons do
+        // -- TextButton has no per-instance text colour, and without one the
+        // ghost style paints accent, so the UNSELECTED tab reads as the
+        // brighter of the two.
+        auto lbl = std::make_unique<pulp::view::Label>(label);
+        lbl->set_font_family(forge::design::type::display);
+        lbl->set_font_size(14.0f);
+        lbl->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        lbl->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
+        lbl->set_text_align(pulp::view::LabelAlign::center);
+        lbl->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
+        lbl->set_hit_testable(false);
+        tab_labels_.push_back(lbl.get());
+        b->add_child(std::move(lbl));
         // Measured: without an explicit width each tab took the FULL row width
         // (1100), so centring two of them put one at x=-554 and the other at
         // +554. justify_content was never the problem -- the children were.
@@ -190,13 +206,21 @@ void ForgeModularShell::style_tabs() {
     // Only one reads as selected. Two toggles that look exclusive have to BE
     // exclusive, or the mode becomes whichever was clicked last rather than the
     // one being shown.
+    // The ACTIVE tab is the raised one. This read backwards in the shipped app
+    // -- Module was selected while Patch wore the pill -- which is the
+    // "both tabs highlighted at once" a user reported.
     const bool patch = artifact_ == Artifact::patch;
-    if (tab_module_)
-        tab_module_->set_style(patch ? TextButton::Style::secondary
-                                     : TextButton::Style::ghost);
-    if (tab_patch_)
-        tab_patch_->set_style(patch ? TextButton::Style::ghost
-                                    : TextButton::Style::secondary);
+    TextButton* const buttons[] = {tab_module_, tab_patch_};
+    const bool active[] = {!patch, patch};
+    for (std::size_t i = 0; i < 2; ++i) {
+        if (!buttons[i]) continue;
+        buttons[i]->set_style(active[i] ? TextButton::Style::secondary
+                                        : TextButton::Style::ghost);
+        if (i < tab_labels_.size() && tab_labels_[i])
+            tab_labels_[i]->set_text_color(active[i] ? color::text
+                                                     : color::text_muted);
+        buttons[i]->request_repaint();
+    }
 }
 
 std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
