@@ -277,6 +277,27 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
     return group;
 }
 
+std::unique_ptr<View> ForgeModularShell::stage_accessory() {
+    auto preview = std::make_unique<RackPreview>();
+    rack_preview_ = preview.get();
+    // Fills the stage: a rack shown in a postage stamp cannot be read, and
+    // reading it is the point.
+    preview->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    preview->flex().flex_grow = 1;
+    preview->flex().min_height = 0;
+    return preview;
+}
+
+void ForgeModularShell::show_rack(std::vector<RackModule> modules,
+                                  std::vector<Connection> connections) {
+    if (!rack_preview_) return;
+    const bool have_rack = !modules.empty();
+    rack_preview_->set_rack(std::move(modules), std::move(connections));
+    // An empty rack keeps the skeleton up rather than showing a blank stage,
+    // which would read as a finished build that produced nothing.
+    if (auto* c = chrome()) c->show_stage_accessory(have_rack);
+}
+
 void ForgeModularShell::set_depth(Depth d) {
     if (d == depth_) return;
     depth_ = d;

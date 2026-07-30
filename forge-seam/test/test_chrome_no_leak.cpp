@@ -1033,3 +1033,45 @@ TEST_CASE("the preview names its panels", "[rack][render]") {
     CHECK(blank.size() > 8000);
     CHECK(named != blank);               // the names actually reached the canvas
 }
+
+TEST_CASE("a wired patch replaces the skeleton on the Build stage", "[rack][seam][render]") {
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    chrome->enter_build();
+
+    // The preview is mounted but yields the stage to the skeleton until there
+    // is something to show.
+    auto* preview = shell.rack_preview();
+    REQUIRE(preview != nullptr);
+    CHECK_FALSE(preview->visible());
+
+    // An empty rack must NOT take the stage: a blank stage reads as a finished
+    // build that produced nothing.
+    shell.show_rack({}, {});
+    CHECK_FALSE(preview->visible());
+
+    shell.show_rack(sample_rack(), sample_patch());
+    CHECK(preview->visible());
+    CHECK(preview->modules().size() == 3);
+    CHECK(preview->connections().size() == 3);
+
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-patch-wired.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
+    CHECK(std::filesystem::file_size(shot) > 20000);
+}

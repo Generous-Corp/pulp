@@ -17,6 +17,7 @@
 
 #include "forge/build_monitor.hpp"
 #include "forge/mention_overlay.hpp"
+#include "forge/rack_preview.hpp"
 
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/widgets.hpp>
@@ -99,6 +100,13 @@ public:
     bool shows_asides() const { return depth_ == Depth::learning; }
 
     std::unique_ptr<pulp::view::View> build_accessory() override;
+    std::unique_ptr<pulp::view::View> stage_accessory() override;
+
+    /// Put a wired patch on the Build stage, replacing the skeleton.
+    void show_rack(std::vector<RackModule> modules,
+                   std::vector<Connection> connections);
+
+    RackPreview* rack_preview() { return rack_preview_; }
 
     BuildOutcome build_outcome() const { return monitor_.outcome(); }
     const BuildMonitor& monitor() const { return monitor_; }
@@ -167,6 +175,7 @@ private:
     MentionOverlay mentions_;
     BuildMonitor monitor_;
     Depth depth_ = Depth::standard;
+    RackPreview* rack_preview_ = nullptr;
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
     void refresh_depth_tabs();
