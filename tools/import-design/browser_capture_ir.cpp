@@ -222,6 +222,7 @@ bool validate_semantic_report(const fs::path& path,
 /// leaving that part of the picture alone.
 int lower_semantic_controls(const fs::path& path,
                             const DesignIR& ir,
+                            double dx, double dy,
                             pulp::view::IRNode& root,
                             int& undeclared_paint_boxes,
                             std::string& error) {
@@ -304,8 +305,10 @@ int lower_semantic_controls(const fs::path& path,
             }
         }
         control.style.position = "absolute";
-        control.style.left = static_cast<float>(number_member(box, "left", 0.0));
-        control.style.top = static_cast<float>(number_member(box, "top", 0.0));
+        control.style.left =
+            static_cast<float>(number_member(box, "left", 0.0) + dx);
+        control.style.top =
+            static_cast<float>(number_member(box, "top", 0.0) + dy);
         control.style.width = static_cast<float>(number_member(box, "width", 0.0));
         control.style.height = static_cast<float>(number_member(box, "height", 0.0));
         // The value layer's colours come from the DESIGN's tokens, not the
@@ -455,6 +458,18 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double logical_width = number_member(reference, "logical_width");
     const double logical_height = number_member(reference, "logical_height");
     const double dpr = number_member(reference, "device_scale_factor");
+    // The panel's own bounds, which the capture already measures. The document
+    // is the VIEWPORT plus whatever room the overhang needed, so using it as
+    // the root opens a plugin far larger than its design with dead space
+    // around it.
+    const auto surface = object_member(
+        object_member(object_member(object_member(envelope, "provenance"),
+                                    "viewport"), "document"),
+        "primary_surface");
+    const double surface_left = number_member(surface, "left", 0.0);
+    const double surface_top = number_member(surface, "top", 0.0);
+    const double surface_width = number_member(surface, "width", 0.0);
+    const double surface_height = number_member(surface, "height", 0.0);
     if (reference_id.empty()) {
         result.error =
             "browser capture reference requires a non-empty asset_id";
@@ -585,14 +600,44 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.settle_rounds =
         static_cast<int>(number_member(settle, "rounds", 0.0));
 
+    // A panel smaller than the document it was captured in becomes a CLIPPED
+    // frame the size of the design, holding the full capture at a negative
+    // offset. The plugin then opens at the size it was designed, and the
+    // pixels outside it are simply not in the window.
+    const bool crop_to_surface =
+        surface_width > 1.0 && surface_height > 1.0 &&
+        (surface_width < logical_width - 1.0 ||
+         surface_height < logical_height - 1.0);
+
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    ir.root.render_mode = NodeRenderMode::faithful_capture;
-    ir.root.capture_asset_id = reference_id;
-    ir.root.style.width = static_cast<float>(logical_width);
-    ir.root.style.height = static_cast<float>(logical_height);
-    ir.root.style.object_fit = "fill";
-    ir.root.style.overflow = "hidden";
+    if (crop_to_surface) {
+        ir.root.style.width = static_cast<float>(surface_width);
+        ir.root.style.height = static_cast<float>(surface_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+
+        pulp::view::IRNode capture;
+        capture.type = "frame";
+        capture.name = "Browser capture";
+        capture.render_mode = NodeRenderMode::faithful_capture;
+        capture.capture_asset_id = reference_id;
+        capture.style.position = "absolute";
+        capture.style.left = static_cast<float>(-surface_left);
+        capture.style.top = static_cast<float>(-surface_top);
+        capture.style.width = static_cast<float>(logical_width);
+        capture.style.height = static_cast<float>(logical_height);
+        capture.style.object_fit = "fill";
+        capture.attributes["asset_ref"] = reference_id;
+        ir.root.children.push_back(std::move(capture));
+    } else {
+        ir.root.render_mode = NodeRenderMode::faithful_capture;
+        ir.root.capture_asset_id = reference_id;
+        ir.root.style.width = static_cast<float>(logical_width);
+        ir.root.style.height = static_cast<float>(logical_height);
+        ir.root.style.object_fit = "fill";
+        ir.root.style.overflow = "hidden";
+    }
     ir.root.stable_anchor_id = "browser:root";
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
@@ -603,9 +648,16 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.root.attributes["asset_ref"] = reference_id;
 
     // The backdrop alone is a picture. These children are the live controls.
+    // Their bounds are page coordinates, so when the root is cropped they must
+    // move with it -- otherwise every control sits exactly one padding-width
+    // down and right of the design it belongs to, which looks deliberate and
+    // is not.
+    const double control_dx = crop_to_surface ? -surface_left : 0.0;
+    const double control_dy = crop_to_surface ? -surface_top : 0.0;
     int undeclared_paint_boxes = 0;
     const int lowered = lower_semantic_controls(
-        *semantic_report, ir, ir.root, undeclared_paint_boxes, result.error);
+        *semantic_report, ir, control_dx, control_dy, ir.root,
+        undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
     // Surfaced rather than swallowed: an undeclared paint box means the widget
