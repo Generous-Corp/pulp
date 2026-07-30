@@ -12,6 +12,7 @@
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/designed_control_painter.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
@@ -1478,6 +1479,31 @@ void apply_svg_paint(SvgLineWidget& line, const IRNode& node) {
 // A single-frame sprite renders the design's disc and core-fits it to the box;
 // the engine overlays the native rotating notch, so the knob stays interactive.
 // No-op when the knob carries no captured-art metadata (a default synth knob).
+// A control that describes its OWN body — a gradient, a background, a border or
+// shadows — has already had that body painted by the box pipeline. Installing
+// the value-only skin makes the widget's stock body rendering unreachable, so
+// the two stop fighting over the same pixels.
+//
+// Without it a model's correct knob idiom (a gradient cap, a hairline border,
+// an inset highlight, a drop shadow) was overpainted by the stock arc, wedge
+// and indicator — the panel showed a blue arc, a teal wedge and a large orange
+// pie slice over a gradient surviving only in patches.
+//
+// Captured art keeps its own skin: that path already composes correctly, and a
+// sprite disc is a body too.
+bool apply_designed_body_skin(View& control, const IRNode& node) {
+    if (attr(node, "asset_path")) return false;  // captured art owns its skin
+    const bool has_body = node.style.background_gradient || node.style.background_color ||
+                          node.style.border_width || !node.style.box_shadow.empty();
+    if (!has_body) return false;
+
+    // Colours are resolved by the painter from the control's own theme, so a
+    // design whose palette was projected reaches its ring without this having
+    // to know the token names.
+    apply_designed_control_skin(control, DesignedControlSkin{});
+    return true;
+}
+
 void apply_captured_art_knob_skin(Knob& knob, const IRNode& node) {
     auto skin = attr(node, "asset_path");
     if (!skin || skin->empty()) return;
@@ -1609,6 +1635,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             // Captured-art skin (design's disc + native notch overlay): keeps the
             // knob design-faithful AND interactive. See hoist_captured_art_knobs.
             apply_captured_art_knob_skin(*knob, node);
+            apply_designed_body_skin(*knob, node);
             return knob;
         }
         case NativeWidgetKind::fader: {
