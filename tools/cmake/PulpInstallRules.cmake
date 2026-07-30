@@ -85,6 +85,12 @@ endif()
 if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
 endif()
+if(TARGET pulp-inspect-protocol)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
+endif()
+if(TARGET pulp-inspect-runtime)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
+endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
@@ -253,6 +259,24 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+# The inspector protocol/session foundation is deliberately separate from the
+# desktop GPU overlay and remains available to installed CPU-only clients.
+if(TARGET pulp-inspect)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inc")
+elseif(TARGET pulp-inspect-protocol)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+endif()
 
 # SDK license + third-party attribution.
 #

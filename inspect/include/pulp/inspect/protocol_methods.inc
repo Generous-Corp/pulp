@@ -3,6 +3,11 @@
 // including it. Keep request and event names here so capability coverage cannot
 // drift from the constants used by dispatch.
 
+PULP_INSPECT_METHOD(kSessionGetCapabilities, "Session.getCapabilities", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kSessionAcquireController, "Session.acquireController", SessionControl, Request)
+PULP_INSPECT_METHOD(kSessionRenewController, "Session.renewController", SessionControl, Request)
+PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", SessionControl, Request)
+
 PULP_INSPECT_METHOD(kInspectorEnable, "Inspector.enable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorDisable, "Inspector.disable", AuthoringTweaks, Request)
 PULP_INSPECT_METHOD(kInspectorGetInfo, "Inspector.getInfo", SessionDescribe, Request)

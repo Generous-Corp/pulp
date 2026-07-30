@@ -2,10 +2,10 @@
 
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/runtime/system.hpp>
-
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -20,7 +20,7 @@
 
 namespace pulp::inspect {
 
-static constexpr int kDefaultPort = 9147;
+static constexpr std::size_t kInspectorMaxMessageBytes = 1024u * 1024u;
 
 // ── Server implementation using InterprocessConnectionServer ────────────
 
@@ -137,15 +137,9 @@ InspectorServer::~InspectorServer() {
 }
 
 bool InspectorServer::start(int port) {
-    if (port == 0) {
-        // Check env var
-        if (auto env = pulp::runtime::get_env("PULP_INSPECTOR_PORT")) {
-            try { port = std::stoi(*env); } catch (...) {}
-        }
-        if (port == 0) port = kDefaultPort;
-    }
-
-    port_ = port;
+    stop();
+    if (port < 0 || port > 65535)
+        return false;
 
     // Loopback ONLY, and not negotiable. A bare port string means "all
     // interfaces" to InterprocessConnectionServer — a deliberate capability of
@@ -154,7 +148,13 @@ bool InspectorServer::start(int port) {
     // where the network can reach it publishes arbitrary code execution in the
     // host process. Debug a remote machine over an SSH tunnel instead.
     const std::string endpoint = "127.0.0.1:" + std::to_string(port);
+    impl_->server.set_max_message_bytes(kInspectorMaxMessageBytes);
     if (!impl_->server.start(endpoint, events::IpcTransport::Socket)) {
+        return false;
+    }
+    port_ = impl_->server.bound_port();
+    if (port_ == 0) {
+        impl_->server.stop();
         return false;
     }
 
@@ -171,6 +171,12 @@ void InspectorServer::stop() {
         clients = std::move(impl_->owned_clients);
     }
     clients.clear();
+    if (!discovery_file_.empty()) {
+        std::error_code error;
+        std::filesystem::remove(discovery_file_, error);
+        discovery_file_.clear();
+    }
+    port_ = 0;
 }
 
 void InspectorServer::set_request_handler(RequestHandler handler) {
@@ -203,8 +209,9 @@ void InspectorServer::advertise_port() const {
     else tmp_dir = "/tmp";
 #endif
 
-    auto port_file = tmp_dir + "/pulp-inspector-" + std::to_string(getpid()) + ".port";
-    std::ofstream f(port_file);
+    discovery_file_ =
+        tmp_dir + "/pulp-inspector-" + std::to_string(getpid()) + ".port";
+    std::ofstream f(discovery_file_);
     if (f.good()) {
         f << port_;
     }

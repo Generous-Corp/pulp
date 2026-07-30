@@ -3,6 +3,7 @@
 // generate named profile sets and fail-closed availability from one inventory.
 
 PULP_INSPECT_CAPABILITY(SessionDescribe, "session.describe", Observe, 1, 1, 1)
+PULP_INSPECT_CAPABILITY(SessionControl, "session.control", Control, 0, 1, 1)
 PULP_INSPECT_CAPABILITY(StateRead, "state.read", Observe, 1, 1, 1)
 PULP_INSPECT_CAPABILITY(UiRead, "ui.read", Observe, 1, 1, 1)
 PULP_INSPECT_CAPABILITY(DiagnosticsRead, "diagnostics.read", Observe, 1, 1, 1)

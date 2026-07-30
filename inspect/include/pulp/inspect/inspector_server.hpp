@@ -53,6 +53,7 @@ private:
     int port_ = 0;
     RequestHandler handler_;
     mutable std::mutex clients_mutex_;
+    mutable std::string discovery_file_;
 
     void on_message_received(const std::string& data, events::InterprocessConnection* sender);
 };
