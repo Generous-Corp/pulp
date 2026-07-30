@@ -128,6 +128,17 @@ catch_discover_tests(pulp-test-cli-import-design
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
         LABELS "parser-import")
 
+# `pulp design {lint,diff,compile,lint-adherence}` must reject partial
+# DESIGN.md parse results before analyzing or emitting artifacts.
+add_executable(pulp-test-cli-designmd-subcommands
+    test_cli_designmd_subcommands.cpp)
+target_link_libraries(pulp-test-cli-designmd-subcommands
+    PRIVATE pulp::platform Catch2::Catch2WithMain)
+# The GPU-enabled desktop configure attaches the real CLI binary and build
+# dependency after `pulp-cli` is declared in tools/cli/CMakeLists.txt.
+catch_discover_tests(pulp-test-cli-designmd-subcommands
+    PROPERTIES LABELS "parser-import")
+
 # Direct shell-out coverage for the standalone import-design tool
 # executable. These tests hit tools/import-design/pulp_import_design.cpp
 # without going through the top-level pulp CLI delegate.

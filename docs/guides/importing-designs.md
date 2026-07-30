@@ -245,15 +245,17 @@ into Pulp; pair it with a screen importer (Figma, Stitch, Pencil, v0,
 Claude) when you also need a UI.
 
 The parser handles the canonical frontmatter keys (`version`, `name`,
-`description`, `colors`, `typography`, `rounded`, `spacing`,
+`description`, `omitted`, `colors`, `typography`, `rounded`, `spacing`,
 `components`), resolves `{group.key}` references at parse time, and
 preserves composite typography references inside `components.*`
 verbatim so downstream tooling can resolve them in widget context.
-It tracks the upstream format spec at tag `0.3.0`: color values may be
+It tracks the upstream format spec at tag `0.4.0`: color values may be
 any valid CSS color (hex, named, `rgb()`/`hsl()`/`oklch()`/`color-mix()`,
-…), token groups nest to arbitrary depth (keyed on the dot-joined path),
+…), token groups nest up to 20 levels (keyed on the dot-joined path),
 `spacing` accepts bare numbers, and an unrecognized top-level key is
-flagged with a warning rather than silently dropped.
+flagged with a warning rather than silently dropped. Intentional
+`omitted` sections suppress their matching lint findings; typography
+property typos and flattened token-name collisions are reported.
 
 Detection is strict: filename must be `DESIGN.md`, the frontmatter
 fence must be present, and the frontmatter must declare `name:` plus
