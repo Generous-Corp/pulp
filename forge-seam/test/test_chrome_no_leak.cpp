@@ -19,6 +19,7 @@
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
 #include <forge/rack_layout.hpp>
+#include <forge/patch_loader.hpp>
 #include <forge/process_engine.hpp>
 #include <forge/rack_preview.hpp>
 
@@ -705,9 +706,13 @@ TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]
 
     using Shell = forge_modular::ForgeModularShell;
 
-    // A module build gets no control at all.
+    // A module build has the control mounted but hidden: the title bar is
+    // built once when the editor opens, so a control that is absent for a
+    // module can never appear when the user switches to Patch.
     shell.set_artifact(forge_modular::Artifact::module);
-    CHECK(shell.build_accessory() == nullptr);
+    auto hidden = shell.build_accessory();
+    REQUIRE(hidden != nullptr);
+    CHECK_FALSE(hidden->visible());
 
     shell.set_artifact(forge_modular::Artifact::patch);
     auto tabs = shell.build_accessory();
@@ -1566,4 +1571,81 @@ TEST_CASE("Ask answers about a real patch, through the app's own path",
     // Asking twice costs nothing and gives the same answer, because no model
     // is involved.
     CHECK(engine.explain(patch) == answer);
+}
+
+TEST_CASE("a real generated patch drives the rack, explanation and tabs",
+          "[phase7][app][render]") {
+    // The last link: everything downstream was tested against hand-built
+    // fixtures. This reads the .vcv the generator actually produced -- the
+    // same file Rack opened -- so the preview cannot be right about a patch
+    // that does not exist.
+    const std::string patch = "/tmp/ambient-drone.vcv";
+    if (!std::filesystem::exists(patch)) {
+        WARN("no generated patch present; skipping");
+        return;
+    }
+
+    const auto loaded = forge_modular::load_patch(patch);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok());
+    // What the generator reported: 8 modules, 10 cables.
+    CHECK(loaded.modules.size() == 8);
+    CHECK(loaded.connections.size() == 10);
+
+    // Roles come from the colour the file carries, which is the colour Rack
+    // shows -- not re-derived here, where a guess could disagree with what the
+    // user sees.
+    int audio = 0, mod = 0;
+    for (const auto& c : loaded.connections) {
+        if (c.role == forge_modular::SignalRole::audio) ++audio;
+        if (c.role == forge_modular::SignalRole::mod) ++mod;
+    }
+    CHECK(audio > 0);
+    CHECK(mod > 0);
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    CHECK(shell.open_patch_file(patch).empty());
+    // Opening a patch implies the patch view, so the depth tabs are present.
+    CHECK(shell.artifact() == forge_modular::Artifact::patch);
+    CHECK(chrome->stage_accessory() != nullptr);
+    CHECK(chrome->stage_accessory()->visible());
+    REQUIRE(shell.explanation() != nullptr);
+    CHECK(shell.explanation()->line_count() == 10);
+    REQUIRE(chrome->build_accessory() != nullptr);
+    CHECK(chrome->build_accessory()->child_count() == 3);
+
+    // The learning tabs change what this real patch says about itself.
+    auto* tabs = chrome->build_accessory();
+    auto press = [&](int i) {
+        dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i))->on_click();
+    };
+    press(0);
+    const auto terse = shell.explanation()->line_text(0);
+    press(2);
+    const auto learning = shell.explanation()->line_text(0);
+    CHECK(learning.size() > terse.size());
+
+    // An unreadable file must not leave an empty rack on screen.
+    CHECK_FALSE(shell.open_patch_file("/tmp/definitely-not-a-patch.vcv").empty());
+    CHECK(shell.explanation()->line_count() == 10);   // the good patch survives
+
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-real-patch.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
+    CHECK(std::filesystem::file_size(shot) > 20000);
 }

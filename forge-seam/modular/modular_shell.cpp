@@ -2,6 +2,7 @@
 
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
+#include <forge/patch_loader.hpp>
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/processor.hpp>
@@ -80,6 +81,9 @@ void ForgeModularShell::set_artifact(Artifact a) {
     // the Build label -- so the chrome is told rather than left to disagree
     // with the tab the user just pressed.
     if (auto* c = chrome()) c->refresh_copy();
+    // The depth tabs belong to patches; revealing them here is what makes
+    // switching artifact mid-session work at all.
+    if (depth_group_) depth_group_->set_visible(artifact_ == Artifact::patch);
 }
 
 forge::ChromeCopy ForgeModularShell::chrome_copy() const {
@@ -250,10 +254,10 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
 }
 
 std::unique_ptr<View> ForgeModularShell::build_accessory() {
-    // Patches only. A module build has one artifact and nothing to narrate at
-    // three depths, and a dead control is worse than no control.
-    if (artifact_ != Artifact::patch) return nullptr;
-
+    // Always mounted, shown only for patches. Returning nullptr for a module
+    // meant the title bar was built without the control and switching to Patch
+    // afterwards could never reveal it -- the bar is built once, when the
+    // editor opens.
     depth_tabs_.clear();
     depth_labels_.clear();
 
@@ -303,6 +307,10 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
         group->add_child(std::move(b));
     }
     refresh_depth_tabs();
+    depth_group_ = group.get();
+    // A module build has one artifact and nothing to narrate at three depths,
+    // and a dead control is worse than no control.
+    group->set_visible(artifact_ == Artifact::patch);
     return group;
 }
 
@@ -426,6 +434,20 @@ std::string ForgeModularShell::start_build() {
     if (input) input->set_text("");
     engine_->submit(prompt, artifact_ == Artifact::patch);
     return engine_->last_error();
+}
+
+std::string ForgeModularShell::open_patch_file(const std::string& path) {
+    auto loaded = load_patch(path);
+    if (!loaded.ok())
+        return loaded.error.empty() ? "that patch has no modules in it"
+                                    : loaded.error;
+    open_patch_ = path;
+    // Opening a patch implies the patch view: the depth tabs are patch-only,
+    // and a loaded patch with no way to change its explanation depth is the
+    // control missing exactly when it is wanted.
+    set_artifact(Artifact::patch);
+    show_rack(std::move(loaded.modules), std::move(loaded.connections));
+    return {};
 }
 
 std::string ForgeModularShell::ask() {

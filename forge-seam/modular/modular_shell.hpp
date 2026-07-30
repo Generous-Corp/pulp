@@ -98,6 +98,12 @@ public:
 
     /// The patch the workspace currently holds, if any. Ask answers about it.
     void set_open_patch(std::string path) { open_patch_ = std::move(path); }
+
+    /// Load a generated patch onto the Build stage: rack, explanation, tabs.
+    ///
+    /// Returns why it could not, or empty. An unreadable file must not leave
+    /// an empty rack on screen -- that reads as a build that produced nothing.
+    std::string open_patch_file(const std::string& path);
     const std::string& open_patch() const { return open_patch_; }
 
     /// Open the mention list, as typing `@` does.
@@ -224,6 +230,7 @@ private:
     PatchExplanation* explanation_ = nullptr;
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
+    pulp::view::View* depth_group_ = nullptr;
     std::vector<pulp::view::Label*> tab_labels_;
     void refresh_depth_tabs();
     std::string last_random_;
