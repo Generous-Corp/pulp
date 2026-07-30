@@ -19,6 +19,7 @@ SDK (RACK_SDK_DIR or ~/SDKs/Rack-SDK), and zstd.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -282,6 +283,20 @@ def main(argv):
     if not os.path.exists(os.path.join(SDK, "include", "rack.hpp")):
         raise SystemExit(f"Rack SDK not found at {SDK}. Set RACK_SDK_DIR, or download "
                          "https://vcvrack.com/downloads/Rack-SDK-2.6.6-mac-arm64.zip")
+
+    # One generation at a time. Every run rewrites the same module pack and
+    # restores it from a snapshot on failure, so two at once interleave their
+    # edits and each restores over the other's work -- silently, with both
+    # reporting on a pack neither of them produced. Easy to hit: the app and a
+    # command-line run, or two app windows.
+    lock_path = os.path.join(PACK, ".generate.lock")
+    lock = open(lock_path, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        raise SystemExit(
+            "another generation is already running against this module pack. "
+            "Wait for it to finish — two at once would corrupt both.")
 
     # Snapshot, so a failed generation leaves the pack exactly as it was.
     backup = tempfile.mkdtemp()

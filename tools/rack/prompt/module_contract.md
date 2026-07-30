@@ -110,6 +110,18 @@ useful in isolation, and it is pervasive in real modules:
 | CV, unipolar | **0…10 V** |
 | CV, bipolar | **±5 V** |
 
+**Every parameter must change the output ON ITS OWN.** The behaviour gate moves one
+parameter at a time from its default, leaves every other control where it started, and fails
+any knob whose full range produces no measurable change. So a control that only matters in
+combination with another reads as broken:
+
+- A **CV-amount** knob is inert if the thing it scales sits at a default where modulation
+  cannot show. If a module has `FALL` and `FALL CV`, `FALL` must default somewhere the CV can
+  visibly push it — not at a floor or ceiling where scaling it changes nothing.
+- Prefer fewer controls that each do something to more controls that only work together. A
+  4 HP module with two live knobs is better than one with five, three of which the gate --
+  and the user -- will find dead.
+
 **A parameter's default must leave the knob somewhere it can move from.** Two rejections come
 up constantly and both are about where a knob STARTS:
 
