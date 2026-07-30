@@ -75,8 +75,8 @@ JUCE: drop in Melatonin Inspector, pay for the licensing, restart
 the host. Pulp:
 
 ```
-Cmd+I   →  Inspector overlay on the running plugin window.
-pulp inspect MyPlugin  →  CLI driver from an external script.
+Cmd+I   →  Visual inspector overlay in a Pulp standalone window.
+pulp inspect  →  Experimental client for an explicitly hosted test fixture.
 ```
 
 The overlay shows:
@@ -88,8 +88,9 @@ The overlay shows:
 * `DirtyTracker::debug_overlay` repaint flash
 * Live constants (see below)
 
-It also speaks JSON-RPC over a local TCP port — that's how `pulp inspect`
-drives it, and it's how AI tools like the design import skill drive it.
+The overlay does not start a JSON-RPC endpoint. The repository contains
+experimental inspector protocol/server components, but normal standalone and
+plugin-format launches do not construct them yet.
 
 ## `PULP_LIVE_CONSTANT(value, min, max)`
 
@@ -297,8 +298,9 @@ If you want the dynamic runtime back, override with
   and a no-install-without-validation policy.
 * `pulp run` / `pulp dev` give you JUCE's "standalone for fast
   iteration" without any project file boilerplate.
-* `pulp inspect` + `Cmd+I` cover Melatonin Inspector and more —
-  bundled, no licensing.
+* The bundled `Cmd+I` visual overlay covers the in-window inspection loop
+  without extra licensing. The external `pulp inspect` runtime path is not yet
+  wired into normal launches.
 * `pulp clean` covers the JUCE-era "`rm -rf build`" reflex without
   losing your CMake cache.
 

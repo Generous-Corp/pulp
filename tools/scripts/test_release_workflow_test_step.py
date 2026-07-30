@@ -53,6 +53,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIGN_AND_RELEASE = REPO_ROOT / ".github" / "workflows" / "sign-and-release.yml"
 RELEASE_CLI = REPO_ROOT / ".github" / "workflows" / "release-cli.yml"
+RELEASE_DRY_RUN = REPO_ROOT / ".github" / "workflows" / "release-dry-run.yml"
 RELEASE_PUBLISH = REPO_ROOT / ".github" / "workflows" / "release-publish.yml"
 RELEASE_PATH_PR_GATE = REPO_ROOT / ".github" / "workflows" / "release-path-pr-gate.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
@@ -300,6 +301,12 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/pulp-mcp")
+        self.assertRegex(
+            run_block,
+            r"--import-design-binary\s+build/tools/import-design/pulp-import-design")
+        self.assertRegex(
+            run_block,
+            r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
 
     def test_windows_package_step_bundles_cpp_delegate(self) -> None:
@@ -308,7 +315,19 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--binary\s+build/pulp\.exe")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/Release/pulp-cpp\.exe")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
+        self.assertRegex(
+            run_block,
+            r"--import-design-binary\s+build/tools/import-design/Release/pulp-import-design\.exe")
+        self.assertRegex(
+            run_block,
+            r"--import-design-runtime-dir\s+build/tools/import-design/Release/browser_capture-v1")
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
+
+    def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
+        dry_run = RELEASE_DRY_RUN.read_text(encoding="utf-8")
+        self.assertRegex(
+            dry_run,
+            r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
 
     def test_unix_preswap_backfills_alias_cpp_cli_to_primary_binary(self) -> None:
         run_block = self._find_step_run("Normalize CLI binary layout (Unix)")
@@ -326,21 +345,29 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_unix_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
-            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)"
+            "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
         )
-        self.assertRegex(run_block, r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp")
+        self.assertRegex(
+            run_block,
+            r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp\s+pulp-import-design")
         self.assertIn('pulp-mcp) echo "--version"', run_block)
+        self.assertIn('pulp-import-design) echo "--help"', run_block)
+        self.assertIn("browser_capture/capture.mjs", run_block)
+        self.assertIn("pulp import-design --help", run_block)
         self.assertIn('"$BIN" $CMD', run_block)
         self.assertIn("Library not loaded", run_block)
         self.assertIn("cannot open shared object", run_block)
 
     def test_windows_smoke_step_exercises_all_cli_binaries(self) -> None:
         run_block = self._find_step_run(
-            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)"
+            "Smoke CLI, delegates, MCP, and import-design runtime (Windows)"
         )
         self.assertIn('"pulp.exe"      = "help"', run_block)
         self.assertIn('"pulp-cpp.exe"  = "help"', run_block)
         self.assertIn('"pulp-mcp.exe"  = "--version"', run_block)
+        self.assertIn('"pulp-import-design.exe" = "--help"', run_block)
+        self.assertIn("browser_capture\\capture.mjs", run_block)
+        self.assertIn("import-design --help", run_block)
         self.assertIn("-ArgumentList $cmd", run_block)
         self.assertIn("DLL was not found", run_block)
         self.assertIn("missing.*\\.dll", run_block)

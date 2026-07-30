@@ -69,8 +69,9 @@ PR merge to main
 │ exact product/format matrix → attest →                   │
 │ upload as an Actions artifact. The `smoke-cli` matrix    │
 │ then extracts each tarball on a fresh runner and runs    │
-│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version` to    │
-│ catch missing-symbol / bad-rpath bugs before publish.    │
+│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version`, and  │
+│ `pulp import-design --help`; it also checks the browser  │
+│ capture runtime, catching missing delegates/rpaths.      │
 │                                                          │
 │ Final `release` job — the SOLE writer of the release:    │
 │   1. Download all 12 matrix artifacts.                   │
@@ -240,7 +241,7 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | Asset | Purpose |
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
-| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, and runtime library) |
+| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, browser-capture runtime, and GPU runtime library) |
 | `pulp-darwin-x64.tar.gz` | Intel (x86_64) CLI tarball — cross-compiled on Apple Silicon |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |

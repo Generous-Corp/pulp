@@ -634,7 +634,7 @@ jobs:
         # #2067: pulp-mcp ships in the CLI tarball so the Claude Code plugin's
         # MCP launcher can resolve it on $PATH after install.
         run: |
-          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp; do
+          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp build/tools/import-design/pulp-import-design; do
             # Fail LOUD if a binary is missing. The strip itself is best-effort
             # on macOS (below), which would otherwise SILENTLY swallow an
             # absent binary — exactly how a skipped Rust `build/pulp` target hid
@@ -679,6 +679,8 @@ jobs:
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
+            --import-design-binary build/tools/import-design/pulp-import-design \
+            --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -691,6 +693,8 @@ jobs:
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `
+            --import-design-binary build/tools/import-design/Release/pulp-import-design.exe `
+            --import-design-runtime-dir build/tools/import-design/Release/browser_capture-v1 `
             --build-dir build `
             --platform ${{ matrix.platform }} `
             --out pulp-${{ matrix.platform }}.zip
@@ -989,7 +993,7 @@ jobs:
       # so we can grep stderr for the diagnostic patterns even when
       # pulp itself exits 0 (defense-in-depth — some runtime loaders
       # warn but don't fail).
-      - name: Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)
+      - name: Smoke CLI, delegates, MCP, and import-design runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -1006,10 +1010,11 @@ jobs:
           smoke_cmd() {
             case "$1" in
               pulp-mcp) echo "--version" ;;
+              pulp-import-design) echo "--help" ;;
               *)        echo "help" ;;
             esac
           }
-          for ART in pulp pulp-cpp pulp-mcp; do
+          for ART in pulp pulp-cpp pulp-mcp pulp-import-design; do
             BIN=/tmp/pulp-smoke/$ART
             CMD=$(smoke_cmd "$ART")
             echo "===== Testing $BIN $CMD ====="
@@ -1070,6 +1075,8 @@ jobs:
             fi
             echo "OK: $ART is portable on ${{ matrix.platform }}."
           done
+          test -s /tmp/pulp-smoke/browser_capture/capture.mjs
+          /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
           # The bundled wgpu-native dylib must match the CLI arch too —
           # package_cli.py returns the first dylib it finds without an
           # arch check, so a stale arm64 dylib beside an x86_64 binary
@@ -1095,7 +1102,7 @@ jobs:
             fi
           fi
 
-      - name: Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)
+      - name: Smoke CLI, delegates, MCP, and import-design runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -1106,7 +1113,13 @@ jobs:
               "pulp.exe"      = "help"
               "pulp-cpp.exe"  = "help"
               "pulp-mcp.exe"  = "--version"
+              "pulp-import-design.exe" = "--help"
           }
+          if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
+              throw "browser capture runtime missing from archive"
+          }
+          & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
+          if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
           foreach ($art in $artCmd.Keys) {
               $cmd = $artCmd[$art]
               $bin = Join-Path $env:TEMP "pulp-smoke\$art"

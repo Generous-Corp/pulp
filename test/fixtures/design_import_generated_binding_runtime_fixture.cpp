@@ -2,7 +2,9 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace pulp::test::generated_binding_runtime {
@@ -21,6 +23,15 @@ std::unique_ptr<pulp::view::View> build_generated_binding_runtime_ui() {
     root->add_child(std::move(checkbox));
 
     return root;
+}
+
+std::unique_ptr<pulp::view::View> build_generated_asset_runtime_ui(
+    const std::filesystem::path& asset_base_directory) {
+    auto image = std::make_unique<pulp::view::ImageView>();
+    image->set_image_source(
+        std::string("file://") +
+        (asset_base_directory / "assets/browser.png").string());
+    return image;
 }
 
 namespace {

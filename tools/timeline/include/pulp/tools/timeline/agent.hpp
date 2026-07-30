@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::tools::timeline {
 
@@ -63,6 +64,32 @@ OperationResult validate(const ProjectSource& project);
 OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
                        std::uint32_t sample_rate = 48'000);
+
+/// Plan a canonical project export without selecting or fabricating an output.
+///
+/// `format` is `smf` or `dawproject`. Success returns the canonical loss
+/// manifest and the exact concept ids that a later publish must accept.
+OperationResult plan_export_project(const ProjectSource& project, std::string_view format);
+
+/// Export a canonical project through the consent-gated interchange planner.
+///
+/// `format` is `smf` or `dawproject`. SMF publishes a new artifact directory;
+/// DAWproject publishes a standard `.dawproject` ZIP file. The output must not
+/// exist. Every model concept the selected format loses must be named
+/// individually in `accepted_losses`; unknown names and blanket consent are
+/// rejected. Publication is atomic and never replaces an existing path.
+OperationResult export_project(const ProjectSource& project, std::string_view format,
+                               const std::filesystem::path& output_directory,
+                               const std::vector<std::string>& accepted_losses);
+
+/// Import a foreign timeline file into a new canonical project directory.
+///
+/// SMF input is one file. DAWproject input is a standard `.dawproject` ZIP;
+/// referenced media entries are sealed and copied into the published directory.
+/// `output_directory` must not exist and is published atomically with
+/// `project.json` plus any imported media.
+OperationResult import_project(const std::filesystem::path& input, std::string_view format,
+                               const std::filesystem::path& output_directory);
 
 /// Convenience overloads that auto-detect canonical inline JSON versus a path.
 OperationResult project_open(std::string_view project);

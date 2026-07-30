@@ -36,6 +36,8 @@ namespace fs = std::filesystem;
 
 namespace pulp::test::generated_binding_runtime {
 std::unique_ptr<pulp::view::View> build_generated_binding_runtime_ui();
+std::unique_ptr<pulp::view::View> build_generated_asset_runtime_ui(
+    const std::filesystem::path& asset_base_directory);
 void bind_generated_binding_runtime_ui(pulp::view::View& root,
                                        pulp::view::NativeImportBindingContext& ctx);
 } // namespace pulp::test::generated_binding_runtime
@@ -68,6 +70,21 @@ public:
     }
 
     fs::path path;
+};
+
+class ScopedCurrentPath {
+public:
+    explicit ScopedCurrentPath(const fs::path& path)
+        : original_(fs::current_path()) {
+        fs::current_path(path);
+    }
+    ~ScopedCurrentPath() {
+        std::error_code ec;
+        fs::current_path(original_, ec);
+    }
+
+private:
+    fs::path original_;
 };
 
 // [[maybe_unused]]: only the codegen-compile test cases use these helpers, and
@@ -2410,6 +2427,65 @@ TEST_CASE("generated C++ binding helper requires a unique materialized anchor",
     const bool compiled = compile_generated_source(source, object, &diagnostics);
     INFO(diagnostics);
     REQUIRE(compiled);
+#endif
+}
+
+TEST_CASE("generated C++ assets use a caller-owned runtime base outside the working directory",
+          "[view][import][native-materializer][cpp-codegen][assets]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_capture;
+    ir.root.capture_asset_id = "reference:browser";
+    ir.root.style.width = 16.0f;
+    ir.root.style.height = 16.0f;
+    IRAssetRef asset;
+    asset.asset_id = "reference:browser";
+    asset.local_path = "assets/browser.png";
+    ir.asset_manifest.assets.push_back(std::move(asset));
+
+    const auto generated =
+        generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(generated.header.find(
+        "build_imported_ui(const std::filesystem::path& asset_base_directory)") !=
+        std::string::npos);
+    REQUIRE(generated.source.find(
+        "(asset_base_directory / \"assets/browser.png\").string()") !=
+        std::string::npos);
+
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-native-materializer-runtime-assets");
+    const auto generated_directory = tmp.path / "generated";
+    const auto deployed_directory = tmp.path / "deployed";
+    const auto other_directory = tmp.path / "other-cwd";
+    fs::create_directories(deployed_directory / "assets");
+    fs::create_directories(other_directory);
+    write_text(
+        deployed_directory / "assets/browser.png", "fixture-pixels");
+    write_text(
+        generated_directory / "imported_ui.hpp", generated.header);
+    write_text(
+        generated_directory / "imported_ui.cpp", generated.source);
+
+    std::string diagnostics;
+    REQUIRE(compile_generated_source(
+        generated_directory / "imported_ui.cpp",
+        generated_directory / "imported_ui.o",
+        &diagnostics));
+    INFO(diagnostics);
+
+    ScopedCurrentPath cwd(other_directory);
+    auto root =
+        pulp::test::generated_binding_runtime::
+            build_generated_asset_runtime_ui(deployed_directory);
+    REQUIRE(root);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image);
+    CHECK(
+        image->image_source() ==
+        "file://" +
+            (deployed_directory / "assets/browser.png").string());
 #endif
 }
 

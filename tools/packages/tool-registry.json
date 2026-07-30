@@ -53,6 +53,45 @@
       "distribution_lane": "tool_addon",
       "bundle_note": "Dev-only query tool for offline traces. SHA-256-verified per platform; never linked into the MIT core or shipped in a plugin. The per-platform SHA-256 pins live in experimental/pulp-rs/src/cmd/trace_fetch.rs, which performs the verified install."
     },
+    "chrome-for-testing": {
+      "display_name": "Google Chrome for Testing",
+      "category": "runtime",
+      "description": "Optional pinned browser evaluator for faithful HTML design import. Downloads only when explicitly installed or updated; imports never download it.",
+      "upstream_url": "https://googlechromelabs.github.io/chrome-for-testing/",
+      "license": "Google Chrome Terms of Service",
+      "license_note": "Optional separately installed machine tool. Review Google's Chrome terms before installation.",
+      "install_method": "verified_archive",
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip",
+          "archive_format": "zip",
+          "binary_name": "Google Chrome for Testing"
+        },
+        "macOS-x64": {
+          "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-x64/chrome-mac-x64.zip",
+          "archive_format": "zip",
+          "binary_name": "Google Chrome for Testing"
+        },
+        "Linux-x64": {
+          "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/linux64/chrome-linux64.zip",
+          "archive_format": "zip",
+          "binary_name": "chrome"
+        },
+        "Windows-x64": {
+          "url_template": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/win64/chrome-win64.zip",
+          "archive_format": "zip",
+          "binary_name": "chrome.exe"
+        }
+      },
+      "pinned_version": "151.0.7922.47",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "explicit_install_only": true,
+      "bundleable": false,
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "bundle_note": "Optional import-time machine tool; never linked into Pulp, embedded in generated plugins, or downloaded during import. Exact URLs and computed SHA-256 pins live in experimental/pulp-rs/src/cmd/chrome_for_testing.rs."
+    },
     "uv": {
       "display_name": "UV (Python package manager)",
       "category": "runtime",

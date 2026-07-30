@@ -34,6 +34,11 @@ use std::process::Command;
 
 use crate::error::{CliError, Result};
 
+#[path = "install_import_design.rs"]
+mod install_import_design;
+
+pub use install_import_design::import_design_basename;
+
 /// Build the release-asset URL for a target. Mirrors the
 /// `pulp::cli::pulp_upgrade_url_for` C++ helper character-for-character.
 #[must_use]
@@ -186,6 +191,10 @@ pub struct ExtractedArchive {
     /// Present only when the archive ships the MCP server binary.
     /// Older tarballs leave this `None`.
     pub new_mcp: Option<PathBuf>,
+    /// Browser-solved design import helper and its required JS runtime.
+    pub new_import_design: Option<PathBuf>,
+    /// Extracted `browser_capture/` runtime directory, when shipped.
+    pub browser_capture_runtime: Option<PathBuf>,
 }
 
 /// Look in `root` for the new `pulp` and optional sibling binaries.
@@ -216,11 +225,14 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
     } else {
         None
     };
+    let import_design = install_import_design::locate_payload(root)?;
     Ok(ExtractedArchive {
         root: root.to_owned(),
         new_pulp: pulp_path,
         new_cpp,
         new_mcp,
+        new_import_design: import_design.helper,
+        browser_capture_runtime: import_design.runtime,
     })
 }
 
@@ -391,6 +403,13 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
             report.mcp_created = true;
         }
     }
+    if let (Some(install_dir), Some(new_import), Some(runtime)) = (
+        plan.self_path.parent(),
+        archive.new_import_design.as_deref(),
+        archive.browser_capture_runtime.as_deref(),
+    ) {
+        install_import_design::install(install_dir, new_import, runtime)?;
+    }
     Ok(report)
 }
 
@@ -541,10 +560,12 @@ mod tests {
             assert_eq!(pulp_basename(), "pulp.exe");
             assert_eq!(cpp_basename(), "pulp-cpp.exe");
             assert_eq!(mcp_basename(), "pulp-mcp.exe");
+            assert_eq!(import_design_basename(), "pulp-import-design.exe");
         } else {
             assert_eq!(pulp_basename(), "pulp");
             assert_eq!(cpp_basename(), "pulp-cpp");
             assert_eq!(mcp_basename(), "pulp-mcp");
+            assert_eq!(import_design_basename(), "pulp-import-design");
         }
     }
 
@@ -580,6 +601,8 @@ mod tests {
         assert_eq!(arch.new_pulp, pulp);
         assert!(arch.new_cpp.is_none(), "pre-swap layout: no pulp-cpp");
         assert!(arch.new_mcp.is_none(), "pre-MCP layout: no pulp-mcp");
+        assert!(arch.new_import_design.is_none());
+        assert!(arch.browser_capture_runtime.is_none());
     }
 
     #[test]

@@ -217,6 +217,22 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     catch_discover_tests(pulp-test-partial-repaint-gpu
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
+    # Visible-frame success contract on a LIVE Dawn/Graphite surface (WAH-2).
+    # The fake-surface unit tests pin how a host REACTS to each FrameOutcome;
+    # this pins which outcome the real backend produces — in particular that a
+    # captured frame (whose recording read_current_rgba already flushed) still
+    # reports as having reached its output. Soft-skips without a real adapter.
+    add_executable(pulp-test-skia-frame-outcome-gpu test_skia_frame_outcome_gpu.cpp)
+    target_link_libraries(pulp-test-skia-frame-outcome-gpu PRIVATE
+        pulp::canvas pulp::render
+        Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-skia-frame-outcome-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-skia-frame-outcome-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-skia-frame-outcome-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
     # NSWindow and proves a nonblank first-frame capture, plus drives the CLAP
     # gui_create/set_parent adapter path. Needs CLAP for the PULP_CLAP_PLUGIN

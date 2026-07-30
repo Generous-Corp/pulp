@@ -102,6 +102,11 @@
       "reason": "WindowsRenderLoop and TimerRenderLoop destructors stop and join their worker threads"
     },
     {
+      "path": "core/runtime/include/pulp/runtime/trace_timeout.hpp",
+      "needle": "std::thread([this, delay, generation, on_expire = std::move(on_expire)]",
+      "reason": "TimeoutController joins the worker in cancel_and_join() and in its destructor, so the worker cannot outlive the controller. Enforcing that is the class's entire purpose: it replaced a DETACHED thread that slept for PULP_TRACE_SECONDS and could wake after the plug-in module was unloaded (FreeLibrary / dlclose), executing freed code inside the Windows loader lock. arm() joins any previous worker before starting a new one, and test_trace_timeout.cpp pins both properties (\"cancel_and_join returns only once the worker cannot run again\", \"destroying a controller joins its armed timeout\")."
+    },
+    {
       "path": "core/runtime/src/async_stream.cpp",
       "needle": "std::thread([this]",
       "reason": "AsyncStream destructor calls stop; existing writer and reader workers remain tracked lifecycle debt"

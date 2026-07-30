@@ -41,6 +41,11 @@ expression: v
       "default": true
     },
     {
+      "key": "import_design.browser",
+      "value": "auto",
+      "default": true
+    },
+    {
       "key": "claude.send_user_file",
       "value": "on",
       "default": true

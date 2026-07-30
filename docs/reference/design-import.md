@@ -10,10 +10,14 @@ Import a design from an external tool into Pulp JS, DesignIR, or baked C++
 artifacts.
 
 ```
-pulp import-design --from <source> [options]
+pulp import-design --file <design> [--from <source>] [options]
 ```
 
-**Sources:** `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`
+**Sources:** `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `html`, `designmd`, `jsx`
+
+Runnable `.html`/`.htm` files are detected automatically. Claude bundle
+fingerprints retain `claude` provenance; ordinary pages use the distinct
+`html` source identity. Both use the same isolated Chromium evaluator.
 
 > `fig` decodes a local Figma `.fig` save file offline into the same envelope
 > consumed by the `figma-plugin` path.
@@ -23,7 +27,7 @@ pulp import-design --from <source> [options]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--from <source>` | Design source (required) | — |
+| `--from <source>` | Design source. Optional for runnable HTML, where the CLI detects `claude` versus generic `html`. | auto for HTML |
 | `--file <path>` | Input file path. **Repeatable with `--from figma-plugin`** — pass one faithful-vector envelope per state to capture a multi-state design into one `DesignFrameView`; the order given is the frame index a `swap <n>` layer targets (the first `--file` is frame 0). | — |
 | `--url <url>` | URL that serves design JSON/HTML directly (e.g. a v0 share link). Fetched unauthenticated — a figma.com file URL does **not** work; see [Importing from Figma](#importing-from-figma) | — |
 | `--frame <name>` | Frame/artboard to import. For `--from fig`, pass a frame guid or name; required unless using `--outline`. | first frame for `figma` |
@@ -35,6 +39,10 @@ pulp import-design --from <source> [options]
 | `--mode {live\|baked}` | Runtime model. `live` is the built-in default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` built-in, or `import_design.default_mode` |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
+| `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides path env, mode, managed, and system selection. | — |
+| `--browser-interactions <json>` | Apply a versioned bounded click/type/wait plan before browser evidence capture. | initial state |
+| `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. | off |
+| `--allow-browser-network` | Permit only the source document's declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
 | `--asset-timeout-ms <ms>` | Per-request network asset timeout. | `30000` |
 | `--asset-hash <uri=sha256>` | Expected content hash for an asset URI; may be repeated. | — |
@@ -44,8 +52,8 @@ pulp import-design --from <source> [options]
 | `--no-tokens` | Skip token extraction | — |
 | `--no-comments` | Omit comments from generated code | — |
 | `--web-compat` | Use DOM API instead of native Pulp API | — |
-| `--validate` | Render generated JS and validate layout | — |
-| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. **Skia** (default) composites file-backed images; **CoreGraphics** does not (it draws an image's filename placeholder — not faithful). | `skia` |
+| `--validate` | Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output. | — |
+| `--screenshot-backend {skia\|coregraphics}` | Validation render backend; browser-backed HTML uses it for the automatic A/B gate. **Skia** (default) composites file-backed images; **CoreGraphics** does not (it draws an image's filename placeholder — not faithful). | `skia` |
 | `--reference <png>` | Compare render against reference screenshot | — |
 | `--diff <png>` | Save visual diff image | — |
 | `--render-size WxH` | Render dimensions | `340x280` |
@@ -58,6 +66,38 @@ pulp import-design --from <source> [options]
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
 
 Either `--file` or `--url` is required (or `--directory` for `--detect-only`). When `--url` is provided without `--file`, the URL is fetched through an argv-safe `curl` invocation into a unique temporary file. Literal `--file` paths are read directly and may contain normal filesystem punctuation; `--url` still rejects shell metacharacters before fetching.
+
+For a secondary prototype screen, pass
+`--browser-interactions <plan.json>`. The versioned
+`pulp-browser-interactions-v1` document accepts only bounded `click`, `type`,
+`wait-for`, and `wait-ms` actions. Selectors and action results are saved in
+the capture evidence; typed text is represented only by its length, with
+neither plaintext nor a per-action text hash in the interaction report. Typed
+text remains rendered page state and may appear in screenshots, DOM/semantic
+evidence, or tokens, so plans must never contain secrets. There is deliberately
+no arbitrary JavaScript action, and popup pages are rejected. Per-action
+selector timeouts remain bounded by the capture-wide timeout and cannot extend
+it. A `wait-for` action checks the
+live rendered element state, so hidden
+or inert DOM content does not count merely because its strings exist in the
+document. A source may expose `globalThis.__pulpInteractionReady` for a
+distinct post-action asynchronous completion boundary; the initial
+`__pulpCaptureReady` contract remains one-shot.
+
+```json
+{
+  "schema": "pulp-browser-interactions-v1",
+  "version": 1,
+  "actions": [
+    { "action": "click", "selector": "[data-view='patch']" },
+    {
+      "action": "wait-for",
+      "selector": "[data-screen='patch-composer']",
+      "state": "visible"
+    }
+  ]
+}
+```
 
 `--url` fetches **unauthenticated** and sends no credential of any kind. It is therefore only useful for URLs that serve the design data itself — a v0 share link, or any host that returns design JSON/HTML directly. It is not a Figma import path; see below.
 
@@ -94,6 +134,16 @@ artifact default. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
 environment/session, and direct `--mode` / `--emit` flags override the matching
 preference.
 `pulp status` reports the effective import-design defaults.
+
+Browser selection uses `--browser` > `PULP_DESIGN_BROWSER` >
+`PULP_DESIGN_BROWSER_MODE` / `import_design.browser` > an explicitly installed
+managed Chrome for Testing > system Chrome/Chromium. `auto` is the default;
+installing the managed option is explicit and never happens during import:
+
+```bash
+pulp tool install chrome-for-testing
+pulp config set import_design.browser auto
+```
 
 Mental model:
 
@@ -435,6 +485,12 @@ pulp import-design --from figma --file design.json --validate
 pulp import-design --from figma --file design.json \
     --validate --reference source.png --diff diff.png
 ```
+
+Runnable browser-backed HTML is the exception: its browser-to-DesignIR A/B
+validation is a required adoption gate and therefore runs even without
+`--validate`. The proof remains under the durable browser-capture evidence
+directory. Passing `--validate` additionally publishes convenient render and
+diff copies beside the primary output.
 
 Similarity threshold: 85% (PASS) / below 85% (NEEDS REVIEW).
 

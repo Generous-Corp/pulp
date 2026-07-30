@@ -28,7 +28,22 @@ ContentHash content_hash(char digit = 'a') {
 // A document DAWproject carries without loss: flat track, beat-anchored clips,
 // one tempo, one meter, media referenced by locator.
 Project lossless_project() {
-    auto clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{2}, {0}, 100}));
+    auto clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{2}, {0}, 1'000}));
+    auto track = take_value(Track::create({6}, "track", {clip}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
+    return take_value(Project::create(
+        ProjectInput{{1},
+                     "project",
+                     20,
+                     {3},
+                     {MediaAsset{{2}, "audio.wav", 1'000, {48'000, 1}, content_hash(),
+                                 AssetStoragePolicy::External, {}, {}, {}}},
+                     {sequence}}));
+}
+
+Project media_window_project(SamplePosition source_start, std::uint64_t frame_count) {
+    auto clip = take_value(
+        Clip::create({4}, {0}, {100}, MediaRef{{2}, source_start, frame_count}));
     auto track = take_value(Track::create({6}, "track", {clip}));
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
     return take_value(Project::create(
@@ -152,6 +167,45 @@ TEST_CASE("an export cannot run without consent for each loss", "[interchange]")
         auto result = run_export(plan, options, writer);
         REQUIRE(result.is_err());
         REQUIRE(result.error().code == ExportErrorCode::WriterFailed);
+    }
+}
+
+TEST_CASE("a DAWproject media source window requires exact named consent",
+          "[interchange][dawproject]") {
+    for (const Project& project : {media_window_project({25}, 975),
+                                   media_window_project({0}, 500)}) {
+        const ExportPlan plan = plan_export(project, Format::DawProject);
+        REQUIRE_FALSE(plan.is_lossless());
+        REQUIRE(plan.required_consent() == std::vector{Concept::ClipMediaWindow});
+        const LossEntry* loss = plan.losses().find(Concept::ClipMediaWindow);
+        REQUIRE(loss != nullptr);
+        REQUIRE(loss->count == 1);
+        REQUIRE(loss->owners == std::vector<ItemId>{ItemId{4}});
+
+        bool ran = false;
+        const FormatBoundExportWriter writer{Format::DawProject, [&ran](const ExportPlan&) {
+            ran = true;
+            return pulp::runtime::Ok(ExportArtifacts{});
+        }};
+
+        auto refused = run_export(plan, ExportOptions{}, writer);
+        REQUIRE(refused.is_err());
+        REQUIRE_FALSE(ran);
+        REQUIRE(refused.error().concepts == std::vector{Concept::ClipMediaWindow});
+        REQUIRE(refused.error().message.find("clip.media-window") != std::string::npos);
+
+        ExportOptions wrong;
+        wrong.accepted_losses = {Concept::ClipAbsolute};
+        refused = run_export(plan, wrong, writer);
+        REQUIRE(refused.is_err());
+        REQUIRE_FALSE(ran);
+        REQUIRE(refused.error().concepts == std::vector{Concept::ClipMediaWindow});
+
+        ExportOptions exact;
+        exact.accepted_losses = {Concept::ClipMediaWindow};
+        auto exported = run_export(plan, exact, writer);
+        REQUIRE(exported.has_value());
+        REQUIRE(ran);
     }
 }
 

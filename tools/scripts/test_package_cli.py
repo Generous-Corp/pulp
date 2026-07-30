@@ -7,6 +7,8 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -487,6 +489,105 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(rc, 2)
         self.assertIn("FAIL: --mcp-binary not at", err.getvalue())
+
+    def test_main_packages_import_design_helper_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            importer = root / "pulp-import-design-built"
+            runtime = root / "browser_capture"
+            pulp.write_text("rust", encoding="utf-8")
+            importer.write_text("importer", encoding="utf-8")
+            runtime.mkdir()
+            source_runtime = (
+                pathlib.Path(__file__).parents[1]
+                / "import-design" / "browser_capture"
+            )
+            for name in (
+                "browser_process.mjs",
+                "capture.mjs",
+                "health.mjs",
+                "interaction_executor.mjs",
+                "interaction_plan.mjs",
+                "interaction_plan_protocol.json",
+                "lifecycle.mjs",
+                "network_dependencies.mjs",
+                "renderers.mjs",
+                "security.mjs",
+                "semantics.mjs",
+                "settle.mjs",
+                "tokens.mjs",
+            ):
+                shutil.copy2(source_runtime / name, runtime / name)
+            wgpu = root / "libwgpu_native.so"
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-linux-x64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_linux"):
+                    with argv(
+                        [
+                            "package_cli.py",
+                            "--binary",
+                            str(pulp),
+                            "--import-design-binary",
+                            str(importer),
+                            "--import-design-runtime-dir",
+                            str(runtime),
+                            "--build-dir",
+                            str(root / "build"),
+                            "--platform",
+                            "linux-x64",
+                            "--out",
+                            str(out),
+                        ]
+                    ):
+                        rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            extracted = root / "extracted"
+            with tarfile.open(out, "r:gz") as tar:
+                names = sorted(tar.getnames())
+                tar.extractall(extracted, filter="data")
+            self.assertEqual(
+                names,
+                [
+                    "browser_capture/browser_process.mjs",
+                    "browser_capture/capture.mjs",
+                    "browser_capture/health.mjs",
+                    "browser_capture/interaction_executor.mjs",
+                    "browser_capture/interaction_plan.mjs",
+                    "browser_capture/interaction_plan_protocol.json",
+                    "browser_capture/lifecycle.mjs",
+                    "browser_capture/network_dependencies.mjs",
+                    "browser_capture/renderers.mjs",
+                    "browser_capture/security.mjs",
+                    "browser_capture/semantics.mjs",
+                    "browser_capture/settle.mjs",
+                    "browser_capture/tokens.mjs",
+                    "libwgpu_native.so",
+                    "pulp",
+                    "pulp-import-design",
+                ],
+            )
+            node = shutil.which("node")
+            if node:
+                probe = subprocess.run(
+                    [
+                        node,
+                        str(extracted / "browser_capture" / "capture.mjs"),
+                        "probe",
+                        "--browser",
+                        str(root / "missing-browser"),
+                        "--timeout-ms",
+                        "1000",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(probe.returncode, 0)
+                self.assertNotIn("ERR_MODULE_NOT_FOUND", probe.stderr)
 
     def test_main_packages_without_mcp_when_flag_omitted(self) -> None:
         # Pre-#2067 release lanes still call package_cli.py with only

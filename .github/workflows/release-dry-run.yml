@@ -78,6 +78,8 @@ jobs:
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
+            --import-design-binary build/tools/import-design/pulp-import-design \
+            --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -98,6 +100,12 @@ jobs:
           tar -xzf pulp-${{ matrix.platform }}.tar.gz -C dryrun-extract
           BIN="$(find dryrun-extract -name pulp -type f | head -1)"
           test -x "$BIN" || { echo "::error::packaged pulp binary missing"; exit 1; }
+          HELPER="$(dirname "$BIN")/pulp-import-design"
+          test -x "$HELPER" || { echo "::error::packaged pulp-import-design helper missing"; exit 1; }
+          test -s "$(dirname "$BIN")/browser_capture/capture.mjs" || {
+            echo "::error::packaged browser-capture runtime missing"
+            exit 1
+          }
           ARCHS="$(lipo -archs "$BIN" 2>/dev/null || true)"
           if [ "$ARCHS" != "$EXPECT_ARCH" ]; then
             echo "::error::packaged pulp arch is '$ARCHS', expected exactly '$EXPECT_ARCH' — $(file "$BIN")"
@@ -106,6 +114,8 @@ jobs:
           echo "OK: packaged pulp is thin $EXPECT_ARCH — running it:"
           "$BIN" help >/dev/null
           echo "OK: '$BIN help' ran on native ${{ matrix.platform }}."
+          "$BIN" import-design --help >/dev/null
+          echo "OK: packaged import-design delegation and runtime are present."
         shell: bash
 
       - name: Generate + validate appcast (synthetic version, no publish)

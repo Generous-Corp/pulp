@@ -250,6 +250,14 @@ if [ -f "$ROOT/tools/scripts/processing_model_terms_lint.py" ]; then
     fi
 fi
 
+# ── Development-inspector capability and runtime truth ───────────────────────
+if [ -f "$ROOT/tools/scripts/inspector_truth_check.py" ]; then
+    echo "Checking development-inspector capability and runtime truth..."
+    if ! python3 "$ROOT/tools/scripts/inspector_truth_check.py" --root "$ROOT"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── Widget catalog sync (every View primitive documented) ─────────────────────
 if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
     echo "Checking widget catalog (docs/reference/widgets.md) is in sync..."

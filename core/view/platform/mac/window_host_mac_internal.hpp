@@ -14,6 +14,7 @@
 
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/plugin_frame_renderer.hpp>  // kEditorHostClear{R,G,B}
 #include <pulp/view/view.hpp>  // View::CursorStyle (set_ns_cursor_for_style)
 
 #include <cstdint>
@@ -293,11 +294,9 @@ private:
 
 /// Should the CPU plugin-view host drive a per-vsync render link?
 ///
-/// Yes whenever the editor is in a window. It used to additionally require a
-/// scripted idle callback, which ONLY a JS/scripted editor installs
-/// (`make_scripted_idle_pump`, wired in clap_entry / vst3_plug_view /
-/// au_v2_cocoa_view / au_view_controller_mac — all guarded on a script bridge).
-/// A native C++ editor installs none, so it got no render link, no FrameClock
+/// Yes whenever the editor is in a window. It used to additionally require an
+/// idle callback; before the shared `make_editor_idle_pump` was installed for
+/// every editor, a native C++ editor could get no render link, no FrameClock
 /// tick, no widget or CSS animation, and a caret that never blinked.
 ///
 /// The GPU plugin host has always started its link on window attach alone; this
@@ -320,9 +319,12 @@ inline bool plugin_view_wants_render_link(bool has_view, bool in_window) {
 // never drift apart.
 namespace pulp::view::mac_host {
 
-inline constexpr uint8_t kHostClearR = 30;
-inline constexpr uint8_t kHostClearG = 30;
-inline constexpr uint8_t kHostClearB = 46;
+// Aliases of the platform-neutral definition in plugin_frame_renderer.hpp —
+// the Windows and Linux editor hosts paint the same background, so the value
+// cannot live in a macOS-only header.
+inline constexpr uint8_t kHostClearR = pulp::view::kEditorHostClearR;
+inline constexpr uint8_t kHostClearG = pulp::view::kEditorHostClearG;
+inline constexpr uint8_t kHostClearB = pulp::view::kEditorHostClearB;
 
 // AppKit spelling for NSWindow.backgroundColor.
 inline NSColor* ns_host_clear_color() {
