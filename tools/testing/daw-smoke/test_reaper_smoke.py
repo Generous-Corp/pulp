@@ -248,5 +248,39 @@ class LuaStructure(unittest.TestCase):
         self.assertIn("PULP_DAW_SMOKE_LOOP_END", text)
 
 
+class EditorOpenMode(unittest.TestCase):
+    """The fourth mode: insert, open the editor, confirm it rendered.
+
+    Products whose editor IS the product need this and none of the hot-swap or
+    transport scenarios. auval and clap-validator prove a plugin scans and
+    instantiates; neither proves its window comes up.
+    """
+
+    def test_mode_is_offered(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        self.assertEqual(args.mode, "editor-open")
+
+    def test_needs_nothing_but_the_plugin(self):
+        # The other modes each demand extra flags. Requiring any here would
+        # defeat the point: the question is only whether the thing loads and
+        # draws.
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        rs.validate_mode_args(ap, args)   # must not raise or exit
+
+    def test_a_missing_plugin_is_not_a_pass(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-open",
+                              "--plugin-name", "Nope",
+                              "--plugin-path", "/tmp/definitely-not-here.vst3"])
+        rc = rs.run_editor_open_mode(pathlib.Path("/nonexistent/REAPER"), args)
+        self.assertNotEqual(rc, rs.EXIT_PASS)
+
+
 if __name__ == "__main__":
     unittest.main()

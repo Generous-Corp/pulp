@@ -11,6 +11,7 @@ WHY THIS EXISTS
     result by scraping the plugin's runtime log.
 
 MODES  (--mode, default reload)
+  editor-open        insert the plugin, open its editor, confirm it rendered
     reload             Hot-swap a watched DSP artifact (the original flow): seed
                        variant A, insert+float the FX, copy variant B over the
                        watched path, assert the reload was ACCEPTED + APPLIED.
@@ -367,6 +368,60 @@ def run_reload_mode(reaper: Path, args: argparse.Namespace) -> int:
         session.cleanup()
 
 
+def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
+    """Insert the plugin, open its editor, confirm it rendered.
+
+    The other three modes each assume a hot-swap or transport scenario. A
+    product whose editor IS the product needs neither: the question is only
+    whether the thing loads in a real host and draws. That is also the check
+    the format validators cannot make -- auval and clap-validator prove a
+    plugin scans and instantiates, not that its window comes up.
+
+    Built on the same place-then-wait-for-fx-shown path the other modes use,
+    so this is a fourth mode over tested machinery rather than new
+    infrastructure.
+    """
+    plugin = Path(os.path.expanduser(args.plugin_path))
+    bad = _validate_inputs([plugin])
+    if bad is not None:
+        return bad
+
+    _announce(f'"{args.plugin_name}" ({args.format}) editor-open smoke', args.timeout)
+    session = ReaperSession(reaper, args)
+    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    try:
+        placed = session.place_plugin()
+        if placed is not None:
+            return placed
+        if status.exists():
+            status.unlink()
+
+        env = _common_env(args, status)
+        not_shown = session.run_until_fx_shown(env, status)
+        if not_shown is not None:
+            return not_shown
+
+        # The window is up. Give it long enough to actually paint a frame --
+        # an editor that opens and then throws is still a failure, and it
+        # reports itself in the seconds after the window appears.
+        time.sleep(5)
+        session.terminate()
+
+        text = session.captured_log()
+        crashed = [ln for ln in text.splitlines()
+                   if "PULP_DAW_SMOKE_EDITOR_FAILED" in ln
+                   or "editor failed" in ln.lower()]
+        if crashed:
+            log("editor opened then reported failure — FAIL. reason:")
+            for ln in crashed[-2:]:
+                log("  " + ln.strip())
+            return EXIT_FAIL
+        log("editor opened and stayed up — PASS.")
+        return EXIT_PASS
+    finally:
+        session.terminate()
+
+
 def run_live_plugin_swap_mode(reaper: Path, args: argparse.Namespace) -> int:
     plugin = Path(os.path.expanduser(args.plugin_path))
     watched = Path(os.path.expanduser(args.watched_swap_request))
@@ -655,7 +710,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="REAPER functional smoke for Pulp reload/editor/live-swap changes.")
     ap.add_argument("--mode",
-                    choices=["reload", "live-plugin-swap", "sequence-loop-seek"],
+                    choices=["reload", "live-plugin-swap", "sequence-loop-seek",
+                             "editor-open"],
                     default="reload",
                     help="reload (default) hot-swaps a watched DSP artifact; "
                          "live-plugin-swap drives a hosted plugin-instance swap; "
@@ -725,6 +781,9 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
         ) if not v]
         if missing:
             ap.error("live-plugin-swap mode requires: " + ", ".join(missing))
+    elif args.mode == "editor-open":
+        # Needs nothing beyond the plugin itself: that is the point of it.
+        pass
     else:  # sequence-loop-seek
         if args.loop_end <= args.loop_start:
             ap.error("sequence-loop-seek mode requires --loop-end > --loop-start "
@@ -751,6 +810,8 @@ def main() -> int:
         return run_reload_mode(reaper, args)
     if args.mode == "live-plugin-swap":
         return run_live_plugin_swap_mode(reaper, args)
+    if args.mode == "editor-open":
+        return run_editor_open_mode(reaper, args)
     return run_sequence_loop_seek_mode(reaper, args)
 
 
