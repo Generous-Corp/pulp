@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 58 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 59 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
