@@ -22,7 +22,7 @@
 #
 set -uo pipefail
 
-GOLDEN=9002
+GOLDEN=9003
 CLONE_BASE=200            # clones live at 200..219, well clear of 101/102
 CLONE_MAX=219
 CORES=4
