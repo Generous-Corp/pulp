@@ -62,7 +62,7 @@ TEST_CASE("tempo mapped musical audio placement resolves to exact samples") {
     REQUIRE_THAT(at_clip.storage[0][0], WithinAbs(0.25f, 1e-7f));
 }
 
-TEST_CASE("musical resample spans the authored duration while none and stretch stay native") {
+TEST_CASE("musical resample spans the authored duration while none stays native") {
     std::vector<float> ramp(120);
     for (std::size_t frame = 0; frame < ramp.size(); ++frame)
         ramp[frame] = static_cast<float>(frame);
@@ -106,7 +106,6 @@ TEST_CASE("musical resample spans the authored duration while none and stretch s
     const auto none = render(TimeConform::None);
     const auto resample = render(TimeConform::Resample);
     const auto split_resample = render(TimeConform::Resample, true);
-    const auto stretch = render(TimeConform::Stretch);
 
     REQUIRE_THAT(resample[50], WithinAbs(35.0f, 1.0e-5f));
     REQUIRE_THAT(resample[100], WithinAbs(60.0f, 1.0e-5f));
@@ -114,7 +113,6 @@ TEST_CASE("musical resample spans the authored duration while none and stretch s
     REQUIRE(resample == split_resample);
     REQUIRE_THAT(none[50], WithinAbs(60.0f, 1.0e-7f));
     REQUIRE(none[100] == 0.0f);
-    REQUIRE(none == stretch);
 }
 
 TEST_CASE("musical resample follows tick phase through a document tempo ramp") {

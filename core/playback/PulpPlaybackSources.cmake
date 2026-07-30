@@ -16,9 +16,12 @@ function(pulp_resolve_playback_sources root output)
         external_sync_timecode.cpp
         midi_capture_materializer.cpp
         note_renderer.cpp
+        offline_stretch_artifact.cpp
+        offline_stretch_program_compiler.cpp
         production_class.cpp
         program.cpp
         program_compiler.cpp
+        program_compiler_helpers.cpp
         recording_commit.cpp
         sequence_compile_bookkeeping.cpp
         sequence_content_lowerer.cpp

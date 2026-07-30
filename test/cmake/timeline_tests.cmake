@@ -118,6 +118,7 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
 pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp
         test_playback_audio_renderer_conversion.cpp
+        test_playback_offline_stretch.cpp
         test_playback_track_freeze.cpp
         test_playback_track_mixer.cpp
         harness/rt_allocation_probe.cpp

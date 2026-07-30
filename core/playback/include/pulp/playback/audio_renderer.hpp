@@ -21,6 +21,8 @@ namespace pulp::playback {
 class PlaybackProgram;
 class ProgramCompilerTask;
 class AudioClipConversionArtifact;
+struct OfflineStretchArtifact;
+struct OfflineStretchProvenance;
 
 enum class AudioRendererErrorCode : std::uint8_t {
     InvalidIdentity,
@@ -33,6 +35,8 @@ enum class AudioRendererErrorCode : std::uint8_t {
     InvalidFade,
     CapacityExceeded,
     InvalidTakeComp,
+    OfflineStretchRequired,
+    OfflineStretchFailed,
 };
 
 struct AudioRendererError {
@@ -46,6 +50,13 @@ struct AudioRendererError {
 struct DecodedAudioAsset {
     timeline::ItemId id;
     std::shared_ptr<const audio::AudioFileData> audio;
+    /// SHA-256 identity of the sealed encoded media bytes that produced audio.
+    /// Legacy non-stretch callers may leave this invalid; offline Stretch
+    /// requires it to match the project's asset identity before cache lookup.
+    timeline::ContentHash content_hash;
+    /// Pool-sealed identity of the decoded sample rate, layout, and PCM bits.
+    /// DecodedAudioAssetPool::create always overwrites this value from audio.
+    timeline::ContentHash decoded_content_hash;
 };
 
 /// Immutable, ID-sorted ownership table prepared off the audio thread.
@@ -72,7 +83,11 @@ class DecodedAudioAssetPool {
 struct AudioClipRendererProgram {
     enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
     enum class TimeDomain : std::uint8_t { Musical, Absolute };
-    enum class SourceTimeMapping : std::uint8_t { NativeRate, MusicalPhaseResample };
+    enum class SourceTimeMapping : std::uint8_t {
+        NativeRate,
+        MusicalPhaseResample,
+        OfflineStretchArtifact,
+    };
 
     timeline::ItemId id;
     timeline::ItemId asset_id;
@@ -94,6 +109,8 @@ struct AudioClipRendererProgram {
     timebase::TickPosition musical_tick_start{};
     timebase::TickPosition musical_tick_end{};
     SourceTimeMapping source_time_mapping = SourceTimeMapping::NativeRate;
+    std::shared_ptr<const OfflineStretchArtifact> offline_stretch_artifact;
+    std::shared_ptr<const OfflineStretchProvenance> offline_stretch_provenance;
 
     std::int64_t timeline_end() const noexcept;
     bool uses_sample_rate_conversion() const noexcept;

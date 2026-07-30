@@ -49,9 +49,17 @@ ratio). A later feed returns `input_closed`; reset starts a new stream.
 final output becomes readable. It is not leading silence:
 `output_alignment_samples()` is zero. `output_free_space()` is an advisory
 scheduling value; the typed feed/finalize result remains authoritative. These
-methods allocate nothing after `prepare()`. Do not wire this path into Timeline
-clips until the renderer owns this retry/drain lifecycle and proves it under
-varying host block schedules.
+methods allocate nothing after `prepare()`. Timeline `TimeConform::Stretch` uses
+this finite path only during program compilation. The compiler first
+materializes the exact source slice at the compiled timeline sample rate,
+updates ratios only at analysis boundaries from the authored tempo map, and
+accepts only an exact target-frame result. It then publishes immutable audio
+that the renderer reads 1:1. This offline path uses the scalar double finite
+builder and a bounded final conversion to float so separate compiles remain
+bit-identical within one build/platform. Compiler work-block size is
+deliberately absent
+from cache identity and must not change output. This is offline compilation,
+not the separate live/realtime stretch lifecycle.
 
 For reproducible offline artifacts, prefer `FiniteStretchBuilder64` from
 `finite_stretch_builder.hpp` over open-coding the stream loop. Keep the render

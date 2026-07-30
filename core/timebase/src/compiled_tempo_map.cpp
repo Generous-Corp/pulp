@@ -104,6 +104,19 @@ CompiledTempoMap::compile(std::span<const TempoPoint> points, RationalRate sampl
     return runtime::Ok(CompiledTempoMap(normalized_rate, std::move(segments)));
 }
 
+bool CompiledTempoMap::matches(std::span<const TempoPoint> points) const noexcept {
+    if (points.size() != segments_.size())
+        return false;
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        const auto& point = points[index];
+        const auto& segment = segments_[index];
+        if (segment.start_tick != point.tick || segment.start_bpm != point.bpm ||
+            segment.curve != point.curve_to_next)
+            return false;
+    }
+    return true;
+}
+
 long double CompiledTempoMap::samples_from_segment_start(const Segment& segment,
                                                          std::int64_t delta_ticks) const noexcept {
     const auto ticks = static_cast<long double>(delta_ticks);

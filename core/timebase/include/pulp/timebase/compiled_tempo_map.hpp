@@ -103,6 +103,11 @@ class CompiledTempoMap {
     /// Maximum tempo over [start, end], including every intersected ramp extremum.
     double maximum_tempo_between(TickPosition start, TickPosition end) const noexcept;
 
+    /// True when this compiled map was built from exactly these canonical
+    /// editable points. Sample rate is intentionally separate from the point
+    /// identity and remains available through sample_rate().
+    bool matches(std::span<const TempoPoint> points) const noexcept;
+
     RationalRate sample_rate() const noexcept {
         return sample_rate_;
     }
