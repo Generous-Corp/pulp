@@ -1,0 +1,141 @@
+// The no-leak guard: a change made for one Forge product must not alter another.
+//
+// Forge varies ONE chrome across three products through ShellKind. That sharing
+// is the point -- it is what keeps the products looking like one family -- but it
+// also means a change intended for one can silently move another. Renders exist
+// in test_chrome.cpp today; nothing compares them to anything, so a drift is
+// invisible until somebody notices by eye.
+//
+// This renders each product's Home frame and compares it to a committed
+// baseline. Adding a fourth product, or touching shared chrome for any reason,
+// must leave these three byte-identical.
+//
+// Refresh a baseline deliberately, never casually:
+//     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
+// and commit the changed PNGs with the reason in the message.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <forge/chrome.hpp>
+#include <forge/fx_shell.hpp>
+#include <forge/instrument_shell.hpp>
+#include <forge/midi_shell.hpp>
+
+#include <pulp/format/processor.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/view.hpp>
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+constexpr double kSr = 48000.0;
+constexpr int kFrames = 256;
+
+std::filesystem::path baseline_dir() {
+    // Beside the test source, so the baselines travel with the repo rather than
+    // living in a build directory that a clean checkout would not have.
+    return std::filesystem::path(__FILE__).parent_path() / "baselines" / "chrome-home";
+}
+
+bool updating() { return std::getenv("FORGE_NO_LEAK_UPDATE") != nullptr; }
+
+std::vector<unsigned char> read_all(const std::filesystem::path& p) {
+    std::ifstream f(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
+/// A short digest of a file, for the failure message.
+///
+/// Comparing the byte vectors directly is correct and unreadable: Catch2 prints
+/// both on failure, so a one-pixel drift buried the real message under thousands
+/// of characters of PNG. Two hashes and two paths is what a person can act on.
+std::string digest(const std::vector<unsigned char>& bytes) {
+    std::uint64_t h = 1469598103934665603ull;          // FNV-1a
+    for (unsigned char c : bytes) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+    return std::string(buf) + " (" + std::to_string(bytes.size()) + " bytes)";
+}
+
+/// Render a shell's Home frame and hold it against its baseline.
+///
+/// Byte comparison rather than a tolerance. A tolerance invites the question of
+/// how much drift is acceptable, and for "did this change another product" the
+/// answer is none. Renders are deterministic here -- same backend, same size,
+/// same scale -- so byte-equality is achievable and anything else is a real
+/// change worth looking at.
+template <typename ShellT>
+void check_home_frame(ShellT& shell, const char* product) {
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr;
+    pc.max_buffer_size = kFrames;
+    pc.input_channels = 1;
+    pc.output_channels = 2;
+    shell.prepare(pc);
+
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    REQUIRE(chrome->mode() == forge::ForgeChrome::Mode::Home);
+
+    std::error_code ec;
+    std::filesystem::create_directories(baseline_dir(), ec);
+    const auto baseline = baseline_dir() / (std::string(product) + "-home.png");
+    const auto actual = std::filesystem::temp_directory_path() /
+                        (std::string("no-leak-") + product + "-home.png");
+
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        actual.string(), /*scale=*/1.0f, pulp::view::ScreenshotBackend::skia));
+
+    // A blank frame is not a passing frame. Without this a render that produced
+    // nothing would match an equally empty baseline and report success.
+    const auto got = read_all(actual);
+    INFO("product: " << product << "  bytes: " << got.size());
+    REQUIRE(got.size() > 20000);
+
+    if (updating() || !std::filesystem::exists(baseline)) {
+        std::filesystem::copy_file(
+            actual, baseline, std::filesystem::copy_options::overwrite_existing, ec);
+        WARN("wrote baseline for " << product << " -> " << baseline.string());
+        return;
+    }
+
+    const auto want = read_all(baseline);
+    INFO("baseline: " << baseline.string() << "\nactual:   " << actual.string()
+                      << "\nIf this change was intended, refresh with "
+                         "FORGE_NO_LEAK_UPDATE=1 and say why in the commit.");
+    CHECK(digest(got) == digest(want));
+}
+
+}  // namespace
+
+TEST_CASE("Forge FX's Home frame matches its baseline", "[no-leak]") {
+    forge::ForgeFxShell shell;
+    check_home_frame(shell, "fx");
+}
+
+TEST_CASE("Forge Instrument's Home frame matches its baseline", "[no-leak]") {
+    forge::ForgeInstrumentShell shell;
+    check_home_frame(shell, "instrument");
+}
+
+TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
+    // MIDI ships CLAP and AU only -- no standalone to screenshot -- which is
+    // exactly why this guard renders the chrome directly instead of driving three
+    // apps. Every product is covered whether or not it has a window.
+    forge::ForgeMidiShell shell;
+    check_home_frame(shell, "midi");
+}
