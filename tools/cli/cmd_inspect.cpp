@@ -152,6 +152,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
         std::cerr << "Error: inspector sessions are loopback-only\n";
         return 2;
     }
+    if (host == "localhost")
+        host = "127.0.0.1";
 
     InspectorDiscoveryReader discovery;
     auto records = discovery.list();

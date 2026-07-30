@@ -31,10 +31,6 @@ public:
             suffix += "0123456789abcdef"[(*secret)[index] & 0xf];
         path = std::filesystem::temp_directory_path() /
                ("pulp-inspector-discovery-test-" + suffix);
-        std::filesystem::create_directories(path);
-#ifndef _WIN32
-        REQUIRE(::chmod(path.c_str(), 0700) == 0);
-#endif
     }
 
     ~TemporaryDirectory() {
@@ -60,12 +56,17 @@ InspectorDiscoveryRecord fixture_record(std::string session) {
 TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up",
           "[inspect][discovery]") {
     TemporaryDirectory temporary;
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+    CHECK_FALSE(std::filesystem::exists(temporary.path));
+
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
 
     InspectorDiscoveryPublisher publisher(temporary.path);
     REQUIRE(publisher.publish(fixture_record("session-one"), *token, 5s));
     REQUIRE(publisher.record().has_value());
+    CHECK_FALSE(publisher.record()->process_start_id.empty());
     CHECK(std::filesystem::exists(publisher.record()->record_path));
     CHECK(std::filesystem::exists(publisher.record()->credential_path));
 
@@ -75,7 +76,6 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
     CHECK((info.st_mode & 077) == 0);
 #endif
 
-    InspectorDiscoveryReader reader(temporary.path);
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     CHECK(records.front().session_id == "session-one");
@@ -86,6 +86,48 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
     CHECK_FALSE(std::filesystem::exists(
         temporary.path / "session-one.token"));
 }
+
+TEST_CASE("discovery rejects a stale record after process id reuse",
+          "[inspect][discovery][security]") {
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    REQUIRE(publisher.publish(fixture_record("stale-process"), *token, 5s));
+    REQUIRE(publisher.record().has_value());
+
+    std::ifstream input(publisher.record()->record_path, std::ios::binary);
+    std::string json((std::istreambuf_iterator<char>(input)),
+                     std::istreambuf_iterator<char>());
+    const auto start = publisher.record()->process_start_id;
+    const auto position = json.find(start);
+    REQUIRE(position != std::string::npos);
+    json.replace(position, start.size(), start + "-reused");
+    std::ofstream output(publisher.record()->record_path,
+                         std::ios::binary | std::ios::trunc);
+    REQUIRE(static_cast<bool>(output << json));
+    output.close();
+
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+}
+
+#ifndef _WIN32
+TEST_CASE("discovery reader does not harden an insecure runtime directory",
+          "[inspect][discovery][security]") {
+    TemporaryDirectory temporary;
+    std::filesystem::create_directories(temporary.path);
+    REQUIRE(::chmod(temporary.path.c_str(), 0755) == 0);
+
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+
+    struct stat info {};
+    REQUIRE(::stat(temporary.path.c_str(), &info) == 0);
+    CHECK((info.st_mode & 077) == 055);
+}
+#endif
 
 TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
           "[inspect][discovery][security]") {

@@ -138,7 +138,7 @@ TEST_CASE("pulp inspect one-shot prints a server response",
     };
 
     auto result = run_pulp({"inspect",
-                            "--host", "127.0.0.1",
+                            "--host", "localhost",
                             "--port", fixture.port_string(),
                             "--command", "DOM.getDocument",
                             "--params", R"({"depth":2})"},

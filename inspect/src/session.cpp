@@ -84,6 +84,11 @@ std::optional<InspectorMessage> InspectorAccessPolicy::authorize(
                           "method_not_found",
                           choc::json::toString(data, false));
     }
+    if (request.id == 0 || method->kind != InspectorMethodKind::Request) {
+        return make_error(request.id,
+                          "Inspector messages sent to a session must be requests",
+                          "invalid_request");
+    }
     const auto capability = method->capability;
     const auto data = authorization_data(request.method, capability, profile_);
     if (!capability_is_grantable(capability) || !is_available(capability)) {
@@ -188,18 +193,22 @@ InspectorSession::InspectorSession(InspectorSessionInfo info,
 
 InspectorMessage InspectorSession::handle(std::string_view client_id,
                                           const InspectorMessage& request) {
-    std::lock_guard lock(mutex_);
-    if (request.method.rfind("Session.", 0) == 0)
-        return handle_session_method(client_id, request);
+    RequestHandler handler;
+    {
+        std::lock_guard lock(mutex_);
+        if (request.method.rfind("Session.", 0) == 0)
+            return handle_session_method(client_id, request);
 
-    if (auto denied = policy_.authorize(request, lease_.owns(client_id)))
-        return std::move(*denied);
-    if (!handler_) {
+        if (auto denied = policy_.authorize(request, lease_.owns(client_id)))
+            return std::move(*denied);
+        handler = handler_;
+    }
+    if (!handler) {
         return make_error(request.id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
-    return handler_(request);
+    return handler(request);
 }
 
 void InspectorSession::disconnect(std::string_view client_id) {

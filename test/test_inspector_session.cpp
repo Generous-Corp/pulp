@@ -27,6 +27,7 @@ using pulp::inspect::InspectorSession;
 using pulp::inspect::InspectorSessionInfo;
 using pulp::inspect::make_request;
 using pulp::inspect::make_response;
+using pulp::inspect::make_event;
 using pulp::inspect::make_inspector_auth_proof;
 
 namespace {
@@ -73,6 +74,17 @@ TEST_CASE("InspectorAccessPolicy resolves named profiles against host availabili
         make_request(3, "Unknown.method"), false);
     REQUIRE(unknown.has_value());
     CHECK(unknown->error_code == "method_not_found");
+
+    auto event = make_event("DOM.documentUpdated");
+    event.id = 4;
+    auto invalid_event = observe.authorize(event, false);
+    REQUIRE(invalid_event.has_value());
+    CHECK(invalid_event->error_code == "invalid_request");
+
+    auto zero_id = observe.authorize(
+        make_request(0, "State.getParameters"), false);
+    REQUIRE(zero_id.has_value());
+    CHECK(zero_id->error_code == "invalid_request");
 }
 
 TEST_CASE("custom policy is an exact allow-list and runtime eval is separately gated",
@@ -160,6 +172,24 @@ TEST_CASE("InspectorSession enforces capability and controller lease before disp
     auto reacquired = session.handle(
         "other", make_request(6, "Session.acquireController"));
     CHECK_FALSE(reacquired.is_error);
+}
+
+TEST_CASE("InspectorSession invokes domain handlers outside its lease mutex",
+          "[inspect][session][dispatch][concurrency]") {
+    auto config = policy(InspectorProfile::Develop);
+    InspectorSession* session_ptr = nullptr;
+    InspectorSession session(
+        InspectorSessionInfo{"session-unlocked", "instance-1", "fixture"},
+        std::move(config),
+        [&](const auto& request) {
+            session_ptr->disconnect("reader");
+            return make_response(request.id, R"({"unlocked":true})");
+        });
+    session_ptr = &session;
+
+    const auto response =
+        session.handle("reader", make_request(1, "State.getParameters"));
+    CHECK_FALSE(response.is_error);
 }
 
 TEST_CASE("InspectorSession reports effective authority without dispatching",
