@@ -1,4 +1,14 @@
 #include <pulp/inspect/discovery.hpp>
+#include <pulp/inspect/discovery_publisher.hpp>
+
+#if defined(PULP_INSPECT_READER_ONLY) == defined(PULP_INSPECT_PUBLISHER_ONLY)
+#error "discovery.cpp must build as exactly one discovery authority"
+#endif
+
+// Reader and publisher targets intentionally compile mutually exclusive
+// public implementations from this source. Shared path-validation helpers stay
+// identical, while the read-only client archive contains no publication
+// symbols and cannot acquire or mutate discovery ownership.
 
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/system.hpp>
@@ -38,6 +48,7 @@
 
 namespace pulp::inspect {
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 InspectorCredential::InspectorCredential(
     std::span<const std::uint8_t> bytes)
     : bytes_(bytes.begin(), bytes.end()) {}
@@ -66,6 +77,7 @@ void InspectorCredential::clear() noexcept {
     pulp::runtime::secure_zero_memory(bytes_.data(), bytes_.size());
     bytes_.clear();
 }
+#endif
 
 namespace {
 
@@ -258,6 +270,7 @@ bool create_owner_only_windows_directory(
 }
 #endif
 
+#ifndef PULP_INSPECT_READER_ONLY
 bool ensure_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
     return create_owner_only_windows_directory(directory);
@@ -308,7 +321,9 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
     return secured;
 #endif
 }
+#endif
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 bool validate_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
     return owner_only_windows_path(directory, true);
@@ -319,6 +334,7 @@ bool validate_private_directory(const std::filesystem::path& directory) {
            info.st_uid == ::geteuid() && (info.st_mode & 077) == 0;
 #endif
 }
+#endif
 
 bool private_regular_file(const std::filesystem::path& path) {
 #ifdef _WIN32
@@ -391,6 +407,7 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
 #endif
 }
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 std::optional<std::filesystem::path> confined_path(
     const std::filesystem::path& root,
     const std::filesystem::path& candidate) {
@@ -404,7 +421,9 @@ std::optional<std::filesystem::path> confined_path(
         return std::nullopt;
     return canonical_candidate;
 }
+#endif
 
+#ifndef PULP_INSPECT_READER_ONLY
 bool write_private_file_atomic(const std::filesystem::path& destination,
                                std::string_view contents) {
     const auto random = pulp::runtime::secure_random_bytes(8);
@@ -478,6 +497,7 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
 #endif
     return true;
 }
+#endif
 
 std::optional<std::string> read_private_text_file(
     const std::filesystem::path& path) {
@@ -500,6 +520,7 @@ std::optional<std::string> read_private_text_file(
     return contents;
 }
 
+#ifndef PULP_INSPECT_READER_ONLY
 std::string encode_record(const InspectorDiscoveryRecord& record) {
     auto value = choc::value::createObject("");
     value.addMember("sessionId",
@@ -522,7 +543,9 @@ std::string encode_record(const InspectorDiscoveryRecord& record) {
                         record.credential_path.filename().string()));
     return choc::json::toString(value, false);
 }
+#endif
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 std::optional<InspectorDiscoveryRecord> decode_record(
     const std::filesystem::path& root,
     const std::filesystem::path& path) {
@@ -573,9 +596,11 @@ std::optional<InspectorDiscoveryRecord> decode_record(
         return std::nullopt;
     }
 }
+#endif
 
 } // namespace
 
+#ifndef PULP_INSPECT_READER_ONLY
 struct InspectorDiscoveryPublisher::OwnershipLease {
 #ifdef _WIN32
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -673,7 +698,9 @@ struct InspectorDiscoveryPublisher::OwnershipLease {
         return lease;
     }
 };
+#endif
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 std::filesystem::path default_inspector_runtime_directory() {
     if (const auto configured =
             pulp::runtime::get_env("PULP_INSPECTOR_RUNTIME_DIR")) {
@@ -772,7 +799,9 @@ InspectorDiscoveryReader::read_credential(
     }
     return InspectorCredential(result.bytes);
 }
+#endif
 
+#ifndef PULP_INSPECT_READER_ONLY
 InspectorDiscoveryPublisher::InspectorDiscoveryPublisher(
     std::filesystem::path runtime_directory)
     : runtime_directory_(std::move(runtime_directory)) {}
@@ -874,7 +903,9 @@ void InspectorDiscoveryPublisher::remove() {
         credential_.data(), credential_.size());
     credential_.clear();
 }
+#endif
 
+#ifndef PULP_INSPECT_PUBLISHER_ONLY
 std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::span<const InspectorDiscoveryRecord> records,
     std::string_view session_id,
@@ -909,5 +940,6 @@ std::optional<InspectorDiscoveryRecord> select_inspector_session(
     }
     return std::nullopt;
 }
+#endif
 
 } // namespace pulp::inspect

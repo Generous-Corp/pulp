@@ -2,7 +2,7 @@
 // Accepts multiple clients, dispatches requests, broadcasts events.
 #pragma once
 
-#include <pulp/inspect/discovery.hpp>
+#include <pulp/inspect/discovery_publisher.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/session.hpp>
 #include <pulp/events/interprocess_connection.hpp>

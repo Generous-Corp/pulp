@@ -42,7 +42,9 @@ struct PendingCall {
     std::mutex mutex;
     std::condition_variable cv;
     bool started = false;
-    bool completed = false;
+    bool operation_finished = false;
+    bool response_ready = false;
+    bool cancelled_before_start = false;
     bool slot_held = true;
     InspectorMessage response;
 };
@@ -80,9 +82,10 @@ public:
         bool release_slot = false;
         {
             std::lock_guard lock(call->mutex);
-            if (!call->completed) {
+            call->operation_finished = true;
+            if (!call->response_ready) {
                 call->response = std::move(response);
-                call->completed = true;
+                call->response_ready = true;
                 notify = true;
             }
             release_slot = call->slot_held;
@@ -165,7 +168,7 @@ InspectorMessage InspectorMainThreadRpc::call(
             std::lock_guard operation_lock(impl->operation_mutex);
             {
                 std::lock_guard lock(pending->mutex);
-                if (pending->completed)
+                if (pending->cancelled_before_start)
                     return;
             }
             if (!impl->accepting.load(std::memory_order_acquire)) {
@@ -174,7 +177,7 @@ InspectorMessage InspectorMainThreadRpc::call(
             }
             {
                 std::lock_guard lock(pending->mutex);
-                if (pending->completed)
+                if (pending->cancelled_before_start)
                     return;
                 pending->started = true;
             }
@@ -191,12 +194,23 @@ InspectorMessage InspectorMainThreadRpc::call(
 
     std::unique_lock lock(pending->mutex);
     if (!pending->cv.wait_for(lock, impl_->config.timeout,
-                              [&] { return pending->completed; })) {
+                              [&] { return pending->response_ready; })) {
         const bool may_have_applied = pending->started;
-        pending->completed = true;
-        pending->slot_held = false;
+        if (may_have_applied) {
+            // Once execution starts, the synchronous caller remains the
+            // operation's lifetime owner. Wait for the posted mutation to
+            // drain before returning the timeout so session controller-lease
+            // accounting cannot end while old work is still active.
+            pending->cv.wait(lock, [&] {
+                return pending->operation_finished;
+            });
+        } else {
+            pending->cancelled_before_start = true;
+            pending->response_ready = true;
+            pending->slot_held = false;
+        }
         lock.unlock();
-        {
+        if (!may_have_applied) {
             std::lock_guard pending_lock(impl_->pending_mutex);
             if (impl_->pending_count > 0)
                 --impl_->pending_count;

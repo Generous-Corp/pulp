@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/inspect/discovery.hpp>
+#include <pulp/inspect/discovery_publisher.hpp>
 
 #include <algorithm>
 #include <chrono>

@@ -81,7 +81,7 @@ endif()
 
 add_executable(pulp-test-inspector-discovery test_inspector_discovery.cpp)
 target_link_libraries(pulp-test-inspector-discovery PRIVATE
-    pulp::inspect-discovery Catch2::Catch2WithMain)
+    pulp::inspect-publication Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-discovery)
 
 add_executable(
