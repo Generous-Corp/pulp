@@ -815,7 +815,7 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
     const auto second_bytes = std::filesystem::file_size(second_path);
     pulp::interchange::ExportArtifacts refused;
     const auto refusal = pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, refused, first_bytes + second_bytes - 1);
+        loaded, refused, 3u * std::max(first_bytes, second_bytes));
     REQUIRE_FALSE(refusal);
     REQUIRE(refusal.error().code ==
             pulp::tools::timeline::detail::DawProjectMediaErrorCode::AssetReadFailed);
@@ -833,7 +833,7 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
 
     pulp::interchange::ExportArtifacts near_limit;
     const auto near_limit_result = pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, near_limit, 192u * 1024u);
+        loaded, near_limit, 320u * 1024u);
     REQUIRE(near_limit_result);
     REQUIRE(near_limit.artifacts.size() == 2);
 
@@ -933,6 +933,18 @@ TEST_CASE("DAWproject ZIP export and import enforce one exact aggregate working 
     const std::vector<std::uint8_t> preserved{std::istreambuf_iterator<char>(preserved_stream),
                                               std::istreambuf_iterator<char>()};
     REQUIRE(preserved == sentinel);
+
+    pulp::interchange::ExportArtifacts nul_collision;
+    nul_collision.artifacts.push_back(
+        {std::string("audio/x.wav\0a", 13), std::vector<std::uint8_t>{'a'}});
+    nul_collision.artifacts.push_back(
+        {std::string("audio/x.wav\0b", 13), std::vector<std::uint8_t>{'b'}});
+    const auto nul_destination = temp.path / "nul-collision.dawproject";
+    const auto nul_refused = detail::write_dawproject_archive_no_replace(
+        nul_collision, nul_destination, kTestLimit);
+    REQUIRE_FALSE(nul_refused);
+    REQUIRE(nul_refused.error().code == detail::DawProjectArchiveErrorCode::Export);
+    REQUIRE_FALSE(std::filesystem::exists(nul_destination));
 
     pulp::interchange::ExportArtifacts tiny;
     tiny.artifacts.push_back({"project.xml", std::vector<std::uint8_t>{'x'}});

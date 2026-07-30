@@ -72,17 +72,19 @@ add_dawproject_media(const LoadedProject& loaded, pulp::interchange::ExportArtif
                     return fail(DawProjectMediaErrorCode::DuplicateArchivePath,
                                 reference->asset_id.value, asset->name,
                                 "archive path collides with another export artifact");
-                const auto read_allowance = std::min(limit - logical, budget.remaining_bytes());
-                if (read_allowance == 0)
+                const auto read_ceiling =
+                    std::min(limit - logical, budget.remaining_bytes() / 2u);
+                if (read_ceiling == 0)
                     return fail(DawProjectMediaErrorCode::ByteLimitExceeded,
                                 reference->asset_id.value, asset->name,
                                 "media payload exceeds the remaining working-set limit");
-                if (!budget.acquire_external(read_allowance))
+                const auto read_reserve = 2u * read_ceiling;
+                if (!budget.acquire_external(read_reserve))
                     return fail(DawProjectMediaErrorCode::ByteLimitExceeded,
                                 reference->asset_id.value, asset->name,
                                 "media payload exceeds the remaining working-set limit");
-                external += read_allowance;
-                auto bytes = read_verified_asset_bytes(loaded, *asset, read_allowance);
+                external += read_reserve;
+                auto bytes = read_verified_asset_bytes(loaded, *asset, read_ceiling);
                 if (!bytes)
                     return fail(
                         DawProjectMediaErrorCode::AssetReadFailed, reference->asset_id.value,
@@ -93,12 +95,12 @@ add_dawproject_media(const LoadedProject& loaded, pulp::interchange::ExportArtif
                                 reference->asset_id.value, asset->name,
                                 "cumulative media payload exceeds the working-set limit");
                 logical += bytes->size();
-                if (bytes->capacity() > read_allowance)
+                if (bytes->capacity() > read_reserve)
                     return fail(DawProjectMediaErrorCode::ByteLimitExceeded,
                                 reference->asset_id.value, asset->name,
                                 "cumulative media payload exceeds the working-set limit");
-                budget.release_external(read_allowance - bytes->capacity());
-                external -= read_allowance - bytes->capacity();
+                budget.release_external(read_reserve - bytes->capacity());
+                external -= read_reserve - bytes->capacity();
                 media.push_back({std::move(archive_name), std::move(*bytes)});
             }
         }

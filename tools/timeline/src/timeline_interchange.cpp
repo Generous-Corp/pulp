@@ -252,7 +252,6 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                                "input, format (smf or dawproject), and output are required", {}, 2);
 
     std::optional<pulp::timeline::Project> imported;
-    std::set<std::string, std::less<>> media_paths;
     std::optional<detail::BoundedZipArchive> archive_entries;
     std::string fidelity;
     if (*format == Format::Smf) {
@@ -290,37 +289,26 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
             return detail::failure("import",
                                    "DAWproject ZIP must contain a bounded root project.xml entry",
                                    filesystem_path_to_utf8(input));
-        std::uint64_t total_media = 0;
-        std::uint64_t prior_resolver_copy_charge = 0;
-        auto resolver = [&](std::string_view relative) -> std::optional<std::vector<std::uint8_t>> {
-            archive_entries->release_external(prior_resolver_copy_charge);
-            prior_resolver_copy_charge = 0;
-            const auto entry = archive_entries->find(relative);
-            if (!entry || entry->size() > limits.max_media_bytes_per_resolver_call ||
-                total_media > limits.max_total_media_bytes ||
-                entry->size() > limits.max_total_media_bytes - total_media)
-                return std::nullopt;
-            const auto copy_charge = static_cast<std::uint64_t>(entry->size()) +
-                                     detail::kExternalArtifactMetadataReserveBytes;
-            if (!archive_entries->acquire_external(copy_charge))
-                return std::nullopt;
-            prior_resolver_copy_charge = copy_charge;
-            total_media += entry->size();
-            if (!media_paths.contains(relative)) {
-                const auto path_charge = static_cast<std::uint64_t>(relative.size()) +
-                                         detail::kExternalArtifactMetadataReserveBytes;
-                if (!archive_entries->acquire_external(path_charge))
+        struct ResolverContext {
+            detail::BoundedZipArchive* archive = nullptr;
+            const pulp::timeline::DawProjectImportLimits* limits = nullptr;
+        } resolver_context{&*archive_entries, &limits};
+        pulp::timeline::detail::DawProjectMediaViewResolver resolver{
+            &resolver_context, [](void* opaque, std::string_view relative)
+                -> std::optional<std::span<const std::uint8_t>> {
+                auto& context = *static_cast<ResolverContext*>(opaque);
+                const auto entry = context.archive->find(relative);
+                if (!entry ||
+                    entry->size() > context.limits->max_media_bytes_per_resolver_call ||
+                    !context.archive->retain_media_path(relative))
                     return std::nullopt;
-                media_paths.insert(std::string(relative));
-            }
-            return std::vector<std::uint8_t>(entry->begin(), entry->end());
-        };
-        auto result = pulp::timeline::import_dawproject_xml(
+                return entry;
+            }};
+        auto result = pulp::timeline::detail::import_dawproject_xml_view(
             std::string_view(reinterpret_cast<const char*>(xml_entry->data()), xml_entry->size()),
             resolver, limits);
         if (!result)
             return detail::failure("import", result.error().message);
-        archive_entries->release_external(prior_resolver_copy_charge);
         imported.emplace(std::move(result).value());
     }
 
@@ -339,9 +327,8 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                                filesystem_path_to_utf8(output_directory));
     if (!publisher->write("project.json", serialized.value().json))
         return detail::failure("publish", "could not stage canonical project.json");
-    for (const auto& path : media_paths)
-        if (!publisher->write(path, *archive_entries->find(path)))
-            return detail::failure("publish", "could not stage imported sibling media", path);
+    if (archive_entries && !archive_entries->publish_retained_media(*publisher))
+        return detail::failure("publish", "could not stage imported sibling media");
     if (!publisher->commit_directory())
         return detail::failure("publish", "output directory appeared before atomic publication",
                                filesystem_path_to_utf8(output_directory));

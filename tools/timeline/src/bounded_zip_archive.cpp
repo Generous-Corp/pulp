@@ -267,8 +267,10 @@ struct BoundedZipArchive::Impl {
     using String = std::pmr::string;
     using Bytes = std::pmr::vector<std::uint8_t>;
     using Entries = std::pmr::map<String, Bytes, std::less<>>;
+    using Paths = std::pmr::unordered_set<String>;
 
-    explicit Impl(std::uint64_t limit) : ledger(limit), resource(ledger), entries(&resource) {
+    explicit Impl(std::uint64_t limit)
+        : ledger(limit), resource(ledger), entries(&resource), media_paths(std::in_place, &resource) {
         if (!ledger.acquire(kZipControlAndApiReserveBytes))
             throw std::bad_alloc();
     }
@@ -278,6 +280,7 @@ struct BoundedZipArchive::Impl {
     }
     ZipBudgetStats finish() noexcept {
         if (!closed) {
+            media_paths.reset();
             entries.clear();
             if (external != 0)
                 ledger.release(external);
@@ -291,6 +294,7 @@ struct BoundedZipArchive::Impl {
     BudgetLedger ledger;
     LedgerResource resource;
     Entries entries;
+    std::optional<Paths> media_paths;
     std::uint64_t external = 0;
     bool closed = false;
 };
@@ -306,6 +310,23 @@ BoundedZipArchive::find(std::string_view name) const noexcept {
     if (found == impl_->entries.end())
         return std::nullopt;
     return std::span<const std::uint8_t>(found->second.data(), found->second.size());
+}
+bool BoundedZipArchive::retain_media_path(std::string_view name) noexcept {
+    try {
+        impl_->media_paths->emplace(name.data(), name.size());
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+bool BoundedZipArchive::publish_retained_media(AtomicPublisher& publisher) const {
+    for (const auto& path : *impl_->media_paths) {
+        const auto entry = impl_->entries.find(path);
+        if (entry == impl_->entries.end() ||
+            !publisher.write(path, std::span<const std::uint8_t>(entry->second)))
+            return false;
+    }
+    return true;
 }
 bool BoundedZipArchive::acquire_external(std::uint64_t bytes) noexcept {
     if (!impl_->ledger.acquire(bytes))
