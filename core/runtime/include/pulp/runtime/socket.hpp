@@ -30,8 +30,10 @@ public:
     /// Accept an incoming connection (TCP only). Returns a new Socket.
     std::optional<Socket> accept();
 
-    /// Connect to a remote address (TCP).
-    bool connect(std::string_view address, uint16_t port);
+    /// Connect to a remote address (TCP). A positive timeout bounds the
+    /// nonblocking connect phase; non-positive preserves blocking behavior.
+    bool connect(std::string_view address, uint16_t port,
+                 std::chrono::milliseconds timeout = {});
 
     /// Send data. Returns bytes sent, or -1 on error.
     int send(const uint8_t* data, size_t length);

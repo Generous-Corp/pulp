@@ -328,18 +328,34 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     impl_->connection.set_on_disconnected([this, generation] {
         impl_->mark_disconnected(generation);
     });
-    impl_->connection.set_write_timeout(
-        std::max(timeout, std::chrono::milliseconds(1)));
+    const auto bounded_timeout =
+        std::max(timeout, std::chrono::milliseconds(1));
+    const auto connect_started = std::chrono::steady_clock::now();
+    const auto remaining = [&] {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - connect_started);
+        return elapsed >= bounded_timeout
+                   ? std::chrono::milliseconds(0)
+                   : bounded_timeout - elapsed;
+    };
+    impl_->connection.set_write_timeout(bounded_timeout);
     if (!impl_->connection.connect(record.endpoint,
-                                   events::IpcTransport::Socket)) {
+                                   events::IpcTransport::Socket,
+                                   bounded_timeout)) {
         impl_->disconnect_current(false);
         return false;
     }
 
     InspectorAuthChallenge challenge;
     {
+        const auto challenge_timeout = remaining();
+        if (challenge_timeout <= std::chrono::milliseconds(0)) {
+            impl_->disconnect_current(false);
+            return false;
+        }
         std::unique_lock lock(impl_->mutex);
-        if (!impl_->cv.wait_for(lock, timeout, [&] {
+        if (!impl_->cv.wait_for(lock, challenge_timeout, [&] {
                 return impl_->challenge.has_value() || impl_->disconnected;
             }) ||
             !impl_->challenge) {
@@ -371,6 +387,16 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         std::lock_guard lock(impl_->mutex);
         impl_->in_flight.insert(authentication.id);
     }
+    const auto authentication_timeout = remaining();
+    if (authentication_timeout <= std::chrono::milliseconds(0)) {
+        {
+            std::lock_guard lock(impl_->mutex);
+            impl_->in_flight.erase(authentication.id);
+        }
+        impl_->disconnect_current(false);
+        return false;
+    }
+    impl_->connection.set_write_timeout(authentication_timeout);
     if (!impl_->connection.send_message(encode_message(authentication))) {
         {
             std::lock_guard lock(impl_->mutex);
@@ -379,7 +405,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         impl_->disconnect_current(false);
         return false;
     }
-    const auto response = impl_->wait_for_response(1, timeout);
+    const auto response =
+        impl_->wait_for_response(1, remaining());
     if (response.is_error) {
         impl_->disconnect_current(false);
         return false;

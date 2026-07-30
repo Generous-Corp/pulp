@@ -96,6 +96,16 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "out_path is unavailable over the inspector\n"
                 "ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb\n"
                 "Tracing::start(categories, {}, ring_kb)\n",
+            "core/runtime/src/socket.cpp":
+                "FIONBIO\nO_NONBLOCK\nWSAPoll\n"
+                "::poll(&descriptor, 1, wait_ms)\nSO_ERROR\n"
+                "restore_blocking()\n",
+            "inspect/src/client.cpp":
+                "events::IpcTransport::Socket,\n"
+                "                                   bounded_timeout\n"
+                "const auto challenge_timeout = remaining()\n"
+                "const auto authentication_timeout = remaining()\n"
+                "impl_->wait_for_response(1, remaining())\n",
         }
         for relative, text in files.items():
             path = root / relative

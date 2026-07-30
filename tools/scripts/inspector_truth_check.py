@@ -198,6 +198,20 @@ REQUIRED_SECURITY_CONTRACTS = {
         '"minimum":1,"maximum":512',
         "The host owns the trace destination.",
     ),
+    "core/runtime/src/socket.cpp": (
+        "FIONBIO",
+        "O_NONBLOCK",
+        "WSAPoll",
+        "::poll(&descriptor, 1, wait_ms)",
+        "SO_ERROR",
+        "restore_blocking()",
+    ),
+    "inspect/src/client.cpp": (
+        "events::IpcTransport::Socket,\n                                   bounded_timeout",
+        "const auto challenge_timeout = remaining()",
+        "const auto authentication_timeout = remaining()",
+        "impl_->wait_for_response(1, remaining())",
+    ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (
         "must be an integer from 1 to 65535",
     ),
