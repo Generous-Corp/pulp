@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   awaitExplicitReadiness,
   finalizeKnownRenderers,
+  mergeRendererHooks,
 } from "./renderers.mjs";
 
 test("explicit page readiness is awaited when the source provides it",
@@ -49,6 +50,30 @@ test("a rejected explicit readiness contract fails capture", async () => {
       /assets did not initialize/.test(error.message));
 });
 
+test("post-interaction readiness uses a distinct one-shot contract",
+  async () => {
+    const cdp = {
+      async call(method, options) {
+        assert.equal(method, "Runtime.evaluate");
+        assert.match(options.expression, /__pulpInteractionReady/);
+        assert.doesNotMatch(options.expression, /globalThis\.__pulpCaptureReady/);
+        return {
+          result: {
+            value: {
+              contract: "__pulpInteractionReady",
+              awaited: true,
+            },
+          },
+        };
+      },
+    };
+
+    const result = await awaitExplicitReadiness(
+      cdp, "__pulpInteractionReady");
+    assert.equal(result.contract, "__pulpInteractionReady");
+    assert.equal(result.awaited, true);
+  });
+
 test("renderer registry resolves loaded Lucide placeholders", async () => {
   const cdp = {
     async call(method, options) {
@@ -83,4 +108,25 @@ test("renderer registry rejects unresolved Lucide placeholders", async () => {
   await assert.rejects(
     finalizeKnownRenderers(cdp),
     (error) => error.code === "capture-renderer-not-ready");
+});
+
+test("renderer provenance preserves transformations from every phase", () => {
+  assert.deepEqual(mergeRendererHooks(
+    [{
+      name: "lucide",
+      applied: true,
+      placeholders: 30,
+      remaining: 0,
+    }],
+    [{
+      name: "lucide",
+      applied: true,
+      placeholders: 1,
+      remaining: 0,
+    }]), [{
+      name: "lucide",
+      applied: true,
+      placeholders: 31,
+      remaining: 0,
+    }]);
 });

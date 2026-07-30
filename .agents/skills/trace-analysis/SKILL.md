@@ -306,6 +306,33 @@ build shell—must receive `PULP_TRACE_PATH` and `PULP_TRACE_SECONDS`. If the
 plug-in loads but produces no file, distinguish an untraced installed SDK from
 a session that merely has not flushed before changing instrumentation.
 
+### The auto-flush timer is owned, joined, and generation-tagged
+
+`PULP_TRACE_SECONDS` used to arm a DETACHED `std::thread` that slept and
+then called back into process-global tracing state. Two consequences you
+may still see in older builds:
+
+- **A capture that truncates early.** Close and reopen the editor inside
+  the window and the FIRST session's timer stopped the SECOND session.
+  Timeouts now carry the session generation they were armed for and
+  refuse to act on any other, so a re-opened editor gets its full window.
+- **A crash on plug-in unload.** Nothing joined the sleeping thread, so
+  `FreeLibrary` / `dlclose` could pull the module out from under it. The
+  final `Tracing::detach()` now cancels and JOINS the timer before it
+  flushes.
+
+Practical consequence for capture: the last detach is a synchronous
+flush + join. If you are scripting a capture, let the host finish
+unloading the plug-in rather than killing the process — a `SIGKILL`
+still loses the trace, but a clean unload no longer races the timer.
+
+Adapters attach via RAII (`runtime::ScopedTracingAttachment`), and
+tracing is now wired into **VST3, CLAP, AU v2, AU v3, AAX, and
+Standalone** — it used to be VST3-only, so a Perfetto capture of any
+other format recorded nothing while the API claimed to be
+process-global. If a capture is empty, check the format is one of those
+before suspecting the environment.
+
 ### Always instrument the blocking call
 
 A frame span whose children sum to ~2 ms while the frame itself takes 45 ms

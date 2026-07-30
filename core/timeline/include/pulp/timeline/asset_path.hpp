@@ -9,9 +9,10 @@ namespace pulp::timeline {
  */
 
 /// Returns whether a UTF-8 package-relative asset locator is lexically
-/// relative and contains no parent traversal component.
+/// relative and contains no parent traversal component or embedded NUL byte.
 inline bool package_relative_path_is_lexically_safe(std::string_view path) noexcept {
-    if (path.empty() || path.front() == '/' || path.front() == '\\')
+    if (path.empty() || path.find('\0') != std::string_view::npos || path.front() == '/' ||
+        path.front() == '\\')
         return false;
     const auto ascii_alpha = [](char value) noexcept {
         return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');

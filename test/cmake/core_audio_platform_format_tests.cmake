@@ -68,10 +68,13 @@ catch_discover_tests(pulp-test-mcp-server)
 # the agent loop hands its rendered variants to pulp_audio_compare, whose
 # handler lives in the same library, and compiling one of its translation units
 # a second time here would duplicate those symbols.
-add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
+add_executable(pulp-test-mcp-timeline-tools
+    test_mcp_timeline_sessions.cpp
+    test_mcp_timeline_tools.cpp)
 target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
     pulp-mcp-core
     pulp::audio
+    pulp::interchange
     pulp::playback
     pulp::timeline
     pulp::tool-timeline
@@ -79,6 +82,8 @@ target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
 # pulp_audio_compare resolves its delegated CLI from a project root.
 target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(pulp-test-mcp-timeline-tools PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/miniz)
 catch_discover_tests(pulp-test-mcp-timeline-tools)
 
 # MIDI tests
@@ -121,6 +126,11 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
+
+# Editor parameter-write provenance: host automation interleaved with editor
+# edits during an open gesture, exact begin/value/end ordering, one normalized
+# snapshot per reported edit, and no host-originated echo.
+pulp_add_test_suite(pulp-test-host-parameter-edit LIBRARIES pulp::format pulp::state)
 
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)

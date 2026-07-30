@@ -1487,6 +1487,7 @@ exit codes, diagnostics, and current limitations).
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
 | `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides `PULP_DESIGN_BROWSER`, browser mode, managed Chrome for Testing, and system discovery. |
+| `--browser-interactions <json>` | Apply a `pulp-browser-interactions-v1` click/type/wait plan before browser evidence capture. Without it, capture remains on the settled initial state. |
 | `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
 | `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
@@ -1567,6 +1568,13 @@ pulp seq schema
 pulp seq validate song.pulpseq.json
 pulp seq explain song.pulpseq.json [--sample-rate 48000]
 pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+pulp seq export song.pulpseq.json --format smf --plan
+pulp seq export song.pulpseq.json --format smf --out song-smf \
+  [--accept-loss concept-id]...
+pulp seq export song.pulpseq.json --format dawproject --out song.dawproject \
+  [--accept-loss concept-id]...
+pulp seq import song.mid --format smf --out imported-song
+pulp seq import song.dawproject --format dawproject --out imported-song
 ```
 
 `apply` accepts an array of typed command envelopes. It prints the committed
@@ -1574,6 +1582,29 @@ project and revision as JSON; `--out` also writes the canonical project member
 through a sibling temporary file. Invalid projects, unknown command types,
 precondition conflicts, and empty command batches fail without publishing a
 partial edit.
+
+`export` first plans conversion against the selected format and stops unless
+every reported lossy concept has its own repeated `--accept-loss <concept-id>`
+argument. There is deliberately no force or accept-all switch: a newly
+introduced loss stops an unattended pipeline until that exact concept is
+reviewed. Unknown concept IDs are rejected. `--plan` rejects `--out` and
+`--accept-loss`, always writes nothing, and returns the canonical manifest plus
+`required_consent`, including for a lossless project that could otherwise
+export immediately. Publishing requires `--out`. Normal refusal and successful
+export results carry the same manifest object.
+
+Import publishes only to a new directory. SMF export likewise publishes a new
+artifact directory containing `project.mid` and the canonical interchange
+manifest. DAWproject export instead publishes one standard `.dawproject` ZIP
+containing root `project.xml`, the manifest, and referenced media entries (for
+example under `audio/`). Every destination, including a symlink, must not
+already exist. Staging is private and publication is atomic and no-replace.
+
+SMF import accepts a MIDI file. DAWproject import accepts a `.dawproject` ZIP,
+requires a bounded root `project.xml`, rejects unsafe, duplicate, encrypted, or
+symlink entries, and resolves media only from safe package-relative entries.
+Both imports create `project.json` in the new destination plus sealed media
+where the imported document references it.
 
 `explain` reports the compiled track plan, including clip IDs, note-event and
 audio-region counts, and automation presence. Plugin latency is a host-binding
@@ -1590,7 +1621,8 @@ compiler lowers today is produced in band, so tracks report `synchronous`.
 
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,
-validation, explanation, render, and the equivalent five-tool MCP flow.
+validation, explanation, render, import/export interchange, and the equivalent
+seven-tool MCP flow.
 
 ### render
 

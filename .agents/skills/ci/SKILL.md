@@ -597,6 +597,41 @@ Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in 
 same change, or the hourly topology check reports an unset lane as having no route
 at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
 it.
+## A cache that looks configured can be saving nothing
+
+`actions/cache` reports success whether or not the path it was handed contains
+anything. So a cache step can sit green for months while every build re-downloads
+its dependencies. Verify the path a tool actually writes to, not the one the
+workflow names.
+
+`build.yml`'s FetchContent cache listed three paths and populated none:
+
+```
+Linux    cached ~/.cache/Pulp/...   CMake writes ~/.cache/pulp/...   (case)
+Windows  cached ~/AppData/Local/Pulp/Cache/...   CMake uses $LOCALAPPDATA/Pulp/fc
+macOS    path matched — but the sources never left <build>/_deps
+```
+
+The underlying cause is worth knowing before touching any of this:
+`pulp_configure_fetchcontent_base_dir` in `tools/cmake/PulpFetchContent.cmake`
+**returns early unless `WIN32`**. It is a MAX_PATH workaround for MSBuild, not a
+cross-platform cache. Off Windows, `FETCHCONTENT_BASE_DIR` keeps its default of
+`<build>/_deps`, so sources live inside the build tree and cannot survive it.
+
+Cost when it is broken: **414 s cold configure vs 119 s warm**, measured on an
+identical tree — roughly 295 s per clean build. three.js is the bulk of it, a
+2.2 GB git clone fetched whenever `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are both
+ON, which is the default on `pull_request` and `merge_group`.
+
+To check a cache is real rather than nominal:
+
+```sh
+# in the guest/runner, after a configure
+du -sh "$FETCHCONTENT_BASE_DIR" 2>/dev/null || echo "nothing cached"
+```
+
+Same idea applies to the self-hosted golden images: bake with the flags CI actually
+uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 

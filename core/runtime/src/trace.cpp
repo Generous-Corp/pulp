@@ -31,11 +31,11 @@ bool tracing_reminder_first_time(std::atomic<bool>& already_emitted) {
 #include <filesystem>
 #include <fstream>
 #include <chrono>
-#include <thread>
 #include <memory>
 #include <mutex>
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace_timeout.hpp>
 
 // Track-event storage for the categories declared in trace.hpp. Exactly one TU.
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
@@ -77,6 +77,26 @@ std::unique_ptr<perfetto::TracingSession> g_session;    // the one process sessi
 std::string g_out_path;
 std::atomic<int> g_refcount{0};
 std::once_flag g_init_once;
+
+// Bumped by every successful start(). A timeout captures the generation it was
+// armed for and refuses to act once this has moved on, so a timer left over
+// from a closed editor cannot truncate the capture of the next one.
+std::atomic<std::uint64_t> g_generation{0};
+
+// The owned auto-flush timeout (see trace_timeout.hpp — it lives in a header
+// so its lifetime rules are testable in the default PULP_TRACING=OFF build,
+// which is the only build CI runs).
+//
+// Guarded by g_timeout_mu, NOT g_mu: the expiry callback takes g_mu to stop the
+// session, so sharing one mutex would deadlock a cancel that races an expiry.
+//
+// Declared LAST in this block on purpose. Namespace-scope statics destroy in
+// reverse declaration order, so ~TimeoutController — which joins a worker that
+// may be inside stop() — runs while g_mu and g_session are still alive. That
+// destructor is only a backstop for an unbalanced attach; the balanced path
+// joins in the final detach() below.
+std::mutex g_timeout_mu;
+detail::TimeoutController g_timeout;
 
 void ensure_initialized() {
     std::call_once(g_init_once, [] {
@@ -120,6 +140,9 @@ bool Tracing::start(const std::vector<std::string>& /*categories*/,
     session->Setup(cfg);
     session->StartBlocking();
     g_session = std::move(session);
+    // Bump AFTER the session is live, so a timeout armed for this generation
+    // cannot fire against a half-started session.
+    g_generation.fetch_add(1, std::memory_order_release);
     return true;
 }
 
@@ -153,6 +176,15 @@ bool Tracing::active() {
     return static_cast<bool>(g_session);
 }
 
+std::uint64_t Tracing::session_generation() {
+    std::lock_guard<std::mutex> lk(g_mu);
+    return g_session ? g_generation.load(std::memory_order_acquire) : 0;
+}
+
+int Tracing::attachment_count() {
+    return g_refcount.load(std::memory_order_relaxed);
+}
+
 void Tracing::attach() {
     const bool first = g_refcount.fetch_add(1, std::memory_order_relaxed) == 0;
     if (!first) return;
@@ -163,7 +195,8 @@ void Tracing::attach() {
     // in the host's environment is the whole opt-in.
     const char* path = std::getenv("PULP_TRACE_PATH");
     if (!path || !*path || active()) return;
-    start({}, path);
+    if (!start({}, path)) return;
+    const std::uint64_t generation = g_generation.load(std::memory_order_acquire);
 
     // PULP_TRACE_SECONDS already caps the Perfetto buffer duration, but the
     // .pftrace is only written by stop(). Without a timed stop the file would
@@ -172,26 +205,40 @@ void Tracing::attach() {
     // open editor. Flush on a timer instead so the capture is self-completing.
     if (const char* s = std::getenv("PULP_TRACE_SECONDS"); s && *s) {
         if (int secs = std::atoi(s); secs > 0) {
-            std::thread([secs] {
-                std::this_thread::sleep_for(std::chrono::seconds(secs));
-                if (active()) {
+            std::lock_guard<std::mutex> lk(g_timeout_mu);
+            g_timeout.arm(
+                std::chrono::seconds(secs), generation,
+                [](std::uint64_t armed_for) {
+                    // Refuse to act on a session this timeout was not armed
+                    // for. Close and reopen an editor inside the window and the
+                    // old timer would otherwise truncate the new capture.
+                    if (!detail::timeout_targets_current_session(
+                            armed_for, Tracing::session_generation()))
+                        return;
                     auto r = stop();
                     if (r.ok)
                         log_info("Tracing: auto-flushed {} bytes to {}",
                                  r.trace_bytes, r.path);
-                }
-            }).detach();
+                });
         }
     }
 }
 
 void Tracing::detach() {
-    // Last owner gone — tear the session down (flush) if one is still active.
+    // Last owner gone — cancel and JOIN the auto-flush timer, then tear the
+    // session down. The join is the load-bearing part: this module can be
+    // unloaded (FreeLibrary / dlclose) the moment the host is done with the
+    // plug-in, and a timer thread that wakes after that runs freed code.
+    //
     // Callers must ensure their audio callbacks are stopped before the final
     // detach (adapters call this from their destroy path, off the audio thread).
-    if (g_refcount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        if (active()) stop();
+    if (g_refcount.fetch_sub(1, std::memory_order_acq_rel) != 1) return;
+
+    {
+        std::lock_guard<std::mutex> lk(g_timeout_mu);
+        g_timeout.cancel_and_join();
     }
+    if (active()) stop();
 }
 
 }  // namespace pulp::runtime
@@ -208,6 +255,8 @@ TraceStopResult Tracing::stop() { return {}; }
 bool Tracing::active() { return false; }
 void Tracing::attach() {}
 void Tracing::detach() {}
+std::uint64_t Tracing::session_generation() { return 0; }
+int Tracing::attachment_count() { return 0; }
 
 // Default shipping build: the reminder never fires — tracing is not compiled in.
 void log_tracing_reminder() {}

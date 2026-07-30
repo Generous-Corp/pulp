@@ -11,6 +11,7 @@
 
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -250,6 +251,14 @@ protected:
     OSStatus HandleSysEx(const UInt8* inData, UInt32 inLength) override;
 
 private:
+    // Declared FIRST so it is destroyed LAST: the final detach cancels and joins
+    // the tracing auto-flush timer and writes the .pftrace, and that must happen
+    // after every span this instance can still emit. Tracing used to be wired
+    // into VST3 ONLY, so a Perfetto capture of an AU/CLAP/AAX/standalone session
+    // recorded nothing while the API happily claimed to be process-global.
+    // No-op unless PULP_TRACING=ON.
+    runtime::ScopedTracingAttachment tracing_;
+
     /// True when the wrapped Processor's descriptor declares `produces_midi`.
     /// Gates the MIDI-output property surface so plain audio effects never
     /// advertise a MIDI output the host would try to wire up.

@@ -58,6 +58,7 @@
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -289,6 +290,14 @@ struct ScopedAuV3HostWriting {
     AUParameterTree *_parameterTree;
     AUParameterObserverToken _automationToken;
     pulp::state::ListenerToken _automationListener;
+
+    // ObjC ivars destroy in REVERSE declaration order, so declaring this LAST
+    // makes it destroy FIRST — wrong for tracing, which must outlive every span
+    // this instance can emit. -dealloc therefore resets it explicitly at the
+    // very end instead of relying on ivar order. Tracing used to be wired into
+    // VST3 ONLY, so a Perfetto capture of an AUv3 session recorded nothing while
+    // the API claimed to be process-global. No-op unless PULP_TRACING=ON.
+    pulp::runtime::ScopedTracingAttachment _tracing;
 }
 
 /// Raw pointer to the host-owned Processor + StateStore. Used by the
@@ -822,6 +831,13 @@ struct ScopedAuV3HostWriting {
         pulp::events::unregister_plugin_backend(_mainThreadToken);
         _mainThreadToken = 0;
     }
+
+    // LAST: the final detach flushes the .pftrace and joins the auto-flush
+    // timer, so it must come after every span this instance can still emit.
+    // Explicit rather than left to ivar destruction — ObjC destroys C++ ivars
+    // in reverse declaration order after -dealloc, which would run this FIRST.
+    _tracing.reset();
+
     [super dealloc];
 }
 

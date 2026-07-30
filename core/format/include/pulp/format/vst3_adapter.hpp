@@ -27,8 +27,10 @@
 
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/vst3_restart_publisher.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
@@ -200,6 +202,12 @@ public:
     static Steinberg::FUnknown* createInstance(void*);
 
 private:
+    // Declared FIRST so it is destroyed LAST: the final detach cancels and
+    // joins the tracing auto-flush timer and writes the .pftrace, and that must
+    // happen after every span this instance can still emit. RAII rather than a
+    // hand-balanced attach/detach pair — a leaked attachment silently produces
+    // an empty capture. No-op unless PULP_TRACING=ON.
+    runtime::ScopedTracingAttachment tracing_;
     ProcessorFactory factory_;
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -253,13 +261,14 @@ private:
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
 
-    // Parameters the EDITOR currently has an open gesture on. The store's
-    // gesture callbacks maintain this; editor_param_listener_ consults it so
-    // only editor-driven writes are reported to the host with performEdit().
-    // A host-driven change arrives on the audio thread with no open gesture, so
-    // it can never be echoed straight back at the host.
-    std::set<state::ParamID> editing_params_;
-    state::ListenerToken editor_param_listener_;
+    // Editor -> host parameter reporting. Owns the provenance decision (which
+    // writes are the EDITOR's), the single normalized snapshot per edit, and
+    // the begin/value/end ordering. Replaces a local "is a gesture open?"
+    // inference that host automation could satisfy — see
+    // host_parameter_edit.hpp. Held by pointer because it installs store
+    // callbacks in its constructor and removes them in its destructor, which
+    // must happen at defined points in this object's lifetime.
+    std::unique_ptr<HostParameterEditBridge> edit_bridge_;
 
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
