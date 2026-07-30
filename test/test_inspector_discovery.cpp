@@ -107,6 +107,10 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     InspectorDiscoveryReader reader(temporary.path);
     const auto records = reader.list();
     REQUIRE(records.size() == 2);
+    std::string selection_error;
+    CHECK_FALSE(select_inspector_session(
+        records, "shared-session", &selection_error).has_value());
+    CHECK(selection_error.find("Multiple") != std::string::npos);
     CHECK(records[0].record_path != records[1].record_path);
     CHECK(records[0].credential_path != records[1].credential_path);
     for (const auto& record : records) {

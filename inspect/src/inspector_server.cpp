@@ -34,6 +34,7 @@ public:
     bool stopping_cleanup = false;
     bool stopping_callbacks = true;
     std::size_t active_callbacks = 0;
+    std::map<std::thread::id, std::size_t> callback_threads;
     std::atomic<std::uint64_t> next_client_id{1};
     InspectorServer* owner = nullptr;
     std::function<void()> heartbeat;
@@ -46,6 +47,7 @@ public:
             if (!candidate->stopping_callbacks) {
                 impl = candidate;
                 ++impl->active_callbacks;
+                ++impl->callback_threads[std::this_thread::get_id()];
             }
         }
 
@@ -55,6 +57,12 @@ public:
             {
                 std::lock_guard lock(impl->clients_mutex);
                 --impl->active_callbacks;
+                const auto thread = std::this_thread::get_id();
+                if (auto found = impl->callback_threads.find(thread);
+                    found != impl->callback_threads.end() &&
+                    --found->second == 0) {
+                    impl->callback_threads.erase(found);
+                }
             }
             impl->cleanup_cv.notify_all();
         }
@@ -71,16 +79,37 @@ public:
             auto client =
                 std::shared_ptr<events::InterprocessConnection>(std::move(conn));
             auto* raw = client.get();
+            if (!owner || !owner->session_) {
+                raw->disconnect();
+                return;
+            }
+            const auto challenge = make_inspector_auth_challenge(
+                owner->session_->info().session_id,
+                owner->session_->info().protocol_version);
+            if (!challenge) {
+                raw->disconnect();
+                return;
+            }
+            const auto client_id =
+                "client-" + std::to_string(next_client_id.fetch_add(1));
+            {
+                std::lock_guard lock(clients_mutex);
+                if (stopping_callbacks) {
+                    client.reset();
+                    return;
+                }
+                owned_clients.push_back(client);
+                authentication.insert_or_assign(
+                    raw,
+                    AuthenticationState{
+                        std::make_unique<InspectorAuthVerifier>(
+                            owner->token_, *challenge),
+                        client_id,
+                        false,
+                        std::chrono::steady_clock::now() +
+                            owner->authentication_timeout_});
+            }
             const std::weak_ptr<events::InterprocessConnection> weak = client;
-            raw->set_on_text_message([this, weak, raw](std::string_view msg) {
-                const auto keep_alive = weak.lock();
-                if (!keep_alive)
-                    return;
-                CallbackGuard callback(this);
-                if (!callback)
-                    return;
-                on_message(std::string(msg), raw);
-            });
             raw->set_on_disconnected([this, weak, raw]() {
                 const auto keep_alive = weak.lock();
                 if (!keep_alive)
@@ -109,37 +138,15 @@ public:
                     owner->session_->disconnect(authenticated_client);
                 cleanup_cv.notify_one();
             });
-            {
-                std::lock_guard lock(clients_mutex);
-                if (stopping_callbacks) {
-                    client.reset();
+            raw->set_on_text_message([this, weak, raw](std::string_view msg) {
+                const auto keep_alive = weak.lock();
+                if (!keep_alive)
                     return;
-                }
-                owned_clients.push_back(client);
-            }
-            if (owner && owner->session_) {
-                const auto challenge = make_inspector_auth_challenge(
-                    owner->session_->info().session_id,
-                    owner->session_->info().protocol_version);
-                if (!challenge) {
-                    raw->disconnect();
+                CallbackGuard callback(this);
+                if (!callback)
                     return;
-                }
-                const auto client_id =
-                    "client-" +
-                    std::to_string(next_client_id.fetch_add(1));
-                {
-                    std::lock_guard lock(clients_mutex);
-                    authentication.insert_or_assign(
-                        raw,
-                        AuthenticationState{
-                            std::make_unique<InspectorAuthVerifier>(
-                                owner->token_, *challenge),
-                            client_id,
-                            false,
-                            std::chrono::steady_clock::now() +
-                                owner->authentication_timeout_});
-                }
+                on_message(std::string(msg), raw);
+            });
                 auto params = choc::value::createObject("");
                 params.addMember(
                     "scheme",
@@ -156,8 +163,8 @@ public:
                 const auto event = make_event(
                     methods::kSessionAuthChallenge,
                     choc::json::toString(params, false));
-                raw->send_message(encode_message(event));
-            }
+                if (!raw->send_message(encode_message(event)))
+                    raw->disconnect();
         };
     }
 
@@ -298,8 +305,12 @@ void InspectorServer::stop() {
     }
     {
         std::unique_lock lock(impl_->clients_mutex);
-        impl_->cleanup_cv.wait(lock, [this] {
-            return impl_->active_callbacks == 0;
+        const auto current = impl_->callback_threads.find(
+            std::this_thread::get_id());
+        const auto current_callbacks =
+            current == impl_->callback_threads.end() ? 0 : current->second;
+        impl_->cleanup_cv.wait(lock, [this, current_callbacks] {
+            return impl_->active_callbacks <= current_callbacks;
         });
         impl_->authentication.clear();
     }

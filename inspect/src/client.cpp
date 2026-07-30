@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <thread>
 #include <utility>
 
 namespace pulp::inspect {
@@ -35,15 +37,53 @@ public:
     std::set<std::int64_t> in_flight;
     std::optional<InspectorAuthChallenge> challenge;
     EventHandler event_handler;
+    std::deque<InspectorMessage> events;
+    std::condition_variable event_cv;
+    std::thread event_thread;
+    bool stopping_events = false;
     std::atomic<std::int64_t> next_request_id{2};
     bool disconnected = true;
+
+    Impl() {
+        event_thread = std::thread([this] {
+            std::unique_lock lock(mutex);
+            while (!stopping_events) {
+                event_cv.wait(lock, [this] {
+                    return stopping_events || !events.empty();
+                });
+                if (stopping_events)
+                    break;
+                auto event = std::move(events.front());
+                events.pop_front();
+                auto handler = event_handler;
+                lock.unlock();
+                if (handler) {
+                    try {
+                        handler(event);
+                    } catch (...) {
+                    }
+                }
+                lock.lock();
+            }
+        });
+    }
+
+    ~Impl() {
+        {
+            std::lock_guard lock(mutex);
+            stopping_events = true;
+            events.clear();
+        }
+        event_cv.notify_all();
+        if (event_thread.joinable())
+            event_thread.join();
+    }
 
     void receive(std::string_view text) {
         InspectorMessage message;
         if (!decode_message(std::string(text), message))
             return;
 
-        EventHandler event;
         {
             std::lock_guard lock(mutex);
             if (message.method == "Session.authChallenge") {
@@ -70,10 +110,11 @@ public:
                 }
                 return;
             }
-            event = event_handler;
+            if (events.size() >= 256)
+                events.pop_front();
+            events.push_back(std::move(message));
         }
-        if (event)
-            event(message);
+        event_cv.notify_one();
     }
 
     InspectorMessage wait_for_response(std::int64_t id,
