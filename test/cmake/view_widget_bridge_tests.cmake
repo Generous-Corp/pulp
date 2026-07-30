@@ -204,20 +204,42 @@ target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
     pulp::format)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
-if(CMAKE_NM)
+set(_pulp_inspector_symbol_tool "")
+set(_pulp_inspector_symbol_mode "NM")
+if(MSVC)
+    get_filename_component(_pulp_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_pulp_inspector_symbol_tool
+        NAMES dumpbin.exe dumpbin llvm-nm.exe llvm-nm
+        HINTS "${_pulp_compiler_dir}")
+    if(_pulp_inspector_symbol_tool MATCHES "llvm-nm")
+        set(_pulp_inspector_symbol_mode "COFF_NM")
+    else()
+        set(_pulp_inspector_symbol_mode "DUMPBIN")
+    endif()
+elseif(CMAKE_NM)
+    set(_pulp_inspector_symbol_tool "${CMAKE_NM}")
+endif()
+if(NOT _pulp_inspector_symbol_tool)
+    message(FATAL_ERROR
+        "The inspector stripped-artifact proof requires nm, llvm-nm, or dumpbin")
+else()
     set(_pulp_inspector_archive "")
     if(TARGET pulp-inspect-runtime)
         set(_pulp_inspector_archive "$<TARGET_FILE:pulp-inspect-runtime>")
     endif()
     add_custom_command(TARGET pulp-test-inspector-stripped-artifact POST_BUILD
         COMMAND "${CMAKE_COMMAND}"
-            "-DNM=${CMAKE_NM}"
+            "-DSYMBOL_TOOL=${_pulp_inspector_symbol_tool}"
+            "-DSYMBOL_MODE=${_pulp_inspector_symbol_mode}"
             "-DSTRIPPED_ARTIFACT=$<TARGET_FILE:pulp-test-inspector-stripped-artifact>"
             "-DINSPECTOR_ARCHIVE=${_pulp_inspector_archive}"
             -P "${CMAKE_CURRENT_LIST_DIR}/check_inspector_stripped_artifact.cmake"
         COMMENT "Checking ordinary format consumers contain no inspector symbols")
     unset(_pulp_inspector_archive)
 endif()
+unset(_pulp_compiler_dir)
+unset(_pulp_inspector_symbol_mode)
+unset(_pulp_inspector_symbol_tool)
 
 # Widget bridge tests
 set(_pulp_widget_bridge_test_libs pulp::view)

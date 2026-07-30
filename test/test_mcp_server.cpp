@@ -772,7 +772,6 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_motion_disable_cost",
         "pulp_motion_enable_cost",
         "pulp_motion_list_traces",
-        "pulp_motion_load_fixture",
         "pulp_motion_pause",
         "pulp_motion_play",
         "pulp_motion_scrub_to",
@@ -2526,7 +2525,8 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
 
 // Every pulp_motion_* tool must be recognized by the dispatcher
 // (no "Unknown tool" fall-through) AND routes through the same
-// project-root gate that pulp_inspect_* uses. From a tempdir all 10
+// project-root gate that pulp_inspect_* uses. From a tempdir all remotely
+// grantable tools
 // tools must short-circuit with "Error: not in a Pulp project" before
 // shelling out to `pulp inspect`. This proves the dispatch arm exists
 // and the tool name is registered.
@@ -2565,19 +2565,24 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
     require_contains(stop_trace, "Error: not in a Pulp project");
     REQUIRE(stop_trace.find("Unknown tool") == std::string::npos);
 
-    auto load_fixture =
-        handle_request(tool_call(std::to_string(id++), "pulp_motion_load_fixture",
-                                 R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
-    require_contains(load_fixture, "Error: not in a Pulp project");
-    REQUIRE(load_fixture.find("Unknown tool") == std::string::npos);
-
     auto scrub_to = handle_request(
         tool_call(std::to_string(id++), "pulp_motion_scrub_to", R"JSON({"frame":42})JSON"));
     require_contains(scrub_to, "Error: not in a Pulp project");
     REQUIRE(scrub_to.find("Unknown tool") == std::string::npos);
 }
 
-// pulp #2153: code-shape check that the 10 pulp_motion_* MCP tools
+TEST_CASE("MCP does not expose filesystem-backed motion fixture loading",
+          "[mcp][tools][motion][security]") {
+    const auto tools = handle_request(
+        R"JSON({"jsonrpc":"2.0","id":99,"method":"tools/list"})JSON");
+    REQUIRE(tools.find("pulp_motion_load_fixture") == std::string::npos);
+    const auto response = handle_request(tool_call(
+        "100", "pulp_motion_load_fixture",
+        R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
+    require_contains(response, "Unknown tool: pulp_motion_load_fixture");
+}
+
+// pulp #2153: code-shape check that the grantable pulp_motion_* MCP tools
 // map to the right Motion.* inspector protocol method names. Source
 // text assertion mirrors the existing inspector-mapping test — the
 // actual round-trip lands at MotionInspector::handle /
@@ -2599,7 +2604,6 @@ TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
         {"pulp_motion_stop_trace", "Motion.stopTrace"},
         {"pulp_motion_snapshot", "Motion.snapshot"},
         {"pulp_motion_list_traces", "Motion.listTraces"},
-        {"pulp_motion_load_fixture", "Motion.loadFixture"},
         {"pulp_motion_scrub_to", "Motion.scrubTo"},
         {"pulp_motion_play", "Motion.play"},
         {"pulp_motion_pause", "Motion.pause"},
@@ -2629,7 +2633,6 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
     const auto tools_with_required_params = {
         std::pair{"pulp_motion_start_trace", "view_name"},
         std::pair{"pulp_motion_stop_trace", "trace_id"},
-        std::pair{"pulp_motion_load_fixture", "path"},
         std::pair{"pulp_motion_scrub_to", "frame"},
     };
     for (const auto& [tool, required] : tools_with_required_params) {

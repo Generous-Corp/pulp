@@ -154,7 +154,7 @@ enum Command {
 
     /// Agent-facing wrappers around the inspector `Motion.*`
     /// protocol — record / stop / snapshot / list-traces /
-    /// load-fixture / scrub / play / pause / cost. Pairs with the
+    /// scrub / play / pause / cost. Pairs with the
     /// `/motion` slash command and the `pulp_motion_*` MCP tools.
     /// Off by default — requires a running inspector
     /// (PULP_MOTION_SERVER=1).
@@ -749,7 +749,7 @@ fn real_main() -> Result<(), ExitCode> {
                     eprintln!("pulp motion: unknown subcommand");
                     eprintln!(
                         "  supported: record, stop, snapshot, list-traces, \
-                         load-fixture, scrub, play, pause, cost"
+                         scrub, play, pause, cost"
                     );
                     ExitCode::from(2)
                 }

@@ -26,6 +26,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "loopback only; nonce/HMAC proof; "
                 "owner-private per-session credential\n",
             "docs/guides/coming-from-reference.md": "visual overlay only\n",
+            "docs/guides/motion-observability.md":
+                "authenticated discovery filter\n",
             ".claude/commands/inspect.md":
                 "unavailable in normal launches; explicitly wired custom fixture\n",
             "docs/agent-integrations.md":
@@ -188,6 +190,34 @@ class InspectorTruthCheckTests(unittest.TestCase):
         self.assertIn("cmd/motion.rs retains stale claim", errors)
         self.assertIn("cmd/trace.rs retains stale claim", errors)
         self.assertIn(".claude/commands/trace.md retains stale claim", errors)
+
+    def test_rejects_fixed_port_and_unavailable_fixture_client_surfaces(self) -> None:
+        root = self.make_root()
+        (root / "docs/reference/cli.md").write_text(
+            "unavailable in normal launches; explicitly wired; "
+            "trace defaults to `9147`\n",
+            encoding="utf-8",
+        )
+        (root / "docs/status/cli-commands.yaml").write_text(
+            "trace defaults to 9147\n", encoding="utf-8"
+        )
+        guide = root / "docs/guides/motion-observability.md"
+        guide.parent.mkdir(parents=True, exist_ok=True)
+        guide.write_text(
+            "each command probes `127.0.0.1:9147`\n", encoding="utf-8"
+        )
+        (root / "tools/mcp/pulp_mcp.cpp").write_text(
+            '"name":"pulp_motion_load_fixture",'
+            '"description":"Experimental source-checkout client"\n',
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn("docs/reference/cli.md retains stale claim", errors)
+        self.assertIn("docs/status/cli-commands.yaml retains stale claim", errors)
+        self.assertIn(
+            "docs/guides/motion-observability.md retains stale claim", errors
+        )
+        self.assertIn("tools/mcp/pulp_mcp.cpp retains stale claim", errors)
 
     def test_rejects_stale_rust_help_claim(self) -> None:
         root = self.make_root()

@@ -2074,6 +2074,16 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--host",
             "kind": "option",
             "required": false
@@ -2547,17 +2557,6 @@
           {
             "name": "list-traces",
             "arguments": [],
-            "subcommands": []
-          },
-          {
-            "name": "load-fixture",
-            "arguments": [
-              {
-                "name": "path",
-                "kind": "positional",
-                "required": true
-              }
-            ],
             "subcommands": []
           },
           {
@@ -4545,10 +4544,6 @@
       },
       {
         "name": "pulp_motion_list_traces",
-        "disposition": "candidate-shared-later"
-      },
-      {
-        "name": "pulp_motion_load_fixture",
         "disposition": "candidate-shared-later"
       },
       {

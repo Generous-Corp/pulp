@@ -26,6 +26,8 @@ struct InspectorServerConfig {
         std::chrono::seconds(3);
     std::chrono::milliseconds frame_read_timeout =
         std::chrono::seconds(3);
+    std::chrono::milliseconds heartbeat_interval =
+        std::chrono::seconds(10);
     std::size_t max_message_bytes = 1024u * 1024u;
     std::size_t max_clients = 16;
 };

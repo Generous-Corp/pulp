@@ -134,6 +134,8 @@ public:
     std::atomic<bool> transition_waiting_for_callbacks{false};
     std::function<void()> heartbeat;
     std::chrono::steady_clock::time_point next_heartbeat{};
+    std::chrono::milliseconds heartbeat_interval =
+        std::chrono::seconds(10);
 
     class CallbackGuard {
     public:
@@ -339,7 +341,7 @@ public:
             std::function<void()> refresh;
             if (!should_stop && heartbeat && now >= next_heartbeat) {
                 refresh = heartbeat;
-                next_heartbeat = now + std::chrono::seconds(10);
+                next_heartbeat = now + heartbeat_interval;
             }
             lock.unlock();
             for (const auto& outbound : retired) {
@@ -411,9 +413,12 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         config.record.plugin_id != config.session->info().plugin_id) {
         return false;
     }
-    session = config.session;
-    discovery = config.discovery;
-    token = std::move(config.token);
+    {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        session = config.session;
+        discovery = config.discovery;
+        token = std::move(config.token);
+    }
     authentication_timeout =
         std::max(config.authentication_timeout, std::chrono::milliseconds(1));
     server.set_max_message_bytes(
@@ -426,6 +431,8 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::lock_guard lock(clients_mutex);
         max_clients =
             std::clamp<std::size_t>(config.max_clients, 1, 64);
+        heartbeat_interval =
+            std::max(config.heartbeat_interval, std::chrono::milliseconds(1));
         stopping_callbacks = false;
     }
     if (!server.start("127.0.0.1:0", events::IpcTransport::Socket)) {
@@ -444,9 +451,17 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     config.record.endpoint =
         "127.0.0.1:" +
         std::to_string(port.load(std::memory_order_acquire));
-    config.record.protocol_version = session->info().protocol_version;
-    config.record.profile = session->policy().profile();
-    if (!discovery->publish(config.record, token)) {
+    bool published = false;
+    {
+        // A prior generation's heartbeat may already have copied its refresh
+        // closure before stop_locked() cleared it. Serialize publication with
+        // that closure so the shared publisher is never mutated concurrently.
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        config.record.protocol_version = session->info().protocol_version;
+        config.record.profile = session->policy().profile();
+        published = discovery->publish(config.record, token);
+    }
+    if (!published) {
         stop_locked();
         return false;
     }
@@ -457,7 +472,7 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     {
         std::lock_guard lock(clients_mutex);
         next_heartbeat =
-            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            std::chrono::steady_clock::now() + heartbeat_interval;
         const std::weak_ptr<Impl> weak_self = shared_from_this();
         heartbeat = [weak_self] {
             const auto self = weak_self.lock();

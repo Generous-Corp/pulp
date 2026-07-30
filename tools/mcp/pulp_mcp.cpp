@@ -150,7 +150,6 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_motion_stop_trace","description":"Experimental source-checkout custom-fixture client for Motion.stopTrace; normal Pulp launches provide no endpoint. Releases a fixture-owned trace.","inputSchema":{"type":"object","required":["trace_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_snapshot","description":"Experimental source-checkout custom-fixture client for Motion.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_list_traces","description":"Experimental source-checkout custom-fixture client for Motion.listTraces; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_load_fixture","description":"Experimental source-checkout custom-fixture client for Motion.loadFixture; normal Pulp launches provide no endpoint. This legacy method reads a filesystem path and is classified unavailable in the future policy.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Absolute path to a .motion.jsonl fixture"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_scrub_to","description":"Experimental source-checkout custom-fixture client for Motion.scrubTo; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["frame"],"properties":{"frame":{"type":"integer","description":"Target playhead frame (>= 0)"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_play","description":"Experimental source-checkout custom-fixture client for Motion.play; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_pause","description":"Experimental source-checkout custom-fixture client for Motion.pause; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -393,7 +392,7 @@ static std::string handle_request_raw(const std::string& json) {
         // don't need to pre-arm tracing.
         else if (name == "pulp_motion_start_trace" || name == "pulp_motion_stop_trace" ||
                  name == "pulp_motion_snapshot" || name == "pulp_motion_list_traces" ||
-                 name == "pulp_motion_load_fixture" || name == "pulp_motion_scrub_to" ||
+                 name == "pulp_motion_scrub_to" ||
                  name == "pulp_motion_play" || name == "pulp_motion_pause" ||
                  name == "pulp_motion_enable_cost" || name == "pulp_motion_disable_cost") {
             std::string inspector_method;
@@ -415,16 +414,6 @@ static std::string handle_request_raw(const std::string& json) {
                 inspector_method = "Motion.snapshot";
             } else if (name == "pulp_motion_list_traces") {
                 inspector_method = "Motion.listTraces";
-            } else if (name == "pulp_motion_load_fixture") {
-                inspector_method = "Motion.loadFixture";
-                auto path = extract_string(args_json, "path");
-                // Shell-quote the JSON object in single quotes so the
-                // file path's spaces and special characters survive
-                // the cli's argv parse. Paths cannot contain single
-                // quotes in practice (POSIX) — if a user passes one
-                // the inspector will reject the malformed JSON, which
-                // is the right answer.
-                inspector_params = std::string(" --params '{\"path\":\"") + path + "\"}'";
             } else if (name == "pulp_motion_scrub_to") {
                 inspector_method = "Motion.scrubTo";
                 auto frame_raw = extract_raw(args_json, "frame");

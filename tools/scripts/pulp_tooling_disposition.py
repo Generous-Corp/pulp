@@ -136,7 +136,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "pulp_inspect_pending_requests", "pulp_inspect_performance",
             "pulp_inspect_screenshot", "pulp_inspect_set_param",
             "pulp_motion_disable_cost", "pulp_motion_enable_cost",
-            "pulp_motion_list_traces", "pulp_motion_load_fixture",
+            "pulp_motion_list_traces",
             "pulp_motion_pause", "pulp_motion_play", "pulp_motion_scrub_to",
             "pulp_motion_snapshot", "pulp_motion_start_trace",
             "pulp_motion_stop_trace", "pulp_screenshot", "pulp_simulate_click",
