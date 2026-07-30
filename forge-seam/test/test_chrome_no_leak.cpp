@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <forge/chrome.hpp>
+#include <forge/design_tokens.hpp>
 #include <forge/fx_shell.hpp>
 #include <forge/instrument_shell.hpp>
 #include <forge/midi_shell.hpp>
@@ -652,4 +653,112 @@ TEST_CASE("what the generator says reaches the transcript", "[buildlog][seam]") 
     CHECK(shell.chrome()->chat_line_count() == before + 5);
 
     std::filesystem::remove(log);
+}
+
+TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]") {
+    // From the prototype: three depths in the Build title bar, wrapped in the
+    // `isPatch` guard. A module build has one artifact and nothing to narrate
+    // at three depths, so the control must not appear for it.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    using Shell = forge_modular::ForgeModularShell;
+
+    // A module build gets no control at all.
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(shell.build_accessory() == nullptr);
+
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto tabs = shell.build_accessory();
+    REQUIRE(tabs != nullptr);
+    REQUIRE(tabs->child_count() == 3);
+
+    // Standard is the default: the middle setting, not an extreme.
+    CHECK(shell.depth() == Shell::Depth::standard);
+    CHECK(shell.shows_reasoning());
+    CHECK_FALSE(shell.shows_asides());
+
+    // Every tab is clickable and actually changes the depth -- the Random
+    // button shipped once with no handler at all, so a handler-less control
+    // is a defect this suite now names.
+    for (int i = 0; i < 3; ++i) {
+        auto* b = dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i));
+        REQUIRE(b != nullptr);
+        REQUIRE(b->on_click);
+    }
+
+    dynamic_cast<pulp::view::TextButton*>(tabs->child_at(0))->on_click();
+    CHECK(shell.depth() == Shell::Depth::terse);
+    CHECK_FALSE(shell.shows_reasoning());   // Terse drops the "why"
+    CHECK_FALSE(shell.shows_asides());
+
+    dynamic_cast<pulp::view::TextButton*>(tabs->child_at(2))->on_click();
+    CHECK(shell.depth() == Shell::Depth::learning);
+    CHECK(shell.shows_reasoning());         // Learning adds to it, never replaces
+    CHECK(shell.shows_asides());
+
+    // Exactly one tab reads as selected, whichever is chosen -- asserted on the
+    // colour actually painted, not the style enum. The first version of this
+    // control passed a style-only check while rendering two tabs in accent and
+    // the real selection in plain white: to a reader, two looked chosen. That
+    // is the same "both tabs highlighted at once" defect reported on Home, and
+    // only a colour assertion catches it.
+    for (int chosen = 0; chosen < 3; ++chosen) {
+        dynamic_cast<pulp::view::TextButton*>(tabs->child_at(chosen))->on_click();
+        int raised = 0, bright = 0;
+        for (int i = 0; i < 3; ++i) {
+            auto* b = dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i));
+            REQUIRE(b->child_count() >= 1);
+            auto* lbl = dynamic_cast<pulp::view::Label*>(b->child_at(0));
+            REQUIRE(lbl != nullptr);
+            if (b->style() == pulp::view::TextButton::Style::secondary) ++raised;
+            if (lbl->text_color() == forge::design::color::text) ++bright;
+            // No unselected tab may wear the accent: an accent sibling reads
+            // as more chosen than the chosen one.
+            if (i != chosen)
+                CHECK(lbl->text_color() != forge::design::color::accent);
+        }
+        INFO("chose tab " << chosen);
+        CHECK(raised == 1);
+        CHECK(bright == 1);
+    }
+}
+
+TEST_CASE("the patch composer renders its depth tabs", "[depth][render]") {
+    // The visual proof: the tabs are in the live Build title bar, not just
+    // reachable through build_accessory(). Renders the real screen.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    chrome->enter_build();
+    REQUIRE(chrome->mode() == forge::ForgeChrome::Mode::Build);
+
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-patch-composer.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), /*scale=*/1.0f, pulp::view::ScreenshotBackend::skia));
+    // A blank frame is not a passing frame.
+    CHECK(std::filesystem::file_size(shot) > 20000);
 }

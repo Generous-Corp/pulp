@@ -1,6 +1,7 @@
 #include "forge/modular_shell.hpp"
 
 #include <forge/chrome.hpp>
+#include <forge/design_tokens.hpp>
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/processor.hpp>
@@ -17,6 +18,15 @@ using pulp::view::FlexAlign;
 using pulp::view::FlexDirection;
 using pulp::view::TextButton;
 using pulp::view::View;
+
+namespace color = forge::design::color;
+
+// The prototype names --accent-soft but never defines it, so its selected pill
+// falls back to transparent and reads only as accent-coloured text. A faint
+// accent wash makes the selection unambiguous. Kept local rather than added to
+// the shared palette: no Rack-specific token belongs in Forge's tokens.
+constexpr auto kAccentSoft = pulp::canvas::Color::rgba8(0x16, 0xDA, 0xC2, 0x1F);
+constexpr auto kTransparent = pulp::canvas::Color::rgba8(0, 0, 0, 0);
 
 // Suggestions the Random button offers. Deliberately concrete: "a filter" is not
 // a prompt anybody can judge, and the point of showing it before building is
@@ -208,6 +218,84 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
         }
     };
     return v;
+}
+
+std::unique_ptr<View> ForgeModularShell::build_accessory() {
+    // Patches only. A module build has one artifact and nothing to narrate at
+    // three depths, and a dead control is worse than no control.
+    if (artifact_ != Artifact::patch) return nullptr;
+
+    depth_tabs_.clear();
+    depth_labels_.clear();
+
+    // Built to the same recipe as the Code | Preview toggle it sits beside:
+    // raised trough, 3 of padding, 2 of gap, radius 8, 26-tall buttons whose
+    // colour lives on a centred child label. Matching that exactly is the
+    // point -- a second segmented control with its own geometry is how two
+    // products start looking like two products.
+    auto group = std::make_unique<View>();
+    group->flex().direction = FlexDirection::row;
+    group->flex().align_items = FlexAlign::center;
+    group->flex().padding = 3;
+    group->flex().gap = 2;
+    group->flex().flex_shrink = 0;
+    group->set_background_color(color::surface_raised);
+    group->set_border_radius(8);
+
+    struct Tab { const char* label; Depth depth; float width; };
+    static constexpr Tab kTabs[] = {
+        {"Terse", Depth::terse, 54},
+        {"Standard", Depth::standard, 72},
+        {"Learning", Depth::learning, 70},
+    };
+    for (const auto& t : kTabs) {
+        auto b = std::make_unique<TextButton>();
+        b->set_access_label(t.label);
+        b->flex().preferred_width = t.width;
+        b->flex().preferred_height = 26;
+        b->flex().flex_grow = 0;
+        b->flex().flex_shrink = 0;
+        b->set_overflow(View::Overflow::hidden);
+
+        auto label = std::make_unique<pulp::view::Label>(t.label);
+        label->set_font_family(forge::design::type::display);
+        label->set_font_size(14.0f);
+        label->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        label->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
+        label->set_text_align(pulp::view::LabelAlign::center);
+        label->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
+        label->set_hit_testable(false);
+        depth_labels_.push_back(label.get());
+        b->add_child(std::move(label));
+
+        const auto depth = t.depth;
+        b->on_click = [this, depth]() { set_depth(depth); };
+        depth_tabs_.push_back(b.get());
+        group->add_child(std::move(b));
+    }
+    refresh_depth_tabs();
+    return group;
+}
+
+void ForgeModularShell::set_depth(Depth d) {
+    if (d == depth_) return;
+    depth_ = d;
+    refresh_depth_tabs();
+}
+
+void ForgeModularShell::refresh_depth_tabs() {
+    for (std::size_t i = 0; i < depth_tabs_.size(); ++i) {
+        auto* b = depth_tabs_[i];
+        if (!b) continue;
+        const bool on = static_cast<int>(depth_) == static_cast<int>(i);
+        // Selected reads as raised-and-bright, unselected as quiet. NOT accent:
+        // an accent-coloured sibling looks more chosen than the chosen one,
+        // which is exactly how two tabs came to look highlighted at once.
+        b->set_style(on ? TextButton::Style::secondary : TextButton::Style::ghost);
+        if (i < depth_labels_.size() && depth_labels_[i])
+            depth_labels_[i]->set_text_color(on ? color::text : color::text_muted);
+        b->request_repaint();
+    }
 }
 
 void ForgeModularShell::watch_build_log(const std::string& path) {

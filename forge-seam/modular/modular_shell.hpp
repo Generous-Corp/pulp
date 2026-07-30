@@ -19,6 +19,7 @@
 #include "forge/mention_overlay.hpp"
 
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <memory>
 #include <string>
@@ -81,6 +82,23 @@ public:
     /// Returns how many lines were added, so a test can assert the pump without
     /// reading the view tree.
     int pump_build_log();
+
+    /// How much a patch explains itself as it is built.
+    ///
+    /// A patch is a lesson as much as an artifact; a module is not, which is
+    /// why the control only appears for patches.
+    enum class Depth { terse, standard, learning };
+
+    Depth depth() const { return depth_; }
+    void set_depth(Depth d);
+
+    /// Whether a given note survives the current depth. `why` text is the
+    /// reasoning behind a connection; Terse drops it, Learning adds the
+    /// long-form asides on top of it.
+    bool shows_reasoning() const { return depth_ != Depth::terse; }
+    bool shows_asides() const { return depth_ == Depth::learning; }
+
+    std::unique_ptr<pulp::view::View> build_accessory() override;
 
     BuildOutcome build_outcome() const { return monitor_.outcome(); }
     const BuildMonitor& monitor() const { return monitor_; }
@@ -148,6 +166,10 @@ private:
 
     MentionOverlay mentions_;
     BuildMonitor monitor_;
+    Depth depth_ = Depth::standard;
+    std::vector<pulp::view::TextButton*> depth_tabs_;
+    std::vector<pulp::view::Label*> depth_labels_;
+    void refresh_depth_tabs();
     std::string last_random_;
     std::size_t next_random_ = 0;
     pulp::view::TextButton* tab_module_ = nullptr;
