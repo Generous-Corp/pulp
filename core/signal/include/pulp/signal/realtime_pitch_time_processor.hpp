@@ -34,6 +34,7 @@
 ///
 /// No allocation or locks after prepare().
 
+#include <pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp>
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
@@ -69,6 +70,20 @@ enum class PitchTimeStreamFinalizeStatus {
     backpressure,
     complete,
     invalid_mode,
+    invalid_request,
+};
+
+enum class PitchTimeStreamFinalizePlanStatus {
+    ready,
+    needs_drain,
+    complete,
+    invalid_mode,
+    invalid_request,
+};
+
+struct PitchTimeStreamFinalizePlan {
+    PitchTimeStreamFinalizePlanStatus status = PitchTimeStreamFinalizePlanStatus::invalid_mode;
+    int samples = 0;
 };
 
 enum class PitchTimePrepareStatus {
@@ -546,14 +561,56 @@ public:
     int input_priming_samples() const { return fft_size_ + analysis_hop_; }
     int output_alignment_samples() const { return 0; }
 
+    /// Samples remaining before the next analysis frame completes. This is
+    /// exposed for finite-stream drivers that must apply control changes at
+    /// analysis boundaries independently of their own feed quantum.
+    /// Returns zero outside prepared time_stretch mode.
+    int samples_until_next_analysis_frame() const noexcept {
+        return config_.mode == PitchTimeMode::time_stretch && ring_size_ > 0
+                   ? engine_.samples_until_next_frame()
+                   : 0;
+    }
+
     /// Seal the finite input stream and advance at most one prepared input
     /// block of zero padding. Repeat after draining output until complete.
     /// The final output count is derived from the same frame map used by the
     /// realtime reader, so constant and varying feed schedules produce the
     /// same hop-quantized duration. No caller-authored silence is required.
     PitchTimeStreamFinalizeStatus finalize() {
+        return finalize(config_.max_block);
+    }
+
+    /// Allocation-free, non-mutating preflight for bounded finalization. A
+    /// `ready` plan is guaranteed admissible until another stream operation
+    /// mutates the processor. Drivers can therefore resolve a boundary control
+    /// exactly once only after rejected/terminal work has been ruled out.
+    PitchTimeStreamFinalizePlan plan_finalize(int max_samples) const noexcept {
+        if (config_.mode != PitchTimeMode::time_stretch)
+            return {PitchTimeStreamFinalizePlanStatus::invalid_mode, 0};
+        if (max_samples <= 0 || max_samples > config_.max_block)
+            return {PitchTimeStreamFinalizePlanStatus::invalid_request, 0};
+        if (final_output_limit_ >= 0 && stretch_written_ >= final_output_limit_) {
+            return {available_stretched() == 0 ? PitchTimeStreamFinalizePlanStatus::complete
+                                               : PitchTimeStreamFinalizePlanStatus::needs_drain,
+                    0};
+        }
+        const int padding_remaining = input_closed_
+                                          ? finalize_padding_remaining_
+                                          : fft_size_ + 2 * analysis_hop_;
+        const int run = std::min(max_samples, padding_remaining);
+        if (run <= 0 || !can_accept_input(run))
+            return {PitchTimeStreamFinalizePlanStatus::needs_drain, 0};
+        return {PitchTimeStreamFinalizePlanStatus::ready, run};
+    }
+
+    /// Bounded finalization variant. Advances no more than `max_samples` of
+    /// prepared zero padding, so a driver can stop exactly at the next analysis
+    /// boundary and update per-frame controls before continuing.
+    PitchTimeStreamFinalizeStatus finalize(int max_samples) {
         if (config_.mode != PitchTimeMode::time_stretch)
             return PitchTimeStreamFinalizeStatus::invalid_mode;
+        if (max_samples <= 0 || max_samples > config_.max_block)
+            return PitchTimeStreamFinalizeStatus::invalid_request;
         if (!input_closed_) {
             input_closed_ = true;
             final_input_count_ = input_count_;
@@ -563,7 +620,7 @@ public:
             return available_stretched() == 0 ? PitchTimeStreamFinalizeStatus::complete
                                               : PitchTimeStreamFinalizeStatus::draining;
 
-        const int run = std::min(config_.max_block, finalize_padding_remaining_);
+        const int run = std::min(max_samples, finalize_padding_remaining_);
         if (run <= 0) return PitchTimeStreamFinalizeStatus::backpressure;
         if (!can_accept_input(run)) return PitchTimeStreamFinalizeStatus::backpressure;
 
@@ -611,7 +668,7 @@ public:
         std::fill(stretch_ring_.begin(), stretch_ring_.end(), SampleType{0});
         pitch_smoother_.set_immediate(pitch_smoother_.target());
         formant_smoother_.set_immediate(formant_smoother_.target());
-        synth_accum_ = 0.0;
+        synth_hop_accumulator_.reset();
         synth_accum_int_ = 0;
         frames_done_ = 0;
         stretch_written_ = 0;
@@ -666,8 +723,8 @@ private:
 
         // Integer synthesis hop from the fractional accumulator, so the
         // average hop tracks stretch * analysis_hop exactly.
-        synth_accum_ += static_cast<double>(stretch) * analysis_hop_;
-        int hop = static_cast<int>(std::llround(synth_accum_) - synth_accum_int_);
+        int hop = synth_hop_accumulator_.advance(
+            static_cast<double>(stretch) * static_cast<double>(analysis_hop_));
         hop = std::clamp(hop, 1, static_cast<int>(std::ceil(
                                      static_cast<double>(stretch) * analysis_hop_))
                                  + 1);
@@ -899,7 +956,7 @@ private:
     std::vector<const SampleType*> finalize_zero_ptrs_;
     const SampleType* in_ptrs_scratch_[kRealtimePitchTimeMaximumChannels] = {};
 
-    double synth_accum_ = 0.0;
+    detail::FractionalSynthesisHopAccumulator synth_hop_accumulator_;
     std::int64_t synth_accum_int_ = 0;
     std::int64_t frames_done_ = 0;
     std::int64_t stretch_written_ = 0;
