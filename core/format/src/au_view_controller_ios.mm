@@ -13,6 +13,7 @@
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -199,7 +200,7 @@
         mode = gpu.mode;
         _viewHost = pulp::view::PluginViewHost::create(*root, opts);
         if (_viewHost) {
-            _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
+            _viewHost->set_idle_callback(pulp::format::make_editor_idle_pump(*_bridge));
             // Follow the host's GpuSurface so JS navigator.gpu /
             // canvas.getContext('webgpu') routes through Pulp's Dawn instance
             // instead of mocks — and so the session drops the pointer when the

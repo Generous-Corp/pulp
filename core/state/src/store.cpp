@@ -4,6 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -24,6 +25,8 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         std::uint64_t id = 0;
         ParamChangeCallback callback;
         ListenerThread thread = ListenerThread::Main;
+        ListenerRestoreBehavior restore_behavior =
+            ListenerRestoreBehavior::Silent;
     };
 
     // Reads the current (live atomic) value for a parameter, or nullopt if
@@ -35,7 +38,28 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     // bogus default.
     std::function<std::optional<float>(ParamID)> value_getter;
 
-    using EntryList = std::vector<Entry>;
+    struct EntryList {
+        EntryList() = default;
+        explicit EntryList(std::vector<Entry> values)
+            : entries(std::move(values)) {
+            by_id.reserve(entries.size());
+            for (std::size_t i = 0; i < entries.size(); ++i)
+                by_id.emplace(entries[i].id, i);
+        }
+
+        bool empty() const noexcept { return entries.empty(); }
+        std::size_t size() const noexcept { return entries.size(); }
+        auto begin() const noexcept { return entries.begin(); }
+        auto end() const noexcept { return entries.end(); }
+
+        const Entry* find(std::uint64_t id) const noexcept {
+            const auto it = by_id.find(id);
+            return it == by_id.end() ? nullptr : &entries[it->second];
+        }
+
+        std::vector<Entry> entries;
+        std::unordered_map<std::uint64_t, std::size_t> by_id;
+    };
     using SharedEntries = std::shared_ptr<const EntryList>;
 
     // CoW model: mutators rebuild and atomically swap a new shared_ptr.
@@ -106,15 +130,16 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         reclaim_retired_rt_entries_if_idle();
     }
 
-    std::uint64_t add(ParamChangeCallback cb, ListenerThread thread) {
+    std::uint64_t add(ParamChangeCallback cb, ListenerThread thread,
+                      ListenerRestoreBehavior restore_behavior) {
         const auto id = next_id.fetch_add(1, std::memory_order_relaxed);
         std::lock_guard lock(entries_mutex);
         auto current =
             std::atomic_load_explicit(&entries, std::memory_order_acquire);
-        EntryList copy;
+        std::vector<Entry> copy;
         copy.reserve((current ? current->size() : 0) + 1);
-        if (current) copy = *current;
-        copy.push_back({id, std::move(cb), thread});
+        if (current) copy = current->entries;
+        copy.push_back({id, std::move(cb), thread, restore_behavior});
         publish_snapshot(std::make_shared<const EntryList>(std::move(copy)),
                          std::move(current));
         return id;
@@ -126,7 +151,7 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         auto current =
             std::atomic_load_explicit(&entries, std::memory_order_acquire);
         if (!current) return;
-        EntryList copy;
+        std::vector<Entry> copy;
         copy.reserve(current->size());
         for (const auto& e : *current) {
             if (e.id != id) copy.push_back(e);
@@ -140,16 +165,16 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
 
     // Re-look-up + invoke at dispatch time so a token reset between
     // EventLoop enqueue and drain cancels the queued call.
-    void invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
+    bool invoke_if_present(std::uint64_t entry_id, ParamID param_id, float value) {
         auto snap = load_snapshot();
-        if (!snap) return;
-        for (const auto& entry : *snap) {
-            if (entry.id == entry_id) {
-                if (entry.callback) entry.callback(param_id, value);
-                return;
-            }
+        if (!snap) return false;
+        const auto* entry = snap->find(entry_id);
+        if (entry && entry->callback) {
+            entry->callback(param_id, value);
+            return true;
         }
         // Entry was removed between dispatch and drain — drop the call.
+        return false;
     }
 
     void notify(ParamID param_id, float value) {
@@ -259,6 +284,30 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
             }
         }
         return drained;
+    }
+
+    std::size_t reconcile_restore_listeners(std::span<const ParamInfo> params) {
+        const auto snap = load_snapshot();
+        if (!snap || snap->empty()) return 0;
+
+        std::vector<std::uint64_t> listener_ids;
+        listener_ids.reserve(snap->size());
+        for (const auto& entry : *snap) {
+            if (entry.callback && entry.thread == ListenerThread::Main
+                && entry.restore_behavior == ListenerRestoreBehavior::Reconcile)
+                listener_ids.push_back(entry.id);
+        }
+
+        std::size_t invoked = 0;
+        for (const auto& param : params) {
+            const auto current =
+                value_getter ? value_getter(param.id) : std::nullopt;
+            if (!current) continue;
+            for (const auto listener_id : listener_ids)
+                if (invoke_if_present(listener_id, param.id, *current))
+                    ++invoked;
+        }
+        return invoked;
     }
 
     RtListenerQueueTelemetry rt_queue_telemetry() const {
@@ -432,6 +481,21 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
 std::size_t StateStore::pump_listeners() {
     if (!registry_) return 0;
     return registry_->drain_main_listeners();
+}
+
+std::size_t StateStore::reconcile_restore_listeners() {
+    if (!registry_) return 0;
+    const auto revision = state_restore_revision_.load(std::memory_order_acquire);
+    auto reconciled =
+        reconciled_state_restore_revision_.load(std::memory_order_acquire);
+    while (reconciled != revision) {
+        if (reconciled_state_restore_revision_.compare_exchange_weak(
+                reconciled, revision, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return registry_->reconcile_restore_listeners(params_);
+        }
+    }
+    return 0;
 }
 
 RtListenerQueueTelemetry StateStore::rt_listener_queue_telemetry() const {
@@ -640,10 +704,18 @@ void StateStore::set_main_loop(pulp::events::EventLoop* loop) {
 }
 
 ListenerToken StateStore::add_listener(ParamChangeCallback callback,
-                                       ListenerThread thread) {
+                                       ListenerThread thread,
+                                       ListenerRestoreBehavior restore_behavior) {
     if (!registry_) return ListenerToken{};
-    const auto id = registry_->add(std::move(callback), thread);
+    const auto id =
+        registry_->add(std::move(callback), thread, restore_behavior);
     return ListenerToken(std::weak_ptr<detail::ListenerRegistry>(registry_), id);
+}
+
+ListenerToken StateStore::add_listener(ParamChangeCallback callback,
+                                       ListenerThread thread) {
+    return add_listener(std::move(callback), thread,
+                        ListenerRestoreBehavior::Silent);
 }
 
 ListenerToken StateStore::add_audio_listener(ParamChangeCallback callback) {
@@ -821,6 +893,7 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         }
     }
 
+    state_restore_revision_.fetch_add(1, std::memory_order_release);
     return true;
 }
 

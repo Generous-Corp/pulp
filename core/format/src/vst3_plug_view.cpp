@@ -6,6 +6,7 @@
 
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -62,8 +63,8 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         bridge_.close();
         return kResultFalse;
     }
-    // Pump the scripted UI session (async results, timers, rAF) per vsync.
-    editor_host_->set_idle_callback(make_scripted_idle_pump(bridge_));
+    // Run editor automation, restore/reload, and scripted work per vsync.
+    editor_host_->set_idle_callback(make_editor_idle_pump(bridge_));
 
     // Subscribe to the host's GPU-surface lifecycle BEFORE attaching. On
     // Windows the surface is created inside attach_to_parent(), so a read taken

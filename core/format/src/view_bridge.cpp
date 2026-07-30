@@ -63,6 +63,7 @@ ViewBridge::ViewBridge(Processor& processor, state::StateStore& store,
       supports_editor_reload_(processor.supports_editor_reload()),
       owner_alive_(owner_alive ? std::move(owner_alive)
                                : local_owner_alive_.capture()),
+      last_state_restore_revision_(store.state_restore_revision()),
       size_hints_(safe_view_size(processor)) {
     width_ = size_hints_.preferred_width;
     height_ = size_hints_.preferred_height;
@@ -166,6 +167,15 @@ bool ViewBridge::open(std::string* error) {
     attached_ = false;
     released_ = false;
     last_reload_generation_ = processor_.editor_reload_generation();
+    return true;
+}
+
+bool ViewBridge::poll_state_restore() {
+    if (!owner_is_alive() || !view_raw_) return false;
+    const auto revision = store_.state_restore_revision();
+    if (revision == last_state_restore_revision_) return false;
+    last_state_restore_revision_ = revision;
+    store_.reconcile_restore_listeners();
     return true;
 }
 

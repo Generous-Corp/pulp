@@ -1,13 +1,12 @@
 #pragma once
 
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/scripted_ui.hpp>
 
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 
 // Shared GPU PluginViewHost auto-selection for every plugin format adapter
 // (AU v2 / VST3 / CLAP / iOS AUv3). The renderer, JS runtime, Yoga layout,
@@ -92,44 +91,6 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
 #endif
 
     return d;
-}
-
-/// Build the per-vsync idle pump for a bridge. GPU hosts invoke it once per
-/// display-link tick so the scripted UI session keeps polling async results,
-/// timers, and `requestAnimationFrame` while the editor is embedded. Captures
-/// the bridge by pointer; the host MUST drop this callback (via `detach()` /
-/// destruction) before the bridge is destroyed — every adapter resets its
-/// host before `bridge.close()`.
-inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
-    auto* bridge_ptr = &bridge;
-    // Copy the bridge's liveness token. This pump is dispatched to the main
-    // queue by the GPU display link and can outlive the bridge (host view
-    // reload replaces the bridge; teardown races where CVDisplayLinkStop does
-    // not join an in-flight callback). Guarding on the token makes the pump a
-    // no-op once the bridge is gone instead of dereferencing freed memory —
-    // the crash seen embedding the AU in Ableton Live. Belt-and-suspenders on
-    // top of the adapter contract that the host drops this callback first.
-    auto alive = bridge.alive_token();
-    return [bridge_ptr, alive]() {
-        if (!alive->load(std::memory_order_acquire)) return;  // bridge gone
-        if (!bridge_ptr->owner_is_alive()) return;            // adapter gone
-        // Drain queued host-automation parameter changes to Main-thread
-        // listeners on the UI thread, so parameter-bound widgets
-        // (bind_parameter) follow automation playback / host edits: the
-        // adapter writes the store from the audio thread, this propagates it
-        // to the editor. Cheap when the queue is empty.
-        bridge_ptr->pump_store_listeners();
-        // Live editor reload (1.9): when the processor's logic hot-swaps
-        // (ReloadableShell), rebuild the OPEN editor in place and request a
-        // repaint, so the DAW shows the new UI live without re-instantiating the
-        // plugin. No-op (cheap generation compare) for non-reloadable processors.
-        if (bridge_ptr->poll_editor_reload()) {
-            if (auto* v = bridge_ptr->view()) v->request_repaint();
-        }
-        if (auto* session = bridge_ptr->scripted_ui()) {
-            session->poll();
-        }
-    };
 }
 
 /// Scream-guard (runtime): after the host's surface state is DECIDED, verify

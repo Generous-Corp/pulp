@@ -41,6 +41,8 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+# Pulp Delay: stereo character delay with tempo and in-loop tone controls
+add_subdirectory(pulp-delay)
 # Combined-bundle demo: ONE binary per format exposing TWO plugins via
 # pulp_add_plugin_bundle() (multi-plugin packaging surface).
 add_subdirectory(combined-bundle-demo)
