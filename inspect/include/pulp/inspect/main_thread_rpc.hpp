@@ -11,7 +11,9 @@ namespace pulp::inspect {
 
 /// Bounded response-after-apply handoff from an inspector transport thread to
 /// the registered host main thread. A request that times out before execution
-/// is cancelled and cannot mutate later.
+/// is cancelled and cannot mutate later. Once execution starts, call() keeps
+/// owning the operation until it drains, then returns a timeout response if the
+/// configured deadline was exceeded.
 class InspectorMainThreadRpc {
 public:
     using Operation = std::function<InspectorMessage()>;

@@ -91,6 +91,9 @@ endif()
 if(TARGET pulp-inspect-discovery)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
 endif()
+if(TARGET pulp-inspect-publication)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-publication)
+endif()
 if(TARGET pulp-inspect-client)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-client)
 endif()
@@ -282,6 +285,7 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery_publisher.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"

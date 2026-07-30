@@ -484,6 +484,69 @@ TEST_CASE("timed-out queued main-thread work cannot mutate later",
     CHECK(mutations == 0);
 }
 
+TEST_CASE("timed-out started main-thread work retains its slot until drained",
+          "[inspect][session][main-thread-rpc][timeout][lifetime]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    bool operation_started = false;
+    bool release_operation = false;
+    InspectorMainThreadRpc rpc(
+        {5ms, 1},
+        [&](auto task) {
+            queued = std::move(task);
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+
+    pulp::inspect::InspectorMessage response;
+    std::atomic<bool> caller_returned{false};
+    std::thread caller([&] {
+        response = rpc.call(80, [&] {
+            std::unique_lock lock(mutex);
+            operation_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_operation; });
+            return make_response(80, R"({"applied":true})");
+        });
+        caller_returned.store(true, std::memory_order_release);
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] {
+            return static_cast<bool>(queued);
+        }));
+    }
+
+    std::thread executor([&] { queued(); });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] {
+            return operation_started;
+        }));
+    }
+    std::this_thread::sleep_for(20ms);
+    CHECK_FALSE(caller_returned.load(std::memory_order_acquire));
+    const auto full = rpc.call(
+        81, [] { return make_response(81, "{}"); });
+    CHECK(full.error_code == "dispatch_queue_full");
+
+    {
+        std::lock_guard lock(mutex);
+        release_operation = true;
+    }
+    cv.notify_all();
+    executor.join();
+    caller.join();
+
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "main_thread_timeout");
+    CHECK(response.error_data_json.find(
+              R"("mayHaveApplied":true)") != std::string::npos);
+    CHECK(caller_returned.load(std::memory_order_acquire));
+}
+
 TEST_CASE("cancelling main-thread RPC wakes queued callers and rejects new work",
           "[inspect][session][main-thread-rpc][teardown]") {
     std::mutex mutex;

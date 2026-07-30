@@ -124,6 +124,10 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
     "inspect/CMakeLists.txt": (
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
+        "add_library(pulp-inspect-publication src/discovery.cpp)",
+        "PULP_INSPECT_READER_ONLY=1",
+        "PULP_INSPECT_PUBLISHER_ONLY=1",
+        "pulp::inspect-publication",
     ),
     "tools/cli/CMakeLists.txt": (
         "cmd_inspect_unavailable.cpp",
@@ -230,6 +234,21 @@ def check_root(root: pathlib.Path) -> list[str]:
                 errors.append(
                     f"{relative_path} omits inspector security contract: {contract}"
                 )
+
+    reader_header = (
+        root / "inspect/include/pulp/inspect/discovery.hpp"
+    ).read_text(encoding="utf-8")
+    publisher_header = (
+        root / "inspect/include/pulp/inspect/discovery_publisher.hpp"
+    ).read_text(encoding="utf-8")
+    if "InspectorDiscoveryPublisher" in reader_header:
+        errors.append(
+            "read-only discovery header exposes publisher authority"
+        )
+    if "class InspectorDiscoveryPublisher" not in publisher_header:
+        errors.append(
+            "publisher authority header omits InspectorDiscoveryPublisher"
+        )
 
     mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")
     for tool_name, description in MCP_TOOL_RE.findall(mcp_source):

@@ -55,7 +55,15 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)\n"
                 "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)\n",
             "inspect/CMakeLists.txt":
+                "add_library(pulp-inspect-publication src/discovery.cpp)\n"
+                "PULP_INSPECT_READER_ONLY=1\n"
+                "PULP_INSPECT_PUBLISHER_ONLY=1\n"
+                "pulp::inspect-publication\n"
                 "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)\n",
+            "inspect/include/pulp/inspect/discovery.hpp":
+                "class InspectorDiscoveryReader {};\n",
+            "inspect/include/pulp/inspect/discovery_publisher.hpp":
+                "class InspectorDiscoveryPublisher {};\n",
             "tools/cli/CMakeLists.txt":
                 "cmd_inspect_unavailable.cpp\ncmd_tweaks_unavailable.cpp\n",
             "test/cmake/view_widget_bridge_tests.cmake":
@@ -288,6 +296,18 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         self.assertIn(
             "omits inspector security contract",
+            " ".join(inspector_truth_check.check_root(root)),
+        )
+
+    def test_rejects_publisher_authority_in_the_reader_header(self) -> None:
+        root = self.make_root()
+        (root / "inspect/include/pulp/inspect/discovery.hpp").write_text(
+            "class InspectorDiscoveryReader {};\n"
+            "class InspectorDiscoveryPublisher {};\n",
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "read-only discovery header exposes publisher authority",
             " ".join(inspector_truth_check.check_root(root)),
         )
 
