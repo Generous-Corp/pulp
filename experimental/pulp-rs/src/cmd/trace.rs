@@ -865,11 +865,12 @@ pub fn run_doctor<T: InspectorTalker>(
 struct CaptureControls {
     session: bool,
     trace: bool,
+    controller_available: bool,
 }
 
 impl CaptureControls {
     fn ready(self) -> bool {
-        self.session && self.trace
+        self.session && self.trace && self.controller_available
     }
 }
 
@@ -882,6 +883,7 @@ fn parse_capture_controls(response: &str) -> Option<CaptureControls> {
     Some(CaptureControls {
         session: contains("session.control"),
         trace: contains("trace.control"),
+        controller_available: value.get("controller").is_none(),
     })
 }
 
@@ -940,6 +942,7 @@ fn build_doctor_report(
              \"inspector_reachable\":{reachable},\
              \"session_control_granted\":{},\
              \"trace_control_granted\":{},\
+             \"controller_available\":{},\
              \"compiled_in\":{},\
              \"active\":{},\
              \"last_trace_path\":{},\
@@ -951,6 +954,7 @@ fn build_doctor_report(
              \"ready_to_query\":{ready_to_query}}}\n",
             json_bool_opt(controls.map(|value| value.session)),
             json_bool_opt(controls.map(|value| value.trace)),
+            json_bool_opt(controls.map(|value| value.controller_available)),
             json_bool_opt(compiled_in),
             json_bool_opt(active),
             json_str_opt(last_trace_path.as_deref()),
@@ -985,6 +989,8 @@ fn build_doctor_report(
         "  capture controls ........ {}\n",
         match controls {
             Some(value) if value.ready() => "granted",
+            Some(value) if value.session && value.trace =>
+                "controller lease busy",
             Some(_) => "NOT GRANTED",
             None => "unknown (Session.getCapabilities unavailable)",
         }
@@ -1604,6 +1610,12 @@ mod tests {
         )
         .unwrap();
         assert!(!observe.ready());
+        let busy = parse_capture_controls(
+            "{\"effective\":[\"session.control\",\"trace.control\"],\
+             \"controller\":\"another-client\"}",
+        )
+        .unwrap();
+        assert!(!busy.ready());
         assert!(parse_capture_controls("{}").is_none());
     }
 
@@ -1615,7 +1627,11 @@ mod tests {
     }
 
     fn controls() -> Option<CaptureControls> {
-        Some(CaptureControls { session: true, trace: true })
+        Some(CaptureControls {
+            session: true,
+            trace: true,
+            controller_available: true,
+        })
     }
 
     #[test]
@@ -1697,6 +1713,7 @@ mod tests {
         let controls = Some(CaptureControls {
             session: true,
             trace: false,
+            controller_available: true,
         });
         let json = build_doctor_report(
             9147,
@@ -1711,6 +1728,30 @@ mod tests {
             serde_json::from_str(json.trim()).unwrap();
         assert_eq!(value["session_control_granted"], true);
         assert_eq!(value["trace_control_granted"], false);
+        assert_eq!(value["ready_to_capture"], false);
+    }
+
+    #[test]
+    fn doctor_report_rejects_a_busy_controller_lease() {
+        let snap = "{\"compiled_in\":true,\"active\":false}";
+        let status = tp(TraceProcessorSource::None, None);
+        let controls = Some(CaptureControls {
+            session: true,
+            trace: true,
+            controller_available: false,
+        });
+        let json = build_doctor_report(
+            9147,
+            true,
+            controls,
+            Some(snap),
+            None,
+            &status,
+            true,
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["controller_available"], false);
         assert_eq!(value["ready_to_capture"], false);
     }
 

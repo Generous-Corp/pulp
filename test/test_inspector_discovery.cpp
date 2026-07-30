@@ -102,6 +102,9 @@ TEST_CASE("discovery rejects records and credentials above their fixed bounds",
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
     InspectorDiscoveryPublisher publisher(temporary.path);
+    auto oversized = fixture_record("oversized-publication");
+    oversized.plugin_id = std::string(2000, 'x');
+    CHECK_FALSE(publisher.publish(oversized, *token, 5s));
     REQUIRE(publisher.publish(
         fixture_record("bounded-input"), *token, 5s));
     InspectorDiscoveryReader reader(temporary.path);
