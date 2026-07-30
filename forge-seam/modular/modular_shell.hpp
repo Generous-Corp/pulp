@@ -127,8 +127,11 @@ public:
 
 private:
     void style_tabs();
+    void offer_random();
 
     MentionOverlay mentions_;
+    std::string last_random_;
+    std::size_t next_random_ = 0;
     pulp::view::TextButton* tab_module_ = nullptr;
     pulp::view::TextButton* tab_patch_ = nullptr;
     EngineClient* engine_ = nullptr;

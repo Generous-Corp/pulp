@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -172,6 +173,7 @@ TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
 // Modular's answers actually reach the chrome — using the real shell rather than
 // a test double, because ForgeFxShell is final and cannot be subclassed.
 
+#include <forge/build_monitor.hpp>
 #include <forge/mention_overlay.hpp>
 #include <forge/modular_shell.hpp>
 
@@ -444,4 +446,152 @@ TEST_CASE("the selection lands on something insertable", "[mention]") {
     overlay.handle_text("@", 1);
     CHECK(overlay.selected_index() == 1);
     CHECK(overlay.candidates()[overlay.selected_index()].insertable());
+}
+
+// ── the generator log ────────────────────────────────────────────────────────
+
+namespace {
+
+/// A refusal captured verbatim from a real run on a second machine, where it
+/// reached a log file and never a person. Kept exactly as the generator wrote
+/// it -- a hand-tidied paraphrase would agree with the classifier by
+/// construction and prove nothing.
+constexpr const char* kRealRefusal =
+    "forge-modular: patch\n"
+    "tools: /Users/x/Applications/Forge Modular.app/Contents/Resources/tools\n"
+    "prompt: a kick and hat pattern where the hats swing against the kick\n"
+    "---\n"
+    "  hold on \xE2\x80\x94 this asks for something you don't have installed:\n"
+    "\n"
+    "  no drum module is installed. These would do it:\n"
+    "      free     4ms-ProducerPack/Decay            Decay  (4ms)\n"
+    "      free     4ms-ProducerPack/DrumBus          DrumBus  (4ms)\n"
+    "\n"
+    "  install one in Rack's Library, then ask again \xE2\x80\x94\n"
+    "  or pass --anyway: Rack keeps missing modules as\n"
+    "  placeholders and offers to fetch them when you open it.\n";
+
+/// A gate rejection and a retry, also captured from a real run.
+constexpr const char* kRealGateRetry =
+    "forge-modular: module\n"
+    "prompt: a 4 HP clock divider with reset and four divisions\n"
+    "---\n"
+    "      DIVIDELY: param DIV4_PARAM defaults to the TOP of its range "
+    "(7.0 in 0.0..7.0); the knob has nowhere left to turn\n"
+    "  asking the model (retry 2)\xE2\x80\xA6\n"
+    "  uses Pulp DSP: trigger.hpp\n"
+    "  installed \xE2\x86\x92 /Users/x/Library/Application Support/Rack2/plugins-mac-arm64/"
+    "ForgeModular-2.0.0-mac-arm64.vcvplugin\n";
+
+std::string write_log(const char* body, const char* name) {
+    const auto p = std::filesystem::temp_directory_path() / name;
+    std::ofstream(p) << body;
+    return p.string();
+}
+
+}  // namespace
+
+TEST_CASE("a real refusal is recognised as a refusal", "[buildlog]") {
+    forge_modular::BuildMonitor mon;
+    mon.watch(write_log(kRealRefusal, "fm-refusal.log"));
+    const auto added = mon.poll();
+    REQUIRE_FALSE(added.empty());
+
+    CHECK(mon.outcome() == forge_modular::BuildOutcome::refused);
+
+    // And the headline is the reason, not the last line of narration. Burying
+    // it under "step 7 of 9" is how this failed on a real machine.
+    INFO("headline: " << mon.headline());
+    CHECK(mon.headline().find("hold on") != std::string::npos);
+}
+
+TEST_CASE("a gate rejection is not a failure, and a success is", "[buildlog]") {
+    forge_modular::BuildMonitor mon;
+    mon.watch(write_log(kRealGateRetry, "fm-gate.log"));
+    mon.poll();
+
+    // The run rejected an attempt, retried, and landed an artifact. That is the
+    // pipeline working, and calling it "failed" would teach the user to ignore
+    // the status line.
+    CHECK(mon.outcome() == forge_modular::BuildOutcome::done);
+
+    int gates = 0, retries = 0, successes = 0;
+    for (const auto& l : mon.lines()) {
+        if (l.kind == forge_modular::BuildLine::Kind::gate) ++gates;
+        if (l.kind == forge_modular::BuildLine::Kind::retry) ++retries;
+        if (l.kind == forge_modular::BuildLine::Kind::success) ++successes;
+    }
+    CHECK(gates >= 1);
+    CHECK(retries >= 1);
+    CHECK(successes >= 1);
+}
+
+TEST_CASE("unfamiliar output is progress, never failure", "[buildlog]") {
+    // The generator's wording will drift. A classifier that invented failures
+    // from lines it did not recognise would cry wolf on every change.
+    CHECK(forge_modular::BuildMonitor::classify("  writing panel SVG") ==
+          forge_modular::BuildLine::Kind::progress);
+    CHECK(forge_modular::BuildMonitor::classify("something entirely new") ==
+          forge_modular::BuildLine::Kind::progress);
+    CHECK(forge_modular::BuildMonitor::classify("Traceback (most recent call last):") ==
+          forge_modular::BuildLine::Kind::error);
+}
+
+TEST_CASE("the monitor streams rather than re-reading", "[buildlog]") {
+    const auto path = std::filesystem::temp_directory_path() / "fm-stream.log";
+    { std::ofstream f(path); f << "forge-modular: module\n"; }
+
+    forge_modular::BuildMonitor mon;
+    mon.watch(path.string());
+    CHECK(mon.poll().size() == 1);
+    CHECK(mon.poll().empty());                 // nothing new, nothing re-reported
+
+    { std::ofstream f(path, std::ios::app); f << "  asking the model (retry 2)\n"; }
+    const auto more = mon.poll();
+    REQUIRE(more.size() == 1);
+    CHECK(more[0].kind == forge_modular::BuildLine::Kind::retry);
+
+    // A new run truncates the log. Without noticing, the reader would seek past
+    // the end and go silent for the rest of the session.
+    { std::ofstream f(path, std::ios::trunc); f << "forge-modular: patch\n"; }
+    CHECK(mon.poll().size() == 1);
+    CHECK(mon.lines().size() == 1);
+}
+
+TEST_CASE("Random fills the composer, and never repeats itself", "[seam]") {
+    // Reported twice by a user: first as "the same suggestion every time", then
+    // as a button that did nothing at all. Both are asserted here.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto row = shell.composer_row();
+    REQUIRE(row.left.size() >= 2);
+    const auto& random = row.left[1];
+    REQUIRE(random.label == "Random");
+    REQUIRE(random.on_click);            // a button with no handler is decoration
+
+    auto* input = shell.chrome()->prompt_input();
+    REQUIRE(input != nullptr);
+
+    std::set<std::string> seen;
+    std::string previous;
+    for (int i = 0; i < 6; ++i) {
+        random.on_click();
+        const auto text = input->text();
+        INFO("press " << i << ": " << text);
+        REQUIRE_FALSE(text.empty());     // every press, not every other one
+        CHECK(text != previous);         // never the same twice running
+        previous = text;
+        seen.insert(text);
+    }
+    CHECK(seen.size() > 1);              // not one value forever
 }

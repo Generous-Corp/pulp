@@ -108,6 +108,8 @@ forge::ComposerRow ForgeModularShell::composer_row() {
         .label = "Random",
         .access_label = patch ? "Random patch idea" : "Random module idea",
         .icon = forge::ComposerAction::Icon::dice,
+        .primary = false,
+        .on_click = [this] { offer_random(); },
     });
 
     // Ask and Build differ in one bit and it is carried, not inferred: an Ask
@@ -206,6 +208,26 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
         }
     };
     return v;
+}
+
+void ForgeModularShell::offer_random() {
+    // Fills the composer rather than building. A suggestion you cannot read
+    // before committing to it is a dice roll, not a prompt.
+    const bool patch = artifact_ == Artifact::patch;
+    const auto& pool = patch ? kRandomPatch : kRandomModule;
+    const std::size_t count = patch ? std::size(kRandomPatch) : std::size(kRandomModule);
+    if (count == 0) return;
+
+    // Never the same suggestion twice running: drawing the prompt just
+    // dismissed reads as a broken button, which is how this was reported.
+    std::size_t pick = next_random_ % count;
+    if (count > 1 && pool[pick] == last_random_) pick = (pick + 1) % count;
+    next_random_ = pick + 1;
+    last_random_ = pool[pick];
+
+    if (auto* c = chrome()) {
+        if (auto* input = c->prompt_input()) input->set_text(last_random_);
+    }
 }
 
 void ForgeModularShell::process_audio(
