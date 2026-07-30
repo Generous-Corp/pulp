@@ -44,12 +44,11 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use crate::error::{CliError, Result};
 
 /// Optional explicit discovery filter understood by the wrapper.
-pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
+pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
 
 /// Parsed `pulp motion …` subcommand. One variant per verb; each
 /// carries the already-parsed params so [`dispatch`] is a pure
@@ -457,103 +456,15 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        let bin = resolve_inspect_binary().ok_or_else(|| {
-            CliError::Other(
-                "pulp motion: could not find `pulp-cpp` or `pulp` binary \
-                 on PATH (needed to talk to the inspector). Install / \
-                 build the CLI first."
-                    .to_owned(),
-            )
-        })?;
-        let mut command = Command::new(&bin);
-        command.arg("inspect");
-        if port != 0 {
-            command.arg("--port").arg(port.to_string());
-        }
-        let output = command
-            .arg("--command")
-            .arg(method)
-            .arg("--params")
-            .arg(params_json)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "pulp motion: failed to spawn {}: {}",
-                    bin.display(),
-                    e
-                ))
-            })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(CliError::Other(format!(
-                "pulp motion: `{} inspect --command {}` exited with {:?}: {}",
-                bin.display(),
-                method,
-                output.status.code(),
-                stderr.trim(),
-            )));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        crate::cmd::inspector::call("motion", port, method, params_json)
     }
-}
-
-/// Resolve the inspect-capable binary. Preference order:
-///
-/// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
-/// 2. The Rust `pulp` binary on `$PATH` *only if* it can fall
-///    through to `pulp-cpp` via fallthrough. The Rust binary
-///    itself doesn't implement `inspect` natively yet, so we don't
-///    pick `target/release/pulp` here — that would just bounce back
-///    through unknown-subcommand fallthrough.
-fn resolve_inspect_binary() -> Option<PathBuf> {
-    if let Some(p) = crate::proc::which("pulp-cpp") {
-        return Some(p);
-    }
-    // Local in-tree dev build, before `pulp install` runs. Saves
-    // contributors from `cargo install`ing `pulp-cpp` on every
-    // worktree.
-    for candidate in [
-        "build/tools/cli/pulp-cpp",
-        "build/tools/cli/pulp",
-        "build/pulp",
-    ] {
-        let p = PathBuf::from(candidate);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    // Last resort — fall through to `pulp` on PATH and hope its
-    // fallthrough routes the `inspect` verb to `pulp-cpp`.
-    crate::proc::which("pulp")
-}
-
-fn resolve_port_value(
-    flags: &GlobalFlags,
-    configured: Option<&str>,
-) -> Result<u16> {
-    if let Some(p) = flags.port {
-        return Ok(p);
-    }
-    if let Some(value) = configured {
-        return match value.parse::<u16>() {
-            Ok(port) if port != 0 => Ok(port),
-            _ => Err(CliError::BadUsage(format!(
-                "${INSPECTOR_PORT_ENV} must be an integer from 1 to 65535; got `{value}`"
-            ))),
-        };
-    }
-    Ok(0)
 }
 
 /// Resolve the explicit port filter from CLI flags + env. Zero delegates
 /// selection to authenticated discovery. A configured but invalid environment
 /// filter is an error rather than permission to select a different session.
 pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
-    let configured = std::env::var(INSPECTOR_PORT_ENV).ok();
-    resolve_port_value(flags, configured.as_deref())
+    crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure
@@ -1018,28 +929,6 @@ mod tests {
         assert!(j.contains("\"properties\":[\"minX\",\"minY\"]"));
         assert!(j.contains("\"space\":\"window\""));
         assert!(j.contains("\"source\":\"presentation\""));
-    }
-
-    #[test]
-    fn resolve_port_prefers_explicit_and_otherwise_auto_discovers() {
-        // Explicit wins.
-        let g = GlobalFlags {
-            json: false,
-            port: Some(1234),
-        };
-        assert_eq!(resolve_port_value(&g, Some("0")).unwrap(), 1234);
-        // With no explicit filter, zero delegates to authenticated discovery.
-        let g = GlobalFlags::default();
-        assert_eq!(resolve_port_value(&g, None).unwrap(), 0);
-    }
-
-    #[test]
-    fn resolve_port_rejects_invalid_environment_filters() {
-        let flags = GlobalFlags::default();
-        for value in ["0", "not-a-port", "65536", "-1"] {
-            let error = resolve_port_value(&flags, Some(value)).unwrap_err();
-            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
-        }
     }
 
     #[test]

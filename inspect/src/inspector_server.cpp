@@ -5,13 +5,13 @@
 #include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
 
-#include "bounded_event_queue.hpp"
+#include "inspector_connected_client.hpp"
+#include "inspector_publication.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <deque>
 #include <functional>
 #include <map>
 #include <thread>
@@ -57,104 +57,11 @@ bool json_nesting_is_bounded(std::string_view text) {
 class InspectorServer::Impl
     : public std::enable_shared_from_this<InspectorServer::Impl> {
 public:
-    struct AuthenticationState {
-        std::unique_ptr<InspectorAuthVerifier> verifier;
-        std::string client_id;
-        bool authenticated = false;
-        std::chrono::steady_clock::time_point deadline;
-        std::uint64_t generation = 0;
-    };
-
-    class OutboundClient
-        : public std::enable_shared_from_this<OutboundClient> {
-    public:
-        static std::shared_ptr<OutboundClient> create(
-            std::shared_ptr<events::InterprocessConnection> connection) {
-            auto result = std::shared_ptr<OutboundClient>(
-                new OutboundClient(std::move(connection)));
-            result->worker = std::thread([result] { result->run(); });
-            return result;
-        }
-
-        detail::EventQueuePushResult enqueue(std::string message,
-                                             bool lossy) {
-            detail::EventQueuePushResult result;
-            {
-                std::lock_guard lock(mutex);
-                if (stopping)
-                    return detail::EventQueuePushResult::DroppedLossy;
-                result = messages.push(std::move(message), lossy);
-            }
-            if (result == detail::EventQueuePushResult::Queued)
-                cv.notify_one();
-            return result;
-        }
-
-        void request_stop() {
-            {
-                std::lock_guard lock(mutex);
-                stopping = true;
-                messages.clear();
-            }
-            cv.notify_all();
-        }
-
-        void join() {
-            if (worker.joinable() &&
-                worker.get_id() == std::this_thread::get_id())
-                worker.detach();
-            else if (worker.joinable())
-                worker.join();
-        }
-
-        void shutdown() {
-            request_stop();
-            join();
-        }
-
-    private:
-        explicit OutboundClient(
-            std::shared_ptr<events::InterprocessConnection> value)
-            : connection(std::move(value)) {}
-
-        void run() {
-            std::unique_lock lock(mutex);
-            while (!stopping) {
-                cv.wait(lock, [this] {
-                    return stopping || !messages.empty();
-                });
-                if (stopping)
-                    break;
-                auto message = messages.take_front();
-                if (!message)
-                    continue;
-                auto retained = connection;
-                lock.unlock();
-                if (retained && !retained->send_message(*message)) {
-                    retained->disconnect();
-                    lock.lock();
-                    stopping = true;
-                    messages.clear();
-                    break;
-                }
-                lock.lock();
-            }
-        }
-
-        std::shared_ptr<events::InterprocessConnection> connection;
-        std::mutex mutex;
-        std::condition_variable cv;
-        detail::BoundedEventQueue<std::string> messages{32};
-        std::thread worker;
-        bool stopping = false;
-    };
-
     events::InterprocessConnectionServer server;
-    std::vector<std::shared_ptr<events::InterprocessConnection>> owned_clients;
-    std::map<events::InterprocessConnection*, AuthenticationState> authentication;
     std::map<events::InterprocessConnection*,
-             std::shared_ptr<OutboundClient>> outbound_clients;
-    std::vector<std::shared_ptr<OutboundClient>> retired_outbound_clients;
+             std::shared_ptr<detail::InspectorConnectedClient>> clients;
+    std::vector<std::shared_ptr<detail::InspectorOutboundClient>>
+        retired_outbound_clients;
     std::mutex clients_mutex;
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
@@ -167,7 +74,7 @@ public:
     std::size_t max_clients = 16;
     std::atomic<int> port{0};
     InspectorSession* session = nullptr;
-    InspectorDiscoveryPublisher* discovery = nullptr;
+    detail::InspectorPublication publication;
     std::vector<std::uint8_t> token;
     std::chrono::milliseconds authentication_timeout =
         std::chrono::seconds(3);
@@ -175,10 +82,6 @@ public:
     std::recursive_mutex transition_mutex;
     std::atomic<bool> stop_requested{false};
     std::atomic<bool> transition_waiting_for_callbacks{false};
-    std::function<void()> heartbeat;
-    std::chrono::steady_clock::time_point next_heartbeat{};
-    std::chrono::milliseconds heartbeat_interval =
-        std::chrono::seconds(10);
     std::size_t max_message_bytes = 1024u * 1024u;
 
     class CallbackGuard {
@@ -254,24 +157,21 @@ public:
                     client.reset();
                     return;
                 }
-                if (owned_clients.size() >= max_clients) {
+                if (clients.size() >= max_clients) {
                     client.reset();
                     return;
                 }
-                owned_clients.push_back(client);
-                outbound_clients.insert_or_assign(
-                    raw, OutboundClient::create(client));
-                authentication.insert_or_assign(
+                clients.insert_or_assign(
                     raw,
-                    AuthenticationState{
+                    detail::InspectorConnectedClient::create(
+                        client,
                         std::make_unique<InspectorAuthVerifier>(
                             token, *challenge),
                         client_id,
-                        false,
                         std::chrono::steady_clock::now() +
                             authentication_timeout,
                         session_generation.load(
-                            std::memory_order_acquire)});
+                            std::memory_order_acquire)));
             }
             const std::weak_ptr<events::InterprocessConnection> weak = client;
             const std::weak_ptr<Impl> weak_self = shared_from_this();
@@ -284,30 +184,19 @@ public:
                 if (!callback)
                     return;
                 std::string authenticated_client;
-                std::shared_ptr<OutboundClient> outbound;
+                std::shared_ptr<detail::InspectorConnectedClient> client;
                 {
                     std::lock_guard lock(self->clients_mutex);
-                    if (const auto found = self->authentication.find(raw);
-                        found != self->authentication.end()) {
-                        if (found->second.authenticated)
-                            authenticated_client = found->second.client_id;
-                        self->authentication.erase(found);
+                    if (const auto found = self->clients.find(raw);
+                        found != self->clients.end()) {
+                        client = std::move(found->second);
+                        self->clients.erase(found);
+                        if (client->authenticated)
+                            authenticated_client = client->client_id;
+                        client->outbound->request_stop();
+                        self->retired_outbound_clients.push_back(
+                            client->outbound);
                     }
-                    if (const auto found = self->outbound_clients.find(raw);
-                        found != self->outbound_clients.end()) {
-                        outbound = std::move(found->second);
-                        self->outbound_clients.erase(found);
-                        outbound->request_stop();
-                        self->retired_outbound_clients.push_back(outbound);
-                    }
-                    self->owned_clients.erase(
-                        std::remove_if(
-                            self->owned_clients.begin(),
-                            self->owned_clients.end(),
-                            [raw](const auto& candidate) {
-                                return candidate.get() == raw;
-                            }),
-                        self->owned_clients.end());
                 }
                 if (!authenticated_client.empty() && self->session)
                     self->session->disconnect(authenticated_client);
@@ -372,22 +261,13 @@ public:
             const auto now = std::chrono::steady_clock::now();
             std::vector<std::shared_ptr<events::InterprocessConnection>> expired;
             if (!should_stop) {
-                for (const auto& [client, state] : authentication) {
-                    if (!state.authenticated && now >= state.deadline) {
-                        const auto retained = std::find_if(
-                            owned_clients.begin(), owned_clients.end(),
-                            [client](const auto& candidate) {
-                                return candidate.get() == client;
-                            });
-                        if (retained != owned_clients.end())
-                            expired.push_back(*retained);
+                for (const auto& [raw, client] : clients) {
+                    (void)raw;
+                    if (!client->authenticated &&
+                        now >= client->deadline) {
+                        expired.push_back(client->connection);
                     }
                 }
-            }
-            std::function<void()> refresh;
-            if (!should_stop && heartbeat && now >= next_heartbeat) {
-                refresh = heartbeat;
-                next_heartbeat = now + heartbeat_interval;
             }
             lock.unlock();
             for (const auto& outbound : retired) {
@@ -398,8 +278,8 @@ public:
                 if (client)
                     client->disconnect();
             }
-            if (refresh)
-                refresh();
+            if (!should_stop)
+                publication.refresh_if_due(now);
             if (should_stop)
                 break;
             lock.lock();
@@ -467,7 +347,6 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         session = config.session;
-        discovery = config.discovery;
         token = std::move(config.token);
         session_generation.fetch_add(1, std::memory_order_acq_rel);
     }
@@ -484,13 +363,8 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::lock_guard lock(clients_mutex);
         max_clients =
             std::clamp<std::size_t>(config.max_clients, 1, 64);
-        heartbeat_interval = config.heartbeat_interval;
         stopping_callbacks = false;
     }
-    const auto discovery_ttl = std::max(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::seconds(30)),
-        heartbeat_interval * 3);
     if (!server.start("127.0.0.1:0", events::IpcTransport::Socket)) {
         stop_locked();
         return false;
@@ -507,37 +381,17 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     config.record.endpoint =
         "127.0.0.1:" +
         std::to_string(port.load(std::memory_order_acquire));
-    bool published = false;
-    {
-        // A prior generation's heartbeat may already have copied its refresh
-        // closure before stop_locked() cleared it. Serialize publication with
-        // that closure so the shared publisher is never mutated concurrently.
-        std::lock_guard lifecycle_lock(lifecycle_mutex);
-        config.record.protocol_version = session->info().protocol_version;
-        config.record.profile = session->policy().profile();
-        published = discovery->publish(config.record, token, discovery_ttl);
-    }
-    if (!published) {
+    config.record.protocol_version = session->info().protocol_version;
+    config.record.profile = session->policy().profile();
+    if (!publication.publish(
+            *config.discovery, config.record, token,
+            config.heartbeat_interval)) {
         stop_locked();
         return false;
     }
     if (stop_requested.load(std::memory_order_acquire)) {
         stop_locked();
         return false;
-    }
-    {
-        std::lock_guard lock(clients_mutex);
-        next_heartbeat =
-            std::chrono::steady_clock::now() + heartbeat_interval;
-        const std::weak_ptr<Impl> weak_self = shared_from_this();
-        heartbeat = [weak_self, discovery_ttl] {
-            const auto self = weak_self.lock();
-            if (!self)
-                return;
-            std::lock_guard lifecycle_lock(self->lifecycle_mutex);
-            if (self->discovery)
-                (void)self->discovery->refresh(discovery_ttl);
-        };
     }
     return true;
 }
@@ -578,35 +432,35 @@ void InspectorServer::Impl::stop_locked() {
     transition_waiting_for_callbacks.store(true, std::memory_order_release);
     {
         std::lock_guard lock(clients_mutex);
-        heartbeat = {};
         stopping_callbacks = true;
     }
     server.stop();
-    std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
-    std::vector<std::shared_ptr<Impl::OutboundClient>> outbound_to_stop;
+    std::vector<std::shared_ptr<detail::InspectorConnectedClient>>
+        clients_to_stop;
+    std::vector<std::shared_ptr<detail::InspectorOutboundClient>>
+        retired_to_stop;
     std::vector<std::string> authenticated_clients;
     {
         std::lock_guard lock(clients_mutex);
-        clients = std::move(owned_clients);
-        for (auto& [client, outbound] : this->outbound_clients) {
-            (void)client;
-            outbound_to_stop.push_back(std::move(outbound));
+        for (auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated)
+                authenticated_clients.push_back(client->client_id);
+            clients_to_stop.push_back(std::move(client));
         }
-        this->outbound_clients.clear();
-        for (auto& outbound : retired_outbound_clients)
-            outbound_to_stop.push_back(std::move(outbound));
+        clients.clear();
+        retired_to_stop = std::move(retired_outbound_clients);
         retired_outbound_clients.clear();
-        for (const auto& [client, state] : authentication) {
-            (void)client;
-            if (state.authenticated)
-                authenticated_clients.push_back(state.client_id);
-        }
     }
-    for (const auto& client : clients) {
-        if (client)
-            client->disconnect();
+    for (const auto& client : clients_to_stop) {
+        if (client->connection)
+            client->connection->disconnect();
     }
-    for (const auto& outbound : outbound_to_stop) {
+    for (const auto& client : clients_to_stop) {
+        if (client->outbound)
+            client->outbound->shutdown();
+    }
+    for (const auto& outbound : retired_to_stop) {
         if (outbound)
             outbound->shutdown();
     }
@@ -619,19 +473,16 @@ void InspectorServer::Impl::stop_locked() {
         cleanup_cv.wait(lock, [this, current_callbacks] {
             return active_callbacks <= current_callbacks;
         });
-        authentication.clear();
     }
     transition_waiting_for_callbacks.store(false, std::memory_order_release);
-    clients.clear();
+    clients_to_stop.clear();
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         if (session) {
             for (const auto& client_id : authenticated_clients)
                 session->disconnect(client_id);
         }
-        if (discovery)
-            discovery->remove();
-        discovery = nullptr;
+        publication.clear();
         session = nullptr;
         pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();
@@ -665,20 +516,14 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
             generation) {
             return;
         }
-        for (const auto& client : owned_clients) {
-            const auto auth = authentication.find(client.get());
-            if (auth != authentication.end() &&
-                auth->second.authenticated &&
-                auth->second.generation == generation) {
-                if (const auto outbound =
-                        outbound_clients.find(client.get());
-                    outbound != outbound_clients.end()) {
-                    if (outbound->second->enqueue(
-                            json, inspector_event_is_lossy(event.method)) ==
-                        detail::EventQueuePushResult::ReliableOverflow) {
-                        overflowed.push_back(client);
-                    }
-                }
+        for (const auto& [raw, client] : clients) {
+            (void)raw;
+            if (client->authenticated &&
+                client->generation == generation &&
+                client->outbound->enqueue(
+                    json, inspector_event_is_lossy(event.method)) ==
+                    detail::EventQueuePushResult::ReliableOverflow) {
+                overflowed.push_back(client->connection);
             }
         }
     }
@@ -689,11 +534,9 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
 int InspectorServer::Impl::client_count() {
     std::lock_guard lock(clients_mutex);
     return static_cast<int>(std::count_if(
-        owned_clients.begin(), owned_clients.end(),
-        [&](const auto& client) {
-            const auto auth = authentication.find(client.get());
-            return auth != authentication.end() &&
-                   auth->second.authenticated;
+        clients.begin(), clients.end(),
+        [](const auto& entry) {
+            return entry.second->authenticated;
         }));
 }
 
@@ -739,13 +582,13 @@ void InspectorServer::Impl::on_message_received(
         bool authenticated = false;
         {
             std::lock_guard lock(clients_mutex);
-            const auto found = authentication.find(sender);
-            if (found == authentication.end()) {
+            const auto found = clients.find(sender);
+            if (found == clients.end()) {
                 sender->disconnect();
                 return;
             }
-            client_id = found->second.client_id;
-            authenticated = found->second.authenticated;
+            client_id = found->second->client_id;
+            authenticated = found->second->authenticated;
         }
 
         if (!authenticated) {
@@ -768,14 +611,14 @@ void InspectorServer::Impl::on_message_received(
             bool accepted = false;
             {
                 std::lock_guard lock(clients_mutex);
-                const auto found = authentication.find(sender);
-                if (found != authentication.end() &&
-                    found->second.verifier &&
+                const auto found = clients.find(sender);
+                if (found != clients.end() &&
+                    found->second->verifier &&
                     std::chrono::steady_clock::now() <
-                        found->second.deadline) {
-                    accepted = found->second.verifier->verify(proof);
-                    found->second.verifier.reset();
-                    found->second.authenticated = accepted;
+                        found->second->deadline) {
+                    accepted = found->second->verifier->verify(proof);
+                    found->second->verifier.reset();
+                    found->second->authenticated = accepted;
                 }
             }
             if (!accepted) {

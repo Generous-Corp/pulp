@@ -54,14 +54,13 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use crate::cmd::trace_open::{run_open, OpenArgs};
 use crate::cmd::trace_query::run_offline_query;
 use crate::error::{CliError, Result};
 
 /// Optional explicit discovery filter understood by the wrapper.
-pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
+pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
 
 /// Output format for `pulp trace query`. JSON is the default because
 /// it is the easiest for agents to parse; humans reach for `table`.
@@ -531,11 +530,6 @@ pub trait InspectorTalker {
     /// command exited non-zero).
     fn call(&self, port: u16, method: &str, params_json: &str)
         -> Result<String>;
-
-    /// Probe an authenticated session independently of any Trace capability.
-    fn is_reachable(&self, port: u16) -> bool {
-        self.call(port, "Session.getCapabilities", "{}").is_ok()
-    }
 }
 
 /// Production talker — shells out to `pulp-cpp
@@ -551,69 +545,8 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        let bin = resolve_inspect_binary().ok_or_else(|| {
-            CliError::Other(
-                "pulp trace: could not find `pulp-cpp` or `pulp` binary \
-                 on PATH (needed to talk to the inspector). Install / \
-                 build the CLI first."
-                    .to_owned(),
-            )
-        })?;
-        let mut command = Command::new(&bin);
-        command.arg("inspect");
-        if port != 0 {
-            command.arg("--port").arg(port.to_string());
-        }
-        let output = command
-            .arg("--command")
-            .arg(method)
-            .arg("--params")
-            .arg(params_json)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "pulp trace: failed to spawn {}: {}",
-                    bin.display(),
-                    e
-                ))
-            })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(CliError::Other(format!(
-                "pulp trace: `{} inspect --command {}` exited with {:?}: {}",
-                bin.display(),
-                method,
-                output.status.code(),
-                stderr.trim(),
-            )));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        crate::cmd::inspector::call("trace", port, method, params_json)
     }
-}
-
-/// Resolve the inspect-capable binary. Preference order:
-///
-/// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
-/// 2. A local in-tree dev build.
-/// 3. `pulp` on `$PATH`, relying on its fallthrough to `pulp-cpp`.
-fn resolve_inspect_binary() -> Option<PathBuf> {
-    if let Some(p) = crate::proc::which("pulp-cpp") {
-        return Some(p);
-    }
-    for candidate in [
-        "build/tools/cli/pulp-cpp",
-        "build/tools/cli/pulp",
-        "build/pulp",
-    ] {
-        let p = PathBuf::from(candidate);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    crate::proc::which("pulp")
 }
 
 /// The clear "no inspector" hint string surfaced after an authenticated
@@ -634,30 +567,11 @@ fn no_inspector_hint(port: u16) -> String {
     )
 }
 
-fn resolve_port_value(
-    flags: &GlobalFlags,
-    configured: Option<&str>,
-) -> Result<u16> {
-    if let Some(p) = flags.port {
-        return Ok(p);
-    }
-    if let Some(value) = configured {
-        return match value.parse::<u16>() {
-            Ok(port) if port != 0 => Ok(port),
-            _ => Err(CliError::BadUsage(format!(
-                "${INSPECTOR_PORT_ENV} must be an integer from 1 to 65535; got `{value}`"
-            ))),
-        };
-    }
-    Ok(0)
-}
-
 /// Resolve the explicit port filter from CLI flags + env. Zero delegates
 /// selection to authenticated discovery. A configured but invalid environment
 /// filter is an error rather than permission to select a different session.
 pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
-    let configured = std::env::var(INSPECTOR_PORT_ENV).ok();
-    resolve_port_value(flags, configured.as_deref())
+    crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure glue
@@ -920,25 +834,55 @@ pub fn run_doctor<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let reachable = talker.is_reachable(port);
-    let (snapshot, snapshot_error) = if reachable {
-        match talker.call(port, "Trace.snapshot", "{}") {
-            Ok(snapshot) => (Some(snapshot), None),
-            Err(error) => (None, Some(error.to_string())),
-        }
-    } else {
-        (None, None)
+    let capabilities_response =
+        talker.call(port, "Session.getCapabilities", "{}");
+    let controls = capabilities_response
+        .as_deref()
+        .ok()
+        .and_then(parse_capture_controls);
+    let snapshot_response = talker.call(port, "Trace.snapshot", "{}");
+    let reachable =
+        capabilities_response.is_ok() || snapshot_response.is_ok();
+    let (snapshot, snapshot_error) = match snapshot_response {
+        Ok(snapshot) => (Some(snapshot), None),
+        Err(error) if reachable => (None, Some(error.to_string())),
+        Err(_) => (None, None),
     };
     let tp = resolve_trace_processor();
     let report = build_doctor_report(
         port,
         reachable,
+        controls,
         snapshot.as_deref(),
         snapshot_error.as_deref(),
         &tp,
         json,
     );
     write!(out, "{report}").map_err(io_err)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CaptureControls {
+    session: bool,
+    trace: bool,
+}
+
+impl CaptureControls {
+    fn ready(self) -> bool {
+        self.session && self.trace
+    }
+}
+
+fn parse_capture_controls(response: &str) -> Option<CaptureControls> {
+    let value: serde_json::Value = serde_json::from_str(response).ok()?;
+    let effective = value.get("effective")?.as_array()?;
+    let contains = |capability: &str| {
+        effective.iter().any(|value| value.as_str() == Some(capability))
+    };
+    Some(CaptureControls {
+        session: contains("session.control"),
+        trace: contains("trace.control"),
+    })
 }
 
 fn json_bool_opt(v: Option<bool>) -> &'static str {
@@ -965,9 +909,10 @@ fn json_str_opt(v: Option<&str>) -> String {
 /// `ready_to_capture` needs a reachable inspector with tracing compiled in;
 /// `ready_to_query` needs a `trace_processor` plus a captured trace.
 #[must_use]
-pub fn build_doctor_report(
+fn build_doctor_report(
     port: u16,
     reachable: bool,
+    controls: Option<CaptureControls>,
     snapshot_json: Option<&str>,
     snapshot_error: Option<&str>,
     tp: &TraceProcessorStatus,
@@ -978,7 +923,9 @@ pub fn build_doctor_report(
     let last_trace_path =
         snapshot_json.and_then(|s| extract_str(s, "last_trace_path"));
 
-    let ready_to_capture = reachable && compiled_in.unwrap_or(false);
+    let ready_to_capture = reachable
+        && compiled_in.unwrap_or(false)
+        && controls.is_some_and(CaptureControls::ready);
     let ready_to_query = tp.available() && last_trace_path.is_some();
 
     if json {
@@ -991,6 +938,8 @@ pub fn build_doctor_report(
         return format!(
             "{{\"port\":{port_json},\
              \"inspector_reachable\":{reachable},\
+             \"session_control_granted\":{},\
+             \"trace_control_granted\":{},\
              \"compiled_in\":{},\
              \"active\":{},\
              \"last_trace_path\":{},\
@@ -1000,6 +949,8 @@ pub fn build_doctor_report(
              \"trace_processor_source\":\"{}\",\
              \"ready_to_capture\":{ready_to_capture},\
              \"ready_to_query\":{ready_to_query}}}\n",
+            json_bool_opt(controls.map(|value| value.session)),
+            json_bool_opt(controls.map(|value| value.trace)),
             json_bool_opt(compiled_in),
             json_bool_opt(active),
             json_str_opt(last_trace_path.as_deref()),
@@ -1028,6 +979,14 @@ pub fn build_doctor_report(
             Some(false) => "NO (rebuild with -DPULP_TRACING=ON)",
             None if reachable => "unknown (Trace.snapshot unavailable)",
             None => "unknown (inspector unreachable)",
+        }
+    ));
+    b.push_str(&format!(
+        "  capture controls ........ {}\n",
+        match controls {
+            Some(value) if value.ready() => "granted",
+            Some(_) => "NOT GRANTED",
+            None => "unknown (Session.getCapabilities unavailable)",
         }
     ));
     if let Some(error) = snapshot_error {
@@ -1441,32 +1400,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_port_prefers_explicit() {
-        let g = GlobalFlags {
-            json: false,
-            port: Some(1234),
-        };
-        assert_eq!(resolve_port_value(&g, Some("0")).unwrap(), 1234);
-    }
-
-    #[test]
-    fn resolve_port_defaults_to_authenticated_discovery() {
-        assert_eq!(
-            resolve_port_value(&GlobalFlags::default(), None).unwrap(),
-            0
-        );
-    }
-
-    #[test]
-    fn resolve_port_rejects_invalid_environment_filters() {
-        let flags = GlobalFlags::default();
-        for value in ["0", "not-a-port", "65536", "-1"] {
-            let error = resolve_port_value(&flags, Some(value)).unwrap_err();
-            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
-        }
-    }
-
-    #[test]
     fn extract_str_reads_flat_string_field() {
         let body = "{\"out_path\":\"/tmp/pulp-1.pftrace\",\"n\":3}";
         assert_eq!(
@@ -1658,11 +1591,31 @@ mod tests {
         assert_eq!(extract_bool(body, "missing"), None);
     }
 
+    #[test]
+    fn capture_controls_come_from_effective_capabilities() {
+        let controls = parse_capture_controls(
+            "{\"effective\":[\"session.control\",\"trace.control\"]}",
+        )
+        .unwrap();
+        assert!(controls.ready());
+
+        let observe = parse_capture_controls(
+            "{\"effective\":[\"session.describe\",\"diagnostics.read\"]}",
+        )
+        .unwrap();
+        assert!(!observe.ready());
+        assert!(parse_capture_controls("{}").is_none());
+    }
+
     fn tp(source: TraceProcessorSource, path: Option<&str>) -> TraceProcessorStatus {
         TraceProcessorStatus {
             path: path.map(PathBuf::from),
             source,
         }
+    }
+
+    fn controls() -> Option<CaptureControls> {
+        Some(CaptureControls { session: true, trace: true })
     }
 
     #[test]
@@ -1671,7 +1624,7 @@ mod tests {
                     \"last_trace_path\":\"/tmp/x.pftrace\"}";
         let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
         let human =
-            build_doctor_report(9147, true, Some(snap), None, &status, false);
+            build_doctor_report(9147, true, controls(), Some(snap), None, &status, false);
         assert!(human.contains("inspector (port 9147) ... reachable"), "{human}");
         assert!(human.contains("tracing compiled in ..... yes"), "{human}");
         assert!(human.contains("last trace .............. /tmp/x.pftrace"), "{human}");
@@ -1683,7 +1636,7 @@ mod tests {
     fn doctor_report_unreachable_marks_unknowns_and_prints_hint() {
         let status = tp(TraceProcessorSource::None, None);
         let human =
-            build_doctor_report(9200, false, None, None, &status, false);
+            build_doctor_report(9200, false, None, None, None, &status, false);
         assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
         assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
         assert!(human.contains("ready to capture a trace . no"), "{human}");
@@ -1697,6 +1650,7 @@ mod tests {
         let human = build_doctor_report(
             9200,
             true,
+            None,
             None,
             Some("capability_denied"),
             &status,
@@ -1713,6 +1667,7 @@ mod tests {
             9200,
             true,
             None,
+            None,
             Some("capability_denied"),
             &status,
             true,
@@ -1728,11 +1683,35 @@ mod tests {
         let snap = "{\"compiled_in\":false,\"active\":false}";
         let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
         let human =
-            build_doctor_report(9147, true, Some(snap), None, &status, false);
+            build_doctor_report(9147, true, controls(), Some(snap), None, &status, false);
         assert!(human.contains("tracing compiled in ..... NO"), "{human}");
         assert!(human.contains("ready to capture a trace . no"), "{human}");
         // No trace yet, so offline query is not ready even with the binary.
         assert!(human.contains("ready to query offline ... no"), "{human}");
+    }
+
+    #[test]
+    fn doctor_report_requires_both_capture_controls() {
+        let snap = "{\"compiled_in\":true,\"active\":false}";
+        let status = tp(TraceProcessorSource::None, None);
+        let controls = Some(CaptureControls {
+            session: true,
+            trace: false,
+        });
+        let json = build_doctor_report(
+            9147,
+            true,
+            controls,
+            Some(snap),
+            None,
+            &status,
+            true,
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["session_control_granted"], true);
+        assert_eq!(value["trace_control_granted"], false);
+        assert_eq!(value["ready_to_capture"], false);
     }
 
     #[test]
@@ -1741,7 +1720,7 @@ mod tests {
                     \"last_trace_path\":\"/tmp/y.pftrace\"}";
         let status = tp(TraceProcessorSource::Env, Some("/opt/tp"));
         let json =
-            build_doctor_report(9147, true, Some(snap), None, &status, true);
+            build_doctor_report(9147, true, controls(), Some(snap), None, &status, true);
         // Parses as one flat JSON object with the readiness contract.
         let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
         assert_eq!(v["port"], 9147);
@@ -1760,7 +1739,7 @@ mod tests {
     fn doctor_report_json_nulls_when_unreachable() {
         let status = tp(TraceProcessorSource::None, None);
         let json =
-            build_doctor_report(9147, false, None, None, &status, true);
+            build_doctor_report(9147, false, None, None, None, &status, true);
         let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
         assert!(v["compiled_in"].is_null());
         assert!(v["last_trace_path"].is_null());
@@ -1773,10 +1752,10 @@ mod tests {
     fn doctor_report_labels_authenticated_discovery() {
         let status = tp(TraceProcessorSource::None, None);
         let human =
-            build_doctor_report(0, false, None, None, &status, false);
+            build_doctor_report(0, false, None, None, None, &status, false);
         assert!(human.contains("inspector (authenticated discovery)"));
         let json =
-            build_doctor_report(0, false, None, None, &status, true);
+            build_doctor_report(0, false, None, None, None, &status, true);
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(value["port"].is_null());
     }
@@ -1880,6 +1859,35 @@ mod tests {
         assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
         assert!(human.contains("capability_denied"), "{human}");
         assert!(!human.contains("no inspector available"), "{human}");
+    }
+
+    #[test]
+    fn dispatch_doctor_keeps_reachability_when_capability_listing_is_denied() {
+        struct CapabilitiesDeniedTalker;
+        impl InspectorTalker for CapabilitiesDeniedTalker {
+            fn call(
+                &self,
+                _port: u16,
+                method: &str,
+                _params: &str,
+            ) -> Result<String> {
+                if method == "Trace.snapshot" {
+                    Ok("{\"compiled_in\":true}".to_owned())
+                } else {
+                    Err(CliError::Other("capability_denied".to_owned()))
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        run_doctor(9200, true, &CapabilitiesDeniedTalker, &mut output)
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["inspector_reachable"], true);
+        assert_eq!(value["compiled_in"], true);
+        assert!(value["session_control_granted"].is_null());
+        assert_eq!(value["ready_to_capture"], false);
     }
 
     #[test]

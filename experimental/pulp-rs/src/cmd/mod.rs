@@ -19,6 +19,7 @@ pub mod docs;
 pub mod doctor;
 pub mod help;
 pub mod identity;
+pub(crate) mod inspector;
 pub mod motion;
 pub mod orchestrate;
 pub mod pkg;

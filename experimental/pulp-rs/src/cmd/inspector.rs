@@ -1,0 +1,108 @@
+//! Shared adapter for Rust commands that delegate to `pulp-cpp inspect`.
+
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
+use crate::error::{CliError, Result};
+
+pub(crate) const PORT_ENV: &str = "PULP_INSPECTOR_PORT";
+
+pub(crate) fn call(
+    command_name: &str,
+    port: u16,
+    method: &str,
+    params_json: &str,
+) -> Result<String> {
+    let bin = resolve_binary().ok_or_else(|| {
+        CliError::Other(format!(
+            "pulp {command_name}: could not find `pulp-cpp` or `pulp` binary \
+             on PATH (needed to talk to the inspector). Install / build the CLI first."
+        ))
+    })?;
+    let mut command = Command::new(&bin);
+    command.arg("inspect");
+    if port != 0 {
+        command.arg("--port").arg(port.to_string());
+    }
+    let output = command
+        .arg("--command")
+        .arg(method)
+        .arg("--params")
+        .arg(params_json)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| {
+            CliError::Other(format!(
+                "pulp {command_name}: failed to spawn {}: {error}",
+                bin.display()
+            ))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CliError::Other(format!(
+            "pulp {command_name}: `{} inspect --command {method}` exited with {:?}: {}",
+            bin.display(),
+            output.status.code(),
+            stderr.trim(),
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub(crate) fn resolve_port(explicit: Option<u16>, configured: Option<&str>) -> Result<u16> {
+    if let Some(port) = explicit {
+        return Ok(port);
+    }
+    if let Some(value) = configured {
+        return match value.parse::<u16>() {
+            Ok(port) if port != 0 => Ok(port),
+            _ => Err(CliError::BadUsage(format!(
+                "${PORT_ENV} must be an integer from 1 to 65535; got `{value}`"
+            ))),
+        };
+    }
+    Ok(0)
+}
+
+pub(crate) fn resolve_port_from_env(explicit: Option<u16>) -> Result<u16> {
+    let configured = std::env::var(PORT_ENV).ok();
+    resolve_port(explicit, configured.as_deref())
+}
+
+fn resolve_binary() -> Option<PathBuf> {
+    if let Some(path) = crate::proc::which("pulp-cpp") {
+        return Some(path);
+    }
+    for candidate in [
+        "build/tools/cli/pulp-cpp",
+        "build/tools/cli/pulp",
+        "build/pulp",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    crate::proc::which("pulp")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_port_wins_and_missing_filter_auto_discovers() {
+        assert_eq!(resolve_port(Some(1234), Some("0")).unwrap(), 1234);
+        assert_eq!(resolve_port(None, None).unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_environment_filters_are_rejected() {
+        for value in ["0", "not-a-port", "65536", "-1"] {
+            let error = resolve_port(None, Some(value)).unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
+        }
+    }
+}

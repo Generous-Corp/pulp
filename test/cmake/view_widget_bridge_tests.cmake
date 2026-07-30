@@ -84,7 +84,12 @@ target_link_libraries(pulp-test-inspector-discovery PRIVATE
     pulp::inspect-discovery Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-discovery)
 
-add_executable(pulp-test-inspector-client test_inspector_client.cpp)
+add_executable(
+    pulp-test-inspector-client
+    test_inspector_client.cpp
+    test_inspector_server_lifecycle.cpp
+    test_inspector_client_limits.cpp
+)
 target_link_libraries(pulp-test-inspector-client PRIVATE
     pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-client)
