@@ -423,6 +423,63 @@ TEST_CASE("client event handlers can issue follow-up requests",
     CHECK_FALSE(follow_up->is_error);
 }
 
+TEST_CASE("client reconnect discards queued events from the prior session",
+          "[inspect][client][events][generation]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_entered = false;
+    bool release_first = false;
+    std::vector<int> delivered;
+    InspectorClient client;
+    client.set_event_handler([&](const auto& event) {
+        const auto params = choc::json::parse(event.params_json);
+        const auto sequence =
+            static_cast<int>(params["sequence"].getInt64());
+        std::unique_lock lock(mutex);
+        delivered.push_back(sequence);
+        if (sequence == 1) {
+            first_entered = true;
+            cv.notify_all();
+            cv.wait_for(lock, std::chrono::seconds(2),
+                        [&] { return release_first; });
+        }
+        cv.notify_all();
+    });
+    REQUIRE(client.connect(records.front(), fixture.reader));
+    fixture.server.broadcast(pulp::inspect::make_event(
+        "State.parameterChanged", R"({"sequence":1})"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1),
+                            [&] { return first_entered; }));
+    }
+    fixture.server.broadcast(pulp::inspect::make_event(
+        "State.parameterChanged", R"({"sequence":2})"));
+    REQUIRE_FALSE(
+        client.request("Session.getCapabilities").is_error);
+    client.disconnect();
+    REQUIRE(client.connect(records.front(), fixture.reader));
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+    fixture.server.broadcast(pulp::inspect::make_event(
+        "State.parameterChanged", R"({"sequence":3})"));
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return delivered.size() >= 2;
+        }));
+        CHECK(delivered == std::vector<int>{1, 3});
+    }
+}
+
 TEST_CASE("response timeout fences may-have-applied requests",
           "[inspect][client][timeout][mutation]") {
     TemporaryDirectory temporary;

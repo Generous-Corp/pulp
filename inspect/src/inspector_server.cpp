@@ -62,6 +62,7 @@ public:
         std::string client_id;
         bool authenticated = false;
         std::chrono::steady_clock::time_point deadline;
+        std::uint64_t generation = 0;
     };
 
     class OutboundClient
@@ -162,6 +163,7 @@ public:
     std::size_t active_callbacks = 0;
     std::map<std::thread::id, std::size_t> callback_threads;
     std::atomic<std::uint64_t> next_client_id{1};
+    std::atomic<std::uint64_t> session_generation{0};
     std::size_t max_clients = 16;
     std::atomic<int> port{0};
     InspectorSession* session = nullptr;
@@ -267,7 +269,9 @@ public:
                         client_id,
                         false,
                         std::chrono::steady_clock::now() +
-                            authentication_timeout});
+                            authentication_timeout,
+                        session_generation.load(
+                            std::memory_order_acquire)});
             }
             const std::weak_ptr<events::InterprocessConnection> weak = client;
             const std::weak_ptr<Impl> weak_self = shared_from_this();
@@ -465,6 +469,7 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         session = config.session;
         discovery = config.discovery;
         token = std::move(config.token);
+        session_generation.fetch_add(1, std::memory_order_acq_rel);
     }
     authentication_timeout =
         std::max(config.authentication_timeout, std::chrono::milliseconds(1));
@@ -569,6 +574,7 @@ void InspectorServer::Impl::stop() {
 }
 
 void InspectorServer::Impl::stop_locked() {
+    session_generation.fetch_add(1, std::memory_order_acq_rel);
     transition_waiting_for_callbacks.store(true, std::memory_order_release);
     {
         std::lock_guard lock(clients_mutex);
@@ -639,6 +645,7 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
         descriptor->kind != InspectorMethodKind::Event) {
         return;
     }
+    std::uint64_t generation = 0;
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         if (!session ||
@@ -646,16 +653,23 @@ void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
             !session->policy().is_granted(descriptor->capability)) {
             return;
         }
+        generation =
+            session_generation.load(std::memory_order_acquire);
     }
 
     auto json = encode_message(event);
     std::vector<std::shared_ptr<events::InterprocessConnection>> overflowed;
     {
         std::lock_guard lock(clients_mutex);
+        if (session_generation.load(std::memory_order_acquire) !=
+            generation) {
+            return;
+        }
         for (const auto& client : owned_clients) {
             const auto auth = authentication.find(client.get());
             if (auth != authentication.end() &&
-                auth->second.authenticated) {
+                auth->second.authenticated &&
+                auth->second.generation == generation) {
                 if (const auto outbound =
                         outbound_clients.find(client.get());
                     outbound != outbound_clients.end()) {
