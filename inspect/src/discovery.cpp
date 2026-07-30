@@ -642,18 +642,21 @@ std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
     if (!validate_private_directory(runtime_directory_))
         return records;
     std::error_code error;
-    for (const auto& entry :
-         std::filesystem::directory_iterator(runtime_directory_, error)) {
-        if (error)
-            break;
+    auto iterator =
+        std::filesystem::directory_iterator(runtime_directory_, error);
+    const auto end = std::filesystem::directory_iterator{};
+    while (!error && iterator != end) {
+        const auto& entry = *iterator;
         const auto filename = entry.path().filename().string();
-        if (filename.size() <= 5 ||
-            filename.substr(filename.size() - 5) != ".json")
-            continue;
-        if (auto record = decode_record(runtime_directory_, entry.path());
-            record && read_credential(*record).has_value()) {
-            records.push_back(std::move(*record));
+        if (filename.size() > 5 &&
+            filename.substr(filename.size() - 5) == ".json") {
+            if (auto record =
+                    decode_record(runtime_directory_, entry.path());
+                record && read_credential(*record).has_value()) {
+                records.push_back(std::move(*record));
+            }
         }
+        iterator.increment(error);
     }
     std::sort(records.begin(), records.end(), [](const auto& left,
                                                   const auto& right) {

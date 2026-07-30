@@ -34,6 +34,8 @@ target_link_libraries(pulp-inspect-client
     PRIVATE pulp::events)
 
 add_library(pulp-inspect-runtime
+    src/inspector_connected_client.hpp
+    src/inspector_publication.hpp
     src/inspector_server.cpp
     src/main_thread_rpc.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
