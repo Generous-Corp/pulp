@@ -106,6 +106,29 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       return null;
     }
   };
+  // The accent this control is actually drawn in, resolved by the browser.
+  //
+  // Reading the PACK's accent token instead is wrong whenever a panel scopes or
+  // overrides its palette -- which a good one does -- because the token set is
+  // the pack default, not what this control ended up. That mismatch paints a
+  // green value arc onto an orange knob: our render comes out worse than the
+  // browser's, and every pixel gate still passes because the arc is ours alone.
+  //
+  // --accent-ring first: a pack that distinguishes the ring from the general
+  // accent means the ring colour for the ring. Computed style is what makes
+  // this correct -- it resolves inheritance and inline overrides alike, so an
+  // accent set anywhere up the tree arrives here already resolved.
+  const accentColor = element => {
+    try {
+      const painted = element.querySelector('[data-pulp-paint]') || element;
+      const style = window.getComputedStyle(painted);
+      const ring = style.getPropertyValue('--accent-ring').trim();
+      if (ring) return ring;
+      return style.getPropertyValue('--accent').trim();
+    } catch (e) {
+      return '';
+    }
+  };
   // A design-system component states what it is in its class. A pulp-knob is a
   // styled div whose drag handlers sit on an ancestor, so it has no native tag,
   // no ARIA role and no inline handler -- every signal below walks past it, and
@@ -269,6 +292,7 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       // only the author knows which child is the painted control. Inferring it
       // would hard-code one design system's class vocabulary into the importer.
       paint_bounds: paintBox(element),
+      accent: accentColor(element),
       data_pulp: data,
       evidence,
       confidence,

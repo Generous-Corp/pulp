@@ -320,7 +320,20 @@ int lower_semantic_controls(const fs::path& path,
             const auto it = ir.tokens.colors.find(name);
             return it == ir.tokens.colors.end() ? std::string{} : it->second;
         };
-        if (const auto accent = token("css/accent"); !accent.empty())
+        // The control's OWN resolved accent wins over the pack token. A panel
+        // that scopes or overrides its palette -- which a good one does -- is
+        // invisible to the pack's token set, so the pack accent lands a green
+        // arc on an orange knob and our render comes out WORSE than the
+        // browser's, with every pixel gate still green because the arc is ours.
+        //
+        // Read from the CANDIDATE, not from `data`: `data` is the author's
+        // data-pulp-* attributes, and the accent is resolved by the browser
+        // rather than declared. Reading it from `data` compiles, runs, and is
+        // always empty -- a silent fall-through to the pack token.
+        const auto declared_accent = string_member(candidate, "accent");
+        if (!declared_accent.empty())
+            control.attributes["design_accent"] = declared_accent;
+        else if (const auto accent = token("css/accent"); !accent.empty())
             control.attributes["design_accent"] = accent;
         if (const auto track = token("css/line-strong"); !track.empty())
             control.attributes["design_track"] = track;
