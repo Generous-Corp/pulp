@@ -32,8 +32,8 @@ struct AudioRendererLimits {
     float offline_stretch_max_time_ratio = 16.0f;
     std::uint32_t max_realtime_stretch_states = 8u;
     // Per-allocation address ceiling passed to every prepared realtime
-    // stretcher. Aggregate admission reserves this entire amount per state so
-    // the bank remains bounded without depending on allocator bookkeeping.
+    // stretcher. Aggregate admission separately sums each processor's
+    // compositional retained-storage geometry into the bank byte limit below.
     std::uint64_t max_realtime_stretch_allocation_bytes = 64u * 1024u * 1024u;
     std::uint64_t max_realtime_stretch_state_bytes = 512u * 1024u * 1024u;
     float realtime_stretch_max_time_ratio = 4.0f;
