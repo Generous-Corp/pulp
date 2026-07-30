@@ -149,27 +149,19 @@ struct StreamRender {
     int backpressure_count = 0;
 };
 
-StreamRender render_stretched_stream(const std::vector<float>& input,
-                                     float ratio,
-                                     const std::vector<int>& schedule,
-                                     bool drain_after_each_feed) {
+StreamRender render_prepared_stretched_stream(RealtimePitchTimeProcessor& proc,
+                                              const std::vector<float>& input,
+                                              const std::vector<int>& schedule,
+                                              int max_block,
+                                              bool drain_after_each_feed) {
     REQUIRE_FALSE(schedule.empty());
-    RealtimePitchTimeConfig config = quality_config();
-    config.mode = PitchTimeMode::time_stretch;
-    config.quality = PitchTimeQuality::low_latency;
-    config.max_block = *std::max_element(schedule.begin(), schedule.end());
-    config.max_time_ratio = 2.0f;
-
-    RealtimePitchTimeProcessor proc;
-    proc.prepare(kSr, config);
-    proc.set_time_ratio(ratio);
 
     StreamRender rendered;
-    std::vector<float> scratch(static_cast<size_t>(config.max_block));
+    std::vector<float> scratch(static_cast<size_t>(max_block));
     float* output[] = {scratch.data()};
     auto drain = [&] {
         while (proc.available_stretched() > 0) {
-            const int count = std::min(proc.available_stretched(), config.max_block);
+            const int count = std::min(proc.available_stretched(), max_block);
             REQUIRE(proc.read_stretched(output, count) == count);
             rendered.samples.insert(rendered.samples.end(), scratch.begin(),
                                     scratch.begin() + count);
@@ -206,6 +198,23 @@ StreamRender render_stretched_stream(const std::vector<float>& input,
     REQUIRE(proc.available_stretched() == 0);
     REQUIRE(proc.finalize() == PitchTimeStreamFinalizeStatus::complete);
     return rendered;
+}
+
+StreamRender render_stretched_stream(const std::vector<float>& input,
+                                     float ratio,
+                                     const std::vector<int>& schedule,
+                                     bool drain_after_each_feed) {
+    RealtimePitchTimeConfig config = quality_config();
+    config.mode = PitchTimeMode::time_stretch;
+    config.quality = PitchTimeQuality::low_latency;
+    config.max_block = *std::max_element(schedule.begin(), schedule.end());
+    config.max_time_ratio = 2.0f;
+
+    RealtimePitchTimeProcessor proc;
+    proc.prepare(kSr, config);
+    proc.set_time_ratio(ratio);
+    return render_prepared_stretched_stream(proc, input, schedule, config.max_block,
+                                            drain_after_each_feed);
 }
 
 } // namespace
@@ -463,8 +472,20 @@ TEST_CASE("RealtimePitchTimeProcessor declares priming and preserves an EOF tail
 TEST_CASE("RealtimePitchTimeProcessor backpressure is lossless and close is final",
           "[signal][pitch-time][streaming]") {
     auto input = sine(317.0, 0.5, 80'000);
-    const auto reference = render_stretched_stream(input, 2.0f, {1024}, true);
-    const auto pressured = render_stretched_stream(input, 2.0f, {1024}, false);
+    RealtimePitchTimeConfig stream_config = quality_config();
+    stream_config.mode = PitchTimeMode::time_stretch;
+    stream_config.quality = PitchTimeQuality::low_latency;
+    stream_config.max_block = 1024;
+    stream_config.max_time_ratio = 2.0f;
+    RealtimePitchTimeProcessor stream_proc;
+    stream_proc.prepare(kSr, stream_config);
+    stream_proc.set_time_ratio(2.0f);
+    const auto reference =
+        render_prepared_stretched_stream(stream_proc, input, {1024}, 1024, true);
+    stream_proc.reset();
+    stream_proc.set_time_ratio(2.0f);
+    const auto pressured =
+        render_prepared_stretched_stream(stream_proc, input, {1024}, 1024, false);
     REQUIRE(pressured.backpressure_count > 0);
     REQUIRE(pressured.samples == reference.samples);
 

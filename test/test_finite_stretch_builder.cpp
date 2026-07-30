@@ -414,9 +414,58 @@ TEST_CASE("Fractional synthesis hops do not lose quarters at large absolute posi
     detail::FractionalSynthesisHopAccumulator accumulator;
     int bounded_advance = 0;
     for (int frame = 0; frame < 4; ++frame)
-        bounded_advance += accumulator.advance(exact_hop);
+        bounded_advance += accumulator.advance(exact_hop, 1, 2048);
     REQUIRE(bounded_advance == 1025);
     REQUIRE(accumulator.residual() == 0.0);
+}
+
+TEST_CASE("Fractional synthesis hop clamp debt is repaid by a later large hop",
+          "[signal][pitch-time][finite-stretch]") {
+    constexpr std::array exact_hops{0.25, 0.25, 0.25, 0.25, 10.0};
+
+    // Negative control for the old split operation: rounding updates the
+    // residual before the caller clamps, so the four forced one-sample hops are
+    // forgotten and the final hop incorrectly remains ten.
+    double old_residual = 0.0;
+    std::array<int, exact_hops.size()> old_emitted{};
+    for (std::size_t index = 0; index < exact_hops.size(); ++index) {
+        const auto accumulated = old_residual + exact_hops[index];
+        const auto rounded = static_cast<int>(std::llround(accumulated));
+        old_residual = accumulated - rounded;
+        old_emitted[index] = std::clamp(rounded, 1,
+                                        static_cast<int>(std::ceil(exact_hops[index])) + 1);
+    }
+    REQUIRE(old_emitted == std::array{1, 1, 1, 1, 10});
+
+    detail::FractionalSynthesisHopAccumulator accumulator;
+    std::array<int, exact_hops.size()> emitted{};
+    for (std::size_t index = 0; index < exact_hops.size(); ++index)
+        emitted[index] = accumulator.advance(exact_hops[index], 1, 16);
+
+    REQUIRE(emitted == std::array{1, 1, 1, 1, 7});
+    REQUIRE(accumulator.residual() == 0.0);
+    REQUIRE(accumulator.correction_debt() == 0);
+}
+
+TEST_CASE("Fractional synthesis hop debt survives sustained subunit hops",
+          "[signal][pitch-time][finite-stretch]") {
+    detail::FractionalSynthesisHopAccumulator accumulator;
+    std::int64_t emitted_total = 0;
+    for (int frame = 0; frame < 4000; ++frame)
+        emitted_total += accumulator.advance(0.25, 1, 16);
+
+    REQUIRE(emitted_total == 4000);
+    REQUIRE(accumulator.residual() == 0.0);
+    REQUIRE(accumulator.correction_debt() == -3000);
+    REQUIRE(static_cast<std::uint64_t>(-accumulator.correction_debt())
+            <= static_cast<std::uint64_t>(emitted_total));
+
+    for (int frame = 0; frame < 200; ++frame)
+        emitted_total += accumulator.advance(16.0, 1, 16);
+    REQUIRE(emitted_total == 4200);
+    REQUIRE(accumulator.residual() == 0.0);
+    REQUIRE(accumulator.correction_debt() == 0);
+    REQUIRE(accumulator.advance(16.0, 1, 16) == 16);
 }
 
 TEST_CASE("Finite stretch builder handles empty and multichannel streams",
