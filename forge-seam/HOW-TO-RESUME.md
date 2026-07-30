@@ -71,12 +71,33 @@ the hero. Tried, in order: `align_self = center` on the accessory in chrome;
 `dim_width = 100%` plus `justify_content = center` on the row; `flex_grow = 0`
 and `flex_shrink = 0` on each button. None moved them.
 
-**Do not guess at this a fourth time.** Measure it: build the shell's view in a
-test, walk to the accessory and its two children, and print
-`absolute_bounds()` for each. The numbers will say whether the row is full-width
-with the buttons pinned, or the row itself is being stretched and the buttons
-are simply following. `examples/forge-modular/test/shell_interaction.cpp` in the
-Rack repo has the walk-and-measure helpers to copy.
+**Do not guess at this a fourth time — and the measurement itself crashed.**
+
+Attempting to measure it did this:
+
+```cpp
+auto view = shell.create_view();
+view->set_bounds({0, 0, kDesignWidth, kDesignHeight});
+view->layout_children();      // then walk the tree
+```
+
+→ **SIGSEGV.** Removed; it is not a valid test and it left the suite red.
+
+That is the **second** crash touching this shell's view tree, and the first one
+a human hit. Together they are a lead, not two coincidences:
+
+| | Where |
+|---|---|
+| Reported crash | `rebuild_marketplace_cards` destroying a card's `Label`, wild pointer |
+| This crash | walking the tree after `create_view()` + a manual `layout_children()` |
+
+`render_to_file()` on the same tree is fine, and the seam tests are fine, so the
+tree is not simply broken — something about laying it out or tearing it down
+by hand is. **Chase this before the centring**, which is cosmetic by comparison.
+Two candidates worth ruling out first: whether `layout_children()` may be called
+directly on a chrome root at all (`render_to_file` may do a different pass), and
+whether `home_accessory()`'s view, allocated in a different translation unit
+from chrome's, is being destroyed under a mismatched view layout.
 
 Also still owed for Phase 3: the tabs must drive which generator Build reaches,
 with **both** sides asserted -- checking one side of a boolean is what let

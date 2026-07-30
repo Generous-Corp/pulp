@@ -23,12 +23,14 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -208,3 +210,4 @@ TEST_CASE("Forge Modular reports an unwired install rather than claiming success
     CHECK_FALSE(shell.install_generated_bundle(bundle, 48000.0, 512, {}, info, err));
     CHECK_FALSE(err.empty());
 }
+
