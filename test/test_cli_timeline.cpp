@@ -331,9 +331,13 @@ TEST_CASE("timeline CLI interchange requires exact consent and publishes new dir
     REQUIRE(run_cli(cli + " seq export " + quote(project) + " --format smf --plan --out " +
                     quote(planned) + " > /dev/null 2>&1") == 2);
     REQUIRE(run_cli(cli + " seq export " + quote(project) +
+                    " --format smf --plan --out '' > /dev/null 2>&1") == 2);
+    REQUIRE(run_cli(cli + " seq export " + quote(project) +
                     " --format smf --plan --accept-loss clip.absolute > /dev/null 2>&1") == 2);
     REQUIRE(run_cli(cli + " seq export " + quote(project) +
                     " --format smf > /dev/null 2>&1") == 2);
+    REQUIRE(run_cli(cli + " seq export " + quote(project) +
+                    " --format smf --out '' > /dev/null 2>&1") == 2);
     const auto export_result = temp.path() / "export-result.json";
     REQUIRE(run_cli(export_command + " > " + quote(export_result)) == 0);
     const auto export_json = read_text(export_result);
@@ -379,6 +383,8 @@ TEST_CASE("timeline CLI interchange requires exact consent and publishes new dir
     REQUIRE(refusal_json.find(R"json("required_consent":[)json") != std::string::npos);
 
     const auto imported = temp.path() / "imported";
+    REQUIRE(run_cli(cli + " seq import " + quote(exported / "project.mid") +
+                    " --format smf --out '' > /dev/null 2>&1") == 2);
     REQUIRE(run_cli(cli + " seq import " + quote(exported / "project.mid") +
                     " --format smf --out " + quote(imported) + " > /dev/null") == 0);
     REQUIRE(std::filesystem::is_regular_file(imported / "project.json"));

@@ -269,7 +269,7 @@ int cmd_seq(const std::vector<std::string>& args) {
     if (subcommand == "export" || subcommand == "import") {
         if (args.size() < 2)
             return bad_seq_usage(subcommand + " requires an input path");
-        fs::path output;
+        std::optional<fs::path> output;
         std::string format;
         std::vector<std::string> accepted_losses;
         bool plan_only = false;
@@ -297,21 +297,25 @@ int cmd_seq(const std::vector<std::string>& args) {
         const auto input = pulp::tools::timeline::filesystem_path_from_utf8(args[1]);
         if (subcommand == "export") {
             if (plan_only) {
-                if (!output.empty())
+                if (output.has_value())
                     return bad_seq_usage("export --plan does not accept --out");
                 if (!accepted_losses.empty())
                     return bad_seq_usage("export --plan does not accept --accept-loss");
                 return emit(pulp::tools::timeline::plan_export_project(ProjectSource::file(input),
                                                                        format));
             }
-            if (output.empty())
+            if (!output.has_value())
                 return bad_seq_usage("export requires --out unless --plan is used");
+            if (output->empty())
+                return bad_seq_usage("export --out requires a non-empty new directory path");
             return emit(pulp::tools::timeline::export_project(ProjectSource::file(input), format,
-                                                               output, accepted_losses));
+                                                               *output, accepted_losses));
         }
-        if (output.empty())
+        if (!output.has_value())
             return bad_seq_usage("import requires --out");
-        return emit(pulp::tools::timeline::import_project(input, format, output));
+        if (output->empty())
+            return bad_seq_usage("import --out requires a non-empty new directory path");
+        return emit(pulp::tools::timeline::import_project(input, format, *output));
     }
 
     return bad_seq_usage("unknown subcommand: " + subcommand);
