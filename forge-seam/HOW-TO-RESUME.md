@@ -50,7 +50,7 @@ visual work before that was noticed.
 | 0 — no-leak guard | **done**, fails on a 1px shared change, passes when reverted |
 | 1 — the seam | **done**, 3 changes, 3 products byte-identical, each proven live |
 | 2 — Forge Modular runs Forge's UI | **done**, 7.2/255 vs Forge Instrument, verified windowed |
-| 3 — the tabs | **in progress** — see below |
+| 3 — the tabs | **done** — centred, switch both ways, negative-controlled |
 | 4–8 | not started; see `../SPEC-forge-modular.md` |
 
 ## Phase 3, exactly where it stands
@@ -66,10 +66,28 @@ Working, and visible in `design/prototype/modular-tabs-wip.png`:
   the tree and drop a half-typed prompt. It leaves a non-empty prompt alone.
 - Clicking the already-active tab is a no-op rather than a redundant rebuild.
 
-**Not working: the row will not centre.** The two tabs sit at opposite edges of
-the hero. Tried, in order: `align_self = center` on the accessory in chrome;
-`dim_width = 100%` plus `justify_content = center` on the row; `flex_grow = 0`
-and `flex_shrink = 0` on each button. None moved them.
+**The centring is fixed, and the four failed guesses were all aimed at the wrong
+thing.** Measuring took one run:
+
+```
+row   x=60  w=1100  kids=2
+TAB Module x=-554 w=1100
+TAB Patch  x=554  w=1100
+```
+
+`justify_content: center` was working perfectly. Each **tab** was sized to the
+full row width, so centring two 1100px children inside 1100px put one at -554
+and the other at +554. An explicit `preferred_width` on the buttons fixed it:
+
+```
+TAB Module x=442 w=104
+TAB Patch  x=554 w=104
+```
+
+Four attempts went at the container — `align_self`, `dim_width`,
+`justify_content`, `flex_grow/shrink` — because the symptom looked like a
+container problem. Ten lines of measurement said otherwise. **Measure before the
+third attempt, never after the fourth.**
 
 **Do not guess at this a fourth time — and the measurement itself crashed.**
 

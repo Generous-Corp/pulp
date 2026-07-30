@@ -273,3 +273,49 @@ TEST_CASE("Forge Modular's view tree can be walked", "[.crash]") {
     INFO("walked " << views << " views");
     CHECK(views > 100);       // a real chrome, not a stub
 }
+
+TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
+    // The whole of it: the tab must move the mode, and the mode must reach every
+    // string that depends on it. Both directions, because asserting one side of
+    // a boolean is what let "Build always made a patch" ship once already.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    pulp::view::TextButton* module_tab = nullptr;
+    pulp::view::TextButton* patch_tab = nullptr;
+    std::function<void(pulp::view::View&)> find = [&](pulp::view::View& v) {
+        if (auto* b = dynamic_cast<pulp::view::TextButton*>(&v)) {
+            if (b->label() == "Module") module_tab = b;
+            if (b->label() == "Patch") patch_tab = b;
+        }
+        for (std::size_t i = 0; i < v.child_count(); ++i) find(*v.child_at(i));
+    };
+    find(*view);
+    REQUIRE(module_tab != nullptr);
+    REQUIRE(patch_tab != nullptr);
+    REQUIRE(patch_tab->on_click);          // a tab with no handler is decoration
+
+    CHECK(shell.artifact() == forge_modular::Artifact::module);
+    CHECK(shell.chrome_copy().hero_title == "What should the module do?");
+    CHECK(shell.composer_row().right[1].label == "Build module");
+
+    patch_tab->on_click();
+    CHECK(shell.artifact() == forge_modular::Artifact::patch);
+    CHECK(shell.chrome_copy().hero_title == "What should the patch do?");
+    CHECK(shell.chrome_copy().badge == "PATCH");
+    CHECK(shell.composer_row().right[1].label == "Build patch");
+
+    module_tab->on_click();               // and back, so it is not one-way
+    CHECK(shell.artifact() == forge_modular::Artifact::module);
+    CHECK(shell.chrome_copy().hero_title == "What should the module do?");
+    CHECK(shell.composer_row().right[1].label == "Build module");
+}

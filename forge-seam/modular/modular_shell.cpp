@@ -151,6 +151,10 @@ std::unique_ptr<View> ForgeModularShell::home_accessory() {
     const auto add_tab = [&](const char* label, Artifact which) -> TextButton* {
         auto b = std::make_unique<TextButton>(label);
         auto* ptr = b.get();
+        // Measured: without an explicit width each tab took the FULL row width
+        // (1100), so centring two of them put one at x=-554 and the other at
+        // +554. justify_content was never the problem -- the children were.
+        b->flex().preferred_width = 104;
         b->flex().preferred_height = 30;
         b->flex().flex_grow = 0;
         b->flex().flex_shrink = 0;
