@@ -87,15 +87,24 @@ def _run(script: str, env: dict[str, str]) -> tuple[int, dict[str, str], str]:
         out = Path(tmp) / "github_output"
         out.write_text("")
 
-        full = dict(os.environ)
-        full["PATH"] = f"{binp}:{full['PATH']}"
+        # Drop the ambient GITHUB_* namespace before building the fake one.
+        # These tests run INSIDE Actions, where every one of these is already
+        # set to the real run's values — so a `setdefault` silently keeps the
+        # runner's value and the case under test never happens. That is not
+        # hypothetical: GITHUB_SHA defaulted to "EVENT_MERGE" locally and to the
+        # real head SHA on CI, so `test_pull_request_path_unchanged` passed on a
+        # laptop and failed in CI on the same commit. Scrubbing the prefix
+        # rather than overwriting the four names read today keeps a step that
+        # starts reading a fifth from inheriting the runner's.
+        full = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        full["PATH"] = f"{binp}:{os.environ['PATH']}"
         full["GITHUB_OUTPUT"] = str(out)
         full["GITHUB_REPOSITORY"] = "Generous-Corp/pulp"
         full["GH_TOKEN"] = "x"
-        full.setdefault("GITHUB_SHA", "EVENT_MERGE")
+        full["GITHUB_SHA"] = "EVENT_MERGE"
         for key in ("DISPATCH_PR", "PR_BASE", "PR_SOURCE_HEAD", "MERGE_BASE",
                     "MERGE_HEAD", "EVENT_BASE", "EVENT_HEAD", "EVENT_NUMBER"):
-            full.setdefault(key, "")
+            full[key] = ""
         full.update(env)
 
         proc = subprocess.run(["bash", str(body)], env=full, cwd=tmp,
