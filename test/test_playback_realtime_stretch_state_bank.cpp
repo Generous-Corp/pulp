@@ -29,6 +29,23 @@ AudioRendererLimits limits() {
     return value;
 }
 
+std::uint64_t retained_charge(const RealtimeStretchStateSpec& state,
+                              std::uint32_t maximum_block_frames = 128,
+                              std::uint64_t allocation_ceiling =
+                                  std::numeric_limits<std::uint64_t>::max()) {
+    signal::RealtimePitchTimeConfig config;
+    config.mode = signal::PitchTimeMode::time_stretch;
+    config.quality = state.quality;
+    config.channels = static_cast<int>(state.channels);
+    config.max_block = static_cast<int>(maximum_block_frames);
+    config.max_time_ratio = state.max_time_ratio;
+    signal::RealtimePitchTimePreparedGeometry<float> geometry;
+    REQUIRE(signal::checked_realtime_pitch_time_prepared_geometry(
+                config, 1.0, allocation_ceiling, geometry)
+            == signal::PitchTimePrepareStatus::prepared);
+    return geometry.retained_bytes;
+}
+
 } // namespace
 
 TEST_CASE("realtime stretch bank admission is immutable and exactly bounded") {
@@ -39,8 +56,8 @@ TEST_CASE("realtime stretch bank admission is immutable and exactly bounded") {
     REQUIRE(admitted);
     REQUIRE(admitted.actual == specs.size());
     REQUIRE(admitted.limit == configured.max_realtime_stretch_states);
-    REQUIRE(admitted.reserved_state_bytes ==
-            specs.size() * configured.max_realtime_stretch_allocation_bytes);
+    const auto expected_bytes = retained_charge(specs[0]) + retained_charge(specs[1]);
+    REQUIRE(admitted.reserved_state_bytes == expected_bytes);
 
     auto rejected = admit_realtime_stretch_state_bank(
         std::array{spec(10), spec(20), spec(30)}, 48'000.0, 128, configured);
@@ -49,10 +66,11 @@ TEST_CASE("realtime stretch bank admission is immutable and exactly bounded") {
     REQUIRE(rejected.limit == 2);
 
     auto byte_limited = configured;
-    byte_limited.max_realtime_stretch_state_bytes =
-        byte_limited.max_realtime_stretch_allocation_bytes;
+    byte_limited.max_realtime_stretch_state_bytes = expected_bytes - 1;
     rejected = admit_realtime_stretch_state_bank(specs, 48'000.0, 128, byte_limited);
     REQUIRE(rejected.code == RealtimeStretchStateBankError::StateBytesExceeded);
+    REQUIRE(rejected.actual == expected_bytes);
+    REQUIRE(rejected.limit == expected_bytes - 1);
 
     rejected = admit_realtime_stretch_state_bank(
         std::array{spec(10), spec(10)}, 48'000.0, 128, configured);
@@ -74,6 +92,29 @@ TEST_CASE("realtime stretch bank admission is immutable and exactly bounded") {
         std::array{spec(10)}, 48'000.0, 128, allocation_limited);
     REQUIRE(rejected.code == RealtimeStretchStateBankError::ProcessorPrepareRejected);
     REQUIRE(rejected.processor_status == signal::PitchTimePrepareStatus::unrepresentable_capacity);
+}
+
+TEST_CASE("realtime stretch bank retained-byte accounting survives uint64 limits") {
+    const std::array specs{spec(10), spec(20, 1, 1.5f)};
+    auto configured = limits();
+    configured.max_realtime_stretch_allocation_bytes =
+        std::numeric_limits<std::uint64_t>::max();
+    configured.max_realtime_stretch_state_bytes =
+        std::numeric_limits<std::uint64_t>::max();
+
+    const auto expected = retained_charge(specs[0]) + retained_charge(specs[1]);
+    const auto admitted =
+        admit_realtime_stretch_state_bank(specs, 48'000.0, 128, configured);
+    REQUIRE(admitted);
+    REQUIRE(admitted.reserved_state_bytes == expected);
+    REQUIRE(admitted.reserved_state_bytes < configured.max_realtime_stretch_state_bytes);
+
+    configured.max_realtime_stretch_state_bytes = expected - 1;
+    const auto rejected =
+        admit_realtime_stretch_state_bank(specs, 48'000.0, 128, configured);
+    REQUIRE(rejected.code == RealtimeStretchStateBankError::StateBytesExceeded);
+    REQUIRE(rejected.actual == expected);
+    REQUIRE(rejected.limit == expected - 1);
 }
 
 TEST_CASE("realtime stretch bank prepare rolls back the complete live bank") {

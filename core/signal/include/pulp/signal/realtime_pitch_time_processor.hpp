@@ -147,6 +147,8 @@ struct RealtimePitchTimePreparedGeometry {
     std::uint64_t stretch_ring_elements = 0;
     std::uint64_t drain_elements = 0;
     std::uint64_t finalize_zero_elements = 0;
+    /// Conservative total, separate from the per-allocation address ceiling.
+    std::uint64_t retained_bytes = 0;
 };
 
 /// Pure admission pass: derives all geometry and proves every prepare-time
@@ -188,10 +190,38 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
     candidate.engine_config.channels = config.channels;
     candidate.engine_config.max_block = std::max(config.max_block, analysis_hop);
     candidate.engine_config.max_synthesis_hop = static_cast<int>(synthesis_hop);
-    if (!checked_spectral_frame_engine_geometry<SampleType>(candidate.engine_config,
-                                                            target_max_bytes))
+    const auto engine_geometry = checked_spectral_frame_engine_geometry<SampleType>(
+        candidate.engine_config, target_max_bytes);
+    if (!engine_geometry)
         return PitchTimePrepareStatus::unrepresentable_capacity;
 
+    auto charge = [&candidate, target_max_bytes]<typename Element>(std::uint64_t elements) noexcept {
+        std::uint64_t bytes = 0;
+        std::uint64_t total = 0;
+        return checked_allocation_bytes<Element>(elements, target_max_bytes, &bytes)
+            && checked_capacity_sum(candidate.retained_bytes, bytes, UINT64_MAX, total)
+            && ((candidate.retained_bytes = total), true);
+    };
+    const auto engine_ring_size = static_cast<std::uint64_t>(engine_geometry->ring_size);
+    const auto engine_fft_size = static_cast<std::uint64_t>(fft_size);
+    if (!charge.template operator()<SampleType>(engine_geometry->input_ring_elements)
+        || !charge.template operator()<SampleType>(engine_geometry->output_ring_elements)
+        || !charge.template operator()<SampleType>(engine_ring_size)
+        || !charge.template operator()<SampleType>(engine_fft_size) // window
+        || !charge.template operator()<SampleType>(engine_fft_size) // time scratch
+        || !charge.template operator()<std::complex<SampleType>>(engine_geometry->frame_elements)
+        || !charge.template operator()<std::complex<SampleType>>(engine_fft_size) // freq scratch
+        || !charge.template operator()<std::complex<SampleType>*>(
+            static_cast<std::uint64_t>(config.channels))
+        || !charge.template operator()<std::complex<double>>(engine_fft_size / 2u))
+        return PitchTimePrepareStatus::unrepresentable_capacity;
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>) {
+        if (!charge.template operator()<float>(engine_fft_size)
+            || !charge.template operator()<float>(engine_fft_size))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+    }
+#endif
     const std::int64_t span_base = static_cast<std::int64_t>(fft_size)
                                  + 2 * static_cast<std::int64_t>(analysis_hop)
                                  + candidate.engine_config.max_block;
@@ -224,15 +254,11 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
         || !checked_capacity_product(channels, engine_block_elements,
                                      std::numeric_limits<std::uint64_t>::max(),
                                      candidate.finalize_zero_elements)
-        || !checked_allocation_bytes<SampleType>(candidate.stretch_ring_elements,
-                                                 target_max_bytes)
-        || !checked_allocation_bytes<SampleType>(candidate.drain_elements,
-                                                 target_max_bytes)
-        || !checked_allocation_bytes<SampleType>(candidate.finalize_zero_elements,
-                                                 target_max_bytes)
-        || !checked_allocation_bytes<SampleType*>(channels, target_max_bytes) // drain ptrs
-        || !checked_allocation_bytes<SampleType*>(channels,
-                                                  target_max_bytes)) // finalize ptrs
+        || !charge.template operator()<SampleType>(candidate.stretch_ring_elements)
+        || !charge.template operator()<SampleType>(candidate.drain_elements)
+        || !charge.template operator()<SampleType>(candidate.finalize_zero_elements)
+        || !charge.template operator()<SampleType*>(channels) // drain ptrs
+        || !charge.template operator()<const SampleType*>(channels)) // finalize ptrs
         return PitchTimePrepareStatus::unrepresentable_capacity;
 
     const auto bins = static_cast<std::uint64_t>(fft_size / 2 + 1);
@@ -250,32 +276,33 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
         return PitchTimePrepareStatus::unrepresentable_capacity;
 
     const bool coordinator_and_transient_fit =
-        checked_allocation_bytes<double>(bins, target_max_bytes) // previous phase
-        && checked_allocation_bytes<double>(bins, target_max_bytes) // synthesis phase
-        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // reference magnitude
-        && checked_allocation_bytes<double>(bins, target_max_bytes) // reference phase
-        && checked_allocation_bytes<int>(bins, target_max_bytes) // peak indices
-        && checked_allocation_bytes<SampleType>(bins, target_max_bytes); // transient history
+        charge.template operator()<double>(bins) // previous phase
+        && charge.template operator()<double>(bins) // synthesis phase
+        && charge.template operator()<SampleType>(bins) // reference magnitude
+        && charge.template operator()<double>(bins) // reference phase
+        && charge.template operator()<int>(bins) // peak indices
+        && charge.template operator()<SampleType>(bins); // transient history
     const bool freeze_fit =
-        checked_allocation_bytes<SampleType>(channel_capture_bins,
-                                             target_max_bytes) // captured magnitudes
-        && checked_allocation_bytes<double>(capture_bins,
-                                            target_max_bytes) // reference phases
-        && checked_allocation_bytes<SampleType>(channel_bins,
-                                                target_max_bytes) // held magnitudes
-        && checked_allocation_bytes<double>(channel_bins,
-                                            target_max_bytes) // held phases
-        && checked_allocation_bytes<double>(bins, target_max_bytes); // instantaneous freq
+        charge.template operator()<SampleType>(channel_capture_bins) // captured magnitudes
+        && charge.template operator()<double>(capture_bins) // reference phases
+        && charge.template operator()<SampleType>(channel_bins) // held magnitudes
+        && charge.template operator()<double>(channel_bins) // held phases
+        && charge.template operator()<double>(bins); // instantaneous freq
     const bool envelope_fit =
-        checked_allocation_bytes<SampleType>(bins, target_max_bytes) // log magnitude
-        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // envelope
-        && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // smoothing input
-        && checked_allocation_bytes<std::complex<SampleType>>(
-            static_cast<std::uint64_t>(fft_size), target_max_bytes); // cepstrum
-    // The envelope's second FftT has identical typed storage to the engine FFT,
-    // which the canonical SFE validator above has already admitted independently.
+        charge.template operator()<SampleType>(bins) // log magnitude
+        && charge.template operator()<SampleType>(bins) // envelope
+        && charge.template operator()<SampleType>(bins) // smoothing input
+        && charge.template operator()<std::complex<SampleType>>(engine_fft_size) // cepstrum
+        && charge.template operator()<std::complex<double>>(engine_fft_size / 2u); // FFT twiddles
     if (!coordinator_and_transient_fit || !freeze_fit || !envelope_fit)
         return PitchTimePrepareStatus::unrepresentable_capacity;
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>) {
+        if (!charge.template operator()<float>(engine_fft_size)
+            || !charge.template operator()<float>(engine_fft_size))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+    }
+#endif
 
     if (config.noise_morphing) {
         const std::uint64_t time_median = quality ? 7u : 5u;
@@ -286,36 +313,31 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
                                       stn_history_elements))
             return PitchTimePrepareStatus::unrepresentable_capacity;
         const bool stn_fit =
-            checked_allocation_bytes<SampleType>(stn_history_elements, target_max_bytes)
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // sines mask
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // transient mask
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // noise mask
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // harmonic
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // percussive
-            && checked_allocation_bytes<SampleType>(time_median,
-                                                    target_max_bytes) // time window
-            && checked_allocation_bytes<SampleType>(freq_median,
-                                                    target_max_bytes); // frequency window
+            charge.template operator()<SampleType>(stn_history_elements)
+            && charge.template operator()<SampleType>(bins) // sines mask
+            && charge.template operator()<SampleType>(bins) // transient mask
+            && charge.template operator()<SampleType>(bins) // noise mask
+            && charge.template operator()<SampleType>(bins) // harmonic
+            && charge.template operator()<SampleType>(bins) // percussive
+            && charge.template operator()<SampleType>(time_median) // time window
+            && charge.template operator()<SampleType>(freq_median); // frequency window
+        std::uint64_t all_morpher_bins = 0;
         const bool noise_morph_fit =
-            checked_allocation_bytes<NoiseMorpherT<SampleType>>(channels,
-                                                               target_max_bytes)
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // morpher env A
-            && checked_allocation_bytes<SampleType>(bins, target_max_bytes) // morpher env B
-            && checked_allocation_bytes<SampleType>(bins,
-                                                    target_max_bytes) // magnitude scratch
-            && checked_allocation_bytes<SampleType>(channel_bins,
-                                                    target_max_bytes) // channel envelopes
-            && checked_allocation_bytes<std::complex<SampleType>>(
-                bins, target_max_bytes); // noise spectrum
+            checked_capacity_product(channels, bins, UINT64_MAX, all_morpher_bins)
+            && charge.template operator()<NoiseMorpherT<SampleType>>(channels)
+            && charge.template operator()<SampleType>(all_morpher_bins) // env A
+            && charge.template operator()<SampleType>(all_morpher_bins) // env B
+            && charge.template operator()<SampleType>(bins) // magnitude scratch
+            && charge.template operator()<SampleType>(channel_bins) // channel envelopes
+            && charge.template operator()<std::complex<SampleType>>(bins); // noise spectrum
         if (!stn_fit || !noise_morph_fit)
             return PitchTimePrepareStatus::unrepresentable_capacity;
     }
-
     if (config.sinc_resampling) {
         constexpr std::uint64_t taps = 32;
         constexpr std::uint64_t table_elements = 513 * taps;
-        if (!checked_allocation_bytes<SampleType>(table_elements, target_max_bytes)
-            || !checked_allocation_bytes<SampleType>(taps, target_max_bytes))
+        if (!charge.template operator()<SampleType>(table_elements)
+            || !charge.template operator()<SampleType>(taps))
             return PitchTimePrepareStatus::unrepresentable_capacity;
     }
 

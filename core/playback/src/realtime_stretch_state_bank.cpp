@@ -44,12 +44,7 @@ RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
     if (specs.size() > limits.max_realtime_stretch_states)
         return reject(RealtimeStretchStateBankError::StateLimitExceeded, {}, specs.size(),
                       limits.max_realtime_stretch_states);
-    if (specs.size() > limits.max_realtime_stretch_state_bytes /
-                           limits.max_realtime_stretch_allocation_bytes)
-        return reject(RealtimeStretchStateBankError::StateBytesExceeded, {},
-                      limits.max_realtime_stretch_allocation_bytes * specs.size(),
-                      limits.max_realtime_stretch_state_bytes);
-
+    std::uint64_t retained_bytes = 0;
     for (std::size_t index = 0; index < specs.size(); ++index) {
         const auto& spec = specs[index];
         if (!spec.clip_id.valid())
@@ -77,11 +72,22 @@ RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
         if (status != signal::PitchTimePrepareStatus::prepared)
             return reject(RealtimeStretchStateBankError::ProcessorPrepareRejected, spec.clip_id, 0,
                           limits.max_realtime_stretch_allocation_bytes, status);
+        std::uint64_t next_retained_bytes = 0;
+        if (!signal::checked_capacity_sum(retained_bytes, geometry.retained_bytes,
+                                          std::numeric_limits<std::uint64_t>::max(),
+                                          next_retained_bytes))
+            return reject(RealtimeStretchStateBankError::StateBytesExceeded, {},
+                          std::numeric_limits<std::uint64_t>::max(),
+                          limits.max_realtime_stretch_state_bytes);
+        retained_bytes = next_retained_bytes;
+        if (retained_bytes > limits.max_realtime_stretch_state_bytes)
+            return reject(RealtimeStretchStateBankError::StateBytesExceeded, {}, retained_bytes,
+                          limits.max_realtime_stretch_state_bytes);
     }
 
     return {RealtimeStretchStateBankError::None, {}, specs.size(),
             limits.max_realtime_stretch_states,
-            limits.max_realtime_stretch_allocation_bytes * specs.size(),
+            retained_bytes,
             signal::PitchTimePrepareStatus::prepared};
 }
 
