@@ -22,6 +22,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "Connect to an explicitly hosted inspector fixture\n",
             "experimental/pulp-rs/src/help.rs":
                 "Connect to an explicitly hosted inspector fixture\n",
+            "experimental/pulp-rs/src/main.rs":
+                "explicitly owned custom host; authenticated discovery\n",
             "docs/reference/scripted-ui-inspector.md":
                 "loopback only; nonce/HMAC proof; "
                 "owner-private per-session credential\n",
@@ -228,6 +230,17 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "experimental/pulp-rs/src/help.rs retains stale claim",
             " ".join(inspector_truth_check.check_root(root)),
         )
+
+    def test_rejects_nonexistent_rust_server_flags(self) -> None:
+        root = self.make_root()
+        (root / "experimental/pulp-rs/src/main.rs").write_text(
+            "motion: PULP_MOTION_SERVER=1\n"
+            "trace: PULP_TRACE_SERVER=1\n",
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn("main.rs retains stale claim: PULP_MOTION_SERVER=1", errors)
+        self.assertIn("main.rs retains stale claim: PULP_TRACE_SERVER=1", errors)
 
     def test_rejects_stale_migration_guide_claim(self) -> None:
         root = self.make_root()

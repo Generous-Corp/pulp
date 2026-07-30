@@ -36,6 +36,10 @@ FORBIDDEN_CLAIMS = {
     "experimental/pulp-rs/src/help.rs": (
         "Connect to a running plugin inspector",
     ),
+    "experimental/pulp-rs/src/main.rs": (
+        "PULP_MOTION_SERVER=1",
+        "PULP_TRACE_SERVER=1",
+    ),
     "docs/reference/scripted-ui-inspector.md": (
         "binds all interfaces",
         "transport is unauthenticated",
