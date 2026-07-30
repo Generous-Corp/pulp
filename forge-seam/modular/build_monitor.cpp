@@ -27,7 +27,13 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
     // as silence -- "hold on -- this asks for something you don't have
     // installed", followed by the free modules that would satisfy it.
     if (contains(lower, "hold on") || contains(lower, "you don't have installed") ||
-        contains(lower, "install one in rack") || contains(lower, "asks for something")) {
+        contains(lower, "install one in rack") || contains(lower, "asks for something") ||
+        // The generator refuses a second run against the same module pack --
+        // easy to reach with the standalone and the plugin open together.
+        // Classified as a refusal so the run reaches a verdict: as ordinary
+        // progress it never terminates, and the app spins on a build that
+        // exited immediately.
+        contains(lower, "already running against this module pack")) {
         return BuildLine::Kind::refusal;
     }
 

@@ -400,22 +400,20 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
     open_button_ = open_btn.get();
     open_btn->set_visible(false);
 
-    auto row = std::make_unique<View>();
-    row->flex().direction = FlexDirection::row;
-    row->flex().align_items = FlexAlign::center;
-    row->flex().gap = 8;
-
     refresh_depth_tabs();
     depth_group_ = group.get();
     // A module build has one artifact and nothing to narrate at three depths,
     // and a dead control is worse than no control.
-    group->set_visible(artifact_ == Artifact::patch);
-    // The Open-in-Rack button is built but NOT mounted here yet: wrapping the
-    // tabs in an extra row crashed the renderer, and a crash is worse than a
-    // missing button. open_in_rack() is wired and tested; it needs a mount
-    // point that does not disturb the title bar's layout.
-    (void)row;
-    open_button_ = nullptr;
+    // The tabs are patch-only; the group itself must stay visible for a
+    // module build so Open in Rack can appear there too.
+    for (auto* b : depth_tabs_)
+        if (b) b->set_visible(artifact_ == Artifact::patch);
+    // Mounted INSIDE the tab group rather than in a wrapper around it.
+    // Wrapping the group in an extra row crashed the renderer; adding a
+    // sibling to a container that already lays out a row of buttons does not.
+    // Hidden until something exists to open: a button that cannot work yet
+    // teaches people to distrust it.
+    group->add_child(std::move(open_btn));
     return group;
 }
 

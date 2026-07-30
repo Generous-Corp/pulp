@@ -716,14 +716,17 @@ TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]
     // built once when the editor opens, so a control that is absent for a
     // module can never appear when the user switches to Patch.
     shell.set_artifact(forge_modular::Artifact::module);
+    // The group stays mounted and visible -- Open in Rack lives in it too --
+    // but the depth TABS are hidden, because a module has nothing to narrate
+    // at three depths.
     auto hidden = shell.build_accessory();
     REQUIRE(hidden != nullptr);
-    CHECK_FALSE(hidden->visible());
+    CHECK_FALSE(hidden->child_at(0)->visible());
 
     shell.set_artifact(forge_modular::Artifact::patch);
     auto tabs = shell.build_accessory();
     REQUIRE(tabs != nullptr);
-    REQUIRE(tabs->child_count() == 3);
+    REQUIRE(tabs->child_count() == 4);   // three depths + Open in Rack
 
     // Standard is the default: the middle setting, not an extreme.
     CHECK(shell.depth() == Shell::Depth::standard);
@@ -1642,7 +1645,7 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
     REQUIRE(shell.explanation() != nullptr);
     CHECK(shell.explanation()->line_count() == loaded.connections.size());
     REQUIRE(chrome->build_accessory() != nullptr);
-    CHECK(chrome->build_accessory()->child_count() == 3);
+    CHECK(chrome->build_accessory()->child_count() == 4);
 
     // The learning tabs change what this real patch says about itself.
     auto* tabs = chrome->build_accessory();
