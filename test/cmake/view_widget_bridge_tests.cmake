@@ -58,7 +58,8 @@ add_executable(pulp-test-inspector-session
     ${CMAKE_SOURCE_DIR}/inspect/src/protocol.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/session.cpp)
 target_include_directories(pulp-test-inspector-session PRIVATE
-    ${CMAKE_SOURCE_DIR}/inspect/include)
+    ${CMAKE_SOURCE_DIR}/inspect/include
+    ${CMAKE_SOURCE_DIR}/inspect/src)
 target_link_libraries(pulp-test-inspector-session PRIVATE
     pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-session)

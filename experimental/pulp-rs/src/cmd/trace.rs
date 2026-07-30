@@ -47,12 +47,10 @@
 //! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
 //! filter. The C++ client performs authenticated ephemeral discovery and the
 //! real protocol connection is the only connection opened. If no session is available it
-//! prints a clear
-//! "no inspector running — start with `PULP_TRACE_SERVER=1
-//! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
-//! This catches the most common user mistake (forgetting to launch the
-//! host with tracing enabled) without making the user wait for the C++
-//! binary's own discovery + connect cycle to fail.
+//! prints a clear explanation that live capture requires an explicitly owned
+//! source-checkout host which constructs `InspectorServer`, wires
+//! `DomainHandler`, and publishes authenticated discovery. Normal Pulp hosts do
+//! not start this endpoint, and `PULP_TRACE_SERVER` is not implemented.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -623,8 +621,10 @@ fn no_inspector_hint(port: u16) -> String {
     };
     format!(
         "pulp trace: no inspector available through {target}.\n\
-         Start the host with the tracing server enabled, e.g.:\n  \
-         PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview\n\
+         Live capture requires an explicitly owned source-checkout host that\n\
+         constructs InspectorServer, wires DomainHandler, and publishes\n\
+         authenticated discovery. Normal Pulp hosts do not start this endpoint;\n\
+         PULP_TRACE_SERVER is not implemented.\n\
          (override the port with --port N or $PULP_INSPECTOR_PORT)."
     )
 }
@@ -1127,13 +1127,14 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "Example: PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &"
+        "Live capture requires a custom host owning InspectorServer + DomainHandler."
     )?;
-    writeln!(out, "         pulp trace start --categories dsp,render")?;
-    writeln!(out, "         pulp trace stop        # → /tmp/pulp-<ts>.pftrace")?;
+    writeln!(out, "After that host publishes discovery:")?;
+    writeln!(out, "  pulp trace start --categories dsp,render")?;
+    writeln!(out, "  pulp trace stop        # → /tmp/pulp-<ts>.pftrace")?;
     writeln!(
         out,
-        "         pulp trace explain \"why is my plugin slow to open?\""
+        "  pulp trace explain \"why is my plugin slow to open?\""
     )?;
     Ok(())
 }
@@ -1591,10 +1592,12 @@ mod tests {
     }
 
     #[test]
-    fn no_inspector_hint_mentions_port_and_trace_server_knob() {
+    fn no_inspector_hint_names_the_explicit_host_ownership() {
         let s = no_inspector_hint(9200);
         assert!(s.contains("port 9200"), "{s}");
-        assert!(s.contains("PULP_TRACE_SERVER=1"));
+        assert!(s.contains("constructs InspectorServer"), "{s}");
+        assert!(s.contains("wires DomainHandler"), "{s}");
+        assert!(s.contains("PULP_TRACE_SERVER is not implemented"), "{s}");
     }
 
     #[test]
@@ -1654,8 +1657,8 @@ mod tests {
         assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
         assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
         assert!(human.contains("ready to capture a trace . no"), "{human}");
-        // The "how do I start the server" hint is surfaced.
-        assert!(human.contains("PULP_TRACE_SERVER=1"), "{human}");
+        assert!(human.contains("constructs InspectorServer"), "{human}");
+        assert!(human.contains("PULP_TRACE_SERVER is not implemented"), "{human}");
     }
 
     #[test]
