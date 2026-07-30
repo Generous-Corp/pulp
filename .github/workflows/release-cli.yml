@@ -332,6 +332,8 @@ jobs:
         #     linux-arm64, when backfilling older tags.
         #   - tools/scripts/package_cli.py: release packaging/rpath fixes,
         #     including macOS ad-hoc re-signing after install_name_tool rewrites.
+        #   - tools/scripts/release_artifact_contents.py: current compatibility
+        #     engine interprets the exact matrix and release version from the tag.
         #   - tools/scripts/resign_macos_release_tree.py: install-time signature
         #     repair is safe and required for every backfilled Darwin SDK.
         #
@@ -345,6 +347,7 @@ jobs:
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               tools/scripts/package_cli.py \
+              tools/scripts/release_artifact_contents.py \
               tools/scripts/resign_macos_release_tree.py \
               core/canvas/CMakeLists.txt \
               tools/deps/manifest.json \
@@ -391,9 +394,11 @@ jobs:
           PY
 
       # A normal post-contract tag carries these files itself. An old tag or an
-      # explicit old source_ref does not; fetch the current verifier as a
-      # compatibility engine only when absent. Its matrix floor makes a
-      # pre-contract source an explicit skip rather than an accidental pass.
+      # explicit old source_ref may not. Manual dispatches always use the current
+      # verifier as the compatibility engine while retaining the selected
+      # source's matrix; otherwise fetch helpers only when absent. The matrix
+      # floor makes a pre-contract source an explicit skip rather than an
+      # accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
@@ -404,6 +409,13 @@ jobs:
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
               ; do
+            if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
+                && [ "$path" = tools/scripts/release_artifact_contents.py ]; then
+              url="https://raw.githubusercontent.com/${repo}/main/${path}"
+              echo "Overlaying current backfill compatibility engine from ${url}"
+              curl -fsSL "$url" -o "$path"
+              continue
+            fi
             if [ ! -f "$path" ]; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Fetching missing release helper from ${url}"
@@ -624,7 +636,11 @@ jobs:
         # #2067: pulp-mcp ships in the CLI tarball so the Claude Code plugin's
         # MCP launcher can resolve it on $PATH after install.
         run: |
-          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp build/tools/import-design/pulp-import-design; do
+          release_bins=(build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp)
+          if [ -f build/tools/import-design/pulp-import-design ]; then
+            release_bins+=(build/tools/import-design/pulp-import-design)
+          fi
+          for bin in "${release_bins[@]}"; do
             # Fail LOUD if a binary is missing. The strip itself is best-effort
             # on macOS (below), which would otherwise SILENTLY swallow an
             # absent binary — exactly how a skipped Rust `build/pulp` target hid
@@ -665,12 +681,19 @@ jobs:
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
+          import_design_args=()
+          if [ -x build/tools/import-design/pulp-import-design ] \
+              && [ -d build/tools/import-design/browser_capture-v1 ]; then
+            import_design_args=(
+              --import-design-binary build/tools/import-design/pulp-import-design
+              --import-design-runtime-dir build/tools/import-design/browser_capture-v1
+            )
+          fi
           python3 tools/scripts/package_cli.py \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
-            --import-design-binary build/tools/import-design/pulp-import-design \
-            --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
+            "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -679,12 +702,21 @@ jobs:
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
+          $importDesignArgs = @()
+          if ((Test-Path build/tools/import-design/Release/pulp-import-design.exe) `
+              -and (Test-Path build/tools/import-design/Release/browser_capture-v1)) {
+            $importDesignArgs = @(
+              '--import-design-binary',
+              'build/tools/import-design/Release/pulp-import-design.exe',
+              '--import-design-runtime-dir',
+              'build/tools/import-design/Release/browser_capture-v1'
+            )
+          }
           python tools/scripts/package_cli.py `
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `
-            --import-design-binary build/tools/import-design/Release/pulp-import-design.exe `
-            --import-design-runtime-dir build/tools/import-design/Release/browser_capture-v1 `
+            @importDesignArgs `
             --build-dir build `
             --platform ${{ matrix.platform }} `
             --out pulp-${{ matrix.platform }}.zip
@@ -1004,7 +1036,13 @@ jobs:
               *)        echo "help" ;;
             esac
           }
-          for ART in pulp pulp-cpp pulp-mcp pulp-import-design; do
+          CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)
+          if [ -x /tmp/pulp-smoke/pulp-import-design ]; then
+            CLI_ARTIFACTS+=(pulp-import-design)
+            test -s /tmp/pulp-smoke/browser_capture/capture.mjs
+            /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
+          fi
+          for ART in "${CLI_ARTIFACTS[@]}"; do
             BIN=/tmp/pulp-smoke/$ART
             CMD=$(smoke_cmd "$ART")
             echo "===== Testing $BIN $CMD ====="
@@ -1065,8 +1103,6 @@ jobs:
             fi
             echo "OK: $ART is portable on ${{ matrix.platform }}."
           done
-          test -s /tmp/pulp-smoke/browser_capture/capture.mjs
-          /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
           # The bundled wgpu-native dylib must match the CLI arch too —
           # package_cli.py returns the first dylib it finds without an
           # arch check, so a stale arm64 dylib beside an x86_64 binary
@@ -1103,13 +1139,15 @@ jobs:
               "pulp.exe"      = "help"
               "pulp-cpp.exe"  = "help"
               "pulp-mcp.exe"  = "--version"
-              "pulp-import-design.exe" = "--help"
           }
-          if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
-              throw "browser capture runtime missing from archive"
+          if (Test-Path "$env:TEMP\pulp-smoke\pulp-import-design.exe") {
+              $artCmd["pulp-import-design.exe"] = "--help"
+              if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
+                  throw "browser capture runtime missing from archive"
+              }
+              & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
+              if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
           }
-          & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
-          if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
           foreach ($art in $artCmd.Keys) {
               $cmd = $artCmd[$art]
               $bin = Join-Path $env:TEMP "pulp-smoke\$art"
