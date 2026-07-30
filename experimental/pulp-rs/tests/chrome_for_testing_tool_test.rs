@@ -101,3 +101,42 @@ fn chrome_specific_uninstall_works_outside_a_checkout() {
     assert!(!managed.exists());
     assert_eq!(fs::read(sentinel).unwrap(), b"keep");
 }
+
+#[test]
+fn chrome_uninstall_ignores_empty_pulp_home_and_uses_platform_default() {
+    let scratch = tempfile::tempdir().unwrap();
+    let user_home = scratch.path().join("user-home");
+    let user_profile = scratch.path().join("user-profile");
+    let local_app_data = scratch.path().join("local-app-data");
+    let home = if cfg!(windows) {
+        user_profile.join(".pulp")
+    } else {
+        user_home.join(".pulp")
+    };
+    let managed = home.join("tools/chrome-for-testing");
+    fs::create_dir_all(managed.join("151.0.7922.47/fixture")).unwrap();
+    fs::write(managed.join("151.0.7922.47/fixture/browser"), b"fixture").unwrap();
+
+    let result = Command::new(env!("CARGO_BIN_EXE_pulp"))
+        .current_dir(scratch.path())
+        .env("PULP_HOME", "")
+        .env("HOME", &user_home)
+        .env("USERPROFILE", &user_profile)
+        .env("LOCALAPPDATA", &local_app_data)
+        .env("PULP_UPDATE_CHECK_DISABLED", "1")
+        .env_remove("PULP_USE_CPP")
+        .args(["tool", "uninstall", "chrome-for-testing"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!managed.exists());
+    assert!(
+        !scratch.path().join("tools").exists(),
+        "empty PULP_HOME must never resolve to a cwd-relative tools directory"
+    );
+}

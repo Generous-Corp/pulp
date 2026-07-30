@@ -250,37 +250,56 @@ pub fn resolve_registry(cwd: &Path) -> Result<(ToolRegistry, Option<PathBuf>)> {
     }
 }
 
-/// `$PULP_HOME` — mirrors `tool_registry.cpp::pulp_home`.
+/// Resolve the install-tree root for managed tools.
+///
+/// A non-empty `$PULP_HOME` wins. Otherwise macOS/Linux use
+/// `$HOME/.pulp`, Windows uses `%LOCALAPPDATA%\Pulp`, and a stripped
+/// environment falls back to the process temp directory. This is the
+/// managed-tool contract from `tool_registry.cpp::tools_install_home`,
+/// intentionally distinct from the SDK/config home contract on Windows.
+#[must_use]
+pub fn tools_install_home() -> PathBuf {
+    tools_install_home_from(
+        std::env::consts::OS,
+        std::env::var_os("PULP_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+        &std::env::temp_dir(),
+    )
+}
+
+/// Backwards-compatible name for the managed-tool install home.
+///
+/// New lifecycle code should use [`tools_install_home`] so it is not confused
+/// with the distinct SDK/config home contract on Windows.
 #[must_use]
 pub fn pulp_home() -> PathBuf {
-    if let Some(h) = std::env::var_os("PULP_HOME") {
-        return PathBuf::from(h);
+    tools_install_home()
+}
+
+fn tools_install_home_from(
+    os: &str,
+    pulp_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+    local_app_data: Option<PathBuf>,
+    temp_dir: &Path,
+) -> PathBuf {
+    let non_empty = |path: Option<PathBuf>| path.filter(|value| !value.as_os_str().is_empty());
+    if let Some(override_home) = non_empty(pulp_home) {
+        return override_home;
     }
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(h) = std::env::var_os("HOME") {
-            return PathBuf::from(h).join(".pulp");
-        }
+
+    match os {
+        "windows" => non_empty(local_app_data).map(|path| path.join("Pulp")),
+        _ => non_empty(home).map(|path| path.join(".pulp")),
     }
-    #[cfg(windows)]
-    {
-        if let Some(h) = std::env::var_os("LOCALAPPDATA") {
-            return PathBuf::from(h).join("Pulp");
-        }
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Some(h) = std::env::var_os("HOME") {
-            return PathBuf::from(h).join(".pulp");
-        }
-    }
-    std::env::temp_dir().join("pulp")
+    .unwrap_or_else(|| temp_dir.join("pulp"))
 }
 
 /// `$PULP_HOME/tools`.
 #[must_use]
 pub fn tools_dir() -> PathBuf {
-    pulp_home().join("tools")
+    tools_install_home().join("tools")
 }
 
 fn wrapper_file_name() -> &'static str {
@@ -740,10 +759,42 @@ mod tests {
     }
 
     #[test]
-    fn pulp_home_honors_explicit_env_var() {
+    fn tools_install_home_honors_explicit_env_var() {
         let td = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("PULP_HOME", td.path().to_str().unwrap());
-        assert_eq!(pulp_home(), td.path());
+        assert_eq!(tools_install_home(), td.path());
+    }
+
+    #[test]
+    fn tools_install_home_ignores_an_empty_override() {
+        let td = tempfile::tempdir().unwrap();
+        let default_home = td.path().join("user-home");
+        let resolved = tools_install_home_from(
+            "linux",
+            Some(PathBuf::new()),
+            Some(default_home.clone()),
+            Some(td.path().join("local-app-data")),
+            td.path(),
+        );
+        assert_eq!(resolved, default_home.join(".pulp"));
+        assert!(
+            resolved.is_absolute(),
+            "empty PULP_HOME must not yield ./tools"
+        );
+    }
+
+    #[test]
+    fn tools_install_home_uses_local_app_data_on_windows() {
+        let td = tempfile::tempdir().unwrap();
+        let local_app_data = td.path().join("local-app-data");
+        let resolved = tools_install_home_from(
+            "windows",
+            Some(PathBuf::new()),
+            Some(td.path().join("user-profile")),
+            Some(local_app_data.clone()),
+            td.path(),
+        );
+        assert_eq!(resolved, local_app_data.join("Pulp"));
     }
 
     #[test]

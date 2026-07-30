@@ -42,6 +42,8 @@ use tool_doctor::doctor;
 mod tool_status;
 use tool_status::{status_label, tool_available_on_platform};
 
+mod tool_verified_archive;
+
 /// Parsed subcommand token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Sub {
@@ -249,12 +251,15 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
     // Resolve friendly aliases (e.g. "perfetto" → "trace-processor") once, at
     // the dispatch boundary, so every verb — including install's trace-processor
     // short-circuit and uninstall's managed-dir lookup — sees the canonical id.
+    // Chrome's raw spelling remains reserved for its code-owned verified
+    // lifecycle even if checkout-local registry metadata tries to reuse it.
+    let canonical_id = |id: &str| tool_verified_archive::canonical_id(&reg, id);
     match sub {
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
-        Sub::Info { id, json } => info(&reg, &reg.canonical_id(id), *json, out),
+        Sub::Info { id, json } => info(&reg, &canonical_id(id), *json, out),
         Sub::Install { id, all, force, version } => {
-            let canon = id.as_ref().map(|i| reg.canonical_id(i));
+            let canon = id.as_ref().map(|i| canonical_id(i));
             install(
                 &reg,
                 canon.as_deref(),
@@ -265,13 +270,13 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
             )
         }
         Sub::Update { id, version } => {
-            update(&reg, &reg.canonical_id(id), version.as_deref(), out)
+            update(&reg, &canonical_id(id), version.as_deref(), out)
         }
-        Sub::Uninstall(id) => uninstall(&reg.canonical_id(id), out),
-        Sub::Path(id) => path(&reg, &reg.canonical_id(id), out),
-        Sub::Run { id, args } => run_tool(&reg, &reg.canonical_id(id), args, spawner, out),
+        Sub::Uninstall(id) => uninstall(&canonical_id(id), out),
+        Sub::Path(id) => path(&reg, &canonical_id(id), out),
+        Sub::Run { id, args } => run_tool(&reg, &canonical_id(id), args, spawner, out),
         Sub::Doctor { id, run } => {
-            let canon = id.as_ref().map(|i| reg.canonical_id(i));
+            let canon = id.as_ref().map(|i| canonical_id(i));
             doctor(&reg, canon.as_deref(), *run, spawner, out)
         }
     }
@@ -510,13 +515,22 @@ fn install(
     version: Option<&str>,
     out: &mut impl Write,
 ) -> Result<i32> {
+    if all {
+        tool_verified_archive::validate_all(reg)?;
+    }
+    if let Some(result) = tool_verified_archive::install(
+        id,
+        id.and_then(|tool_id| reg.tools.get(tool_id)),
+        force,
+        version,
+        out,
+    ) {
+        return result;
+    }
     if id == Some("trace-processor") {
         return install_trace_processor(version, out);
     }
-    if id == Some("chrome-for-testing") {
-        crate::cmd::chrome_for_testing::validate_requested_version(version)?;
-        return crate::cmd::chrome_for_testing::install_pinned(force, out);
-    }
+    reject_empty_pulp_home_for_delegated_install()?;
     // `--all` sweeps every managed tool, but trace-processor is a bare binary
     // installed only by the SHA-256-verified fetcher: the generic archive
     // installer (Rust delegates it to pulp-cpp) cannot verify it and would try
@@ -584,11 +598,11 @@ fn update(
         .map_err(io)?;
         return Ok(1);
     }
-    if id == "chrome-for-testing" {
-        crate::cmd::chrome_for_testing::validate_requested_version(version)?;
-        let _ = tool_version::clear_override(id)?;
-        report_active_version(id, &tool_version::resolve_active(tool), out)?;
-        return crate::cmd::chrome_for_testing::install_pinned(true, out);
+    if let Some(result) = tool_verified_archive::update(tool, version, out) {
+        return result;
+    }
+    if id != "trace-processor" {
+        reject_empty_pulp_home_for_delegated_install()?;
     }
 
     match version {
@@ -679,6 +693,7 @@ fn strip_version_flag(tail: Vec<String>) -> Vec<String> {
 /// via env for the named tool (a durable override is the source of truth; the
 /// env var lets a C++ install honor it without touching the committed registry).
 fn delegate_install(id_for_env: Option<&str>, argv: &[String], out: &mut impl Write) -> Result<i32> {
+    reject_empty_pulp_home_for_delegated_install()?;
     // Forward the resolved version to the `pulp-cpp` child via env. Gated on
     // fallthrough being live so a disabled/sandboxed run (and the unit suite)
     // never mutates process-wide env — the durable override file remains the
@@ -706,11 +721,27 @@ fn delegate_install(id_for_env: Option<&str>, argv: &[String], out: &mut impl Wr
     }
 }
 
+fn reject_empty_pulp_home_for_delegated_install() -> Result<()> {
+    if std::env::var_os("PULP_HOME").is_some_and(|value| value.is_empty()) {
+        return Err(CliError::BadUsage(
+            "PULP_HOME must not be empty for a delegated tool install; \
+             unset it to use the platform default or set it to a directory"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn uninstall(id: &str, out: &mut impl Write) -> Result<i32> {
     // uninstall_tool validates the id and confines the delete to the managed
     // tree; it returns the exact directory removed so we can name it — deleting
     // silently is the wrong default.
-    match uninstall_tool(id)? {
+    let removed = if let Some(result) = tool_verified_archive::uninstall(id) {
+        result?
+    } else {
+        uninstall_tool(id)?
+    };
+    match removed {
         Some(removed) => {
             writeln!(
                 out,
@@ -886,6 +917,21 @@ mod tests {
                             "url_template": "fixture",
                             "archive_format": "zip",
                             "binary_name": "Google Chrome for Testing"
+                        },
+                        "macOS-x64": {
+                            "url_template": "fixture",
+                            "archive_format": "zip",
+                            "binary_name": "Google Chrome for Testing"
+                        },
+                        "Linux-x64": {
+                            "url_template": "fixture",
+                            "archive_format": "zip",
+                            "binary_name": "chrome"
+                        },
+                        "Windows-x64": {
+                            "url_template": "fixture",
+                            "archive_format": "zip",
+                            "binary_name": "chrome.exe"
                         }
                     }
                 }
@@ -1099,10 +1145,23 @@ mod tests {
     }
 
     #[test]
-    fn doctor_managed_chrome_uses_noninteractive_version_probe() {
+    fn doctor_managed_chrome_uses_default_tool_home_and_noninteractive_version_probe() {
         let td = plant_project(chrome_registry_body());
-        let home = td.path().join("pulp-home");
-        let _home_guard = EnvVarGuard::set("PULP_HOME", home.to_str().unwrap());
+        let user_home = td.path().join("user-home");
+        let user_profile = td.path().join("user-profile");
+        let local_app_data = td.path().join("local-app-data");
+        let _home_guard = EnvVarGuard::set_many(&[
+            ("PULP_HOME", Some("")),
+            ("HOME", Some(user_home.to_str().unwrap())),
+            ("USERPROFILE", Some(user_profile.to_str().unwrap())),
+            ("LOCALAPPDATA", Some(local_app_data.to_str().unwrap())),
+        ]);
+        let home = if cfg!(windows) {
+            user_profile.join(".pulp")
+        } else {
+            user_home.join(".pulp")
+        };
+        assert_eq!(crate::config::pulp_home(), Some(home.clone()));
         let root = home.join("tools/chrome-for-testing");
         let browser = root.join(
             "151.0.7922.47/mac-arm64/chrome-mac-arm64/\
@@ -1110,16 +1169,28 @@ mod tests {
         );
         fs::create_dir_all(browser.parent().unwrap()).unwrap();
         fs::write(&browser, "stub").unwrap();
+        let current = serde_json::json!({
+            "schema": 1,
+            "version": "151.0.7922.47",
+            "platform": "mac-arm64",
+            "executable": browser
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/"),
+        });
         fs::write(
             root.join("current.json"),
-            format!(
-                "{{\"schema\":1,\"version\":\"151.0.7922.47\",\
-                 \"platform\":\"mac-arm64\",\"executable\":\"{}\"}}",
-                browser.strip_prefix(&root).unwrap().to_string_lossy()
-            ),
+            serde_json::to_vec(&current).unwrap(),
         )
         .unwrap();
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        if !tool_available_on_platform(
+            &reg.tools["chrome-for-testing"],
+            current_platform_key(),
+        ) {
+            return;
+        }
         let spawner = crate::proc::testing::RecordingSpawner::ok();
         let mut buf = Vec::new();
         let rc = doctor(
@@ -1176,6 +1247,50 @@ mod tests {
         assert_eq!(rc, 1);
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("not ported"));
+    }
+
+    #[test]
+    fn delegated_operations_reject_empty_pulp_home_before_mutation() {
+        let td = tempfile::tempdir().unwrap();
+        let user_home = td.path().join("user-home");
+        let local_app_data = td.path().join("local-app-data");
+        let _home_guard = EnvVarGuard::set_many(&[
+            ("PULP_HOME", Some("")),
+            ("HOME", Some(user_home.to_str().unwrap())),
+            (
+                "LOCALAPPDATA",
+                Some(local_app_data.to_str().unwrap()),
+            ),
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+        ]);
+        let reg = crate::tool_registry::load_embedded().unwrap();
+        let mut buf = Vec::new();
+
+        let error = install(&reg, Some("uv"), false, false, Some("0.7.0"), &mut buf)
+            .unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)));
+        assert!(tool_version::read_overrides().get("uv").is_none());
+        assert!(buf.is_empty());
+
+        let error = update(&reg, "uv", Some("0.7.0"), &mut buf).unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)));
+        assert!(tool_version::read_overrides().get("uv").is_none());
+        assert!(buf.is_empty());
+
+        let error = install(&reg, None, true, false, None, &mut buf).unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)));
+        assert!(!crate::tool_registry::tools_dir().exists());
+        assert!(buf.is_empty());
+
+        let error = delegate_install(
+            None,
+            &["tool".to_owned(), "install".to_owned(), "uv".to_owned()],
+            &mut buf,
+        )
+        .unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)));
+        assert!(format!("{error}").contains("PULP_HOME must not be empty"));
+        assert!(buf.is_empty());
     }
 
     #[test]
