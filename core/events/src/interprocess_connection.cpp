@@ -19,6 +19,14 @@ namespace {
 
 constexpr uint32_t kDisconnectFrame = 0xFFFFFFFFu;
 
+struct DisconnectLifecycle {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool active = false;
+    std::thread::id owner;
+    std::thread::id read_thread_id;
+};
+
 void encode_u32_le(uint32_t value, uint8_t* out) {
     out[0] = static_cast<uint8_t>(value & 0xFF);
     out[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
@@ -78,11 +86,8 @@ struct InterprocessConnection::Impl {
     NamedPipe pipe;
     Socket socket;
     std::mutex write_mutex;
-    std::mutex lifecycle_mutex;
-    std::condition_variable lifecycle_cv;
-    bool disconnecting = false;
-    std::thread::id disconnect_owner;
-    std::thread::id read_thread_id;
+    std::shared_ptr<DisconnectLifecycle> lifecycle =
+        std::make_shared<DisconnectLifecycle>();
 
     int raw_write(const uint8_t* data, size_t size) {
         if (transport == IpcTransport::NamedPipe)
@@ -254,22 +259,33 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
 
 void InterprocessConnection::disconnect() {
     const auto caller = std::this_thread::get_id();
+    const auto lifecycle = impl_->lifecycle;
     {
-        std::unique_lock lifecycle_lock(impl_->lifecycle_mutex);
-        if (impl_->disconnecting) {
-            if (impl_->disconnect_owner == caller ||
-                impl_->read_thread_id == caller) {
+        std::unique_lock lifecycle_lock(lifecycle->mutex);
+        if (lifecycle->active) {
+            if (lifecycle->owner == caller ||
+                lifecycle->read_thread_id == caller) {
                 return;
             }
-            impl_->lifecycle_cv.wait(lifecycle_lock, [this] {
-                return !impl_->disconnecting;
+            lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
+                return !lifecycle->active;
             });
             return;
         }
-        impl_->disconnecting = true;
-        impl_->disconnect_owner = caller;
+        lifecycle->active = true;
+        lifecycle->owner = caller;
     }
+    auto finish_disconnect = [&lifecycle] {
+        {
+            std::lock_guard lifecycle_lock(lifecycle->mutex);
+            lifecycle->active = false;
+            lifecycle->owner = {};
+            lifecycle->read_thread_id = {};
+        }
+        lifecycle->cv.notify_all();
+    };
 
+    const auto alive = alive_.capture();
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
     impl_->interrupt_blocking_io();
@@ -279,20 +295,22 @@ void InterprocessConnection::disconnect() {
         else
             read_thread_.join();
     }
+    {
+        // A joined thread ID may be reused immediately. Keep the reentrant
+        // read-thread exemption only while that read thread can still exist.
+        std::lock_guard lifecycle_lock(lifecycle->mutex);
+        lifecycle->read_thread_id = {};
+    }
     std::unique_lock write_lock(impl_->write_mutex);
     impl_->close();
     write_lock.unlock();
 
-    {
-        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
-        impl_->disconnecting = false;
-        impl_->disconnect_owner = {};
-        impl_->read_thread_id = {};
-    }
-    impl_->lifecycle_cv.notify_all();
-
     if (was_connected) {
         connection_lost();
+        if (!runtime::AliveToken::is_alive(alive)) {
+            finish_disconnect();
+            return;
+        }
         std::function<void()> disconnected_callback;
         {
             std::lock_guard lock(callback_mutex_);
@@ -300,6 +318,8 @@ void InterprocessConnection::disconnect() {
         }
         if (disconnected_callback) disconnected_callback();
     }
+
+    finish_disconnect();
 }
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {
@@ -414,8 +434,9 @@ void InterprocessConnection::start_read_thread() {
         read_loop();
     });
     {
-        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
-        impl_->read_thread_id = read_thread_.get_id();
+        const auto lifecycle = impl_->lifecycle;
+        std::lock_guard lifecycle_lock(lifecycle->mutex);
+        lifecycle->read_thread_id = read_thread_.get_id();
     }
     start_gate->store(true, std::memory_order_release);
 }
