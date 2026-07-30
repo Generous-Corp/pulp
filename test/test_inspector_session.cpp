@@ -154,6 +154,11 @@ TEST_CASE("InspectorSession enforces capability and controller lease before disp
     CHECK(denied.error_code == "controller_lease_required");
     CHECK(dispatches == 1);
 
+    auto invalid_acquire = session.handle(
+        "writer", make_request(0, "Session.acquireController"));
+    CHECK(invalid_acquire.is_error);
+    CHECK(invalid_acquire.error_code == "invalid_request");
+
     auto acquired = session.handle(
         "writer", make_request(3, "Session.acquireController"));
     CHECK_FALSE(acquired.is_error);

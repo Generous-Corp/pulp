@@ -25,7 +25,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
 #include <libproc.h>
+#endif
 #endif
 #endif
 
@@ -254,7 +257,7 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
         (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) |
         created.dwLowDateTime;
     return std::to_string(value);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && TARGET_OS_OSX
     proc_bsdinfo info{};
     if (proc_pidinfo(static_cast<int>(process_id), PROC_PIDTBSDINFO, 0,
                      &info, sizeof(info)) != sizeof(info)) {

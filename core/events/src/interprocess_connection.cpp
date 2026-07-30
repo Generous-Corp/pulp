@@ -283,10 +283,39 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
     uint8_t header[4];
     encode_u32_le(len, header);
 
+    const auto configured_timeout = std::chrono::milliseconds(
+        write_timeout_ms_.load(std::memory_order_relaxed));
+    const bool has_frame_deadline =
+        impl_->transport == IpcTransport::Socket &&
+        configured_timeout > std::chrono::milliseconds(0);
+    const auto frame_deadline =
+        std::chrono::steady_clock::now() + configured_timeout;
+    auto write_with_deadline = [&](const uint8_t* bytes,
+                                   std::size_t byte_count) {
+        if (has_frame_deadline) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= frame_deadline)
+                return -1;
+            auto remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    frame_deadline - now);
+            if (remaining <= std::chrono::milliseconds(0))
+                remaining = std::chrono::milliseconds(1);
+            if (!impl_->socket.set_write_timeout(remaining))
+                return -1;
+        }
+        const int written = impl_->raw_write(bytes, byte_count);
+        if (has_frame_deadline &&
+            std::chrono::steady_clock::now() >= frame_deadline) {
+            return -1;
+        }
+        return written;
+    };
+
     // Write header with retry for short writes
     size_t header_sent = 0;
     while (header_sent < 4) {
-        int n = impl_->raw_write(header + header_sent, 4 - header_sent);
+        int n = write_with_deadline(header + header_sent, 4 - header_sent);
         if (n <= 0) {
             write_poisoned_.store(true, std::memory_order_release);
             lock.unlock();
@@ -301,7 +330,8 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
         size_t payload_sent = 0;
         auto* payload = static_cast<const uint8_t*>(data);
         while (payload_sent < size) {
-            int n = impl_->raw_write(payload + payload_sent, size - payload_sent);
+            int n = write_with_deadline(payload + payload_sent,
+                                        size - payload_sent);
             if (n <= 0) {
                 write_poisoned_.store(true, std::memory_order_release);
                 lock.unlock();

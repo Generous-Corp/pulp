@@ -242,6 +242,13 @@ void InspectorServer::stop() {
     {
         std::lock_guard lock(impl_->clients_mutex);
         clients = std::move(impl_->owned_clients);
+    }
+    for (const auto& client : clients) {
+        if (client)
+            client->disconnect();
+    }
+    {
+        std::lock_guard lock(impl_->clients_mutex);
         impl_->authentication.clear();
     }
     clients.clear();

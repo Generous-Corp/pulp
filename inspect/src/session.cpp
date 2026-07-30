@@ -42,6 +42,18 @@ std::string lease_result_id(ControllerLeaseResult result) {
     return "invalid_owner";
 }
 
+std::optional<InspectorMessage> validate_request_shape(
+    const InspectorMessage& request) {
+    const auto* method = find_inspector_method(request.method);
+    if (request.id == 0 ||
+        (method && method->kind != InspectorMethodKind::Request)) {
+        return make_error(request.id,
+                          "Inspector messages sent to a session must be requests",
+                          "invalid_request");
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 InspectorAccessPolicy::InspectorAccessPolicy(InspectorPolicyConfig config)
@@ -75,6 +87,8 @@ bool InspectorAccessPolicy::is_granted(InspectorCapability capability) const {
 std::optional<InspectorMessage> InspectorAccessPolicy::authorize(
     const InspectorMessage& request,
     bool owns_controller_lease) const {
+    if (auto invalid = validate_request_shape(request))
+        return invalid;
     const auto* method = find_inspector_method(request.method);
     if (!method) {
         auto data = choc::value::createObject("");
@@ -83,11 +97,6 @@ std::optional<InspectorMessage> InspectorAccessPolicy::authorize(
                           "Unknown inspector method",
                           "method_not_found",
                           choc::json::toString(data, false));
-    }
-    if (request.id == 0 || method->kind != InspectorMethodKind::Request) {
-        return make_error(request.id,
-                          "Inspector messages sent to a session must be requests",
-                          "invalid_request");
     }
     const auto capability = method->capability;
     const auto data = authorization_data(request.method, capability, profile_);
@@ -196,6 +205,8 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
     RequestHandler handler;
     {
         std::lock_guard lock(mutex_);
+        if (auto invalid = validate_request_shape(request))
+            return std::move(*invalid);
         if (request.method.rfind("Session.", 0) == 0)
             return handle_session_method(client_id, request);
 

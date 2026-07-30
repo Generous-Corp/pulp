@@ -1362,6 +1362,66 @@ TEST_CASE("IPC socket write timeout closes a partially written frame",
     REQUIRE(send_duration < std::chrono::seconds(2));
 }
 
+TEST_CASE("IPC socket write timeout bounds the complete frame",
+          "[events][ipc][socket][regression]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::atomic<std::size_t> drained_bytes{0};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        while (socket && !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const auto received = socket->receive(buffer.data(), buffer.size());
+            if (received <= 0)
+                break;
+            drained_bytes.fetch_add(static_cast<std::size_t>(received),
+                                    std::memory_order_relaxed);
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(60));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool sent = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        sent = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(drained_bytes.load(std::memory_order_relaxed) > 0);
+    REQUIRE_FALSE(sent);
+    REQUIRE_FALSE(client.is_connected());
+    REQUIRE(send_duration < std::chrono::seconds(1));
+}
+
 TEST_CASE("IPC socket server observes client disconnect",
           "[events][ipc][socket]") {
     CapturingServer server;
