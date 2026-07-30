@@ -221,6 +221,7 @@ bool validate_semantic_report(const fs::path& path,
 /// and a live widget over the design that moves no parameter is worse than
 /// leaving that part of the picture alone.
 int lower_semantic_controls(const fs::path& path,
+                            const DesignIR& ir,
                             pulp::view::IRNode& root,
                             int& undeclared_paint_boxes,
                             std::string& error) {
@@ -300,6 +301,22 @@ int lower_semantic_controls(const fs::path& path,
         control.style.top = static_cast<float>(number_member(box, "top", 0.0));
         control.style.width = static_cast<float>(number_member(box, "width", 0.0));
         control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        // The value layer's colours come from the DESIGN's tokens, not the
+        // widget defaults. DesignedControlSkin's header says exactly this, but
+        // its call site passes a default-constructed skin whose accent is a
+        // hardcoded teal -- so a warm cream panel drew teal arcs and a green
+        // meter while the browser capture beside it was perfectly coherent.
+        const auto token = [&ir](const char* name) -> std::string {
+            const auto it = ir.tokens.colors.find(name);
+            return it == ir.tokens.colors.end() ? std::string{} : it->second;
+        };
+        if (const auto accent = token("css/accent"); !accent.empty())
+            control.attributes["design_accent"] = accent;
+        if (const auto track = token("css/line-strong"); !track.empty())
+            control.attributes["design_track"] = track;
+        if (const auto ind = token("css/text-strong"); !ind.empty())
+            control.attributes["design_indicator"] = ind;
+
         root.children.push_back(std::move(control));
         ++lowered;
     }
@@ -581,7 +598,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // The backdrop alone is a picture. These children are the live controls.
     int undeclared_paint_boxes = 0;
     const int lowered = lower_semantic_controls(
-        *semantic_report, ir.root, undeclared_paint_boxes, result.error);
+        *semantic_report, ir, ir.root, undeclared_paint_boxes, result.error);
     if (lowered < 0) return result;
     ir.root.attributes["controls_lowered"] = std::to_string(lowered);
     // Surfaced rather than swallowed: an undeclared paint box means the widget

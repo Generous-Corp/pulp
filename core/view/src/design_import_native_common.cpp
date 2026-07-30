@@ -1502,10 +1502,18 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
                           node.style.border_width || !node.style.box_shadow.empty();
     if (!has_body && !body_is_the_capture) return false;
 
-    // Colours are resolved by the painter from the control's own theme, so a
-    // design whose palette was projected reaches its ring without this having
-    // to know the token names.
-    apply_designed_control_skin(control, DesignedControlSkin{});
+    // Colours come from the DESIGN's tokens when the importer carried them.
+    // A default-constructed skin has a hardcoded teal accent, which is how a
+    // warm cream panel ended up with teal arcs and a green meter while the
+    // browser capture beside it was perfectly coherent.
+    DesignedControlSkin skin;
+    if (const auto hex = attr(node, "design_accent"); hex && !hex->empty())
+        skin.accent = parse_css_color(*hex);
+    if (const auto hex = attr(node, "design_track"); hex && !hex->empty())
+        skin.track = parse_css_color(*hex);
+    if (const auto hex = attr(node, "design_indicator"); hex && !hex->empty())
+        skin.indicator = parse_css_color(*hex);
+    apply_designed_control_skin(control, skin);
     return true;
 }
 
