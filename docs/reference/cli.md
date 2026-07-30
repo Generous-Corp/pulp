@@ -1252,7 +1252,7 @@ session credential before sending a request.
 
 ```bash
 pulp inspect
-pulp inspect --session SESSION_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
 pulp inspect --command State.getParameters
@@ -1261,6 +1261,7 @@ pulp inspect --command State.getParameters
 Options:
 
 - `--session ID` - select the exact live session
+- `--instance ID` - disambiguate an exact instance when a session ID is shared
 - `--host HOST` - filter discovery by loopback host
 - `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response

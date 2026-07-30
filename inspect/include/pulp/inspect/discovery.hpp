@@ -79,11 +79,14 @@ private:
     std::filesystem::path runtime_directory_;
     std::optional<InspectorDiscoveryRecord> record_;
     std::vector<std::uint8_t> credential_;
+    std::filesystem::path ownership_path_;
+    std::string ownership_marker_;
 };
 
 std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::span<const InspectorDiscoveryRecord> records,
     std::string_view session_id,
+    std::string_view instance_id = {},
     std::string* error = nullptr);
 
 } // namespace pulp::inspect

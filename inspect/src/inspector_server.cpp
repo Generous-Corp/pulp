@@ -50,18 +50,26 @@ public:
             cv.notify_one();
         }
 
-        void shutdown() {
+        void request_stop() {
             {
                 std::lock_guard lock(mutex);
                 stopping = true;
                 messages.clear();
             }
             cv.notify_all();
+        }
+
+        void join() {
             if (worker.joinable() &&
                 worker.get_id() == std::this_thread::get_id())
                 worker.detach();
             else if (worker.joinable())
                 worker.join();
+        }
+
+        void shutdown() {
+            request_stop();
+            join();
         }
 
     private:
@@ -104,6 +112,7 @@ public:
     std::map<events::InterprocessConnection*, AuthenticationState> authentication;
     std::map<events::InterprocessConnection*,
              std::shared_ptr<OutboundClient>> outbound_clients;
+    std::vector<std::shared_ptr<OutboundClient>> retired_outbound_clients;
     std::mutex clients_mutex;
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
@@ -230,6 +239,8 @@ public:
                         found != self->outbound_clients.end()) {
                         outbound = std::move(found->second);
                         self->outbound_clients.erase(found);
+                        outbound->request_stop();
+                        self->retired_outbound_clients.push_back(outbound);
                     }
                     self->owned_clients.erase(
                         std::remove_if(
@@ -240,8 +251,6 @@ public:
                             }),
                         self->owned_clients.end());
                 }
-                if (outbound)
-                    outbound->shutdown();
                 if (!authenticated_client.empty() && self->owner &&
                     self->owner->session_)
                     self->owner->session_->disconnect(authenticated_client);
@@ -293,37 +302,46 @@ public:
 
     void cleanup_loop() {
         std::unique_lock lock(clients_mutex);
-        while (!stopping_cleanup) {
+        while (true) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
-                return stopping_cleanup;
+                return stopping_cleanup ||
+                       !retired_outbound_clients.empty();
             });
-            if (stopping_cleanup)
-                break;
+            const bool should_stop = stopping_cleanup;
+            auto retired = std::move(retired_outbound_clients);
             const auto now = std::chrono::steady_clock::now();
             std::vector<std::shared_ptr<events::InterprocessConnection>> expired;
-            for (const auto& [client, state] : authentication) {
-                if (!state.authenticated && now >= state.deadline) {
-                    const auto retained = std::find_if(
-                        owned_clients.begin(), owned_clients.end(),
-                        [client](const auto& candidate) {
-                            return candidate.get() == client;
-                        });
-                    if (retained != owned_clients.end())
-                        expired.push_back(*retained);
+            if (!should_stop) {
+                for (const auto& [client, state] : authentication) {
+                    if (!state.authenticated && now >= state.deadline) {
+                        const auto retained = std::find_if(
+                            owned_clients.begin(), owned_clients.end(),
+                            [client](const auto& candidate) {
+                                return candidate.get() == client;
+                            });
+                        if (retained != owned_clients.end())
+                            expired.push_back(*retained);
+                    }
                 }
             }
             std::function<void()> refresh;
-            if (heartbeat && now >= next_heartbeat) {
+            if (!should_stop && heartbeat && now >= next_heartbeat) {
                 refresh = heartbeat;
                 next_heartbeat = now + std::chrono::seconds(10);
             }
             lock.unlock();
+            for (const auto& outbound : retired) {
+                if (outbound)
+                    outbound->shutdown();
+            }
             for (const auto& client : expired) {
                 if (client)
                     client->disconnect();
             }
             if (refresh)
                 refresh();
+            if (should_stop)
+                break;
             lock.lock();
         }
     }
@@ -431,6 +449,9 @@ void InspectorServer::stop() {
             outbound_clients.push_back(std::move(outbound));
         }
         impl_->outbound_clients.clear();
+        for (auto& outbound : impl_->retired_outbound_clients)
+            outbound_clients.push_back(std::move(outbound));
+        impl_->retired_outbound_clients.clear();
         for (const auto& [client, state] : impl_->authentication) {
             (void)client;
             if (state.authenticated)

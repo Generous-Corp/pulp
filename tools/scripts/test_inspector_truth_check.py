@@ -34,6 +34,16 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "unavailable in normal launches; explicitly wired\n",
             "tools/mcp/pulp_mcp.cpp":
                 '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
+            "CMakeLists.txt":
+                "if(PULP_ENABLE_INSPECTOR)\n"
+                "    add_subdirectory(inspect)\n"
+                "endif()\n"
+                "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)\n",
+            "tools/cli/CMakeLists.txt":
+                "cmd_inspect_unavailable.cpp\ncmd_tweaks_unavailable.cpp\n",
+            "test/cmake/view_widget_bridge_tests.cmake":
+                "pulp-test-inspector-stripped-artifact\n"
+                "check_inspector_stripped_artifact.cmake\n",
         }
         for relative, text in files.items():
             path = root / relative
@@ -153,6 +163,18 @@ class InspectorTruthCheckTests(unittest.TestCase):
         errors = " ".join(inspector_truth_check.check_root(root))
         self.assertIn("retains stale claim", errors)
         self.assertIn("omits required claim", errors)
+
+    def test_rejects_overlay_only_build_gate_regression(self) -> None:
+        root = self.make_root()
+        (root / "CMakeLists.txt").write_text(
+            "add_subdirectory(inspect)\n"
+            "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)\n",
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "omits inspector build contract",
+            " ".join(inspector_truth_check.check_root(root)),
+        )
 
 
 if __name__ == "__main__":

@@ -177,15 +177,13 @@ if(PULP_ENABLE_SWIFT)
         "helpers such as pulp_add_ios_host_app(), which enable Swift when "
         "Swift sources are present.")
 endif()
-# Visual Cmd+I inspector overlay in the standalone host. Default ON for
-# dev/examples builds. This option currently gates only standalone overlay
-# construction; it does not create a TCP inspector endpoint and does not prove
-# that inspector archive code is absent from a final artifact.
-#
-# The inspector library is still a transitive desktop-GPU dependency of
-# pulp-format. Until target separation lands, release configurations must not
-# infer endpoint reachability or binary stripping from this option alone.
-option(PULP_ENABLE_INSPECTOR "Wire the visual dev inspector overlay into the standalone host" ON)
+# Optional development-inspector SDK components. This controls build presence
+# only: protocol/client/runtime libraries and the desktop visual overlay are
+# available when ON, while every network endpoint still defaults to runtime
+# profile `off`. Ordinary plugin targets never link these components.
+option(PULP_ENABLE_INSPECTOR
+       "Build optional development-inspector SDK components"
+       ON)
 # RT output-boundary audio probe in the standalone host — the data source for
 # the dev Audio Inspector window. Default ON for dev/examples; release /
 # standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
@@ -385,9 +383,24 @@ target_link_libraries(pulp-standalone
 )
 
 # The inspector protocol/session/client foundation is CPU-only and installable
-# on every platform. inspect/CMakeLists.txt adds the GPU/view overlay target
-# only where that stack exists.
-add_subdirectory(inspect)
+# when the optional SDK component is requested. inspect/CMakeLists.txt adds the
+# GPU/view overlay target only where that stack exists.
+if(PULP_ENABLE_INSPECTOR)
+    add_subdirectory(inspect)
+endif()
+
+# The visual Cmd+I overlay belongs only to the standalone authoring target.
+# Keeping this dependency off pulp-format is what prevents ordinary plugin
+# targets from inheriting inspector archives through the format SDK.
+if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect)
+    target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
+    target_compile_definitions(pulp-standalone PRIVATE
+        PULP_ENABLE_INSPECTOR=1
+        PULP_HAS_INSPECT=1)
+else()
+    target_compile_definitions(pulp-standalone PRIVATE
+        PULP_ENABLE_INSPECTOR=0)
+endif()
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 if(PROJECT_IS_TOP_LEVEL)
@@ -435,12 +448,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
-# ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
-# pulp-cli unconditionally links pulp::inspect (for `pulp inspect`), and
-# pulp::inspect depends on pulp::render which is GPU-only. Without the
-# GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
-# .github/workflows/sanitizers.yml) fail at CMake configure with
-# "Target ... links to pulp::inspect but the target was not found".
+# ── CLI Tool (desktop only) ────────────────────────────────────────────────
+# The CLI already requires the desktop GPU stack for render/audio authoring
+# commands. Inspector commands use the CPU-only client/authoring targets when
+# the optional component exists and compile explicit unavailable stubs when it
+# does not; the CLI never links the visual pulp::inspect overlay.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()

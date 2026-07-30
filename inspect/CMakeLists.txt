@@ -44,6 +44,14 @@ target_include_directories(pulp-inspect-runtime
 target_link_libraries(pulp-inspect-runtime
     PUBLIC pulp::inspect-protocol pulp::inspect-discovery pulp::events)
 
+add_library(pulp-inspect-authoring src/tweak_store.cpp)
+add_library(pulp::inspect-authoring ALIAS pulp-inspect-authoring)
+target_include_directories(pulp-inspect-authoring
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-authoring PUBLIC pulp::runtime)
+
 if(PULP_ENABLE_GPU AND NOT ANDROID)
 add_library(pulp-inspect)
 add_library(pulp::inspect ALIAS pulp-inspect)
@@ -72,11 +80,10 @@ target_sources(pulp-inspect PRIVATE
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
     src/trace_inspector.cpp
-    src/tweak_store.cpp
     src/agent_request_queue.cpp
 )
 
 target_link_libraries(pulp-inspect
     PUBLIC pulp::view pulp::render pulp::state pulp::events pulp::audio
-    PRIVATE pulp::inspect-runtime)
+    PRIVATE pulp::inspect-runtime pulp::inspect-authoring)
 endif()

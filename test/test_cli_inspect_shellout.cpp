@@ -187,6 +187,55 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
              fixture.seen[0].params_json == "{}"));
 }
 
+TEST_CASE("pulp inspect selects an exact instance within a shared session",
+          "[cli][shellout][inspect][identity]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    InspectServerFixture first;
+    first.handler = [&](const InspectorMessage& request) {
+        return make_response(request.id, R"({"instance":"first"})");
+    };
+
+    InspectorDiscoveryPublisher second_publisher{first.temp};
+    auto second_policy = fixture_policy();
+    std::vector<InspectorMessage> second_seen;
+    InspectorSession second_session{
+        InspectorSessionInfo{
+            first.session.info().session_id, "cli-shellout-instance-b",
+            first.session.info().plugin_id, "1"},
+        second_policy,
+        [&](const InspectorMessage& request) {
+            second_seen.push_back(request);
+            return make_response(request.id, R"({"instance":"second"})");
+        }};
+    InspectorServer second_server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = second_session.info().session_id;
+    record.instance_id = second_session.info().instance_id;
+    record.plugin_id = second_session.info().plugin_id;
+    REQUIRE(second_server.start_authenticated(
+        InspectorServerConfig{
+            &second_session, &second_publisher, record, *token}));
+
+    const auto result = run_pulp(
+        {"inspect",
+         "--session", first.session.info().session_id,
+         "--instance", second_session.info().instance_id,
+         "--command", "DOM.getDocument"},
+        10000);
+
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stderr_output.empty());
+    CHECK(compact_json_for_assertion(result.stdout_output)
+              .find(R"({"instance":"second"})") != std::string::npos);
+    CHECK(first.seen.empty());
+    REQUIRE(second_seen.size() == 1);
+    second_server.stop();
+}
+
 TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
           "[cli][shellout][inspect][controller]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

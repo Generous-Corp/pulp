@@ -58,32 +58,6 @@ target_link_libraries(pulp-format
         pulp::timebase
         pulp::native-components
 )
-if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
-    # The current monolithic inspector archive is desktop-only and GPU-only —
-    # pulp-inspect is added in
-    # the root CMakeLists.txt under `if(PULP_ENABLE_GPU AND NOT ANDROID)`.
-    # Linking it here without the same guard breaks PULP_ENABLE_GPU=OFF
-    # builds (the sanitizer matrix in .github/workflows/sanitizers.yml
-    # disables GPU). Defined later in CMake order, so we link by name
-    # rather than using if(TARGET ...).
-    target_link_libraries(pulp-format PUBLIC pulp::inspect)
-    # Source-side gate: standalone.cpp uses PULP_HAS_INSPECT to decide
-    # whether it can include <pulp/inspect/inspector_overlay.hpp>.
-    target_compile_definitions(pulp-format PRIVATE PULP_HAS_INSPECT=1)
-endif()
-
-# PULP_ENABLE_INSPECTOR gates whether standalone.cpp wires the visual
-# Cmd+I overlay (creation + install_inspector_hooks + idle paint pump).
-# Defined unconditionally as 0/1 so source can `#if PULP_ENABLE_INSPECTOR`
-# even on builds that don't link pulp-inspect. Set it OFF to disable that
-# overlay.
-# This does not currently remove the transitive pulp::inspect archive link.
-if(PULP_ENABLE_INSPECTOR)
-    target_compile_definitions(pulp-format PRIVATE PULP_ENABLE_INSPECTOR=1)
-else()
-    target_compile_definitions(pulp-format PRIVATE PULP_ENABLE_INSPECTOR=0)
-endif()
-
 # PULP_ENABLE_AUDIO_PROBES wires the RT output-boundary probe into the
 # standalone host (the dev Audio Inspector's data source). Unlike the
 # inspector flag, this one gates MEMBER declarations in the PUBLIC

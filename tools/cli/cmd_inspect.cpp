@@ -88,6 +88,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string host;
     int port = 0;
     std::string session_id;
+    std::string instance_id;
     std::string command;
     std::string params = "{}";
     std::string output_file;
@@ -101,6 +102,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "Usage: pulp inspect [options]\n\n"
                 << "Options:\n"
                 << "  --session ID      Select the exact live session\n"
+                << "  --instance ID     Select the exact instance within a session\n"
                 << "  --host HOST       Filter discovery by host (loopback only)\n"
                 << "  --port PORT       Filter discovery by port; never bypasses auth\n"
                 << "  --command METHOD  Send one command and print its result\n"
@@ -124,6 +126,9 @@ int cmd_inspect(const std::vector<std::string>& args) {
             }
         } else if (arg == "--session") {
             if (!require_arg_value(args, index, "--session", session_id))
+                return 2;
+        } else if (arg == "--instance") {
+            if (!require_arg_value(args, index, "--instance", instance_id))
                 return 2;
         } else if (arg == "--command") {
             if (!require_arg_value(args, index, "--command", command)) return 2;
@@ -164,8 +169,8 @@ int cmd_inspect(const std::vector<std::string>& args) {
         }),
         records.end());
     std::string selection_error;
-    const auto selected =
-        select_inspector_session(records, session_id, &selection_error);
+    const auto selected = select_inspector_session(
+        records, session_id, instance_id, &selection_error);
     if (!selected) {
         std::cerr << "Error: " << selection_error << "\n";
         return 1;
