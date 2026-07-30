@@ -207,6 +207,7 @@ TEST_CASE("InspectorServer starts on an explicit port and writes discovery file"
     REQUIRE(contents == std::to_string(*port));
 
     server.stop();
+    REQUIRE_FALSE(std::filesystem::exists(file));
     server.stop();
     std::filesystem::remove_all(tmp);
 }
@@ -229,7 +230,7 @@ TEST_CASE("InspectorServer pre-start operations are inert",
         make_event("Inspector.noClientsAfterHandler", R"({"ok":true})")));
 }
 
-TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
+TEST_CASE("InspectorServer uses an OS-assigned port and ignores global port state",
           "[inspect][server]") {
     auto candidate = find_bindable_port();
     REQUIRE(candidate.has_value());
@@ -242,21 +243,26 @@ TEST_CASE("InspectorServer honors PULP_INSPECTOR_PORT when starting with zero",
     tmpdir.set(tmp.string());
     port_env.set(std::to_string(*candidate));
 
+    Socket reserved;
+    REQUIRE(reserved.create(SocketType::TCP));
+    REQUIRE(reserved.bind("127.0.0.1", *candidate));
+
     InspectorServer server;
     REQUIRE(server.start(0));
-    REQUIRE(server.port() == *candidate);
+    REQUIRE(server.port() != 0);
+    REQUIRE(server.port() != *candidate);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == std::to_string(*candidate));
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);
 }
 
-TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
+TEST_CASE("InspectorServer ephemeral start is unaffected by malformed port state",
           "[inspect][server]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-invalid-env-test-" +
@@ -268,18 +274,14 @@ TEST_CASE("InspectorServer ignores malformed PULP_INSPECTOR_PORT values",
     port_env.set("not-a-port");
 
     InspectorServer server;
-    if (!server.start(0)) {
-        std::filesystem::remove_all(tmp);
-        SKIP("default inspector port is already in use");
-    }
-
-    REQUIRE(server.port() == 9147);
+    REQUIRE(server.start(0));
+    REQUIRE(server.port() != 0);
 
     const auto file = inspector_port_file(tmp);
     std::ifstream in(file);
     std::string contents;
     in >> contents;
-    REQUIRE(contents == "9147");
+    REQUIRE(contents == std::to_string(server.port()));
 
     server.stop();
     std::filesystem::remove_all(tmp);

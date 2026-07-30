@@ -384,9 +384,10 @@ target_link_libraries(pulp-standalone
         $<INSTALL_INTERFACE:Pulp::sdl3-static>
 )
 
-if(PULP_ENABLE_GPU AND NOT ANDROID)
-    add_subdirectory(inspect)
-endif()
+# The inspector protocol/session/client foundation is CPU-only and installable
+# on every platform. inspect/CMakeLists.txt adds the GPU/view overlay target
+# only where that stack exists.
+add_subdirectory(inspect)
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 if(PROJECT_IS_TOP_LEVEL)

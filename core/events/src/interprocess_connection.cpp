@@ -1,6 +1,7 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstring>
@@ -15,7 +16,6 @@ using namespace pulp::runtime;
 namespace {
 
 constexpr uint32_t kDisconnectFrame = 0xFFFFFFFFu;
-constexpr uint32_t kMaxMessageBytes = 64u * 1024u * 1024u;
 
 void encode_u32_le(uint32_t value, uint8_t* out) {
     out[0] = static_cast<uint8_t>(value & 0xFF);
@@ -262,7 +262,7 @@ void InterprocessConnection::disconnect() {
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {
     if (!is_connected()) return false;
-    if (size > kMaxMessageBytes) return false;
+    if (size > max_message_bytes_.load(std::memory_order_relaxed)) return false;
 
     std::lock_guard<std::mutex> lock(impl_->write_mutex);
 
@@ -296,6 +296,11 @@ bool InterprocessConnection::send_message(std::string_view message) {
     return send_message(message.data(), message.size());
 }
 
+void InterprocessConnection::set_max_message_bytes(std::size_t bytes) {
+    max_message_bytes_.store(
+        std::clamp<std::size_t>(bytes, 1, UINT32_MAX),
+        std::memory_order_relaxed);
+}
 
 
 void InterprocessConnection::start_read_thread() {
@@ -348,7 +353,7 @@ void InterprocessConnection::read_loop() {
             notify_lost();
             return;
         }
-        if (msg_len > kMaxMessageBytes) {
+        if (msg_len > max_message_bytes_.load(std::memory_order_relaxed)) {
             notify_lost();
             return;
         }
@@ -405,6 +410,18 @@ InterprocessConnectionServer::InterprocessConnectionServer()
 
 InterprocessConnectionServer::~InterprocessConnectionServer() { stop(); }
 
+std::uint16_t InterprocessConnectionServer::bound_port() const {
+    if (!is_running() || server_impl_->transport != IpcTransport::Socket)
+        return 0;
+    return server_impl_->listen_socket.local_port();
+}
+
+void InterprocessConnectionServer::set_max_message_bytes(std::size_t bytes) {
+    max_message_bytes_.store(
+        std::clamp<std::size_t>(bytes, 1, UINT32_MAX),
+        std::memory_order_relaxed);
+}
+
 bool InterprocessConnectionServer::start(std::string_view name, IpcTransport transport) {
     stop();
     server_impl_->transport = transport;
@@ -435,6 +452,8 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 }
 
                 auto conn = std::make_unique<InterprocessConnection>();
+                conn->set_max_message_bytes(
+                    max_message_bytes_.load(std::memory_order_relaxed));
                 auto first_dispatch_gate = std::make_shared<std::atomic<bool>>(false);
                 // Inject the accepted socket via friend access
                 conn->impl_->transport = IpcTransport::Socket;

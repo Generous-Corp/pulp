@@ -144,6 +144,39 @@ TEST_CASE("IPC message framing", "[events][ipc]") {
     REQUIRE_FALSE(conn.send_message(std::string_view("binary data")));
 }
 
+TEST_CASE("IPC framing ceilings reject oversized writes and reach accepted clients",
+          "[events][ipc][socket][bounds]") {
+    CapturingServer server;
+    server.set_max_message_bytes(8);
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(8);
+    REQUIRE(client.max_message_bytes() == 8);
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port),
+                           IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return static_cast<bool>(server.accepted);
+        }));
+        REQUIRE(server.accepted->max_message_bytes() == 8);
+    }
+
+    CHECK_FALSE(client.send_message("123456789"));
+    CHECK(client.send_message("12345678"));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.text_messages == 1;
+        }));
+        CHECK(server.last_text == "12345678");
+    }
+    client.disconnect();
+    server.stop();
+}
+
 TEST_CASE("IPC connection state", "[events][ipc]") {
     InterprocessConnection conn;
     REQUIRE(conn.state() == IpcState::Disconnected);

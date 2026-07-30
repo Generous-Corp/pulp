@@ -13,6 +13,12 @@
 
 namespace pulp::runtime {
 
+// ── Secure random bytes ─────────────────────────────────────────────────
+
+/// Generate bytes from the runtime's entropy-seeded CTR-DRBG. Returns nullopt
+/// when entropy initialization or generation fails.
+std::optional<std::vector<uint8_t>> secure_random_bytes(size_t size);
+
 // ── Encoding ────────────────────────────────────────────────────────────
 
 /// Lowercase-hex encode raw bytes. Header-only; the one place callers should

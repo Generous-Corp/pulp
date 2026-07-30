@@ -44,6 +44,33 @@ target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
     pulp::audio pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
+# CPU-only inspector session policy, capability enforcement, and lease tests.
+add_executable(pulp-test-inspector-session
+    test_inspector_session.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/authentication.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/capabilities.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/protocol.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/session.cpp)
+target_include_directories(pulp-test-inspector-session PRIVATE
+    ${CMAKE_SOURCE_DIR}/inspect/include)
+target_link_libraries(pulp-test-inspector-session PRIVATE
+    pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-session)
+
+add_executable(pulp-test-inspector-server test_inspector_server.cpp)
+target_link_libraries(pulp-test-inspector-server PRIVATE
+    pulp::inspect-runtime Catch2::Catch2WithMain)
+if(WIN32)
+    catch_discover_tests(pulp-test-inspector-server
+        PROPERTIES
+            ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
+            LABELS "windows-pr-quarantine")
+else()
+    catch_discover_tests(pulp-test-inspector-server
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+endif()
+
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)
@@ -86,18 +113,6 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     target_link_libraries(pulp-test-inspector-atlas-viewer PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector-atlas-viewer
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
-
-    add_executable(pulp-test-inspector-server test_inspector_server.cpp)
-    target_link_libraries(pulp-test-inspector-server PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    if(WIN32)
-        catch_discover_tests(pulp-test-inspector-server
-            PROPERTIES
-                ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1"
-                LABELS "windows-pr-quarantine")
-    else()
-        catch_discover_tests(pulp-test-inspector-server
-            PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
-    endif()
 
     # Additional inspector sibling TUs. Same registration as
     # pulp-test-inspector.

@@ -62,6 +62,14 @@ public:
     /// Send a string message.
     bool send_message(std::string_view message);
 
+    /// Override the framing ceiling before connecting or accepting work.
+    /// Oversized outbound frames are rejected; oversized inbound frames close
+    /// the connection before allocating their declared payload.
+    void set_max_message_bytes(std::size_t bytes);
+    std::size_t max_message_bytes() const {
+        return max_message_bytes_.load(std::memory_order_relaxed);
+    }
+
     // ── Callbacks (override or set) ─────────────────────────────────────
 
     /// Called when a connection is established.
@@ -107,6 +115,7 @@ private:
     std::atomic<IpcState> state_{IpcState::Disconnected};
     std::thread read_thread_;
     std::atomic<bool> running_{false};
+    std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
     std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;
     mutable std::mutex callback_mutex_;
@@ -130,8 +139,15 @@ public:
     /// Stop listening and disconnect all clients.
     void stop();
 
+    /// Apply a framing ceiling to every subsequently accepted connection.
+    void set_max_message_bytes(std::size_t bytes);
+
     /// Whether the server is running.
     bool is_running() const { return running_.load(); }
+
+    /// Actual TCP port after binding, including an OS-assigned port requested
+    /// with `host:0`. Returns zero for non-socket or unbound servers.
+    std::uint16_t bound_port() const;
 
     /// Called when a new client connects. Override to handle.
     /// The returned connection is owned by the server.
@@ -146,6 +162,7 @@ public:
 
 private:
     std::atomic<bool> running_{false};
+    std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::thread accept_thread_;
     std::vector<std::unique_ptr<InterprocessConnection>> clients_;
     struct ServerImpl;
