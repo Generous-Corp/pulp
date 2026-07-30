@@ -3,6 +3,7 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1449,6 +1450,82 @@ TEST_CASE("IPC socket write timeout bounds the complete frame",
     // distinguishing the 60 ms whole-frame deadline from the multi-second
     // transfer a per-write timeout would permit.
     REQUIRE(send_duration < std::chrono::seconds(2));
+}
+
+TEST_CASE("IPC socket write timeout includes writer admission",
+          "[events][ipc][socket][regression][concurrency]") {
+    constexpr auto timeout = std::chrono::milliseconds(500);
+    constexpr std::size_t payload_size = 32u * 1024u * 1024u;
+
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> second_started{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket &&
+               !second_started.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::vector<std::uint8_t> buffer(64u * 1024u);
+        std::size_t remaining = payload_size + 4;
+        while (socket && remaining > 0) {
+            const auto received =
+                socket->receive(buffer.data(),
+                                std::min(buffer.size(), remaining));
+            if (received <= 0)
+                break;
+            remaining -= static_cast<std::size_t>(received);
+        }
+        while (socket &&
+               !release_peer.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(payload_size);
+    client.set_write_timeout(timeout);
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::yield();
+    }
+
+    const std::vector<std::uint8_t> payload(payload_size, 0x5a);
+    bool first_sent = false;
+    std::thread first([&] {
+        first_sent = client.send_message(payload.data(), payload.size());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    second_started.store(true, std::memory_order_release);
+    const auto started = std::chrono::steady_clock::now();
+    const bool second_sent =
+        client.send_message(payload.data(), payload.size());
+    const auto duration = std::chrono::steady_clock::now() - started;
+
+    first.join();
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable())
+        peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE(first_sent);
+    REQUIRE_FALSE(second_sent);
+    REQUIRE(duration < timeout + std::chrono::milliseconds(100));
 }
 
 TEST_CASE("IPC timeout disconnect serializes with explicit teardown",

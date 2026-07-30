@@ -17,6 +17,38 @@
 #include <utility>
 
 namespace pulp::inspect {
+namespace {
+
+constexpr std::size_t kMaxJsonNestingDepth = 64;
+
+bool json_nesting_is_bounded(std::string_view text) {
+    std::size_t depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char character : text) {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (character == '"') {
+            in_string = true;
+        } else if (character == '{' || character == '[') {
+            if (++depth > kMaxJsonNestingDepth)
+                return false;
+        } else if ((character == '}' || character == ']') && depth > 0) {
+            --depth;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 // ── Server implementation using InterprocessConnectionServer ────────────
 
@@ -647,6 +679,14 @@ int InspectorServer::Impl::client_count() {
 void InspectorServer::Impl::on_message_received(
     const std::string& data,
     events::InterprocessConnection* sender) {
+    if (!json_nesting_is_bounded(data)) {
+        sender->send_message(encode_message(make_error(
+            0,
+            "Inspector message exceeds the JSON nesting limit",
+            "message_too_deep")));
+        sender->disconnect();
+        return;
+    }
     InspectorMessage request;
     if (!decode_message(data, request)) {
         // Invalid JSON — send error
