@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -35,6 +36,9 @@ using pulp::inspect::make_event;
 using pulp::inspect::make_inspector_auth_proof;
 using pulp::inspect::detail::BoundedEventQueue;
 using pulp::inspect::detail::EventQueuePushResult;
+
+static_assert(!std::is_copy_constructible_v<InspectorAuthVerifier>);
+static_assert(!std::is_move_constructible_v<InspectorAuthVerifier>);
 
 namespace {
 

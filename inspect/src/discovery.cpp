@@ -247,7 +247,7 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
         opened.st_dev == before.st_dev &&
         opened.st_ino == before.st_ino;
     const bool secured =
-        same_directory && ::fchmod(descriptor, 0700) == 0 &&
+        same_directory &&
         ::fstat(descriptor, &opened) == 0 &&
         S_ISDIR(opened.st_mode) &&
         opened.st_uid == ::geteuid() &&
@@ -781,7 +781,8 @@ void InspectorDiscoveryPublisher::remove() {
     ownership_.reset();
     ownership_path_.clear();
     ownership_marker_.clear();
-    std::fill(credential_.begin(), credential_.end(), std::uint8_t{0});
+    pulp::runtime::secure_zero_memory(
+        credential_.data(), credential_.size());
     credential_.clear();
 }
 
