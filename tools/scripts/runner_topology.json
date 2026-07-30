@@ -173,6 +173,60 @@
       ]
     },
     {
+      "variable": "PULP_LOCAL_GCC_RUNS_ON_JSON",
+      "purpose": "GCC compile gate (advisory). Native x86_64 Linux on the macpro Proxmox host; falls back to ubuntu-latest when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-latest",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_IWYU_RUNS_ON_JSON",
+      "purpose": "IWYU advisory lane. Native x86_64 Linux on macpro; falls back to ubuntu-24.04 when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-24.04",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
+      "variable": "PULP_LOCAL_HEADERS_RUNS_ON_JSON",
+      "purpose": "Public-headers-compile-standalone advisory lane. Native x86_64 Linux on macpro; falls back to ubuntu-24.04 when unset.",
+      "expect": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "pulp-build-linux-x64",
+        "pulp-host-macpro"
+      ],
+      "provisioning": "ephemeral",
+      "severity": "advisory",
+      "unset_fallback": "ubuntu-24.04",
+      "supervisor": "proxmox-systemd",
+      "hosts": [
+        "macpro"
+      ]
+    },
+    {
       "variable": "PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON",
       "purpose": "Linux primary target. Not referenced by any workflow today; kept for the reroute/overflow tooling.",
       "expect": [

@@ -62,7 +62,7 @@ concurrency:
 jobs:
   iwyu:
     name: IWYU (Linux, Clang) — advisory
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_IWYU_RUNS_ON_JSON || '"ubuntu-24.04"') }}
     # Advisory period — do NOT block PR merges until the false-positive
     # rate is low enough for required-check enforcement.
     continue-on-error: true

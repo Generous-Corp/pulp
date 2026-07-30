@@ -49,7 +49,7 @@ permissions:
 jobs:
   gcc-core:
     name: GCC compile (core, Linux)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_GCC_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - name: Checkout
