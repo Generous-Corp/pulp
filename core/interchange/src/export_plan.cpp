@@ -34,7 +34,9 @@ void write_json_string(std::ostringstream& out, std::string_view text) {
     out << '"';
 }
 
-std::vector<std::uint8_t> loss_manifest_bytes(const ExportPlan& plan) {
+} // namespace
+
+std::string loss_manifest_json(const ExportPlan& plan) {
     std::ostringstream out;
     out << "{\"schema_version\":1,\"format\":";
     write_json_string(out, format_id(plan.format()));
@@ -70,7 +72,13 @@ std::vector<std::uint8_t> loss_manifest_bytes(const ExportPlan& plan) {
         out << '}';
     }
     out << "]}";
-    const std::string text = out.str();
+    return out.str();
+}
+
+namespace {
+
+std::vector<std::uint8_t> loss_manifest_bytes(const ExportPlan& plan) {
+    const auto text = loss_manifest_json(plan);
     return {text.begin(), text.end()};
 }
 

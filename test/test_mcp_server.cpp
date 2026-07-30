@@ -626,6 +626,8 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_tool_name(tools, "pulp_timeline_validate");
     require_tool_name(tools, "pulp_timeline_explain");
     require_tool_name(tools, "pulp_timeline_render");
+    require_tool_name(tools, "pulp_timeline_export");
+    require_tool_name(tools, "pulp_timeline_import");
     require_contains(tools, "pulp.timeline.command.set_clip_playback_properties");
 
     auto unknown = handle_request(tool_call("5", "pulp_does_not_exist"));
@@ -662,6 +664,12 @@ TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][too
     require_contains(handle_request(tool_call("414", std::string(pulp_mcp::kTimelineMcpToolNames[4]),
                                               project_args)),
                      "project and output are required");
+    require_contains(handle_request(tool_call("415", std::string(pulp_mcp::kTimelineMcpToolNames[5]),
+                                              project_args)),
+                     "project and format are required");
+    require_contains(handle_request(tool_call("416", std::string(pulp_mcp::kTimelineMcpToolNames[6]),
+                                              "{}")),
+                     "input, format, and output are required");
 }
 
 // pulp #1997 — gap 1: every advertised MCP tool is named in tools/list.
@@ -672,7 +680,7 @@ TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][too
 TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
           "[mcp][tools][issue-1997]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":40,"method":"tools/list"})JSON");
-    // The full set of tools advertised today (18 names). Keep this list
+    // The full set of tools advertised today. Keep this list
     // sorted alphabetically so additions are obvious in a diff.
     const auto expected = {
         "pulp_audio_compare",
@@ -746,6 +754,8 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_test",
         "pulp_timeline_command_apply",
         "pulp_timeline_explain",
+        "pulp_timeline_export",
+        "pulp_timeline_import",
         "pulp_timeline_project_open",
         "pulp_timeline_render",
         "pulp_timeline_validate",
@@ -790,6 +800,8 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_timeline_validate", "Error: project is required"},
         std::pair{"pulp_timeline_explain", "Error: project is required"},
         std::pair{"pulp_timeline_render", "Error: project and output are required"},
+        std::pair{"pulp_timeline_export", "Error: project and format are required"},
+        std::pair{"pulp_timeline_import", "Error: input, format, and output are required"},
     };
 
     int id = 10;

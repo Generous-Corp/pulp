@@ -14,6 +14,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace pulp_mcp {
 namespace {
@@ -24,6 +25,10 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* commands = nullptr;
     const pulp::timeline::JsonValue* output = nullptr;
     const pulp::timeline::JsonValue* sample_rate = nullptr;
+    const pulp::timeline::JsonValue* input = nullptr;
+    const pulp::timeline::JsonValue* format = nullptr;
+    const pulp::timeline::JsonValue* accept_losses = nullptr;
+    const pulp::timeline::JsonValue* plan_only = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -40,6 +45,10 @@ parse_timeline_arguments(const std::string& params_json) {
     result.commands = root.find("commands");
     result.output = root.find("output");
     result.sample_rate = root.find("sample_rate");
+    result.input = root.find("input");
+    result.format = root.find("format");
+    result.accept_losses = root.find("accept_losses");
+    result.plan_only = root.find("plan_only");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -153,6 +162,63 @@ std::string handle_timeline_render(const std::string& params_json) {
     return timeline_result(pulp::tools::timeline::render(
         timeline_project_source(*project),
         pulp::tools::timeline::filesystem_path_from_utf8(*output), sample_rate.value()));
+}
+
+std::string handle_timeline_export(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* project = required_timeline_string(arguments.value().project);
+    const auto* format = required_timeline_string(arguments.value().format);
+    if (project == nullptr || format == nullptr)
+        return timeline_argument_error("Error: project and format are required");
+    bool plan_only = false;
+    if (const auto* value = arguments.value().plan_only) {
+        if (value->kind != pulp::timeline::JsonValue::Kind::Boolean)
+            return timeline_argument_error("Error: plan_only must be a boolean");
+        plan_only = value->boolean;
+    }
+    if (plan_only) {
+        if (arguments.value().output != nullptr)
+            return timeline_argument_error("Error: output must be absent when plan_only is true");
+        if (arguments.value().accept_losses != nullptr)
+            return timeline_argument_error(
+                "Error: accept_losses must be absent when plan_only is true");
+        return timeline_result(pulp::tools::timeline::plan_export_project(
+            timeline_project_source(*project), *format));
+    }
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (output == nullptr)
+        return timeline_argument_error("Error: output is required when publishing an export");
+    std::vector<std::string> accepted_losses;
+    if (const auto* losses = arguments.value().accept_losses) {
+        if (losses->kind != pulp::timeline::JsonValue::Kind::Array)
+            return timeline_argument_error("Error: accept_losses must be an array");
+        accepted_losses.reserve(losses->array.size());
+        for (const auto& loss : losses->array) {
+            if (loss.kind != pulp::timeline::JsonValue::Kind::String || loss.scalar.empty())
+                return timeline_argument_error(
+                    "Error: every accept_losses entry must be a concept id");
+            accepted_losses.push_back(loss.scalar);
+        }
+    }
+    return timeline_result(pulp::tools::timeline::export_project(
+        timeline_project_source(*project), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses));
+}
+
+std::string handle_timeline_import(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* input = required_timeline_string(arguments.value().input);
+    const auto* format = required_timeline_string(arguments.value().format);
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (input == nullptr || format == nullptr || output == nullptr)
+        return timeline_argument_error("Error: input, format, and output are required");
+    return timeline_result(pulp::tools::timeline::import_project(
+        pulp::tools::timeline::filesystem_path_from_utf8(*input), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output)));
 }
 
 } // namespace pulp_mcp

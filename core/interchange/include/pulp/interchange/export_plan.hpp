@@ -102,6 +102,11 @@ class ExportPlan {
 ExportPlan plan_export(const timeline::Project& project, Format format,
                        const CensusLimits& limits = {});
 
+/// Serialize the canonical loss manifest carried by every plan and export
+/// result. The exact same bytes are appended to successful export artifacts as
+/// `pulp-loss-manifest.json`.
+std::string loss_manifest_json(const ExportPlan& plan);
+
 /// The released v0.759 writer seam. Kept source-compatible so existing SDK
 /// consumers can still construct, store, and invoke their std::function.
 using ExportWriter =

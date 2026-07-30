@@ -80,6 +80,7 @@
     { "id": "clip.empty", "detect": "model", "summary": "A positioned clip with no note, media, registered, opaque, or nested-sequence content." },
     { "id": "tempo.ramp", "detect": "model", "summary": "A continuous tempo curve between two tempo-map points." },
     { "id": "clip.note-velocity-quantized", "detect": "model", "summary": "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value." },
-    { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." }
+    { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." },
+    { "id": "clip.media-window", "detect": "model", "summary": "A media clip that plays a source subrange rather than the referenced asset's complete frame range." }
   ]
 }

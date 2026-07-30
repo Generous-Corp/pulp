@@ -3104,6 +3104,56 @@
               }
             ],
             "subcommands": []
+          },
+          {
+            "name": "export",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--accept-loss",
+                "kind": "option"
+              },
+              {
+                "name": "--plan",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "import",
+            "arguments": [
+              {
+                "name": "input",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
           }
         ]
       },
@@ -4028,6 +4078,10 @@
       {
         "name": "run",
         "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "seq",
+        "disposition": "pulp-owned"
       },
       {
         "name": "ship",
