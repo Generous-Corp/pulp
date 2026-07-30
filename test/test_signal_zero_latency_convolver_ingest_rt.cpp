@@ -1,5 +1,7 @@
 #include "test_signal_zero_latency_convolver_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("Normalization modes do what they say", "[signal][convolution][ingest]") {
     const auto ir = decaying_noise_ir(5000, 3.0, 0x40);
 
@@ -97,7 +99,7 @@ TEST_CASE("Send EQ endpoints are exact bypass", "[signal][convolution][mix]") {
     // A 1 kHz 1-pole low-pass at 48 kHz passes w/(1+w) of a delta on the first
     // sample, w = 2*pi*1000/48000 — about 12 %, so the first sample must drop
     // to a small fraction of its bypassed value.
-    const double w = 2.0 * M_PI * ZeroLatencyConvolver64::kHighcutHzMin / kFs;
+    const double w = 2.0 * std::numbers::pi * ZeroLatencyConvolver64::kHighcutHzMin / kFs;
     REQUIRE_THAT(lp[0], Catch::Matchers::WithinRel(taps[0] * w / (1.0 + w), 1e-9));
 }
 

@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -189,7 +190,7 @@ TEST_CASE("Forge dynamics VCA: the OverEasy knee widens by the width injected",
         ref.set_time_ms(5.0);
         ref.set_makeup_db(0.0);
         ref.reset();
-        const double w = 2.0 * M_PI * kToneHz / kSr;
+        const double w = 2.0 * std::numbers::pi * kToneHz / kSr;
         for (int i = 0; i < static_cast<int>(kSr); ++i) ref.process(amp * std::sin(w * i));
         return ref.gain_reduction_db();
     };
@@ -751,7 +752,7 @@ TEST_CASE("Forge dynamics diode: the knee widens by the width injected",
         ref.set_character(0.0);
         ref.set_feedback(true);
         ref.reset();
-        const double w = 2.0 * M_PI * kToneHz / kSr;
+        const double w = 2.0 * std::numbers::pi * kToneHz / kSr;
         for (int i = 0; i < static_cast<int>(kSr); ++i) ref.process(amp * std::sin(w * i));
         return ref.gain_reduction_db();
     };

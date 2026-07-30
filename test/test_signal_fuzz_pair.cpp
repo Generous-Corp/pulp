@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -63,7 +64,7 @@ std::vector<double> render_sine(Fuzz& f, double freq_hz, double amp, int length,
                                 int settle = 9600) {
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(length));
-    const double w = 2.0 * M_PI * freq_hz / kSr;
+    const double w = 2.0 * std::numbers::pi * freq_hz / kSr;
     for (int n = 0; n < settle + length; ++n) {
         const double y = f.process(amp * std::sin(w * n));
         if (n >= settle) out.push_back(y);
@@ -74,7 +75,7 @@ std::vector<double> render_sine(Fuzz& f, double freq_hz, double amp, int length,
 /// Coherent DFT magnitude at harmonic `k`. Exact when the window holds a whole
 /// number of periods, which every call below arranges.
 double harmonic(const std::vector<double>& x, double fundamental_hz, int k) {
-    const double w = 2.0 * M_PI * k * fundamental_hz / kSr;
+    const double w = 2.0 * std::numbers::pi * k * fundamental_hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -279,7 +280,7 @@ TEST_CASE("4 a starved bias gates, and the gate tracks the envelope",
     // to the output.
     const auto tail_rms = [](double starve) {
         auto f = make_fuzz(FuzzDevice::germanium, 0.8, starve);
-        const double w = 2.0 * M_PI * 220.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 220.0 / kSr;
         const auto attack = static_cast<int>(kSr * 0.2);
         const auto decay = static_cast<int>(kSr * 2.0);
 
@@ -435,7 +436,7 @@ TEST_CASE("7 the fixed iteration count converges across the grid",
                 auto f = make_fuzz(device, fuzz, starve);
                 // Full-scale drive: the largest operating-point excursions the
                 // solver will ever be asked for.
-                const double w = 2.0 * M_PI * 440.0 / kSr;
+                const double w = 2.0 * std::numbers::pi * 440.0 / kSr;
                 for (int i = 0; i < 4800; ++i) f.process(std::sin(w * i));
                 worst = std::max(worst, f.worst_residual());
             }
@@ -511,7 +512,7 @@ TEST_CASE("7 both devices hold the tolerance over a long full-scale render",
     // here rather than nowhere.
     for (auto device : {FuzzDevice::germanium, FuzzDevice::silicon}) {
         auto f = make_fuzz(device, 0.8);
-        const double w = 2.0 * M_PI * 440.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 440.0 / kSr;
         for (int i = 0; i < 48000; ++i) f.process(std::sin(w * i));
         REQUIRE(f.worst_residual() < Fuzz::kResidualTolerance);
     }
@@ -521,7 +522,7 @@ TEST_CASE("a non-finite sample resets recursive state and finite audio recovers"
           "[fuzz][nan-recovery]") {
     auto f = make_fuzz(FuzzDevice::silicon, 1.0, 0.75, 0.1);
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    const double w = 2.0 * M_PI * 8000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 8000.0 / kSr;
 
     // A non-finite sample must never enter the coupled collector state or the
     // oversampling filters. Alternating it with finite 8 kHz input was the
@@ -595,8 +596,8 @@ TEST_CASE("9 render, reset, re-render is bit-identical", "[fuzz][determinism]") 
                 out.reserve(static_cast<std::size_t>(n));
                 for (int i = 0; i < n; ++i) {
                     const double t = i / kSr;
-                    out.push_back(f.process(0.4 * std::sin(2.0 * M_PI * 220.0 * t) +
-                                            0.3 * std::sin(2.0 * M_PI * 660.0 * t)));
+                    out.push_back(f.process(0.4 * std::sin(2.0 * std::numbers::pi * 220.0 * t) +
+                                            0.3 * std::sin(2.0 * std::numbers::pi * 660.0 * t)));
                 }
                 return out;
             };
@@ -657,7 +658,7 @@ TEST_CASE("the float and double instantiations agree", "[fuzz]") {
 
     REQUIRE(single.latency_samples() == dbl.latency_samples());
 
-    const double w = 2.0 * M_PI * 330.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 330.0 / kSr;
     for (int i = 0; i < 24000; ++i) {
         const double x = 0.6 * std::sin(w * i);
         REQUIRE_THAT(static_cast<double>(single.process(static_cast<float>(x))),

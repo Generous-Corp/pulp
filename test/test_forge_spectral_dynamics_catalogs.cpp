@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -81,7 +82,8 @@ std::vector<float> sine(float amplitude, float frequency_hz = 1000.0f) {
     std::vector<float> result(static_cast<std::size_t>(kFrames));
     for (int i = 0; i < kFrames; ++i) {
         result[static_cast<std::size_t>(i)] =
-            amplitude * std::sin(static_cast<float>(2.0 * M_PI * frequency_hz * i / kSampleRate));
+            amplitude *
+            std::sin(static_cast<float>(2.0 * std::numbers::pi * frequency_hz * i / kSampleRate));
     }
     return result;
 }

@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -63,7 +64,7 @@ std::vector<double> render_sine(SaturatorT<double>& sat, double freq_hz, double 
                                 int analysis_len = kAnalysisLen) {
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(analysis_len));
-    const double w = 2.0 * M_PI * freq_hz / kSr;
+    const double w = 2.0 * std::numbers::pi * freq_hz / kSr;
     for (int n = 0; n < kSettle + analysis_len; ++n) {
         const double y = sat.process(peak * std::sin(w * n));
         if (n >= kSettle) out.push_back(y);
@@ -74,7 +75,7 @@ std::vector<double> render_sine(SaturatorT<double>& sat, double freq_hz, double 
 /// Coherent DFT magnitude at harmonic `k` of the analysis fundamental. Exact
 /// for an integer-period window: no leakage, no window correction.
 double harmonic_magnitude(const std::vector<double>& x, int k) {
-    const double w = 2.0 * M_PI * k / kPeriodSamples;
+    const double w = 2.0 * std::numbers::pi * k / kPeriodSamples;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -95,7 +96,7 @@ double harmonic_magnitude(const std::vector<double>& x, int k) {
 /// by 20·log10(sin(π/3)) = −1.25 dB — an error large enough to look exactly
 /// like a filter that is not flat.
 double magnitude_at_hz(const std::vector<double>& x, double hz) {
-    const double w = 2.0 * M_PI * hz / kSr;
+    const double w = 2.0 * std::numbers::pi * hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -181,7 +182,7 @@ double exact_harmonic(const SaturatorT<double>& sat, double peak, int k) {
     constexpr int kQuadraturePoints = 200000;
     double sum = 0.0;
     for (int n = 0; n < kQuadraturePoints; ++n) {
-        const double t = 2.0 * M_PI * (n + 0.5) / kQuadraturePoints;
+        const double t = 2.0 * std::numbers::pi * (n + 0.5) / kQuadraturePoints;
         sum += sat.shaped(peak * std::sin(t)) * std::sin(k * t);
     }
     return std::abs(2.0 * sum / kQuadraturePoints);
@@ -484,13 +485,14 @@ TEST_CASE("A8 ADAA suppresses the aliased image band", "[saturator][aliasing]") 
 
         std::vector<double> windowed(kProbeLen);
         for (int n = 0; n < kProbeLen; ++n) {
-            const double hann = 0.5 * (1.0 - std::cos(2.0 * M_PI * n / (kProbeLen - 1)));
+            const double hann =
+                0.5 * (1.0 - std::cos(2.0 * std::numbers::pi * n / (kProbeLen - 1)));
             windowed[static_cast<std::size_t>(n)] = out[static_cast<std::size_t>(n)] * hann;
         }
 
         double energy = 0.0;
         for (double f = 200.0; f <= 6000.0; f += 50.0) {
-            const double w = 2.0 * M_PI * f / kSr;
+            const double w = 2.0 * std::numbers::pi * f / kSr;
             double re = 0.0, im = 0.0;
             for (int n = 0; n < kProbeLen; ++n) {
                 re += windowed[static_cast<std::size_t>(n)] * std::cos(w * n);
@@ -633,7 +635,7 @@ TEST_CASE("ADAA converges on direct evaluation for a slow signal",
         auto direct = make_saturator(shape, 12.0, 0.0, SaturatorAliasPolicy::off);
 
         // 10 Hz: 4800 samples per cycle, so consecutive samples are very close.
-        const double w = 2.0 * M_PI * 10.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 10.0 / kSr;
         double worst = 0.0;
         for (int n = 0; n < 9600; ++n) {
             const double x = 0.9 * std::sin(w * n);
@@ -648,7 +650,7 @@ TEST_CASE("ADAA converges on direct evaluation for a slow signal",
                                SaturatorAliasPolicy::adaa);
     auto direct = make_saturator(SaturatorShape::cubic_soft, 30.0, 0.0,
                                  SaturatorAliasPolicy::off);
-    const double w = 2.0 * M_PI * 10.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 10.0 / kSr;
     for (int n = 0; n < 9600; ++n) {
         const double x = 0.9 * std::sin(w * n);
         const double a = adaa.process(x);

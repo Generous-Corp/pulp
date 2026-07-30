@@ -84,6 +84,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -131,8 +132,8 @@ Stereo render_tone(TapeMachine& machine, double hz, double amplitude, int n,
     Stereo out{std::vector<float>(static_cast<std::size_t>(n)),
                std::vector<float>(static_cast<std::size_t>(n))};
     for (int k = 0; k < n; ++k) {
-        const auto v = static_cast<float>(
-            amplitude * std::sin(2.0 * M_PI * hz * k / sample_rate));
+        const auto v =
+            static_cast<float>(amplitude * std::sin(2.0 * std::numbers::pi * hz * k / sample_rate));
         in_l[static_cast<std::size_t>(k)] = v;
         in_r[static_cast<std::size_t>(k)] = v;
     }
@@ -168,7 +169,7 @@ double bin_magnitude(const std::vector<float>& x, double hz, double sample_rate 
     const int start = n / 2;
     double re = 0.0, im = 0.0;
     for (int k = start; k < n; ++k) {
-        const double theta = 2.0 * M_PI * hz * k / sample_rate;
+        const double theta = 2.0 * std::numbers::pi * hz * k / sample_rate;
         re += x[static_cast<std::size_t>(k)] * std::cos(theta);
         im += x[static_cast<std::size_t>(k)] * std::sin(theta);
     }
@@ -200,7 +201,7 @@ double band_noise(const std::vector<float>& x, double lo, double hi, double excl
         const double magnitude = [&] {
             double re = 0.0, im = 0.0;
             for (int k = start; k < n; ++k) {
-                const double theta = 2.0 * M_PI * f * k / kSr;
+                const double theta = 2.0 * std::numbers::pi * f * k / kSr;
                 re += x[static_cast<std::size_t>(k)] * std::cos(theta);
                 im += x[static_cast<std::size_t>(k)] * std::sin(theta);
             }
@@ -243,7 +244,7 @@ std::pair<double, int> peak_of(const std::vector<float>& x, int lo = 0, int hi =
 double fir_response_db(const std::vector<double>& taps, double hz, double sample_rate) {
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < taps.size(); ++n) {
-        const double theta = 2.0 * M_PI * hz * static_cast<double>(n) / sample_rate;
+        const double theta = 2.0 * std::numbers::pi * hz * static_cast<double>(n) / sample_rate;
         re += taps[n] * std::cos(theta);
         im -= taps[n] * std::sin(theta);
     }

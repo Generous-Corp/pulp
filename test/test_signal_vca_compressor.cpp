@@ -40,6 +40,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -101,7 +102,7 @@ Vca curve_probe(double t, double r, double w) {
 /// strictly increasing from 0, so the root is unique and bisection is safe.
 double sine_equilibrium_offset(double coef_ratio) {
     const auto h = [coef_ratio](double c) {
-        return (std::sqrt(1.0 - c * c) - c * std::acos(c)) / M_PI -
+        return (std::sqrt(1.0 - c * c) - c * std::acos(c)) / std::numbers::pi -
                c * coef_ratio / (1.0 - coef_ratio);
     };
     double lo = 0.0, hi = 1.0;
@@ -386,15 +387,15 @@ TEST_CASE("4 both directions cross 63.2 % at exactly their own time constant",
         attack.set_time_ms(time_ms);
         attack.set_attack_release_ratio_k(k);
         attack.reset();
-        const int measured_attack = samples_to_fraction(attack, amplitude, 0.0, power,
-                                                        1.0 - 1.0 / M_E, static_cast<int>(kSr));
+        const int measured_attack = samples_to_fraction(
+            attack, amplitude, 0.0, power, 1.0 - 1.0 / std::numbers::e, static_cast<int>(kSr));
         REQUIRE(measured_attack > 0);
         REQUIRE_THAT(static_cast<double>(measured_attack), WithinAbs(attack_n, 1.0));
 
         Vca release = settled_detector(time_ms, k, amplitude, 1.0);
         const double start = release.mean_square();
-        const int measured_release = samples_to_fraction(release, 0.0, start, 0.0,
-                                                         1.0 - 1.0 / M_E, static_cast<int>(kSr));
+        const int measured_release = samples_to_fraction(
+            release, 0.0, start, 0.0, 1.0 - 1.0 / std::numbers::e, static_cast<int>(kSr));
         REQUIRE(measured_release > 0);
         REQUIRE_THAT(static_cast<double>(measured_release), WithinAbs(release_n, 1.0));
     }

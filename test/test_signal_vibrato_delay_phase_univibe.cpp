@@ -1,5 +1,7 @@
 #include "test_signal_vibrato_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("Pitch instrument recovers a known FM deviation", "[vibrato][instrument]") {
     // Synthetic tone with an exactly known peak deviation of beta*f_m Hz.
     constexpr double kBeta = 0.4225;

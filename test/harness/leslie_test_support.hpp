@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -94,8 +95,10 @@ struct Demodulated {
         const double phase = std::atan2(q, i);
         if (have_previous) {
             double d = phase - previous_phase;
-            while (d > M_PI) d -= kTwoPi;
-            while (d < -M_PI) d += kTwoPi;
+            while (d > std::numbers::pi)
+                d -= kTwoPi;
+            while (d < -std::numbers::pi)
+                d += kTwoPi;
             out.freq_hz.push_back(carrier_hz + d * out.rate_hz / kTwoPi);
         }
         previous_phase = phase;

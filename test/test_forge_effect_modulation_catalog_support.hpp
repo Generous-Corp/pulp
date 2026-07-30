@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <numbers>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,7 +84,7 @@ std::vector<float> silence() { return std::vector<float>(static_cast<std::size_t
 /// Coherent DFT magnitude at `hz` over one block. Exact for any whole multiple
 /// of `kBinHz`, which every call site below is.
 double magnitude_at(const std::vector<float>& x, double hz) {
-    const double w = 2.0 * M_PI * hz / kSr;
+    const double w = 2.0 * std::numbers::pi * hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -186,13 +187,13 @@ Demod demodulate(const std::vector<float>& x, double carrier_hz, double lowpass_
                  int decimation) {
     Demod out;
     out.rate_hz = kSr / decimation;
-    const double pole = std::exp(-2.0 * M_PI * lowpass_hz / kSr);
+    const double pole = std::exp(-2.0 * std::numbers::pi * lowpass_hz / kSr);
     double si[4] = {0, 0, 0, 0};
     double sq[4] = {0, 0, 0, 0};
     double previous = 0.0;
     bool have = false;
     for (std::size_t n = 0; n < x.size(); ++n) {
-        const double w = 2.0 * M_PI * carrier_hz * static_cast<double>(n) / kSr;
+        const double w = 2.0 * std::numbers::pi * carrier_hz * static_cast<double>(n) / kSr;
         double i = x[n] * std::cos(w);
         double q = -x[n] * std::sin(w);
         for (int k = 0; k < 4; ++k) {
@@ -206,9 +207,11 @@ Demod demodulate(const std::vector<float>& x, double carrier_hz, double lowpass_
         const double phase = std::atan2(q, i);
         if (have) {
             double d = phase - previous;
-            while (d > M_PI) d -= 2.0 * M_PI;
-            while (d < -M_PI) d += 2.0 * M_PI;
-            out.freq_hz.push_back(carrier_hz + d * out.rate_hz / (2.0 * M_PI));
+            while (d > std::numbers::pi)
+                d -= 2.0 * std::numbers::pi;
+            while (d < -std::numbers::pi)
+                d += 2.0 * std::numbers::pi;
+            out.freq_hz.push_back(carrier_hz + d * out.rate_hz / (2.0 * std::numbers::pi));
         }
         previous = phase;
         have = true;
@@ -239,7 +242,7 @@ double locate_rate(const std::vector<double>& trace, double lo_hz, double hi_hz,
         const double hz = lo_hz + (hi_hz - lo_hz) * k / steps;
         std::complex<double> acc{0.0, 0.0};
         for (std::size_t n = 0; n < trace.size(); ++n) {
-            const double w = 2.0 * M_PI * hz * static_cast<double>(n) / rate_hz;
+            const double w = 2.0 * std::numbers::pi * hz * static_cast<double>(n) / rate_hz;
             acc += (trace[n] - mean) * std::complex<double>(std::cos(w), -std::sin(w));
         }
         const double mag = std::abs(acc);
@@ -257,7 +260,7 @@ double locate_rate(const std::vector<double>& trace, double lo_hz, double hi_hz,
 double trace_magnitude_at(const std::vector<float>& x, double hz) {
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
-        const double w = 2.0 * M_PI * hz * static_cast<double>(n) / kSr;
+        const double w = 2.0 * std::numbers::pi * hz * static_cast<double>(n) / kSr;
         re += x[n] * std::cos(w);
         im += x[n] * std::sin(w);
     }

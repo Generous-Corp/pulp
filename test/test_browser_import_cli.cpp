@@ -348,7 +348,7 @@ TEST_CASE("browser CLI adapter stages proof and commits evidence once",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;
     auto request = request_for(tree);
-    request.diff_output = tree.root / "elsewhere/capture.json";
+    request.diff_output = (tree.root / "elsewhere/capture.json").string();
     std::vector<std::string> order;
     id::BrowserCaptureValidationOptions observed;
 
@@ -661,19 +661,17 @@ TEST_CASE("browser CLI adapter rejects proof publication collisions",
     }
 #if defined(__APPLE__) || defined(_WIN32)
     SECTION("nonexistent mixed-case output aliases are collisions") {
-        request.diff_output =
-            request.output_file.parent_path() / "UI.JS";
+        request.diff_output = (request.output_file.parent_path() / "UI.JS").string();
     }
     SECTION("nonexistent mixed-case durable aliases are contained") {
         request.diff_output =
-            request.output_file.parent_path() /
-            "UI-BROWSER-CAPTURE/proof.png";
+            (request.output_file.parent_path() / "UI-BROWSER-CAPTURE/proof.png").string();
     }
     SECTION("nonexistent mixed-case interaction aliases are collisions") {
         request.browser_interactions =
             request.output_file.parent_path() / "Interaction-Plan.JSON";
         request.diff_output =
-            request.output_file.parent_path() / "interaction-plan.json";
+            (request.output_file.parent_path() / "interaction-plan.json").string();
     }
 #endif
 
@@ -732,7 +730,7 @@ TEST_CASE("evidence commit rechecks filesystem aliases",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;
     auto request = request_for(tree);
-    request.diff_output = tree.root / "proof/diff.png";
+    request.diff_output = (tree.root / "proof/diff.png").string();
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -778,7 +776,7 @@ TEST_CASE("evidence commit rechecks aliases against the interaction plan",
     auto request = request_for(tree);
     request.browser_interactions =
         tree.root / "interaction-plan.json";
-    request.diff_output = tree.root / "proof/diff.png";
+    request.diff_output = (tree.root / "proof/diff.png").string();
     tree.write(*request.browser_interactions, "interaction-plan");
 
     id::internal::BrowserImportCliOperations operations;
