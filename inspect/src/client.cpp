@@ -35,11 +35,20 @@ InspectorMessage connection_error(std::int64_t request_id,
 
 class InspectorClient::Impl {
 public:
+    struct QueuedEvent {
+        InspectorMessage message;
+        std::uint64_t generation = 0;
+    };
+
     struct EventState {
         std::mutex mutex;
         std::condition_variable cv;
-        detail::BoundedEventQueue<InspectorMessage> events{256};
+        detail::BoundedEventQueue<QueuedEvent> events{256};
         EventHandler handler;
+        std::thread::id callback_thread;
+        std::uint64_t connection_generation = 0;
+        std::uint64_t callback_generation = 0;
+        bool callback_active = false;
         bool stopping = false;
     };
 
@@ -53,6 +62,7 @@ public:
     std::shared_ptr<EventState> event_state = std::make_shared<EventState>();
     std::thread event_thread;
     std::atomic<std::int64_t> next_request_id{2};
+    std::uint64_t connection_generation = 0;
     bool disconnected = true;
 
     Impl() {
@@ -69,14 +79,19 @@ public:
                 if (!event)
                     continue;
                 auto handler = state->handler;
+                state->callback_thread = std::this_thread::get_id();
+                state->callback_generation = event->generation;
+                state->callback_active = true;
                 lock.unlock();
                 if (handler) {
                     try {
-                        handler(*event);
+                        handler(event->message);
                     } catch (...) {
                     }
                 }
                 lock.lock();
+                state->callback_active = false;
+                state->callback_thread = {};
             }
         });
     }
@@ -95,13 +110,15 @@ public:
             event_thread.join();
     }
 
-    void receive(std::string_view text) {
+    void receive(std::string_view text, std::uint64_t generation) {
         InspectorMessage message;
         if (!decode_message(std::string(text), message))
             return;
 
         {
             std::lock_guard lock(mutex);
+            if (disconnected || generation != connection_generation)
+                return;
             if (message.method == "Session.authChallenge") {
                 try {
                     const auto value = choc::json::parse(message.params_json);
@@ -133,7 +150,10 @@ public:
         detail::EventQueuePushResult result;
         {
             std::lock_guard lock(event_state->mutex);
-            result = event_state->events.push(std::move(message), lossy);
+            if (generation != event_state->connection_generation)
+                return;
+            result = event_state->events.push(
+                QueuedEvent{std::move(message), generation}, lossy);
         }
         if (result == detail::EventQueuePushResult::Queued) {
             event_state->cv.notify_one();
@@ -141,6 +161,24 @@ public:
                    detail::EventQueuePushResult::ReliableOverflow) {
             connection.disconnect();
         }
+    }
+
+    void mark_disconnected(std::uint64_t generation) {
+        {
+            std::lock_guard lock(mutex);
+            if (generation != connection_generation)
+                return;
+            disconnected = true;
+        }
+        cv.notify_all();
+    }
+
+    bool request_from_stale_callback() const {
+        std::lock_guard lock(event_state->mutex);
+        return event_state->callback_active &&
+               event_state->callback_thread == std::this_thread::get_id() &&
+               event_state->callback_generation !=
+                   event_state->connection_generation;
     }
 
     InspectorMessage wait_for_response(std::int64_t id,
@@ -179,15 +217,6 @@ public:
 
 InspectorClient::InspectorClient() : impl_(std::make_unique<Impl>()) {
     impl_->connection.set_max_message_bytes(1024u * 1024u);
-    impl_->connection.set_on_text_message(
-        [this](std::string_view message) { impl_->receive(message); });
-    impl_->connection.set_on_disconnected([this] {
-        {
-            std::lock_guard lock(impl_->mutex);
-            impl_->disconnected = true;
-        }
-        impl_->cv.notify_all();
-    });
 }
 
 InspectorClient::~InspectorClient() {
@@ -201,13 +230,26 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
     const auto token = discovery.read_credential(record);
     if (!token)
         return false;
+    std::uint64_t generation = 0;
     {
         std::lock_guard lock(impl_->mutex);
+        generation = ++impl_->connection_generation;
         impl_->disconnected = false;
         impl_->challenge.reset();
         impl_->responses.clear();
         impl_->in_flight.clear();
     }
+    {
+        std::lock_guard lock(impl_->event_state->mutex);
+        impl_->event_state->connection_generation = generation;
+    }
+    impl_->connection.set_on_text_message(
+        [this, generation](std::string_view message) {
+            impl_->receive(message, generation);
+        });
+    impl_->connection.set_on_disconnected([this, generation] {
+        impl_->mark_disconnected(generation);
+    });
     impl_->connection.set_write_timeout(
         std::max(timeout, std::chrono::milliseconds(1)));
     if (!impl_->connection.connect(record.endpoint,
@@ -236,7 +278,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         impl_->connection.disconnect();
         return false;
     }
-    const auto proof = make_inspector_auth_proof(*token, challenge);
+    const auto proof =
+        make_inspector_auth_proof(token->bytes(), challenge);
     if (!proof) {
         impl_->connection.disconnect();
         return false;
@@ -268,9 +311,10 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
 }
 
 void InspectorClient::disconnect() {
-    impl_->connection.disconnect();
+    std::uint64_t generation = 0;
     {
         std::lock_guard lock(impl_->mutex);
+        generation = ++impl_->connection_generation;
         impl_->disconnected = true;
         impl_->responses.clear();
         impl_->in_flight.clear();
@@ -278,8 +322,10 @@ void InspectorClient::disconnect() {
     }
     {
         std::lock_guard lock(impl_->event_state->mutex);
+        impl_->event_state->connection_generation = generation;
         impl_->event_state->events.clear();
     }
+    impl_->connection.disconnect();
     impl_->cv.notify_all();
 }
 
@@ -293,6 +339,12 @@ InspectorMessage InspectorClient::request(
     std::chrono::milliseconds timeout) {
     const auto id =
         impl_->next_request_id.fetch_add(1, std::memory_order_relaxed);
+    if (impl_->request_from_stale_callback()) {
+        return connection_error(
+            id,
+            "Inspector event callback belongs to a prior connection",
+            "stale_event_callback");
+    }
     if (!is_connected()) {
         return connection_error(id,
                                 "Inspector client is not connected",

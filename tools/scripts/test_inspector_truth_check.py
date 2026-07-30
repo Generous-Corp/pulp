@@ -39,10 +39,10 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "docs/status/cli-commands.yaml":
                 "owner-private authenticated discovery\n",
             "experimental/pulp-rs/src/cmd/motion.rs":
-                "authenticated auto-discovery; "
-                "must be an integer from 1 to 65535\n",
+                "authenticated auto-discovery\n",
             "experimental/pulp-rs/src/cmd/trace.rs":
-                "authenticated auto-discovery; "
+                "authenticated auto-discovery\n",
+            "experimental/pulp-rs/src/cmd/inspector.rs":
                 "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":
                 "authenticated ephemeral discovery\n",

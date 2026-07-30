@@ -96,6 +96,35 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
         temporary.path / "11-session-one-instance-1.token"));
 }
 
+TEST_CASE("discovery rejects records and credentials above their fixed bounds",
+          "[inspect][discovery][resource-limit]") {
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    REQUIRE(publisher.publish(
+        fixture_record("bounded-input"), *token, 5s));
+    InspectorDiscoveryReader reader(temporary.path);
+    REQUIRE(reader.list().size() == 1);
+
+    {
+        std::ofstream record(publisher.record()->record_path,
+                             std::ios::binary | std::ios::trunc);
+        record << std::string(1025, 'x');
+    }
+    CHECK(reader.list().empty());
+
+    REQUIRE(publisher.refresh(5s));
+    {
+        std::ofstream credential(
+            publisher.record()->credential_path,
+            std::ios::binary | std::ios::app);
+        credential << '0';
+    }
+    CHECK(reader.list().empty());
+    CHECK_FALSE(reader.read_credential(*publisher.record()).has_value());
+}
+
 TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
           "[inspect][discovery][identity]") {
     TemporaryDirectory temporary;

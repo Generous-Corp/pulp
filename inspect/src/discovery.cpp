@@ -6,6 +6,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <fstream>
@@ -36,9 +37,46 @@
 #endif
 
 namespace pulp::inspect {
+
+InspectorCredential::InspectorCredential(
+    std::span<const std::uint8_t> bytes)
+    : bytes_(bytes.begin(), bytes.end()) {}
+
+InspectorCredential::~InspectorCredential() {
+    clear();
+}
+
+InspectorCredential::InspectorCredential(
+    InspectorCredential&& other) noexcept
+    : bytes_(std::move(other.bytes_)) {
+    other.clear();
+}
+
+InspectorCredential& InspectorCredential::operator=(
+    InspectorCredential&& other) noexcept {
+    if (this != &other) {
+        clear();
+        bytes_ = std::move(other.bytes_);
+        other.clear();
+    }
+    return *this;
+}
+
+void InspectorCredential::clear() noexcept {
+    pulp::runtime::secure_zero_memory(bytes_.data(), bytes_.size());
+    bytes_.clear();
+}
+
 namespace {
 
 using Clock = std::chrono::system_clock;
+
+struct SensitiveText {
+    std::string value;
+    ~SensitiveText() {
+        pulp::runtime::secure_zero_memory(value.data(), value.size());
+    }
+};
 
 std::int64_t unix_ms_now() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -430,10 +468,19 @@ std::optional<std::string> read_private_text_file(
     const std::filesystem::path& path) {
     if (!private_regular_file(path))
         return std::nullopt;
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size > 1024)
+        return std::nullopt;
     std::ifstream input(path, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(input)),
-                         std::istreambuf_iterator<char>());
-    if ((!input.good() && !input.eof()) || contents.size() > 1024)
+    std::string contents(static_cast<std::size_t>(size), '\0');
+    if (!contents.empty())
+        input.read(contents.data(),
+                   static_cast<std::streamsize>(contents.size()));
+    if (input.gcount() != static_cast<std::streamsize>(contents.size()))
+        return std::nullopt;
+    char trailing = '\0';
+    if (input.get(trailing))
         return std::nullopt;
     return contents;
 }
@@ -464,15 +511,11 @@ std::string encode_record(const InspectorDiscoveryRecord& record) {
 std::optional<InspectorDiscoveryRecord> decode_record(
     const std::filesystem::path& root,
     const std::filesystem::path& path) {
-    if (!private_regular_file(path))
-        return std::nullopt;
-    std::ifstream input(path, std::ios::binary);
-    std::string json((std::istreambuf_iterator<char>(input)),
-                     std::istreambuf_iterator<char>());
-    if (!input.good() && !input.eof())
+    const auto json = read_private_text_file(path);
+    if (!json)
         return std::nullopt;
     try {
-        const auto value = choc::json::parse(json);
+        const auto value = choc::json::parse(*json);
         InspectorDiscoveryRecord record;
         record.session_id = std::string(value["sessionId"].getString());
         record.instance_id = std::string(value["instanceId"].getString());
@@ -665,7 +708,7 @@ std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
     return records;
 }
 
-std::optional<std::vector<std::uint8_t>>
+std::optional<InspectorCredential>
 InspectorDiscoveryReader::read_credential(
     const InspectorDiscoveryRecord& record) const {
     if (!validate_private_directory(runtime_directory_))
@@ -673,10 +716,22 @@ InspectorDiscoveryReader::read_credential(
     const auto path = confined_path(runtime_directory_, record.credential_path);
     if (!path || !private_regular_file(*path))
         return std::nullopt;
+    std::error_code error;
+    if (std::filesystem::file_size(*path, error) != 64 || error)
+        return std::nullopt;
     std::ifstream input(*path, std::ios::binary);
-    std::string hex((std::istreambuf_iterator<char>(input)),
-                    std::istreambuf_iterator<char>());
-    if (hex.size() != 64)
+    struct SensitiveHex {
+        std::array<char, 64> bytes{};
+        ~SensitiveHex() {
+            pulp::runtime::secure_zero_memory(bytes.data(), bytes.size());
+        }
+    } hex;
+    input.read(hex.bytes.data(),
+               static_cast<std::streamsize>(hex.bytes.size()));
+    if (input.gcount() != static_cast<std::streamsize>(hex.bytes.size()))
+        return std::nullopt;
+    char trailing = '\0';
+    if (input.get(trailing))
         return std::nullopt;
     auto nibble = [](char value) -> int {
         if (value >= '0' && value <= '9') return value - '0';
@@ -684,15 +739,21 @@ InspectorDiscoveryReader::read_credential(
         if (value >= 'A' && value <= 'F') return value - 'A' + 10;
         return -1;
     };
-    std::vector<std::uint8_t> result(32);
-    for (std::size_t index = 0; index < result.size(); ++index) {
-        const int high = nibble(hex[index * 2]);
-        const int low = nibble(hex[index * 2 + 1]);
+    struct SensitiveBytes {
+        std::array<std::uint8_t, 32> bytes{};
+        ~SensitiveBytes() {
+            pulp::runtime::secure_zero_memory(bytes.data(), bytes.size());
+        }
+    } result;
+    for (std::size_t index = 0; index < result.bytes.size(); ++index) {
+        const int high = nibble(hex.bytes[index * 2]);
+        const int low = nibble(hex.bytes[index * 2 + 1]);
         if (high < 0 || low < 0)
             return std::nullopt;
-        result[index] = static_cast<std::uint8_t>((high << 4) | low);
+        result.bytes[index] =
+            static_cast<std::uint8_t>((high << 4) | low);
     }
-    return result;
+    return InspectorCredential(result.bytes);
 }
 
 InspectorDiscoveryPublisher::InspectorDiscoveryPublisher(
@@ -744,9 +805,10 @@ bool InspectorDiscoveryPublisher::publish(
     std::filesystem::remove(record.record_path, error);
     std::filesystem::remove(record.credential_path, error);
     credential_.assign(credential.begin(), credential.end());
-    if (!write_private_file_atomic(
-            record.credential_path,
-            pulp::runtime::hex_encode(credential_)) ||
+    SensitiveText encoded_credential{
+        pulp::runtime::hex_encode(credential_)};
+    if (!write_private_file_atomic(record.credential_path,
+                                   encoded_credential.value) ||
         !write_private_file_atomic(record.record_path, encode_record(record))) {
         std::error_code error;
         std::filesystem::remove(record.record_path, error);
@@ -754,6 +816,8 @@ bool InspectorDiscoveryPublisher::publish(
         ownership_.reset();
         ownership_path_.clear();
         ownership_marker_.clear();
+        pulp::runtime::secure_zero_memory(
+            credential_.data(), credential_.size());
         credential_.clear();
         return false;
     }
