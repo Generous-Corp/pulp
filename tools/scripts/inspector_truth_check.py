@@ -58,6 +58,8 @@ FORBIDDEN_CLAIMS = {
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
         "same temp-file hint as `pulp inspect`",
         "defaults to `9147`",
+        "pulp trace start --categories dsp,render --out",
+        "start [--categories LIST] [--out FILE.pftrace]",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
@@ -66,11 +68,13 @@ FORBIDDEN_CLAIMS = {
     "tools/mcp/pulp_mcp.cpp": (
         "lacks authenticated main-thread dispatch",
         '"name":"pulp_motion_load_fixture"',
+        '"out_path":{"type":"string","description":"Explicit .pftrace output path',
     ),
     "docs/status/cli-commands.yaml": (
         "auto-discovery from a temp-file hint",
         "same temp-file auto-discovery as `pulp inspect`",
         "defaults to 9147",
+        "description: Output path for the flushed `.pftrace`",
     ),
     "docs/guides/motion-observability.md": (
         "probes `127.0.0.1:9147`",
@@ -87,6 +91,7 @@ FORBIDDEN_CLAIMS = {
         ".arg(\"--port\")\n            .arg(port.to_string())",
         "use std::net::TcpStream;",
         "fn inspector_reachable(",
+        'buf.push_str("\\"out_path\\":\\"");',
     ),
     ".claude/commands/trace.md": (
         "(default 9147)",
@@ -117,6 +122,7 @@ REQUIRED_CLAIMS = {
     "docs/reference/cli.md": (
         "unavailable in normal launches",
         "explicitly wired",
+        "remote clients cannot select a filesystem path",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
@@ -178,6 +184,19 @@ REQUIRED_SECURITY_CONTRACTS = {
         "std::chrono::steady_clock::duration::max()",
         "std::chrono::steady_clock::time_point::max() - interval",
         "!publisher_->refresh(ttl_)",
+    ),
+    "inspect/src/trace_inspector.cpp": (
+        "out_path is unavailable over the inspector",
+        "ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb",
+        "Tracing::start(categories, {}, ring_kb)",
+    ),
+    "experimental/pulp-rs/src/cmd/trace.rs": (
+        "pulp trace start --out is unavailable",
+        "if !(1..=512).contains(&ring_mb)",
+    ),
+    "tools/mcp/pulp_mcp.cpp": (
+        '"minimum":1,"maximum":512',
+        "The host owns the trace destination.",
     ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (
         "must be an integer from 1 to 65535",

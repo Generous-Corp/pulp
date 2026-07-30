@@ -14,7 +14,7 @@
 //!
 //! | `pulp trace <verb>`                    | Inspector method       |
 //! |----------------------------------------|------------------------|
-//! | `start [--categories …] [--out FILE]…` | `Trace.startSession`   |
+//! | `start [--categories …] [--ring-mb N]` | `Trace.startSession`   |
 //! | `stop`                                 | `Trace.stopSession`    |
 //! | `query "<SQL>" [--format …]`           | `Trace.query`          |
 //! | `query "<SQL>" --trace FILE.pftrace`   | `trace_processor` (offline) |
@@ -153,11 +153,8 @@ pub struct StartArgs {
     /// `--categories dsp,render,…` — the span categories to record.
     /// Empty means "let the inspector pick its default taxonomy".
     pub categories: Vec<String>,
-    /// `--out FILE.pftrace` — explicit output path for the flushed
-    /// trace. Empty means the inspector chooses a temp path.
-    pub out: Option<PathBuf>,
     /// `--ring-mb N` — in-process ring size in mebibytes. `None` means
-    /// the inspector's default (80MB).
+    /// the inspector's default (80MB); accepted values are 1 through 512.
     pub ring_mb: Option<u32>,
 }
 
@@ -270,22 +267,28 @@ fn parse_start(args: &[String]) -> Result<Sub> {
                     .collect();
             }
             "--out" => {
-                i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--out requires a path".to_owned())
-                })?;
-                s.out = Some(PathBuf::from(v));
+                return Err(CliError::BadUsage(
+                    "pulp trace start --out is unavailable: authenticated \
+                     inspector clients cannot choose a host filesystem path"
+                        .to_owned(),
+                ));
             }
             "--ring-mb" => {
                 i += 1;
                 let v = args.get(i).ok_or_else(|| {
                     CliError::BadUsage("--ring-mb requires a value".to_owned())
                 })?;
-                s.ring_mb = Some(v.parse::<u32>().map_err(|_| {
+                let ring_mb = v.parse::<u32>().map_err(|_| {
                     CliError::BadUsage(format!(
                         "--ring-mb: invalid u32 value `{v}`"
                     ))
-                })?);
+                })?;
+                if !(1..=512).contains(&ring_mb) {
+                    return Err(CliError::BadUsage(
+                        "--ring-mb must be between 1 and 512".to_owned(),
+                    ));
+                }
+                s.ring_mb = Some(ring_mb);
             }
             other => {
                 return Err(CliError::BadUsage(format!(
@@ -464,15 +467,6 @@ fn build_start_params(s: &StartArgs) -> String {
             buf.push('"');
         }
         buf.push(']');
-        first = false;
-    }
-    if let Some(ref out) = s.out {
-        if !first {
-            buf.push(',');
-        }
-        buf.push_str("\"out_path\":\"");
-        buf.push_str(&escape_json(&out.to_string_lossy()));
-        buf.push('"');
         first = false;
     }
     if let Some(ring_mb) = s.ring_mb {
@@ -1117,7 +1111,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Lifecycle verbs:")?;
     writeln!(
         out,
-        "  start [--categories dsp,render,…] [--out FILE.pftrace] [--ring-mb N]"
+        "  start [--categories dsp,render,…] [--ring-mb 1..512]"
     )?;
     writeln!(
         out,
@@ -1262,13 +1256,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_start_collects_categories_out_and_ring() {
+    fn parse_start_collects_categories_and_ring() {
         let (sub, _) = parse(&s(&[
             "start",
             "--categories",
             "dsp, render ,gpu",
-            "--out",
-            "/tmp/x.pftrace",
             "--ring-mb",
             "128",
         ]))
@@ -1277,7 +1269,6 @@ mod tests {
             panic!("expected start")
         };
         assert_eq!(a.categories, vec!["dsp", "render", "gpu"]);
-        assert_eq!(a.out.as_deref(), Some(Path::new("/tmp/x.pftrace")));
         assert_eq!(a.ring_mb, Some(128));
     }
 
@@ -1286,13 +1277,28 @@ mod tests {
         let (sub, _) = parse(&s(&["start"])).unwrap();
         let Sub::Start(a) = sub else { panic!() };
         assert!(a.categories.is_empty());
-        assert!(a.out.is_none());
         assert!(a.ring_mb.is_none());
     }
 
     #[test]
     fn parse_start_rejects_bad_ring_mb() {
         let err = parse(&s(&["start", "--ring-mb", "big"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+        for value in ["0", "513", "4294967295"] {
+            let err =
+                parse(&s(&["start", "--ring-mb", value])).unwrap_err();
+            assert!(matches!(err, CliError::BadUsage(_)));
+        }
+    }
+
+    #[test]
+    fn parse_start_rejects_client_selected_output_path() {
+        let err = parse(&s(&[
+            "start",
+            "--out",
+            "/tmp/client-selected.pftrace",
+        ]))
+        .unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
@@ -1432,11 +1438,9 @@ mod tests {
         // All fields set.
         let p = build_start_params(&StartArgs {
             categories: vec!["dsp".to_owned(), "render".to_owned()],
-            out: Some(PathBuf::from("/tmp/x.pftrace")),
             ring_mb: Some(64),
         });
         assert!(p.contains("\"categories\":[\"dsp\",\"render\"]"));
-        assert!(p.contains("\"out_path\":\"/tmp/x.pftrace\""));
         assert!(p.contains("\"ring_mb\":64"));
     }
 
@@ -1582,7 +1586,6 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         let sub = Sub::Start(StartArgs {
             categories: vec!["dsp".to_owned()],
-            out: None,
             ring_mb: None,
         });
         dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();

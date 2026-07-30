@@ -73,6 +73,35 @@ TEST_CASE("TraceInspector explain always returns a prose explanation", "[tracing
     CHECK_FALSE(std::string(out["explanation"].getString()).empty());
 }
 
+TEST_CASE("TraceInspector keeps trace output under host authority",
+          "[tracing][inspect][security]") {
+    TraceInspector insp;
+    const auto response = insp.handle(request(
+        methods::kTraceStartSession,
+        R"({"out_path":"/tmp/client-selected.pftrace"})"));
+    CHECK(response.is_error);
+    CHECK(response.error_code == "invalid_params");
+    CHECK(response.params_json.find("host owns the trace destination") !=
+          std::string::npos);
+}
+
+TEST_CASE("TraceInspector bounds the capture ring",
+          "[tracing][inspect][resource-limit]") {
+    TraceInspector insp;
+    for (const auto* params : {
+             R"({"ring_mb":-1})",
+             R"({"ring_mb":0})",
+             R"({"ring_mb":513})",
+             R"({"ring_mb":"80"})",
+         }) {
+        INFO(params);
+        const auto response = insp.handle(
+            request(methods::kTraceStartSession, params));
+        CHECK(response.is_error);
+        CHECK(response.error_code == "invalid_params");
+    }
+}
+
 #if defined(PULP_TRACING_ENABLED) && PULP_TRACING_ENABLED
 
 TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[tracing][inspect]") {

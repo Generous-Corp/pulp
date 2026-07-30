@@ -1213,14 +1213,10 @@ commands:
             kind: option
             required: false
             description: Comma-separated span categories (dsp, render, layout, canvas, text, js, gpu, …)
-          - name: --out
-            kind: option
-            required: false
-            description: Output path for the flushed `.pftrace`
           - name: --ring-mb
             kind: option
             required: false
-            description: In-process ring size in mebibytes (default 80)
+            description: In-process ring size in mebibytes (default 80; accepted range 1 through 512). The host owns the flushed trace destination.
       - name: stop
         summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
       - name: query
