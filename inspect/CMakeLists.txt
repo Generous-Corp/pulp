@@ -19,6 +19,9 @@ target_include_directories(pulp-inspect-discovery
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-discovery PUBLIC pulp::inspect-protocol)
+if(WIN32)
+    target_link_libraries(pulp-inspect-discovery PRIVATE Advapi32)
+endif()
 
 add_library(pulp-inspect-client src/client.cpp)
 add_library(pulp::inspect-client ALIAS pulp-inspect-client)

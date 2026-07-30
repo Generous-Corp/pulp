@@ -26,9 +26,7 @@ public:
     };
 
     events::InterprocessConnectionServer server;
-    std::vector<events::InterprocessConnection*> client_ptrs;
-    std::vector<std::unique_ptr<events::InterprocessConnection>> owned_clients;
-    std::vector<std::pair<events::InterprocessConnection*, std::chrono::steady_clock::time_point>> disconnected_at;
+    std::vector<std::shared_ptr<events::InterprocessConnection>> owned_clients;
     std::map<events::InterprocessConnection*, AuthenticationState> authentication;
     std::mutex clients_mutex;
     std::condition_variable cleanup_cv;
@@ -42,34 +40,44 @@ public:
     Impl() {
         cleanup_thread = std::thread([this]() { cleanup_loop(); });
         server.on_client_connected = [this](std::unique_ptr<events::InterprocessConnection> conn) {
-            prune_disconnected_clients();
-            auto* raw = conn.get();
-            raw->set_on_text_message([this, raw](std::string_view msg) {
+            auto client =
+                std::shared_ptr<events::InterprocessConnection>(std::move(conn));
+            auto* raw = client.get();
+            const std::weak_ptr<events::InterprocessConnection> weak = client;
+            raw->set_on_text_message([this, weak, raw](std::string_view msg) {
+                const auto keep_alive = weak.lock();
+                if (!keep_alive)
+                    return;
                 on_message(std::string(msg), raw);
             });
-            raw->set_on_disconnected([this, raw]() {
-                std::lock_guard lock(clients_mutex);
-                if (const auto found = authentication.find(raw);
-                    found != authentication.end()) {
-                    if (owner && owner->session_ &&
-                        found->second.authenticated) {
-                        owner->session_->disconnect(found->second.client_id);
+            raw->set_on_disconnected([this, weak, raw]() {
+                const auto keep_alive = weak.lock();
+                if (!keep_alive)
+                    return;
+                std::string authenticated_client;
+                {
+                    std::lock_guard lock(clients_mutex);
+                    if (const auto found = authentication.find(raw);
+                        found != authentication.end()) {
+                        if (found->second.authenticated)
+                            authenticated_client = found->second.client_id;
+                        authentication.erase(found);
                     }
-                    authentication.erase(found);
+                    owned_clients.erase(
+                        std::remove_if(
+                            owned_clients.begin(), owned_clients.end(),
+                            [raw](const auto& candidate) {
+                                return candidate.get() == raw;
+                            }),
+                        owned_clients.end());
                 }
-                client_ptrs.erase(std::remove(client_ptrs.begin(), client_ptrs.end(), raw), client_ptrs.end());
-                auto it = std::find_if(disconnected_at.begin(), disconnected_at.end(),
-                                       [raw](const auto& entry) { return entry.first == raw; });
-                if (it == disconnected_at.end())
-                    disconnected_at.emplace_back(raw, std::chrono::steady_clock::now());
-                else
-                    it->second = std::chrono::steady_clock::now();
+                if (!authenticated_client.empty() && owner && owner->session_)
+                    owner->session_->disconnect(authenticated_client);
                 cleanup_cv.notify_one();
             });
             {
                 std::lock_guard lock(clients_mutex);
-                client_ptrs.push_back(raw);
-                owned_clients.push_back(std::move(conn));
+                owned_clients.push_back(client);
             }
             if (owner && owner->session_) {
                 const auto challenge = make_inspector_auth_challenge(
@@ -134,10 +142,17 @@ public:
             if (stopping_cleanup)
                 break;
             const auto now = std::chrono::steady_clock::now();
-            std::vector<events::InterprocessConnection*> expired;
+            std::vector<std::shared_ptr<events::InterprocessConnection>> expired;
             for (const auto& [client, state] : authentication) {
-                if (!state.authenticated && now >= state.deadline)
-                    expired.push_back(client);
+                if (!state.authenticated && now >= state.deadline) {
+                    const auto retained = std::find_if(
+                        owned_clients.begin(), owned_clients.end(),
+                        [client](const auto& candidate) {
+                            return candidate.get() == client;
+                        });
+                    if (retained != owned_clients.end())
+                        expired.push_back(*retained);
+                }
             }
             std::function<void()> refresh;
             if (heartbeat && now >= next_heartbeat) {
@@ -145,57 +160,13 @@ public:
                 next_heartbeat = now + std::chrono::seconds(10);
             }
             lock.unlock();
-            for (auto* client : expired) {
+            for (const auto& client : expired) {
                 if (client)
                     client->disconnect();
             }
             if (refresh)
                 refresh();
             lock.lock();
-            prune_disconnected_clients_locked();
-        }
-    }
-
-    void prune_disconnected_clients() {
-        std::lock_guard lock(clients_mutex);
-        prune_disconnected_clients_locked();
-    }
-
-    void prune_disconnected_clients_locked() {
-        client_ptrs.erase(std::remove_if(client_ptrs.begin(), client_ptrs.end(),
-                                         [](auto* c) { return !c || !c->is_connected(); }),
-                          client_ptrs.end());
-
-        const auto now = std::chrono::steady_clock::now();
-        std::vector<events::InterprocessConnection*> reclaimable;
-        for (const auto& [client, disconnected] : disconnected_at) {
-            if (now - disconnected >= std::chrono::milliseconds(50))
-                reclaimable.push_back(client);
-        }
-
-        owned_clients.erase(
-            std::remove_if(owned_clients.begin(), owned_clients.end(),
-                           [&reclaimable](const auto& c) {
-                               return c && !c->is_connected() &&
-                                      std::find(reclaimable.begin(), reclaimable.end(), c.get()) !=
-                                          reclaimable.end();
-                           }),
-            owned_clients.end());
-        disconnected_at.erase(
-            std::remove_if(disconnected_at.begin(), disconnected_at.end(),
-                           [&reclaimable](const auto& entry) {
-                               return std::find(reclaimable.begin(), reclaimable.end(), entry.first) !=
-                                      reclaimable.end();
-                           }),
-            disconnected_at.end());
-        for (auto it = authentication.begin(); it != authentication.end();) {
-            const auto retained = std::find_if(
-                owned_clients.begin(), owned_clients.end(),
-                [&](const auto& client) { return client.get() == it->first; });
-            if (retained == owned_clients.end())
-                it = authentication.erase(it);
-            else
-                ++it;
         }
     }
 
@@ -267,11 +238,11 @@ void InspectorServer::stop() {
         impl_->heartbeat = {};
     }
     impl_->server.stop();
-    std::vector<std::unique_ptr<events::InterprocessConnection>> clients;
+    std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
     {
         std::lock_guard lock(impl_->clients_mutex);
-        impl_->client_ptrs.clear();
         clients = std::move(impl_->owned_clients);
+        impl_->authentication.clear();
     }
     clients.clear();
     {
@@ -288,24 +259,29 @@ void InspectorServer::stop() {
 
 void InspectorServer::broadcast(const InspectorMessage& event) {
     auto json = encode_message(event);
-    std::lock_guard lock(impl_->clients_mutex);
-    impl_->prune_disconnected_clients_locked();
-    for (auto* client : impl_->client_ptrs) {
-        const auto auth = impl_->authentication.find(client);
-        if (auth != impl_->authentication.end() &&
-            auth->second.authenticated) {
-            client->send_message(json.data(), json.size());
+    std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
+    {
+        std::lock_guard lock(impl_->clients_mutex);
+        for (const auto& client : impl_->owned_clients) {
+            const auto auth = impl_->authentication.find(client.get());
+            if (auth != impl_->authentication.end() &&
+                auth->second.authenticated) {
+                clients.push_back(client);
+            }
         }
+    }
+    for (const auto& client : clients) {
+        if (client)
+            client->send_message(json.data(), json.size());
     }
 }
 
 int InspectorServer::client_count() const {
     std::lock_guard lock(impl_->clients_mutex);
-    impl_->prune_disconnected_clients_locked();
     return static_cast<int>(std::count_if(
-        impl_->client_ptrs.begin(), impl_->client_ptrs.end(),
-        [&](auto* client) {
-            const auto auth = impl_->authentication.find(client);
+        impl_->owned_clients.begin(), impl_->owned_clients.end(),
+        [&](const auto& client) {
+            const auto auth = impl_->authentication.find(client.get());
             return auth != impl_->authentication.end() &&
                    auth->second.authenticated;
         }));

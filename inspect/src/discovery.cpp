@@ -8,9 +8,13 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <limits>
+#include <sstream>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
+#include <aclapi.h>
 #include <process.h>
 #include <windows.h>
 #define getpid _getpid
@@ -20,6 +24,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
 #endif
 
 namespace pulp::inspect {
@@ -42,14 +49,159 @@ bool safe_component(std::string_view value) {
            });
 }
 
+#ifdef _WIN32
+class OwnerOnlySecurity {
+public:
+    OwnerOnlySecurity() {
+        HANDLE token = nullptr;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+            return;
+        DWORD size = 0;
+        GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+        token_user_.resize(size);
+        if (size == 0 ||
+            !GetTokenInformation(token, TokenUser, token_user_.data(), size,
+                                 &size)) {
+            CloseHandle(token);
+            token_user_.clear();
+            return;
+        }
+        CloseHandle(token);
+
+        auto* user = reinterpret_cast<TOKEN_USER*>(token_user_.data());
+        EXPLICIT_ACCESSW entry{};
+        entry.grfAccessPermissions = GENERIC_ALL;
+        entry.grfAccessMode = SET_ACCESS;
+        entry.grfInheritance = NO_INHERITANCE;
+        entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        entry.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        entry.Trustee.ptstrName =
+            static_cast<wchar_t*>(user->User.Sid);
+        if (SetEntriesInAclW(1, &entry, nullptr, &acl_) != ERROR_SUCCESS ||
+            !InitializeSecurityDescriptor(&descriptor_,
+                                          SECURITY_DESCRIPTOR_REVISION) ||
+            !SetSecurityDescriptorDacl(&descriptor_, TRUE, acl_, FALSE) ||
+            !SetSecurityDescriptorControl(&descriptor_, SE_DACL_PROTECTED,
+                                          SE_DACL_PROTECTED)) {
+            if (acl_)
+                LocalFree(acl_);
+            acl_ = nullptr;
+            return;
+        }
+        attributes_.nLength = sizeof(attributes_);
+        attributes_.lpSecurityDescriptor = &descriptor_;
+        valid_ = true;
+    }
+
+    ~OwnerOnlySecurity() {
+        if (acl_)
+            LocalFree(acl_);
+    }
+
+    OwnerOnlySecurity(const OwnerOnlySecurity&) = delete;
+    OwnerOnlySecurity& operator=(const OwnerOnlySecurity&) = delete;
+
+    bool valid() const { return valid_; }
+    SECURITY_ATTRIBUTES* attributes() { return &attributes_; }
+    PSID user_sid() const {
+        if (token_user_.empty())
+            return nullptr;
+        return reinterpret_cast<const TOKEN_USER*>(token_user_.data())
+            ->User.Sid;
+    }
+
+private:
+    std::vector<std::uint8_t> token_user_;
+    PACL acl_ = nullptr;
+    SECURITY_DESCRIPTOR descriptor_{};
+    SECURITY_ATTRIBUTES attributes_{};
+    bool valid_ = false;
+};
+
+bool owner_only_windows_path(const std::filesystem::path& path,
+                             bool expect_directory) {
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+        ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) != expect_directory) {
+        return false;
+    }
+
+    OwnerOnlySecurity expected;
+    if (!expected.valid())
+        return false;
+    PSID owner = nullptr;
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const DWORD result = GetNamedSecurityInfoW(
+        const_cast<wchar_t*>(path.c_str()), SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        &owner, nullptr, &dacl, nullptr, &descriptor);
+    if (result != ERROR_SUCCESS || !owner || !dacl ||
+        !EqualSid(owner, expected.user_sid())) {
+        if (descriptor)
+            LocalFree(descriptor);
+        return false;
+    }
+
+    ACL_SIZE_INFORMATION acl_info{};
+    bool secure = GetAclInformation(
+        dacl, &acl_info, sizeof(acl_info), AclSizeInformation) != FALSE;
+    for (DWORD index = 0; secure && index < acl_info.AceCount; ++index) {
+        void* raw_ace = nullptr;
+        if (!GetAce(dacl, index, &raw_ace)) {
+            secure = false;
+            break;
+        }
+        const auto* header = static_cast<ACE_HEADER*>(raw_ace);
+        if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+            const auto* ace = static_cast<ACCESS_ALLOWED_ACE*>(raw_ace);
+            PSID sid = const_cast<DWORD*>(&ace->SidStart);
+            if (!EqualSid(sid, expected.user_sid()))
+                secure = false;
+        } else if (header->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE ||
+                   header->AceType == ACCESS_ALLOWED_CALLBACK_ACE_TYPE ||
+                   header->AceType ==
+                       ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE) {
+            secure = false;
+        }
+    }
+    LocalFree(descriptor);
+    return secure;
+}
+
+bool create_owner_only_windows_directory(
+    const std::filesystem::path& directory) {
+    const DWORD attributes = GetFileAttributesW(directory.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES)
+        return owner_only_windows_path(directory, true);
+
+    const auto parent = directory.parent_path();
+    if (!parent.empty() &&
+        GetFileAttributesW(parent.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        !create_owner_only_windows_directory(parent)) {
+        return false;
+    }
+
+    OwnerOnlySecurity security;
+    if (!security.valid())
+        return false;
+    if (!CreateDirectoryW(directory.c_str(), security.attributes()) &&
+        GetLastError() != ERROR_ALREADY_EXISTS) {
+        return false;
+    }
+    return owner_only_windows_path(directory, true);
+}
+#endif
+
 bool ensure_private_directory(const std::filesystem::path& directory) {
+#ifdef _WIN32
+    return create_owner_only_windows_directory(directory);
+#else
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     if (error)
         return false;
-#ifdef _WIN32
-    return std::filesystem::is_directory(directory, error) && !error;
-#else
     if (::chmod(directory.c_str(), 0700) != 0)
         return false;
     struct stat info {};
@@ -59,10 +211,20 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
 #endif
 }
 
+bool validate_private_directory(const std::filesystem::path& directory) {
+#ifdef _WIN32
+    return owner_only_windows_path(directory, true);
+#else
+    struct stat info {};
+    return ::lstat(directory.c_str(), &info) == 0 &&
+           S_ISDIR(info.st_mode) && !S_ISLNK(info.st_mode) &&
+           info.st_uid == ::geteuid() && (info.st_mode & 077) == 0;
+#endif
+}
+
 bool private_regular_file(const std::filesystem::path& path) {
 #ifdef _WIN32
-    std::error_code error;
-    return std::filesystem::is_regular_file(path, error) && !error;
+    return owner_only_windows_path(path, false);
 #else
     struct stat info {};
     return ::lstat(path.c_str(), &info) == 0 &&
@@ -71,23 +233,57 @@ bool private_regular_file(const std::filesystem::path& path) {
 #endif
 }
 
-bool process_alive(std::int64_t process_id) {
+std::optional<std::string> process_start_identity(std::int64_t process_id) {
     if (process_id <= 0)
-        return false;
+        return std::nullopt;
 #ifdef _WIN32
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
                                  static_cast<DWORD>(process_id));
     if (!process)
-        return false;
+        return std::nullopt;
     DWORD exit_code = 0;
     const bool alive = GetExitCodeProcess(process, &exit_code) &&
                        exit_code == STILL_ACTIVE;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    const bool has_times =
+        GetProcessTimes(process, &created, &exited, &kernel, &user) != FALSE;
     CloseHandle(process);
-    return alive;
+    if (!alive || !has_times)
+        return std::nullopt;
+    const std::uint64_t value =
+        (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) |
+        created.dwLowDateTime;
+    return std::to_string(value);
+#elif defined(__APPLE__)
+    proc_bsdinfo info{};
+    if (proc_pidinfo(static_cast<int>(process_id), PROC_PIDTBSDINFO, 0,
+                     &info, sizeof(info)) != sizeof(info)) {
+        return std::nullopt;
+    }
+    return std::to_string(info.pbi_start_tvsec) + ":" +
+           std::to_string(info.pbi_start_tvusec);
+#elif defined(__linux__)
+    std::ifstream stat_file(
+        "/proc/" + std::to_string(process_id) + "/stat");
+    std::string line;
+    if (!std::getline(stat_file, line))
+        return std::nullopt;
+    const auto comm_end = line.rfind(')');
+    if (comm_end == std::string::npos || comm_end + 2 >= line.size())
+        return std::nullopt;
+    std::istringstream fields(line.substr(comm_end + 2));
+    std::string value;
+    for (int field = 3; field <= 22; ++field) {
+        if (!(fields >> value))
+            return std::nullopt;
+    }
+    return value;
 #else
     if (::kill(static_cast<pid_t>(process_id), 0) == 0)
-        return true;
-    return errno == EPERM;
+        return std::to_string(process_id);
+    if (errno == EPERM)
+        return std::to_string(process_id);
+    return std::nullopt;
 #endif
 }
 
@@ -113,10 +309,37 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
     const auto temporary = destination.string() + ".tmp-" +
                            pulp::runtime::hex_encode(*random);
 #ifdef _WIN32
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output || !(output << contents))
-            return false;
+    OwnerOnlySecurity security;
+    if (!security.valid())
+        return false;
+    HANDLE file = CreateFileW(
+        std::filesystem::path(temporary).c_str(), GENERIC_WRITE, 0,
+        security.attributes(), CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    std::size_t written = 0;
+    bool succeeded = true;
+    while (written < contents.size()) {
+        const auto remaining = std::min<std::size_t>(
+            contents.size() - written,
+            static_cast<std::size_t>(std::numeric_limits<DWORD>::max()));
+        DWORD count = 0;
+        if (!WriteFile(file, contents.data() + written,
+                       static_cast<DWORD>(remaining), &count, nullptr) ||
+            count == 0) {
+            succeeded = false;
+            break;
+        }
+        written += count;
+    }
+    succeeded = succeeded && FlushFileBuffers(file);
+    CloseHandle(file);
+    if (!succeeded ||
+        !MoveFileExW(std::filesystem::path(temporary).c_str(),
+                     destination.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(std::filesystem::path(temporary).c_str());
+        return false;
     }
 #else
     const int fd = ::open(temporary.c_str(),
@@ -139,14 +362,12 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
         ::unlink(temporary.c_str());
         return false;
     }
-#endif
     std::error_code error;
     std::filesystem::rename(temporary, destination, error);
     if (error) {
         std::filesystem::remove(temporary, error);
         return false;
     }
-#ifndef _WIN32
     if (::chmod(destination.c_str(), 0600) != 0)
         return false;
 #endif
@@ -166,6 +387,8 @@ std::string encode_record(const InspectorDiscoveryRecord& record) {
     value.addMember("profile",
                     choc::value::createString(profile_id(record.profile)));
     value.addMember("pid", choc::value::createInt64(record.process_id));
+    value.addMember("processStartId",
+                    choc::value::createString(record.process_start_id));
     value.addMember("expiresAtUnixMs",
                     choc::value::createInt64(record.expires_at_unix_ms));
     value.addMember("credentialFile",
@@ -199,6 +422,8 @@ std::optional<InspectorDiscoveryRecord> decode_record(
             return std::nullopt;
         record.profile = *profile;
         record.process_id = value["pid"].getInt64();
+        record.process_start_id =
+            std::string(value["processStartId"].getString());
         record.expires_at_unix_ms = value["expiresAtUnixMs"].getInt64();
         record.record_path = path;
         const auto credential_name =
@@ -208,7 +433,8 @@ std::optional<InspectorDiscoveryRecord> decode_record(
             record.endpoint.rfind("127.0.0.1:", 0) != 0 ||
             record.protocol_version != "1" ||
             record.expires_at_unix_ms <= unix_ms_now() ||
-            !process_alive(record.process_id)) {
+            process_start_identity(record.process_id) !=
+                std::optional<std::string>(record.process_start_id)) {
             return std::nullopt;
         }
         const auto credential =
@@ -247,7 +473,7 @@ InspectorDiscoveryReader::InspectorDiscoveryReader(
 
 std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
     std::vector<InspectorDiscoveryRecord> records;
-    if (!ensure_private_directory(runtime_directory_))
+    if (!validate_private_directory(runtime_directory_))
         return records;
     std::error_code error;
     for (const auto& entry :
@@ -271,6 +497,8 @@ std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
 std::optional<std::vector<std::uint8_t>>
 InspectorDiscoveryReader::read_credential(
     const InspectorDiscoveryRecord& record) const {
+    if (!validate_private_directory(runtime_directory_))
+        return std::nullopt;
     const auto path = confined_path(runtime_directory_, record.credential_path);
     if (!path || !private_regular_file(*path))
         return std::nullopt;
@@ -315,6 +543,10 @@ bool InspectorDiscoveryPublisher::publish(
         return false;
     }
     record.process_id = static_cast<std::int64_t>(getpid());
+    const auto process_start_id = process_start_identity(record.process_id);
+    if (!process_start_id)
+        return false;
+    record.process_start_id = *process_start_id;
     record.expires_at_unix_ms = unix_ms_now() + ttl.count();
     record.record_path = runtime_directory_ / (record.session_id + ".json");
     record.credential_path =

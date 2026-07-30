@@ -21,6 +21,7 @@ struct InspectorDiscoveryRecord {
     std::string protocol_version = "1";
     InspectorProfile profile = InspectorProfile::Off;
     std::int64_t process_id = 0;
+    std::string process_start_id;
     std::int64_t expires_at_unix_ms = 0;
     std::filesystem::path record_path;
     std::filesystem::path credential_path;
