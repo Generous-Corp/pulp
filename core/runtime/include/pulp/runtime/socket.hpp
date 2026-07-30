@@ -48,6 +48,10 @@ public:
     /// deadline. Applies to subsequently issued operations.
     bool set_write_timeout(std::chrono::milliseconds timeout);
 
+    /// Bound blocking receive operations. A non-positive duration clears the
+    /// deadline. Applies to subsequently issued operations.
+    bool set_read_timeout(std::chrono::milliseconds timeout);
+
     /// Receive UDP datagram. Returns bytes received and source address.
     int receive_from(uint8_t* buffer, size_t buffer_size,
                      std::string& from_address, uint16_t& from_port);

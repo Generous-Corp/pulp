@@ -24,6 +24,8 @@ struct InspectorServerConfig {
     std::vector<std::uint8_t> token;
     std::chrono::milliseconds authentication_timeout =
         std::chrono::seconds(3);
+    std::chrono::milliseconds frame_read_timeout =
+        std::chrono::seconds(3);
     std::size_t max_message_bytes = 1024u * 1024u;
     std::size_t max_clients = 16;
 };
@@ -35,6 +37,10 @@ public:
     /// Create server. Does not listen until start_authenticated() succeeds.
     InspectorServer();
     ~InspectorServer();
+    InspectorServer(const InspectorServer&) = delete;
+    InspectorServer& operator=(const InspectorServer&) = delete;
+    InspectorServer(InspectorServer&&) = delete;
+    InspectorServer& operator=(InspectorServer&&) = delete;
 
     /// Start an authenticated, ephemeral loopback session and publish its
     /// discovery record. The session and publisher must outlive the server.
