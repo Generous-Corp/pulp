@@ -1,0 +1,202 @@
+# Forge Modular — end-to-end delivery to the M5
+
+The goal this plan exists to reach, stated once:
+
+> On the M5, open Forge Modular — as the standalone app, and as an AU, VST3 and
+> CLAP plugin inside a DAW — type a prompt, and get a working VCV Rack **module**.
+> Switch to Patch, type a prompt, and get a working Rack **patch** that makes
+> sound and explains itself at three depths. Both artifacts open in Rack from the
+> app. Nothing is hand-carried; the machine is set up by running one script.
+
+Everything below is either done and evidenced, or a numbered step toward that.
+
+---
+
+## Where this stands today
+
+Proven on this machine (the dev Mac), by running it rather than reading it:
+
+| | Evidence |
+|---|---|
+| Module generation | Attenuverter, clock divider and slew limiter each build clean: panel validated → compiled → behaviour gate 0 failures → installed |
+| Module in Rack | `Loaded plugin ForgeModular 2.0.0` in Rack's own log; ATNV renders with working knobs at 0.3% CPU |
+| Knobs actually move | Driven by synthetic mouse: 4POLE CUTOFF 10→11 o'clock at 80 px, MORPH RATE 12→2 o'clock at 200 px |
+| Patch generation | 8 modules / 9 cables; gate rejected a silent first attempt, retry carries 0.395 V mean, 1.616 V peak |
+| Patch in Rack | Loads, wires up, cables in role colours |
+| Learn mode | The generated patch drives the rack preview, per-cable explanation and all three depth tabs |
+| App drives the generator | Clicking Build in the standalone spawns the real toolchain; Forge's own plugin pipeline never runs |
+| Four formats | AU (`auval` SUCCEEDED), VST3 (load-probe resolves entry points), CLAP (33/44, 2 pre-existing), Standalone |
+| Signed | Notarization Accepted, stapled, Gatekeeper `accepted — source=Notarized Developer ID` |
+| Guard | Forge FX / Instrument / MIDI render byte-identical; 466 assertions, 46 cases |
+
+**The M5 has none of this.** Its build is dated 29 Jul with AU subtype `FgMd`
+against today's `FrgR` — an older identity entirely, from the JS shell that
+predates all of the above.
+
+### What made generation work
+
+Seven defects, every one of them the same shape — *the model was judged by a rule
+it was never given, or shown a vocabulary that hid what it needed*:
+
+1. `dsp_vocabulary.py` sits above `tools/rack/` and was never installed, so the
+   model got **no DSP list at all** and invented headers.
+2. `return uniq[:7]` capped every class at seven methods, hiding `process`,
+   `prepare` and `reset` — it invented `discard_history` for `reset`.
+3. Enum values were absent: `set_mode(Mode m)` with no statement of what a Mode
+   is, so it guessed `Exponential` where the value is `exponential`.
+4. The contract's own 6 HP columns were 12.5 mm apart against its own 12.7 mm
+   rule — rejected for following its own advice.
+5. Label-collision and bipolar-default rules were enforced and undocumented.
+6. The generated `read_<SLUG>_<PORT>_INPUT` accessor exists only for *normalled*
+   inputs; the contract said to use it without saying when it exists.
+7. The behaviour gate's CV probe was a **constant**. Anything processing CV over
+   time produces identical output for every setting when the input never moves,
+   so slew and glide knobs were reported inert while working perfectly.
+
+That last one was the gate lying, not the module failing. Worth remembering when
+the next "inert knob" appears: check the probe before blaming the module.
+
+---
+
+## Step 1 — Close the two open UI defects
+
+Neither blocks generation; both are visible.
+
+- **Card art top corners.** Fixed in shared chrome (the tile's `overflow:hidden`
+  clips to its rect, not its rounded outline, so the art squared off past the
+  curve). Forge FX / Instrument / MIDI get the same correction. **Confirm this is
+  wanted** before it ships — it changes how the other three look.
+- **Composer button text centering.** Fixed: `align_items` centres the label's
+  box, but glyphs sit on their baseline inside it, so words rode high next to
+  centred icons.
+
+**Done when:** both verified in a render, and the FX/Instrument/MIDI baselines
+refreshed with the reason recorded.
+
+## Step 2 — Prove the GUI path once, quietly
+
+The app spawns the generator and streams to the status card; that is proven. What
+is *not* yet proven is a full app-driven build reaching an installed artifact,
+because `drive_app.py` correctly refuses to click when the terminal steals focus.
+
+**Do:** run `drive_app.py build` with nothing else touching the machine, and let
+it reach a verdict.
+
+**Done when:** `PASS: a module was built and installed into Rack`, from a click
+rather than a command line.
+
+## Step 3 — Prove patch generation from the app
+
+Module generation from the app is the only path exercised so far. Patch mode goes
+through `submit_own` → `patch.py build`, which is the same seam, but same-seam is
+not the same as tested.
+
+**Do:** switch to Patch in the app, build, and confirm the rack preview and depth
+tabs populate from the generated file.
+
+**Done when:** a patch generated by clicking renders in the preview, its cables
+carry role colours, and Terse/Standard/Learning each change the text.
+
+## Step 4 — Prove the three plugin formats generate
+
+All four formats build, validate and open their editors. Only the **standalone**
+has been driven end to end. The engine is shared by `create_forge_modular()`, so
+the plugin formats should generate identically — but "should" is what step 3's
+note is about.
+
+Note the concurrency rule this exposes: the generator now refuses a second run
+against the same module pack, which is exactly what happens when the standalone
+and a plugin are open together. That refusal reaches the chat and terminates the
+run; it must not read as a hang.
+
+**Do:** load the CLAP in REAPER, generate a module, confirm the artifact. Repeat
+for AU and VST3.
+
+**Done when:** each format has produced an installed module from inside a DAW,
+and running two at once produces a clear refusal rather than a corrupted pack.
+
+## Step 5 — Re-validate, sign, notarize the shipping build
+
+Results expire when a binary changes, and every step above changes binaries.
+
+**Do:** `auval` for the AU, `clap-validator` for the CLAP, load-probe the VST3,
+run the standalone, then the REAPER `editor-open` smoke for all three. Sign all
+four (inner dylibs first — each bundle carries `libwgpu_native.dylib`), notarize,
+staple, confirm Gatekeeper.
+
+**Done when:** every check is green **on the binaries that will be copied to the
+M5**, not on an earlier build of them.
+
+## Step 6 — Set the M5 up from scratch
+
+The M5 needs the app, the plugins, and the toolchain — and the toolchain is not
+one directory. Three incomplete-install failures have already been paid for:
+missing fonts failed at panel emission, missing Pulp headers failed at the
+compiler, and a missing `dsp_vocabulary.py` failed *after* the model had run
+three times. Each failed later and more expensively than the last.
+
+`tools/rack/install_toolchain.sh` now copies all of it and verifies by **emitting
+a real panel** and **checking the vocabulary is substantial**, because a
+complete-looking tree that cannot emit an SVG is the failure it exists to catch.
+
+**Do, on the M5:**
+
+1. Remove the stale 29 Jul artifacts — `Forge Modular.app`, the `.clap`,
+   `.component` and `.vst3`, and the old `.vcvplugin`. They carry subtype `FgMd`
+   and predate everything here; leaving them means a DAW may scan the wrong one.
+2. Copy the four signed bundles.
+3. Run `install_toolchain.sh` and confirm it reports a panel emitted and a
+   vocabulary of ~580 lines.
+4. Confirm the Rack SDK is present (`~/SDKs/Rack-SDK`) and `claude` is on PATH —
+   the generator needs both and says so if either is missing.
+
+**Done when:** the app launches on the M5 and its first log line reads
+`generator ready at …`, pointing at Application Support rather than any external
+volume. (macOS gates removable-volume access behind a *modal*, and touching such
+a path from the UI thread parks the whole app behind it — this is what read as a
+freeze on Build.)
+
+## Step 7 — Prove it on the M5, not just install it
+
+**Do:** on the M5, from the standalone: build a module, open it in Rack, turn its
+knobs. Then build a patch, open it in Rack, hear it. Then load the CLAP in a DAW
+and build a module from there.
+
+**Done when:** all three succeed on the M5 with no step performed from this
+machine.
+
+---
+
+## What is deliberately not in scope
+
+- **Generated module faces.** Forge's UI pass is moving to design-system HTML
+  solved by a headless browser and rendered natively by Skia; a module's face
+  will become something a prompt can ask for. That is not landed, the shipped
+  plugin has no browser, and Ink & Signal stays the default. See
+  `planning/2026-07-30-forge-modular-heads-up-generated-faces.md`. The one thing
+  to carry now: when the time comes, the design draws the control **body** only
+  and the live widget draws the value ring and pointer — drawing our own gets
+  both. Nothing in this plan should be built in a way that makes that harder,
+  and nothing should be built *for* it until the steps above land and Forge
+  Instrument is working with it.
+- Windows and Linux. macOS is the delivery target.
+- The two `clap-validator` failures. They are `flush()` gaps in the shared Pulp
+  adapter — Forge FX fails three of the same kind from the same tree — and
+  fixing them is a Pulp change, not a Modular one.
+
+---
+
+## Known-fragile things, so they are not rediscovered
+
+- **The no-leak guard isolates `FORGE_PROJECTS_DIR` and nothing else.** A
+  marketplace card's title is data the fixture does not control, so the guard
+  can fail on it while Forge's chrome is untouched. Investigate the diff before
+  refreshing; it has been genuine data twice and would be genuine drift a third
+  time.
+- **`drive_app.py` refuses to click unless the app is frontmost and showing the
+  expected screen.** That is deliberate: clicks landing in the terminal, and a
+  "nothing changed" verdict measured from a crop box above the text it watched,
+  each cost more than the bugs they hid.
+- **The CLI is the cheap loop.** The app path proves wiring; everything about
+  generation quality is CLI-debuggable in one command with no window, no focus
+  and no clicks.
