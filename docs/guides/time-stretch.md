@@ -16,6 +16,7 @@ to dial it in for your own material.
 |--------|-----|--------|
 | `pulp::signal::OfflineStretch` | Whole-buffer (offline) render: exact output length, best quality. The path PulpTempoSampler uses. | `pulp/signal/offline_stretch.hpp` |
 | `pulp::signal::RealtimePitchTimeProcessor` | Streaming/realtime, hop-quantized. Laroche-Dolson phase propagation with identity phase locking. | `pulp/signal/realtime_pitch_time_processor.hpp` |
+| `pulp::signal::FiniteStretchBuilderT` | Resumable finite-stream driver with exact target-length success/failure and frame-boundary ratio scheduling. Use its `64` alias for reproducible offline artifacts. | `pulp/signal/finite_stretch_builder.hpp` |
 
 ### Minimal offline render
 
@@ -67,6 +68,35 @@ frame zero. All streaming calls are allocation-free after `prepare()` and are
 bounded by `RealtimePitchTimeConfig::max_block` and the prepared output ring.
 This is the DSP prerequisite for future clip integration; no Timeline renderer
 selects it yet.
+
+For control-thread preprocessing that must yield between bounded units, use
+`FiniteStretchBuilder64` for reproducible offline artifacts. It keeps the
+spectral path in double precision (the portable scalar FFT path) across the
+entire render; convert to the destination float format once, after successful
+completion. `FiniteStretchBuilder` remains the float/RT-oriented variant, but
+cross-instance float output from platform FFT backends is only numerically
+equivalent and is not a bitwise artifact contract. The caller owns stable
+planar input and output buffers; `prepare()` validates each channel span and
+all processor allocation geometry before the processor allocates. Output
+planes must be distinct and may not overlap any unread input plane; shared
+read-only input planes are allowed.
+Capacity admission is typed: the 64-bit builder charges `sizeof(double)` for
+each caller-owned plane before allocating processor storage.
+Admission also reserves signed-counter EOF/output headroom. Synthesis carries a
+bounded fractional-hop residual separately from the signed absolute position,
+so long streams do not lose fractional hops as the absolute frame count grows.
+Each `step()` performs at most one bounded feed,
+drain, or finalize operation. Backpressure preserves the pending input span,
+drains once, and retries that identical span.
+
+Set `target_frames` to the required clip length. Completion is reported only
+when exactly that many frames were written; natural output that is shorter or
+longer produces `FiniteStretchFailure::output_too_short` or
+`output_too_long`. A `ratio_at_input_frame` callback can define a varying
+trajectory. It is evaluated at exact analysis-frame boundaries, independent of
+the builder's `max_block`; EOF padding holds the callback's endpoint ratio.
+The callback is part of the allocation-free step path and must be `noexcept`
+and allocation-free. Playback/Timeline still owns no instance of this builder.
 
 ## Character modes — an "engine per job"
 

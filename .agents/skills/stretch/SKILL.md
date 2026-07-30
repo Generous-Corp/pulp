@@ -53,6 +53,33 @@ methods allocate nothing after `prepare()`. Do not wire this path into Timeline
 clips until the renderer owns this retry/drain lifecycle and proves it under
 varying host block schedules.
 
+For reproducible offline artifacts, prefer `FiniteStretchBuilder64` from
+`finite_stretch_builder.hpp` over open-coding the stream loop. Keep the render
+double-precision through completion, then seal to float once. This uses the
+portable scalar FFT path; platform float FFTs are numerically equivalent but
+do not promise bit-identical output across fresh instances. The typed capacity
+checks charge `sizeof(double)` for every 64-bit caller-owned plane.
+`FiniteStretchBuilder` remains available for float/RT-oriented uses. Its
+caller-owned planar buffers must remain stable for the builder lifetime. One
+`step()` does at most one bounded feed, drain, or finalize unit; rejected feeds
+are retained and retried byte-for-byte after a drain. Success means the requested target frame
+count was produced exactly; short and long natural renders are typed failures.
+Output planes must be distinct and non-overlapping with every input plane,
+because incremental writes otherwise corrupt unread source frames. Shared
+read-only input planes are valid.
+Long streams keep absolute synthesis position in a checked signed integer and
+only the bounded fractional-hop residual in floating point. Do not restore an
+ever-growing double accumulator: sub-sample hop fractions disappear around
+large absolute positions even before integer spacing exceeds one.
+
+The non-obvious ramp rule is that ratios belong to analysis-frame boundaries,
+not decoder or host blocks. The builder's `ratio_at_input_frame` callback is
+invoked at those boundaries even when `max_block` changes, and bounded
+finalization preserves the same rule through EOF padding while holding the
+endpoint ratio. Keep the callback `noexcept` and allocation-free. Do not replace
+this with block-start ratio updates: that makes the rendered ramp depend on the
+chosen work quantum.
+
 ## Build + run
 
 ```bash
