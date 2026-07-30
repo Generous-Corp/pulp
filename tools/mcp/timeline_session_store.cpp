@@ -5,12 +5,15 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "document_session_internal.hpp"
+#include "mcp_json.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -23,6 +26,18 @@
 
 namespace pulp_mcp {
 namespace {
+
+std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
+    if (rhs > std::numeric_limits<std::size_t>::max() - lhs)
+        return std::numeric_limits<std::size_t>::max();
+    return lhs + rhs;
+}
+
+std::size_t saturated_multiply(std::size_t value, std::size_t factor) noexcept {
+    if (factor != 0 && value > std::numeric_limits<std::size_t>::max() / factor)
+        return std::numeric_limits<std::size_t>::max();
+    return value * factor;
+}
 
 std::string dirty_flags_json(pulp::timeline::DirtyFlags flags) {
     using pulp::timeline::DirtyFlags;
@@ -113,20 +128,26 @@ namespace {
 
 struct TimelineSession {
     TimelineSession(std::unique_ptr<pulp::timeline::DocumentSession> document_value,
-                    pulp::timeline::WriterToken writer_value, std::size_t retained_bytes_value)
+                    pulp::timeline::WriterToken writer_value, std::size_t admission_charge_value)
         : document(std::move(document_value)), writer(std::move(writer_value)),
-          retained_bytes(retained_bytes_value) {}
+          admission_charge(admission_charge_value) {}
 
     std::unique_ptr<pulp::timeline::DocumentSession> document;
     pulp::timeline::WriterToken writer;
     pulp::timeline::DirtySet latest_dirty;
-    std::size_t retained_bytes = 0;
+    pulp::timeline::DocumentRevision latest_before;
+    pulp::timeline::DocumentRevision latest_after;
+    std::size_t admission_charge = 0;
 };
 
 } // namespace
 
 struct TimelineSessionStore::Impl {
-    explicit Impl(TimelineSessionStoreLimits limits_value) : limits(limits_value) {}
+    explicit Impl(TimelineSessionStoreLimits limits_value) : limits(limits_value) {
+        history_reservation_ = limits.max_history_bytes_per_session;
+        if (history_reservation_ == 0 && limits.max_sessions != 0)
+            history_reservation_ = limits.max_admission_charge_bytes / limits.max_sessions / 2;
+    }
 
     std::optional<std::string> open(std::string_view canonical_project, std::string& error) {
         auto registry = pulp::timeline::make_builtin_timeline_registry();
@@ -139,21 +160,25 @@ struct TimelineSessionStore::Impl {
             error = "could not deserialize the opened project";
             return std::nullopt;
         }
-        auto serialized = pulp::timeline::serialize_project(
-            project.value(), registry.value(), {limits.max_output_bytes});
+        auto serialized = pulp::timeline::serialize_project(project.value(), registry.value(),
+                                                            {limits.max_output_bytes});
         if (!serialized) {
             error = "opened project exceeds the timeline session output limit";
             return std::nullopt;
         }
-        const auto retained = serialized.value().json.size();
-        if (limits.max_sessions == 0 || retained > limits.max_retained_bytes) {
+        const auto charge = session_charge(serialized.value().json.size());
+        if (limits.max_sessions == 0 || charge > limits.max_admission_charge_bytes) {
             error = "opened project exceeds the timeline session store budget";
             return std::nullopt;
         }
         pulp::timeline::SessionLimits session_limits;
         session_limits.max_cached_results = 0;
-        auto document = pulp::timeline::DocumentSession::create(std::move(project).value(),
-                                                                 session_limits);
+        session_limits.journal.max_retained_bytes =
+            history_reservation_ / 3 * 2 + history_reservation_ % 3 * 2 / 3;
+        session_limits.undo.max_retained_bytes =
+            history_reservation_ - session_limits.journal.max_retained_bytes;
+        auto document =
+            pulp::timeline::DocumentSession::create(std::move(project).value(), session_limits);
         if (!document) {
             error = "could not create a document session";
             return std::nullopt;
@@ -165,14 +190,21 @@ struct TimelineSessionStore::Impl {
         }
 
         std::lock_guard lock(mutex_);
+        const auto id = "timeline-" + process_nonce_ + "-" + std::to_string(next_id_);
+        const auto output = "{\"ok\":true,\"project\":" + serialized.value().json +
+                            ",\"session_id\":" + pulp::timeline::quote_json_string(id) + "}";
+        if (json_tool_payload_size(output) > limits.max_output_bytes) {
+            error = "opened project exceeds the timeline session output limit";
+            return std::nullopt;
+        }
         while (sessions_.size() >= limits.max_sessions ||
-               retained_bytes_ > limits.max_retained_bytes - retained)
+               admission_charge_ > limits.max_admission_charge_bytes - charge)
             evict(order_.front());
-        const auto id = "timeline-" + process_nonce_ + "-" + std::to_string(next_id_++);
+        ++next_id_;
         order_.push_back(id);
-        sessions_.emplace(id, TimelineSession{std::move(document).value(),
-                                               std::move(writer).value(), retained});
-        retained_bytes_ += retained;
+        sessions_.emplace(
+            id, TimelineSession{std::move(document).value(), std::move(writer).value(), charge});
+        admission_charge_ += charge;
         return id;
     }
 
@@ -196,10 +228,12 @@ struct TimelineSessionStore::Impl {
         for (auto& command : decoded.value())
             transaction.commands.push_back(
                 {session->writer.allocate_command_id(), std::move(command)});
-        auto preview = pulp::timeline::reduce_transaction(*session->document->snapshot(), transaction);
+        auto preview =
+            pulp::timeline::reduce_transaction(*session->document->snapshot(), transaction);
         if (!preview)
             return transaction_failure(preview.error());
-        auto prepared = prepare_candidate(id, *session, preview.value().project, registry.value());
+        auto prepared = prepare_candidate(id, *session, preview.value().project,
+                                          preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         auto committed = session->document->submit(session->writer, std::move(transaction));
@@ -211,7 +245,10 @@ struct TimelineSessionStore::Impl {
         auto* session = find(id);
         if (session == nullptr)
             return session_failure("unknown or expired timeline session");
-        return {0, status_json(id, *session)};
+        auto json = status_json(id, *session);
+        if (json_tool_payload_size(json) > limits.max_output_bytes)
+            return session_failure("timeline session output byte budget exceeded");
+        return {0, std::move(json)};
     }
 
     pulp::tools::timeline::OperationResult undo(std::string_view id) {
@@ -222,10 +259,12 @@ struct TimelineSessionStore::Impl {
         auto registry = pulp::timeline::make_builtin_timeline_registry();
         if (!registry)
             return session_failure("could not construct the built-in schema registry");
-        auto preview = pulp::timeline::detail::DocumentSessionPreviewAccess::undo(*session->document);
+        auto preview =
+            pulp::timeline::detail::DocumentSessionPreviewAccess::undo(*session->document);
         if (!preview)
             return transaction_failure(preview.error());
-        auto prepared = prepare_candidate(id, *session, preview.value().project, registry.value());
+        auto prepared = prepare_candidate(id, *session, preview.value().project,
+                                          preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         return finish_commit(id, *session, session->document->undo(session->writer),
@@ -240,19 +279,21 @@ struct TimelineSessionStore::Impl {
         auto registry = pulp::timeline::make_builtin_timeline_registry();
         if (!registry)
             return session_failure("could not construct the built-in schema registry");
-        auto preview = pulp::timeline::detail::DocumentSessionPreviewAccess::redo(*session->document);
+        auto preview =
+            pulp::timeline::detail::DocumentSessionPreviewAccess::redo(*session->document);
         if (!preview)
             return transaction_failure(preview.error());
-        auto prepared = prepare_candidate(id, *session, preview.value().project, registry.value());
+        auto prepared = prepare_candidate(id, *session, preview.value().project,
+                                          preview.value().dirty, registry.value());
         if (!prepared)
             return std::move(prepared).error();
         return finish_commit(id, *session, session->document->redo(session->writer),
                              std::move(prepared).value());
     }
 
-    std::size_t retained_bytes() const {
+    std::size_t admission_charge() const {
         std::lock_guard lock(mutex_);
-        return retained_bytes_;
+        return admission_charge_;
     }
 
     void set_max_output_bytes(std::size_t maximum) {
@@ -264,11 +305,12 @@ struct TimelineSessionStore::Impl {
     struct PreparedCandidate {
         std::string project_json;
         std::vector<std::string> evictions;
-        std::size_t retained_bytes = 0;
+        std::size_t admission_charge = 0;
+        std::size_t wire_size_bound = 0;
     };
 
-    using PrepareResult = pulp::runtime::Result<
-        PreparedCandidate, pulp::tools::timeline::OperationResult>;
+    using PrepareResult =
+        pulp::runtime::Result<PreparedCandidate, pulp::tools::timeline::OperationResult>;
 
     TimelineSession* find(std::string_view id) {
         const auto found = sessions_.find(std::string(id));
@@ -301,48 +343,75 @@ struct TimelineSessionStore::Impl {
                        ",\"stage\":\"session\"},\"ok\":false}"};
     }
 
-    static std::string status_json(std::string_view id, const TimelineSession& session) {
-        return "{\"can_redo\":" + std::string(session.document->can_redo() ? "true" : "false") +
-               ",\"can_undo\":" + std::string(session.document->can_undo() ? "true" : "false") +
-               ",\"dirty\":" + timeline_dirty_set_json(session.latest_dirty) +
-               ",\"ok\":true,\"revision\":\"" + std::to_string(session.document->revision().value) +
+    static std::string status_json(std::string_view id, pulp::timeline::DocumentRevision before,
+                                   pulp::timeline::DocumentRevision after,
+                                   const pulp::timeline::DirtySet& dirty, bool can_undo,
+                                   bool can_redo) {
+        return "{\"after_revision\":\"" + std::to_string(after.value) +
+               "\",\"before_revision\":\"" + std::to_string(before.value) +
+               "\",\"can_redo\":" + std::string(can_redo ? "true" : "false") +
+               ",\"can_undo\":" + std::string(can_undo ? "true" : "false") +
+               ",\"dirty\":" + timeline_dirty_set_json(dirty) + ",\"ok\":true,\"revision\":\"" +
+               std::to_string(after.value) +
                "\",\"session_id\":" + pulp::timeline::quote_json_string(id) + "}";
+    }
+
+    static std::string status_json(std::string_view id, const TimelineSession& session) {
+        return status_json(id, session.latest_before, session.latest_after, session.latest_dirty,
+                           session.document->can_undo(), session.document->can_redo());
+    }
+
+    std::size_t session_charge(std::size_t project_json_bytes) const noexcept {
+        return saturated_add(saturated_multiply(project_json_bytes, 2), history_reservation_);
     }
 
     PrepareResult prepare_candidate(std::string_view id, const TimelineSession& session,
                                     const pulp::timeline::Project& project,
+                                    const pulp::timeline::DirtySet& dirty,
                                     const pulp::timeline::SchemaRegistry& registry) const {
-        auto serialized = pulp::timeline::serialize_project(
-            project, registry, {limits.max_output_bytes});
+        auto serialized =
+            pulp::timeline::serialize_project(project, registry, {limits.max_output_bytes});
         if (!serialized) {
-            return pulp::runtime::Err(session_failure(
-                "timeline persistence error " +
-                    std::to_string(static_cast<unsigned>(serialized.error().code)),
-                1, serialized.error().path));
-        }
-        const auto retained = serialized.value().json.size();
-        if (retained > limits.max_retained_bytes) {
             return pulp::runtime::Err(
-                session_failure("timeline session store byte budget exceeded"));
+                session_failure("timeline persistence error " +
+                                    std::to_string(static_cast<unsigned>(serialized.error().code)),
+                                1, serialized.error().path));
         }
-        std::size_t projected = retained_bytes_ - session.retained_bytes + retained;
+        const auto charge = session_charge(serialized.value().json.size());
+        if (charge > limits.max_admission_charge_bytes) {
+            return pulp::runtime::Err(
+                session_failure("timeline session admission charge exceeded"));
+        }
+        std::size_t projected =
+            saturated_add(admission_charge_ - session.admission_charge, charge);
         std::vector<std::string> evictions;
         for (const auto& candidate : order_) {
-            if (projected <= limits.max_retained_bytes)
+            if (projected <= limits.max_admission_charge_bytes)
                 break;
             if (candidate == id)
                 continue;
             const auto found = sessions_.find(candidate);
             if (found == sessions_.end())
                 continue;
-            projected -= found->second.retained_bytes;
+            projected -= found->second.admission_charge;
             evictions.push_back(candidate);
         }
-        if (projected > limits.max_retained_bytes)
+        if (projected > limits.max_admission_charge_bytes)
             return pulp::runtime::Err(
-                session_failure("timeline session store byte budget exceeded"));
-        return pulp::runtime::Ok(PreparedCandidate{
-            std::move(serialized).value().json, std::move(evictions), retained});
+                session_failure("timeline session admission charge exceeded"));
+        auto project_json = std::move(serialized).value().json;
+        const auto before = session.document->revision();
+        if (before.value == std::numeric_limits<std::uint64_t>::max())
+            return pulp::runtime::Err(session_failure("timeline session revision space exhausted"));
+        const pulp::timeline::DocumentRevision after{before.value + 1};
+        auto output = status_json(id, before, after, dirty, false, false);
+        output.insert(output.size() - 1, ",\"project\":" + project_json);
+        const auto wire_size_bound = json_tool_payload_size(output);
+        if (wire_size_bound > limits.max_output_bytes)
+            return pulp::runtime::Err(
+                session_failure("timeline session output byte budget exceeded"));
+        return pulp::runtime::Ok(PreparedCandidate{std::move(project_json), std::move(evictions),
+                                                   charge, wire_size_bound});
     }
 
     pulp::tools::timeline::OperationResult finish_commit(
@@ -354,19 +423,26 @@ struct TimelineSessionStore::Impl {
             return transaction_failure(committed.error());
         for (const auto& victim : prepared.evictions)
             evict(victim);
-        retained_bytes_ -= session.retained_bytes;
-        retained_bytes_ += prepared.retained_bytes;
-        session.retained_bytes = prepared.retained_bytes;
+        admission_charge_ -= session.admission_charge;
+        admission_charge_ += prepared.admission_charge;
+        session.admission_charge = prepared.admission_charge;
         session.latest_dirty = committed.value().dirty;
+        session.latest_after = committed.value().revision;
+        session.latest_before = {committed.value().revision.value - 1};
         auto json = status_json(id, session);
         json.insert(json.size() - 1, ",\"project\":" + prepared.project_json);
+        // prepare_candidate builds the same response with both booleans set to
+        // false, the longest spelling. Every other field comes from the exact
+        // preview committed above, so there is no fallible work after publish.
+        if (json_tool_payload_size(json) > prepared.wire_size_bound)
+            std::terminate();
         return {0, std::move(json)};
     }
 
     void evict(const std::string& id) {
         const auto found = sessions_.find(id);
         if (found != sessions_.end()) {
-            retained_bytes_ -= found->second.retained_bytes;
+            admission_charge_ -= found->second.admission_charge;
             sessions_.erase(found);
         }
         const auto ordered = std::find(order_.begin(), order_.end(), id);
@@ -380,7 +456,8 @@ struct TimelineSessionStore::Impl {
     std::uint64_t next_id_ = 1;
     std::deque<std::string> order_;
     std::unordered_map<std::string, TimelineSession> sessions_;
-    std::size_t retained_bytes_ = 0;
+    std::size_t admission_charge_ = 0;
+    std::size_t history_reservation_ = 0;
 };
 
 TimelineSessionStore& timeline_sessions() {
@@ -415,8 +492,8 @@ pulp::tools::timeline::OperationResult TimelineSessionStore::redo(std::string_vi
     return impl_->redo(session_id);
 }
 
-std::size_t TimelineSessionStore::retained_bytes_for_testing() const {
-    return impl_->retained_bytes();
+std::size_t TimelineSessionStore::admission_charge_for_testing() const {
+    return impl_->admission_charge();
 }
 
 void TimelineSessionStore::set_max_output_bytes_for_testing(std::size_t maximum) {

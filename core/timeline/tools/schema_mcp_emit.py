@@ -162,7 +162,10 @@ def generate(manifest: dict) -> str:
         },
         {
             "name": "pulp_timeline_diff",
-            "description": "Return the precise dirty set produced by the latest edit in an open timeline session.",
+            "description": (
+                "Return the precise dirty set and before/after revisions for the latest "
+                "successful transition in an open timeline session."
+            ),
             "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
             "x-pulp-operation": "session.diff",
         },

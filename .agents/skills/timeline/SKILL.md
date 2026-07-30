@@ -801,8 +801,20 @@ The live MCP server embeds `timeline_mcp_tools.json` at configure time and
 dispatches exactly ten operations. Seven operations retain stateless
 `pulp::tool-timeline` entry points; diff, undo, and redo retain an actual
 `DocumentSession` in the bounded MCP process. The CLI has no `pulp seq diff`,
-`undo`, or `redo` session verbs. Do not
-copy their input schemas into `pulp_mcp.cpp`; regenerate the artifact from the
+`undo`, or `redo` session verbs. The production store admits at most 32 sessions
+and applies a 64 MiB aggregate admission charge equal to twice each session's
+canonical JSON size plus its fixed history reservation. This deterministic charge
+is a resource proxy, not a direct heap measurement. Each complete encoded MCP
+result is independently capped at 64 MiB. The store evicts the oldest session
+first when a new or changed session would exceed the count or aggregate charge.
+With the default limits, each session reserves half of the aggregate charge
+divided across the session cap for journal and undo history; a sufficiently long
+uncheckpointed session can therefore refuse a later edit without changing its
+state. Sessions are process-local and expire on eviction or server restart.
+`diff` describes only the latest successful apply, undo, or redo transition and
+returns its exact dirty set plus `before_revision` and `after_revision`; it is not
+an arbitrary since-revision query. Do not copy their input schemas into
+`pulp_mcp.cpp`; regenerate the artifact from the
 timeline manifest and let the server consume it. The MCP render result can be
 fed to `pulp_audio_compare` for an advisory before/after judgment when the
 opt-in Audio Quality Lab tool is installed.

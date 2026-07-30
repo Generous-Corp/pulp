@@ -22,50 +22,14 @@
 #include "../tools/mcp/timeline_session_store.hpp"
 #include "../tools/timeline/src/timeline_agent_internal.hpp"
 #include "mcp_server_test_support.hpp"
+#include "mcp_timeline_test_support.hpp"
 
 namespace {
 
 using Catch::Matchers::WithinAbs;
 using namespace mcp_test;
+using namespace mcp_timeline_test;
 using namespace pulp_mcp;
-
-template <typename T, typename E> T require_timeline_result(pulp::runtime::Result<T, E> result) {
-    REQUIRE(result);
-    return std::move(result).value();
-}
-
-std::string make_timeline_project_json(
-    const std::filesystem::path& source,
-    pulp::timeline::AssetLocatorKind locator_kind = pulp::timeline::AssetLocatorKind::ExternalUri,
-    std::string locator_hint = {}) {
-    using namespace pulp::timeline;
-    constexpr std::uint64_t frame_count = 32;
-    auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
-                                                              MediaRef{{5}, {0}, frame_count},
-                                                              {.gain_linear = 1.0f}));
-    auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
-    auto sequence = require_timeline_result(Sequence::create(
-        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
-    std::ifstream stream(source, std::ios::binary);
-    REQUIRE(stream);
-    const std::string bytes{std::istreambuf_iterator<char>(stream),
-                            std::istreambuf_iterator<char>()};
-    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
-    REQUIRE(hash);
-    MediaAsset asset{{5},
-                     "source.wav",
-                     frame_count,
-                     {48'000, 1},
-                     *hash,
-                     AssetStoragePolicy::External,
-                     {{locator_kind, locator_hint.empty() ? source.string() : locator_hint}},
-                     {},
-                     {}};
-    auto project = require_timeline_result(
-        Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}}));
-    auto registry = require_timeline_result(make_builtin_timeline_registry());
-    return require_timeline_result(serialize_project(project, registry)).json;
-}
 
 void write_zip(const std::filesystem::path& path,
                const std::vector<std::pair<std::string, std::vector<std::uint8_t>>>& entries) {
@@ -184,25 +148,6 @@ make_nested_timeline_project_json(const std::filesystem::path& source) {
     auto registry =
         require_timeline_result(make_builtin_timeline_registry());
     return require_timeline_result(serialize_project(project, registry)).json;
-}
-
-std::string timeline_project_from_response(const std::string& response) {
-    auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
-    const auto* structured = parsed->root().find("structuredContent");
-    REQUIRE(structured != nullptr);
-    const auto* project = structured->find("project");
-    REQUIRE(project != nullptr);
-    return std::string(parsed->raw(*project));
-}
-
-std::string timeline_string_from_response(const std::string& response, std::string_view key) {
-    auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
-    const auto* structured = parsed->root().find("structuredContent");
-    REQUIRE(structured != nullptr);
-    const auto* value = structured->find(key);
-    REQUIRE(value != nullptr);
-    REQUIRE(value->kind == pulp::timeline::JsonValue::Kind::String);
-    return value->scalar;
 }
 
 TEST_CASE("timeline asset discovery budgets non-intersecting nested probes",
@@ -378,190 +323,6 @@ TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tool
         "{\"output\":\"ignored.wav\",\"project\":" + project_argument + ",\"sample_rate\":768001}");
     require_contains(excessive_rate, R"JSON("isError":true)JSON");
     require_contains(excessive_rate, "sample_rate must be an integer between 1 and 768000");
-}
-
-TEST_CASE("timeline MCP sessions expose exact diff and journaled undo redo",
-          "[mcp][tools][timeline][iteration]") {
-    TempDir temp;
-    pulp::audio::AudioFileData source;
-    source.sample_rate = 48'000;
-    source.channels = {std::vector<float>(32, 0.8f)};
-    const auto source_path = temp.path / "source.wav";
-    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
-                                        pulp::audio::WavBitDepth::Float32));
-
-    const auto project = make_timeline_project_json(source_path);
-    const auto opened = handle_timeline_project_open(
-        "{\"project\":" + pulp::timeline::quote_json_string(project) + "}");
-    const auto session_id = timeline_string_from_response(opened, "session_id");
-    REQUIRE_FALSE(session_id.empty());
-
-    const auto session_argument =
-        "\"session_id\":" + pulp::timeline::quote_json_string(session_id);
-    const auto empty_undo = handle_timeline_undo("{" + session_argument + "}");
-    require_contains(empty_undo, R"JSON("isError":true)JSON");
-    require_contains(empty_undo, R"JSON("conflict_code":"nothing_to_undo")JSON");
-
-    const std::string command =
-        R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
-    const auto applied =
-        handle_timeline_command_apply("{\"commands\":" + command + "," + session_argument + "}");
-    require_contains(applied, R"JSON("revision":"1")JSON");
-    require_contains(applied, R"JSON("item_id":"4")JSON");
-    require_contains(applied, R"JSON("flag_bits":4)JSON");
-    require_contains(applied, R"JSON("can_undo":true)JSON");
-    const auto changed_project = timeline_project_from_response(applied);
-    REQUIRE(changed_project != project);
-
-    const auto diff = handle_timeline_diff("{" + session_argument + "}");
-    require_contains(diff, R"JSON("flags":["content"])JSON");
-    require_contains(diff, R"JSON("owner_track_id":"3")JSON");
-
-    const auto undone = handle_timeline_undo("{" + session_argument + "}");
-    REQUIRE(timeline_project_from_response(undone) == project);
-    require_contains(undone, R"JSON("can_redo":true)JSON");
-    require_contains(undone, R"JSON("flags":["content"])JSON");
-    require_contains(undone, R"JSON("item_id":"4")JSON");
-
-    const auto redone = handle_timeline_redo("{" + session_argument + "}");
-    REQUIRE(timeline_project_from_response(redone) == changed_project);
-    require_contains(redone, R"JSON("can_undo":true)JSON");
-    require_contains(redone, R"JSON("flags":["content"])JSON");
-    require_contains(redone, R"JSON("item_id":"4")JSON");
-
-    const auto missing =
-        handle_timeline_diff(R"JSON({"session_id":"timeline-missing"})JSON");
-    require_contains(missing, R"JSON("isError":true)JSON");
-    require_contains(missing, "unknown or expired timeline session");
-}
-
-TEST_CASE("timeline MCP apply rejects project and session together at runtime",
-          "[mcp][tools][timeline][iteration]") {
-    const auto response = handle_timeline_command_apply(
-        R"JSON({"commands":[{}],"project":"{}","session_id":"timeline-any"})JSON");
-    require_contains(response, R"JSON("isError":true)JSON");
-    require_contains(response, "exactly one of project or session_id is required");
-}
-
-TEST_CASE("timeline MCP session store retains its count cap with deterministic eviction",
-          "[mcp][tools][timeline][iteration]") {
-    std::ifstream fixture(std::filesystem::path(PULP_SOURCE_DIR) /
-                          "test/fixtures/timeline/v1/minimal.json");
-    REQUIRE(fixture);
-    const std::string project{std::istreambuf_iterator<char>(fixture),
-                              std::istreambuf_iterator<char>()};
-    TimelineSessionStore store({2, 1024 * 1024, 1024 * 1024});
-    std::string error;
-    const auto first = store.open(project, error);
-    const auto second = store.open(project, error);
-    const auto third = store.open(project, error);
-    REQUIRE(first);
-    REQUIRE(second);
-    REQUIRE(third);
-    require_contains(store.diff(*first).json, "unknown or expired timeline session");
-    require_contains(store.diff(*second).json, R"JSON("ok":true)JSON");
-    require_contains(store.diff(*third).json, R"JSON("ok":true)JSON");
-}
-
-TEST_CASE("timeline MCP store accounts apply undo redo under a small byte budget",
-          "[mcp][tools][timeline][iteration]") {
-    std::ifstream fixture(std::filesystem::path(PULP_SOURCE_DIR) /
-                          "test/fixtures/timeline/v4/sequence-markers.json");
-    REQUIRE(fixture);
-    const std::string project{std::istreambuf_iterator<char>(fixture),
-                              std::istreambuf_iterator<char>()};
-    const std::string commands =
-        R"JSON([{"data":{"marker":{"data":{"id":"8","name":"budget-marker","position":"0"},"type_name":"pulp.timeline.marker","version":1},"sequence_id":"2"},"type_name":"pulp.timeline.command.insert_marker","version":1}])JSON";
-
-    TimelineSessionStore probe({3, 1024 * 1024, 1024 * 1024});
-    std::string error;
-    const auto probe_id = probe.open(project, error);
-    REQUIRE(probe_id);
-    const auto initial_bytes = probe.retained_bytes_for_testing();
-    REQUIRE(probe.apply(*probe_id, commands));
-    const auto changed_bytes = probe.retained_bytes_for_testing();
-    REQUIRE(changed_bytes > initial_bytes);
-    REQUIRE(probe.undo(*probe_id));
-    const auto undone_bytes = probe.retained_bytes_for_testing();
-    REQUIRE(probe.redo(*probe_id));
-    const auto redone_bytes = probe.retained_bytes_for_testing();
-
-    const auto peak_bytes = std::max({changed_bytes, undone_bytes, redone_bytes});
-    TimelineSessionStore store({3, peak_bytes, 1024 * 1024});
-    const auto id = store.open(project, error);
-    REQUIRE(id);
-    REQUIRE(store.retained_bytes_for_testing() == initial_bytes);
-    REQUIRE(store.apply(*id, commands));
-    REQUIRE(store.retained_bytes_for_testing() == changed_bytes);
-    REQUIRE(store.undo(*id));
-    REQUIRE(store.retained_bytes_for_testing() == undone_bytes);
-    REQUIRE(store.redo(*id));
-    REQUIRE(store.retained_bytes_for_testing() == redone_bytes);
-
-    TimelineSessionStore evicting({3, initial_bytes + changed_bytes - 1, 1024 * 1024});
-    const auto oldest = evicting.open(project, error);
-    const auto updated = evicting.open(project, error);
-    REQUIRE(oldest);
-    REQUIRE(updated);
-    REQUIRE(evicting.apply(*updated, commands));
-    require_contains(evicting.diff(*oldest).json, "unknown or expired timeline session");
-    require_contains(evicting.diff(*updated).json, R"JSON("revision":"1")JSON");
-    REQUIRE(evicting.retained_bytes_for_testing() == changed_bytes);
-}
-
-TEST_CASE("timeline MCP serialization refusal leaves apply undo redo state unchanged",
-          "[mcp][tools][timeline][iteration]") {
-    std::ifstream fixture(std::filesystem::path(PULP_SOURCE_DIR) /
-                          "test/fixtures/timeline/v4/sequence-markers.json");
-    REQUIRE(fixture);
-    const std::string project{std::istreambuf_iterator<char>(fixture),
-                              std::istreambuf_iterator<char>()};
-    const std::string commands =
-        R"JSON([{"data":{"marker":{"data":{"id":"8","name":"atomic-marker","position":"0"},"type_name":"pulp.timeline.marker","version":1},"sequence_id":"2"},"type_name":"pulp.timeline.command.insert_marker","version":1}])JSON";
-
-    TimelineSessionStore store({2, 1024 * 1024, 1024 * 1024});
-    std::string error;
-    const auto id = store.open(project, error);
-    REQUIRE(id);
-    const auto initial_bytes = store.retained_bytes_for_testing();
-    const auto initial_status = store.diff(*id).json;
-
-    store.set_max_output_bytes_for_testing(initial_bytes);
-    REQUIRE_FALSE(store.apply(*id, commands));
-    REQUIRE(store.diff(*id).json == initial_status);
-    REQUIRE(store.retained_bytes_for_testing() == initial_bytes);
-
-    store.set_max_output_bytes_for_testing(1024 * 1024);
-    REQUIRE(store.apply(*id, commands));
-    const auto changed_bytes = store.retained_bytes_for_testing();
-    const auto applied_status = store.diff(*id).json;
-    store.set_max_output_bytes_for_testing(initial_bytes - 1);
-    REQUIRE_FALSE(store.undo(*id));
-    REQUIRE(store.diff(*id).json == applied_status);
-    REQUIRE(store.retained_bytes_for_testing() == changed_bytes);
-
-    store.set_max_output_bytes_for_testing(1024 * 1024);
-    REQUIRE(store.undo(*id));
-    const auto undone_status = store.diff(*id).json;
-    store.set_max_output_bytes_for_testing(changed_bytes - 1);
-    REQUIRE_FALSE(store.redo(*id));
-    REQUIRE(store.diff(*id).json == undone_status);
-    REQUIRE(store.retained_bytes_for_testing() > initial_bytes);
-}
-
-TEST_CASE("timeline MCP dirty JSON preserves combined flags contexts and null owners",
-          "[mcp][tools][timeline][iteration]") {
-    using namespace pulp::timeline;
-    const DirtySet dirty(
-        {DirtyItem{{9}, {}, {2}, DirtyFlags::Structure | DirtyFlags::Context | DirtyFlags::Added}},
-        {DirtyContext{{2}, CompileContextKind::Groove}});
-    const auto json = timeline_dirty_set_json(dirty);
-    require_contains(json, R"JSON("kind":"groove")JSON");
-    require_contains(json, R"JSON("kind_id":1)JSON");
-    require_contains(json, R"JSON("owner_sequence_id":"2")JSON");
-    require_contains(json, R"JSON("flag_bits":1041)JSON");
-    require_contains(json, R"JSON("flags":["structure","added","context"])JSON");
-    require_contains(json, R"JSON("owner_track_id":null)JSON");
 }
 
 TEST_CASE("timeline MCP confines package-relative media to the project base",

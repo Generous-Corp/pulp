@@ -675,7 +675,7 @@ TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][too
         "project and output are required");
     require_contains(
         handle_request(tool_call("418", std::string(kTimelineExportToolName), project_args)),
-        "project, format, and output are required");
+        "project and format are required");
     require_contains(handle_request(tool_call("419", std::string(kTimelineImportToolName), "{}")),
                      "input, format, and output are required");
 }

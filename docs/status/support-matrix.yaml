@@ -1010,7 +1010,7 @@ timeline_engine:
     notes: Fail-closed Standard MIDI File import and a raw exporter that strictly checks visited clip event and tick-grid shapes but does not audit unrelated project state. The separate Format::Smf adapter performs the project-wide census, requires per-concept consent, and emits a versioned central loss manifest.
   cli_mcp:
     status: experimental
-    notes: Seven operations retain stateless tool-timeline entry points shared with pulp seq and pulp render; three additional MCP-local diff/undo/redo operations use bounded process-local DocumentSessions and have no pulp seq session subtools. The shared interchange boundary consumes and produces standard .dawproject ZIP containers atomically without replacing existing outputs.
+    notes: Seven operations retain stateless tool-timeline entry points shared with pulp seq and pulp render; three additional MCP-local diff/undo/redo operations use process-local DocumentSessions capped at 32 sessions, a 64 MiB aggregate admission charge (a deterministic serialized-size plus history proxy, not direct heap measurement), and 64 MiB per complete encoded result, with oldest-first eviction and no pulp seq session subtools. Diff reports the exact dirty set plus before/after revisions for the latest successful transition. The shared interchange boundary consumes and produces standard .dawproject ZIP containers atomically without replacing existing outputs.
   sequence_adapter:
     status: experimental
     notes: SequenceProcessor projects host transport and a caller-owned immutable playback program into plugin-format processing without owning editing, media resolution, devices, or UI.

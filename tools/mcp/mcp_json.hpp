@@ -13,6 +13,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <limits>
 #include <string>
 
 namespace pulp_mcp {
@@ -46,6 +47,21 @@ inline std::string json_string(const std::string& s) {
     return out;
 }
 
+inline std::size_t json_string_encoded_size(const std::string& s) noexcept {
+    std::size_t size = 2;
+    for (const auto c : s) {
+        const auto byte = static_cast<unsigned char>(c);
+        const std::size_t added =
+            c == '\n' || c == '\r' || c == '\t' || c == '"' || c == '\\'
+                ? 2
+                : (byte < 0x20 ? 6 : 1);
+        if (size > std::numeric_limits<std::size_t>::max() - added)
+            return std::numeric_limits<std::size_t>::max();
+        size += added;
+    }
+    return size;
+}
+
 // JSON-RPC 2.0 error envelope.
 inline std::string json_error(const std::string& id, int code, const std::string& msg) {
     return "{\"jsonrpc\":\"2.0\",\"id\":" + id +
@@ -63,6 +79,18 @@ inline std::string json_result(const std::string& id, const std::string& result_
 inline std::string json_tool_payload(const std::string& structured_json) {
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(structured_json) +
            "}],\"structuredContent\":" + structured_json + "}";
+}
+
+inline std::size_t json_tool_payload_size(const std::string& structured_json) noexcept {
+    constexpr std::size_t framing = sizeof("{\"content\":[{\"type\":\"text\",\"text\":") - 1 +
+                                    sizeof("}],\"structuredContent\":") - 1 +
+                                    sizeof("}") - 1;
+    const auto quoted = json_string_encoded_size(structured_json);
+    if (quoted > std::numeric_limits<std::size_t>::max() - framing ||
+        structured_json.size() >
+            std::numeric_limits<std::size_t>::max() - framing - quoted)
+        return std::numeric_limits<std::size_t>::max();
+    return framing + quoted + structured_json.size();
 }
 
 // ── JSON field extraction (simple, dependency-free parsing) ──────────────────

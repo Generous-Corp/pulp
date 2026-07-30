@@ -16,8 +16,14 @@ std::string timeline_dirty_set_json(const pulp::timeline::DirtySet& dirty);
 
 struct TimelineSessionStoreLimits {
     std::size_t max_sessions = 32;
-    std::size_t max_retained_bytes = 64 * 1024 * 1024;
+    // Deterministic admission-charge ceiling, not a direct heap measurement.
+    // Each session is charged twice its canonical JSON size plus its fixed
+    // history reservation.
+    std::size_t max_admission_charge_bytes = 64 * 1024 * 1024;
     std::size_t max_output_bytes = 64 * 1024 * 1024;
+    // Zero derives a reservation equal to half the aggregate admission-charge
+    // ceiling divided across max_sessions. It is split between journal and undo.
+    std::size_t max_history_bytes_per_session = 0;
 };
 
 class TimelineSessionStore {
@@ -34,7 +40,7 @@ class TimelineSessionStore {
     pulp::tools::timeline::OperationResult undo(std::string_view session_id);
     pulp::tools::timeline::OperationResult redo(std::string_view session_id);
 
-    std::size_t retained_bytes_for_testing() const;
+    std::size_t admission_charge_for_testing() const;
     void set_max_output_bytes_for_testing(std::size_t maximum);
 
   private:

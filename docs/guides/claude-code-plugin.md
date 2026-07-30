@@ -153,7 +153,16 @@ subcommands.
 Opening a project returns a bounded in-process session identifier;
 pass it to command application, diff, undo, and redo to iterate without
 re-reading whole documents. Command application accepts only the generated
-typed command envelopes, and diff reports the engine's exact dirty set. Use
+typed command envelopes. The MCP process admits at most 32 sessions and applies
+a 64 MiB aggregate admission charge equal to twice each canonical JSON size plus
+its fixed history reservation. This deterministic charge is a resource proxy,
+not a direct heap measurement. Each complete encoded result is independently
+capped at 64 MiB, and the oldest session is evicted first when admitting a
+session would cross the count or aggregate charge. Sessions expire on eviction or process
+restart, and a session whose bounded journal is full refuses the next edit
+atomically. Diff reports the engine's exact dirty set and before/after revisions
+for the latest successful apply, undo, or redo transition; it is not a
+since-revision query. Use
 `pulp_timeline_render` for deterministic Float32 WAV output, then optionally pass
 before/after renders to `pulp_audio_compare` for an advisory judgment. Export
 requires explicit consent for every reported lossy concept; its accepted-loss
