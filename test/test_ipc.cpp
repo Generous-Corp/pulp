@@ -1531,3 +1531,33 @@ TEST_CASE("IPC socket client reports disconnect callback once",
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
+
+TEST_CASE("IPC disconnect callback may destroy its own connection",
+          "[events][ipc][socket][owner-lifetime][lifecycle]") {
+    CapturingServer server;
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    auto client = std::make_unique<InterprocessConnection>();
+    bool destroyed = false;
+    client->set_on_disconnected([&] {
+        client.reset();
+        destroyed = true;
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    client->disconnect();
+    CHECK(destroyed);
+    CHECK_FALSE(client);
+
+    if (server.accepted)
+        server.accepted->disconnect();
+    server.stop();
+}

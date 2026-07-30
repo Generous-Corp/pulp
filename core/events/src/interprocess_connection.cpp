@@ -282,6 +282,14 @@ void InterprocessConnection::disconnect() {
     impl_->close();
     write_lock.unlock();
 
+    {
+        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
+        impl_->disconnecting = false;
+        impl_->disconnect_owner = {};
+        impl_->read_thread_id = {};
+    }
+    impl_->lifecycle_cv.notify_all();
+
     if (was_connected) {
         connection_lost();
         std::function<void()> disconnected_callback;
@@ -291,14 +299,6 @@ void InterprocessConnection::disconnect() {
         }
         if (disconnected_callback) disconnected_callback();
     }
-
-    {
-        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
-        impl_->disconnecting = false;
-        impl_->disconnect_owner = {};
-        impl_->read_thread_id = {};
-    }
-    impl_->lifecycle_cv.notify_all();
 }
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {

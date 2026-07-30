@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <thread>
@@ -35,7 +36,10 @@ public:
     bool stopping_callbacks = true;
     std::size_t active_callbacks = 0;
     std::map<std::thread::id, std::size_t> callback_threads;
+    std::deque<std::pair<
+        std::weak_ptr<events::InterprocessConnection>, std::string>> outbound;
     std::atomic<std::uint64_t> next_client_id{1};
+    std::size_t max_clients = 16;
     InspectorServer* owner = nullptr;
     std::function<void()> heartbeat;
     std::chrono::steady_clock::time_point next_heartbeat{};
@@ -95,6 +99,10 @@ public:
             {
                 std::lock_guard lock(clients_mutex);
                 if (stopping_callbacks) {
+                    client.reset();
+                    return;
+                }
+                if (owned_clients.size() >= max_clients) {
                     client.reset();
                     return;
                 }
@@ -182,7 +190,7 @@ public:
         std::unique_lock lock(clients_mutex);
         while (!stopping_cleanup) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
-                return stopping_cleanup;
+                return stopping_cleanup || !outbound.empty();
             });
             if (stopping_cleanup)
                 break;
@@ -200,6 +208,8 @@ public:
                 }
             }
             std::function<void()> refresh;
+            decltype(outbound) pending_writes;
+            pending_writes.swap(outbound);
             if (heartbeat && now >= next_heartbeat) {
                 refresh = heartbeat;
                 next_heartbeat = now + std::chrono::seconds(10);
@@ -208,6 +218,10 @@ public:
             for (const auto& client : expired) {
                 if (client)
                     client->disconnect();
+            }
+            for (auto& [weak, message] : pending_writes) {
+                if (const auto client = weak.lock())
+                    (void)client->send_message(message);
             }
             if (refresh)
                 refresh();
@@ -249,6 +263,8 @@ bool InspectorServer::start_authenticated(InspectorServerConfig config) {
     impl_->server.set_write_timeout(std::chrono::seconds(3));
     {
         std::lock_guard lock(impl_->clients_mutex);
+        impl_->max_clients =
+            std::clamp<std::size_t>(config.max_clients, 1, 64);
         impl_->stopping_callbacks = false;
     }
     if (!impl_->server.start("127.0.0.1:0",
@@ -285,6 +301,7 @@ void InspectorServer::stop() {
     {
         std::lock_guard lock(impl_->clients_mutex);
         impl_->heartbeat = {};
+        impl_->outbound.clear();
         impl_->stopping_callbacks = true;
     }
     impl_->server.stop();
@@ -347,21 +364,19 @@ void InspectorServer::broadcast(const InspectorMessage& event) {
     }
 
     auto json = encode_message(event);
-    std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
     {
         std::lock_guard lock(impl_->clients_mutex);
         for (const auto& client : impl_->owned_clients) {
             const auto auth = impl_->authentication.find(client.get());
             if (auth != impl_->authentication.end() &&
                 auth->second.authenticated) {
-                clients.push_back(client);
+                if (impl_->outbound.size() >= 256)
+                    impl_->outbound.pop_front();
+                impl_->outbound.emplace_back(client, json);
             }
         }
     }
-    for (const auto& client : clients) {
-        if (client)
-            client->send_message(json.data(), json.size());
-    }
+    impl_->cleanup_cv.notify_one();
 }
 
 int InspectorServer::client_count() const {
