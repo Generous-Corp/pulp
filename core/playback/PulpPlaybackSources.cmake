@@ -22,6 +22,7 @@ function(pulp_resolve_playback_sources root output)
         program.cpp
         program_compiler.cpp
         program_compiler_helpers.cpp
+        program_validator.cpp
         recording_commit.cpp
         realtime_stretch_state_bank.cpp
         sequence_compile_bookkeeping.cpp
@@ -33,6 +34,7 @@ function(pulp_resolve_playback_sources root output)
         track_automation_compiler.cpp
         track_automation_program.cpp
         track_automation_renderer.cpp
+        track_audio_program_compiler.cpp
         transport.cpp
     )
     set(_PULP_PLAYBACK_SOURCES)
