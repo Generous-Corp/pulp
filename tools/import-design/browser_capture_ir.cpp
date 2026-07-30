@@ -78,6 +78,16 @@ choc::value::ValueView object_member(const choc::value::ValueView& object,
     return object[key];
 }
 
+/// object_member insists the member is an OBJECT and hands back an empty view
+/// for an array, which reads as "absent" — a silent zero rather than an error.
+choc::value::ValueView array_member(const choc::value::ValueView& object,
+                                    const char* key) {
+    if (!object.isObject() || !object.hasObjectMember(key) ||
+        !object[key].isArray())
+        return {};
+    return object[key];
+}
+
 bool load_token_report(const fs::path& path,
                        DesignIR& ir,
                        int expected_colors,
@@ -191,6 +201,88 @@ bool validate_semantic_report(const fs::path& path,
         return false;
     }
     return true;
+}
+
+/// Lower each bound semantic candidate into a control node beneath the
+/// faithful-capture backdrop.
+///
+/// The capture is a picture; these children are what make it a panel. Every
+/// step downstream already exists — design_codegen emits createKnob/createFader
+/// /createMeter for any node carrying audio_widget, and the designed-control
+/// skin paints value-only geometry so the design underneath is not erased.
+///
+/// Geometry comes from the author-declared paint box when present. It is NOT
+/// the component box: a knob's component includes its caption (116x139.9 where
+/// the dial is 116x116), so painting a value ring into it lands the ring ~12px
+/// below the dial centre — which renders, looks almost right, and is invisible
+/// to pixel-parity and to the component and macro contracts alike.
+///
+/// Only BOUND candidates become controls. An unbound candidate drives nothing,
+/// and a live widget over the design that moves no parameter is worse than
+/// leaving that part of the picture alone.
+int lower_semantic_controls(const fs::path& path,
+                            pulp::view::IRNode& root,
+                            int& undeclared_paint_boxes,
+                            std::string& error) {
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream bytes;
+    bytes << input.rdbuf();
+    choc::value::Value report;
+    try {
+        report = choc::json::parse(bytes.str());
+    } catch (const std::exception& e) {
+        error = std::string("invalid browser semantic JSON: ") + e.what();
+        return -1;
+    }
+    const auto candidates = array_member(report, "candidates");
+    if (!candidates.isArray()) return 0;
+
+    int lowered = 0;
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        const auto candidate = candidates[i];
+        if (!candidate.isObject()) continue;
+        if (string_member(candidate, "binding_status") != "bound") continue;
+
+        const auto kind = string_member(candidate, "kind");
+        auto widget = pulp::view::AudioWidgetType::none;
+        if (kind == "knob") widget = pulp::view::AudioWidgetType::knob;
+        else if (kind == "fader") widget = pulp::view::AudioWidgetType::fader;
+        else if (kind == "meter") widget = pulp::view::AudioWidgetType::meter;
+        else continue;  // buttons and unknowns stay part of the backdrop
+
+        const auto data = object_member(candidate, "data_pulp");
+        std::string param = string_member(data, "param");
+        if (param.empty()) param = string_member(data, "meter");
+        if (param.empty()) continue;  // "bound" without a key is not a binding
+
+        // Prefer the declared paint box; fall back to the component box and
+        // count it, so an undeclared control is reported rather than silently
+        // mispainted. A meter legitimately has no inner paint box — the
+        // component IS its track — so the fallback is correct there.
+        auto box = object_member(candidate, "paint_bounds");
+        if (!box.isObject()) {
+            box = object_member(candidate, "bounds");
+            ++undeclared_paint_boxes;
+        }
+
+        pulp::view::IRNode control;
+        control.type = "frame";
+        control.name = string_member(candidate, "name");
+        control.audio_widget = widget;
+        // design_codegen keys the host binding off attributes["binding"] —
+        // IRNode::param_key does not exist; that field belongs to the
+        // geometry-detected element struct, which is a different lane.
+        control.attributes["binding"] = param;
+        control.audio_label = control.name;
+        control.style.position = "absolute";
+        control.style.left = static_cast<float>(number_member(box, "left", 0.0));
+        control.style.top = static_cast<float>(number_member(box, "top", 0.0));
+        control.style.width = static_cast<float>(number_member(box, "width", 0.0));
+        control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        root.children.push_back(std::move(control));
+        ++lowered;
+    }
+    return lowered;
 }
 
 bool validate_png_header(const fs::path& path,
@@ -464,6 +556,20 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // existing source-agnostic manifest refresh/localization pass aware of the
     // same backing without teaching that utility a browser-specific field.
     ir.root.attributes["asset_ref"] = reference_id;
+
+    // The backdrop alone is a picture. These children are the live controls.
+    int undeclared_paint_boxes = 0;
+    const int lowered = lower_semantic_controls(
+        *semantic_report, ir.root, undeclared_paint_boxes, result.error);
+    if (lowered < 0) return result;
+    ir.root.attributes["controls_lowered"] = std::to_string(lowered);
+    // Surfaced rather than swallowed: an undeclared paint box means the widget
+    // was placed on the component box, which for a captioned control paints its
+    // value geometry low. Correct for a meter, wrong for a knob, and nothing
+    // downstream can tell the difference.
+    if (undeclared_paint_boxes > 0)
+        ir.root.attributes["controls_without_paint_box"] =
+            std::to_string(undeclared_paint_boxes);
     // These are evidence identifiers, not filesystem dependencies. Keep them
     // portable when the DesignIR and its localized asset directory move.
     ir.root.attributes["browser_capture_envelope"] =
