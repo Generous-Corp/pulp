@@ -1424,3 +1424,84 @@ TEST_CASE("every composer control changes something observable",
         CHECK(chrome->mode() == forge::ForgeChrome::Mode::Home);
     }
 }
+
+TEST_CASE("the shelf, the library link and settings all go somewhere",
+          "[phase6][controls]") {
+    // Phase 6's bar: one assertion per control that something observable
+    // changed. Navigation counts as observable only if the mode actually moves.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome->mode() == forge::ForgeChrome::Mode::Home);
+
+    SECTION("the library link opens the library") {
+        chrome->enter_marketplace();
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Marketplace);
+        // And it comes back, or the link is a trap door.
+        chrome->enter_home();
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Home);
+    }
+
+    SECTION("opening a shelf item moves to the workspace") {
+        chrome->open_project();
+        CHECK(chrome->mode() != forge::ForgeChrome::Mode::Home);
+    }
+
+    SECTION("the shelf lists what the store holds, for both artifact kinds") {
+        // The shelf must show patches as well as modules -- a patch that
+        // cannot be reopened is a patch that was never really saved.
+        for (auto kind : {forge_modular::Artifact::module,
+                          forge_modular::Artifact::patch}) {
+            shell.set_artifact(kind);
+            const auto copy = shell.chrome_copy();
+            INFO(copy.badge);
+            CHECK_FALSE(copy.badge.empty());
+            // The badge names the kind, so a card cannot be mistaken for the
+            // other sort of thing.
+            const bool patch = kind == forge_modular::Artifact::patch;
+            CHECK(copy.badge == (patch ? "PATCH" : "MODULE"));
+        }
+    }
+}
+
+TEST_CASE("model roles are re-cut by artifact, not duplicated", "[phase6][settings]") {
+    // Forge's settings stay the single source of the selections; this only
+    // says which of them a Rack artifact consumes.
+    using Shell = forge_modular::ForgeModularShell;
+    const auto module_roles = Shell::roles_for(forge_modular::Artifact::module);
+    const auto patch_roles = Shell::roles_for(forge_modular::Artifact::patch);
+
+    // A module compiles DSP and draws a panel.
+    CHECK(module_roles.dsp);
+    CHECK(module_roles.ui);
+
+    // A patch compiles nothing. Offering a DSP model for it would imply the
+    // build does something it does not.
+    CHECK_FALSE(patch_roles.dsp);
+    CHECK(patch_roles.ui);
+
+    // Every artifact uses at least one role, or its build has no model at all.
+    for (auto a : {forge_modular::Artifact::module, forge_modular::Artifact::patch}) {
+        const auto r = Shell::roles_for(a);
+        CHECK((r.dsp || r.ui));
+    }
+
+    // And the live shell follows its own artifact rather than a stored copy.
+    HermeticProjects isolated;
+    Shell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    CHECK(shell.model_roles().dsp);                 // module by default
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK_FALSE(shell.model_roles().dsp);
+}

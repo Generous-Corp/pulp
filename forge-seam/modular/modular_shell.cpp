@@ -375,6 +375,17 @@ void ForgeModularShell::refresh_depth_tabs() {
     }
 }
 
+ForgeModularShell::ModelRoles ForgeModularShell::roles_for(Artifact artifact) {
+    switch (artifact) {
+        // C++ for the DSP, and a panel to draw.
+        case Artifact::module: return {true, true};
+        // No DSP is written at all: the modules already exist, and what is
+        // produced is a wiring plan plus the prose that explains it.
+        case Artifact::patch:  return {false, true};
+    }
+    return {true, true};
+}
+
 void ForgeModularShell::begin_mention() {
     auto* c = chrome();
     if (!c) return;

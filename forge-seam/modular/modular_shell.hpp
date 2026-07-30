@@ -91,6 +91,21 @@ public:
     /// Open the mention list, as typing `@` does.
     void begin_mention();
 
+    /// Which of Forge's model roles an artifact actually consumes.
+    ///
+    /// Inherited, not duplicated: the selections live in Forge's settings and
+    /// this only says which of them a Rack artifact uses. A module compiles
+    /// DSP and draws a panel, so it uses both. A patch compiles nothing -- it
+    /// wires modules that already exist and writes the explanation -- so the
+    /// DSP role is irrelevant to it, and offering that choice would imply the
+    /// build does something it does not.
+    struct ModelRoles {
+        bool dsp = false;
+        bool ui = false;
+    };
+    static ModelRoles roles_for(Artifact artifact);
+    ModelRoles model_roles() const { return roles_for(artifact_); }
+
     void watch_build_log(const std::string& path);
 
     /// Drain whatever the generator has written since the last call, appending
