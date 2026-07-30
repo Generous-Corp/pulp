@@ -69,8 +69,41 @@ Two things this cost that are worth knowing:
   answer fails to compile rather than silently inheriting another product's
   words.
 
-Still to do in Phase 1: the composer action row as a description (the one
-genuinely shared change), and the two optional view hooks.
+### Phase 1, step 2 — the composer action row
+
+**Done, and it is the one genuinely shared change.** `ComposerRow` describes what
+the row contains — left items, right items, each a label, an icon, a primary
+flag and a callback — and `ForgeShell::composer_row()` returns it. An **empty**
+row means "the standard one", so the three original products are untouched and
+nothing that does not care has to change.
+
+The chrome still owns the treatment: size, radius, border, icon colour, label
+type. A product says what its buttons ARE; the chrome decides how they look, so a
+described row cannot accidentally style itself out of the family.
+
+Proven live and per-product in one run. Temporarily describing Forge FX's row:
+
+| Product | Result |
+|---|---|
+| FX (described) | **failed** — the render changed, so the path is live |
+| Instrument | passed — untouched |
+| MIDI | passed — untouched |
+
+Reverted: 3 of 3 pass, and Forge's chrome suite stays at 4,711 assertions.
+
+That is the guarantee demonstrated rather than asserted: a product describing its
+own row changes only itself.
+
+**One honest gap.** That demonstration was manual, because `ForgeFxShell` is
+`final` and cannot be subclassed for a test double. A permanent test needs a
+`ForgeShell` subclass — which is exactly what `ForgeModularShell` will be in
+Phase 2, so the test becomes natural there rather than requiring a throwaway.
+
+`icon_kind` was dropped from the icon enum: it is not declared where the row
+builder sits, and an icon that cannot be wired is worse than one that does not
+exist.
+
+Still to do in Phase 1: the two optional view hooks.
 
 ## Applying it to a Forge checkout
 

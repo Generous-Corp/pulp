@@ -102,13 +102,41 @@ index 27f98d0..ac2e51f 100644
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..108db34 100644
+index c8101e1..5754e69 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
-@@ -59,6 +59,23 @@ class ProjectStore;
+@@ -59,6 +59,51 @@ class ProjectStore;
  // re-bake into an effect shell), and used to select the generation vocabulary.
  enum class ShellKind { effect, instrument, midi_effect };
  
++/// One button in the composer's action row.
++///
++/// A description rather than a built widget, so a product can say what its row
++/// contains without the chrome hard-coding it and without the product reaching
++/// into chrome's view types.
++struct ComposerAction {
++    /// Which of chrome's icons to draw. `none` leaves the button text-only.
++    enum class Icon { none, plus, dice, arrow_up, document, search, gear };
++    /// Empty means icon-only, which is how the compact tiles are expressed.
++    std::string label;
++    /// What a screen reader says. Required -- an icon-only button with no label
++    /// is unreachable, and defaulting it to the visible text would leave the
++    /// icon-only cases silent.
++    std::string access_label;
++    Icon icon = Icon::none;
++    /// `primary` is the filled accent treatment; everything else is ghost.
++    bool primary = false;
++    /// Runs on click. A null callback means the button is present but inert,
++    /// which some are before their feature lands.
++    std::function<void()> on_click;
++};
++
++/// The composer's action row: what sits left of the spacer, and what sits right.
++struct ComposerRow {
++    std::vector<ComposerAction> left;
++    std::vector<ComposerAction> right;
++};
++
 +/// The product-facing words the chrome shows.
 +///
 +/// These used to be four `switch (kind)` functions inside chrome.cpp, which put
@@ -129,7 +157,7 @@ index c8101e1..108db34 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +360,12 @@ public:
+@@ -343,6 +388,19 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -139,14 +167,21 @@ index c8101e1..108db34 100644
 +    /// compile, rather than silently inheriting another product's copy.
 +    virtual ChromeCopy chrome_copy() const = 0;
 +
++    /// The composer's action row for this product.
++    ///
++    /// Returning an empty row means "the standard one", which is what the three
++    /// original products want and keeps this from being a breaking change for
++    /// anything that does not care.
++    virtual ComposerRow composer_row() { return {}; }
++
      virtual bool has_build() const = 0;
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..b45bc3f 100644
+index 1c3814e..a3e633c 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
-@@ -1151,44 +1151,26 @@ private:
+@@ -1151,44 +1151,66 @@ private:
  // these has an answer for all three kinds — a fall-through would show effect
  // wording ("darker feedback tail", "Lo-Fi Delay") inside the instrument or
  // MIDI-effect plugin.
@@ -155,28 +190,59 @@ index 1c3814e..b45bc3f 100644
 -        case ShellKind::instrument: return "Subtractive Synth";
 -        case ShellKind::midi_effect: return "Note Pass";
 -        case ShellKind::effect: break;
--    }
--    return "Lo-Fi Delay";
 +// Product copy comes from the shell, which answers for itself. These four used
 +// to switch on ShellKind here, which put product words in the layout code and
 +// meant a new product could not supply its own without editing this file.
 +//
 +// std::string rather than const char*: the copy lives in a value the shell
 +// returns, so handing back a pointer into a temporary would dangle.
-+std::string default_build_title(const ForgeShell& shell) {
-+    return shell.chrome_copy().default_build_title;
- }
++/// Build one composer action from its description.
++///
++/// The chrome owns the treatment -- size, radius, border, icon colour -- so a
++/// product describing a row cannot accidentally style itself differently from
++/// its siblings. It says what the buttons ARE; this decides how they look.
++std::unique_ptr<TextButton> make_composer_action(const ComposerAction& spec) {
++    auto b = std::make_unique<TextButton>();
++    b->set_style(spec.primary ? TextButton::Style::primary
++                              : TextButton::Style::ghost);
++    b->set_access_label(spec.access_label.empty() ? spec.label
++                                                  : spec.access_label);
++    const bool icon_only = spec.label.empty();
++    size(*b, icon_only ? 34.0f : 0.0f, 34.0f);
++    if (!spec.primary) b->set_border(kLine, 1, design::radius::medium);
++    b->flex().align_items = FlexAlign::center;
++    b->flex().justify_content = FlexJustify::center;
++    if (!icon_only) {
++        b->flex().padding_left = 12;
++        b->flex().padding_right = 14;
++        b->flex().gap = 7;
+     }
+-    return "Lo-Fi Delay";
+-}
  
 -const char* prompt_placeholder(ShellKind kind) {
 -    switch (kind) {
 -        case ShellKind::instrument: return "a warm analog pad with a slow filter sweep…";
 -        case ShellKind::midi_effect: return "a scale-locked up-down arpeggiator…";
 -        case ShellKind::effect: break;
--    }
++    const Color ink = spec.primary ? kOnInk : kMuted;
++    switch (spec.icon) {
++        case ComposerAction::Icon::plus:      b->add_child(icon_plus(ink)); break;
++        case ComposerAction::Icon::dice:      b->add_child(icon_dice(ink)); break;
++        case ComposerAction::Icon::arrow_up:  b->add_child(icon_arrow_up(ink)); break;
++        case ComposerAction::Icon::document:  b->add_child(icon_document(ink)); break;
++        case ComposerAction::Icon::search:    b->add_child(icon_search(ink)); break;
++        case ComposerAction::Icon::gear:      b->add_child(icon_gear(ink)); break;
++        case ComposerAction::Icon::none:      break;
+     }
 -    return "Build a lo-fi multi-fx plugin — reverb, delay, chorus. "
 -           "Nocturne, dreamy, a visualizer per effect.";
-+std::string prompt_placeholder(const ForgeShell& shell) {
-+    return shell.chrome_copy().prompt_placeholder;
++    if (!icon_only) {
++        b->add_child(make_label(spec.label, kFontDisplay, 12.5f, 600,
++                                spec.primary ? kOnInk : kText));
++    }
++    if (spec.on_click) b->on_click = spec.on_click;
++    return b;
  }
  
 -const char* followup_placeholder(ShellKind kind) {
@@ -186,8 +252,8 @@ index 1c3814e..b45bc3f 100644
 -        case ShellKind::effect: break;
 -    }
 -    return "refine it — e.g. darker feedback tail";
-+std::string followup_placeholder(const ForgeShell& shell) {
-+    return shell.chrome_copy().followup_placeholder;
++std::string default_build_title(const ForgeShell& shell) {
++    return shell.chrome_copy().default_build_title;
  }
  
 -std::string shell_kind_badge(ShellKind kind) {
@@ -200,12 +266,20 @@ index 1c3814e..b45bc3f 100644
 -            return std::string(brand::kProductNameUpper) + " FX";
 -    }
 -    return std::string(brand::kProductNameUpper);
++std::string prompt_placeholder(const ForgeShell& shell) {
++    return shell.chrome_copy().prompt_placeholder;
++}
++
++std::string followup_placeholder(const ForgeShell& shell) {
++    return shell.chrome_copy().followup_placeholder;
++}
++
 +std::string shell_kind_badge(const ForgeShell& shell) {
 +    return shell.chrome_copy().badge;
  }
  
  std::string trim_copy(const std::string& s) {
-@@ -1350,7 +1332,7 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
+@@ -1350,7 +1372,7 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
      // shell ships a lo-fi delay; the instrument shell a subtractive synth; the
      // MIDI-effect shell a pass-through transform chain). A generated build
      // overrides this with its own name at install.
@@ -214,7 +288,7 @@ index 1c3814e..b45bc3f 100644
  }
  
  ForgeChrome::~ForgeChrome() {
-@@ -1683,7 +1665,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1683,7 +1705,7 @@ void ForgeChrome::build_title_bar(View& parent) {
      player_title_ = title.get();
      title->flex().flex_shrink = 0;
      identity->add_child(std::move(title));
@@ -223,7 +297,7 @@ index 1c3814e..b45bc3f 100644
                            kFaint, 0.8f);
      shell_kind_badge_ = tag.get();
      tag->set_border(kLine, 1, 5);
-@@ -1946,7 +1928,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1946,7 +1968,7 @@ void ForgeChrome::build_home(View& parent) {
          kHomePromptTextWidth, design::geometry::composer_max_text_lines,
          design::geometry::composer_text_line_height);
      prompt_input_ = input.get();
@@ -232,7 +306,35 @@ index 1c3814e..b45bc3f 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -3401,7 +3383,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -1993,6 +2015,27 @@ void ForgeChrome::build_home(View& parent) {
+     actions->flex().align_items = FlexAlign::center;
+     actions->flex().margin_top = 10;
+     actions->flex().flex_shrink = 0;
++
++    // A product may describe its own row. An empty description means "the
++    // standard one", so the three original products are unaffected and this is
++    // not a breaking change for anything that does not care.
++    if (auto described = shell_.composer_row();
++        !described.left.empty() || !described.right.empty()) {
++        for (const auto& a : described.left) {
++            auto b = make_composer_action(a);
++            b->flex().margin_right = 8;
++            actions->add_child(std::move(b));
++        }
++        actions->add_child(make_spacer());
++        for (const auto& a : described.right) {
++            auto b = make_composer_action(a);
++            b->flex().margin_left = 8;
++            actions->add_child(std::move(b));
++        }
++        box->add_child(std::move(actions));
++        return;
++    }
++
+     auto attach = std::make_unique<TextButton>();
+     home_attach_button_ = attach.get();
+     attach->set_style(TextButton::Style::ghost);
+@@ -3401,7 +3444,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -241,7 +343,7 @@ index 1c3814e..b45bc3f 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -4268,7 +4250,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4311,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -250,7 +352,7 @@ index 1c3814e..b45bc3f 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -5726,7 +5708,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5769,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -259,7 +361,7 @@ index 1c3814e..b45bc3f 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +5841,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +5902,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -268,7 +370,7 @@ index 1c3814e..b45bc3f 100644
      enter_home();
  }
  
-@@ -9019,7 +9001,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9062,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
