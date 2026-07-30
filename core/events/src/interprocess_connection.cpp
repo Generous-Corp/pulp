@@ -85,7 +85,7 @@ struct InterprocessConnection::Impl {
     IpcTransport transport = IpcTransport::NamedPipe;
     NamedPipe pipe;
     Socket socket;
-    std::mutex write_mutex;
+    std::timed_mutex write_mutex;
     std::shared_ptr<DisconnectLifecycle> lifecycle =
         std::make_shared<DisconnectLifecycle>();
 
@@ -327,7 +327,24 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
     if (write_poisoned_.load(std::memory_order_acquire)) return false;
     if (size > max_message_bytes_.load(std::memory_order_relaxed)) return false;
 
-    std::unique_lock<std::mutex> lock(impl_->write_mutex);
+    const auto configured_timeout = std::chrono::milliseconds(
+        write_timeout_ms_.load(std::memory_order_relaxed));
+    const bool has_frame_deadline =
+        impl_->transport == IpcTransport::Socket &&
+        configured_timeout > std::chrono::milliseconds(0);
+    const auto frame_deadline =
+        std::chrono::steady_clock::now() + configured_timeout;
+    std::unique_lock<std::timed_mutex> lock(
+        impl_->write_mutex, std::defer_lock);
+    if (has_frame_deadline) {
+        if (!lock.try_lock_until(frame_deadline)) {
+            write_poisoned_.store(true, std::memory_order_release);
+            disconnect();
+            return false;
+        }
+    } else {
+        lock.lock();
+    }
     if (!is_connected() ||
         write_poisoned_.load(std::memory_order_acquire))
         return false;
@@ -337,13 +354,6 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
     uint8_t header[4];
     encode_u32_le(len, header);
 
-    const auto configured_timeout = std::chrono::milliseconds(
-        write_timeout_ms_.load(std::memory_order_relaxed));
-    const bool has_frame_deadline =
-        impl_->transport == IpcTransport::Socket &&
-        configured_timeout > std::chrono::milliseconds(0);
-    const auto frame_deadline =
-        std::chrono::steady_clock::now() + configured_timeout;
     auto write_with_deadline = [&](const uint8_t* bytes,
                                    std::size_t byte_count) {
         if (has_frame_deadline) {

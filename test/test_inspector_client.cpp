@@ -238,6 +238,43 @@ TEST_CASE("server rejects unsupported protocol versions before publishing",
     CHECK(reader.list().empty());
 }
 
+TEST_CASE("server rejects deeply nested JSON before authentication",
+          "[inspect][client][authentication][resource-limit]") {
+    AuthenticatedFixture fixture;
+
+    Socket socket;
+    REQUIRE(socket.create(SocketType::TCP));
+    REQUIRE(socket.set_read_timeout(std::chrono::seconds(1)));
+    REQUIRE(socket.connect("127.0.0.1",
+                           static_cast<std::uint16_t>(
+                               fixture.server.port())));
+    REQUIRE(receive_frame(socket).has_value());
+
+    constexpr std::size_t depth = 65;
+    std::string params(depth, '[');
+    params += '0';
+    params.append(depth, ']');
+    const auto request =
+        std::string(R"({"id":1,"method":"Session.authenticate","params":)") +
+        params + '}';
+    REQUIRE(send_frame(socket, request));
+
+    const auto response_frame = receive_frame(socket);
+    REQUIRE(response_frame.has_value());
+    pulp::inspect::InspectorMessage response;
+    REQUIRE(pulp::inspect::decode_message(*response_frame, response));
+    CHECK(response.is_error);
+    CHECK(response.error_code == "message_too_deep");
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (fixture.server.client_count() != 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    CHECK(fixture.server.client_count() == 0);
+}
+
 TEST_CASE("authenticated client completes read and controlled mutation",
           "[inspect][client][authentication]") {
     AuthenticatedFixture fixture;
