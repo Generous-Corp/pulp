@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::runtime {
 
@@ -158,7 +159,8 @@ bool Socket::set_write_timeout(std::chrono::milliseconds timeout) {
     const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
 #ifdef _WIN32
     const DWORD value = static_cast<DWORD>(
-        std::min<std::int64_t>(bounded.count(), DWORD_MAX));
+        std::min<std::int64_t>(
+            bounded.count(), std::numeric_limits<DWORD>::max()));
     return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_SNDTIMEO,
                         reinterpret_cast<const char*>(&value),
                         sizeof(value)) == 0;

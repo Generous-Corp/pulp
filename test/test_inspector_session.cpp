@@ -7,8 +7,10 @@
 #include <choc/text/choc_JSON.h>
 
 #include <chrono>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -197,6 +199,23 @@ TEST_CASE("InspectorSession invokes domain handlers outside its lease mutex",
     CHECK_FALSE(response.is_error);
 }
 
+TEST_CASE("InspectorSession contains exceptions from domain handlers",
+          "[inspect][session][dispatch][exception]") {
+    auto config = policy(InspectorProfile::Develop);
+    InspectorSession session(
+        InspectorSessionInfo{"session-throws", "instance-1", "fixture"},
+        std::move(config),
+        [](const auto&) -> pulp::inspect::InspectorMessage {
+            throw std::runtime_error("fixture failure");
+        });
+
+    const auto response =
+        session.handle("reader", make_request(1, "State.getParameters"));
+    CHECK(response.is_error);
+    CHECK(response.error_code == "dispatch_failed");
+    CHECK(response.params_json.find("fixture failure") != std::string::npos);
+}
+
 TEST_CASE("InspectorSession reports effective authority without dispatching",
           "[inspect][session][capabilities]") {
     auto config = policy(InspectorProfile::Observe);
@@ -346,4 +365,50 @@ TEST_CASE("cancelling main-thread RPC wakes queued callers and rejects new work"
     const auto rejected =
         rpc.call(10, [] { return make_response(10, "{}"); });
     CHECK(rejected.error_code == "dispatch_cancelled");
+}
+
+TEST_CASE("cancelling main-thread RPC waits for running direct work",
+          "[inspect][session][main-thread-rpc][teardown]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool started = false;
+    bool release = false;
+    InspectorMainThreadRpc rpc(
+        {1s, 1},
+        [](auto) { return false; },
+        [] { return true; });
+
+    pulp::inspect::InspectorMessage response;
+    std::thread caller([&] {
+        response = rpc.call(11, [&] {
+            std::unique_lock lock(mutex);
+            started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(11, "{}");
+        });
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return started; }));
+    }
+
+    std::atomic<bool> cancel_returned{false};
+    std::thread canceller([&] {
+        rpc.cancel();
+        cancel_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(20ms);
+    CHECK_FALSE(cancel_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    cv.notify_all();
+    caller.join();
+    canceller.join();
+
+    CHECK(cancel_returned.load(std::memory_order_acquire));
+    CHECK_FALSE(response.is_error);
+    CHECK_FALSE(rpc.active());
 }

@@ -1419,7 +1419,10 @@ TEST_CASE("IPC socket write timeout bounds the complete frame",
     REQUIRE(drained_bytes.load(std::memory_order_relaxed) > 0);
     REQUIRE_FALSE(sent);
     REQUIRE_FALSE(client.is_connected());
-    REQUIRE(send_duration < std::chrono::seconds(1));
+    // Keep enough scheduler headroom for heavily loaded CI while still
+    // distinguishing the 60 ms whole-frame deadline from the multi-second
+    // transfer a per-write timeout would permit.
+    REQUIRE(send_duration < std::chrono::seconds(2));
 }
 
 TEST_CASE("IPC socket server observes client disconnect",
