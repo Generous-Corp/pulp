@@ -153,8 +153,9 @@ application accepts only the generated typed command envelopes. Use
 before/after renders to `pulp_audio_compare` for an advisory judgment. Export
 requires explicit consent for every reported lossy concept; its accepted-loss
 enum is generated from the committed interchange concept authority and offers
-no force or accept-all escape hatch. Call it first with `plan_only: true` to
-receive the canonical manifest and `required_consent` without writing; refusal
+no force or accept-all escape hatch. Call it first with outputless
+`plan_only: true` (and no `accept_losses`) to receive the canonical manifest and
+`required_consent` without writing; publishing requires `output`; refusal
 and successful export return the same manifest shape. Import/export publish new
 directories only. SMF interchange uses a MIDI file, while the current DAWproject boundary
 is an unpacked `project.xml` with confined sibling media rather than a packaged

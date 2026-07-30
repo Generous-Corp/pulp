@@ -757,8 +757,9 @@ pulp seq schema
 pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
+pulp seq export <project.json> --format <smf|dawproject> --plan
 pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
-  [--plan] [--accept-loss <concept-id>]...
+  [--accept-loss <concept-id>]...
 pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \
   --out <new-directory>
 pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
@@ -775,7 +776,10 @@ force, overwrite, or accept-all path. Export requires separate consent for
 every planned lossy concept so a newly introduced loss stops an unattended
 pipeline. Run `--plan` first: it returns the canonical manifest and
 `required_consent` without writing anything, even when the project is lossless.
-MCP uses the equivalent `plan_only: true` input. Refusal and successful export
+Planning rejects `--out` and `--accept-loss`; it does not invent a destination.
+Publishing requires `--out`. MCP uses the equivalent outputless
+`plan_only: true` input and rejects `output` or `accept_losses` in that mode.
+Refusal and successful export
 results carry the same manifest object. SMF exports contain `project.mid`;
 DAWproject exports are currently
 unpacked `project.xml` plus sibling media, not packaged `.dawproject` files.

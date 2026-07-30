@@ -238,18 +238,27 @@ std::string concept_array_json(std::span<const Concept> concepts) {
 }
 
 std::string export_result_json(std::string_view format, const fs::path& output,
-                               const pulp::interchange::ExportPlan& plan, bool plan_only,
-                               std::span<const Concept> required_consent = {}) {
+                               const pulp::interchange::ExportPlan& plan) {
     std::string result =
         "{\"format\":" + pulp::timeline::quote_json_string(format) +
         ",\"lossless\":" + (plan.is_lossless() ? std::string("true") : std::string("false")) +
         ",\"manifest\":" + pulp::interchange::loss_manifest_json(plan) + ",\"ok\":true";
     result += ",\"output\":";
     result += pulp::timeline::quote_json_string(filesystem_path_to_utf8(output));
-    result += ",\"plan_only\":";
-    result += plan_only ? "true" : "false";
-    result += ",\"required_consent\":";
-    result += concept_array_json(required_consent);
+    result += ",\"plan_only\":false,\"required_consent\":[]";
+    result += '}';
+    return result;
+}
+
+std::string export_plan_json(std::string_view format,
+                             const pulp::interchange::ExportPlan& plan) {
+    const auto required = plan.required_consent();
+    std::string result =
+        "{\"format\":" + pulp::timeline::quote_json_string(format) +
+        ",\"lossless\":" + (plan.is_lossless() ? std::string("true") : std::string("false")) +
+        ",\"manifest\":" + pulp::interchange::loss_manifest_json(plan) +
+        ",\"ok\":true,\"plan_only\":true,\"required_consent\":";
+    result += concept_array_json(required);
     result += '}';
     return result;
 }
@@ -353,10 +362,25 @@ bool add_dawproject_media(const LoadedProject& loaded,
 
 } // namespace detail
 
+OperationResult plan_export_project(const ProjectSource& project, std::string_view format_text) {
+    const auto format = parse_format(format_text);
+    if (!format)
+        return detail::failure("arguments", "format (smf or dawproject) is required", {}, 2);
+
+    auto registry = pulp::timeline::make_builtin_timeline_registry();
+    if (!registry)
+        return detail::failure("registry", "could not construct the built-in schema registry");
+    auto loaded = detail::load_project(project, registry.value());
+    if (!loaded)
+        return detail::failure("open", detail::persistence_message(loaded.error()),
+                               loaded.error().path);
+    const auto plan = pulp::interchange::plan_export(loaded.value().value, *format);
+    return {0, export_plan_json(format_text, plan)};
+}
+
 OperationResult export_project(const ProjectSource& project, std::string_view format_text,
                                const fs::path& output_directory,
-                               const std::vector<std::string>& accepted_loss_names,
-                               ExportDisposition disposition) {
+                               const std::vector<std::string>& accepted_loss_names) {
     const auto format = parse_format(format_text);
     if (!format || output_directory.empty())
         return detail::failure("arguments", "format (smf or dawproject) and output are required",
@@ -380,10 +404,6 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
         return detail::failure("open", detail::persistence_message(loaded.error()),
                                loaded.error().path);
     const auto plan = pulp::interchange::plan_export(loaded.value().value, *format);
-    if (disposition == ExportDisposition::PlanOnly) {
-        const auto required = plan.required_consent();
-        return {0, export_result_json(format_text, output_directory, plan, true, required)};
-    }
     auto exported = pulp::interchange::run_export(
         plan, options, *format == Format::Smf ? pulp::smf::writer() : pulp::dawproject::writer());
     if (!exported) {
@@ -411,7 +431,7 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
         return export_error_result(format_text, plan, "publish",
                                    "output directory appeared before atomic publication",
                                    filesystem_path_to_utf8(output_directory));
-    return {0, export_result_json(format_text, output_directory, plan, false)};
+    return {0, export_result_json(format_text, output_directory, plan)};
 }
 
 OperationResult import_project(const fs::path& input, std::string_view format_text,

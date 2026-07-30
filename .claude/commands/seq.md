@@ -14,7 +14,7 @@ pulp seq schema
 pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
-pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> --plan
+pulp seq export <project.json> --format <smf|dawproject> --plan
 pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
   [--accept-loss <concept-id>]...
 pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \

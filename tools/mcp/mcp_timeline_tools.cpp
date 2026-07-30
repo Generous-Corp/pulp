@@ -170,9 +170,26 @@ std::string handle_timeline_export(const std::string& params_json) {
         return timeline_argument_error(arguments.error());
     const auto* project = required_timeline_string(arguments.value().project);
     const auto* format = required_timeline_string(arguments.value().format);
+    if (project == nullptr || format == nullptr)
+        return timeline_argument_error("Error: project and format are required");
+    bool plan_only = false;
+    if (const auto* value = arguments.value().plan_only) {
+        if (value->kind != pulp::timeline::JsonValue::Kind::Boolean)
+            return timeline_argument_error("Error: plan_only must be a boolean");
+        plan_only = value->boolean;
+    }
+    if (plan_only) {
+        if (arguments.value().output != nullptr)
+            return timeline_argument_error("Error: output must be absent when plan_only is true");
+        if (arguments.value().accept_losses != nullptr)
+            return timeline_argument_error(
+                "Error: accept_losses must be absent when plan_only is true");
+        return timeline_result(pulp::tools::timeline::plan_export_project(
+            timeline_project_source(*project), *format));
+    }
     const auto* output = required_timeline_string(arguments.value().output);
-    if (project == nullptr || format == nullptr || output == nullptr)
-        return timeline_argument_error("Error: project, format, and output are required");
+    if (output == nullptr)
+        return timeline_argument_error("Error: output is required when publishing an export");
     std::vector<std::string> accepted_losses;
     if (const auto* losses = arguments.value().accept_losses) {
         if (losses->kind != pulp::timeline::JsonValue::Kind::Array)
@@ -185,17 +202,9 @@ std::string handle_timeline_export(const std::string& params_json) {
             accepted_losses.push_back(loss.scalar);
         }
     }
-    bool plan_only = false;
-    if (const auto* value = arguments.value().plan_only) {
-        if (value->kind != pulp::timeline::JsonValue::Kind::Boolean)
-            return timeline_argument_error("Error: plan_only must be a boolean");
-        plan_only = value->boolean;
-    }
     return timeline_result(pulp::tools::timeline::export_project(
         timeline_project_source(*project), *format,
-        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses,
-        plan_only ? pulp::tools::timeline::ExportDisposition::PlanOnly
-                  : pulp::tools::timeline::ExportDisposition::Publish));
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses));
 }
 
 std::string handle_timeline_import(const std::string& params_json) {

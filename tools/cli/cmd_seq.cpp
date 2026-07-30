@@ -31,8 +31,9 @@ void print_seq_usage() {
                  "  validate <project.json>\n"
                  "  explain <project.json> [--sample-rate <hz>]\n"
                  "  apply <project.json> <commands.json> [--out <project.json>]\n"
+                 "  export <project.json> --format <smf|dawproject> --plan\n"
                  "  export <project.json> --format <smf|dawproject> --out <new-directory>\n"
-                 "         [--plan] [--accept-loss <concept>]...\n"
+                 "         [--accept-loss <concept>]...\n"
                  "  import <input> --format <smf|dawproject> --out <new-directory>\n";
 }
 
@@ -291,14 +292,25 @@ int cmd_seq(const std::vector<std::string>& args) {
                 return bad_seq_usage("unknown " + subcommand + " option: " + args[index]);
             }
         }
-        if (output.empty() || format.empty())
-            return bad_seq_usage(subcommand + " requires --format and --out");
+        if (format.empty())
+            return bad_seq_usage(subcommand + " requires --format");
         const auto input = pulp::tools::timeline::filesystem_path_from_utf8(args[1]);
-        if (subcommand == "export")
-            return emit(pulp::tools::timeline::export_project(
-                ProjectSource::file(input), format, output, accepted_losses,
-                plan_only ? pulp::tools::timeline::ExportDisposition::PlanOnly
-                          : pulp::tools::timeline::ExportDisposition::Publish));
+        if (subcommand == "export") {
+            if (plan_only) {
+                if (!output.empty())
+                    return bad_seq_usage("export --plan does not accept --out");
+                if (!accepted_losses.empty())
+                    return bad_seq_usage("export --plan does not accept --accept-loss");
+                return emit(pulp::tools::timeline::plan_export_project(ProjectSource::file(input),
+                                                                       format));
+            }
+            if (output.empty())
+                return bad_seq_usage("export requires --out unless --plan is used");
+            return emit(pulp::tools::timeline::export_project(ProjectSource::file(input), format,
+                                                               output, accepted_losses));
+        }
+        if (output.empty())
+            return bad_seq_usage("import requires --out");
         return emit(pulp::tools::timeline::import_project(input, format, output));
     }
 

@@ -216,8 +216,26 @@ def generate(manifest: dict) -> str:
                         ),
                     },
                 },
-                ["format", "output", "project"],
-            ),
+                ["format", "project"],
+            )
+            | {
+                "oneOf": [
+                    {
+                        "properties": {"plan_only": {"const": True}},
+                        "required": ["plan_only"],
+                        "not": {
+                            "anyOf": [
+                                {"required": ["output"]},
+                                {"required": ["accept_losses"]},
+                            ]
+                        },
+                    },
+                    {
+                        "properties": {"plan_only": {"const": False}},
+                        "required": ["output"],
+                    },
+                ]
+            },
             "x-pulp-operation": "project.export",
             "x-pulp-loss-concepts": loss_concepts,
         },

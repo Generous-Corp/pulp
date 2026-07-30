@@ -666,7 +666,7 @@ TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][too
                      "project and output are required");
     require_contains(handle_request(tool_call("415", std::string(pulp_mcp::kTimelineMcpToolNames[5]),
                                               project_args)),
-                     "project, format, and output are required");
+                     "project and format are required");
     require_contains(handle_request(tool_call("416", std::string(pulp_mcp::kTimelineMcpToolNames[6]),
                                               "{}")),
                      "input, format, and output are required");
@@ -800,7 +800,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_timeline_validate", "Error: project is required"},
         std::pair{"pulp_timeline_explain", "Error: project is required"},
         std::pair{"pulp_timeline_render", "Error: project and output are required"},
-        std::pair{"pulp_timeline_export", "Error: project, format, and output are required"},
+        std::pair{"pulp_timeline_export", "Error: project and format are required"},
         std::pair{"pulp_timeline_import", "Error: input, format, and output are required"},
     };
 

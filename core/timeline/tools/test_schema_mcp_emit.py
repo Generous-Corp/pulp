@@ -221,7 +221,28 @@ def main() -> int:
                 "writing or publishing artifacts."
             ),
         }
-        and "plan_only" not in export_tool["inputSchema"]["required"],
+        and "plan_only" not in export_tool["inputSchema"]["required"]
+        and export_tool["inputSchema"]["required"] == ["format", "project"],
+    )
+    check(
+        "export schema separates outputless planning from publication",
+        export_tool["inputSchema"]["oneOf"]
+        == [
+            {
+                "properties": {"plan_only": {"const": True}},
+                "required": ["plan_only"],
+                "not": {
+                    "anyOf": [
+                        {"required": ["output"]},
+                        {"required": ["accept_losses"]},
+                    ]
+                },
+            },
+            {
+                "properties": {"plan_only": {"const": False}},
+                "required": ["output"],
+            },
+        ],
     )
     check(
         "import documents the unpacked DAWproject boundary",

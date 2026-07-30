@@ -512,15 +512,37 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
             pulp::tools::timeline::filesystem_path_to_utf8(exported)) +
         ",\"project\":" + pulp::timeline::quote_json_string(project) + "}";
 
-    auto plan_args = export_args;
-    plan_args.pop_back();
-    plan_args += ",\"plan_only\":true}";
+    const auto plan_args =
+        "{\"format\":\"smf\",\"plan_only\":true,\"project\":" +
+        pulp::timeline::quote_json_string(project) + "}";
     const auto plan_result = handle_timeline_export(plan_args);
     REQUIRE(pulp::timeline::parse_json(plan_result));
     require_contains(plan_result, R"JSON("plan_only":true)JSON");
     require_contains(plan_result, R"JSON("manifest":{"schema_version":1)JSON");
     require_contains(plan_result, R"JSON("required_consent":[])JSON");
+    REQUIRE(plan_result.find(R"JSON("output")JSON") == std::string::npos);
     REQUIRE_FALSE(std::filesystem::exists(exported));
+
+    const auto direct_plan = pulp::tools::timeline::plan_export_project(
+        pulp::tools::timeline::ProjectSource::inline_json(project), "smf");
+    REQUIRE(direct_plan.exit_code == 0);
+    REQUIRE(pulp::timeline::parse_json(direct_plan.json));
+    REQUIRE(direct_plan.json.find(R"JSON("output")JSON") == std::string::npos);
+
+    auto plan_with_output = plan_args;
+    plan_with_output.pop_back();
+    plan_with_output += ",\"output\":\"unused\"}";
+    require_contains(handle_timeline_export(plan_with_output),
+                     "output must be absent when plan_only is true");
+    auto plan_with_consent = plan_args;
+    plan_with_consent.pop_back();
+    plan_with_consent += ",\"accept_losses\":[\"clip.absolute\"]}";
+    require_contains(handle_timeline_export(plan_with_consent),
+                     "accept_losses must be absent when plan_only is true");
+    require_contains(handle_timeline_export(
+                         "{\"format\":\"smf\",\"project\":" +
+                         pulp::timeline::quote_json_string(project) + "}"),
+                     "output is required when publishing an export");
 
     const auto export_result = handle_timeline_export(export_args);
     REQUIRE(pulp::timeline::parse_json(export_result));
@@ -645,15 +667,20 @@ TEST_CASE("timeline MCP interchange rejects malformed boundaries without publish
 
     const auto invalid_export = pulp::tools::timeline::export_project(
         pulp::tools::timeline::ProjectSource::inline_json("{}"), "unknown",
-        temp.path / "invalid-export");
+        temp.path / "invalid-export", {});
     REQUIRE(invalid_export.exit_code == 2);
     REQUIRE_FALSE(std::filesystem::exists(temp.path / "invalid-export"));
 
     const auto malformed_project = pulp::tools::timeline::export_project(
         pulp::tools::timeline::ProjectSource::inline_json("{}"), "smf",
-        temp.path / "malformed-project");
+        temp.path / "malformed-project", {});
     REQUIRE(malformed_project.exit_code == 1);
     REQUIRE_FALSE(std::filesystem::exists(temp.path / "malformed-project"));
+
+    const auto invalid_plan = pulp::tools::timeline::plan_export_project(
+        pulp::tools::timeline::ProjectSource::inline_json("{}"), "unknown");
+    REQUIRE(invalid_plan.exit_code == 2);
+    REQUIRE(invalid_plan.json.find(R"json("output")json") == std::string::npos);
 
     const auto renamed_xml = temp.path / "renamed.xml";
     {
