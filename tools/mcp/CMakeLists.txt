@@ -77,6 +77,7 @@ target_link_libraries(pulp-mcp-core
         pulp::tool-audio
         pulp::tool-timeline
     PRIVATE
+        pulp::platform
         pulp::timebase
         pulp::timeline)
 

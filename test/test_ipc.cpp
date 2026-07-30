@@ -1635,6 +1635,71 @@ TEST_CASE("IPC socket client reports disconnect callback once",
     REQUIRE_FALSE(server.is_running());
 }
 
+TEST_CASE("IPC concurrent disconnect also tears down a callback reconnect",
+          "[events][ipc][socket][lifecycle][reentrant]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    InterprocessConnection client;
+    std::mutex callback_mutex;
+    std::condition_variable callback_cv;
+    bool callback_entered = false;
+    bool release_callback = false;
+    bool reconnected = false;
+    int callback_count = 0;
+    client.set_on_disconnected([&] {
+        {
+            std::unique_lock lock(callback_mutex);
+            ++callback_count;
+            if (callback_count != 1)
+                return;
+            callback_entered = true;
+            callback_cv.notify_all();
+            callback_cv.wait(lock, [&] { return release_callback; });
+        }
+        reconnected = client.connect(
+            "127.0.0.1:" + std::to_string(*second_port),
+            IpcTransport::Socket);
+    });
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+
+    std::thread first_disconnect([&] { client.disconnect(); });
+    {
+        std::unique_lock lock(callback_mutex);
+        REQUIRE(callback_cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return callback_entered;
+        }));
+    }
+
+    std::thread waiting_disconnect([&] { client.disconnect(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    {
+        std::lock_guard lock(callback_mutex);
+        release_callback = true;
+    }
+    callback_cv.notify_all();
+    first_disconnect.join();
+    waiting_disconnect.join();
+
+    CHECK(reconnected);
+    CHECK(callback_count == 2);
+    CHECK_FALSE(client.is_connected());
+    CHECK(client.state() == IpcState::Disconnected);
+
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
 TEST_CASE("IPC disconnect callback may destroy its own connection",
           "[events][ipc][socket][owner-lifetime][lifecycle]") {
     CapturingServer server;

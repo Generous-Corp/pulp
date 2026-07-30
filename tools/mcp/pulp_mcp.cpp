@@ -17,6 +17,7 @@
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/service.hpp>
+#include <pulp/platform/child_process.hpp>
 
 #include "pulp_mcp_version.h"
 #include "mcp_json.hpp"
@@ -96,9 +97,15 @@ std::string run_inspector_command(const fs::path& root,
                                   const std::string& method,
                                   const std::string& params_json = "{}") {
     const auto cli = resolve_inspect_cli_binary(root);
-    return exec(shell_quote(cli.string()) + " inspect --command " +
-                shell_quote(method) + " --params " + shell_quote(params_json) +
-                " 2>&1");
+    pulp::platform::ProcessOptions options;
+    options.working_directory = root.string();
+    options.max_output_bytes = 2u * 1024u * 1024u;
+    auto result = pulp::platform::ChildProcess::run(
+        cli.string(),
+        {"inspect", "--command", method, "--params", params_json},
+        options);
+    result.stdout_output += result.stderr_output;
+    return result.stdout_output;
 }
 
 }  // namespace
