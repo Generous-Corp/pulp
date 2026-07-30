@@ -25,10 +25,15 @@ For MediaRef clips, prepare a `DecodedAudioAssetPool` off the audio thread. Use
 `DecodedAudioAssetPool::decode_wav()` for bounded in-memory WAV bytes, then pass
 the immutable pool in `ProgramCompileRequest::audio_assets`. The existing
 compiler incrementally lowers media clips into each `TrackProgram`; do not build
-a second playback-program model. The renderer uses bounded stateless linear SRC so
-source audio runs at its native wall-clock rate after sample-rate conversion.
-A musically anchored clip changes placement and timeline extent through the
-tempo map but does not imply warp or time-stretch.
+a second playback-program model. `TimeConform::None` and the not-yet-implemented
+`Stretch` use the existing bounded native-rate source mapping after sample-rate
+conversion. `TimeConform::Resample` uses bounded stateless varispeed: map each
+rendered musical tick to the same fraction of the referenced source range and
+derive the effective source step for anti-aliasing. Use the compiled tempo map's
+analytic fractional sample-to-tick inverse for ordinary playback and precise
+host ticks for host beat mapping; sample-fraction interpolation across a tempo
+ramp is not musical phase. Do not implement `Stretch` by routing it through
+`Resample`.
 Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.

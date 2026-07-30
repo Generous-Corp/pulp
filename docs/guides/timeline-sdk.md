@@ -289,9 +289,11 @@ absolute clips and non-media content reject non-default intent with
 `resample`, and `stretch`; v1 clips load as `None`, and release downgrade to v1
 refuses an authored non-default value rather than discarding it.
 
-This field is document intent only in the current playback stage. The compiler
-and renderers do not yet conform media from it, so setting `Resample` or
-`Stretch` does not change rendered audio until the playback integration lands.
+Playback consumes `Resample` as bounded realtime varispeed: source phase spans
+the clip's musical tick interval, so tempo ramps and precise host beat mapping
+change duration and pitch together. `None` retains native-rate playback.
+`Stretch` remains persisted intent and currently renders through the same
+native-rate path as `None`; tempo-preserving stretch is not implemented here.
 
 ### Reusing and diverging sequences
 

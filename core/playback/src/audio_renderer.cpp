@@ -142,6 +142,17 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         !std::isfinite(clip.source_frames_per_timeline_frame) ||
         clip.source_frames_per_timeline_frame <= 0.0)
         return error(AudioRendererErrorCode::InvalidClipRange);
+    switch (clip.source_time_mapping) {
+    case AudioClipRendererProgram::SourceTimeMapping::NativeRate:
+        break;
+    case AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample:
+        if (clip.time_domain != AudioClipRendererProgram::TimeDomain::Musical ||
+            clip.renderable_timeline_frames != clip.timeline_frame_count)
+            return error(AudioRendererErrorCode::InvalidClipRange);
+        break;
+    default:
+        return error(AudioRendererErrorCode::InvalidClipRange);
+    }
     if (!std::isfinite(clip.gain_linear) || clip.gain_linear < 0.0f ||
         clip.fade_in_frames > clip.timeline_frame_count ||
         clip.fade_out_frames > clip.timeline_frame_count)
@@ -384,13 +395,14 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     auto converter = cache.get(source_rate, timeline_rate, clip.id(), media->asset_id, limits);
     if (!converter)
         return runtime::Err(converter.error());
-    const auto renderable_frames =
+    const auto native_renderable_frames =
         source_frame_offset == 0.0
             ? scale_duration_ceil(media->frame_count, source_rate, timeline_rate)
-            : scale_duration_ceil_from_offset(media->frame_count, source_frame_offset,
-                                              source_rate, timeline_rate);
-    if (!renderable_frames ||
-        *renderable_frames > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+            : scale_duration_ceil_from_offset(media->frame_count, source_frame_offset, source_rate,
+                                              timeline_rate);
+    if (!native_renderable_frames ||
+        *native_renderable_frames >
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               clip.id(), media->asset_id);
     const auto playback = clip.playback_properties();
@@ -440,6 +452,33 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f ||
         fade_in_frames > timeline_frames || fade_out_frames > timeline_frames)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade, clip.id());
+    const auto source_time_mapping =
+        clip.time_conform() == timeline::TimeConform::Resample
+            ? AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample
+            : AudioClipRendererProgram::SourceTimeMapping::NativeRate;
+    if (source_time_mapping ==
+        AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
+        const auto tick_span = static_cast<long double>(clip.end().value) -
+                               static_cast<long double>(clip.start().value);
+        const auto source_span = static_cast<long double>(media->frame_count) -
+                                 static_cast<long double>(source_frame_offset);
+        const auto maximum_tempo = tempo_map.maximum_tempo_between(clip.start(), clip.end());
+        const auto maximum_ticks_per_sample =
+            static_cast<long double>(maximum_tempo) *
+            static_cast<long double>(timebase::kTicksPerQuarter) /
+            (timeline_rate.as_long_double() * 60.0L);
+        const auto maximum_source_step = source_span / tick_span * maximum_ticks_per_sample;
+        if (!std::isfinite(maximum_source_step) ||
+            maximum_source_step >
+                static_cast<long double>(
+                    audio::PreparedVariableRateConversion::kMaximumSourceFramesPerOutputFrame))
+            return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
+                                                  clip.id(), media->asset_id);
+    }
+    const auto renderable_frames =
+        source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample
+            ? timeline_frames
+            : *native_renderable_frames;
     std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter;
     if (clip.time_anchor() == timeline::ClipTimeAnchor::Musical) {
         auto prepared = cache.get_host(resolved->decoded->audio, resolved->source_start,
@@ -449,22 +488,33 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
         host_rate_converter = std::move(prepared).value();
     }
     return runtime::Ok(AudioClipRendererProgram{
-        clip.id(), media->asset_id, resolved->decoded->audio, timeline_start, timeline_frames,
-        resolved->source_start, media->frame_count, source_frame_offset, *renderable_frames,
+        clip.id(),
+        media->asset_id,
+        resolved->decoded->audio,
+        timeline_start,
+        timeline_frames,
+        resolved->source_start,
+        media->frame_count,
+        source_frame_offset,
+        renderable_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         std::make_shared<AudioClipConversionArtifact>(
             resolved->decoded->audio, resolved->source_start, media->frame_count,
             static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
             std::move(converter).value(), std::move(host_rate_converter)),
-        playback.gain_linear, fade_in_frames, fade_out_frames,
-        AudioClipRendererProgram::SourceKind::ArrangementClip, 0,
+        playback.gain_linear,
+        fade_in_frames,
+        fade_out_frames,
+        AudioClipRendererProgram::SourceKind::ArrangementClip,
+        0,
         clip.time_anchor() == timeline::ClipTimeAnchor::Musical
             ? AudioClipRendererProgram::TimeDomain::Musical
             : AudioClipRendererProgram::TimeDomain::Absolute,
         clip.time_anchor() == timeline::ClipTimeAnchor::Musical ? clip.start()
                                                                 : timebase::TickPosition{},
         clip.time_anchor() == timeline::ClipTimeAnchor::Musical ? clip.end()
-                                                                : timebase::TickPosition{}});
+                                                                : timebase::TickPosition{},
+        source_time_mapping});
 }
 
 runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate_converters(
