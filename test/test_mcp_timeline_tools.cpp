@@ -773,7 +773,7 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
 
     pulp::audio::AudioFileData first_audio;
     first_audio.sample_rate = 48'000;
-    first_audio.channels = {std::vector<float>(32, 0.25f)};
+    first_audio.channels = {std::vector<float>(16'384, 0.25f)};
     pulp::audio::AudioFileData second_audio = first_audio;
     second_audio.channels[0][0] = -0.25f;
     const auto first_path = temp.path / "first.wav";
@@ -817,6 +817,8 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
     const auto refusal = pulp::tools::timeline::detail::add_dawproject_media(
         loaded, refused, first_bytes + second_bytes - 1);
     REQUIRE_FALSE(refusal);
+    REQUIRE(refusal.error().code ==
+            pulp::tools::timeline::detail::DawProjectMediaErrorCode::AssetReadFailed);
     REQUIRE(refusal.error().asset_id == 7);
     REQUIRE(refusal.error().asset_name == "second.wav");
     REQUIRE_FALSE(refusal.error().reason.empty());
@@ -828,6 +830,25 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
     REQUIRE(accumulated);
     REQUIRE(accumulated.value() == 2);
     REQUIRE(accepted.artifacts.size() == 2);
+
+    pulp::interchange::ExportArtifacts near_limit;
+    const auto near_limit_result = pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, near_limit, 192u * 1024u);
+    REQUIRE(near_limit_result);
+    REQUIRE(near_limit.artifacts.size() == 2);
+
+    std::error_code removed;
+    REQUIRE(std::filesystem::remove(first_path, removed));
+    REQUIRE_FALSE(removed);
+    pulp::interchange::ExportArtifacts metadata_heavy;
+    for (std::size_t index = 0; index < 64; ++index)
+        metadata_heavy.artifacts.push_back(
+            {"metadata/" + std::to_string(index) + "/" + std::string(1'024, 'x'), {}});
+    const auto metadata_refusal = pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, metadata_heavy, 32u * 1024u);
+    REQUIRE_FALSE(metadata_refusal);
+    REQUIRE(metadata_refusal.error().code ==
+            pulp::tools::timeline::detail::DawProjectMediaErrorCode::ByteLimitExceeded);
 }
 
 TEST_CASE("DAWproject ZIP export and import enforce one exact aggregate working set",
@@ -879,9 +900,10 @@ TEST_CASE("DAWproject ZIP export and import enforce one exact aggregate working 
     const auto inspected = detail::inspect_dawproject_archive(
         archive, kTestLimit, artifacts.artifacts.size(), artifacts.artifacts.size(), 4'096);
     REQUIRE(inspected);
-    REQUIRE(inspected.value() > 0);
+    REQUIRE(inspected.value().peak_bytes > 0);
+    REQUIRE(inspected.value().final_balance_bytes == 0);
     const auto import_refused = detail::inspect_dawproject_archive(
-        archive, inspected.value() - 1, artifacts.artifacts.size(),
+        archive, inspected.value().peak_bytes - 1, artifacts.artifacts.size(),
         artifacts.artifacts.size(), 4'096);
     REQUIRE_FALSE(import_refused);
     REQUIRE(import_refused.error().find("working-set") != std::string::npos);
@@ -911,6 +933,19 @@ TEST_CASE("DAWproject ZIP export and import enforce one exact aggregate working 
     const std::vector<std::uint8_t> preserved{std::istreambuf_iterator<char>(preserved_stream),
                                               std::istreambuf_iterator<char>()};
     REQUIRE(preserved == sentinel);
+
+    pulp::interchange::ExportArtifacts tiny;
+    tiny.artifacts.push_back({"project.xml", std::vector<std::uint8_t>{'x'}});
+    const auto tiny_archive = temp.path / "tiny.dawproject";
+    REQUIRE(detail::write_dawproject_archive_no_replace(tiny, tiny_archive,
+                                                         1024u * 1024u));
+    REQUIRE_FALSE(detail::write_dawproject_archive_no_replace(
+        artifacts, temp.path / "payload-dimension.dawproject", 1024u * 1024u));
+    REQUIRE(detail::inspect_dawproject_archive(tiny_archive, 1024u * 1024u,
+                                                1, 1, 4'096));
+    REQUIRE_FALSE(detail::inspect_dawproject_archive(archive, 1024u * 1024u,
+                                                      artifacts.artifacts.size(),
+                                                      artifacts.artifacts.size(), 4'096));
 }
 
 } // namespace

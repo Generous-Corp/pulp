@@ -2,6 +2,9 @@ add_library(pulp-tool-timeline)
 add_library(pulp::tool-timeline ALIAS pulp-tool-timeline)
 
 target_sources(pulp-tool-timeline PRIVATE
+    src/atomic_publisher.cpp
+    src/bounded_zip_archive.cpp
+    src/dawproject_media_packager.cpp
     src/timeline_agent.cpp
     src/timeline_interchange.cpp
     src/timeline_output.cpp
