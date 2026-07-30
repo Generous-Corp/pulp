@@ -71,9 +71,18 @@ InspectorAccessPolicy::InspectorAccessPolicy(InspectorPolicyConfig config)
     const auto requested = profile_ == InspectorProfile::Custom
         ? std::span<const InspectorCapability>(config.custom_capabilities)
         : profile_capabilities(profile_);
+    const bool can_acquire_controller =
+        contains(available_, InspectorCapability::SessionControl) &&
+        contains(requested, InspectorCapability::SessionControl);
     for (const auto capability : requested) {
-        if (contains(available_, capability))
-            append_unique(effective_, capability);
+        if (!contains(available_, capability))
+            continue;
+        if (capability != InspectorCapability::SessionControl &&
+            capability_requires_controller_lease(capability) &&
+            !can_acquire_controller) {
+            continue;
+        }
+        append_unique(effective_, capability);
     }
 }
 

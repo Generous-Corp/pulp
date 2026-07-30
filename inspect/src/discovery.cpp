@@ -410,14 +410,15 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
     const auto random = pulp::runtime::secure_random_bytes(8);
     if (!random)
         return false;
-    const auto temporary = destination.string() + ".tmp-" +
-                           pulp::runtime::hex_encode(*random);
+    auto temporary = destination;
+    temporary += std::filesystem::path(
+        ".tmp-" + pulp::runtime::hex_encode(*random)).native();
 #ifdef _WIN32
     OwnerOnlySecurity security;
     if (!security.valid())
         return false;
     HANDLE file = CreateFileW(
-        std::filesystem::path(temporary).c_str(), GENERIC_WRITE, 0,
+        temporary.c_str(), GENERIC_WRITE, 0,
         security.attributes(), CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return false;
@@ -439,10 +440,10 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
     succeeded = succeeded && FlushFileBuffers(file);
     CloseHandle(file);
     if (!succeeded ||
-        !MoveFileExW(std::filesystem::path(temporary).c_str(),
+        !MoveFileExW(temporary.c_str(),
                      destination.c_str(),
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(std::filesystem::path(temporary).c_str());
+        DeleteFileW(temporary.c_str());
         return false;
     }
 #else
@@ -715,6 +716,8 @@ std::vector<InspectorDiscoveryRecord> InspectorDiscoveryReader::list() const {
         }
         iterator.increment(error);
     }
+    if (error)
+        records.clear();
     std::sort(records.begin(), records.end(), [](const auto& left,
                                                   const auto& right) {
         return left.session_id < right.session_id;
