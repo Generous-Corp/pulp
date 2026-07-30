@@ -467,3 +467,25 @@ TEST_CASE("cancelling main-thread RPC waits for running direct work",
     CHECK_FALSE(response.is_error);
     CHECK_FALSE(rpc.active());
 }
+
+TEST_CASE("reentrant cancellation preserves a started RPC result",
+          "[inspect][session][main-thread-rpc][teardown][reentrant]") {
+    InspectorMainThreadRpc* rpc_ptr = nullptr;
+    InspectorMainThreadRpc rpc(
+        {1s, 1},
+        [](auto task) {
+            task();
+            return true;
+        },
+        [] { return false; });
+    rpc_ptr = &rpc;
+
+    const auto response = rpc.call(12, [&] {
+        rpc_ptr->cancel();
+        return make_response(12, R"({"applied":true})");
+    });
+    CHECK_FALSE(response.is_error);
+    CHECK(response.id == 12);
+    CHECK(response.params_json.find("applied") != std::string::npos);
+    CHECK_FALSE(rpc.active());
+}

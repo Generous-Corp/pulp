@@ -319,6 +319,10 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
     for (int field = 3; field <= 22; ++field) {
         if (!(fields >> value))
             return std::nullopt;
+        if (field == 3 &&
+            (value == "Z" || value == "X" || value == "x")) {
+            return std::nullopt;
+        }
     }
     return value;
 #else

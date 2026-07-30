@@ -229,8 +229,15 @@ void InspectorMainThreadRpc::cancel() {
                 calls.push_back(std::move(call));
         }
     }
-    for (const auto& call : calls)
-        impl_->complete_call(call, cancelled(call->request_id));
+    for (const auto& call : calls) {
+        bool started = false;
+        {
+            std::lock_guard lock(call->mutex);
+            started = call->started;
+        }
+        if (!started)
+            impl_->complete_call(call, cancelled(call->request_id));
+    }
 }
 
 bool InspectorMainThreadRpc::active() const {
