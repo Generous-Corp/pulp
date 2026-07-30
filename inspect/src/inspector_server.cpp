@@ -407,6 +407,9 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         return false;
     if (!config.session || !config.discovery ||
         config.token.size() != inspector_token_size ||
+        config.heartbeat_interval <= std::chrono::milliseconds(0) ||
+        config.heartbeat_interval >
+            std::chrono::milliseconds::max() / 3 ||
         config.session->info().protocol_version != "1" ||
         config.record.session_id != config.session->info().session_id ||
         config.record.instance_id != config.session->info().instance_id ||
@@ -431,10 +434,13 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::lock_guard lock(clients_mutex);
         max_clients =
             std::clamp<std::size_t>(config.max_clients, 1, 64);
-        heartbeat_interval =
-            std::max(config.heartbeat_interval, std::chrono::milliseconds(1));
+        heartbeat_interval = config.heartbeat_interval;
         stopping_callbacks = false;
     }
+    const auto discovery_ttl = std::max(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::seconds(30)),
+        heartbeat_interval * 3);
     if (!server.start("127.0.0.1:0", events::IpcTransport::Socket)) {
         stop_locked();
         return false;
@@ -459,7 +465,7 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         config.record.protocol_version = session->info().protocol_version;
         config.record.profile = session->policy().profile();
-        published = discovery->publish(config.record, token);
+        published = discovery->publish(config.record, token, discovery_ttl);
     }
     if (!published) {
         stop_locked();
@@ -474,13 +480,13 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         next_heartbeat =
             std::chrono::steady_clock::now() + heartbeat_interval;
         const std::weak_ptr<Impl> weak_self = shared_from_this();
-        heartbeat = [weak_self] {
+        heartbeat = [weak_self, discovery_ttl] {
             const auto self = weak_self.lock();
             if (!self)
                 return;
             std::lock_guard lifecycle_lock(self->lifecycle_mutex);
             if (self->discovery)
-                (void)self->discovery->refresh();
+                (void)self->discovery->refresh(discovery_ttl);
         };
     }
     return true;
