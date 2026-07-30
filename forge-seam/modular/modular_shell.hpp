@@ -116,6 +116,21 @@ public:
     /// Open the mention list, as typing `@` does.
     void begin_mention();
 
+    /// Open the finished artifact in VCV Rack.
+    ///
+    /// Returns why it could not, or empty. The generator already prints the
+    /// exact command; leaving that in a log and offering no button meant the
+    /// last step of every build was "go find the file yourself".
+    std::string open_in_rack();
+
+    /// True only for the standalone app. Hosted builds must not steal focus
+    /// from the DAW session by launching another application.
+    bool is_standalone() const;
+    void set_standalone(bool yes) { standalone_ = yes; }
+
+    /// The path the generator reported, or empty until a build succeeds.
+    std::string artifact_path() const;
+
     /// Which of Forge's model roles an artifact actually consumes.
     ///
     /// Inherited, not duplicated: the selections live in Forge's settings and
@@ -157,6 +172,9 @@ public:
 
     std::unique_ptr<pulp::view::View> build_accessory() override;
     std::unique_ptr<pulp::view::View> stage_accessory() override;
+
+    void on_poll() override;
+    bool busy() const override;
 
     /// Put a wired patch on the Build stage, replacing the skeleton.
     void show_rack(std::vector<RackModule> modules,
@@ -231,6 +249,8 @@ private:
 
     MentionOverlay mentions_;
     BuildMonitor monitor_;
+    bool watching_ = false;
+    bool standalone_ = false;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;
     std::string open_patch_;
@@ -238,6 +258,7 @@ private:
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
     pulp::view::View* depth_group_ = nullptr;
+    pulp::view::TextButton* open_button_ = nullptr;
     std::vector<pulp::view::Label*> tab_labels_;
     void refresh_depth_tabs();
     std::string last_random_;

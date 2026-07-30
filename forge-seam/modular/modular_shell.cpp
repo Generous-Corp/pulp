@@ -5,6 +5,10 @@
 #include <forge/patch_loader.hpp>
 #include <forge/process_engine.hpp>
 
+#include <pulp/runtime/log.hpp>
+
+#include <thread>
+
 #include <cstdlib>
 #include <filesystem>
 
@@ -24,12 +28,19 @@ namespace {
 std::string tools_dir() {
     if (const char* env = std::getenv("FORGE_MODULAR_TOOLS"); env && *env) return env;
     const char* home = std::getenv("HOME");
-    const std::string source = "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
+    // Application Support first, and deliberately NOT a source checkout on an
+    // external volume. macOS gates removable-volume access behind a MODAL
+    // consent dialog; touching such a path from the UI thread parks the whole
+    // app behind that modal, which is what read as a freeze on Build. Nothing
+    // under Application Support is gated.
+    const std::string installed = std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/tools/rack";
     std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::path(source) / "patch.py", ec))
-        return source;
-    return std::string(home ? home : ".") +
-           "/Library/Application Support/Forge Modular/tools/rack";
+    if (std::filesystem::exists(std::filesystem::path(installed) / "patch.py", ec))
+        return installed;
+    // A developer with no installed copy can still point at their checkout,
+    // consent once, and carry on.
+    return "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
 }
 
 std::string build_log_path() {
@@ -143,7 +154,9 @@ forge::ChromeCopy ForgeModularShell::chrome_copy() const {
                         " MODULAR \u00b7 FOR VCV RACK",
         .hero_title = patch ? "What should the patch do?"
                             : "What should the module do?",
-        .default_build_title = patch ? "Ambient Drone" : "Wavefolder",
+        // Neutral until the generator names it. A leftover example name on a
+        // session building something else reads as another project's work.
+        .default_build_title = patch ? "Untitled patch" : "Untitled module",
     };
 }
 
@@ -348,11 +361,50 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
         depth_tabs_.push_back(b.get());
         group->add_child(std::move(b));
     }
+    // Open in Rack, beside the depth tabs. Hidden until something has actually
+    // been built: a button that cannot work yet teaches people to distrust it.
+    auto open_btn = std::make_unique<TextButton>();
+    open_btn->set_access_label("Open in VCV Rack");
+    open_btn->set_style(TextButton::Style::primary);
+    open_btn->flex().preferred_width = 118;
+    open_btn->flex().preferred_height = 26;
+    open_btn->flex().flex_grow = 0;
+    open_btn->flex().flex_shrink = 0;
+    {
+        auto lbl = std::make_unique<pulp::view::Label>("Open in Rack");
+        lbl->set_font_family(forge::design::type::display);
+        lbl->set_font_size(13.0f);
+        lbl->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        lbl->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
+        lbl->set_text_align(pulp::view::LabelAlign::center);
+        lbl->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
+        lbl->set_hit_testable(false);
+        open_btn->add_child(std::move(lbl));
+    }
+    open_btn->on_click = [this] {
+        const auto why = open_in_rack();
+        if (!why.empty())
+            if (auto* c = chrome()) c->narrate(why, /*alarming=*/true);
+    };
+    open_button_ = open_btn.get();
+    open_btn->set_visible(false);
+
+    auto row = std::make_unique<View>();
+    row->flex().direction = FlexDirection::row;
+    row->flex().align_items = FlexAlign::center;
+    row->flex().gap = 8;
+
     refresh_depth_tabs();
     depth_group_ = group.get();
     // A module build has one artifact and nothing to narrate at three depths,
     // and a dead control is worse than no control.
     group->set_visible(artifact_ == Artifact::patch);
+    // The Open-in-Rack button is built but NOT mounted here yet: wrapping the
+    // tabs in an extra row crashed the renderer, and a crash is worse than a
+    // missing button. open_in_rack() is wired and tested; it needs a mount
+    // point that does not disturb the title bar's layout.
+    (void)row;
+    open_button_ = nullptr;
     return group;
 }
 
@@ -468,10 +520,26 @@ std::string ForgeModularShell::start_build() {
         return why.empty() ? "the generator would not start" : why;
     }
 
+    // A prompt typed on Home starts a NEW project. Continuing the last one
+    // makes two unrelated builds share a transcript, and the second inherits
+    // the first one's stage -- reported after seeing one composer hold two
+    // different module requests. Only opening an existing project should show
+    // its old conversation.
+    if (c->mode() == forge::ForgeChrome::Mode::Home) {
+        c->begin_new_session();
+        open_patch_.clear();
+    }
+
     // Move to the Build screen BEFORE submitting: a user who presses Build and
     // stays on Home cannot tell whether anything happened, which is exactly
     // what was reported.
     c->enter_build();
+    // Name it from the request until the generator reports the real name.
+    c->set_project_title(prompt.size() > 40 ? prompt.substr(0, 40) + "\u2026"
+                                            : prompt);
+    pulp::runtime::log_info("Forge Modular: Build pressed; mode is now {}",
+                            c->mode() == forge::ForgeChrome::Mode::Build
+                                ? "Build" : "NOT Build");
     c->narrate(prompt.substr(0, 200));
     if (input) input->set_text("");
     engine_->submit(prompt, artifact_ == Artifact::patch);
@@ -489,6 +557,45 @@ std::string ForgeModularShell::open_patch_file(const std::string& path) {
     // control missing exactly when it is wanted.
     set_artifact(Artifact::patch);
     show_rack(std::move(loaded.modules), std::move(loaded.connections));
+    return {};
+}
+
+std::string ForgeModularShell::artifact_path() const {
+    // Read back from what the generator said rather than kept as state: the
+    // log is the record, and a second copy could disagree with it.
+    for (const auto& line : monitor_.lines()) {
+        const auto at = line.text.find(".vcv");
+        if (at == std::string::npos) continue;
+        auto start = line.text.rfind('/', at);
+        if (start == std::string::npos) continue;
+        auto end = line.text.find_first_of(" \"", at);
+        auto path = line.text.substr(start, end == std::string::npos
+                                                ? std::string::npos
+                                                : end - start);
+        // .vcvplugin is the installed plugin, not a patch to open.
+        if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") return path;
+    }
+    return {};
+}
+
+std::string ForgeModularShell::open_in_rack() {
+    const auto path = artifact_path();
+    if (path.empty()) return "nothing has finished building yet";
+    // Launching another application from inside a DAW steals focus from a
+    // session the user is working in, so hosted builds say where the artifact
+    // is instead of opening it. Standalone opens it directly.
+    if (!is_standalone())
+        return "installed for VCV Rack: " + path;
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec))
+        return "the generator named a file that is not there";
+    // Detached, and never blocking the UI thread: launching an app touches the
+    // filesystem and can take a moment.
+    std::thread([path] {
+        std::string cmd = "open -a \"/Applications/VCV Rack 2 Free.app\" '" + path + "' &";
+        std::string out;
+        ProcessEngine::run(cmd, out);
+    }).detach();
     return {};
 }
 
@@ -522,8 +629,34 @@ std::string ForgeModularShell::ask() {
     return {};
 }
 
+void ForgeModularShell::on_poll() {
+    // Reveal Open in Rack the moment there is something to open.
+    if (open_button_) {
+        const bool ready = !artifact_path().empty();
+        if (ready != open_button_->visible()) {
+            open_button_->set_visible(ready);
+            open_button_->request_repaint();
+        }
+    }
+    // The heartbeat that makes a running build visible. Without it the pump
+    // existed and nothing ever called it: the generator wrote a perfectly good
+    // progress stream to its log while the screen showed an inert status card
+    // and a skeleton that never resolved.
+    pump_build_log();
+}
+
+bool ForgeModularShell::is_standalone() const {
+    // Set by the standalone entry point; every plugin format leaves it false.
+    return standalone_;
+}
+
+bool ForgeModularShell::busy() const {
+    return watching_ && monitor_.outcome() == BuildOutcome::running;
+}
+
 void ForgeModularShell::watch_build_log(const std::string& path) {
     monitor_.watch(path);
+    watching_ = true;
 }
 
 int ForgeModularShell::pump_build_log() {
@@ -607,7 +740,11 @@ bool ForgeModularShell::install_generated_bundle(
     //
     // Reporting false with a reason rather than true-and-nothing: a success that
     // installed nothing is the failure mode this project has hit most often.
-    err = "installing a generated Rack artifact is not wired yet";
+    // Not a failure. A Rack module is installed by the generator into Rack's
+    // own plugin folder, which Forge's plugin-install path knows nothing
+    // about. Saying "not wired yet" at the end of a build that succeeded reads
+    // as the build having failed.
+    err = "installed into VCV Rack, not as a Forge plugin \u2014 open it in Rack";
     return false;
 }
 

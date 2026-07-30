@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <sstream>
+#include <thread>
 
 namespace forge_modular {
 
@@ -40,14 +41,20 @@ int ProcessEngine::run(const std::string& command, std::string& output) {
 }
 
 bool ProcessEngine::available() const {
+    const int cached = available_.load(std::memory_order_relaxed);
+    if (cached >= 0) return cached == 1;
     namespace fs = std::filesystem;
     std::error_code ec;
-    return fs::exists(fs::path(tools_dir_) / "generate.py", ec) &&
-           fs::exists(fs::path(tools_dir_) / "patch.py", ec);
+    const bool ok = fs::exists(fs::path(tools_dir_) / "generate.py", ec) &&
+                    fs::exists(fs::path(tools_dir_) / "patch.py", ec);
+    available_.store(ok ? 1 : 0, std::memory_order_relaxed);
+    return ok;
 }
 
 bool ProcessEngine::ensure_running() {
     error_.clear();
+    // First call still probes, so a genuinely missing toolchain is reported
+    // before anything promises a build. Subsequent calls are free.
     if (!available()) {
         error_ = "the generator is not installed";
         return false;
@@ -55,8 +62,12 @@ bool ProcessEngine::ensure_running() {
     // Prove the interpreter runs before promising a build. Discovering a
     // missing python3 minutes in, from a log nobody opened, is how a refusal
     // reads as a hang.
-    std::string out;
-    if (run("python3 -c 'pass' 2>&1", out) != 0) {
+    if (python_ok_.load(std::memory_order_relaxed) < 0) {
+        std::string out;
+        python_ok_.store(run("python3 -c 'pass' 2>&1", out) == 0 ? 1 : 0,
+                         std::memory_order_relaxed);
+    }
+    if (python_ok_.load(std::memory_order_relaxed) != 1) {
         error_ = "python3 is not available on this machine";
         return false;
     }
@@ -73,14 +84,24 @@ void ProcessEngine::submit(const std::string& prompt, bool patch_mode) {
     const std::string verb = patch_mode ? " build " : " ";
 
     std::ostringstream cmd;
+    // nohup + setsid: a generation takes minutes, and without this it is a
+    // child of the app's process group -- quitting the window SIGHUPs it
+    // mid-build. Observed: a run died right after "manifest + panel
+    // validated", never reaching "compiled", because the app was closed.
     cmd << "cd " << shell_quote(tools_dir_) << " && "
-        << "python3 " << tool << verb << shell_quote(prompt)
+        << "nohup python3 " << tool << verb << shell_quote(prompt)
         // Truncate: BuildMonitor treats a shrinking file as a new run, so the
         // transcript starts clean rather than replaying the previous build.
         << " > " << shell_quote(log_path_) << " 2>&1 &";
-    std::string out;
-    // Detached: a generation lasts minutes and must not block the UI thread.
-    run(cmd.str(), out);
+    // On a worker, not the UI thread. Even backgrounded, this forks a shell and
+    // touches tools_dir_ -- which may live on a removable, network-backed or
+    // TCC-gated volume, where either can block for seconds. That is what made
+    // the app appear to freeze on Build, which is precisely when a user is
+    // least willing to believe it is still alive.
+    std::thread([command = cmd.str()]() {
+        std::string out;
+        run(command, out);
+    }).detach();
 }
 
 std::string ProcessEngine::explain(const std::string& patch_path) const {
@@ -96,6 +117,19 @@ std::string ProcessEngine::explain(const std::string& patch_path) const {
     if (run(cmd.str(), out) != 0 || out.empty())
         return "I could not read that patch.";
     return out;
+}
+
+void ProcessEngine::explain_async(const std::string& patch_path,
+                                  std::function<void(std::string)> done) const {
+    if (!done) return;
+    // Detached: the answer is advisory and the app must stay responsive while
+    // it is computed. Copies everything the worker touches, so the engine
+    // outliving or not outliving the thread cannot matter.
+    std::thread([tools = tools_dir_, patch_path,
+                 done = std::move(done)]() mutable {
+        ProcessEngine scratch(tools, {});
+        done(scratch.explain(patch_path));
+    }).detach();
 }
 
 }  // namespace forge_modular

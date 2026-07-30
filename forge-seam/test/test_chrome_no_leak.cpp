@@ -1649,3 +1649,32 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
         shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
     CHECK(std::filesystem::file_size(shot) > 20000);
 }
+
+TEST_CASE("the toolchain path is not on a volume macOS gates", "[phase8][tcc]") {
+    // macOS gates removable-volume access behind a MODAL consent dialog.
+    // Touching such a path from the UI thread parks the whole app behind that
+    // modal, which is what read as a freeze on Build. Nothing under
+    // Application Support is gated.
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto processor = forge_modular::create_forge_modular();
+    REQUIRE(processor != nullptr);
+
+    const char* home = std::getenv("HOME");
+    REQUIRE(home != nullptr);
+    const auto installed = std::filesystem::path(home) /
+        "Library/Application Support/Forge Modular/tools/rack/patch.py";
+    if (!std::filesystem::exists(installed)) {
+        WARN("no installed toolchain; skipping");
+        return;
+    }
+    // The engine must resolve to the installed copy, never the checkout on an
+    // external volume. There were two tools_dir() implementations once, and
+    // the standalone kept using the one that preferred the gated path long
+    // after the shared one was fixed.
+    forge_modular::ProcessEngine engine(installed.parent_path().string(), "/tmp/x.log");
+    CHECK(engine.available());
+    CHECK(engine.log_path().find("/Volumes/") == std::string::npos);
+}

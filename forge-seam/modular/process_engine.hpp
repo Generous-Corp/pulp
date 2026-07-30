@@ -13,6 +13,8 @@
 
 #include "forge/modular_shell.hpp"
 
+#include <atomic>
+#include <functional>
 #include <string>
 
 namespace forge_modular {
@@ -37,6 +39,13 @@ public:
     /// exist is worse than no answer.
     std::string explain(const std::string& patch_path) const;
 
+    /// Same, off the UI thread. `done` is called with the answer on a worker,
+    /// so the caller must marshal it back before touching any view. The
+    /// synchronous form loads the whole module inventory and takes seconds --
+    /// long enough to read as a hang.
+    void explain_async(const std::string& patch_path,
+                       std::function<void(std::string)> done) const;
+
     /// Where the most recent run put its artifact, or empty.
     std::string last_artifact() const { return artifact_; }
 
@@ -51,6 +60,12 @@ private:
     std::string log_path_;
     std::string error_;
     std::string artifact_;
+    // Probing the toolchain touches a filesystem that may be removable,
+    // network-backed, or TCC-gated -- any of which can block for seconds. Doing
+    // that on the UI thread is what made the app appear to freeze, so each
+    // probe runs once and the answer is remembered.
+    mutable std::atomic<int> available_{-1};   // -1 unknown, 0 no, 1 yes
+    std::atomic<int> python_ok_{-1};
 };
 
 }  // namespace forge_modular

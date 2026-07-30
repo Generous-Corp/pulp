@@ -1,8 +1,8 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..f255dba 100644
+index 0863f43..3f2931d 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
-@@ -640,6 +640,28 @@ public:
+@@ -640,6 +640,38 @@ public:
          return generation_turn_state_.has_active();
      }
      int chat_line_count() const { return chat_line_count_; }
@@ -16,6 +16,16 @@ index 0863f43..f255dba 100644
 +    }
 +    pulp::view::View* stage_accessory() const { return stage_accessory_; }
 +    pulp::view::View* build_accessory() const { return build_accessory_; }
++
++    /// Begin a fresh session: empty transcript, no carried-over artifact.
++    ///
++    /// A prompt typed on Home is a NEW thing. Appending it to whatever was last
++    /// open makes two unrelated builds share one conversation, and the second
++    /// one inherits the first one's stage.
++    void begin_new_session() {
++        clear_chat_rail();
++        show_stage_accessory(false);
++    }
 +
 +    /// Put one line of narration in the Build transcript.
 +    ///
@@ -31,7 +41,22 @@ index 0863f43..f255dba 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -722,6 +744,14 @@ public:
+@@ -712,6 +744,14 @@ public:
+     std::string first_tile_badge_text() const;
+     bool delete_affordance_visible() const;
+     const std::string& project_title() const { return project_title_; }
++
++    /// Name the thing being built, from what was asked for.
++    ///
++    /// The title otherwise stays at whatever placeholder the product declared,
++    /// so a session building a random module still reads "FORGING · WAVEFOLDER".
++    /// A wrong name is worse than a generic one: it says the app is showing you
++    /// someone else's work.
++    void set_project_title(std::string title);
+     // The FIRST shelf tile — the live build's (tests: drive its hover reveal
+     // without coordinates).
+     pulp::view::View* shelf_tile() { return shelf_tile_; }
+@@ -722,6 +762,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -46,7 +71,7 @@ index 0863f43..f255dba 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1163,8 @@ private:
+@@ -1133,6 +1181,8 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
@@ -55,7 +80,7 @@ index 0863f43..f255dba 100644
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1203,7 @@ private:
+@@ -1171,6 +1221,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -64,7 +89,7 @@ index 0863f43..f255dba 100644
      pulp::view::View* shell_body_ = nullptr;
      pulp::view::View* shell_rail_ = nullptr;
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..73a5f1e 100644
+index c8101e1..3a27c47 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -123,7 +148,7 @@ index c8101e1..73a5f1e 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +392,49 @@ public:
+@@ -343,6 +392,61 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -169,12 +194,24 @@ index c8101e1..73a5f1e 100644
 +    /// unchanged.
 +    virtual std::unique_ptr<pulp::view::View> stage_accessory() { return nullptr; }
 +
++    /// Called on the chrome's poll tick (~120ms), on the main thread.
++    ///
++    /// A product that drives work outside Forge's own generation loop has no
++    /// other way to get a heartbeat. Without it such a product can write a
++    /// perfectly good progress stream that nothing ever reads.
++    virtual void on_poll() {}
++
++    /// True while this shell has work in flight. Keeps the poll loop alive:
++    /// it otherwise stops as soon as Forge's own generation is idle, which for
++    /// an external generator is immediately.
++    virtual bool busy() const { return false; }
++
 +
      virtual bool has_build() const = 0;
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..51fe022 100644
+index 1c3814e..c02d5ca 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,75 @@ private:
@@ -447,7 +484,21 @@ index 1c3814e..51fe022 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -5726,7 +5814,7 @@ void ForgeChrome::on_project_restored() {
+@@ -4327,6 +4415,13 @@ void ForgeChrome::enter_home() {
+     apply_modes();
+ }
+ 
++void ForgeChrome::set_project_title(std::string title) {
++    if (title.empty()) return;
++    project_title_ = std::move(title);
++    refresh_copy();
++    if (root_) root_->request_repaint();
++}
++
+ void ForgeChrome::enter_build() {
+     // The shell's generated source is worker-owned until the exact terminal
+     // event has been reduced. Build can become the visible destination now,
+@@ -5726,7 +5821,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -456,7 +507,7 @@ index 1c3814e..51fe022 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +5947,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +5954,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -465,7 +516,27 @@ index 1c3814e..51fe022 100644
      enter_home();
  }
  
-@@ -8630,6 +8718,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -6189,6 +6284,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+ }
+ 
+ void ForgeChrome::poll() {
++    // A shell driving work outside Forge's generation loop needs the same
++    // heartbeat. Inside poll() rather than beside one caller, so it arrives on
++    // both drivers -- the dispatcher fallback and a host-installed FrameClock.
++    shell_.on_poll();
+     // Publication callbacks may arrive on arbitrary provider threads. They
+     // write only to a shared mailbox; the host's UI-thread tick owns every
+     // ForgeChrome and widget mutation.
+@@ -6379,7 +6478,7 @@ void ForgeChrome::schedule_poll() {
+             if (!alive->load(std::memory_order_acquire)) return;
+             poll_armed_ = false;
+             poll();
+-            if (generating() || session_.running() ||
++            if (generating() || session_.running() || shell_.busy() ||
+                 !pending_open_entry_id_.empty() ||
+                 code_autosave_pending_) {
+                 schedule_poll();
+@@ -8630,6 +8729,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -485,7 +556,7 @@ index 1c3814e..51fe022 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9019,7 +9120,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9131,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(

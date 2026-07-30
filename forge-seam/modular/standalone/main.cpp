@@ -26,46 +26,11 @@
 
 namespace {
 
-/// Where the generator lives, and where a run's output lands.
-///
-/// The app bundle carries its own copy; a source checkout is preferred when
-/// present so a developer's edits are what actually runs. Overridable, because
-/// a machine that keeps the toolchain elsewhere should not need a rebuild.
-std::string tools_dir() {
-    if (const char* env = std::getenv("FORGE_MODULAR_TOOLS"); env && *env) return env;
-    const char* home = std::getenv("HOME");
-    const std::string source =
-        "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
-    std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::path(source) / "patch.py", ec))
-        return source;
-    return std::string(home ? home : ".") +
-           "/Library/Application Support/Forge Modular/tools/rack";
-}
-
-std::string build_log_path() {
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") +
-           "/Library/Application Support/Forge Modular/last-run.log";
-}
-
-// One engine for the whole process. The shell holds a raw pointer, so it must
-// outlive every editor the host opens and closes.
-forge_modular::ProcessEngine& engine() {
-    static forge_modular::ProcessEngine instance(tools_dir(), build_log_path());
-    return instance;
-}
-
-std::unique_ptr<pulp::format::Processor> create_forge_modular() {
-    auto shell = std::make_unique<forge_modular::ForgeModularShell>();
-    // Without this the app had no generator at all: Build reached a null
-    // engine and did nothing, while the same toolchain worked perfectly from
-    // the command line. Scripted proof said nothing about the app.
-    shell->set_engine(&engine());
-    shell->watch_build_log(build_log_path());
-    return shell;
-}
-
+// The factory, the engine and the toolchain path all live in modular_shell.cpp
+// and are shared by every format. They were duplicated here once; the copies
+// drifted, and the standalone kept resolving the toolchain to an external
+// volume long after the shared one had been pointed somewhere macOS does not
+// gate behind a modal.
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -86,9 +51,7 @@ int main(int argc, char** argv) {
     // Say plainly whether the generator is reachable. A Build that fails
     // because the toolchain is missing should be diagnosable from the app's
     // own first line, not by reading source.
-    pulp::runtime::log_info("Forge Modular: generator {} at {}",
-                            engine().available() ? "ready" : "NOT FOUND",
-                            tools_dir());
+    pulp::runtime::log_info("Forge Modular: standalone starting");
 
     std::string screenshot_path;
     for (int i = 1; i < argc; ++i) {
@@ -96,7 +59,12 @@ int main(int argc, char** argv) {
         if (arg == "--screenshot" && i + 1 < argc) screenshot_path = argv[++i];
     }
 
-    pulp::format::StandaloneApp app(create_forge_modular);
+    pulp::format::StandaloneApp app([] {
+        auto p = forge_modular::create_forge_modular();
+        if (auto* s = dynamic_cast<forge_modular::ForgeModularShell*>(p.get()))
+            s->set_standalone(true);
+        return p;
+    });
 
     pulp::format::StandaloneConfig config;
     config.sample_rate = 48000.0;
