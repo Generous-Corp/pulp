@@ -263,6 +263,95 @@ TEST_CASE("server stop is reentrant from a request callback",
     CHECK(reader.list().empty());
 }
 
+TEST_CASE("server can be released from a request callback",
+          "[inspect][client][teardown][owner-lifetime]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Observe;
+    config.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::unique_ptr<InspectorServer> server =
+        std::make_unique<InspectorServer>();
+    InspectorSession session(
+        {"session-destroy-server", "instance", "plugin", "1"},
+        config,
+        [&](const auto& request) {
+            server.reset();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server->start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    CHECK(client.request("State.getParameters").is_error);
+    CHECK_FALSE(server);
+}
+
+TEST_CASE("concurrent callback stop requests do not deadlock",
+          "[inspect][client][teardown][concurrency][reentrant]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Observe;
+    config.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    InspectorServer server;
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+    int entered = 0;
+    InspectorSession session(
+        {"session-concurrent-stop", "instance", "plugin", "1"},
+        config,
+        [&](const auto& request) {
+            {
+                std::unique_lock lock(barrier_mutex);
+                ++entered;
+                barrier_cv.notify_all();
+                barrier_cv.wait(lock, [&] { return entered == 2; });
+            }
+            server.stop();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient first;
+    InspectorClient second;
+    REQUIRE(first.connect(records.front(), reader));
+    REQUIRE(second.connect(records.front(), reader));
+    std::thread first_request([&] {
+        (void)first.request("State.getParameters");
+    });
+    std::thread second_request([&] {
+        (void)second.request("State.getParameters");
+    });
+    first_request.join();
+    second_request.join();
+    CHECK(reader.list().empty());
+}
+
 TEST_CASE("server stop releases leases before a session restart",
           "[inspect][client][teardown][lease]") {
     AuthenticatedFixture fixture;
