@@ -57,6 +57,69 @@ GROUPS = [
 BORING = {"reset", "prepare", "set_sample_rate", "clear"}
 
 
+def public_enums(text: str, cls: str):
+    """Enum types declared inside `cls`, as (name, [values]).
+
+    Without these the model sees `set_mode(Mode m)` and has to guess what a
+    Mode is. It guesses plausibly and wrongly -- `Mode::Independent`,
+    `Mode::Exponential` -- and the run dies at the compiler after the model has
+    already been paid for. A method signature that names a type is only useful
+    alongside the type's values.
+    """
+    m = re.search(rf"(?:class|struct)\s+{re.escape(cls)}\b", text)
+    if not m:
+        return []
+    body, depth, i, started = [], 0, m.end(), False
+    while i < len(text):
+        c = text[i]
+        if c == "{":
+            depth += 1
+            started = True
+        elif c == "}":
+            depth -= 1
+            if started and depth == 0:
+                break
+        if started:
+            body.append(c)
+        i += 1
+    src = "".join(body)
+    out = []
+
+    # A class often aliases a file-level enum -- `using Mode = SlewMode;` --
+    # so the values live outside the body the caller sees. Follow the alias,
+    # and report it under the name the METHOD signature uses, since that is
+    # the name the model has to write.
+    aliased = []
+    for am in re.finditer(r"using\s+(\w+)\s*=\s*(\w+)\s*;", src):
+        local, target = am.group(1), am.group(2)
+        em = re.search(rf"enum\s+class\s+{re.escape(target)}\b[^{{]*\{{([^}}]*)\}}", text)
+        if em:
+            aliased.append((local, em.group(1)))
+
+    for local, block in aliased:
+        values = []
+        for raw in block.split(","):
+            raw = re.sub(r"//.*", "", raw.split("=")[0]).strip()
+            if re.fullmatch(r"[A-Za-z_]\w*", raw):
+                values.append(raw)
+        if values:
+            out.append((local, values))
+
+    for em in re.finditer(r"enum\s+class\s+(\w+)[^{]*\{([^}]*)\}", src):
+        name = em.group(1)
+        values = []
+        for raw in em.group(2).split(","):
+            raw = raw.split("=")[0].strip()
+            # Drop comments and stray tokens; an enumerator is a bare
+            # identifier.
+            raw = re.sub(r"//.*", "", raw).strip()
+            if re.fullmatch(r"[A-Za-z_]\w*", raw):
+                values.append(raw)
+        if values:
+            out.append((name, values))
+    return out
+
+
 def public_methods(text: str, cls: str):
     """Public methods of `cls`, in declaration order, as `name(args)`."""
     m = re.search(rf"(?:class|struct)\s+{re.escape(cls)}\b", text)
@@ -116,7 +179,8 @@ def scan():
                     continue
                 meth = public_methods(text, cls)
                 if meth:
-                    classes.append({"class": cls, "methods": meth})
+                    classes.append({"class": cls, "methods": meth,
+                                    "enums": public_enums(text, cls)})
             if classes:
                 found[rel] = classes
     return found
@@ -153,6 +217,9 @@ def markdown(found):
                 L.append(f"- `#include <pulp/signal/{rel}>` → **`{c['class']}<float>`**")
                 if meths:
                     L.append(f"  - {meths}")
+                for ename, evals in c.get("enums", []):
+                    joined = " · ".join(f"`{v}`" for v in evals)
+                    L.append(f"  - `{ename}`: {joined}")
         L.append("")
     return "\n".join(L)
 
