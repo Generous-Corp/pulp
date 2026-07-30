@@ -76,7 +76,8 @@ add_dependencies(pulp-import-design pulp-browser-capture-runtime)
 # `pulp` frontend delegates design import to this sibling executable, which in
 # turn requires the JavaScript capture runtime beside it.
 install(TARGETS pulp-import-design
-    RUNTIME DESTINATION bin)
+    RUNTIME DESTINATION bin
+    BUNDLE DESTINATION bin)
 install(FILES ${_pulp_browser_capture_runtime_files}
     DESTINATION bin/browser_capture-v1)
 
