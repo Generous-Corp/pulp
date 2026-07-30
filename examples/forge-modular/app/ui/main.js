@@ -12,28 +12,56 @@
 //
 // Ink & Signal throughout, shared with Forge, because these are one brand.
 
+// ── design tokens, taken from Forge ──────────────────────────────────────────
+//
+// Copied value-for-value from Forge's src/chrome.cpp, not approximated. Forge
+// Modular is a sibling product, so it should differ where the product differs
+// and nowhere else -- and several of these were quietly wrong before, which is
+// why it read as a different app: the app background, the rail width, the hero
+// size, and a composer nearly 300px too wide.
+//
+// The comment on each line is Forge's own token name, so a change there can be
+// found here.
+
 const C = {
-    appBg:      "#0F1217",
-    rail:       "#12161C",
-    surface:    "#161A21",
-    panel:      "#1E2530",
-    raised:     "#28303C",
-    line:       "#2B3340",
-    lineStrong: "#3A4351",
-    accent:     "#16DAC2",
-    accentDeep: "#10B6A3",
+    appBg:      "#161A21",   // kAppBg      --surface-app
+    panel:      "#1E2530",   // kPanel      --surface-panel
+    raised:     "#28303C",   // kRaised     --surface-raised
+    line:       "#2B3340",   // kLine       --line
+    accent:     "#16DAC2",   // kAccent     --ink-signal
+    accentDeep: "#10B6A3",   // kAccentDim  --ink-signal-deep
+    onAccent:   "#052320",   // kOnInk      --on-ink
+    textStrong: "#F3F6F9",   // kTextStrong --text-strong
+    text:       "#D6DCE4",   // kText       --text
+    muted:      "#939CA9",   // kMuted      --text-muted
+    faint:      "#646D7A",   // kFaint      --text-faint
+    coral:      "#FF5C4D",   // kCoral      --ink-coral  (errors; was amber here)
+    ghost:      "#37404D",   // kGhost      skeleton bones
+
+    // Forge Modular's own, because a rack has roles a plugin does not: cable
+    // groups in the chat and the preview are colour-coded by what they carry.
     violet:     "#8B6CF5",
-    amber:      "#F6B847",
     leaf:       "#3FCF77",
-    indigo:     "#5E78FF",
-    textStrong: "#F3F6F9",
-    text:       "#D6DCE4",
-    muted:      "#939CA9",
-    faint:      "#646D7A",
-    onAccent:   "#052320",
 };
-const FONT = "Jost";
-const MONO = "JetBrains Mono";
+
+// Forge's shell geometry. The silhouette is the thing a person recognises, so
+// these are the numbers to match before any styling detail.
+const G = {
+    railWidth:      60,      // kShellRailWidth   (was 64)
+    gutter:         48,      // center padding on the home screen
+    promptWidth:    720,     // the prompt row     (was 1000 -- the big one)
+    promptHeight:   58,
+    promptRadius:   16,
+    toolbarHeight:  52,      // kWorkspaceToolbarHeight (was 46)
+    chatWidth:      384,     // kBuildChatWidth    (was 460)
+    heroTitleSize:  32,      // kHeroTitleSize     (was 44)
+    heroSubSize:    14,
+    iconTile:       30,      // Forge's 30x30 radius-8 tile
+    iconTileRadius: 8,
+};
+
+const FONT = "Jost";              // kFontDisplay
+const MONO = "JetBrains Mono";    // kFontMono
 
 let mode = "module";      // "module" | "patch"
 let lastRandom = "";      // so Random never offers the same prompt twice running
@@ -88,8 +116,8 @@ setFlex("shell", "flex_grow", 1);
 setFlex("shell", "width", "100%");
 
 const rail = createCol("rail", "shell");
-setBackground("rail", C.rail);
-setFlex("rail", "width", 64);
+setBackground("rail", C.appBg);
+setFlex("rail", "width", G.railWidth);
 setFlex("rail", "align_items", "center");
 setFlex("rail", "padding_top", 14);
 setFlex("rail", "direction", "column");
@@ -99,9 +127,9 @@ setCornerRadius("rail", "BottomLeft", 14);
 // The logo tile is the accent square Forge uses, not a button.
 const brand = createRow("rail-brand", "rail");
 setBackground("rail-brand", C.accent);
-setCornerRadius("rail-brand", 12);
-setFlex("rail-brand", "width", 40);
-setFlex("rail-brand", "height", 40);
+setCornerRadius("rail-brand", G.iconTileRadius);
+setFlex("rail-brand", "width", G.iconTile);
+setFlex("rail-brand", "height", G.iconTile);
 setFlex("rail-brand", "align_items", "center");
 setFlex("rail-brand", "justify_content", "center");
 createLabel("rail-brand-mark", "⠿", "rail-brand");
@@ -193,12 +221,12 @@ function railIcon(id, glyph, active, marginTop) {
     // The rail reads as icons, not buttons. An unselected tile takes the rail's
     // own colour on both background and border, or the rail becomes a grid of
     // boxes -- which is what it looked like before these were set.
-    setToggleBackground(id, C.rail, C.raised);
-    setToggleBorderColor(id, C.rail, C.raised);
-    setBackground(id, active ? C.raised : C.rail);
-    setCornerRadius(id, 12);
-    setFlex(id, "width", 40);
-    setFlex(id, "height", 40);
+    setToggleBackground(id, C.appBg, C.raised);
+    setToggleBorderColor(id, C.appBg, C.raised);
+    setBackground(id, active ? C.raised : C.appBg);
+    setCornerRadius(id, G.iconTileRadius);
+    setFlex(id, "width", G.iconTile);
+    setFlex(id, "height", G.iconTile);
     setFlex(id, "margin_top", marginTop);
     setFlex(id, "align_items", "center");
     setFlex(id, "justify_content", "center");
@@ -236,7 +264,7 @@ const topbar = createRow("topbar", "main");
 setFlex("topbar", "align_items", "center");
 setFlex("topbar", "padding_left", 18);
 setFlex("topbar", "padding_right", 18);
-setFlex("topbar", "height", 46);
+setFlex("topbar", "height", G.toolbarHeight);
 setCornerRadius("topbar", "TopRight", 14);
 
 createLabel("topbar-name", "Forge Modular", "topbar");
@@ -249,7 +277,7 @@ setTextColor("topbar-name", C.textStrong);
 /// the formats this build provides on the right.
 function chip(id, parent, text, color, marginLeft) {
     const c = createRow(id, parent);
-    setBackground(id, C.surface);
+    setBackground(id, C.panel);
     setBorder(id, C.line, 1);
     setCornerRadius(id, 7);
     setFlex(id, "padding_left", 9);
@@ -289,8 +317,10 @@ const hero = createCol("hero", "main");
 setFlex("hero", "flex_grow", 1);
 setFlex("hero", "align_items", "center");
 setFlex("hero", "justify_content", "center");
+setFlex("hero", "padding_left", G.gutter);
+setFlex("hero", "padding_right", G.gutter);
 setFlex("hero", "direction", "column");
-setBackground("hero", C.surface);
+setBackground("hero", C.panel);
 
 createLabel("hero-eyebrow", "FORGE MODULAR · FOR VCV RACK", "hero");
 setFontFamily("hero-eyebrow", MONO);
@@ -300,14 +330,15 @@ setTextColor("hero-eyebrow", C.muted);
 
 createLabel("hero-title", "What should the module do?", "hero");
 setFontFamily("hero-title", FONT);
-setFontSize("hero-title", 44);
+setFontSize("hero-title", G.heroTitleSize);
+setLetterSpacing("hero-title", 0.2);
 setFontWeight("hero-title", 700);
 setTextColor("hero-title", C.textStrong);
 setFlex("hero-title", "margin_top", 12);
 
 createLabel("hero-sub", "One Eurorack panel — knobs, jacks and the DSP behind them.", "hero");
 setFontFamily("hero-sub", FONT);
-setFontSize("hero-sub", 15);
+setFontSize("hero-sub", G.heroSubSize);
 setTextColor("hero-sub", C.muted);
 setFlex("hero-sub", "margin_top", 10);
 
@@ -318,19 +349,19 @@ setFlex("hero-sub", "margin_top", 10);
 
 const tabs = createRow("tabs", "hero");
 setFlex("tabs", "align_items", "flex_end");
-setFlex("tabs", "width", 1000);
-setFlex("tabs", "max_width", 1000);
+setFlex("tabs", "width", G.promptWidth);
+setFlex("tabs", "max_width", G.promptWidth);
 setFlex("tabs", "flex_grow", 0);
 setFlex("tabs", "flex_shrink", 0);
-setFlex("tabs", "margin_top", 34);
+setFlex("tabs", "margin_top", 28);
 
 function tab(id, glyph, title, sub, active) {
     const t = createToggleButton(id, "tabs");
     setFlex(id, "direction", "row");
     setToggleBackground(id, C.panel, C.raised);
-    setToggleBorderColor(id, C.line, C.lineStrong);
+    setToggleBorderColor(id, C.line, C.line);
     setBackground(id, active ? C.raised : C.panel);
-    setBorder(id, active ? C.lineStrong : C.line, 1);
+    setBorder(id, active ? C.line : C.line, 1);
     setCornerRadius(id, 12);
     setFlex(id, "padding_left", 16);
     setFlex(id, "padding_right", 16);
@@ -371,10 +402,10 @@ setToggleOn("tab-module", true);
 
 const composer = createCol("composer", "hero");
 setBackground("composer", C.raised);
-setBorder("composer", C.lineStrong, 1);
-setCornerRadius("composer", 16);
-setFlex("composer", "width", 1000);
-setFlex("composer", "max_width", 1000);
+setBorder("composer", C.line, 1);
+setCornerRadius("composer", G.promptRadius);
+setFlex("composer", "width", G.promptWidth);
+setFlex("composer", "max_width", G.promptWidth);
 setFlex("composer", "flex_grow", 0);
 setFlex("composer", "flex_shrink", 0);
 setFlex("composer", "padding", 20);
@@ -430,7 +461,7 @@ function button(id, parent, glyph, label, kind, width) {
     return b;
 }
 
-button("btn-mention", "actions", "at", "", "icon", 44);
+button("btn-mention", "actions", "at", "", "icon", G.iconTile + 14);
 setFlex("btn-mention", "margin_right", 9);
 button("btn-random", "actions", "dice", "Random module", "ghost", 186);
 
@@ -591,8 +622,8 @@ setFlex("work", "flex_grow", 1);
 setVisible("work", false);
 
 const chat = createCol("chat", "work");
-setBackground("chat", C.surface);
-setFlex("chat", "width", 460);
+setBackground("chat", C.panel);
+setFlex("chat", "width", G.chatWidth);
 setFlex("chat", "flex_shrink", 0);
 setFlex("chat", "direction", "column");
 setFlex("chat", "padding", 22);
@@ -706,8 +737,8 @@ function showPatch(modules) {
         setFlex(id, "margin_left", Math.max(0, m.x - cursor));
         cursor = m.x + m.width;
         // A module we have never seen is drawn, but not as though we know it.
-        setBackground(id, m.known ? C.panel : C.surface);
-        setBorder(id, m.known ? C.lineStrong : C.line, 1);
+        setBackground(id, m.known ? C.panel : C.panel);
+        setBorder(id, m.known ? C.line : C.line, 1);
         setCornerRadius(id, 3);
 
         createLabel(id + "-slug", m.slug, id);
@@ -746,7 +777,7 @@ function beginBuild(promptText) {
 /// to a log nobody opens. Whatever the host reads out of that log lands here.
 function setBuildStatus(text, kind) {
     setText("chat-status", text);
-    setTextColor("chat-status", kind === "error" ? C.amber
+    setTextColor("chat-status", kind === "error" ? C.coral
                               : kind === "done" ? C.leaf : C.muted);
 }
 
@@ -757,7 +788,7 @@ function setBuildStatus(text, kind) {
 /// logged. A dead handler that says so is debuggable; a silent one is not.
 function __dispatchError__(id, eventName, err) {
     setText("rack-status", "\u25cf HANDLER FAILED " + id + ": " + err);
-    setTextColor("rack-status", C.amber);
+    setTextColor("rack-status", C.coral);
 }
 
 // ── wiring ───────────────────────────────────────────────────────────────────
@@ -778,7 +809,7 @@ const RAIL = ["rail-home", "rail-module", "rail-patch", "rail-settings"];
 function selectRail(id) {
     for (let i = 0; i < RAIL.length; ++i) {
         const on_ = RAIL[i] === id;
-        setBackground(RAIL[i], on_ ? C.raised : C.rail);
+        setBackground(RAIL[i], on_ ? C.raised : C.appBg);
         setSvgStroke(RAIL[i] + "-glyph", on_ ? C.accent : C.faint);
     }
 }

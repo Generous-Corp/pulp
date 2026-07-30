@@ -117,6 +117,50 @@ def main():
             else:
                 print(f"  ok     every setFlex key is one of the bridge's {len(known)}")
 
+    # Brand parity: our palette must not drift from Forge's. Forge Modular is a
+    # sibling product, so it should differ where the product differs and nowhere
+    # else -- and it had drifted on the app background, the rail width, the hero
+    # size and a composer 280px too wide, which is what made it read as a
+    # different app.
+    forge = "/Volumes/Workshop/Code/forge/src/chrome.cpp"
+    if os.path.exists(forge):
+        ftext = open(forge, errors="replace").read()
+        theirs = {}
+        for name, r, g, b in re.findall(
+                r"const Color k(\w+) = Color::rgba8\(0x(\w\w), 0x(\w\w), 0x(\w\w)\)", ftext):
+            theirs[name.lower()] = f"#{r}{g}{b}".upper()
+        ours = dict(re.findall(r'^\s+(\w+):\s*"(#[0-9A-Fa-f]{6})"', text, re.M))
+        # Their token name -> ours. Only the ones both products have.
+        PAIRS = {"appbg": "appBg", "panel": "panel", "raised": "raised",
+                 "line": "line", "accent": "accent", "accentdim": "accentDeep",
+                 "onink": "onAccent", "textstrong": "textStrong", "text": "text",
+                 "muted": "muted", "faint": "faint", "coral": "coral",
+                 "ghost": "ghost"}
+        drift = [(t, theirs[t], ours.get(o, "(missing)"))
+                 for t, o in PAIRS.items()
+                 if t in theirs and ours.get(o, "").upper() != theirs[t]]
+        if drift:
+            for t, want, got in drift[:6]:
+                print(f"  WRONG  {t}: Forge has {want}, we have {got}")
+            bad += 1
+        else:
+            print(f"  ok     all {len(PAIRS)} shared tokens match Forge's chrome.cpp")
+
+    # A colour that is not defined evaluates to undefined and the style call
+    # silently does nothing. Renaming the palette to Forge's tokens left three
+    # references dangling -- C.rail, C.surface, C.lineStrong -- and the only
+    # symptom was that part of the shell looked wrong.
+    m = re.search(r'const C = \{(.*?)\n\};', text, re.S)
+    if m:
+        defined = set(re.findall(r'^\s+(\w+):', m.group(1), re.M))
+        dangling = sorted(set(re.findall(r'\bC\.(\w+)', text)) - defined)
+        if dangling:
+            for d in dangling[:6]:
+                print(f"  WRONG  C.{d} is used but never defined")
+            bad += 1
+        else:
+            print(f"  ok     every colour used is one of the {len(defined)} defined")
+
     # Anything that paints like a control must BE one. This was missed three
     # times running -- the composer buttons, then the mode tabs, then the shelf
     # tabs -- each fixed in isolation without asking what else was a box
