@@ -50,6 +50,7 @@ using pulp_mcp::handle_compat;
 // mcp_tools.{hpp,cpp}.
 using pulp_mcp::exec;
 using pulp_mcp::find_project_root;
+using pulp_mcp::resolve_inspect_cli_binary;
 using pulp_mcp::shell_quote;
 using pulp_mcp::handle_build;
 using pulp_mcp::handle_test;
@@ -88,6 +89,19 @@ using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
 using pulp_mcp::handle_timeline_tool;
 using pulp_mcp::handle_inspect_pending_requests;
+
+namespace {
+
+std::string run_inspector_command(const fs::path& root,
+                                  const std::string& method,
+                                  const std::string& params_json = "{}") {
+    const auto cli = resolve_inspect_cli_binary(root);
+    return exec(shell_quote(cli.string()) + " inspect --command " +
+                shell_quote(method) + " --params " + shell_quote(params_json) +
+                " 2>&1");
+}
+
+}  // namespace
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
@@ -372,7 +386,7 @@ static std::string handle_request_raw(const std::string& json) {
             } else if (query.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: query is required\"}]}";
             } else {
-                auto output = exec(shell_quote((root / "build" / "tools" / "cli" / "pulp").string()) +
+                auto output = exec(shell_quote(pulp_mcp::resolve_cli_binary(root).string()) +
                                    " docs search " + shell_quote(query) + " 2>&1");
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
@@ -396,7 +410,7 @@ static std::string handle_request_raw(const std::string& json) {
                  name == "pulp_motion_play" || name == "pulp_motion_pause" ||
                  name == "pulp_motion_enable_cost" || name == "pulp_motion_disable_cost") {
             std::string inspector_method;
-            std::string inspector_params;  // pulp inspect --params JSON, empty for none
+            std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
                 inspector_method = "Motion.startTrace";
                 // Forward the raw args sub-object as params verbatim
@@ -404,12 +418,13 @@ static std::string handle_request_raw(const std::string& json) {
                 // out of it. Empty {} would fail with "metrics array
                 // required" on the inspector side, which is the
                 // right answer for callers that omit metrics.
-                inspector_params = " --params '" + args_json + "'";
+                inspector_params = args_json;
             } else if (name == "pulp_motion_stop_trace") {
                 inspector_method = "Motion.stopTrace";
                 auto trace_id_raw = extract_raw(args_json, "trace_id");
                 if (trace_id_raw.empty()) trace_id_raw = "0";
-                inspector_params = std::string(" --params '{\"trace_id\":") + trace_id_raw + "}'";
+                inspector_params =
+                    std::string("{\"trace_id\":") + trace_id_raw + "}";
             } else if (name == "pulp_motion_snapshot") {
                 inspector_method = "Motion.snapshot";
             } else if (name == "pulp_motion_list_traces") {
@@ -418,7 +433,8 @@ static std::string handle_request_raw(const std::string& json) {
                 inspector_method = "Motion.scrubTo";
                 auto frame_raw = extract_raw(args_json, "frame");
                 if (frame_raw.empty()) frame_raw = "0";
-                inspector_params = std::string(" --params '{\"frame\":") + frame_raw + "}'";
+                inspector_params =
+                    std::string("{\"frame\":") + frame_raw + "}";
             } else if (name == "pulp_motion_play") {
                 inspector_method = "Motion.play";
             } else if (name == "pulp_motion_pause") {
@@ -433,8 +449,8 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
+                auto output =
+                    run_inspector_command(root, inspector_method, inspector_params);
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
@@ -449,28 +465,28 @@ static std::string handle_request_raw(const std::string& json) {
                  name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
                  name == "pulp_trace_explain") {
             std::string inspector_method;
-            std::string inspector_params;  // pulp inspect --params JSON, empty for none
+            std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
                 inspector_method = "Trace.startSession";
-                inspector_params = " --params '" + args_json + "'";
+                inspector_params = args_json;
             } else if (name == "pulp_trace_stop") {
                 inspector_method = "Trace.stopSession";
             } else if (name == "pulp_trace_snapshot") {
                 inspector_method = "Trace.snapshot";
             } else if (name == "pulp_trace_query") {
                 inspector_method = "Trace.query";
-                inspector_params = " --params '" + args_json + "'";
+                inspector_params = args_json;
             } else if (name == "pulp_trace_explain") {
                 inspector_method = "Trace.explain";
-                inspector_params = " --params '" + args_json + "'";
+                inspector_params = args_json;
             }
 
             auto root = find_project_root();
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
+                auto output =
+                    run_inspector_command(root, inspector_method, inspector_params);
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
@@ -495,11 +511,8 @@ static std::string handle_request_raw(const std::string& json) {
                 std::string params_json = std::string("{\"id\":") + std::to_string(pid) +
                     ",\"value\":" + std::to_string(value) +
                     ",\"normalized\":" + (normalized ? "true" : "false") + "}";
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                // Single-quote the JSON payload: it contains only digits,
-                // braces, colons, commas and bare true/false — no single quotes.
-                auto output = exec(cli + " inspect --command State.setParameter --params '"
-                                   + params_json + "' 2>&1");
+                auto output =
+                    run_inspector_command(root, "State.setParameter", params_json);
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
@@ -511,7 +524,7 @@ static std::string handle_request_raw(const std::string& json) {
                  name == "pulp_inspect_performance" || name == "pulp_inspect_audio") {
             // Map MCP tool name to inspector protocol method
             std::string inspector_method;
-            std::string inspector_params;
+            std::string inspector_params = "{}";
             if (name == "pulp_inspect_dom")         inspector_method = "DOM.getDocument";
             else if (name == "pulp_inspect_params")  inspector_method = "State.getParameters";
             else if (name == "pulp_inspect_value_channels") inspector_method = "State.getValueChannels";
@@ -521,7 +534,7 @@ static std::string handle_request_raw(const std::string& json) {
                 auto expr = extract_string(args_json, "expression");
                 if (!expr.empty()) {
                     auto params_json = std::string("{\"expression\":") + json_string(expr) + "}";
-                    inspector_params = " --params " + shell_quote(params_json);
+                    inspector_params = params_json;
                 }
             }
             else if (name == "pulp_inspect_performance") inspector_method = "Performance.getMetrics";
@@ -531,8 +544,8 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto cli = (root / "build" / "tools" / "cli" / "pulp").string();
-                auto output = exec(cli + " inspect --command " + inspector_method + inspector_params + " 2>&1");
+                auto output =
+                    run_inspector_command(root, inspector_method, inspector_params);
                 result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }

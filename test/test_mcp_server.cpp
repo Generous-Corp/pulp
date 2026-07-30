@@ -189,6 +189,32 @@ std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
     return cli;
 }
 
+std::filesystem::path make_fake_inspector_cli(
+    const std::filesystem::path& root) {
+#if defined(_WIN32)
+    const auto cli =
+        root / "build" / "tools" / "cli" / "pulp-cpp.exe";
+#else
+    const auto cli = root / "build" / "tools" / "cli" / "pulp-cpp";
+#endif
+    std::filesystem::create_directories(cli.parent_path());
+    std::ofstream script(cli);
+#if defined(_WIN32)
+    script << "fake";
+#else
+    script << "#!/bin/sh\n"
+           << "printf 'fake-inspector'\n"
+           << "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n";
+#endif
+    script.close();
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+    return cli;
+}
+
 std::filesystem::path make_package_workflow_fake_pulp_cli(const std::filesystem::path& root,
                                                           const std::filesystem::path& log_path) {
     const auto cli = root / "build" / "tools" / "cli" / "pulp";
@@ -403,6 +429,18 @@ TEST_CASE("MCP CLI resolver finds Windows multi-config delegates", "[mcp][shell]
     std::ofstream(cli) << "fake";
 
     REQUIRE(pulp_mcp::resolve_cli_binary(project.path) == cli);
+    REQUIRE(pulp_mcp::resolve_inspect_cli_binary(project.path) == cli);
+}
+
+TEST_CASE("MCP inspector CLI resolver selects pulp-cpp over the Rust CLI",
+          "[mcp][shell][inspect]") {
+    TempDir project;
+    const auto rust_cli = project.path / "build" / "pulp";
+    std::filesystem::create_directories(rust_cli.parent_path());
+    std::ofstream(rust_cli) << "fake";
+    const auto inspect_cli = make_fake_inspector_cli(project.path);
+
+    REQUIRE(pulp_mcp::resolve_inspect_cli_binary(project.path) == inspect_cli);
 }
 
 TEST_CASE("MCP shell exec returns stdout and failure diagnostics", "[mcp][shell]") {
@@ -856,17 +894,54 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {
-    // Exercise the dispatch branch: from a project root it resolves the CLI
-    // and shells `pulp inspect --command State.setParameter --params {...}`.
-    // No inspector is running here, so the shellout returns an error string,
-    // but the response is still a well-formed JSON-RPC result wrapping the
-    // tool's text content — which is all we assert (and covers the branch).
-    ScopedCurrentPath cwd(repo_root());
+TEST_CASE("pulp_inspect_set_param delegates a typed payload to pulp-cpp",
+          "[mcp][tools][mcp-set-param]") {
+#if defined(_WIN32)
+    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n";
+    make_fake_inspector_cli(project.path);
+    ScopedCurrentPath cwd(project.path);
+
     auto response = handle_request(
         tool_call("60", "pulp_inspect_set_param", R"({"id":0,"value":1.0,"normalized":true})"));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
-    require_contains(response, R"JSON("content")JSON");
+    require_contains(
+        response,
+        R"JSON(fake-inspector [inspect] [--command] [State.setParameter] [--params] [{\"id\":0,\"value\":1.000000,\"normalized\":true}])JSON");
+#endif
+}
+
+TEST_CASE("MCP inspector families execute the shared pulp-cpp delegate",
+          "[mcp][tools][inspect][delegate]") {
+#if defined(_WIN32)
+    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n";
+    make_fake_inspector_cli(project.path);
+    ScopedCurrentPath cwd(project.path);
+
+    const std::pair<const char*, const char*> cases[] = {
+        {"pulp_inspect_dom", "DOM.getDocument"},
+        {"pulp_motion_snapshot", "Motion.snapshot"},
+        {"pulp_trace_snapshot", "Trace.snapshot"},
+    };
+    int id = 61;
+    for (const auto& [tool, method] : cases) {
+        INFO("tool=" << tool << " method=" << method);
+        const auto response =
+            handle_request(tool_call(std::to_string(id++), tool));
+        require_contains(response,
+                         std::string("fake-inspector [inspect] [--command] [") +
+                             method + "] [--params] [{}]");
+    }
+#endif
 }
 
 TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mcp][tools][audio]") {
@@ -1904,21 +1979,24 @@ TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable tex
     TempDir project;
     std::filesystem::create_directories(project.path / "core");
     std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
-    make_fake_pulp_cli(project.path);
+    make_fake_inspector_cli(project.path);
 
     ScopedCurrentPath cwd(project.path);
 
     auto evaluate = handle_request(tool_call("50", "pulp_inspect_evaluate",
                                              R"JSON({"expression":"window.title + ' ok'"})JSON"));
     require_contains(evaluate, R"JSON("id":50)JSON");
-    require_contains(evaluate, "fake-pulp [inspect] [--command] [Runtime.evaluate] [--params]");
+    require_contains(evaluate,
+                     "fake-inspector [inspect] [--command] [Runtime.evaluate] [--params]");
     require_contains(evaluate, R"JSON([{\"expression\":\"window.title + ' ok'\"}])JSON");
     REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON") == std::string::npos);
 
     auto screenshot = handle_request(tool_call("51", "pulp_inspect_screenshot"));
     require_contains(screenshot, R"JSON("id":51)JSON");
     require_contains(screenshot, R"JSON("type":"text")JSON");
-    require_contains(screenshot, "fake-pulp [inspect] [--command] [Capture.screenshot]");
+    require_contains(
+        screenshot,
+        "fake-inspector [inspect] [--command] [Capture.screenshot]");
     REQUIRE(screenshot.find(R"JSON("type":"image")JSON") == std::string::npos);
     REQUIRE(screenshot.find(R"JSON("mimeType":"image/png")JSON") == std::string::npos);
 #endif
