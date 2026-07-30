@@ -103,10 +103,14 @@ function selectorProbeExpression(selector, operation) {
       if (!editable) {
         return { ok: false, error: "target is not an editable text control" };
       }
-      if (element.disabled || element.readOnly) {
+      if (element.matches(":disabled") || element.readOnly) {
         return { ok: false, error: "target is disabled or read-only" };
       }
       element.focus();
+      if (document.activeElement !== element &&
+          !element.contains(document.activeElement)) {
+        return { ok: false, error: "target did not accept focus" };
+      }
       if (typeof element.select === "function") element.select();
       else {
         const selection = getSelection();
@@ -117,7 +121,7 @@ function selectorProbeExpression(selector, operation) {
       }
       return { ok: true, x, y };
     }
-    if (element.disabled || style.pointerEvents === "none") {
+    if (element.matches(":disabled") || style.pointerEvents === "none") {
       return { ok: false, error: "target is disabled or ignores pointer events" };
     }
     const hit = paintHitAt(x, y);
@@ -215,24 +219,26 @@ export async function createMainFrameNavigationGuard(cdp) {
       popupBlock.result?.value !== true) {
     throw navigationFailure();
   }
-  const rejectPopup = (targetInfo) => {
+  const rejectPopup = (sessionId, targetInfo) => {
     if (targetInfo?.type !== "page") return;
     violation = true;
-    if (targetInfo.targetId) {
-      Promise.resolve(cdp.call("Target.closeTarget", {
-        targetId: targetInfo.targetId,
-      })).catch(() => {});
-    }
+    Promise.resolve(
+      sessionId
+        ? cdp.call("Page.close", {}, sessionId)
+        : cdp.call("Target.closeTarget", {
+            targetId: targetInfo.targetId,
+          }))
+      .catch(() => {});
   };
   cdp.on("Page.windowOpen", () => {
     violation = true;
   });
-  cdp.on("Target.attachedToTarget", ({ targetInfo }) => {
-    rejectPopup(targetInfo);
+  cdp.on("Target.attachedToTarget", ({ sessionId, targetInfo }) => {
+    rejectPopup(sessionId, targetInfo);
   });
   await cdp.call("Target.setAutoAttach", {
     autoAttach: true,
-    waitForDebuggerOnStart: false,
+    waitForDebuggerOnStart: true,
     flatten: true,
     filter: [{ type: "page", exclude: false }],
   });

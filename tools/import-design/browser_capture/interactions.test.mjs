@@ -201,8 +201,10 @@ test("executor retries transient actionability failures until the timeout",
   async () => {
     let probes = 0;
     const cdp = {
-      async call(method) {
+      async call(method, params) {
         if (method === "Runtime.evaluate") {
+          assert.match(params.expression, /matches\(":disabled"\)/);
+          assert.match(params.expression, /document\.activeElement/);
           probes += 1;
           return {
             result: {
@@ -231,8 +233,8 @@ test("main-frame navigation guard allows same-document routing and ignores subfr
     const calls = [];
     let currentUrl = "http://127.0.0.1/editor.html";
     const cdp = {
-      async call(method, params) {
-        calls.push({ method, params });
+      async call(method, params, sessionId) {
+        calls.push({ method, params, sessionId });
         if (method === "Page.getFrameTree") {
           return {
             frameTree: {
@@ -272,8 +274,8 @@ test("main-frame navigation guard closes popup pages before they run",
     const listeners = new Map();
     const calls = [];
     const cdp = {
-      async call(method, params) {
-        calls.push({ method, params });
+      async call(method, params, sessionId) {
+        calls.push({ method, params, sessionId });
         if (method === "Page.getFrameTree") {
           return {
             frameTree: {
@@ -299,11 +301,12 @@ test("main-frame navigation guard closes popup pages before they run",
       calls.find(({ method }) => method === "Target.setAutoAttach").params,
       {
         autoAttach: true,
-        waitForDebuggerOnStart: false,
+        waitForDebuggerOnStart: true,
         flatten: true,
         filter: [{ type: "page", exclude: false }],
       });
     listeners.get("Target.attachedToTarget")({
+      sessionId: "popup-session-1",
       targetInfo: { targetId: "popup-1", type: "page" },
     });
     await assert.rejects(
@@ -311,6 +314,10 @@ test("main-frame navigation guard closes popup pages before they run",
       (error) => error.code ===
         "browser-interaction-navigation-rejected");
     assert.deepEqual(
-      calls.find(({ method }) => method === "Target.closeTarget").params,
-      { targetId: "popup-1" });
+      calls.find(({ method }) => method === "Page.close"),
+      {
+        method: "Page.close",
+        params: {},
+        sessionId: "popup-session-1",
+      });
   });

@@ -182,7 +182,7 @@ class Cdp {
     });
   }
 
-  call(method, params = {}) {
+  call(method, params = {}, sessionId = undefined) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -190,7 +190,12 @@ class Cdp {
         reject(new Error(`${method} timed out`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer, method });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      this.socket.send(JSON.stringify({
+        id,
+        method,
+        params,
+        ...(sessionId ? { sessionId } : {}),
+      }));
     });
   }
 
