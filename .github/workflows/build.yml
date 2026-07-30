@@ -603,6 +603,14 @@ jobs:
     # this matrix leg — so the leg no longer self-names `macos`.
     name: ${{ format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
+      # FetchContent puts sources AND subbuilds under FETCHCONTENT_BASE_DIR.
+      # tools/cmake/PulpFetchContent.cmake only redirects that on WIN32 (a
+      # MAX_PATH workaround), so off Windows it defaults to <build>/_deps —
+      # inside the build tree, hence uncacheable and re-downloaded on every clean
+      # build. three.js alone is a 2.2 GB git clone; a warm cache measured 119s
+      # of configure against 414s cold. Pin one path so the cache steps below have
+      # something real to save.
+      PULP_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/../.pulp-fc
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
       # cached CMake flags such as -fsanitize=address cannot bleed into it.
@@ -757,10 +765,13 @@ jobs:
         id: fetchcontent-cache
         uses: actions/cache/restore@v4
         with:
+          # One path, and the one FetchContent actually writes to. The three
+          # it replaced never populated: on Linux the cased `Pulp` did not match
+          # CMake's lowercase `pulp`, on Windows an extra `Cache/` segment did not
+          # match `$LOCALAPPDATA/Pulp/fc`, and on macOS/Linux the sources never
+          # left <build>/_deps in the first place.
           path: |
-            ~/Library/Caches/Pulp/fetchcontent-src
-            ~/.cache/Pulp/fetchcontent-src
-            ~/AppData/Local/Pulp/Cache/fetchcontent-src
+            ${{ github.workspace }}/../.pulp-fc
           key: ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
@@ -800,10 +811,13 @@ jobs:
         if: runner.environment == 'github-hosted' && runner.os != 'macOS' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
+          # One path, and the one FetchContent actually writes to. The three
+          # it replaced never populated: on Linux the cased `Pulp` did not match
+          # CMake's lowercase `pulp`, on Windows an extra `Cache/` segment did not
+          # match `$LOCALAPPDATA/Pulp/fc`, and on macOS/Linux the sources never
+          # left <build>/_deps in the first place.
           path: |
-            ~/Library/Caches/Pulp/fetchcontent-src
-            ~/.cache/Pulp/fetchcontent-src
-            ~/AppData/Local/Pulp/Cache/fetchcontent-src
+            ${{ github.workspace }}/../.pulp-fc
           key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
       - name: Fetch prebuilt Skia (macOS)
@@ -937,6 +951,12 @@ jobs:
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
           fi
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          # Off Windows nothing redirects FETCHCONTENT_BASE_DIR, so point it at
+          # the cached path. Windows keeps the short MAX_PATH-safe dir set above.
+          if [ "${RUNNER_OS}" != "Windows" ]; then
+            mkdir -p "${PULP_FETCHCONTENT_BASE_DIR}"
+            cmake_args+=(-DFETCHCONTENT_BASE_DIR="${PULP_FETCHCONTENT_BASE_DIR}")
+          fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             cmake_args+=(-DPULP_ENABLE_GPU=OFF)
           fi

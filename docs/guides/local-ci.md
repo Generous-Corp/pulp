@@ -7,6 +7,28 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## The FetchContent cache had to be pointed at a real path
+
+`FetchContent` writes sources and subbuilds under `FETCHCONTENT_BASE_DIR`.
+`tools/cmake/PulpFetchContent.cmake` only redirects that on **Windows** — it is a
+MAX_PATH workaround for MSBuild, not a cache — so off Windows it defaulted to
+`<build>/_deps`, inside the build tree. That made it uncacheable and re-downloaded
+on every clean build, three.js alone being a 2.2 GB git clone.
+
+`build.yml`'s cache steps were therefore saving nothing, and for a different reason
+per platform: on Linux the cached `~/.cache/Pulp/...` did not match CMake's
+lowercase `~/.cache/pulp/...`; on Windows the cached path carried an extra `Cache/`
+segment versus `$LOCALAPPDATA/Pulp/fc`; on macOS the path matched but the sources
+never left the build tree anyway.
+
+The matrix build now pins `PULP_FETCHCONTENT_BASE_DIR` beside the workspace and
+caches exactly that, passing it to CMake off Windows (Windows keeps its short
+MAX_PATH-safe directory). Measured on an ephemeral Linux runner: **414 s cold
+configure against 119 s warm** — about 295 s per clean build.
+
+If a dependency pin changes and a stale cache is suspected, the key includes
+`hashFiles('setup.sh')`; bump that or clear the Actions cache to force a refetch.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
