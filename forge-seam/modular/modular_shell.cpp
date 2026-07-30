@@ -3,6 +3,10 @@
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
 #include <forge/patch_loader.hpp>
+#include <forge/process_engine.hpp>
+
+#include <cstdlib>
+#include <filesystem>
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/processor.hpp>
@@ -12,6 +16,44 @@
 #include <cstddef>
 
 namespace forge_modular {
+
+namespace {
+
+/// Where the generator lives. A source checkout wins when present so a
+/// developer's edits are what runs; the bundle's own copy is the fallback.
+std::string tools_dir() {
+    if (const char* env = std::getenv("FORGE_MODULAR_TOOLS"); env && *env) return env;
+    const char* home = std::getenv("HOME");
+    const std::string source = "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
+    std::error_code ec;
+    if (std::filesystem::exists(std::filesystem::path(source) / "patch.py", ec))
+        return source;
+    return std::string(home ? home : ".") +
+           "/Library/Application Support/Forge Modular/tools/rack";
+}
+
+std::string build_log_path() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") +
+           "/Library/Application Support/Forge Modular/last-run.log";
+}
+
+/// One engine per process. The shell holds a raw pointer, so it must outlive
+/// every editor a host opens and closes.
+ProcessEngine& shared_engine() {
+    static ProcessEngine instance(tools_dir(), build_log_path());
+    return instance;
+}
+
+}  // namespace
+
+std::unique_ptr<pulp::format::Processor> create_forge_modular() {
+    auto shell = std::make_unique<ForgeModularShell>();
+    shell->set_engine(&shared_engine());
+    shell->watch_build_log(build_log_path());
+    return shell;
+}
+
 
 namespace {
 

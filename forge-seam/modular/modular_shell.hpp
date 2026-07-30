@@ -58,6 +58,13 @@ public:
     }
 };
 
+/// Build a Forge Modular processor with its generator already connected.
+///
+/// Shared by every format. The standalone once wired the engine itself, which
+/// meant a plugin build would have had none -- Build would reach a null engine
+/// and do nothing, exactly the defect that shipped in the app.
+std::unique_ptr<pulp::format::Processor> create_forge_modular();
+
 class ForgeModularShell final : public forge::ForgeShell {
 public:
     ForgeModularShell();
