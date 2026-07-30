@@ -187,6 +187,27 @@ void ForgeModularShell::style_tabs() {
                                     : TextButton::Style::secondary);
 }
 
+std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
+    // The mention list. Its candidates come from a source the app installs --
+    // the 4,705-module library index -- so this file never learns where that
+    // index lives.
+    auto v = mentions_.build();
+    mentions_.on_choose = [this](const std::string& slug) {
+        if (auto* c = chrome()) {
+            if (auto* input = c->prompt_input()) {
+                // Replace the token being typed, rather than appending: the user
+                // has already typed "@vc" and expects it to become the module,
+                // not to sit in front of it.
+                std::string text = input->text();
+                const auto at = text.rfind('@');
+                if (at != std::string::npos) text.erase(at);
+                input->set_text(text + slug + " ");
+            }
+        }
+    };
+    return v;
+}
+
 void ForgeModularShell::process_audio(
     pulp::audio::BufferView<float>& audio_output,
     const pulp::audio::BufferView<const float>& audio_input,

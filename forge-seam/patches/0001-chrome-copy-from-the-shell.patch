@@ -1,5 +1,5 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..5df8f84 100644
+index 0863f43..b17beb2 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
 @@ -722,6 +722,14 @@ public:
@@ -17,6 +17,14 @@ index 0863f43..5df8f84 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
+@@ -1171,6 +1179,7 @@ private:
+ 
+     // Non-owning pointers into the built tree (valid while the root lives).
+     pulp::view::View* root_ = nullptr;
++    pulp::view::View* overlay_accessory_ = nullptr;
+     pulp::view::View* title_bar_ = nullptr;
+     pulp::view::View* shell_body_ = nullptr;
+     pulp::view::View* shell_rail_ = nullptr;
 diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
 index 528e598..2e8e820 100644
 --- a/include/forge/fx_shell.hpp
@@ -110,7 +118,7 @@ index 27f98d0..cdecceb 100644
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..ac8d716 100644
+index c8101e1..c90737b 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -169,7 +177,7 @@ index c8101e1..ac8d716 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +392,27 @@ public:
+@@ -343,6 +392,35 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -193,12 +201,20 @@ index c8101e1..ac8d716 100644
 +    /// is byte-identical for anything that declines.
 +    virtual std::unique_ptr<pulp::view::View> home_accessory() { return nullptr; }
 +
++    /// A view layered over everything, or nullptr for none.
++    ///
++    /// Mounted last, beside the publish sheet, so it paints above the composer.
++    /// Forge Modular's `@` mention list lives here: it has to sit over the
++    /// prompt card and follow the caret, which nothing in the ordinary flow can
++    /// do. Every other product returns nullptr and gets no extra view.
++    virtual std::unique_ptr<pulp::view::View> overlay_accessory() { return nullptr; }
++
 +
      virtual bool has_build() const = 0;
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..35c7faf 100644
+index 1c3814e..e65e077 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,75 @@ private:
@@ -317,7 +333,22 @@ index 1c3814e..35c7faf 100644
  }
  
  ForgeChrome::~ForgeChrome() {
-@@ -1683,7 +1714,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1476,6 +1507,14 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
+     settings_surface_->build(*root);  // above the confirm sheet
+     audio_assets_surface_->build(*root);  // capability-aware asset authoring
+     build_publish_sheet(*root);   // marketplace authoring is the topmost sheet
++
++    // A product may layer one more thing above everything -- Forge Modular's
++    // mention list. Added after the sheet so it paints last, and absent for
++    // anything that returns nullptr.
++    if (auto overlay = shell_.overlay_accessory()) {
++        overlay_accessory_ = overlay.get();
++        root->add_child(std::move(overlay));
++    }
+     restore_open_state();
+     // A terminal turn may predate this editor instance. Its transaction state
+     // is shell-owned, so rematerialize the actions just as we rematerialize the
+@@ -1683,7 +1722,7 @@ void ForgeChrome::build_title_bar(View& parent) {
      player_title_ = title.get();
      title->flex().flex_shrink = 0;
      identity->add_child(std::move(title));
@@ -326,7 +357,7 @@ index 1c3814e..35c7faf 100644
                            kFaint, 0.8f);
      shell_kind_badge_ = tag.get();
      tag->set_border(kLine, 1, 5);
-@@ -1881,8 +1912,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1881,8 +1920,7 @@ void ForgeChrome::build_home(View& parent) {
  
      hero->add_child(make_spacer());
  
@@ -336,7 +367,7 @@ index 1c3814e..35c7faf 100644
                                kFontMono, 11, 400,
                                kMuted, 1.76f);
      home_eyebrow_ = eyebrow.get();
-@@ -1890,13 +1920,27 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1890,13 +1928,27 @@ void ForgeChrome::build_home(View& parent) {
      eyebrow->flex().flex_shrink = 0;
      hero->add_child(std::move(eyebrow));
  
@@ -365,7 +396,7 @@ index 1c3814e..35c7faf 100644
      // Prompt card: a writing row above the composer toolbar. The card has no
      // authored height — it is exactly as tall as the prompt, the attachment
      // strip, and the toolbar need, so it opens compact and grows around the
-@@ -1946,7 +1990,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1946,7 +1998,7 @@ void ForgeChrome::build_home(View& parent) {
          kHomePromptTextWidth, design::geometry::composer_max_text_lines,
          design::geometry::composer_text_line_height);
      prompt_input_ = input.get();
@@ -374,7 +405,7 @@ index 1c3814e..35c7faf 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -1993,6 +2037,28 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1993,6 +2045,28 @@ void ForgeChrome::build_home(View& parent) {
      actions->flex().align_items = FlexAlign::center;
      actions->flex().margin_top = 10;
      actions->flex().flex_shrink = 0;
@@ -403,7 +434,7 @@ index 1c3814e..35c7faf 100644
      auto attach = std::make_unique<TextButton>();
      home_attach_button_ = attach.get();
      attach->set_style(TextButton::Style::ghost);
-@@ -2047,6 +2113,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -2047,6 +2121,7 @@ void ForgeChrome::build_home(View& parent) {
      };
      actions->add_child(std::move(send));
      box->add_child(std::move(actions));
@@ -411,7 +442,7 @@ index 1c3814e..35c7faf 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3401,7 +3468,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3401,7 +3476,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -420,7 +451,7 @@ index 1c3814e..35c7faf 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -4268,7 +4335,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4343,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -429,7 +460,7 @@ index 1c3814e..35c7faf 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -5726,7 +5793,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5801,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -438,7 +469,7 @@ index 1c3814e..35c7faf 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +5926,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +5934,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -447,7 +478,7 @@ index 1c3814e..35c7faf 100644
      enter_home();
  }
  
-@@ -8630,6 +8697,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8705,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -467,7 +498,7 @@ index 1c3814e..35c7faf 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9019,7 +9099,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9107,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(

@@ -51,7 +51,7 @@ visual work before that was noticed.
 | 1 — the seam | **done**, 3 changes, 3 products byte-identical, each proven live |
 | 2 — Forge Modular runs Forge's UI | **done**, 7.2/255 vs Forge Instrument, verified windowed |
 | 3 — the tabs | **done** — centred, switch both ways, negative-controlled |
-| 4 — the `@` overlay | groundwork done, not built; see below |
+| 4 — the `@` overlay | **done** — filters, keyboard-first, negative-controlled |
 | 5–8 | not started; see `../SPEC-forge-modular.md` |
 
 ## Phase 4 groundwork — the overlay is reachable, and C++ was the right call
@@ -72,11 +72,9 @@ axes work here**, which is the thing the widget bridge could not do — it expos
 `start`/`end` and nothing vertical. That was the original argument for building
 this in C++ and it holds up.
 
-**The seam addition it needs:** one more hook, called where
-`build_publish_sheet` is, returning `nullptr` for the other three products. Same
-shape as `home_accessory()`, same no-leak guarantee, and it should be
-live-proved the same way — give Forge FX one temporarily, watch FX's baseline
-fail while Instrument and MIDI pass.
+**Added:** `ForgeShell::overlay_accessory()`, mounted right after
+`build_publish_sheet(*root)` so it paints above everything. `nullptr` for the
+other three products, and their baselines stayed byte-identical.
 
 **What the composer already gives you:** `ForgeChrome::prompt_input()` is public
 and returns the `TextEditor`, which has `on_text_input()` and `on_key_event()`

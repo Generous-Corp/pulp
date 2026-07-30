@@ -15,6 +15,8 @@
 #include "forge/brand.hpp"
 #include "forge/shell.hpp"
 
+#include "forge/mention_overlay.hpp"
+
 #include <pulp/view/buttons.hpp>
 
 #include <memory>
@@ -60,6 +62,11 @@ public:
     forge::ChromeCopy chrome_copy() const override;
     forge::ComposerRow composer_row() override;
     std::unique_ptr<pulp::view::View> home_accessory() override;
+    std::unique_ptr<pulp::view::View> overlay_accessory() override;
+
+    /// The mention list, so the composer's keystrokes can reach it and a test
+    /// can drive it without a window.
+    MentionOverlay& mentions() { return mentions_; }
 
     /// What a host sees.
     ///
@@ -121,6 +128,7 @@ public:
 private:
     void style_tabs();
 
+    MentionOverlay mentions_;
     pulp::view::TextButton* tab_module_ = nullptr;
     pulp::view::TextButton* tab_patch_ = nullptr;
     EngineClient* engine_ = nullptr;

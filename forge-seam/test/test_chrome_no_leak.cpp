@@ -27,6 +27,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -171,6 +172,7 @@ TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
 // Modular's answers actually reach the chrome — using the real shell rather than
 // a test double, because ForgeFxShell is final and cannot be subclassed.
 
+#include <forge/mention_overlay.hpp>
 #include <forge/modular_shell.hpp>
 
 TEST_CASE("Forge Modular's copy reaches the chrome", "[seam]") {
@@ -318,4 +320,128 @@ TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
     CHECK(shell.artifact() == forge_modular::Artifact::module);
     CHECK(shell.chrome_copy().hero_title == "What should the module do?");
     CHECK(shell.composer_row().right[1].label == "Build module");
+}
+
+// ── the @ mention overlay ────────────────────────────────────────────────────
+
+namespace {
+
+/// A small, known library so the assertions are about behaviour rather than
+/// whatever 4,705 real modules happen to contain.
+std::vector<forge_modular::MentionCandidate> test_library(const std::string& q) {
+    using A = forge_modular::MentionCandidate::Availability;
+    std::vector<forge_modular::MentionCandidate> all = {
+        {"Fundamental", "VCO", "Fundamental/VCO", A::ready},
+        {"Fundamental", "VCF", "Fundamental/VCF", A::ready},
+        {"4ms", "DrumBus", "4ms-ProducerPack/DrumBus", A::available},
+        {"Vult", "Freak", "Vult/Freak", A::paid},
+    };
+    if (q.empty()) return all;
+    std::vector<forge_modular::MentionCandidate> hit;
+    for (const auto& c : all) {
+        auto lower = [](std::string s) {
+            for (auto& ch : s) ch = static_cast<char>(std::tolower(ch));
+            return s;
+        };
+        if (lower(c.name).find(lower(q)) != std::string::npos) hit.push_back(c);
+    }
+    return hit;
+}
+
+}  // namespace
+
+TEST_CASE("typing @ opens the mention list and typing filters it", "[mention]") {
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    REQUIRE(view != nullptr);
+    overlay.set_source(test_library);
+
+    CHECK_FALSE(overlay.is_open());
+
+    overlay.handle_text("a patch with @", 14);
+    CHECK(overlay.is_open());
+    CHECK(overlay.candidates().size() == 4);
+
+    overlay.handle_text("a patch with @vc", 16);
+    CHECK(overlay.candidates().size() == 2);      // VCO and VCF
+
+    overlay.handle_text("a patch with @vco", 17);
+    CHECK(overlay.candidates().size() == 1);
+    CHECK(overlay.candidates()[0].name == "VCO");
+}
+
+TEST_CASE("a space closes the mention list", "[mention]") {
+    // "@ " is somebody typing an address, not reaching for a module.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(test_library);
+
+    overlay.handle_text("@vc", 3);
+    REQUIRE(overlay.is_open());
+    overlay.handle_text("@vc ", 4);
+    CHECK_FALSE(overlay.is_open());
+}
+
+TEST_CASE("the mention list is keyboard-first", "[mention]") {
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(test_library);
+    std::string chosen;
+    overlay.on_choose = [&](const std::string& slug) { chosen = slug; };
+
+    overlay.handle_text("@", 1);
+    REQUIRE(overlay.is_open());
+    CHECK(overlay.selected_index() == 0);
+
+    CHECK(overlay.handle_key(125));               // down
+    CHECK(overlay.selected_index() == 1);
+    CHECK(overlay.handle_key(126));               // up
+    CHECK(overlay.selected_index() == 0);
+
+    CHECK(overlay.handle_key(36));                // enter
+    CHECK(chosen == "Fundamental/VCO");
+    CHECK_FALSE(overlay.is_open());               // and it closes
+
+    // Escape dismisses without choosing.
+    chosen.clear();
+    overlay.handle_text("@", 1);
+    CHECK(overlay.handle_key(53));
+    CHECK_FALSE(overlay.is_open());
+    CHECK(chosen.empty());
+}
+
+TEST_CASE("only an installed module can be inserted", "[mention]") {
+    // Rack keeps missing modules as placeholders and offers to fetch them, so an
+    // unavailable mention is an offer -- but wiring a patch to a module the user
+    // does not have produces a patch that cannot sound. Enter refuses rather
+    // than silently making one.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source(test_library);
+    std::string chosen;
+    overlay.on_choose = [&](const std::string& slug) { chosen = slug; };
+
+    overlay.handle_text("@drum", 5);
+    REQUIRE(overlay.candidates().size() == 1);
+    CHECK_FALSE(overlay.candidates()[0].insertable());     // 4ms, not installed
+
+    CHECK(overlay.handle_key(36));      // consumed, so the prompt is not submitted
+    CHECK(chosen.empty());             // but nothing was inserted
+    CHECK(overlay.is_open());          // and it stays up rather than vanishing
+}
+
+TEST_CASE("the selection lands on something insertable", "[mention]") {
+    // Opening with an uninstallable row first would put Enter on a dead choice.
+    forge_modular::MentionOverlay overlay;
+    auto view = overlay.build();
+    overlay.set_source([](const std::string&) {
+        using A = forge_modular::MentionCandidate::Availability;
+        return std::vector<forge_modular::MentionCandidate>{
+            {"Vult", "Freak", "Vult/Freak", A::paid},
+            {"Fundamental", "VCA", "Fundamental/VCA", A::ready},
+        };
+    });
+    overlay.handle_text("@", 1);
+    CHECK(overlay.selected_index() == 1);
+    CHECK(overlay.candidates()[overlay.selected_index()].insertable());
 }
