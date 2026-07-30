@@ -541,6 +541,7 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // its old conversation.
     if (c->mode() == forge::ForgeChrome::Mode::Home) {
         c->begin_new_session();
+        reported_outcome_ = BuildOutcome::running;
         open_patch_.clear();
     }
 
@@ -643,6 +644,35 @@ std::string ForgeModularShell::ask() {
 }
 
 void ForgeModularShell::on_poll() {
+    // Read what the generator has written FIRST. Evaluating the outcome before
+    // pumping meant judging lines that had not been read yet, so every verdict
+    // arrived a tick late -- and in a test that polls once, never.
+    pump_build_log();
+
+    // Report the end of a run once. Left alone, the stage kept animating
+    // "materializing…" under a transcript that had already printed
+    // "gave up after 3 attempts" -- the screen contradicting itself.
+    const auto outcome = monitor_.outcome();
+    if (watching_ && outcome != BuildOutcome::running &&
+        outcome != reported_outcome_) {
+        reported_outcome_ = outcome;
+        if (auto* c = chrome()) {
+            switch (outcome) {
+                case BuildOutcome::done:
+                    c->set_skeleton_caption("built \u00b7 open it in Rack");
+                    break;
+                case BuildOutcome::refused:
+                    c->set_skeleton_caption("stopped \u2014 see the reason above");
+                    break;
+                case BuildOutcome::failed:
+                    c->set_skeleton_caption("build failed \u2014 nothing was installed");
+                    break;
+                case BuildOutcome::running:
+                    break;
+            }
+        }
+    }
+
     // Reveal Open in Rack the moment there is something to open.
     if (open_button_) {
         const bool ready = !artifact_path().empty();
@@ -651,11 +681,6 @@ void ForgeModularShell::on_poll() {
             open_button_->request_repaint();
         }
     }
-    // The heartbeat that makes a running build visible. Without it the pump
-    // existed and nothing ever called it: the generator wrote a perfectly good
-    // progress stream to its log while the screen showed an inert status card
-    // and a skeleton that never resolved.
-    pump_build_log();
 }
 
 bool ForgeModularShell::is_standalone() const {
@@ -670,6 +695,7 @@ bool ForgeModularShell::busy() const {
 void ForgeModularShell::watch_build_log(const std::string& path) {
     monitor_.watch(path);
     watching_ = true;
+    reported_outcome_ = BuildOutcome::running;
 }
 
 int ForgeModularShell::pump_build_log() {

@@ -255,6 +255,7 @@ private:
     MentionOverlay mentions_;
     BuildMonitor monitor_;
     bool watching_ = false;
+    BuildOutcome reported_outcome_ = BuildOutcome::running;
     bool standalone_ = false;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;

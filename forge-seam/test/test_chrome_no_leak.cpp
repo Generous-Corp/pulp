@@ -1779,3 +1779,47 @@ TEST_CASE("the title bar names what is being built", "[phase7][title]") {
                           forge::ForgeChrome::PromptOrigin::home);
     CHECK(chrome->project_title() != title);
 }
+
+TEST_CASE("the stage stops saying 'materializing' when a build ends",
+          "[phase7][stage]") {
+    // Reported from a screenshot: the skeleton kept animating under a
+    // transcript that had already printed "gave up after 3 attempts". A screen
+    // contradicting itself is worse than a screen saying nothing.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-stage.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+
+    auto caption = [&] { return chrome->skeleton_caption_text(); };
+
+    // While it runs, the stage says what it always said.
+    { std::ofstream f(log); f << "asking the model\n"; }
+    shell.on_poll();
+    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::running);
+    CHECK(caption().find("materializing") != std::string::npos);
+
+    // A hard failure must be visible on the stage, not only in the transcript.
+    { std::ofstream f(log, std::ios::app); f << "Traceback (most recent call last)\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::failed);
+    INFO("caption: " << caption());
+    CHECK(caption().find("materializing") == std::string::npos);
+    CHECK(caption().find("failed") != std::string::npos);
+
+    // Starting a new build clears it rather than carrying the old verdict.
+    chrome->begin_new_session();
+    CHECK(caption().find("materializing") != std::string::npos);
+}

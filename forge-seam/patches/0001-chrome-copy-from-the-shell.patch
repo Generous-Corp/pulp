@@ -1,8 +1,8 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..a6c7e89 100644
+index 0863f43..13f51a9 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
-@@ -640,6 +640,38 @@ public:
+@@ -640,6 +640,47 @@ public:
          return generation_turn_state_.has_active();
      }
      int chat_line_count() const { return chat_line_count_; }
@@ -25,6 +25,15 @@ index 0863f43..a6c7e89 100644
 +    void begin_new_session() {
 +        clear_chat_rail();
 +        show_stage_accessory(false);
++        set_skeleton_caption("materializing\u2026");
++    }
++
++    /// What the stage says while it waits. A build that has stopped must stop
++    /// saying "materializing…": a skeleton still animating under a transcript
++    /// that already reported failure is the screen contradicting itself.
++    void set_skeleton_caption(const std::string& text) {
++        if (skeleton_caption_) skeleton_caption_->set_text(text);
++        if (root_) root_->request_repaint();
 +    }
 +
 +    /// Put one line of narration in the Build transcript.
@@ -41,7 +50,7 @@ index 0863f43..a6c7e89 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -712,6 +744,16 @@ public:
+@@ -712,6 +753,16 @@ public:
      std::string first_tile_badge_text() const;
      bool delete_affordance_visible() const;
      const std::string& project_title() const { return project_title_; }
@@ -58,7 +67,7 @@ index 0863f43..a6c7e89 100644
      // The FIRST shelf tile — the live build's (tests: drive its hover reveal
      // without coordinates).
      pulp::view::View* shelf_tile() { return shelf_tile_; }
-@@ -722,6 +764,14 @@ public:
+@@ -722,6 +773,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -73,7 +82,7 @@ index 0863f43..a6c7e89 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1183,8 @@ private:
+@@ -1133,6 +1192,8 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
@@ -82,7 +91,7 @@ index 0863f43..a6c7e89 100644
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1223,7 @@ private:
+@@ -1171,6 +1232,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -230,7 +239,7 @@ index c8101e1..433eb33 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..b285a84 100644
+index 1c3814e..89f496f 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,75 @@ private:
@@ -595,7 +604,33 @@ index 1c3814e..b285a84 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9019,7 +9144,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9125,11 @@ void ForgeChrome::refresh_shelf() {
+         // too weak to explain why the default build is already making sound.
+         tile->set_border(model.in_slot ? kAccentDim : kLine,
+                          model.in_slot ? 2 : 1, 14);
+-        // The source card is one rounded clipping context. Without explicit
+-        // overflow:hidden the rectangular artwork paints across the rounded
+-        // top corners even though the outer border itself is rounded.
++        // overflow:hidden clips to the tile's RECT, not to its rounded border,
++        // so on its own the rectangular artwork still painted square corners
++        // poking outside the rounded outline. The art carries its own top
++        // radii for the same reason the marketplace card's art does; the clip
++        // stays for everything below it.
+         tile->set_overflow(View::Overflow::hidden);
+         tile->flex().flex_shrink = 0;
+ 
+@@ -9012,6 +9139,10 @@ void ForgeChrome::refresh_shelf() {
+         art->flex().padding_left = 10;
+         art->flex().padding_bottom = 10;
+         art->flex().justify_content = FlexJustify::end_;
++        // One point inside the tile's 14, so the fill sits within the border
++        // rather than running along its inside edge.
++        art->set_corner_radius_tl(13);
++        art->set_corner_radius_tr(13);
+         art->set_background_gradient_radial(
+             model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
+             {model.generated ? design::color::violet : design::color::indigo,
+@@ -9019,7 +9150,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
