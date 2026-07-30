@@ -34,6 +34,18 @@ std::optional<std::string> make_inspector_auth_proof(
     std::span<const std::uint8_t> token,
     const InspectorAuthChallenge& challenge);
 
+/// Construct and verify the distinct server-side transcript proof returned
+/// after the client proof succeeds.
+std::optional<std::string> make_inspector_server_auth_proof(
+    std::span<const std::uint8_t> token,
+    const InspectorAuthChallenge& challenge,
+    std::string_view client_proof);
+bool verify_inspector_server_auth_proof(
+    std::span<const std::uint8_t> token,
+    const InspectorAuthChallenge& challenge,
+    std::string_view client_proof,
+    std::string_view server_proof);
+
 /// One-shot verifier for a server-issued nonce. Every verification attempt
 /// consumes the challenge, so failed and replayed proofs fail closed.
 class InspectorAuthVerifier {
@@ -49,6 +61,8 @@ public:
 
     const InspectorAuthChallenge& challenge() const { return challenge_; }
     bool verify(std::string_view proof_hex);
+    std::optional<std::string> authenticate(
+        std::string_view client_proof);
     bool consumed() const { return consumed_; }
 
 private:

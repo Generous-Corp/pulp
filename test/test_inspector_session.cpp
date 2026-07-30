@@ -34,6 +34,7 @@ using pulp::inspect::make_request;
 using pulp::inspect::make_response;
 using pulp::inspect::make_event;
 using pulp::inspect::make_inspector_auth_proof;
+using pulp::inspect::verify_inspector_server_auth_proof;
 using pulp::inspect::detail::BoundedEventQueue;
 using pulp::inspect::detail::EventQueuePushResult;
 
@@ -352,9 +353,15 @@ TEST_CASE("inspector authentication binds a one-shot proof to session and protoc
     REQUIRE(proof.has_value());
 
     InspectorAuthVerifier verifier(token, challenge);
-    CHECK(verifier.verify(*proof));
+    const auto server_proof = verifier.authenticate(*proof);
+    REQUIRE(server_proof.has_value());
+    CHECK(*server_proof != *proof);
+    CHECK(verify_inspector_server_auth_proof(
+        token, challenge, *proof, *server_proof));
     CHECK(verifier.consumed());
     CHECK_FALSE(verifier.verify(*proof));
+    CHECK_FALSE(verify_inspector_server_auth_proof(
+        token, challenge, *proof, *proof));
 
     auto wrong_session = challenge;
     wrong_session.session_id = "session-2";

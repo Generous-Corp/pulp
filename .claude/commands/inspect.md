@@ -27,5 +27,6 @@ The inspector exposes:
 - Layout debug information
 
 Auto-discovery reads owner-private ephemeral records and credentials, selects
-an exact session/instance, and authenticates with a per-connection nonce/HMAC
-proof. Mutations additionally require the session's controller lease.
+an exact session/instance, and authenticates both peers with role-separated
+per-connection nonce/HMAC proofs. Mutations additionally require the session's
+controller lease.

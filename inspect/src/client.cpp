@@ -97,6 +97,7 @@ public:
     }
 
     ~Impl() {
+        disconnect_current(true);
         {
             std::lock_guard lock(event_state->mutex);
             event_state->stopping = true;
@@ -181,6 +182,30 @@ public:
                    event_state->connection_generation;
     }
 
+    void disconnect_current(bool clear_callbacks) {
+        std::uint64_t generation = 0;
+        {
+            std::lock_guard lock(mutex);
+            generation = ++connection_generation;
+            disconnected = true;
+            responses.clear();
+            in_flight.clear();
+            challenge.reset();
+        }
+        {
+            std::lock_guard lock(event_state->mutex);
+            event_state->connection_generation = generation;
+            event_state->events.clear();
+        }
+        if (clear_callbacks) {
+            connection.set_on_text_message(
+                std::function<void(std::string_view)>{});
+            connection.set_on_disconnected(std::function<void()>{});
+        }
+        connection.disconnect();
+        cv.notify_all();
+    }
+
     InspectorMessage wait_for_response(std::int64_t id,
                                        std::chrono::milliseconds timeout) {
         std::unique_lock lock(mutex);
@@ -219,9 +244,7 @@ InspectorClient::InspectorClient() : impl_(std::make_unique<Impl>()) {
     impl_->connection.set_max_message_bytes(1024u * 1024u);
 }
 
-InspectorClient::~InspectorClient() {
-    disconnect();
-}
+InspectorClient::~InspectorClient() = default;
 
 bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
                               const InspectorDiscoveryReader& discovery,
@@ -309,28 +332,25 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         impl_->connection.disconnect();
         return false;
     }
+    std::string server_proof;
+    try {
+        const auto result = choc::json::parse(response.params_json);
+        server_proof =
+            std::string(result["serverProof"].getString());
+    } catch (...) {
+    }
+    if (!verify_inspector_server_auth_proof(
+            token->bytes(), challenge, *proof, server_proof)) {
+        impl_->connection.disconnect();
+        return false;
+    }
     return true;
 }
 
 void InspectorClient::disconnect() {
     if (impl_->request_from_stale_callback())
         return;
-    std::uint64_t generation = 0;
-    {
-        std::lock_guard lock(impl_->mutex);
-        generation = ++impl_->connection_generation;
-        impl_->disconnected = true;
-        impl_->responses.clear();
-        impl_->in_flight.clear();
-        impl_->challenge.reset();
-    }
-    {
-        std::lock_guard lock(impl_->event_state->mutex);
-        impl_->event_state->connection_generation = generation;
-        impl_->event_state->events.clear();
-    }
-    impl_->connection.disconnect();
-    impl_->cv.notify_all();
+    impl_->disconnect_current(false);
 }
 
 bool InspectorClient::is_connected() const {
