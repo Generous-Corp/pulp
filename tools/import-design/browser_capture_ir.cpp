@@ -273,7 +273,14 @@ int lower_semantic_controls(const fs::path& path,
         // design_codegen keys the host binding off attributes["binding"] —
         // IRNode::param_key does not exist; that field belongs to the
         // geometry-detected element struct, which is a different lane.
+        // Two consumers read the host binding under DIFFERENT names, and a
+        // control that carries only one is silently half-wired: the JS codegen
+        // keys off "binding", while the C++ path's binding metadata reads
+        // "pulpParamKey". Exporting a panel with only the first produced eight
+        // real widgets and an EMPTY binding manifest -- knobs that render and
+        // move nothing.
         control.attributes["binding"] = param;
+        control.attributes["pulpParamKey"] = param;
         // The body of this control is the captured bitmap beneath it, so it
         // carries no background of its own and would otherwise fail the
         // has-a-body test that selects the value-only skin -- and be painted

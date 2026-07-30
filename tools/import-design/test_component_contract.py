@@ -74,5 +74,23 @@ problems, unknown, _ = check('<div class="wrapper"><span class="x"></span></div>
                              components, children)
 expect("non-component markup is not policed", not problems and not unknown)
 
+
+# ── The two binding names ───────────────────────────────────────────────────
+# The JS codegen keys the host binding off attributes["binding"]; the C++
+# binding metadata reads attributes["pulpParamKey"]. A control carrying only one
+# is silently HALF-WIRED — the C++ export produced eight real widgets and an
+# EMPTY binding manifest, which is knobs that render and move nothing.
+#
+# This is a SOURCE check, not a behavioural one: it reads the lowering for both
+# names. It would still pass if the emitter stopped consuming them, so it is a
+# tripwire against dropping a name, not proof the export is wired. The
+# behavioural proof needs a browser and lives in the e2e suite.
+_src = pathlib.Path(__file__).parent / "browser_capture_ir.cpp"
+_text = _src.read_text() if _src.exists() else ""
+expect("lowering writes attributes[\"binding\"]",
+       'attributes["binding"]' in _text, "(source not found)" if not _text else "")
+expect("lowering writes attributes[\"pulpParamKey\"]",
+       'attributes["pulpParamKey"]' in _text, "(source not found)" if not _text else "")
+
 print(f"\n{'FAILED: ' + ', '.join(failures) if failures else 'all checks passed'}")
 sys.exit(1 if failures else 0)
