@@ -86,10 +86,6 @@ struct InspectServerFixture {
     std::uint16_t port = 0;
 
     InspectServerFixture() {
-        fs::create_directories(temp);
-#ifndef _WIN32
-        REQUIRE(::chmod(temp.c_str(), 0700) == 0);
-#endif
         runtime_dir.set(temp.string());
         update_disabled.set("1");
         const auto token = generate_inspector_secret();

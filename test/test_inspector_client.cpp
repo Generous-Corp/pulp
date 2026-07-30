@@ -6,8 +6,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -39,10 +42,6 @@ public:
             suffix += "0123456789abcdef"[(*token)[index] & 0xf];
         path = std::filesystem::temp_directory_path() /
                ("pulp-inspector-client-test-" + suffix);
-        std::filesystem::create_directories(path);
-#ifndef _WIN32
-        REQUIRE(::chmod(path.c_str(), 0700) == 0);
-#endif
     }
     ~TemporaryDirectory() {
         std::error_code error;
@@ -128,6 +127,110 @@ TEST_CASE("authenticated client completes read and controlled mutation",
         client.request("State.setParameter",
                        R"({"id":"gain","value":0.75})")
             .is_error);
+}
+
+TEST_CASE("server stop releases leases before a session restart",
+          "[inspect][client][teardown][lease]") {
+    AuthenticatedFixture fixture;
+    auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient first;
+    REQUIRE(first.connect(records.front(), fixture.reader));
+    REQUIRE_FALSE(first.request("Session.acquireController").is_error);
+
+    fixture.server.stop();
+
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = fixture.session.info().session_id;
+    record.instance_id = fixture.session.info().instance_id;
+    record.plugin_id = fixture.session.info().plugin_id;
+    REQUIRE(fixture.server.start_authenticated(InspectorServerConfig{
+        &fixture.session, &fixture.publisher, record, *token}));
+
+    records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient replacement;
+    REQUIRE(replacement.connect(records.front(), fixture.reader));
+    const auto acquired =
+        replacement.request("Session.acquireController");
+    CHECK_FALSE(acquired.is_error);
+}
+
+TEST_CASE("server stop waits for an active request callback",
+          "[inspect][client][teardown][concurrency]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool release = false;
+    InspectorSession session(
+        {"session-stop-waits", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            entered = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(request.id, "{}");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    std::thread requester([&] {
+        (void)client.request("State.getParameters");
+    });
+    bool request_entered = false;
+    {
+        std::unique_lock lock(mutex);
+        request_entered = cv.wait_for(
+            lock, std::chrono::seconds(1), [&] { return entered; });
+        if (!request_entered)
+            release = true;
+    }
+    cv.notify_all();
+    if (!request_entered) {
+        requester.join();
+        FAIL("request handler did not start");
+    }
+
+    std::atomic<bool> stop_returned{false};
+    std::thread stopper([&] {
+        server.stop();
+        stop_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_FALSE(stop_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    cv.notify_all();
+    stopper.join();
+    requester.join();
+    CHECK(stop_returned.load(std::memory_order_acquire));
 }
 
 TEST_CASE("authentication rejects a replaced credential and teardown removes discovery",
