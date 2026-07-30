@@ -177,11 +177,12 @@ if(TARGET pulp-import-design)
     add_dependencies(pulp-test-cli-shellout pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
-if(TARGET pulp::inspect)
+if(TARGET pulp::inspect-runtime AND TARGET pulp::inspect-client)
     add_executable(pulp-test-cli-inspect-shellout test_cli_inspect_shellout.cpp)
     target_link_libraries(pulp-test-cli-inspect-shellout PRIVATE
         pulp::platform
-        pulp::inspect
+        pulp::inspect-runtime
+        pulp::inspect-client
         Catch2::Catch2WithMain)
     pulp_bind_cli_shellout_target(pulp-test-cli-inspect-shellout)
     catch_discover_tests(pulp-test-cli-inspect-shellout)

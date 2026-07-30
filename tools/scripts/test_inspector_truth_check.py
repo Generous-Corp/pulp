@@ -15,8 +15,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 'PULP_INSPECT_CAPABILITY(StateRead, "state.read", Observe, 1, 1, 1)\n',
             "docs/reference/development-inspector-capabilities.md":
                 "| `state.read` | yes | yes | available |\n"
-                "classified unavailable for future policy; "
-                "current dispatch does not enforce the registry\n",
+                "owner-private ephemeral record/token files; "
+                "Capability dispatch is fail-closed\n",
             "tools/cli/cmd_inspect.cpp": "custom fixture only\n",
             "tools/cli/pulp_cli.cpp":
                 "Connect to an explicitly hosted inspector fixture\n",
@@ -128,7 +128,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         (root / "docs/reference/development-inspector-capabilities.md").write_text(
             "| `state.read` | yes | yes | available |\n"
-            "filesystem and editor-launch methods are unavailable\n",
+            "current dispatch does not enforce the registry\n",
             encoding="utf-8",
         )
         errors = " ".join(inspector_truth_check.check_root(root))

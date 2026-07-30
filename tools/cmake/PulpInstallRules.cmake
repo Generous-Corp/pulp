@@ -88,6 +88,12 @@ endif()
 if(TARGET pulp-inspect-protocol)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-protocol)
 endif()
+if(TARGET pulp-inspect-discovery)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-discovery)
+endif()
+if(TARGET pulp-inspect-client)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-client)
+endif()
 if(TARGET pulp-inspect-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
 endif()
@@ -271,6 +277,9 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/authentication.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capabilities.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/capability_definitions.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/client.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/discovery.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_server.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"

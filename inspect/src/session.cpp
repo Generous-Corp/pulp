@@ -188,6 +188,7 @@ InspectorSession::InspectorSession(InspectorSessionInfo info,
 
 InspectorMessage InspectorSession::handle(std::string_view client_id,
                                           const InspectorMessage& request) {
+    std::lock_guard lock(mutex_);
     if (request.method.rfind("Session.", 0) == 0)
         return handle_session_method(client_id, request);
 
@@ -202,6 +203,7 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
 }
 
 void InspectorSession::disconnect(std::string_view client_id) {
+    std::lock_guard lock(mutex_);
     lease_.disconnect(client_id);
 }
 

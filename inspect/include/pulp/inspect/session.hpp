@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -123,6 +124,7 @@ private:
     InspectorAccessPolicy policy_;
     RequestHandler handler_;
     InspectorControllerLease lease_;
+    mutable std::mutex mutex_;
 };
 
 } // namespace pulp::inspect

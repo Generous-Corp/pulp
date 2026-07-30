@@ -12,6 +12,24 @@ target_include_directories(pulp-inspect-protocol
 )
 target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
 
+add_library(pulp-inspect-discovery src/discovery.cpp)
+add_library(pulp::inspect-discovery ALIAS pulp-inspect-discovery)
+target_include_directories(pulp-inspect-discovery
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-discovery PUBLIC pulp::inspect-protocol)
+
+add_library(pulp-inspect-client src/client.cpp)
+add_library(pulp::inspect-client ALIAS pulp-inspect-client)
+target_include_directories(pulp-inspect-client
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-client
+    PUBLIC pulp::inspect-discovery
+    PRIVATE pulp::events)
+
 add_library(pulp-inspect-runtime
     src/inspector_server.cpp
     src/main_thread_rpc.cpp)
@@ -21,7 +39,7 @@ target_include_directories(pulp-inspect-runtime
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-runtime
-    PUBLIC pulp::inspect-protocol pulp::events)
+    PUBLIC pulp::inspect-protocol pulp::inspect-discovery pulp::events)
 
 if(PULP_ENABLE_GPU AND NOT ANDROID)
 add_library(pulp-inspect)

@@ -2,10 +2,13 @@
 // Accepts multiple clients, dispatches requests, broadcasts events.
 #pragma once
 
+#include <pulp/inspect/discovery.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/session.hpp>
 #include <pulp/events/interprocess_connection.hpp>
 
-#include <functional>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -13,27 +16,30 @@
 
 namespace pulp::inspect {
 
-using RequestHandler = std::function<InspectorMessage(const InspectorMessage& request)>;
+struct InspectorServerConfig {
+    InspectorSession* session = nullptr;
+    InspectorDiscoveryPublisher* discovery = nullptr;
+    InspectorDiscoveryRecord record;
+    std::vector<std::uint8_t> token;
+    std::chrono::milliseconds authentication_timeout =
+        std::chrono::seconds(3);
+    std::size_t max_message_bytes = 1024u * 1024u;
+};
 
 /// TCP server exposing the inspector protocol to external tools.
 /// Wraps InterprocessConnectionServer for multi-client support.
 class InspectorServer {
 public:
-    /// Create server. Does not start listening until start() is called.
+    /// Create server. Does not listen until start_authenticated() succeeds.
     InspectorServer();
     ~InspectorServer();
 
-    /// Start listening on the given port. Returns true on success.
-    /// Default port: 9147. Configurable via PULP_INSPECTOR_PORT env var.
-    bool start(int port = 0);
+    /// Start an authenticated, ephemeral loopback session and publish its
+    /// discovery record. The session and publisher must outlive the server.
+    bool start_authenticated(InspectorServerConfig config);
 
     /// Stop listening and disconnect all clients.
     void stop();
-
-    /// Set the handler that processes incoming requests.
-    /// Called on a background thread — handler must be thread-safe or
-    /// marshal to UI thread internally.
-    void set_request_handler(RequestHandler handler);
 
     /// Broadcast an event to all connected clients.
     void broadcast(const InspectorMessage& event);
@@ -44,17 +50,16 @@ public:
     /// The port we're actually listening on (may differ from requested if 0 was passed).
     int port() const { return port_; }
 
-    /// Write port to discovery file so CLI tools can find us.
-    void advertise_port() const;
-
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
     int port_ = 0;
-    RequestHandler handler_;
-    mutable std::mutex clients_mutex_;
-    mutable std::string discovery_file_;
-
+    InspectorSession* session_ = nullptr;
+    InspectorDiscoveryPublisher* discovery_ = nullptr;
+    std::vector<std::uint8_t> token_;
+    std::chrono::milliseconds authentication_timeout_ =
+        std::chrono::seconds(3);
+    mutable std::mutex lifecycle_mutex_;
     void on_message_received(const std::string& data, events::InterprocessConnection* sender);
 };
 

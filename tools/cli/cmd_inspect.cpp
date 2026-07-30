@@ -1,42 +1,24 @@
-// cmd_inspect.cpp — experimental client for an explicitly hosted inspector fixture
-// Interactive REPL or one-shot command mode.
+// cmd_inspect.cpp — authenticated client for explicitly enabled inspector sessions
 
-#include <pulp/inspect/protocol.hpp>
-#include <pulp/events/interprocess_connection.hpp>
-#include <pulp/runtime/system.hpp>
+#include <pulp/inspect/client.hpp>
+#include <pulp/inspect/discovery.hpp>
 
-#include <filesystem>
+#include <algorithm>
+#include <charconv>
 #include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
-#include <charconv>
 #include <system_error>
-#include <thread>
-#include <chrono>
-#include <atomic>
 #include <vector>
 
-#ifdef _WIN32
-#include <process.h>
-#define getpid _getpid
-#else
-#include <unistd.h>
-#endif
-
-namespace fs = std::filesystem;
-
-// Minimal helpers (these exist in pulp_cli.cpp as static — we duplicate the tiny ones)
-static std::string inspect_trim(const std::string& s) {
-    auto start = s.find_first_not_of(" \t\r\n");
+static std::string inspect_trim(const std::string& value) {
+    const auto start = value.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return {};
-    auto end = s.find_last_not_of(" \t\r\n");
-    return s.substr(start, end - start + 1);
+    const auto end = value.find_last_not_of(" \t\r\n");
+    return value.substr(start, end - start + 1);
 }
 
-// Simple color helpers for the inspect command
 static bool g_inspect_color = true;
-static std::string ic_dim()   { return g_inspect_color ? "\033[2m"  : ""; }
 static std::string ic_bold()  { return g_inspect_color ? "\033[1m"  : ""; }
 static std::string ic_cyan()  { return g_inspect_color ? "\033[36m" : ""; }
 static std::string ic_green() { return g_inspect_color ? "\033[32m" : ""; }
@@ -46,288 +28,209 @@ static std::string ic_reset() { return g_inspect_color ? "\033[0m"  : ""; }
 namespace {
 
 using namespace pulp::inspect;
-using namespace pulp::events;
 
-static bool parse_port_arg(const std::string& text, int& out) {
-    if (text.empty()) return false;
-
-    int value = 0;
-    const char* begin = text.data();
-    const char* end = begin + text.size();
-    auto [ptr, ec] = std::from_chars(begin, end, value);
-    if (ec != std::errc{} || ptr != end || value <= 0 || value > 65535) {
-        return false;
-    }
-
-    out = value;
-    return true;
-}
-
-static bool require_arg_value(const std::vector<std::string>& args,
-                              size_t& i,
-                              const char* flag,
-                              std::string& out) {
-    if (i + 1 >= args.size()) {
+bool require_arg_value(const std::vector<std::string>& args,
+                       std::size_t& index,
+                       const char* flag,
+                       std::string& output) {
+    if (index + 1 >= args.size()) {
         std::cerr << "Error: " << flag << " requires a value\n";
         return false;
     }
-    out = args[++i];
-    if (out.empty()) {
+    output = args[++index];
+    if (output.empty()) {
         std::cerr << "Error: " << flag << " requires a non-empty value\n";
         return false;
     }
     return true;
 }
 
-// Find the inspector port by reading discovery files
-static int discover_port() {
-    std::string tmp_dir;
-#ifdef _WIN32
-    if (auto env = pulp::runtime::get_env("TEMP")) tmp_dir = *env;
-    else tmp_dir = ".";
-#else
-    if (auto env = pulp::runtime::get_env("TMPDIR")) tmp_dir = *env;
-    else tmp_dir = "/tmp";
-#endif
+bool parse_port(std::string_view text, int& output) {
+    int value = 0;
+    const auto [end, error] =
+        std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() ||
+        value <= 0 || value > 65535)
+        return false;
+    output = value;
+    return true;
+}
 
-    // Look for pulp-inspector-*.port files, pick the most recent
-    int found_port = 0;
-    fs::file_time_type newest_time{};
+std::string endpoint_host(std::string_view endpoint) {
+    const auto separator = endpoint.rfind(':');
+    return separator == std::string_view::npos
+               ? std::string(endpoint)
+               : std::string(endpoint.substr(0, separator));
+}
 
-    std::error_code ec;
-    if (!fs::is_directory(tmp_dir, ec)) {
+int endpoint_port(std::string_view endpoint) {
+    const auto separator = endpoint.rfind(':');
+    int value = 0;
+    if (separator == std::string_view::npos ||
+        !parse_port(endpoint.substr(separator + 1), value))
         return 0;
-    }
-
-    fs::directory_iterator it(tmp_dir, ec);
-    fs::directory_iterator end;
-    for (; !ec && it != end; it.increment(ec)) {
-        const auto& entry = *it;
-        auto name = entry.path().filename().string();
-        if (name.find("pulp-inspector-") == 0 && name.find(".port") != std::string::npos) {
-            std::ifstream f(entry.path());
-            int port = 0;
-            if (f >> port && port > 0) {
-                std::error_code time_ec;
-                auto mtime = fs::last_write_time(entry.path(), time_ec);
-                if (time_ec) continue;
-                if (mtime > newest_time || found_port == 0) {
-                    newest_time = mtime;
-                    found_port = port;
-                }
-            }
-        }
-    }
-
-    return found_port;
+    return value;
 }
 
-// Send a request and wait for response
-static std::string send_request(InterprocessConnection& conn, const std::string& method,
-                                 const std::string& params = "{}") {
-    static std::atomic<int64_t> next_id{1};
-    auto id = next_id++;
-    auto msg = make_request(id, method, params);
-    auto json = encode_message(msg);
-    conn.send_message(json);
-
-    // Wait for response (simple blocking — fine for CLI)
-    // The response will arrive via on_text_message
-    // For now, we use a simple sleep+poll approach
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    return "";  // Response handled by callback
+void print_error(const InspectorMessage& response) {
+    std::cerr << "Error";
+    if (!response.error_code.empty())
+        std::cerr << " [" << response.error_code << "]";
+    std::cerr << ": " << response.params_json << "\n";
+    if (!response.error_data_json.empty() &&
+        response.error_data_json != "{}")
+        std::cerr << response.error_data_json << "\n";
 }
 
-} // anonymous namespace
+} // namespace
 
 int cmd_inspect(const std::vector<std::string>& args) {
-    // Parse flags
-    std::string host = "127.0.0.1";
+    std::string host;
     int port = 0;
-    std::string one_shot_command;
-    std::string one_shot_params = "{}";
+    std::string session_id;
+    std::string command;
+    std::string params = "{}";
     std::string output_file;
     bool params_provided = false;
 
-    for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp inspect — experimental client for an explicitly hosted fixture\n\n";
-            std::cout << "Usage: pulp inspect [options]\n\n";
-            std::cout << "Options:\n";
-            std::cout << "  --host HOST       Connect to HOST (default: 127.0.0.1)\n";
-            std::cout << "  --port PORT       Connect to PORT (default: auto-discover)\n";
-            std::cout << "  --command METHOD  Send one command and print result\n";
-            std::cout << "  --params JSON     JSON params for --command (default: {})\n";
-            std::cout << "  --output FILE     Write result to FILE (with --command)\n\n";
-            std::cout << "Examples:\n";
-            std::cout << "  pulp inspect                              # Interactive REPL\n";
-            std::cout << "  pulp inspect --command DOM.getDocument     # One-shot query\n";
-            std::cout << "  pulp inspect --command State.getParameters # Parameter snapshot\n";
-            std::cout << "  pulp inspect --command Runtime.getCapabilities  # Debug-console capabilities\n";
-            std::cout << "  pulp inspect --command Runtime.evaluate --params '{\"code\":\"1+1\"}'  # Custom fixture only\n";
-            std::cout << "  pulp inspect --command Console.getMessages --params '{\"sinceSeq\":0}'  # Tail device logs\n";
-            std::cout << "\n";
-            std::cout << "Note: normal Pulp standalone and plugin-format launches do not start an\n";
-            std::cout << "inspector endpoint. This client requires a custom host/test fixture that\n";
-            std::cout << "constructs InspectorServer. Its transitional transport is unauthenticated.\n";
-            std::cout << "Runtime.evaluate is RCE and additionally requires explicit custom-host\n";
-            std::cout << "wiring and opt-in. Runtime reports\n";
-            std::cout << "honest capabilities via Runtime.getCapabilities; source-line\n";
-            std::cout << "breakpoints/stepping are not offered (mainline QuickJS has no debug protocol).\n";
-            std::cout << "Capture.screenshot reports unavailable until host-capture wiring lands.\n";
+    for (std::size_t index = 0; index < args.size(); ++index) {
+        const auto& arg = args[index];
+        if (arg == "--help" || arg == "-h") {
+            std::cout
+                << "pulp inspect — authenticated client for explicitly enabled sessions\n\n"
+                << "Usage: pulp inspect [options]\n\n"
+                << "Options:\n"
+                << "  --session ID      Select the exact live session\n"
+                << "  --host HOST       Filter discovery by host (loopback only)\n"
+                << "  --port PORT       Filter discovery by port; never bypasses auth\n"
+                << "  --command METHOD  Send one command and print its result\n"
+                << "  --params JSON     JSON params for --command (default: {})\n"
+                << "  --output FILE     Write the one-shot result to FILE\n\n"
+                << "Normal launches do not start an inspector endpoint. A standalone\n"
+                << "must be explicitly launched with an inspector profile. Discovery is\n"
+                << "ephemeral and every connection proves possession of its owner-private\n"
+                << "session credential. Runtime.evaluate additionally requires its\n"
+                << "separate build and runtime opt-in.\n";
             return 0;
         }
-        if (args[i] == "--host") {
-            if (!require_arg_value(args, i, "--host", host)) return 2;
-        } else if (args[i] == "--port") {
+        if (arg == "--host") {
+            if (!require_arg_value(args, index, "--host", host)) return 2;
+        } else if (arg == "--port") {
             std::string text;
-            if (!require_arg_value(args, i, "--port", text)) return 2;
-            if (!parse_port_arg(text, port)) {
+            if (!require_arg_value(args, index, "--port", text)) return 2;
+            if (!parse_port(text, port)) {
                 std::cerr << "Error: invalid --port value: " << text << "\n";
                 return 2;
             }
-        } else if (args[i] == "--command") {
-            if (!require_arg_value(args, i, "--command", one_shot_command)) return 2;
-        } else if (args[i] == "--params") {
-            if (!require_arg_value(args, i, "--params", one_shot_params)) return 2;
+        } else if (arg == "--session") {
+            if (!require_arg_value(args, index, "--session", session_id))
+                return 2;
+        } else if (arg == "--command") {
+            if (!require_arg_value(args, index, "--command", command)) return 2;
+        } else if (arg == "--params") {
+            if (!require_arg_value(args, index, "--params", params)) return 2;
             params_provided = true;
-        } else if (args[i] == "--output") {
-            if (!require_arg_value(args, i, "--output", output_file)) return 2;
+        } else if (arg == "--output") {
+            if (!require_arg_value(args, index, "--output", output_file))
+                return 2;
         } else {
-            std::cerr << "Error: unknown inspect argument: " << args[i] << "\n";
-            std::cerr << "Run `pulp inspect --help` for usage.\n";
+            std::cerr << "Error: unknown inspect argument: " << arg << "\n"
+                      << "Run `pulp inspect --help` for usage.\n";
             return 2;
         }
     }
 
-    if (!output_file.empty() && one_shot_command.empty()) {
+    if (!output_file.empty() && command.empty()) {
         std::cerr << "Error: --output requires --command\n";
         return 2;
     }
-    if (params_provided && one_shot_command.empty()) {
+    if (params_provided && command.empty()) {
         std::cerr << "Error: --params requires --command\n";
         return 2;
     }
-
-    // Auto-discover port if not specified
-    if (port == 0) {
-        port = discover_port();
-        if (port == 0) {
-            std::cerr << "Error: no running Pulp inspector found.\n";
-            std::cerr << "  Start an explicitly wired custom-host fixture, or specify --port.\n";
-            return 1;
-        }
-        std::cout << ic_dim() << "Found inspector on port " << port << ic_reset() << "\n";
+    if (!host.empty() && host != "127.0.0.1" && host != "localhost") {
+        std::cerr << "Error: inspector sessions are loopback-only\n";
+        return 2;
     }
 
-    // Connect
-    InterprocessConnection conn;
-    auto address = host + ":" + std::to_string(port);
-    std::cout << "Connecting to " << address << "...\n";
-
-    // Set up message handler
-    std::atomic<bool> got_response{false};
-    std::atomic<bool> got_error{false};
-    std::string last_response;
-    conn.on_text_message = [&](std::string_view msg) {
-        InspectorMessage response;
-        if (decode_message(std::string(msg), response)) {
-            if (!one_shot_command.empty()) {
-                // One-shot mode: capture result
-                if (response.is_error) {
-                    std::cerr << "Error: " << response.params_json << "\n";
-                    got_error = true;
-                } else {
-                    last_response = response.params_json;
-                }
-                got_response = true;
-            } else {
-                // REPL mode: print events and responses
-                if (!response.method.empty()) {
-                    // Event
-                    std::cout << ic_cyan() << "← " << response.method << ic_reset() << "\n";
-                    if (!response.params_json.empty() && response.params_json != "{}")
-                        std::cout << "  " << response.params_json << "\n";
-                } else {
-                    // Response
-                    if (response.is_error) {
-                        std::cout << ic_red() << "✗ Error: " << response.params_json << ic_reset() << "\n";
-                    } else {
-                        std::cout << ic_green() << "✓" << ic_reset() << " "
-                                  << response.params_json << "\n";
-                    }
-                }
-            }
-        }
-    };
-
-    if (!conn.connect(address, IpcTransport::Socket)) {
-        std::cerr << "Error: could not connect to " << address << "\n";
+    InspectorDiscoveryReader discovery;
+    auto records = discovery.list();
+    records.erase(
+        std::remove_if(records.begin(), records.end(), [&](const auto& record) {
+            return (!host.empty() && endpoint_host(record.endpoint) != host) ||
+                   (port != 0 && endpoint_port(record.endpoint) != port);
+        }),
+        records.end());
+    std::string selection_error;
+    const auto selected =
+        select_inspector_session(records, session_id, &selection_error);
+    if (!selected) {
+        std::cerr << "Error: " << selection_error << "\n";
         return 1;
     }
 
-    std::cout << "  " << ic_green() << "\xe2\x9c\x93" << ic_reset() << " Connected to inspector\n";
+    std::cout << "Found inspector session " << selected->session_id << "\n"
+              << "Connecting to " << selected->endpoint << "...\n";
+    InspectorClient client;
+    client.set_event_handler([](const InspectorMessage& event) {
+        std::cout << ic_cyan() << "← " << event.method << ic_reset() << "\n";
+        if (!event.params_json.empty() && event.params_json != "{}")
+            std::cout << "  " << event.params_json << "\n";
+    });
+    if (!client.connect(*selected, discovery)) {
+        std::cerr << "Error: authentication or connection failed for session "
+                  << selected->session_id << "\n";
+        return 1;
+    }
+    std::cout << "  " << ic_green() << "✓" << ic_reset()
+              << " Connected to inspector\n";
 
-    // One-shot mode
-    if (!one_shot_command.empty()) {
-        auto msg = make_request(1, one_shot_command, one_shot_params);
-        auto json = encode_message(msg);
-        conn.send_message(json);
-
-        // Wait for response
-        for (int i = 0; i < 50 && !got_response; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        if (!got_response) {
-            std::cerr << "Error: no response received (timeout)\n";
+    if (!command.empty()) {
+        const auto response = client.request(command, params);
+        if (response.is_error) {
+            print_error(response);
             return 1;
         }
-
-        if (got_error) return 1;
-
         if (!output_file.empty()) {
-            std::ofstream f(output_file);
-            f << last_response;
+            std::ofstream output(output_file, std::ios::trunc);
+            if (!output || !(output << response.params_json)) {
+                std::cerr << "Error: could not write " << output_file << "\n";
+                return 1;
+            }
             std::cout << "Written to " << output_file << "\n";
         } else {
-            std::cout << last_response << "\n";
+            std::cout << response.params_json << "\n";
         }
-
         return 0;
     }
 
-    // REPL mode
-    std::cout << "Inspector REPL. Type a method name (e.g., DOM.getDocument) or 'quit'.\n\n";
-
+    std::cout << "Inspector REPL. Enter METHOD [JSON_PARAMS], or 'quit'.\n\n";
     std::string line;
-    int64_t request_id = 1;
     while (true) {
         std::cout << ic_bold() << "inspect> " << ic_reset();
         std::cout.flush();
-
-        if (!std::getline(std::cin, line)) break;
+        if (!std::getline(std::cin, line))
+            break;
         line = inspect_trim(line);
-        if (line.empty()) continue;
-        if (line == "quit" || line == "exit" || line == "q") break;
-
-        // Parse: METHOD [JSON_PARAMS]
+        if (line.empty())
+            continue;
+        if (line == "quit" || line == "exit" || line == "q")
+            break;
         std::string method = line;
-        std::string params = "{}";
-        auto space = line.find(' ');
-        if (space != std::string::npos) {
-            method = line.substr(0, space);
-            params = inspect_trim(line.substr(space + 1));
+        std::string request_params = "{}";
+        if (const auto separator = line.find(' ');
+            separator != std::string::npos) {
+            method = line.substr(0, separator);
+            request_params = inspect_trim(line.substr(separator + 1));
         }
-
-        auto msg = make_request(request_id++, method, params);
-        auto json = encode_message(msg);
-        conn.send_message(json);
-
-        // Brief pause to receive response
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        const auto response = client.request(method, request_params);
+        if (response.is_error) {
+            std::cout << ic_red() << "✗ [" << response.error_code << "] "
+                      << response.params_json << ic_reset() << "\n";
+        } else {
+            std::cout << ic_green() << "✓" << ic_reset() << " "
+                      << response.params_json << "\n";
+        }
     }
-
-    conn.disconnect();
     return 0;
 }
