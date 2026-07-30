@@ -1,6 +1,8 @@
 #include "mcp_tools.hpp"
 
 #include "mcp_json.hpp"
+#include "timeline_mcp_tools.h"
+#include "timeline_session_store.hpp"
 
 #include <pulp/tools/timeline/agent.hpp>
 
@@ -14,6 +16,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace pulp_mcp {
 namespace {
@@ -21,9 +24,14 @@ namespace {
 struct TimelineArguments {
     std::shared_ptr<const pulp::timeline::ParsedJson> parsed;
     const pulp::timeline::JsonValue* project = nullptr;
+    const pulp::timeline::JsonValue* session_id = nullptr;
     const pulp::timeline::JsonValue* commands = nullptr;
     const pulp::timeline::JsonValue* output = nullptr;
     const pulp::timeline::JsonValue* sample_rate = nullptr;
+    const pulp::timeline::JsonValue* input = nullptr;
+    const pulp::timeline::JsonValue* format = nullptr;
+    const pulp::timeline::JsonValue* accept_losses = nullptr;
+    const pulp::timeline::JsonValue* plan_only = nullptr;
 };
 
 pulp::runtime::Result<TimelineArguments, std::string>
@@ -37,9 +45,14 @@ parse_timeline_arguments(const std::string& params_json) {
     TimelineArguments result;
     result.parsed = std::move(parsed).value();
     result.project = root.find("project");
+    result.session_id = root.find("session_id");
     result.commands = root.find("commands");
     result.output = root.find("output");
     result.sample_rate = root.find("sample_rate");
+    result.input = root.find("input");
+    result.format = root.find("format");
+    result.accept_losses = root.find("accept_losses");
+    result.plan_only = root.find("plan_only");
     return pulp::runtime::Ok(std::move(result));
 }
 
@@ -97,7 +110,20 @@ std::string handle_timeline_project_open(const std::string& params_json) {
     const auto* project = required_timeline_string(arguments.value().project);
     if (project == nullptr)
         return timeline_argument_error("Error: project is required");
-    return timeline_result(pulp::tools::timeline::project_open(timeline_project_source(*project)));
+    auto opened = pulp::tools::timeline::project_open(timeline_project_source(*project));
+    if (!opened)
+        return timeline_result(std::move(opened));
+    auto parsed = pulp::timeline::parse_json(opened.json);
+    const auto* canonical = parsed ? parsed.value()->root().find("project") : nullptr;
+    if (canonical == nullptr)
+        return timeline_argument_error("Error: opened project did not contain canonical state");
+    std::string error;
+    auto session_id = open_timeline_session(parsed.value()->raw(*canonical), error);
+    if (!session_id)
+        return timeline_argument_error("Error: " + error);
+    opened.json.insert(opened.json.size() - 1,
+                       ",\"session_id\":" + pulp::timeline::quote_json_string(*session_id));
+    return timeline_result(std::move(opened));
 }
 
 std::string handle_timeline_command_apply(const std::string& params_json) {
@@ -105,14 +131,48 @@ std::string handle_timeline_command_apply(const std::string& params_json) {
     if (!arguments)
         return timeline_argument_error(arguments.error());
     const auto* project = required_timeline_string(arguments.value().project);
-    if (project == nullptr)
-        return timeline_argument_error("Error: project is required");
+    const auto* session_id = required_timeline_string(arguments.value().session_id);
+    if ((project == nullptr) == (session_id == nullptr))
+        return timeline_argument_error("Error: exactly one of project or session_id is required");
     const auto* commands = arguments.value().commands;
     if (commands == nullptr || commands->kind != pulp::timeline::JsonValue::Kind::Array ||
         commands->array.empty())
         return timeline_argument_error("Error: commands must be a non-empty array");
-    return timeline_result(pulp::tools::timeline::command_apply(
-        timeline_project_source(*project), arguments.value().parsed->raw(*commands)));
+    const auto commands_json = arguments.value().parsed->raw(*commands);
+    if (session_id != nullptr)
+        return timeline_result(apply_timeline_session(*session_id, commands_json));
+    return timeline_result(
+        pulp::tools::timeline::command_apply(timeline_project_source(*project), commands_json));
+}
+
+std::string handle_timeline_diff(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session_id = required_timeline_string(arguments.value().session_id);
+    if (session_id == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    return timeline_result(diff_timeline_session(*session_id));
+}
+
+std::string handle_timeline_undo(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session_id = required_timeline_string(arguments.value().session_id);
+    if (session_id == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    return timeline_result(undo_timeline_session(*session_id));
+}
+
+std::string handle_timeline_redo(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* session_id = required_timeline_string(arguments.value().session_id);
+    if (session_id == nullptr)
+        return timeline_argument_error("Error: session_id is required");
+    return timeline_result(redo_timeline_session(*session_id));
 }
 
 std::string handle_timeline_validate(const std::string& params_json) {
@@ -153,6 +213,90 @@ std::string handle_timeline_render(const std::string& params_json) {
     return timeline_result(pulp::tools::timeline::render(
         timeline_project_source(*project),
         pulp::tools::timeline::filesystem_path_from_utf8(*output), sample_rate.value()));
+}
+
+std::string handle_timeline_export(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* project = required_timeline_string(arguments.value().project);
+    const auto* format = required_timeline_string(arguments.value().format);
+    if (project == nullptr || format == nullptr)
+        return timeline_argument_error("Error: project and format are required");
+    bool plan_only = false;
+    if (const auto* value = arguments.value().plan_only) {
+        if (value->kind != pulp::timeline::JsonValue::Kind::Boolean)
+            return timeline_argument_error("Error: plan_only must be a boolean");
+        plan_only = value->boolean;
+    }
+    if (plan_only) {
+        if (arguments.value().output != nullptr)
+            return timeline_argument_error("Error: output must be absent when plan_only is true");
+        if (arguments.value().accept_losses != nullptr)
+            return timeline_argument_error(
+                "Error: accept_losses must be absent when plan_only is true");
+        return timeline_result(pulp::tools::timeline::plan_export_project(
+            timeline_project_source(*project), *format));
+    }
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (output == nullptr)
+        return timeline_argument_error("Error: output is required when publishing an export");
+    std::vector<std::string> accepted_losses;
+    if (const auto* losses = arguments.value().accept_losses) {
+        if (losses->kind != pulp::timeline::JsonValue::Kind::Array)
+            return timeline_argument_error("Error: accept_losses must be an array");
+        accepted_losses.reserve(losses->array.size());
+        for (const auto& loss : losses->array) {
+            if (loss.kind != pulp::timeline::JsonValue::Kind::String || loss.scalar.empty())
+                return timeline_argument_error(
+                    "Error: every accept_losses entry must be a concept id");
+            accepted_losses.push_back(loss.scalar);
+        }
+    }
+    return timeline_result(pulp::tools::timeline::export_project(
+        timeline_project_source(*project), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), accepted_losses));
+}
+
+std::string handle_timeline_import(const std::string& params_json) {
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    const auto* input = required_timeline_string(arguments.value().input);
+    const auto* format = required_timeline_string(arguments.value().format);
+    const auto* output = required_timeline_string(arguments.value().output);
+    if (input == nullptr || format == nullptr || output == nullptr)
+        return timeline_argument_error("Error: input, format, and output are required");
+    return timeline_result(pulp::tools::timeline::import_project(
+        pulp::tools::timeline::filesystem_path_from_utf8(*input), *format,
+        pulp::tools::timeline::filesystem_path_from_utf8(*output)));
+}
+
+std::optional<std::string> handle_timeline_tool(std::string_view name,
+                                                const std::string& params_json) {
+    using Handler = std::string (*)(const std::string&);
+    struct ToolBinding {
+        std::string_view name;
+        Handler handler;
+    };
+    static constexpr std::array<ToolBinding, 10> bindings{
+        ToolBinding{kTimelineProjectOpenToolName, handle_timeline_project_open},
+        ToolBinding{kTimelineCommandApplyToolName, handle_timeline_command_apply},
+        ToolBinding{kTimelineDiffToolName, handle_timeline_diff},
+        ToolBinding{kTimelineUndoToolName, handle_timeline_undo},
+        ToolBinding{kTimelineRedoToolName, handle_timeline_redo},
+        ToolBinding{kTimelineValidateToolName, handle_timeline_validate},
+        ToolBinding{kTimelineExplainToolName, handle_timeline_explain},
+        ToolBinding{kTimelineRenderToolName, handle_timeline_render},
+        ToolBinding{kTimelineExportToolName, handle_timeline_export},
+        ToolBinding{kTimelineImportToolName, handle_timeline_import},
+    };
+    static_assert(bindings.size() == kTimelineMcpToolNames.size());
+    for (const auto& binding : bindings) {
+        if (name == binding.name)
+            return binding.handler(params_json);
+    }
+    return std::nullopt;
 }
 
 } // namespace pulp_mcp

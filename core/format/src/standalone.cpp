@@ -5,6 +5,7 @@
 #include <pulp/format/detail/standalone_musical_typing.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -740,11 +741,13 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // `bridge->close()` dispatches Processor::on_view_closed(*view),
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
-    window->set_close_callback([this, bridge_raw]() {
+    auto* window_raw = window.get();
+    window->set_close_callback([this, window_raw, bridge_raw]() {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
-        if (bridge_raw) bridge_raw->close();
+        if (window_raw && bridge_raw)
+            detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
     });
 
@@ -792,37 +795,21 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
 #if PULP_STANDALONE_INSPECTOR
-    if (scripted_ui_ptr) {
-        pre_screenshot_idle = [scripted_ui_ptr, settings_ptr, inspector_ptr, inspector_host] {
-            if (scripted_ui_ptr) scripted_ui_ptr->poll();
-            if (settings_ptr) settings_ptr->poll();
-            if (inspector_ptr->is_active()) {
-                // Enqueue on the window root's own queue (S11): paint_overlays
-                // drains the painting root's queue, and inspector_host IS that
-                // root, so the inspector overlay paints exactly once.
-                inspector_host->interaction().overlay_queue.push_back({
-                    [inspector_ptr](canvas::Canvas& canvas) {
-                        inspector_ptr->paint(canvas);
-                    },
-                    inspector_host
-                });
-            }
-        };
-        window->set_idle_callback(pre_screenshot_idle);
-    } else {
-        pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
-            if (settings_ptr) settings_ptr->poll();
-            if (inspector_ptr->is_active()) {
-                inspector_host->interaction().overlay_queue.push_back({
-                    [inspector_ptr](canvas::Canvas& canvas) {
-                        inspector_ptr->paint(canvas);
-                    },
-                    inspector_host
-                });
-            }
-        };
-        window->set_idle_callback(pre_screenshot_idle);
-    }
+    pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
+        if (settings_ptr) settings_ptr->poll();
+        if (inspector_ptr->is_active()) {
+            // Enqueue on the window root's own queue (S11): paint_overlays
+            // drains the painting root's queue, and inspector_host IS that
+            // root, so the inspector overlay paints exactly once.
+            inspector_host->interaction().overlay_queue.push_back({
+                [inspector_ptr](canvas::Canvas& canvas) {
+                    inspector_ptr->paint(canvas);
+                },
+                inspector_host
+            });
+        }
+    };
+    window->set_idle_callback(pre_screenshot_idle);
 
     // Enable inspector by default when PULP_INSPECTOR env var is set
     if (runtime::get_env("PULP_INSPECTOR")) {
@@ -831,27 +818,23 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     }
 #else
     pre_screenshot_idle = detail::make_standalone_idle_callback(
-        scripted_ui_ptr
-            ? std::function<void()>{[scripted_ui_ptr] { scripted_ui_ptr->poll(); }}
-            : std::function<void()>{},
+        {},
         settings_ptr
             ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
             : std::function<void()>{});
     window->set_idle_callback(pre_screenshot_idle);
 #endif
 
-    // Live editor reload (1.9): when the hosted processor's logic hot-swaps
-    // (ReloadableShell), rebuild the OPEN editor in place and request a repaint —
-    // the same path the plugin editor pump uses (make_scripted_idle_pump), so the
-    // standalone dev window shows the swapped UI live too. Composed over whatever
-    // idle work the build wired above; cheap no-op for non-reloadable processors.
+    // Run the same automation, restore/reload, and scripted work as embedded
+    // plugin editors. Compose it over settings/inspector work so standalone
+    // state restores reconcile bound controls on the UI thread too.
     {
         auto prev_idle = pre_screenshot_idle;
-        pre_screenshot_idle = [prev_idle, bridge_raw] {
+        auto editor_idle = make_editor_idle_pump(*bridge_raw);
+        pre_screenshot_idle = [prev_idle,
+                               editor_idle = std::move(editor_idle)]() mutable {
+            editor_idle();
             if (prev_idle) prev_idle();
-            if (bridge_raw && bridge_raw->poll_editor_reload()) {
-                if (auto* v = bridge_raw->view()) v->request_repaint();
-            }
         };
         window->set_idle_callback(pre_screenshot_idle);
     }
@@ -1066,7 +1049,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // processor is torn down; removal is harmless on platforms where no
     // editor-initiated resize handler was installed.
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
-    bridge->close();
+    detail::retire_standalone_editor(*window, *bridge);
     stop();
     return true;
 }

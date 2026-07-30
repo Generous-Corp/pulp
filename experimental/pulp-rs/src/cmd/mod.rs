@@ -9,6 +9,7 @@
 
 mod aax_sdk;
 pub mod audit;
+pub mod chrome_for_testing;
 pub mod config;
 pub mod create;
 mod create_formats;

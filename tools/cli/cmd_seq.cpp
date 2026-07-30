@@ -30,7 +30,11 @@ void print_seq_usage() {
                  "  schema\n"
                  "  validate <project.json>\n"
                  "  explain <project.json> [--sample-rate <hz>]\n"
-                 "  apply <project.json> <commands.json> [--out <project.json>]\n";
+                 "  apply <project.json> <commands.json> [--out <project.json>]\n"
+                 "  export <project.json> --format <smf|dawproject> --plan\n"
+                 "  export <project.json> --format <smf|dawproject> --out <new-artifact>\n"
+                 "         [--accept-loss <concept>]...\n"
+                 "  import <input> --format <smf|dawproject> --out <new-directory>\n";
 }
 
 void print_render_usage() {
@@ -260,6 +264,58 @@ int cmd_seq(const std::vector<std::string>& args) {
             return 1;
         }
         return emit(std::move(result));
+    }
+
+    if (subcommand == "export" || subcommand == "import") {
+        if (args.size() < 2)
+            return bad_seq_usage(subcommand + " requires an input path");
+        std::optional<fs::path> output;
+        std::string format;
+        std::vector<std::string> accepted_losses;
+        bool plan_only = false;
+        for (std::size_t index = 2; index < args.size(); ++index) {
+            if (args[index] == "--out") {
+                if (++index == args.size())
+                    return bad_seq_usage("--out requires a new directory path");
+                output = pulp::tools::timeline::filesystem_path_from_utf8(args[index]);
+            } else if (args[index] == "--format") {
+                if (++index == args.size())
+                    return bad_seq_usage("--format requires smf or dawproject");
+                format = args[index];
+            } else if (args[index] == "--accept-loss" && subcommand == "export") {
+                if (++index == args.size())
+                    return bad_seq_usage("--accept-loss requires one concept id");
+                accepted_losses.push_back(args[index]);
+            } else if (args[index] == "--plan" && subcommand == "export") {
+                plan_only = true;
+            } else {
+                return bad_seq_usage("unknown " + subcommand + " option: " + args[index]);
+            }
+        }
+        if (format.empty())
+            return bad_seq_usage(subcommand + " requires --format");
+        const auto input = pulp::tools::timeline::filesystem_path_from_utf8(args[1]);
+        if (subcommand == "export") {
+            if (plan_only) {
+                if (output.has_value())
+                    return bad_seq_usage("export --plan does not accept --out");
+                if (!accepted_losses.empty())
+                    return bad_seq_usage("export --plan does not accept --accept-loss");
+                return emit(pulp::tools::timeline::plan_export_project(ProjectSource::file(input),
+                                                                       format));
+            }
+            if (!output.has_value())
+                return bad_seq_usage("export requires --out unless --plan is used");
+            if (output->empty())
+                return bad_seq_usage("export --out requires a non-empty new directory path");
+            return emit(pulp::tools::timeline::export_project(ProjectSource::file(input), format,
+                                                               *output, accepted_losses));
+        }
+        if (!output.has_value())
+            return bad_seq_usage("import requires --out");
+        if (output->empty())
+            return bad_seq_usage("import --out requires a non-empty new directory path");
+        return emit(pulp::tools::timeline::import_project(input, format, *output));
     }
 
     return bad_seq_usage("unknown subcommand: " + subcommand);

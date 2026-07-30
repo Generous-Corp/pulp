@@ -161,6 +161,13 @@ public:
     }
 
     canvas::Canvas* begin_frame() override {
+        // Default the outcome pessimistically: every early return below is a
+        // frame that did not reach the screen, and the one place that can
+        // upgrade it is a successful end_frame().
+        last_outcome_ = FrameOutcome::failed;
+        // A frame abandoned without end_frame() must not leave its flag set for
+        // the next one.
+        frame_work_submitted_ = false;
         if (!recorder_ || !context_) return nullptr;
 
         // Persistent-scene mode (FU-2): draw into the retained scene surface,
@@ -169,10 +176,18 @@ public:
         // The presentable drawable is wrapped later, at end_frame, for the blit.
         if (persistent_scene_) {
             if (!scene_surface_) create_scene_target();
-            if (!scene_surface_) return nullptr;
+            if (!scene_surface_) {
+                // No scene target on a surface that claims persistent-scene
+                // mode is a resource failure, not a policy: recreate.
+                last_outcome_ = FrameOutcome::recreate;
+                return nullptr;
+            }
             frame_surface_.reset();
             SkCanvas* sk_canvas = scene_surface_->getCanvas();
-            if (!sk_canvas) return nullptr;
+            if (!sk_canvas) {
+                last_outcome_ = FrameOutcome::recreate;
+                return nullptr;
+            }
             canvas_ = std::make_unique<canvas::SkiaCanvas>(
                 sk_canvas, recorder_.get(), retained_layers_);
             return canvas_.get();
@@ -237,7 +252,17 @@ public:
             }
         }
 
-        // Fallback to offscreen target if no presentable texture
+        // The offscreen target is the INTENDED output only when there is no
+        // presentable surface (headless capture, render_to_png, tests). When a
+        // presentable surface exists and its drawable could not be wrapped,
+        // redirecting here would produce a perfect-looking frame that the
+        // screen never sees — and, worse, one the caller would count as
+        // successful and clear its damage for. Report it instead.
+        if (!sk_canvas && gpu_.has_surface()) {
+            last_outcome_ = FrameOutcome::recreate;
+            return nullptr;
+        }
+
         if (!sk_canvas && offscreen_surface_) {
             sk_canvas = offscreen_surface_->getCanvas();
         }
@@ -249,24 +274,40 @@ public:
         return canvas_.get();
     }
 
-    void end_frame() override {
+    FrameOutcome end_frame() override {
         // Graphite recording snap + insert + submit — the GPU-submit stage of
         // the frame pipeline.
         PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
         canvas_.reset();  // flush the frame's draws into the recorder
 
-        if (!recorder_ || !context_) return;
+        if (!recorder_ || !context_) return finish_frame(FrameOutcome::failed);
 
         // Persistent-scene mode (FU-2): the frame drew into the retained scene
         // surface. Record a 1:1 blit of the scene onto the presentable drawable
         // into the SAME recorder, so the single snap() below carries both the
         // scene draws and the blit. Offscreen (no presentable surface) needs no
         // blit — the scene IS the readback target.
+        //
+        // A failed blit used to log and fall through to a submit that carried
+        // only the scene draws, so the host presented a stale drawable and
+        // cleared its damage: the retained scene silently stopped reaching the
+        // screen while every frame still "succeeded".
+        bool blit_ok = true;
         if (persistent_scene_ && scene_surface_)
-            blit_scene_to_drawable();
+            blit_ok = blit_scene_to_drawable();
 
         // Submit the Graphite recording to the shared device/queue.
         // The GPU work targets the same texture that GpuSurface will present.
+        // Submitted even when the blit failed: the scene draws are still valid
+        // work, and dropping them would force a full repaint of content that is
+        // already correct in the retained scene.
+        //
+        // Success is judged on insertRecording's InsertStatus, NOT on submit()'s
+        // bool. submit() reports "was there anything to send", which is legally
+        // false on a frame whose work read_current_rgba already flushed — using
+        // it would fail every captured frame and make the host repaint in full
+        // forever. InsertStatus is the documented accepted/rejected signal.
+        bool insert_ok = true;
         auto recording = recorder_->snap();
         if (recording) {
             skgpu::graphite::InsertRecordingInfo info;
@@ -282,15 +323,36 @@ public:
                 info.fFinishedWithStatsProc = &SkiaSurfaceImpl::on_gpu_stats;
             }
 
-            context_->insertRecording(info);
+            const auto status = context_->insertRecording(info);
+            insert_ok = (status == skgpu::graphite::InsertStatus::kSuccess);
+            if (!insert_ok) {
+                runtime::log_error(
+                    "SkiaSurface: Graphite rejected this frame's recording — "
+                    "nothing was drawn into the drawable.");
+            }
             context_->submit({});
+            frame_work_submitted_ = true;
         }
+
+        // A null snap() with no earlier submit means this frame produced no GPU
+        // work at all. When read_current_rgba() already flushed the frame, the
+        // absent second recording is expected and the drawable is fine.
+        const bool produced_work = recording != nullptr || frame_work_submitted_;
+        frame_work_submitted_ = false;
 
         // GpuSurface::end_frame() handles the actual present call.
         // Keep frame_surface_ alive until the next begin_frame() so callers
         // can perform deterministic post-submit readback of the presentable
         // texture before it is presented/replaced.
+        if (!blit_ok) return finish_frame(FrameOutcome::recreate);
+        if (!insert_ok || !produced_work) return finish_frame(FrameOutcome::failed);
+        return finish_frame(has_presentable_target() ? FrameOutcome::presented
+                                                     : FrameOutcome::offscreen);
     }
+
+    FrameOutcome last_frame_outcome() const override { return last_outcome_; }
+
+    bool has_presentable_target() const override { return gpu_.has_surface(); }
 
     void resize(uint32_t width, uint32_t height, float scale) override {
         if (scale != scale_) {
@@ -353,6 +415,10 @@ public:
                 info.fRecording = recording.get();
                 context_->insertRecording(info);
                 context_->submit({});
+                // end_frame()'s second snap() will legitimately find nothing
+                // left to record; remember that this frame's work DID reach the
+                // GPU so it is not misreported as a failed frame.
+                frame_work_submitted_ = true;
             }
         }
 
@@ -540,22 +606,26 @@ private:
     // are physical size, so the blit is an identity-CTM drawImageRect — no
     // scale (the drawable wrap starts with an identity CTM). Uses drawImageRect
     // (a GPU composite), NOT makeShader, so the ensure_gpu_image() image-shader
-    // gotcha is not in play. Offscreen (no presentable surface) is a no-op: the
-    // scene is itself the readback target.
-    void blit_scene_to_drawable() {
-        if (!gpu_.has_surface()) return;
+    // gotcha is not in play. Offscreen (no presentable surface) is a no-op that
+    // reports SUCCESS: the scene is itself the readback target, so there is
+    // nothing to blit and nothing has gone wrong.
+    //
+    // Returns false when the scene did not reach the drawable, so end_frame()
+    // can tell the host the frame is not on screen.
+    bool blit_scene_to_drawable() {
+        if (!gpu_.has_surface()) return true;
 
         auto* texture_ptr = static_cast<wgpu::Texture*>(gpu_.current_texture_handle());
         if (!texture_ptr || !*texture_ptr) {
             runtime::log_warn("SkiaSurface: no current texture for persistent-scene blit");
-            return;
+            return false;
         }
         WGPUTexture raw_texture = texture_ptr->Get();
         skgpu::graphite::BackendTexture backend_tex =
             skgpu::graphite::BackendTextures::MakeDawn(raw_texture);
         if (!backend_tex.isValid()) {
             runtime::log_warn("SkiaSurface: invalid drawable texture for persistent-scene blit");
-            return;
+            return false;
         }
         // Same contract as begin_frame(): the color type must come from the
         // texture, not from the platform.
@@ -566,7 +636,7 @@ private:
                 "SkiaSurface: persistent-scene blit target format {} has no "
                 "SkColorType mapping — nothing will be presented.",
                 wgpu_texture_format_name(surface_format));
-            return;
+            return false;
         }
         frame_surface_ = SkSurfaces::WrapBackendTexture(
             recorder_.get(), backend_tex, surface_color_type,
@@ -576,18 +646,39 @@ private:
                 "SkiaSurface: WrapBackendTexture failed for persistent-scene "
                 "blit (format {}) — nothing will be presented.",
                 wgpu_texture_format_name(surface_format));
-            return;
+            return false;
         }
 
         sk_sp<SkImage> snapshot = scene_surface_->makeImageSnapshot();
-        if (!snapshot) return;
+        if (!snapshot) {
+            runtime::log_error(
+                "SkiaSurface: retained scene produced no snapshot — nothing "
+                "will be presented.");
+            return false;
+        }
 
         const SkRect full = SkRect::MakeWH(static_cast<float>(snapshot->width()),
                                            static_cast<float>(snapshot->height()));
         frame_surface_->getCanvas()->drawImageRect(
             snapshot, full, full, SkSamplingOptions(), nullptr,
             SkCanvas::kStrict_SrcRectConstraint);
+        return true;
     }
+
+    FrameOutcome finish_frame(FrameOutcome outcome) {
+        last_outcome_ = outcome;
+        return outcome;
+    }
+
+    /// Outcome of the frame in flight. begin_frame() seeds it so a caller that
+    /// got a null canvas can still ask what went wrong.
+    FrameOutcome last_outcome_ = FrameOutcome::offscreen;
+
+    /// True once this frame's recording has reached the GPU — set by
+    /// read_current_rgba()'s mid-frame flush as well as by end_frame(), and
+    /// cleared at end_frame(). Without it, a captured frame looks like a frame
+    /// that produced no work at all.
+    bool frame_work_submitted_ = false;
 };
 
 std::unique_ptr<SkiaSurface> SkiaSurface::create(GpuSurface& gpu, const Config& config) {

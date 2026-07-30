@@ -15,7 +15,8 @@ namespace pulp::timeline::detail {
 
 class DawProjectMediaSealer {
   public:
-    DawProjectMediaSealer(DawProjectMediaResolver resolver, const DawProjectImportLimits& limits,
+    DawProjectMediaSealer(DawProjectMediaViewResolver resolver,
+                          const DawProjectImportLimits& limits,
                           std::uint64_t& next_item_id);
 
     std::optional<DawProjectImportError> seal(const pugi::xml_node& audio, ItemId& asset_id,
@@ -24,7 +25,7 @@ class DawProjectMediaSealer {
     std::vector<MediaAsset> take_assets();
 
   private:
-    DawProjectMediaResolver resolver_;
+    DawProjectMediaViewResolver resolver_;
     DawProjectImportLimits limits_;
     std::uint64_t& next_item_id_;
     std::unordered_map<std::string, std::string> hash_by_path_;

@@ -107,5 +107,68 @@ echo 'AU VALIDATION SUCCEEDED'
         self.assertEqual(status.read_text(encoding="utf-8").strip(), "0")
 
 
+
+
+class AuvalExecFailedPredicateTests(unittest.TestCase):
+    """The launchd-exec predicate must fire ONLY on a genuine exec failure.
+
+    A false positive would turn a real validation failure into a skip, which is
+    the whole risk of reporting a skip at all — so both directions are pinned.
+    """
+
+    LIB = Path(__file__).parent / "lib" / "auval-exec-check.sh"
+    SCRIPT = "/Volumes/Work/pulp/tools/ci/run-auval-component.sh"
+
+    def predicate(self, stderr_text):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "launchd.stderr"
+            log.write_text(stderr_text, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'source "{self.LIB}"; '
+                    f'auval_worker_exec_failed "{log}" "{self.SCRIPT}"',
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            return result.returncode == 0
+
+    def test_permission_denied_on_the_worker_is_an_exec_failure(self):
+        # The real signature: a checkout launchd is not allowed to read.
+        self.assertTrue(
+            self.predicate(f"/bin/bash: {self.SCRIPT}: Operation not permitted\n")
+        )
+
+    def test_missing_worker_is_an_exec_failure(self):
+        self.assertTrue(
+            self.predicate(f"/bin/bash: {self.SCRIPT}: No such file or directory\n")
+        )
+
+    def test_empty_stderr_is_not_an_exec_failure(self):
+        self.assertFalse(self.predicate(""))
+
+    def test_validation_noise_is_not_an_exec_failure(self):
+        # A plug-in failing validation must never be reported as a skip.
+        self.assertFalse(
+            self.predicate(
+                "AU VALIDATION FAILED\n"
+                "* * FAIL\n"
+                "ERROR: initialization failed\n"
+            )
+        )
+
+    def test_permission_error_naming_another_path_is_not_an_exec_failure(self):
+        # Requires BOTH the worker path and an exec-failure message, so an
+        # unrelated permission complaint from the plug-in does not qualify.
+        self.assertFalse(
+            self.predicate(
+                "/bin/bash: /some/other/tool: Operation not permitted\n"
+            )
+        )
+
 if __name__ == "__main__":
     unittest.main()

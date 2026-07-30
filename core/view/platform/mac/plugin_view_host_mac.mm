@@ -1813,6 +1813,10 @@ public:
                 this->on_native_frame_changed(w, h);
             };
 
+            // This host builds its surface right here, but say "not yet"
+            // first so a consumer that observes mid-construction never reads
+            // the null as "this editor is CPU".
+            mark_gpu_surface_pending();
             init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
         }
     }
@@ -1834,6 +1838,10 @@ public:
             metal_view_.onBackingChange = nil;
             metal_view_.onResize = nil;
         }
+        // Publish the teardown while the surfaces are still alive, so a
+        // consumer holding the raw pointer drops it here rather than on its
+        // next frame.
+        publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
         skia_surface_.reset();
         gpu_surface_.reset();
         metal_view_.rootView = nullptr;
@@ -2066,6 +2074,7 @@ private:
         if (!gpu_surface_) {
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=create_dawn_null "
                             "falling_back=cpu-paint\n");
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2084,6 +2093,7 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=initialize "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2097,8 +2107,12 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=skia_create_null "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
+        // The surface is live. Consumers subscribed via observe_gpu_surface()
+        // learn about it here rather than having to poll gpu_surface().
+        publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
         fprintf(stderr, "[plugin-gpu-host] init requested size=%.0fx%.0f scale=%.1f "
                         "gpu=%ux%u\n", width, height, scale, phys_w, phys_h);
     }

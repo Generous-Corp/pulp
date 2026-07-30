@@ -67,6 +67,7 @@ is not a reason to add a model feature.
 | `tempo.ramp` | yes | A continuous tempo curve between two tempo-map points. |
 | `clip.note-velocity-quantized` | yes | A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value. |
 | `tempo.value-quantized` | yes | A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation. |
+| `clip.media-window` | yes | A media clip that plays a source subrange rather than the referenced asset's complete frame range. |
 
 ## DAWproject
 
@@ -124,6 +125,7 @@ Format id `dawproject`. Writer registered: yes.
 | `tempo.ramp` | none | not declared |
 | `clip.note-velocity-quantized` | none | not declared |
 | `tempo.value-quantized` | none | not declared |
+| `clip.media-window` | none | not declared |
 
 ### Export
 
@@ -177,6 +179,7 @@ Format id `dawproject`. Writer registered: yes.
 | `tempo.ramp` | drop |  | dropped | the writer emits only its first constant tempo, so continuous tempo curves are dropped with the rest of the tempo map |
 | `clip.note-velocity-quantized` | full |  |  |  |
 | `tempo.value-quantized` | full |  |  |  |
+| `clip.media-window` | drop |  | dropped | the writer references the complete media asset, so a nonzero source start or partial frame count is dropped |
 
 ## Standard MIDI File
 
@@ -234,6 +237,7 @@ Format id `smf`. Writer registered: yes.
 | `tempo.ramp` | none | continuous tempo ramps |
 | `clip.note-velocity-quantized` | none | not declared |
 | `tempo.value-quantized` | none | not declared |
+| `clip.media-window` | none | not declared |
 
 ### Export
 
@@ -287,6 +291,7 @@ Format id `smf`. Writer registered: yes.
 | `tempo.ramp` | degrade | `tempo.map` | approximated | continuous tempo curves become discrete Set Tempo steps at the authored tempo points |
 | `clip.note-velocity-quantized` | degrade | `clip.note` | approximated | 16-bit note velocities are quantized to the nearest nonzero 7-bit Standard MIDI velocity |
 | `tempo.value-quantized` | degrade | `tempo.map` | approximated | tempo values are rounded to the nearest representable integer microseconds per quarter note |
+| `clip.media-window` | drop | | dropped | not declared |
 
 ## Adding a format
 

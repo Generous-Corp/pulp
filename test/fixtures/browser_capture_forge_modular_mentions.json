@@ -1,0 +1,10 @@
+{
+  "schema": "pulp-browser-interactions-v1",
+  "version": 1,
+  "actions": [
+    {
+      "action": "click",
+      "selector": "[title^=\"Mention a module\"]"
+    }
+  ]
+}

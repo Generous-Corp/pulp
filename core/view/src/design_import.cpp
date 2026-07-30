@@ -42,6 +42,7 @@ std::optional<DesignSource> parse_design_source(const std::string& name) {
     if (name == "v0")       return DesignSource::v0;
     if (name == "pencil")   return DesignSource::pencil;
     if (name == "claude")   return DesignSource::claude;
+    if (name == "html")     return DesignSource::html;
     if (name == "designmd") return DesignSource::designmd;
     if (name == "jsx")      return DesignSource::jsx;
     if (name == "figma-plugin") return DesignSource::figma_plugin;
@@ -55,6 +56,7 @@ const char* design_source_name(DesignSource source) {
         case DesignSource::v0:       return "v0";
         case DesignSource::pencil:   return "Pencil";
         case DesignSource::claude:   return "Claude Design";
+        case DesignSource::html:     return "HTML";
         case DesignSource::designmd: return "DESIGN.md";
         case DesignSource::jsx:          return "JSX instrument";
         case DesignSource::figma_plugin: return "Figma plugin export";
@@ -81,6 +83,7 @@ const char* design_source_vendor_key(DesignSource source) {
         case DesignSource::v0:       return "v0";
         case DesignSource::pencil:   return "pencil";
         case DesignSource::claude:   return "claude";
+        case DesignSource::html:     return "html";
         case DesignSource::designmd: return "designmd";
         case DesignSource::jsx:      return "jsx";
         case DesignSource::figma_plugin: return "figma-plugin";

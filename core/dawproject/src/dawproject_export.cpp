@@ -123,8 +123,16 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
         const auto* asset = find_asset(project, media->asset_id);
         auto audio = node.append_child("Audio");
         audio.append_attribute("algorithm") = "stretch";
-        audio.append_attribute("channels") = 2;
-        audio.append_attribute("duration") = number(beats(clip.duration())).c_str();
+        // Arrangement Clip duration is measured in beats, but Audio duration
+        // is the referenced media duration in seconds. The importer seals this
+        // value against actual WAV frames, so deriving it from clip placement
+        // makes a writer-produced project.xml fail its own import boundary.
+        const double media_seconds =
+            asset ? static_cast<double>(asset->frame_count) *
+                        static_cast<double>(asset->sample_rate.denominator) /
+                        static_cast<double>(asset->sample_rate.numerator)
+                  : 0.0;
+        audio.append_attribute("duration") = number(media_seconds).c_str();
         audio.append_attribute("sampleRate") =
             asset ? static_cast<int>(asset->sample_rate.numerator) : 48'000;
         auto file = audio.append_child("File");

@@ -167,6 +167,49 @@ other:
 
 
 class MainTests(unittest.TestCase):
+    def test_main_requires_seq_slash_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            (root / "tools" / "cli" / "pulp_cli.cpp").write_text(
+                """
+                static const Command commands[] = {
+                    {"seq", "Timeline", handle_seq}
+                \n};
+                """,
+                encoding="utf-8",
+            )
+            (root / "docs" / "status" / "cli-commands.yaml").write_text(
+                "commands:\n  - name: seq\n    summary: Timeline\n",
+                encoding="utf-8",
+            )
+
+            out = io.StringIO()
+            with chdir(root), argv(["cli_sync_check.py", "--strict", "--json"]):
+                with contextlib.redirect_stdout(out):
+                    rc = csc.main()
+
+            self.assertEqual(rc, 1)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["issues"], 1)
+            self.assertTrue(
+                any(
+                    check["status"] == "fail"
+                    and check["message"] == "Missing required slash commands: seq"
+                    for check in payload["checks"]
+                )
+            )
+
+            (root / ".claude" / "commands" / "seq.md").write_text(
+                "# seq\n", encoding="utf-8"
+            )
+            out = io.StringIO()
+            with chdir(root), argv(["cli_sync_check.py", "--strict", "--json"]):
+                with contextlib.redirect_stdout(out):
+                    rc = csc.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out.getvalue())["issues"], 0)
+
     def test_main_json_reports_cli_yaml_mismatch_as_strict_failure(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(pathlib.Path(td) / "repo")

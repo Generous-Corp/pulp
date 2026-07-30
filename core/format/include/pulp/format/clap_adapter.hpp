@@ -5,6 +5,7 @@
 // Built from CLAP specification headers (MIT license)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/ara.hpp>
@@ -75,6 +76,13 @@ static constexpr std::size_t kOutboundParamEventCapacity = 1024;
 
 // CLAP plugin instance — wraps a Pulp Processor
 struct PulpClapPlugin {
+    // Declared FIRST so it is destroyed LAST: the final detach cancels and joins
+    // the tracing auto-flush timer and writes the .pftrace, and that must happen
+    // after every span this instance can still emit. Tracing used to be wired
+    // into VST3 ONLY, so a Perfetto capture of a CLAP/AU/AAX/standalone session
+    // recorded nothing while the API happily claimed to be process-global.
+    // No-op unless PULP_TRACING=ON.
+    runtime::ScopedTracingAttachment tracing;
     clap_plugin_t plugin;
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -223,6 +231,9 @@ struct PulpClapPlugin {
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     std::unique_ptr<ViewBridge> bridge;
     std::unique_ptr<view::PluginViewHost> editor_host;
+    // Forwards editor_host's GPU-surface transitions into bridge's scripted UI
+    // session. Reset in gui_destroy() before either of them dies.
+    view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
 #endif
     bool editor_visible = false;
 

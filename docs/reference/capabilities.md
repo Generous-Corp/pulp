@@ -492,6 +492,10 @@ downgrading arbitrary sessions.
 
 ## Agent / Automation
 
+The checked baseline and stable capability IDs for the in-progress development
+inspector are documented in
+[Development inspector capabilities](development-inspector-capabilities.md).
+
 | Capability | Status | Docs | Notes |
 |---|---|---|---|
 | Repo-level MCP server (`pulp-mcp`) | experimental | | Project/repo automation server in `tools/mcp/pulp_mcp.cpp`; not a per-plugin control surface |
@@ -519,7 +523,7 @@ The `pulp` CLI wraps common development workflows.
 | `pulp run` (launch standalone binary) | usable | [cli](cli.md) |
 | `pulp upgrade` (self-update) | usable | [cli](cli.md) |
 | `pulp doctor` (check system dependencies) | usable | [cli](cli.md) |
-| `pulp inspect` (component inspector) | usable | [cli](cli.md) |
+| `pulp inspect` (low-level client; no normal runtime endpoint yet) | experimental | [cli](cli.md) |
 | `pulp audit` (dependency license check) | usable | [cli](cli.md) |
 | `pulp add` (add dependency) | usable | [cli](cli.md) |
 | `pulp cache` (build cache management) | usable | [cli](cli.md) |

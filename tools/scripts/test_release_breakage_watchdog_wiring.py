@@ -52,6 +52,19 @@ class RequiredGateLivenessWiring(unittest.TestCase):
         ):
             self.assertIn(test, WORKFLOW_LINT)
 
+    def test_sdk_definition_inputs_trigger_release_matrix_parity(self) -> None:
+        for path in (
+            "'CMakeLists.txt'",
+            "'**/CMakeLists.txt'",
+            "'tools/cmake/**'",
+        ):
+            self.assertEqual(
+                WORKFLOW_LINT.count(path),
+                2,
+                "both pull_request and main push must run release matrix parity "
+                f"when {path} changes",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

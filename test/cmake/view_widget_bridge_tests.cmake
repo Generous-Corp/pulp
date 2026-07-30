@@ -33,8 +33,10 @@ catch_discover_tests(pulp-test-hot-reload
 add_executable(pulp-test-inspector-domain-helpers
     test_inspector_domain_helpers.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/audio_inspector.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/capabilities.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/console_capture.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/editor_url.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/protocol.cpp
     ${CMAKE_SOURCE_DIR}/inspect/src/state_inspector.cpp)
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)

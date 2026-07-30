@@ -342,6 +342,18 @@ inline void install_standalone_idle_callback(
         std::move(poll_scripted_ui), std::move(poll_settings)));
 }
 
+/// Retire every processor-facing route owned by the standalone editor before
+/// StandaloneApp destroys its Processor. Clearing the host callback prevents
+/// future ticks; retiring the bridge owner also makes an already-dispatched
+/// display-link callback fail closed before touching Processor or StateStore.
+inline void retire_standalone_editor(
+    view::WindowHost& window,
+    ViewBridge& bridge) noexcept {
+    window.set_idle_callback({});
+    bridge.close();
+    bridge.notify_processor_destroyed();
+}
+
 template <typename ScriptedUi>
 inline void install_scripted_ui_repaint_callback(
     ScriptedUi* scripted_ui,

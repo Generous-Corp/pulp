@@ -39,8 +39,8 @@ fn expected_installed_banner() -> String {
     let expected = fs::read_to_string(fixture_dir().join("expected_cpp.txt")).expect("fixture");
     expected
         .replace(
-            "  inspect        Connect to a running plugin inspector\n",
-            "  inspect        Connect to a running plugin inspector\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
+            "  inspect        Connect to an explicitly hosted inspector fixture\n",
+            "  inspect        Connect to an explicitly hosted inspector fixture\n  motion         Agent-facing wrappers around inspector Motion protocol\n  trace          Agent-facing wrappers around inspector Trace (Perfetto) protocol\n",
         )
         .replace(
             "  import         Detect a framework project and emit a Pulp migration scaffold\n",

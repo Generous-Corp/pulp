@@ -362,6 +362,51 @@ line. Host-side setup and the deeper lease/role/memory-axis mechanics live in
 the [tartci](https://github.com/danielraffel/tartci) repo (`scripts/leases.py`,
 `scripts/host_profile.py`, `tartci host-profile` / `tartci leases`).
 
+## Lane timeouts — and why a timeout looks like a broken PR
+
+`[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
+validation lane may run. The mac lane is **7200s (2h)** as of 2026-07-27, raised
+from 3600s.
+
+The reason the value matters more than it looks: when a lane hits it, Shipyard
+reports
+
+```
+✗ Validation failed. PR #NNNN not merged.
+    Target:  mac
+    Error:   Validation timed out
+```
+
+with **no per-target diagnostics**. That is indistinguishable from a genuinely
+broken branch, and the natural response — re-push, or start debugging the diff —
+is wrong in both directions. Always read the lane log before believing the
+verdict:
+
+```bash
+tail -40 "~/Library/Application Support/shipyard/logs/<job-id>/mac.log"
+grep -c "error:" "~/Library/Application Support/shipyard/logs/<job-id>/mac.log"
+```
+
+A log that ends mid-build at some percentage with **zero** `error:` lines was
+killed by the clock, not by your code.
+
+Two properties worth knowing when reading a timeout:
+
+- **Queue wait is not charged against the budget.** The clock starts when the
+  lane starts, so a job that sat pending for 40 minutes still gets its full
+  window. Check `started_at` vs `completed_at` in `queue.json` to tell queueing
+  apart from a slow build.
+- **Warm build dirs are the difference between passing and timing out.** On one
+  loaded afternoon, a small change against a warm dir finished in 41 min and
+  passed, while a broad `core/view` change was killed at 98% after 62 min and
+  again at 67% after 113 min on a cold dir. Whether a branch lands should not
+  depend on that, which is why the ceiling was raised rather than left to look
+  like flakiness.
+
+If you are running heavy work on the same machine — a VM, a parallel build — it
+competes with the lane directly. Shutting it down is a legitimate first move
+when a lane is timing out marginally.
+
 ## Validation Profiles
 
 Shipyard validates from a profile (`shipyard run --pipeline <name>`).

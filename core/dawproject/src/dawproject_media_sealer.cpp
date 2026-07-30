@@ -25,7 +25,7 @@ bool declared_duration_matches_frames(long double declared_frames,
 
 } // namespace
 
-DawProjectMediaSealer::DawProjectMediaSealer(DawProjectMediaResolver resolver,
+DawProjectMediaSealer::DawProjectMediaSealer(DawProjectMediaViewResolver resolver,
                                              const DawProjectImportLimits& limits,
                                              std::uint64_t& next_item_id)
     : resolver_(std::move(resolver)), limits_(limits), next_item_id_(next_item_id) {}

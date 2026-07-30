@@ -1,11 +1,11 @@
 # Scripted-UI runtime inspector
 
-Pulp's scripted UIs (JS via `@pulp/react` on QuickJS / JavaScriptCore / V8) can
-be inspected at runtime over the existing inspector protocol: evaluate
-expressions against the live engine, read honest debug capabilities, tail device
-logs, and abort a runaway evaluation. This is a **runtime inspector / debug
-console**, not a step debugger — see [runtime capabilities](#runtimegetcapabilities)
-for why.
+Pulp contains reusable scripted-UI inspector components for QuickJS,
+JavaScriptCore, and V8. A custom host can attach those components to the
+experimental protocol. Normal standalone and plugin-format launches do not
+construct an inspector server, so this is not currently a shipped live-plugin
+workflow. The surface is a **runtime inspector / debug console**, not a step
+debugger.
 
 ## Why not a step debugger (yet)
 
@@ -21,8 +21,10 @@ backend, or the Chrome DevTools inspector that JSC/V8 expose), gated behind the
 
 ## Protocol methods
 
-All methods speak the standard inspector JSON-RPC (`Domain.method` + `params`),
-reachable via `pulp inspect --command … --params …` or any inspector client.
+The component methods use the inspector JSON message shape (`Domain.method` +
+`params`). They are reachable only after a custom host explicitly constructs
+and wires the server; `pulp inspect` is the experimental client for such a
+fixture.
 
 ### `Runtime.getCapabilities`
 
@@ -125,6 +127,7 @@ inspector transport is unauthenticated. Two consequences:
 - Evaluate/interrupt are **off by default** — a host must explicitly
   `set_runtime_eval_enabled(true)`, and should only do so for a trusted, local
   dev session. Read-only surfaces (logs, DOM, state) are unaffected.
-- The inspector server currently binds all interfaces; do not enable eval on a
-  host reachable from an untrusted network. Evaluation is serialized and never
-  runs on the audio thread.
+- The TCP server binds loopback only, but it is currently unauthenticated and
+  uses a discoverable port-file hint. Do not enable eval outside a controlled
+  custom-host fixture. Evaluation is serialized and never runs on the audio
+  thread.

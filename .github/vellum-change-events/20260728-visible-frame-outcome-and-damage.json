@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20260728-visible-frame-outcome-and-damage",
+  "kind": "change",
+  "created_at": "2026-07-28T05:12:15Z",
+  "slices": [
+    "render-skia-dawn",
+    "retained-ui-kernel"
+  ],
+  "rationale": "A frame could render perfectly and reach nothing. When SkiaSurface failed to wrap the acquired native drawable it silently returned the OFFSCREEN canvas instead; the host painted, submitted, presented, reported success and CLEARED ITS DAMAGE, while the texture actually being presented had never been drawn into. Screenshot readback reads that offscreen target, so every observable signal agreed the frame was fine while the editor was black. Persistent-scene blit failures had the same shape: log and continue. end_frame() now returns a FrameOutcome, the offscreen target is reserved for surfaces with no presentable drawable by design, and success is judged on Graphite's InsertStatus rather than submit()'s bool \u2014 the latter reports only whether there was anything to send, which is legally false for a frame whose recording was already flushed. On the Ganesh/WebGL backend a lost context reports recreate rather than failed, because the caller must rebuild before the frame means anything. WindowHost's duplicate dirty-flag/rect/union trio is replaced by the same PendingDamage abstraction the plug-in host uses, gaining take()/restore() so a frame that did not reach its output hands its damage back instead of retiring a region nobody presented. These originate in Pulp's own renderer and host and have no counterpart framework backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-gpu-surface-binding",
+    "pulp-test-pending-damage",
+    "pulp-test-plugin-frame-clip",
+    "pulp-test-plugin-frame-renderer",
+    "pulp-test-skia-frame-outcome-gpu"
+  ],
+  "disposition": "pulp-only"
+}

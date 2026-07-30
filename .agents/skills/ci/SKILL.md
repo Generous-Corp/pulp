@@ -931,6 +931,17 @@ a burst of merges replaces the queued run and only the latest head runs.
   exported with a library while its public headers are accidentally omitted
   from the install manifest. Keep `tools/validation/sdk-smoke` in sync so the
   same proof is runnable locally without GitHub Actions.
+- **The release archive matrix must match every archive-bearing SDK target.**
+  `test_release_artifact_contents.py` derives the installed target set from
+  `tools/cmake/PulpInstallRules.cmake`, removes interface-only libraries, and
+  requires exact equality with `release_product_matrix.json`. The
+  `workflow-lint.yml` path filter deliberately covers every `CMakeLists.txt`
+  plus `tools/cmake/**`, because target definitions also live in the repo root,
+  `inspect/`, and CMake helpers—not only under `core/`. When adding an installed
+  library, update the matrix in the same PR; when changing how
+  `PULP_SDK_TARGETS` is assembled or consumed, keep the canonical literal
+  `set` / `list(APPEND)` / `install(TARGETS ...)` forms or extend the
+  fail-closed parser and its negative controls together.
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS

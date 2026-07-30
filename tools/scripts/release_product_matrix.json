@@ -11,6 +11,7 @@
   "pulp_library_stems": [
     "pulp-audio",
     "pulp-canvas",
+    "pulp-dawproject-export",
     "pulp-dawproject-import",
     "pulp-events",
     "pulp-format",
@@ -30,6 +31,7 @@
     "pulp-sequence",
     "pulp-signal-fft-backend",
     "pulp-signal-modal-spec",
+    "pulp-smf-interchange",
     "pulp-smf-interop",
     "pulp-standalone",
     "pulp-state",

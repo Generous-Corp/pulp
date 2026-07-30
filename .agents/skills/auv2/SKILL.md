@@ -725,6 +725,25 @@ shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section for the cross-platform
 contract.
 
+**Updated (WAH-1): subscribe, do not sample.** The one-shot
+`attach_gpu_surface(host->gpu_surface())` read this section used to
+describe is GONE. It only worked on hosts that build their surface in
+the constructor; the Windows host creates its Dawn surface inside
+`attach_to_parent()`, so the read returned `nullptr` forever and every
+Windows editor fell back to mock WebGPU. Adapters now call the shared
+helper once:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host, bridge->scripted_ui(),
+                                        gpu_decision, "AU v2");
+```
+
+It follows `PluginViewHost::observe_gpu_surface()`, forwards creation
+AND teardown into the session, and owns the CPU-fallback diagnostic
+(which no longer fires on a pre-attach `pending` state). Reset the
+returned subscription in the editor-close path, before the bridge that
+owns the session is destroyed.
+
 ## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
@@ -955,3 +974,24 @@ All three AU v2 classes own a `state_restore_gate_` and gate their render:
 
 If you add a new AU v2 class, give it a gate and pass it to
 `restore_pulp_state()`; the parameter is not optional.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a AU v2
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`PulpAUEffect::tracing_`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.

@@ -334,6 +334,7 @@ TEST_CASE("pulp import-design --from claude emits classnames.json by default",
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--tokens", tokens_out.string(),
@@ -370,6 +371,7 @@ TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean imp
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--dry-run",
@@ -396,6 +398,7 @@ TEST_CASE("pulp import-design --fidelity-report writes a valid ledger",
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--no-bridge-scaffold",
@@ -425,6 +428,7 @@ TEST_CASE("pulp import-design --from claude --no-emit-classnames suppresses the 
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--no-bridge-scaffold",
@@ -499,6 +503,7 @@ TEST_CASE("pulp import-design --from claude emits native-react hint on bundler e
     auto js_out = tmp / "ui.js";
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--no-bridge-scaffold",
@@ -528,6 +533,7 @@ TEST_CASE("pulp import-design --output anchors sidecar files to output dir",
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string()});
     REQUIRE_FALSE(r.timed_out);
@@ -551,6 +557,7 @@ TEST_CASE("pulp import-design respects explicit sidecar paths over --output anch
 
     auto r = run_pulp({"import-design",
                        "--from", "claude",
+                       "--offline",
                        "--file", html_in.string(),
                        "--output", js_out.string(),
                        "--bridge-output", bridge_out.string(),

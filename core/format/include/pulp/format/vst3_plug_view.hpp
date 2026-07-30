@@ -55,6 +55,11 @@ private:
     state::StateStore& store_;
     ViewBridge bridge_;
     std::unique_ptr<view::PluginViewHost> editor_host_;
+    // Forwards the host's GPU-surface transitions into the scripted UI session.
+    // Declared AFTER editor_host_ so destruction order alone already drops it
+    // before the host; removed() resets it explicitly because bridge_ (which
+    // owns the session the observer writes into) outlives both.
+    view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding_;
 };
 
 } // namespace pulp::format::vst3

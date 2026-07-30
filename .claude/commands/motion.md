@@ -3,15 +3,15 @@ name: motion
 description: Debug or validate a Pulp animation / transition / scroll — runtime trace, fixture record/replay/assert, visual analysis, scrubber, cost attribution
 ---
 
-Debug a motion behavior the framework's way: attach a runtime trace over
-the inspector wire, capture a fixture, and read the numbers — don't
-guess from source.
+Debug a motion behavior using fixture/replay or visual evidence. The live
+inspector path is reserved but not wired into normal Pulp launches;
+`PULP_MOTION_SERVER` is not implemented.
 
 ## Eight paths (pick by what you have)
 
 | You have | Path | Tool |
 |---|---|---|
-| Running app + node id | **Runtime trace** | `Motion.startTrace` over the inspector wire (port 9147) |
+| Custom source-checkout fixture + node id | **Experimental runtime trace** | Explicitly construct `InspectorServer`, then use `Motion.startTrace` |
 | Just frames (no instrumentation) | **Visual analysis** | `python3 -m tools.motion.visual.analyze_sequence --frames-dir DIR` |
 | A `.motion.jsonl` fixture | **Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
 | An interaction to record | **Input record/replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
@@ -20,11 +20,11 @@ guess from source.
 | SwiftUI / UIKit / AppKit code path | **Swift facade** (Path G) | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
 | Compose / Android View code path | **Kotlin facade** (Path H) | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
 
-## Fastest path — quick trace via the standalone host
+## Experimental live path — custom fixture only
 
 ```bash
-# 1. Launch the host with the motion inspector server up.
-PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
+# Normal standalone and preview hosts do not start an inspector endpoint.
+# A custom source-checkout fixture must construct and wire it first.
 
 # 2a. Easiest: `pulp motion *` CLI subcommands (one verb per Motion.*
 #     method, prints the trace_id, honors --port + $PULP_INSPECTOR_PORT).
@@ -32,15 +32,7 @@ pulp motion record --view Card --out card-fade.jsonl
 # → trace started — trace_id=1
 pulp motion stop --trace-id 1
 
-# 2b. Raw inspector wire (TCP port 9147) — equivalent payload.
-echo '{"id":1,"method":"Motion.startTrace","params":{
-  "view_name":"Card","fps":30,
-  "metrics":[{"kind":"geometry","name":"frame","node_id":"card",
-    "properties":["minX","minY","width","height"],
-    "space":"window","source":"presentation"}]}}' \
-  | nc -w 30 localhost 9147
-
-# 3. Trigger the suspect interaction in the app; events stream as JSON.
+# The transport is length-prefixed; raw line-delimited `nc` is not a client.
 
 # 4. Other handy verbs:
 pulp motion snapshot          # view tracing_enabled / active_traces / cost
@@ -52,7 +44,7 @@ pulp motion cost enable       # opt in to per-frame cost samples
 ## Useful env knobs in `pulp-ui-preview`
 
 - `PULP_MOTION_LOG=1` — install the default `[PulpMotion]` log sink + enable tracing.
-- `PULP_MOTION_SERVER=1` — start the `Motion.*` inspector server (port 9147).
+- `PULP_MOTION_SERVER=1` — reserved by older docs; currently does not start a server.
 - `PULP_MOTION_FIREHOSE=1` — broadcast every `publish_value` call to all sinks (dev-only).
 
 ## Assertion shape (use the dedicated helpers, never one global "smoothness")

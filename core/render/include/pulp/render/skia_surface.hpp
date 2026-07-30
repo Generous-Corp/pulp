@@ -12,6 +12,39 @@ class Context;
 
 namespace pulp::render {
 
+/// Where a frame actually ended up.
+///
+/// A frame that renders perfectly and reaches nothing is the failure mode this
+/// enum exists to stop being silent. Before it, `begin_frame()` answered a
+/// failed native-drawable wrap by handing back the OFFSCREEN canvas: the host
+/// painted, submitted, presented, reported success, and cleared its damage,
+/// while the texture being presented had never been drawn into. The editor was
+/// black and every observable signal — including screenshot readback, which
+/// reads the offscreen target — said the frame was fine.
+///
+/// `offscreen` is therefore a first-class SUCCESS (headless capture and the
+/// browser path have no presentable surface by design), and the offscreen
+/// canvas is never a fallback for a presentable surface that failed.
+enum class FrameOutcome {
+    /// Drew into, and submitted to, the intended presentable drawable.
+    presented,
+    /// No native surface exists by design; the offscreen target IS the output.
+    offscreen,
+    /// The native drawable could not be wrapped or blitted. Its contents are
+    /// undefined; the surface should be recreated before the next attempt.
+    recreate,
+    /// Submission failed. The surface is still usable — retry the frame.
+    failed,
+};
+
+/// True when `outcome` means the frame's pixels reached their intended output,
+/// i.e. the caller may retire this frame's damage. The one predicate hosts
+/// should use, so "did it reach the screen?" cannot drift between platforms.
+constexpr bool frame_reached_output(FrameOutcome outcome) {
+    return outcome == FrameOutcome::presented ||
+           outcome == FrameOutcome::offscreen;
+}
+
 /// Skia Graphite rendering surface.
 ///
 /// Connects a GpuSurface (WebGPU device) to Skia's GPU 2D rendering.
@@ -66,15 +99,41 @@ public:
 
     virtual ~SkiaSurface() = default;
 
-    /// Begin a frame: returns a Canvas to draw into.
-    /// If GpuSurface has a presentable surface, the canvas targets the current
-    /// swapchain texture. Otherwise, it targets an offscreen render target.
+    /// Begin a frame: returns a Canvas to draw into, or nullptr on failure.
+    ///
+    /// The canvas targets, in order: the retained scene surface in
+    /// persistent-scene mode; the current swapchain texture when GpuSurface has
+    /// a presentable surface; the offscreen render target when it does not.
     /// The canvas is valid until end_frame() is called.
+    ///
+    /// Returns nullptr — rather than quietly redirecting to the offscreen
+    /// target — when a PRESENTABLE surface exists but its drawable could not be
+    /// wrapped. The caller must not treat that as a rendered frame; query
+    /// last_frame_outcome() for whether to recreate the surface or just retry.
     virtual canvas::Canvas* begin_frame() = 0;
 
-    /// End a frame: submits the Graphite recording to the GPU.
-    /// Actual presentation is handled by GpuSurface::end_frame().
-    virtual void end_frame() = 0;
+    /// End a frame: submits the Graphite recording to the GPU, and reports
+    /// whether the frame reached its intended output.
+    ///
+    /// Actual presentation is handled by GpuSurface::end_frame(); this covers
+    /// everything up to and including submission of the drawable's contents, so
+    /// a `presented` result means "the correct texture was drawn into and
+    /// submitted", not "the compositor has shown it".
+    ///
+    /// Hosts must not retire pending damage unless frame_reached_output() is
+    /// true for the returned outcome, or the failed frame's damage is lost and
+    /// the retry paints nothing.
+    virtual FrameOutcome end_frame() = 0;
+
+    /// Outcome of the most recent begin_frame()/end_frame() pair. Set by
+    /// begin_frame() too, so a caller that got a null canvas can distinguish
+    /// "recreate the surface" from "retry" without a second entry point.
+    virtual FrameOutcome last_frame_outcome() const { return FrameOutcome::offscreen; }
+
+    /// Whether this surface has a presentable native drawable. False for
+    /// headless/offscreen surfaces, where `offscreen` is the intended output
+    /// rather than a fallback.
+    virtual bool has_presentable_target() const = 0;
 
     /// Resize the surface
     virtual void resize(uint32_t width, uint32_t height, float scale = 1.0f) = 0;

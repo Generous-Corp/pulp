@@ -4,6 +4,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/format/aax_midi_packets.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -363,6 +364,13 @@ struct BypassDisplayDelegate final : AAX_IDisplayDelegate<float> {
 };
 
 struct InstanceState {
+    // Declared FIRST so it is destroyed LAST: the final detach cancels and joins
+    // the tracing auto-flush timer and writes the .pftrace, and that must happen
+    // after every span this instance can still emit. Tracing used to be wired
+    // into VST3 ONLY, so a Perfetto capture of any other format recorded nothing
+    // while the API claimed to be process-global. No-op unless PULP_TRACING=ON.
+    runtime::ScopedTracingAttachment tracing;
+
     explicit InstanceState(const EntryConfig& entry)
         : config(entry)
     {

@@ -160,8 +160,12 @@ idempotent: the finalizer no-ops on an already-published tag.
 
 **File:** `.github/workflows/workflow-lint.yml`
 
-Runs on any PR that touches `.github/workflows/**` or `.github/actions/**`.
-Executes three checks:
+Runs on any PR that touches workflows/actions or a release-policy input covered
+by its regression suite. In particular, changes to
+any `CMakeLists.txt` or `tools/cmake/**` run the SDK archive/matrix parity test,
+so a new installed library—or a target changing between interface-only and
+archive-bearing—cannot survive until the multi-platform release build before
+being rejected as unexpected. Executes three checks:
 
 1. **`yamllint`** against `relaxed` profile. Catches syntactic errors
    and flags most structural issues.

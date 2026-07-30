@@ -1,13 +1,12 @@
 #pragma once
 
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/scripted_ui.hpp>
 
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 
 // Shared GPU PluginViewHost auto-selection for every plugin format adapter
 // (AU v2 / VST3 / CLAP / iOS AUv3). The renderer, JS runtime, Yoga layout,
@@ -94,64 +93,91 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
     return d;
 }
 
-/// Build the per-vsync idle pump for a bridge. GPU hosts invoke it once per
-/// display-link tick so the scripted UI session keeps polling async results,
-/// timers, and `requestAnimationFrame` while the editor is embedded. Captures
-/// the bridge by pointer; the host MUST drop this callback (via `detach()` /
-/// destruction) before the bridge is destroyed — every adapter resets its
-/// host before `bridge.close()`.
-inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
-    auto* bridge_ptr = &bridge;
-    // Copy the bridge's liveness token. This pump is dispatched to the main
-    // queue by the GPU display link and can outlive the bridge (host view
-    // reload replaces the bridge; teardown races where CVDisplayLinkStop does
-    // not join an in-flight callback). Guarding on the token makes the pump a
-    // no-op once the bridge is gone instead of dereferencing freed memory —
-    // the crash seen embedding the AU in Ableton Live. Belt-and-suspenders on
-    // top of the adapter contract that the host drops this callback first.
-    auto alive = bridge.alive_token();
-    return [bridge_ptr, alive]() {
-        if (!alive->load(std::memory_order_acquire)) return;  // bridge gone
-        if (!bridge_ptr->owner_is_alive()) return;            // adapter gone
-        // Drain queued host-automation parameter changes to Main-thread
-        // listeners on the UI thread, so parameter-bound widgets
-        // (bind_parameter) follow automation playback / host edits: the
-        // adapter writes the store from the audio thread, this propagates it
-        // to the editor. Cheap when the queue is empty.
-        bridge_ptr->pump_store_listeners();
-        // Live editor reload (1.9): when the processor's logic hot-swaps
-        // (ReloadableShell), rebuild the OPEN editor in place and request a
-        // repaint, so the DAW shows the new UI live without re-instantiating the
-        // plugin. No-op (cheap generation compare) for non-reloadable processors.
-        if (bridge_ptr->poll_editor_reload()) {
-            if (auto* v = bridge_ptr->view()) v->request_repaint();
-        }
-        if (auto* session = bridge_ptr->scripted_ui()) {
-            session->poll();
-        }
-    };
-}
-
-/// Scream-guard (runtime): after the host is created, verify the GPU path
-/// actually took. If GPU was expected (requested + Skia compiled in) but the
-/// host fell back to CoreGraphics, log LOUDLY — the same "expected-but-not-used
-/// → scream" philosophy as the build-time Skia-not-linked guard (c6da9c4da).
-/// On a no-Skia build the request is moot, so no scream fires.
+/// Scream-guard (runtime): after the host's surface state is DECIDED, verify
+/// the GPU path actually took. If GPU was expected (requested + Skia compiled
+/// in) but the host has no surface, log LOUDLY — the same
+/// "expected-but-not-used → scream" philosophy as the build-time
+/// Skia-not-linked guard (c6da9c4da). On a no-Skia build the request is moot,
+/// so no scream fires.
+///
+/// `pending` is silent on purpose. A host that has not built its surface yet
+/// has not fallen back to anything: the Windows host cannot create its Dawn
+/// surface until attach_to_parent() reparents the HWND, so calling this right
+/// after create() — which every adapter used to do — reported a CPU fallback on
+/// an editor that was about to run on the GPU. Prefer bind_gpu_surface(), which
+/// defers this to the transition that actually decides.
 inline void warn_if_unexpected_cpu_fallback(const GpuHostDecision& d,
                                             const view::PluginViewHost* host) {
 #ifdef PULP_HAS_SKIA
-    if (d.use_gpu && host != nullptr && !host->is_gpu_backed()) {
-        runtime::log_error(
-            "[plugin-gpu-host] gpu-init-failed falling_back=cpu mode={} "
-            "use_gpu=true host=cpu — a GPU/scripted editor view silently "
-            "fell back to CoreGraphics. Check Dawn/Metal availability in the "
-            "host process (or set PULP_DISABLE_PLUGIN_GPU=1 intentionally).",
-            d.mode);
-    }
+    if (!d.use_gpu || host == nullptr) return;
+    if (host->gpu_surface_state() != view::PluginViewHost::GpuSurfaceState::unavailable)
+        return;
+    runtime::log_error(
+        "[plugin-gpu-host] gpu-init-failed falling_back=cpu mode={} "
+        "use_gpu=true host=cpu — a GPU/scripted editor view silently "
+        "fell back to CPU rendering. Check Dawn/Metal availability in the "
+        "host process (or set PULP_DISABLE_PLUGIN_GPU=1 intentionally).",
+        d.mode);
 #else
     (void) d;
     (void) host;
 #endif
+}
+
+/// Wire a host's GPU-surface lifecycle to a scripted UI session, for every
+/// format.
+///
+/// This is the one call an adapter needs after building its host. It replaces
+/// the `scripted->attach_gpu_surface(host->gpu_surface())` one-shot read that
+/// each format did independently — a read that is only correct on hosts which
+/// build their surface in the constructor. On Windows it always returned null,
+/// so `navigator.gpu` fell through to mocks and JS-rendered 3D was black in
+/// every DAW.
+///
+/// Also owns the CPU-fallback diagnostic, so it fires exactly once, when the
+/// host's surface state is actually decided, rather than on a pre-attach null.
+///
+/// The returned subscription must be dropped before `session` is destroyed —
+/// adapters keep it next to their host and reset it in their close/removed
+/// path. Dropping it is enough: no callback can fire afterwards.
+[[nodiscard]] inline view::PluginViewHost::GpuSurfaceSubscription
+bind_gpu_surface(view::PluginViewHost& host, view::ScriptedUiSession* session,
+                 const GpuHostDecision& decision, const char* format_tag) {
+    using State = view::PluginViewHost::GpuSurfaceState;
+    const bool expected_gpu = decision.use_gpu;
+    const char* mode = decision.mode;
+    return host.observe_gpu_surface(
+        [session, expected_gpu, mode,
+         format_tag](const view::PluginViewHost::GpuSurfaceStatus& status) {
+            // Route navigator.gpu / canvas.getContext('webgpu') through the
+            // host's live GpuSurface — and, just as importantly, DETACH on the
+            // way down so the session never holds a dangling surface.
+            if (session) session->attach_gpu_surface(status.surface);
+
+            switch (status.state) {
+                case State::ready:
+                    runtime::log_info(
+                        "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
+                        "via ScriptedUiSession ({})",
+                        format_tag);
+                    break;
+                case State::unavailable:
+                    if (expected_gpu) {
+                        runtime::log_error(
+                            "[plugin-gpu-host] gpu-init-failed falling_back=cpu "
+                            "mode={} use_gpu=true host=cpu ({}) — a "
+                            "GPU/scripted editor view has no GPU surface. Check "
+                            "Dawn availability in the host process (or set "
+                            "PULP_DISABLE_PLUGIN_GPU=1 intentionally).",
+                            mode, format_tag);
+                    }
+                    break;
+                case State::pending:
+                    // Not yet created. Nothing to say and nothing to warn
+                    // about — this is the normal Windows pre-attach state.
+                    break;
+            }
+        });
 }
 
 } // namespace pulp::format
