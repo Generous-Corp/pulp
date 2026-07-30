@@ -197,6 +197,34 @@ test("executor rejects a covered click target", async () => {
     /covered by another rendered element/);
 });
 
+test("executor retries transient actionability failures until the timeout",
+  async () => {
+    let probes = 0;
+    const cdp = {
+      async call(method) {
+        if (method === "Runtime.evaluate") {
+          probes += 1;
+          return {
+            result: {
+              value: probes < 3
+                ? { ok: false, error: "target is disabled or read-only" }
+                : { ok: true, x: 20, y: 30 },
+            },
+          };
+        }
+        return {};
+      },
+    };
+    const report = await executeInteractionPlan(cdp, plan([{
+      action: "type",
+      selector: "input",
+      text: "ready",
+      timeout_ms: 1000,
+    }]), { delay: async () => {} });
+    assert.equal(probes, 3);
+    assert.equal(report.actions[0].status, "completed");
+  });
+
 test("main-frame navigation guard allows same-document routing and ignores subframes",
   async () => {
     const listeners = new Map();

@@ -26,7 +26,11 @@ function selectorProbeExpression(selector, operation) {
     try {
       element = document.querySelector(selector);
     } catch (cause) {
-      return { ok: false, error: "invalid CSS selector: " + cause.message };
+      return {
+        ok: false,
+        permanent: true,
+        error: "invalid CSS selector: " + cause.message
+      };
     }
     if (!element) return { ok: false, state: "detached" };
     const style = getComputedStyle(element);
@@ -137,13 +141,16 @@ async function probeUntil(cdp, action, index, operation, predicate, wait) {
   do {
     last = await evaluate(
       cdp, selectorProbeExpression(action.selector, operation));
-    if (last?.error) throw actionError(index, action, last.error);
+    if (last?.error && last.permanent) {
+      throw actionError(index, action, last.error);
+    }
     if (predicate(last)) return last;
     await wait(Math.min(50, Math.max(0, deadline - Date.now())));
   } while (Date.now() < deadline);
   throw actionError(
     index, action,
-    `selector ${JSON.stringify(action.selector)} did not reach the required state`);
+    last?.error ??
+      `selector ${JSON.stringify(action.selector)} did not reach the required state`);
 }
 
 function publicActionEvidence(action) {
