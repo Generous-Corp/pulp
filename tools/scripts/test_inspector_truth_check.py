@@ -70,7 +70,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "pulp-test-inspector-stripped-artifact\n"
                 "check_inspector_stripped_artifact.cmake\n",
             "inspect/src/discovery.cpp":
-                "if (info.pbi_status == SZOMB)\n"
+                "info.kp_proc.p_stat == SZOMB\n"
+                "without a supported start-time identity fail closed\n"
                 "record && read_credential(*record).has_value()\n",
         }
         for relative, text in files.items():

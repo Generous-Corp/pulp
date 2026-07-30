@@ -141,7 +141,8 @@ REQUIRED_BUILD_CONTRACTS = {
 
 REQUIRED_SECURITY_CONTRACTS = {
     "inspect/src/discovery.cpp": (
-        "if (info.pbi_status == SZOMB)",
+        "info.kp_proc.p_stat == SZOMB",
+        "without a supported start-time identity fail closed",
         "record && read_credential(*record).has_value()",
     ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (

@@ -32,17 +32,13 @@
 #define getpid _getpid
 #else
 #include <cerrno>
-#include <csignal>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
-#include <TargetConditionals.h>
-#if TARGET_OS_OSX
-#include <libproc.h>
 #include <sys/proc.h>
-#endif
+#include <sys/sysctl.h>
 #endif
 #endif
 
@@ -368,16 +364,23 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
         (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) |
         created.dwLowDateTime;
     return std::to_string(value);
-#elif defined(__APPLE__) && TARGET_OS_OSX
-    proc_bsdinfo info{};
-    if (proc_pidinfo(static_cast<int>(process_id), PROC_PIDTBSDINFO, 0,
-                     &info, sizeof(info)) != sizeof(info)) {
+#elif defined(__APPLE__)
+    int query[] = {
+        CTL_KERN,
+        KERN_PROC,
+        KERN_PROC_PID,
+        static_cast<int>(process_id),
+    };
+    kinfo_proc info{};
+    std::size_t size = sizeof(info);
+    if (::sysctl(query, 4, &info, &size, nullptr, 0) != 0 ||
+        size != sizeof(info) ||
+        info.kp_proc.p_pid != static_cast<pid_t>(process_id) ||
+        info.kp_proc.p_stat == SZOMB) {
         return std::nullopt;
     }
-    if (info.pbi_status == SZOMB)
-        return std::nullopt;
-    return std::to_string(info.pbi_start_tvsec) + ":" +
-           std::to_string(info.pbi_start_tvusec);
+    return std::to_string(info.kp_proc.p_starttime.tv_sec) + ":" +
+           std::to_string(info.kp_proc.p_starttime.tv_usec);
 #elif defined(__linux__)
     std::ifstream stat_file(
         "/proc/" + std::to_string(process_id) + "/stat");
@@ -399,10 +402,8 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
     }
     return value;
 #else
-    if (::kill(static_cast<pid_t>(process_id), 0) == 0)
-        return std::to_string(process_id);
-    if (errno == EPERM)
-        return std::to_string(process_id);
+    // Publication must bind liveness to more than a reusable PID. Platforms
+    // without a supported start-time identity fail closed.
     return std::nullopt;
 #endif
 }
