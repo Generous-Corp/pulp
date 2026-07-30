@@ -48,9 +48,8 @@ struct RealtimeStretchStateBankAdmission {
 };
 
 /// Pure, allocation-free admission for one immutable bank shape. The byte
-/// calculation is deliberately conservative: every state reserves the full
-/// per-processor allocation ceiling, so the accepted aggregate cannot widen
-/// during prepare.
+/// calculation checked-sums each processor geometry's conservative retained
+/// charge. The separate per-allocation ceiling remains an addressability bound.
 RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
     std::span<const RealtimeStretchStateSpec> specs, double sample_rate,
     std::uint32_t maximum_block_frames, const AudioRendererLimits& limits) noexcept;
@@ -59,6 +58,11 @@ RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
 /// prepare() is transactional: it prepares a complete candidate and swaps it
 /// into service only after every state succeeds. state_for_epoch() and reset()
 /// are allocation-free and intended for the audio thread.
+///
+/// With exceptions enabled, allocation failures preserve the live bank and
+/// return AllocationFailed. In no-exception builds the standard containers'
+/// OOM behavior is process termination; prepare cannot report allocation
+/// failure because the allocator provides no recoverable failure channel.
 class RealtimeStretchStateBank {
   public:
     RealtimeStretchStateBank();

@@ -253,6 +253,50 @@ TEST_CASE("RealtimePitchTimeProcessor rejects target-byte capacity atomically",
     REQUIRE(double_prepared.output_free_space() == double_capacity);
 }
 
+TEST_CASE("RealtimePitchTime prepared geometry reports every retained backing store",
+          "[signal][pitch-time][streaming]") {
+    const auto geometry = [](RealtimePitchTimeConfig config) {
+        RealtimePitchTimePreparedGeometry<float> result;
+        REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                    config, 1.0, std::numeric_limits<std::uint64_t>::max(), result)
+                == PitchTimePrepareStatus::prepared);
+        REQUIRE(result.retained_bytes > 0);
+        return result;
+    };
+
+    auto base_config = stream_config(128);
+    base_config.channels = 1;
+    base_config.max_time_ratio = 1.0f;
+    const auto base = geometry(base_config);
+
+    auto stereo_config = base_config;
+    stereo_config.channels = 2;
+    const auto stereo = geometry(stereo_config);
+    REQUIRE(stereo.retained_bytes > base.retained_bytes);
+
+    auto wider_block_config = stereo_config;
+    wider_block_config.max_block = 256;
+    const auto wider_block = geometry(wider_block_config);
+    REQUIRE(wider_block.retained_bytes >= stereo.retained_bytes);
+
+    auto noise_config = stereo_config;
+    noise_config.noise_morphing = true;
+    const auto noise = geometry(noise_config);
+    REQUIRE(noise.retained_bytes > stereo.retained_bytes);
+
+    auto sinc_config = stereo_config;
+    sinc_config.sinc_resampling = true;
+    const auto sinc = geometry(sinc_config);
+    REQUIRE(sinc.retained_bytes > stereo.retained_bytes);
+
+    // The retained charge is an aggregate, not a second address ceiling.
+    RealtimePitchTimePreparedGeometry<float> bounded;
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                base_config, 1.0, 64u * 1024u, bounded)
+            == PitchTimePrepareStatus::prepared);
+    REQUIRE(bounded.retained_bytes > 64u * 1024u);
+}
+
 TEST_CASE("RealtimePitchTimeProcessor partial EOF read preserves the real prefix",
           "[signal][pitch-time][streaming]") {
     RealtimePitchTimeProcessor processor;
