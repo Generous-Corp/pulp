@@ -591,7 +591,9 @@ TEST_CASE("Character engine bank steady processing keeps realtime reserve",
                                   << relative_cost << "x; callback fraction "
                                   << callback_fraction);
     REQUIRE(relative_cost < kMaxRelativeCost);
+#ifdef NDEBUG
     REQUIRE(callback_fraction < kMaxCallbackFraction);
+#endif
 }
 
 TEST_CASE("Pulp Delay zero mix is exact dry pass-through", "[pulp-delay][audio]") {

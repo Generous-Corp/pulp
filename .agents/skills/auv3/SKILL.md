@@ -1430,3 +1430,24 @@ unread on this format.
 
 That is a gap in the AU API, not an omission in the adapter. Do not invent a
 private property for it.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a AU v3
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`PulpAudioUnit`'s `_tracing` ivar, reset explicitly at the end of `-dealloc`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.

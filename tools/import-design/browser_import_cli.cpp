@@ -59,6 +59,31 @@ fs::path normalized_destination(const fs::path& path) {
 #endif
 }
 
+bool validate_primary_output_destinations(
+    const BrowserImportCliRequest& request,
+    std::string& error) {
+    std::vector<fs::path> outputs = request.reserved_output_paths;
+    outputs.push_back(request.output_file);
+    std::vector<fs::path> inputs{request.input_file};
+    if (request.browser_interactions)
+        inputs.push_back(*request.browser_interactions);
+    if (!request.reference_image.empty())
+        inputs.emplace_back(request.reference_image);
+    for (const auto& output : outputs) {
+        if (output.empty()) continue;
+        const auto normalized_output = normalized_destination(output);
+        for (const auto& input : inputs) {
+            if (!input.empty() &&
+                normalized_output == normalized_destination(input)) {
+                error =
+                    "browser primary output collides with a protected input";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool path_contains(const fs::path& directory, const fs::path& candidate) {
     const auto base = normalized_destination(directory);
     const auto path = normalized_destination(candidate);
@@ -83,6 +108,8 @@ bool validate_publication_destinations(
     std::vector<fs::path> protected_paths = request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
     protected_paths.push_back(request.input_file);
+    if (request.browser_interactions)
+        protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
     if (std::any_of(
@@ -128,6 +155,8 @@ bool validate_localized_asset_destinations(
     std::vector<fs::path> protected_paths = request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
     protected_paths.push_back(request.input_file);
+    if (request.browser_interactions)
+        protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
     for (const auto& asset : ir.asset_manifest.assets) {
@@ -526,6 +555,12 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
     const BrowserImportCliRequest& request,
     std::string_view content,
     const internal::BrowserImportCliOperations& operations) {
+    std::string primary_output_error;
+    if (!validate_primary_output_destinations(
+            request, primary_output_error)) {
+        std::cerr << "Error: " << primary_output_error << "\n";
+        return BrowserImportFailure{2};
+    }
     int render_width = request.initial_width;
     int render_height = request.initial_height;
     std::string reference_image = request.reference_image;
@@ -540,6 +575,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
     protected_paths.push_back(request.input_file);
+    if (request.browser_interactions)
+        protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
 
@@ -548,6 +585,7 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .output_file = request.output_file,
          .importer_executable = request.importer_executable,
          .browser_executable = request.browser_executable,
+         .browser_interactions = request.browser_interactions,
          .source = request.source,
          .initial_width = request.initial_width,
          .initial_height = request.initial_height,
@@ -611,12 +649,24 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         return BrowserImportFailure{failure->exit_code};
     } else if (std::holds_alternative<BrowserHtmlLegacyFallback>(
                    browser_import)) {
+        if (request.browser_interactions) {
+            std::cerr
+                << "Error: --browser-interactions requires browser-solved "
+                   "runnable HTML and cannot be combined with --offline\n";
+            return BrowserImportFailure{2};
+        }
         std::cerr
             << "Warning: --offline selected the legacy partial HTML parser; "
                "CSS layout, runtime DOM, canvas/WebGL, and dynamic content may "
                "not match the browser.\n";
         return BrowserImportNotApplicable{};
     } else {
+        if (request.browser_interactions) {
+            std::cerr
+                << "Error: --browser-interactions applies only to "
+                   "browser-solved runnable HTML\n";
+            return BrowserImportFailure{2};
+        }
         if (request.fail_below_percent >= 0.0f &&
             reference_image.empty()) {
             std::cerr

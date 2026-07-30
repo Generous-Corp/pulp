@@ -593,6 +593,10 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     TempTree tree("argv");
     const auto script = tree.write("capture script ' $().mjs", "// fixture");
     auto request = fixture_request(tree, script);
+    const auto interactions = tree.write(
+        "interaction plan ' $().json",
+        R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+    request.interaction_plan = interactions;
     request.allow_network = true;
     tree.write(
         "authorized root ' $()/nested/runtime.js",
@@ -616,6 +620,8 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     CHECK(contains_line(args, output.string()));
     CHECK(contains_line(args, "Fixture Chromium"));
     CHECK(contains_line(args, "123.4.5.6"));
+    CHECK(contains_line(args, "--interactions"));
+    CHECK(contains_line(args, interactions.string()));
     CHECK(contains_line(args, "--allow-network"));
     CHECK(contains_line(args, "--declared-network-origin"));
     CHECK(contains_line(args, "https://cdn.example.com"));
@@ -634,6 +640,9 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     CHECK(fs::exists(output / "browser.png"));
     CHECK(fs::exists(output / "semantic-report.json"));
     CHECK(fs::exists(output / "dom-snapshot.json"));
+    REQUIRE(result.artifacts->interaction_report);
+    CHECK(*result.artifacts->interaction_report ==
+          output / "interaction-report.json");
 }
 
 TEST_CASE("capture preserves the runtime diagnostic code",
@@ -717,6 +726,7 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
              "semantic-report.json",
              "tokens.json",
              "dom-snapshot.json",
+             "interaction-report.json",
              "capture-error.json",
          }) {
         std::ofstream(request.output_directory / name) << "stale";
@@ -729,8 +739,60 @@ TEST_CASE("capture clears known stale artifacts before validating fresh output",
     CHECK(result.diagnostic.code == "browser-capture-incomplete");
     CHECK_FALSE(fs::exists(
         request.output_directory / "semantic-report.json"));
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
     CHECK(fs::exists(request.output_directory / "capture-error.json"));
     CHECK(read_file(request.output_directory / "keep.me") == "unrelated");
+}
+
+TEST_CASE("non-interactive reuse clears prior interaction evidence",
+          "[import-design][browser-capture][interactions]") {
+    TempTree tree("interaction-reuse");
+    const auto script = tree.write("capture.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.interaction_plan = tree.write(
+        "interactions.json",
+        R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+
+    const auto interactive =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE(interactive.ok());
+    REQUIRE(interactive.artifacts->interaction_report);
+    CHECK(fs::exists(
+        request.output_directory / "interaction-report.json"));
+    CHECK(read_file(request.output_directory / "capture.json")
+          .find("\"interactions\"") != std::string::npos);
+
+    request.interaction_plan.reset();
+    const auto initial =
+        capture::capture_document(fixture_browser(), request);
+    REQUIRE(initial.ok());
+    CHECK_FALSE(initial.artifacts->interaction_report);
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
+    CHECK(read_file(request.output_directory / "capture.json")
+          .find("\"interactions\"") == std::string::npos);
+}
+
+TEST_CASE("interactive capture requires a fresh interaction report",
+          "[import-design][browser-capture][interactions][security]") {
+    TempTree tree("missing-interaction-report");
+    const auto script =
+        tree.write("omit-interaction.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.interaction_plan = tree.write(
+        "interactions.json",
+        R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "browser-capture-incomplete");
+    CHECK(result.diagnostic.message.find("interaction report") !=
+          std::string::npos);
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
 }
 
 TEST_CASE("capture never accepts a stale token report",

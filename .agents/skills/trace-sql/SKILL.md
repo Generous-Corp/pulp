@@ -300,3 +300,21 @@ FROM f WHERE nts IS NOT NULL;
 Query 1 is what identified the Windows knob-drag regression: frames of 19-45 ms
 whose children summed to ~2 ms. Small gaps plus large unaccounted time means the
 thread is blocked *inside* the frame, not idle between frames.
+
+## An empty capture may be a missing attachment, not a bad query (WAH-4)
+
+Before reaching for `trace_processor`, confirm the session actually recorded.
+Tracing attach/detach was wired into **VST3 only** until WAH-4; a capture of a
+CLAP, AU v2, AU v3, AAX or Standalone session produced an empty `.pftrace`
+while every command looked correct. All six formats now attach via
+`runtime::ScopedTracingAttachment`.
+
+Two other capture-shaping facts worth knowing before you blame a query:
+
+- **The trace is written by the FINAL detach.** A leaked attachment means it is
+  never written at all. Let the host finish unloading the plug-in rather than
+  killing the process.
+- **`PULP_TRACE_SECONDS` timeouts are tagged with a session generation.** They
+  used to be untagged, so closing and reopening an editor inside the window let
+  the FIRST session's timer stop the SECOND one — a capture that looks
+  mysteriously truncated mid-gesture. A stale timer is now a no-op.

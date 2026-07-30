@@ -904,6 +904,25 @@ The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
 
+## The source list covers `core/runtime/` too — not just the adapter's TUs
+
+The rule above ("a new CLAP adapter TU must be added to `PulpWclap.cmake`")
+generalises further than it reads: `PulpWclap.cmake`'s list is the wasm module's
+**entire world**, because it does not link `pulp::runtime` either. So a symbol
+the adapter merely *references* has to be there as well.
+
+Concretely: `clap_adapter.cpp` gained a `runtime::ScopedTracingAttachment`, which
+calls `Tracing::attach()` / `detach()`. Under the default `PULP_TRACING=OFF`
+those compile to no-op stubs — but the symbols still have to exist, and
+`core/runtime/src/trace.cpp` was not in the list. Native builds linked fine
+(they get it out of the `pulp::runtime` archive); every WebCLAP target failed
+with `wasm-ld: undefined symbol: pulp::runtime::Tracing::attach()`.
+
+The failure mode is what makes this expensive: it is invisible locally and on
+the required macOS gate, and surfaces only in the `Build + prove` lane. When you
+add ANY dependency to a TU on this list — not just a new TU — check whether its
+definition is in the list too.
+
 ## The Ganesh/WebGL surface reports a frame outcome now (WAH-2)
 
 `SkiaSurface::end_frame()` returns `render::FrameOutcome` instead of

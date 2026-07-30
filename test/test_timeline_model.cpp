@@ -1,16 +1,28 @@
 #include "../core/timeline/src/identity_directory.hpp"
 #include "../core/timeline/src/identity_transition.hpp"
+#include <pulp/timeline/asset_path.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 using namespace pulp::timeline;
 namespace runtime = pulp::runtime;
+
+TEST_CASE("Package-relative paths reject embedded NUL without C-string aliasing") {
+    const std::string first_asset_name{"x.wav\0a", 7};
+    const std::string second_asset_name{"x.wav\0b", 7};
+
+    REQUIRE(first_asset_name != second_asset_name);
+    REQUIRE_FALSE(package_relative_path_is_lexically_safe(first_asset_name));
+    REQUIRE_FALSE(package_relative_path_is_lexically_safe(second_asset_name));
+    REQUIRE(package_relative_path_is_lexically_safe("media/x.wav"));
+}
 
 TEST_CASE("Timeline private identity equality is semantic across insertion histories") {
     pulp::timeline::detail::IdentityDirectory ascending;

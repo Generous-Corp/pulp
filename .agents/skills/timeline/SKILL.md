@@ -7,13 +7,19 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
 
 ## Choose the surface
 
-- Use MCP for agent-driven project inspection, command application, validation,
-  explanation, and render. Its five operations are `pulp_timeline_project_open`,
-  `pulp_timeline_command_apply`, `pulp_timeline_validate`,
-  `pulp_timeline_explain`, and `pulp_timeline_render`.
-- Use `pulp seq` and `pulp render` for shell scripts, CI, and human-operated
-  headless workflows. Prefer `seq apply` with typed command envelopes over
-  inventing one-off mutation flags.
+- Use MCP for agent-driven project inspection, command application, diff,
+  undo/redo, validation, explanation, render, export, and import. Its ten
+  operations are
+  `pulp_timeline_project_open`, `pulp_timeline_command_apply`,
+  `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`,
+  `pulp_timeline_validate`, `pulp_timeline_explain`,
+  `pulp_timeline_render`, `pulp_timeline_export`, and `pulp_timeline_import`.
+  Seven operations retain stateless `pulp::tool-timeline` entry points; diff,
+  undo, and redo are MCP-local operations backed by a live `DocumentSession`.
+- Use `/seq` for the agent-guided inspect, validate, edit, explain, import, and
+  consent-gated export workflow. Use `pulp seq` and `pulp render` directly for
+  shell scripts, CI, and human-operated headless workflows. Prefer `seq apply`
+  with typed command envelopes over inventing one-off mutation flags.
 - Use the C++ SDK when embedding an editor, transport, compiler, renderer,
   recorder, or durable session. Keep document mutation in `DocumentSession`,
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
@@ -26,6 +32,12 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   not hand-copy schema vocabularies into a client.
 
 Start with `project_open` or `seq validate` when the source is unfamiliar.
+MCP `project_open` returns a bounded process-local `session_id`; use that
+identifier for apply, diff, undo, and redo. A session keeps the real
+`DocumentSession` undo stack and latest canonical `DirtySet`; session handles
+expire when that server process exits and may expire after it reaches its
+bounded session capacity, so preserve the returned project snapshot as the
+durable handoff.
 Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
@@ -703,8 +715,9 @@ that the emitted module parses, imports, and is deeply frozen (skipped, not
 failed, without `node`).
 
 The **MCP tool-definition surface** is another manifest projection:
-`core/timeline/tools/schema_mcp_emit.py` emits the fixed five engine operations
-(project open, command apply, validate, explain, and render) into
+`core/timeline/tools/schema_mcp_emit.py` emits the fixed ten operations
+(project open, command apply, diff, undo, redo, validate, explain, render,
+export, and import) into
 `core/timeline/schema/timeline_mcp_tools.json`. The operation set is an API
 decision rather than a copy of the schema CLI-verb table. Its type vocabularies
 remain manifest-derived: project open lists every Document type, command apply
@@ -715,7 +728,9 @@ the registry defines one. JSON Schema forbids an empty `enum`, and the released
 MCP Tool wire contract requires property schemas to be objects rather than
 boolean schemas; omitting the enum would accidentally accept an unbounded
 string. The live MCP server consumes this generated artifact for both
-advertisement and exact-five operation dispatch.
+advertisement and exact-ten operation dispatch. Export's accepted-loss enum is
+projected from the committed interchange concept authority, excluding
+`unknown`; never hand-copy or broaden that vocabulary.
 
 ```
 python3 core/timeline/tools/schema_mcp_emit.py \
@@ -752,6 +767,11 @@ pulp seq schema
 pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
+pulp seq export <project.json> --format <smf|dawproject> --plan
+pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
+  [--accept-loss <concept-id>]...
+pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \
+  --out <new-directory>
 pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
 ```
 
@@ -760,9 +780,41 @@ registry-derived typed command envelopes. `render` emits Float32 WAV and does
 not silently instantiate hosted devices or invent plugin delay compensation.
 The headless explain result reports unknown PDC offsets as JSON `null`.
 
+Import and export refuse every existing destination, stage into a private
+sibling directory, and publish the complete directory atomically. Never add a
+force, overwrite, or accept-all path. Export requires separate consent for
+every planned lossy concept so a newly introduced loss stops an unattended
+pipeline. Run `--plan` first: it returns the canonical manifest and
+`required_consent` without writing anything, even when the project is lossless.
+Planning rejects `--out` and `--accept-loss`; it does not invent a destination.
+Publishing requires `--out`. MCP uses the equivalent outputless
+`plan_only: true` input and rejects `output` or `accept_losses` in that mode.
+Refusal and successful export
+results carry the same manifest object. SMF exports contain `project.mid`;
+DAWproject exports are currently
+unpacked `project.xml` plus sibling media, not packaged `.dawproject` files.
+DAWproject import likewise requires the input filename `project.xml`, confines
+sibling media resolution to its directory, and publishes canonical
+`project.json` plus sealed sibling artifacts.
+
 The live MCP server embeds `timeline_mcp_tools.json` at configure time and
-dispatches exactly its five operations through `pulp::tool-timeline`. Do not
-copy their input schemas into `pulp_mcp.cpp`; regenerate the artifact from the
+dispatches exactly ten operations. Seven operations retain stateless
+`pulp::tool-timeline` entry points; diff, undo, and redo retain an actual
+`DocumentSession` in the bounded MCP process. The CLI has no `pulp seq diff`,
+`undo`, or `redo` session verbs. The production store admits at most 32 sessions
+and applies a 64 MiB aggregate admission charge equal to twice each session's
+canonical JSON size plus its fixed history reservation. This deterministic charge
+is a resource proxy, not a direct heap measurement. Each complete encoded MCP
+result is independently capped at 64 MiB. The store evicts the oldest session
+first when a new or changed session would exceed the count or aggregate charge.
+With the default limits, each session reserves half of the aggregate charge
+divided across the session cap for journal and undo history; a sufficiently long
+uncheckpointed session can therefore refuse a later edit without changing its
+state. Sessions are process-local and expire on eviction or server restart.
+`diff` describes only the latest successful apply, undo, or redo transition and
+returns its exact dirty set plus `before_revision` and `after_revision`; it is not
+an arbitrary since-revision query. Do not copy their input schemas into
+`pulp_mcp.cpp`; regenerate the artifact from the
 timeline manifest and let the server consume it. The MCP render result can be
 fed to `pulp_audio_compare` for an advisory before/after judgment when the
 opt-in Audio Quality Lab tool is installed.

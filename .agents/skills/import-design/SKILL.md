@@ -3254,6 +3254,20 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - If authored async initialization has a real completion boundary, the page
   may expose `globalThis.__pulpCaptureReady` as a Promise or function returning
   one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
+- If the requested screen is not the landing state, pass
+  `--browser-interactions <plan.json>`. The
+  `pulp-browser-interactions-v1` plan accepts only bounded `click`, `type`,
+  `wait-for`, and `wait-ms` actions. End navigation sequences with
+  `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
+  script source do not prove which screen rendered. Capture records action
+  results and typed-text length without retaining the text or a per-action
+  text hash in the interaction report. Typed text remains live rendered state
+  and may appear in screenshot, DOM/semantic, or token evidence, so never put
+  passwords, credentials, private drafts, or other secrets in a plan. Popup
+  pages are rejected. For a distinct post-action asynchronous completion
+  boundary, expose `globalThis.__pulpInteractionReady`; capture awaits it after
+  the plan without calling the initial `__pulpCaptureReady` contract twice.
+  Never add an arbitrary JavaScript action.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated

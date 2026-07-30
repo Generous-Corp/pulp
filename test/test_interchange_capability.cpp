@@ -17,6 +17,7 @@ TEST_CASE("concept vocabulary is a closed, self-describing set", "[interchange]"
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::TempoRamp) == 45);
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipNoteVelocityQuantized) == 46);
     STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::TempoValueQuantized) == 47);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipMediaWindow) == 48);
 
     SECTION("Unknown is the zero value so an unclassified construct refuses by default") {
         REQUIRE(static_cast<std::size_t>(Concept::Unknown) == 0);
@@ -120,6 +121,14 @@ TEST_CASE("the capability world is closed: undeclared means refused", "[intercha
         REQUIRE_FALSE(export_capability(Format::DawProject, Concept::Marker).loss.empty());
         REQUIRE(export_capability(Format::DawProject, Concept::AssetEmbeddedMedia).level ==
                 ExportLevel::Drop);
+    }
+
+    SECTION("DAWproject explicitly declares media source windows as a loss") {
+        const ExportRow& window =
+            export_capability(Format::DawProject, Concept::ClipMediaWindow);
+        REQUIRE(window.level == ExportLevel::Drop);
+        REQUIRE(window.loss_class == LossClass::Dropped);
+        REQUIRE_FALSE(window.loss.empty());
     }
 }
 
