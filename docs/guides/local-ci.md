@@ -7,6 +7,38 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## Routing the Linux advisory lanes to macpro
+
+Three advisory Linux lanes can run on the self-hosted x86_64 host instead of
+GitHub's pool. Measured cost on hosted runners, per PR:
+
+| Lane | Variable | Hosted wait | Hosted run |
+|---|---|---|---|
+| GCC compile (core, Linux) | `PULP_LOCAL_GCC_RUNS_ON_JSON` | 63.2m | 11.3m |
+| IWYU (Linux, Clang) | `PULP_LOCAL_IWYU_RUNS_ON_JSON` | 4.2m | 5.2m |
+| Public headers standalone | `PULP_LOCAL_HEADERS_RUNS_ON_JSON` | 9.7m | 2.9m |
+
+About 96 job-minutes of hosted load per PR. None is a required check, so a red
+result here never blocks a merge — which is why they are the right lanes to move
+first.
+
+Each falls back to its GitHub-hosted label when the variable is unset, so the
+workflow change is inert until a variable is set. **Flip them one at a time and
+watch a full cycle**: `runs-on` has no automatic fallback once a variable *is*
+set, so a lane pointed at a stopped pool queues indefinitely rather than erroring.
+Rollback is unsetting the variable.
+
+```sh
+gh variable set PULP_LOCAL_IWYU_RUNS_ON_JSON \
+  --repo Generous-Corp/pulp \
+  --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
+```
+
+Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
+Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
+remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
+against each other before they queue against GitHub.
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
