@@ -262,7 +262,7 @@ void InterprocessConnection::disconnect() {
     const auto lifecycle = impl_->lifecycle;
     {
         std::unique_lock lifecycle_lock(lifecycle->mutex);
-        if (lifecycle->active) {
+        while (lifecycle->active) {
             if (lifecycle->owner == caller ||
                 lifecycle->read_thread_id == caller) {
                 return;
@@ -270,7 +270,6 @@ void InterprocessConnection::disconnect() {
             lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
                 return !lifecycle->active;
             });
-            return;
         }
         lifecycle->active = true;
         lifecycle->owner = caller;
@@ -280,7 +279,6 @@ void InterprocessConnection::disconnect() {
             std::lock_guard lifecycle_lock(lifecycle->mutex);
             lifecycle->active = false;
             lifecycle->owner = {};
-            lifecycle->read_thread_id = {};
         }
         lifecycle->cv.notify_all();
     };

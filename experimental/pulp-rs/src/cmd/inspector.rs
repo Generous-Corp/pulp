@@ -7,9 +7,25 @@ use crate::error::{CliError, Result};
 
 pub(crate) const PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionSelection {
+    pub session_id: String,
+    pub instance_id: String,
+}
+
 pub(crate) fn call(
     command_name: &str,
     port: u16,
+    method: &str,
+    params_json: &str,
+) -> Result<String> {
+    call_selected(command_name, port, None, method, params_json)
+}
+
+pub(crate) fn call_selected(
+    command_name: &str,
+    port: u16,
+    selection: Option<&SessionSelection>,
     method: &str,
     params_json: &str,
 ) -> Result<String> {
@@ -23,6 +39,13 @@ pub(crate) fn call(
     command.arg("inspect");
     if port != 0 {
         command.arg("--port").arg(port.to_string());
+    }
+    if let Some(selection) = selection {
+        command
+            .arg("--session")
+            .arg(&selection.session_id)
+            .arg("--instance")
+            .arg(&selection.instance_id);
     }
     let output = command
         .arg("--command")

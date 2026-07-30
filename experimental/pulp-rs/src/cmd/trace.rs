@@ -530,6 +530,21 @@ pub trait InspectorTalker {
     /// command exited non-zero).
     fn call(&self, port: u16, method: &str, params_json: &str)
         -> Result<String>;
+
+    /// Send a request to the exact session selected by an earlier
+    /// authenticated request. Implementations that maintain one persistent
+    /// connection may use the default; subprocess adapters override this so
+    /// each invocation repeats the original session identity.
+    fn call_selected(
+        &self,
+        port: u16,
+        _session_id: &str,
+        _instance_id: &str,
+        method: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        self.call(port, method, params_json)
+    }
 }
 
 /// Production talker — shells out to `pulp-cpp
@@ -546,6 +561,27 @@ impl InspectorTalker for SystemInspector {
         params_json: &str,
     ) -> Result<String> {
         crate::cmd::inspector::call("trace", port, method, params_json)
+    }
+
+    fn call_selected(
+        &self,
+        port: u16,
+        session_id: &str,
+        instance_id: &str,
+        method: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        let selection = crate::cmd::inspector::SessionSelection {
+            session_id: session_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+        };
+        crate::cmd::inspector::call_selected(
+            "trace",
+            port,
+            Some(&selection),
+            method,
+            params_json,
+        )
     }
 }
 
@@ -836,11 +872,30 @@ pub fn run_doctor<T: InspectorTalker>(
 ) -> Result<()> {
     let capabilities_response =
         talker.call(port, "Session.getCapabilities", "{}");
-    let controls = capabilities_response
+    let selection = capabilities_response
         .as_deref()
         .ok()
-        .and_then(parse_capture_controls);
-    let snapshot_response = talker.call(port, "Trace.snapshot", "{}");
+        .and_then(parse_session_selection);
+    let controls = selection.as_ref().and_then(|_| {
+        capabilities_response
+            .as_deref()
+            .ok()
+            .and_then(parse_capture_controls)
+    });
+    let snapshot_response = match selection.as_ref() {
+        Some(selection) => talker.call_selected(
+            port,
+            &selection.session_id,
+            &selection.instance_id,
+            "Trace.snapshot",
+            "{}",
+        ),
+        None if capabilities_response.is_ok() => Err(CliError::Other(
+            "Session.getCapabilities did not return a sessionId and instanceId"
+                .to_owned(),
+        )),
+        None => talker.call(port, "Trace.snapshot", "{}"),
+    };
     let reachable =
         capabilities_response.is_ok() || snapshot_response.is_ok();
     let (snapshot, snapshot_error) = match snapshot_response {
@@ -884,6 +939,21 @@ fn parse_capture_controls(response: &str) -> Option<CaptureControls> {
         session: contains("session.control"),
         trace: contains("trace.control"),
         controller_available: value.get("controller").is_none(),
+    })
+}
+
+fn parse_session_selection(
+    response: &str,
+) -> Option<crate::cmd::inspector::SessionSelection> {
+    let value: serde_json::Value = serde_json::from_str(response).ok()?;
+    let session_id = value.get("sessionId")?.as_str()?;
+    let instance_id = value.get("instanceId")?.as_str()?;
+    if session_id.is_empty() || instance_id.is_empty() {
+        return None;
+    }
+    Some(crate::cmd::inspector::SessionSelection {
+        session_id: session_id.to_owned(),
+        instance_id: instance_id.to_owned(),
     })
 }
 
@@ -1436,6 +1506,9 @@ mod tests {
     struct RecordingTalker {
         responses: std::cell::RefCell<Vec<String>>,
         calls: std::cell::RefCell<Vec<(u16, String, String)>>,
+        selections: std::cell::RefCell<
+            Vec<Option<crate::cmd::inspector::SessionSelection>>,
+        >,
     }
 
     impl RecordingTalker {
@@ -1445,6 +1518,28 @@ mod tests {
                     responses.into_iter().map(str::to_owned).collect(),
                 ),
                 calls: std::cell::RefCell::new(Vec::new()),
+                selections: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn record_call(
+            &self,
+            port: u16,
+            selection: Option<crate::cmd::inspector::SessionSelection>,
+            method: &str,
+            params: &str,
+        ) -> Result<String> {
+            self.calls.borrow_mut().push((
+                port,
+                method.to_owned(),
+                params.to_owned(),
+            ));
+            self.selections.borrow_mut().push(selection);
+            let mut responses = self.responses.borrow_mut();
+            if responses.is_empty() {
+                Ok("{}".to_owned())
+            } else {
+                Ok(responses.remove(0))
             }
         }
     }
@@ -1456,17 +1551,26 @@ mod tests {
             method: &str,
             params: &str,
         ) -> Result<String> {
-            self.calls.borrow_mut().push((
+            self.record_call(port, None, method, params)
+        }
+
+        fn call_selected(
+            &self,
+            port: u16,
+            session_id: &str,
+            instance_id: &str,
+            method: &str,
+            params: &str,
+        ) -> Result<String> {
+            self.record_call(
                 port,
-                method.to_owned(),
-                params.to_owned(),
-            ));
-            let mut r = self.responses.borrow_mut();
-            if r.is_empty() {
-                Ok("{}".to_owned())
-            } else {
-                Ok(r.remove(0))
-            }
+                Some(crate::cmd::inspector::SessionSelection {
+                    session_id: session_id.to_owned(),
+                    instance_id: instance_id.to_owned(),
+                }),
+                method,
+                params,
+            )
         }
     }
 
@@ -1854,7 +1958,11 @@ mod tests {
 
     #[test]
     fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
-        let t = RecordingTalker::new(vec![]);
+        let t = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"effective\":[\"session.control\",\"trace.control\"]}",
+            "{}",
+        ]);
         let mut buf: Vec<u8> = Vec::new();
         let flags = GlobalFlags { json: false, port: Some(1) };
         dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
@@ -1866,6 +1974,16 @@ mod tests {
             &[
                 (1, "Session.getCapabilities".to_owned(), "{}".to_owned()),
                 (1, "Trace.snapshot".to_owned(), "{}".to_owned()),
+            ]
+        );
+        assert_eq!(
+            &*t.selections.borrow(),
+            &[
+                None,
+                Some(crate::cmd::inspector::SessionSelection {
+                    session_id: "session-a".to_owned(),
+                    instance_id: "instance-b".to_owned(),
+                }),
             ]
         );
     }
@@ -1881,7 +1999,11 @@ mod tests {
                 _params: &str,
             ) -> Result<String> {
                 if method == "Session.getCapabilities" {
-                    Ok("{}".to_owned())
+                    Ok(
+                        "{\"sessionId\":\"session-a\",\
+                         \"instanceId\":\"instance-b\"}"
+                            .to_owned(),
+                    )
                 } else {
                     Err(CliError::Other("capability_denied".to_owned()))
                 }
@@ -1900,6 +2022,27 @@ mod tests {
         assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
         assert!(human.contains("capability_denied"), "{human}");
         assert!(!human.contains("no inspector available"), "{human}");
+    }
+
+    #[test]
+    fn dispatch_doctor_does_not_snapshot_without_an_exact_session_identity() {
+        let talker = RecordingTalker::new(vec![
+            "{\"effective\":[\"session.control\",\"trace.control\"]}",
+            "{\"compiled_in\":true,\"active\":true}",
+        ]);
+        let mut output = Vec::new();
+        run_doctor(9200, true, &talker, &mut output).unwrap();
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["inspector_reachable"], true);
+        assert!(value["compiled_in"].is_null());
+        assert_eq!(value["ready_to_capture"], false);
+        assert!(value["snapshot_error"]
+            .as_str()
+            .unwrap()
+            .contains("sessionId and instanceId"));
+        assert_eq!(talker.calls.borrow().len(), 1);
     }
 
     #[test]
