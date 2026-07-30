@@ -143,126 +143,117 @@ std::vector<std::uint8_t> to_bytes(std::string_view text) {
     return std::vector<std::uint8_t>(text.begin(), text.end());
 }
 
-/// The loss record, carried into the package rather than left behind in the
-/// caller's console. An export whose manifest does not travel with it is an
-/// export whose losses are invisible to whoever opens the file next.
-std::string manifest_json(const interchange::ExportPlan& plan) {
-    std::ostringstream out;
-    out << "{\"format\":\"dawproject\",\"lossless\":" << (plan.is_lossless() ? "true" : "false")
-        << ",\"losses\":[";
-    bool first = true;
-    for (const interchange::LossEntry& entry : plan.losses().entries()) {
-        if (!first)
-            out << ',';
-        first = false;
-        out << "{\"concept\":\"" << interchange::concept_id(entry.concept_value) << "\",\"class\":\""
-            << interchange::loss_class_id(entry.loss_class) << "\",\"count\":" << entry.count
-            << ",\"detail\":\"" << entry.detail << "\"}";
+runtime::Result<interchange::ExportArtifacts, interchange::ExportError>
+write_plan(const interchange::ExportPlan& plan, const ExportOptions& options) {
+    const timeline::Project& project = plan.project();
+    const timeline::Sequence* sequence = project.find_sequence(project.root_sequence_id());
+    if (sequence == nullptr)
+        return runtime::Err(
+            interchange::ExportError{interchange::ExportErrorCode::WriterFailed,
+                                     "the project names a root sequence that does not exist",
+                                     {}});
+
+    pugi::xml_document doc;
+    auto declaration = doc.append_child(pugi::node_declaration);
+    declaration.append_attribute("version") = "1.0";
+    declaration.append_attribute("encoding") = "UTF-8";
+
+    auto root = doc.append_child("Project");
+    root.append_attribute("version") = "1.0";
+
+    auto application = root.append_child("Application");
+    application.append_attribute("name") = options.application_name.c_str();
+    application.append_attribute("version") = options.application_version.c_str();
+
+    // A single tempo and a single time signature: the plan has already
+    // refused (or the caller has already accepted losing) anything richer.
+    auto transport = root.append_child("Transport");
+    auto tempo = transport.append_child("Tempo");
+    tempo.append_attribute("unit") = "bpm";
+    const auto tempo_points = project.tempo_map().points();
+    tempo.append_attribute("value") =
+        number(tempo_points.empty() ? 120.0 : tempo_points.front().bpm).c_str();
+    auto signature = transport.append_child("TimeSignature");
+    const auto meter_points = project.meter_map().points();
+    const auto meter =
+        meter_points.empty() ? timebase::MeterSignature{4, 4} : meter_points.front().signature;
+    signature.append_attribute("numerator") = static_cast<int>(meter.numerator);
+    signature.append_attribute("denominator") = static_cast<int>(meter.denominator);
+
+    auto structure = root.append_child("Structure");
+    auto arrangement = root.append_child("Arrangement");
+    arrangement.append_attribute("id") = element_id("arrangement", sequence->id()).c_str();
+    auto lanes = arrangement.append_child("Lanes");
+    lanes.append_attribute("timeUnit") = "beats";
+    lanes.append_attribute("id") = "lanes-root";
+
+    for (const timeline::Track& track : sequence->tracks()) {
+        const std::string track_id = element_id("track", track.id());
+        auto track_node = structure.append_child("Track");
+        track_node.append_attribute("contentType") = track_holds_notes(track) ? "notes" : "audio";
+        track_node.append_attribute("loaded") = "true";
+        track_node.append_attribute("id") = track_id.c_str();
+        track_node.append_attribute("name") = track.name().c_str();
+
+        // A DAWproject track is a channel. A receiving DAW registers the
+        // track from this element, and a <Lanes track="..."> reference to a
+        // track that was never registered resolves to nothing -- Bitwig
+        // 6.0.11 fails such a file with EmptyStackException while adding the
+        // first clip, because its track-context stack is empty.
+        //
+        // This channel is deliberately NEUTRAL: unity volume, centre pan.
+        // That is not the document's authored mixer state, which this writer
+        // does not export -- the capability table says mixer.track-gain and
+        // mixer.track-pan are dropped, and they are. Emitting a default
+        // channel is what makes the file loadable, not a partial export of
+        // levels the manifest claims were dropped.
+        auto channel = track_node.append_child("Channel");
+        channel.append_attribute("id") = element_id("channel", track.id()).c_str();
+        channel.append_attribute("role") = "regular";
+        channel.append_attribute("audioChannels") = 2;
+        auto volume = channel.append_child("Volume");
+        volume.append_attribute("value") = "1.000000";
+        volume.append_attribute("unit") = "linear";
+        volume.append_attribute("min") = "0.000000";
+        volume.append_attribute("max") = "2.000000";
+        auto pan = channel.append_child("Pan");
+        pan.append_attribute("value") = "0.500000";
+        pan.append_attribute("unit") = "normalized";
+        pan.append_attribute("min") = "0.000000";
+        pan.append_attribute("max") = "1.000000";
+
+        auto track_lanes = lanes.append_child("Lanes");
+        track_lanes.append_attribute("track") = track_id.c_str();
+        track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
+        auto clips = track_lanes.append_child("Clips");
+        clips.append_attribute("id") = element_id("clips", track.id()).c_str();
+        for (const timeline::Clip& clip : track.clips()) {
+            if (!omit_clip(clip))
+                write_clip(clips, project, clip);
+        }
     }
-    out << "]}";
-    return out.str();
+
+    std::ostringstream xml;
+    doc.save(xml, "  ");
+
+    interchange::ExportArtifacts artifacts;
+    artifacts.artifacts.push_back({"project.xml", to_bytes(xml.str())});
+    return runtime::Ok(std::move(artifacts));
 }
 
 } // namespace
 
-interchange::ExportWriter writer(const timeline::Project& project, const ExportOptions& options) {
-    return [&project, options](const interchange::ExportPlan& plan)
-               -> runtime::Result<interchange::ExportArtifacts, interchange::ExportError> {
-        const timeline::Sequence* sequence = project.find_sequence(project.root_sequence_id());
-        if (sequence == nullptr)
-            return runtime::Err(interchange::ExportError{
-                interchange::ExportErrorCode::WriterFailed,
-                "the project names a root sequence that does not exist",
-                {}});
+interchange::FormatBoundExportWriter writer(const ExportOptions& options) {
+    return {interchange::Format::DawProject,
+            [options](const interchange::ExportPlan& plan) {
+                return write_plan(plan, options);
+            }};
+}
 
-        pugi::xml_document doc;
-        auto declaration = doc.append_child(pugi::node_declaration);
-        declaration.append_attribute("version") = "1.0";
-        declaration.append_attribute("encoding") = "UTF-8";
-
-        auto root = doc.append_child("Project");
-        root.append_attribute("version") = "1.0";
-
-        auto application = root.append_child("Application");
-        application.append_attribute("name") = options.application_name.c_str();
-        application.append_attribute("version") = options.application_version.c_str();
-
-        // A single tempo and a single time signature: the plan has already
-        // refused (or the caller has already accepted losing) anything richer.
-        auto transport = root.append_child("Transport");
-        auto tempo = transport.append_child("Tempo");
-        tempo.append_attribute("unit") = "bpm";
-        const auto tempo_points = project.tempo_map().points();
-        tempo.append_attribute("value") =
-            number(tempo_points.empty() ? 120.0 : tempo_points.front().bpm).c_str();
-        auto signature = transport.append_child("TimeSignature");
-        const auto meter_points = project.meter_map().points();
-        const auto meter = meter_points.empty() ? timebase::MeterSignature{4, 4}
-                                                : meter_points.front().signature;
-        signature.append_attribute("numerator") = static_cast<int>(meter.numerator);
-        signature.append_attribute("denominator") = static_cast<int>(meter.denominator);
-
-        auto structure = root.append_child("Structure");
-        auto arrangement = root.append_child("Arrangement");
-        arrangement.append_attribute("id") = element_id("arrangement", sequence->id()).c_str();
-        auto lanes = arrangement.append_child("Lanes");
-        lanes.append_attribute("timeUnit") = "beats";
-        lanes.append_attribute("id") = "lanes-root";
-
-        for (const timeline::Track& track : sequence->tracks()) {
-            const std::string track_id = element_id("track", track.id());
-            auto track_node = structure.append_child("Track");
-            track_node.append_attribute("contentType") =
-                track_holds_notes(track) ? "notes" : "audio";
-            track_node.append_attribute("loaded") = "true";
-            track_node.append_attribute("id") = track_id.c_str();
-            track_node.append_attribute("name") = track.name().c_str();
-
-            // A DAWproject track is a channel. A receiving DAW registers the
-            // track from this element, and a <Lanes track="..."> reference to a
-            // track that was never registered resolves to nothing -- Bitwig
-            // 6.0.11 fails such a file with EmptyStackException while adding the
-            // first clip, because its track-context stack is empty.
-            //
-            // This channel is deliberately NEUTRAL: unity volume, centre pan.
-            // That is not the document's authored mixer state, which this writer
-            // does not export -- the capability table says mixer.track-gain and
-            // mixer.track-pan are dropped, and they are. Emitting a default
-            // channel is what makes the file loadable, not a partial export of
-            // levels the manifest claims were dropped.
-            auto channel = track_node.append_child("Channel");
-            channel.append_attribute("id") = element_id("channel", track.id()).c_str();
-            channel.append_attribute("role") = "regular";
-            channel.append_attribute("audioChannels") = 2;
-            auto volume = channel.append_child("Volume");
-            volume.append_attribute("value") = "1.000000";
-            volume.append_attribute("unit") = "linear";
-            volume.append_attribute("min") = "0.000000";
-            volume.append_attribute("max") = "2.000000";
-            auto pan = channel.append_child("Pan");
-            pan.append_attribute("value") = "0.500000";
-            pan.append_attribute("unit") = "normalized";
-            pan.append_attribute("min") = "0.000000";
-            pan.append_attribute("max") = "1.000000";
-
-            auto track_lanes = lanes.append_child("Lanes");
-            track_lanes.append_attribute("track") = track_id.c_str();
-            track_lanes.append_attribute("id") = element_id("lanes", track.id()).c_str();
-            auto clips = track_lanes.append_child("Clips");
-            clips.append_attribute("id") = element_id("clips", track.id()).c_str();
-            for (const timeline::Clip& clip : track.clips()) {
-                if (!omit_clip(clip))
-                    write_clip(clips, project, clip);
-            }
-        }
-
-        std::ostringstream xml;
-        doc.save(xml, "  ");
-
-        interchange::ExportArtifacts artifacts;
-        artifacts.artifacts.push_back({"project.xml", to_bytes(xml.str())});
-        artifacts.artifacts.push_back({"pulp-loss-manifest.json", to_bytes(manifest_json(plan))});
-        return runtime::Ok(std::move(artifacts));
+interchange::ExportWriter writer(const timeline::Project& /*legacy_project*/,
+                                 const ExportOptions& options) {
+    return [options](const interchange::ExportPlan& plan) {
+        return write_plan(plan, options);
     };
 }
 

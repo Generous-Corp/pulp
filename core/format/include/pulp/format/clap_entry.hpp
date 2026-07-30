@@ -567,19 +567,16 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
     p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
-        warn_if_unexpected_cpu_fallback(gpu, p->editor_host.get());
         // Pump the scripted UI session (async results, timers, rAF) per vsync.
         p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
-        // Route navigator.gpu / canvas.getContext('webgpu') through
-        // the host's live GpuSurface instead of the JS mock path.
-        if (auto* scripted = p->bridge->scripted_ui()) {
-            scripted->attach_gpu_surface(p->editor_host->gpu_surface());
-            if (p->editor_host->gpu_surface()) {
-                runtime::log_info(
-                    "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
-                    "via ScriptedUiSession (CLAP)");
-            }
-        }
+        // Route navigator.gpu / canvas.getContext('webgpu') through the host's
+        // live GpuSurface instead of the JS mock path — and keep following it.
+        // The Windows host does not have a surface until gui_set_parent()
+        // reparents its HWND, so the one-shot read this replaces was null on
+        // every Windows CLAP editor. The subscription also carries the detach
+        // edge, and owns the CPU-fallback diagnostic.
+        p->gpu_surface_binding = bind_gpu_surface(
+            *p->editor_host, p->bridge->scripted_ui(), gpu, "CLAP");
         // Resize contract (ViewSize), mirroring the VST3 adapter:
         //   - not resizable (min==0): pin the viewport at preferred so an
         //     off-size pane letterbox-scales the content (today's behavior).
@@ -625,6 +622,9 @@ inline void gui_destroy(const clap_plugin_t* plugin) {
     // Drop the editor→host resize handler BEFORE the bridge / editor host it
     // captures, so a late call can never dereference freed editor state.
     if (p->processor) p->processor->set_editor_resize_handler(p, nullptr);
+    // Unsubscribe BEFORE the host publishes its teardown and before the bridge
+    // that owns the scripted session goes away: no callback after teardown.
+    p->gpu_surface_binding.reset();
     p->editor_host.reset();
     if (p->bridge) {
         p->bridge->close();

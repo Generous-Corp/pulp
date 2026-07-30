@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-text-geometry-finite-guard",
+  "kind": "change",
+  "created_at": "2026-07-29T20:30:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "A crash report (Forge FX 0.7.2, macOS 26.2) died in libsystem_malloc's cold path under SkStroke::strokePath, reached from drawTextBlob via the GPU glyph path: stroked text converts each glyph to a path, and a non-finite or absurd size makes that allocation pathological. The abort is a SIGTRAP inside malloc, so no caller can catch it, and inside a plug-in it takes the host DAW down with it. SkiaCanvas validated neither font size nor line width, so a scripted UI could reach that allocation by assigning ctx.lineWidth or a computed font size. One transferred surface moves with it: skia_canvas.cpp's set_line_width, set_font and set_font_full now refuse non-finite and non-positive values and clamp absurd finite ones. Refusing rather than substituting a default follows Canvas2D, which specifies that assigning a non-finite lineWidth leaves the previous value in place; the upper clamp is Pulp's, because the alternative to clamping is aborting. Nothing else changes: the accepted range and the drawing paths are untouched, and the guard is additive at the three setters. This is Pulp-specific plug-in-host survivability work -- an uncatchable abort in a hosted plug-in kills the DAW process -- and closes a Pulp crash report rather than backporting named framework behaviour.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "unusable text geometry is refused rather than reaching the glyph stroker"
+  ],
+  "disposition": "pulp-only"
+}

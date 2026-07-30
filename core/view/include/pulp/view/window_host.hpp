@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <algorithm>
 #include <set>
@@ -156,20 +157,26 @@ public:
     // (the first frame is always full) and after any no-arg mark_dirty();
     // becomes false once clear_pending_dirty() runs and only bounded
     // mark_dirty(rect) calls have arrived since.
-    bool pending_repaint_is_full() const { return dirty_full_; }
+    bool pending_repaint_is_full() const { return damage_.is_full(); }
 
     // Bounding box (root coords) of the bounded mark_dirty(rect) calls since the
     // last clear_pending_dirty(). Only meaningful when pending_repaint_is_full()
     // is false and has_pending_dirty_bounds() is true.
-    bool has_pending_dirty_bounds() const { return have_dirty_bounds_; }
-    Rect pending_dirty_bounds() const { return dirty_bounds_; }
+    bool has_pending_dirty_bounds() const { return damage_.has_bounds(); }
+    Rect pending_dirty_bounds() const { return damage_.bounds(); }
 
     // Reset the accumulated dirty region. A host calls this after it has
     // painted and submitted the frame (mirrors DirtyTracker::clear()).
-    void clear_pending_dirty() {
-        dirty_full_ = false;
-        have_dirty_bounds_ = false;
-        dirty_bounds_ = {};
+    void clear_pending_dirty() { damage_.clear(); }
+
+    // Read this frame's damage and clear it in one step, so a host cannot
+    // consult the accessors above and then clear a different logical state.
+    // A frame that does NOT reach its intended output hands the snapshot back
+    // with restore_pending_dirty(). Same contract as PluginViewHost — both
+    // hosts share one PendingDamage.
+    PendingDamage::Snapshot take_pending_dirty() { return damage_.take(); }
+    void restore_pending_dirty(const PendingDamage::Snapshot& snapshot) {
+        damage_.restore(snapshot);
     }
 
     // Consume the accumulated dirty region and paint `root`, then clear the
@@ -547,10 +554,10 @@ private:
     render::RenderLoop* render_loop_ = nullptr;
 
     // Accumulated dirty region for the pending frame (root/window coords).
-    // dirty_full_ starts true so the first frame is always a full repaint.
-    bool dirty_full_ = true;
-    bool have_dirty_bounds_ = false;
-    Rect dirty_bounds_{};
+    // The SAME abstraction the plug-in host uses (PluginViewHost::damage_) —
+    // this used to be three hand-rolled fields plus a copy of the union logic,
+    // which is how the two hosts drifted apart on what "damage" even means.
+    PendingDamage damage_;
 
 private:
     // ── Attached-view registry ──────────────────────────────────────────────

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <thread>
+#include <limits>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -1852,6 +1853,69 @@ TEST_CASE("compile_sksl reports each shader's own error under concurrent compile
 
     REQUIRE(good_failures.load() == 0);  // the good shader always compiled
     REQUIRE(mismatches.load() == 0);     // no cross-thread error attribution
+}
+
+
+TEST_CASE("unusable text geometry is refused rather than reaching the glyph stroker",
+          "[canvas][skia][text][robustness]") {
+    // Motivated by a crash report (Forge FX 0.7.2, macOS 26.2) that died in
+    // libsystem_malloc's cold path under SkStroke::strokePath, reached from
+    // drawTextBlob via the GPU glyph path. Stroked text turns each glyph into a
+    // path; a non-finite or absurd size makes that allocation pathological, and
+    // the abort is not catchable.
+    //
+    // This asserts the GUARD, not the crash. measure_text is the observable: it
+    // scales with the active font size, so a size that was accepted moves it and
+    // a size that was refused does not. An earlier version of this case only
+    // drew and called SUCCEED("no abort") -- and passed identically with the
+    // guard removed, because this raster surface does not take the GPU glyph
+    // path the report died on. A test that cannot fail is worse than none.
+    //
+    // The original crash is NOT reproduced here, and this does not prove it
+    // cured. What it proves is that a script can no longer put a non-finite or
+    // absurd value into the text geometry at all.
+    SkImageInfo info = SkImageInfo::Make(64, 32, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    const float nan_v = std::numeric_limits<float>::quiet_NaN();
+    const float inf_v = std::numeric_limits<float>::infinity();
+
+    canvas.set_font("Inter", 12.0f);
+    const float baseline = canvas.measure_text("stroked");
+    REQUIRE(baseline > 0.0f);
+    REQUIRE(std::isfinite(baseline));
+
+    SECTION("a non-finite or non-positive size leaves the previous one in place") {
+        // Canvas2D specifies that assigning a non-finite value is ignored.
+        // Substituting a default would silently redraw at the wrong size.
+        for (float bad : {nan_v, inf_v, -inf_v, 0.0f, -5.0f}) {
+            canvas.set_font("Inter", bad);
+            const float after = canvas.measure_text("stroked");
+            INFO("rejected size " << bad);
+            CHECK(after == Catch::Approx(baseline));
+        }
+    }
+
+    SECTION("an absurd but finite size is clamped, so measurement stays finite") {
+        // 1e9 is finite, so a finite-only check would pass it straight through
+        // to the allocation that aborted.
+        canvas.set_font("Inter", 1.0e9f);
+        const float huge = canvas.measure_text("stroked");
+        INFO("measured width for a 1e9 request: " << huge);
+        CHECK(std::isfinite(huge));
+        CHECK(huge > baseline);
+        CHECK(huge <= baseline * 1.0e6f);
+    }
+
+    SECTION("a usable size is still honoured") {
+        // Guard the guard: the refusal must not swallow legitimate values.
+        canvas.set_font("Inter", 24.0f);
+        CHECK(canvas.measure_text("stroked") > baseline);
+    }
 }
 
 #endif  // PULP_HAS_SKIA

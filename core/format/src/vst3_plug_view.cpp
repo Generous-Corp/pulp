@@ -62,25 +62,23 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         bridge_.close();
         return kResultFalse;
     }
-    warn_if_unexpected_cpu_fallback(gpu, editor_host_.get());
-
     // Pump the scripted UI session (async results, timers, rAF) per vsync.
     editor_host_->set_idle_callback(make_scripted_idle_pump(bridge_));
 
-    // Route navigator.gpu / canvas.getContext('webgpu') through the
-    // host's live GpuSurface.
-    if (auto* scripted = bridge_.scripted_ui()) {
-        scripted->attach_gpu_surface(editor_host_->gpu_surface());
-        if (editor_host_->gpu_surface()) {
-            runtime::log_info(
-                "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
-                "via ScriptedUiSession (VST3)");
-        }
-    }
+    // Subscribe to the host's GPU-surface lifecycle BEFORE attaching. On
+    // Windows the surface is created inside attach_to_parent(), so a read taken
+    // here would be null forever; the subscription picks up that creation (and
+    // the matching teardown on removed()) instead. Also owns the CPU-fallback
+    // diagnostic, so it can only fire once the state is actually decided.
+    gpu_surface_binding_ =
+        bind_gpu_surface(*editor_host_, bridge_.scripted_ui(), gpu, "VST3");
 
     editor_host_->attach_to_parent(parent);
     auto result = CPluginView::attached(parent, type);
     if (result != kResultTrue) {
+        // Drop the subscription before the session it writes into goes away
+        // with bridge_.close().
+        gpu_surface_binding_.reset();
         editor_host_->detach();
         editor_host_.reset();
         bridge_.close();
@@ -155,6 +153,12 @@ tresult PLUGIN_API PulpPlugView::removed() {
 
     // Drop the editor→host resize handler before the editor host it captures.
     processor_.set_editor_resize_handler(this, nullptr);
+
+    // Unsubscribe FIRST: the observer writes into the scripted UI session that
+    // bridge_.close() destroys, and the host publishes `unavailable` from both
+    // detach() and its destructor. Dropping it here is what makes "no callback
+    // after consumer teardown" structural rather than ordering luck.
+    gpu_surface_binding_.reset();
 
     if (editor_host_) {
         editor_host_->detach();

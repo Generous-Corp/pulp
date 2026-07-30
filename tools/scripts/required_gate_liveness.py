@@ -49,10 +49,20 @@ def evaluate(required: Sequence[str], check_runs: Sequence[dict]) -> list[Findin
         if not matches:
             findings.append(Finding(context, "missing: no check-run with this name exists on the target SHA"))
             continue
-        # A rerun creates a new check-run with a larger ID. An old green must
-        # never mask the latest failed/pending rerun on the same SHA.
+        # A push may create a skipped duplicate of a required merge-group
+        # check on the same SHA (for example, the cache-warming Build and Test
+        # workflow deliberately skips its `macos` alias on push). A skipped
+        # duplicate did not execute the gate and must not shadow a real run.
+        # If every matching run skipped, keep the newest one so the gate still
+        # fails closed.
+        executed = [run for run in matches if run.get("conclusion") != "skipped"]
+        candidates = executed or matches
+
+        # A rerun creates a new check-run with a larger ID. Among runs that
+        # actually executed, an old green must never mask the latest
+        # failed/pending rerun on the same SHA.
         latest = max(
-            enumerate(matches),
+            enumerate(candidates),
             key=lambda item: (int(item[1].get("id") or 0), item[0]),
         )[1]
         if latest.get("status") == "completed" and latest.get("conclusion") == "success":

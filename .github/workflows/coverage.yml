@@ -417,10 +417,17 @@ jobs:
         if: matrix.os == 'linux'
         run: |
           sudo apt-get update
+          # Keep in step with build.yml's Linux list. Skia's
+          # SkFontMgr_fontconfig.h includes <fontconfig/fontconfig.h>, so
+          # without libfontconfig1-dev core/canvas/src/sdf_atlas.cpp fails to
+          # compile, the whole build exits 2, and the leg produces no Cobertura
+          # XML at all — Codecov then waits forever on an upload that never
+          # arrives (after_n_builds) and reports partial line counts.
           sudo apt-get install -y \
             clang llvm lld \
             libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+            libfontconfig1-dev libgbm-dev libgl1-mesa-dev libjack-jackd2-dev \
+            libx11-dev libxext-dev libxfixes-dev \
             libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
             libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
 

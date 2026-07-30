@@ -1,6 +1,7 @@
 #include <pulp/timeline/smf.hpp>
 
 #include "smf_error.hpp"
+#include "smf_export_internal.hpp"
 #include "smf_tick_scale.hpp"
 
 #include <pulp/interchange/capability.hpp>
@@ -59,6 +60,21 @@ constexpr std::uint8_t kNoteOffReleaseVelocity = 0x40u;
 // notes per quarter. The timeline model carries no counterpart to reproduce.
 constexpr std::uint8_t kMetronomeClocksPerClick = 24u;
 constexpr std::uint8_t kThirtySecondsPerQuarter = 8u;
+
+bool may_drop_non_note_content(const ClipContent& content,
+                               const detail::SmfExportLossPolicy& policy) noexcept {
+    return std::visit(ClipContentCases{
+                          [](const EmptyContent&) { return true; },
+                          [&](const MediaRef&) { return policy.drop_media_clips; },
+                          [](const NoteContent&) { return false; },
+                          [&](const RegisteredContent&) {
+                              return policy.drop_registered_content;
+                          },
+                          [&](const OpaqueContent&) { return policy.drop_opaque_content; },
+                          [&](const SequenceRef&) { return policy.drop_nested_sequences; },
+                      },
+                      content);
+}
 
 // Scale the model's 16-bit velocity down to 7-bit MIDI. Inverse of the
 // importer's scale_velocity_7_to_16 over the 7-bit-representable values.
@@ -148,9 +164,10 @@ std::optional<SmfError> append_track_chunk(std::vector<std::uint8_t>& out,
 
 class Exporter {
   public:
-    Exporter(const Project& project, const SmfExportOptions& options)
+    Exporter(const Project& project, const SmfExportOptions& options,
+             detail::SmfExportLossPolicy loss_policy = {})
         : project_(project), options_(options),
-          scale_(TickScale::create(options.ticks_per_quarter)) {}
+          scale_(TickScale::create(options.ticks_per_quarter)), loss_policy_(loss_policy) {}
 
     ExportResult run();
 
@@ -165,6 +182,7 @@ class Exporter {
     const Project& project_;
     const SmfExportOptions& options_;
     TickScale scale_;
+    detail::SmfExportLossPolicy loss_policy_;
     std::size_t event_count_ = 0;
     bool exact_ = true;
     std::int64_t max_rounding_error_ = 0;
@@ -205,7 +223,8 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_conductor_tr
     std::vector<OutputEvent> events;
 
     for (const auto& point : project_.tempo_map().points()) {
-        if (point.curve_to_next != timebase::TempoCurve::Constant)
+        if (point.curve_to_next != timebase::TempoCurve::Constant &&
+            !loss_policy_.step_tempo_ramps)
             return TrackResult(Err(smf_error(
                 SmfErrorCode::UnsupportedFeature,
                 "tempo ramp at tick " + decimal(point.tick.value) +
@@ -272,9 +291,12 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
     }
 
     for (const auto& clip : track.clips()) {
+        if (clip.time_anchor() != ClipTimeAnchor::Musical &&
+            loss_policy_.drop_absolute_clips)
+            continue;
         const auto* notes = std::get_if<NoteContent>(&clip.content());
         if (notes == nullptr) {
-            if (std::holds_alternative<EmptyContent>(clip.content()))
+            if (may_drop_non_note_content(clip.content(), loss_policy_))
                 continue;
             if (options_.skip_non_note_clips)
                 continue;
@@ -290,7 +312,8 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
                 SmfErrorCode::UnsupportedFeature,
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
                     " is anchored to absolute time, which has no musical tick position")));
-        if (!notes->modifiers().empty() || notes->modifier_seed() != 0)
+        if ((!notes->modifiers().empty() || notes->modifier_seed() != 0) &&
+            !loss_policy_.strip_note_modifiers)
             return TrackResult(Err(smf_error(
                 SmfErrorCode::UnsupportedFeature,
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
@@ -298,7 +321,9 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
                     "representation")));
 
         for (const auto& note : notes->notes()) {
-            const auto velocity = scale_velocity_16_to_7(note.velocity);
+            auto velocity = scale_velocity_16_to_7(note.velocity);
+            if (velocity == 0 && loss_policy_.quantize_note_velocity)
+                velocity = 1;
             if (velocity == 0)
                 return TrackResult(Err(smf_error(
                     SmfErrorCode::InvalidValue,
@@ -335,7 +360,8 @@ ExportResult Exporter::run() {
         return Err(smf_error(SmfErrorCode::UnsupportedDivision,
                              "ticks_per_quarter " + decimal(options_.ticks_per_quarter) +
                                  " is not a metrical division in 1..32767"));
-    if (project_.sequences().size() != 1)
+    if (project_.sequences().size() != 1 &&
+        !loss_policy_.drop_non_root_sequences)
         return Err(smf_error(SmfErrorCode::UnsupportedFeature,
                              "project holds " +
                                  decimal(static_cast<std::int64_t>(project_.sequences().size())) +
@@ -392,7 +418,13 @@ ExportResult export_smf(const Project& project) {
 }
 
 ExportResult export_smf(const Project& project, const SmfExportOptions& options) {
-    Exporter exporter(project, options);
+    return detail::export_smf_with_policy(project, options, {});
+}
+
+ExportResult detail::export_smf_with_policy(const Project& project,
+                                            const SmfExportOptions& options,
+                                            const detail::SmfExportLossPolicy& loss_policy) {
+    Exporter exporter(project, options, loss_policy);
     return exporter.run();
 }
 

@@ -70,6 +70,7 @@
 #include <pulp/signal/character_delay/tape.hpp>
 #include <pulp/signal/character_delay/tape_physical.hpp>
 #include <pulp/signal/character_delay/vintage.hpp>
+#include <pulp/signal/svf.hpp>
 
 #include <algorithm>
 #include <array>
@@ -127,13 +128,15 @@ public:
         channels_[0].tape_physical.set_seeds(chardelay::kPrngSeed);
         channels_[1].tape_physical.set_seeds(chardelay::kPrngSeed ^ 0x2545F491u);
 
-        for (auto* smoother : {&feedback_, &crossfeed_, &duck_, &freeze_, &character_})
+        for (auto* smoother : {&feedback_, &crossfeed_, &duck_, &freeze_, &character_,
+                               &diffusion_amount_})
             smoother->configure(chardelay::kParamGlideS, sample_rate_);
 
         duck_follower_.configure(chardelay::kDuckAttackS, chardelay::kDuckReleaseS,
                                  sample_rate_ / static_cast<double>(chardelay::kControlInterval));
         configure_time_slew();
         apply_tape_speed();
+        update_loop_tone();
         reset();
     }
 
@@ -158,10 +161,38 @@ public:
                               chardelay::kMaxDelayMs);
     }
 
+    /// Right-channel time as a MULTIPLE of the left. Selects ratio mode; the
+    /// right channel tracks the left, which is what a stereo-spread delay
+    /// wants.
     void set_time_offset(SampleType multiplier) {
-        time_offset_ = std::clamp(finite_or(static_cast<double>(multiplier), time_offset_),
-                                  chardelay::kTimeOffsetMin,
+        const double candidate = static_cast<double>(multiplier);
+        if (!std::isfinite(candidate)) return;
+        time_offset_ = std::clamp(candidate, chardelay::kTimeOffsetMin,
                                   chardelay::kTimeOffsetMax);
+        right_time_absolute_ = false;
+    }
+
+    /// Right-channel time in MILLISECONDS, independent of the left. Selects
+    /// absolute mode, which is what a dual-mono setup (two unrelated delay
+    /// times) and a millisecond offset both need — neither can be expressed as
+    /// a ratio, because a fixed ratio is a different millisecond spread at
+    /// every delay time and a fixed spread is a different ratio.
+    ///
+    /// Ratio mode is restored by calling set_time_offset().
+    void set_right_time_ms(SampleType right_ms) {
+        const double candidate = static_cast<double>(right_ms);
+        if (!std::isfinite(candidate)) return;
+        right_time_ms_ =
+            std::clamp(candidate, 1.0, chardelay::kMaxAddressableDelayMs);
+        right_time_absolute_ = true;
+    }
+
+    /// True while the right channel is following set_right_time_ms().
+    bool right_time_is_absolute() const noexcept { return right_time_absolute_; }
+
+    /// The right channel's target time in ms, whichever mode is selected.
+    double right_time_ms() const noexcept {
+        return right_time_absolute_ ? right_time_ms_ : time_ms_ * time_offset_;
     }
 
     void set_feedback(SampleType feedback) {
@@ -178,6 +209,15 @@ public:
     void set_character_amount(SampleType amount) {
         character_target_ =
             std::clamp(finite_or(static_cast<double>(amount), character_target_), 0.0, 1.0);
+    }
+
+    // Cross-character diffusion: smears ANY character's wet output through the
+    // diffusion network by this 0..1 amount. It stays outside the feedback
+    // loop, so increasing the amount cannot dissipate or destabilize the echo
+    // train. 0 leaves the selected character untouched.
+    void set_diffusion_amount(SampleType amount) {
+        diffusion_amount_target_ =
+            std::clamp(finite_or(static_cast<double>(amount), diffusion_amount_target_), 0.0, 1.0);
     }
 
     void set_mod(SampleType rate01, SampleType depth01) {
@@ -199,6 +239,54 @@ public:
 
     void set_freeze(bool on) { freeze_on_ = on; }
     void set_reverse(bool on) { reverse_on_ = on; }
+
+    // ── In-loop tone (audio thread) ───────────────────────────────────────
+    //
+    // A resonant 12 dB/oct high-pass (low cut) and low-pass (high cut) in the
+    // RECIRCULATION path, so each repeat is filtered again and the tail evolves
+    // — the behavior a tone control after the delay cannot produce. Orthogonal
+    // to the character's own loop bandwidth: this is the player's control, that
+    // is the realization's model.
+    //
+    // Bypassed bit-exactly while low cut is at its minimum and high cut at its
+    // maximum, so an untouched delay is unchanged. Also bypassed under freeze,
+    // which needs a unity loop to hold its content. Crossing the explicit
+    // bypass boundary clears the integrators so suspended resonance cannot
+    // return as a transient later.
+    void set_loop_low_cut_hz(SampleType hz) {
+        const double next = std::clamp(finite_or(static_cast<double>(hz), loop_low_cut_hz_),
+                                       chardelay::kLoopToneHpMinHz, chardelay::kLoopToneHpMaxHz);
+        if (next == loop_low_cut_hz_) return;  // per-block pushes are free
+        loop_low_cut_hz_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_low_cut_resonance(SampleType q) {
+        const double next = std::clamp(finite_or(static_cast<double>(q), loop_low_cut_q_),
+                                       chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
+        if (next == loop_low_cut_q_) return;  // per-block pushes are free
+        loop_low_cut_q_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_high_cut_hz(SampleType hz) {
+        const double next = std::clamp(finite_or(static_cast<double>(hz), loop_high_cut_hz_),
+                                       chardelay::kLoopToneLpMinHz, chardelay::kLoopToneLpMaxHz);
+        if (next == loop_high_cut_hz_) return;   // per-block pushes are free
+        loop_high_cut_hz_ = next;
+        update_loop_tone();
+    }
+
+    void set_loop_high_cut_resonance(SampleType q) {
+        const double next = std::clamp(finite_or(static_cast<double>(q), loop_high_cut_q_),
+                                      chardelay::kLoopToneResMin, chardelay::kLoopToneResMax);
+        if (next == loop_high_cut_q_) return;   // per-block pushes are free
+        loop_high_cut_q_ = next;
+        update_loop_tone();
+    }
+
+    /// True when the in-loop tone stage is doing anything at all.
+    bool loop_tone_active() const noexcept { return loop_tone_active_; }
 
     // ── Runtime ───────────────────────────────────────────────────────────
 
@@ -224,12 +312,15 @@ public:
             channel.instability.reset();
             channel.loop_highpass.reset();
             channel.loop_lowpass.reset();
+            channel.tone_high_pass.reset();
+            channel.tone_low_pass.reset();
             channel.wet = 0.0;
         }
         feedback_.snap(feedback_target_);
         crossfeed_.snap(crossfeed_target_);
         duck_.snap(duck_target_);
         character_.snap(character_target_);
+        diffusion_amount_.snap(diffusion_amount_target_);
         freeze_.snap(freeze_on_ ? 1.0 : 0.0);
 
         duck_follower_.reset(0.0);
@@ -241,7 +332,7 @@ public:
         control_counter_ = 0;
 
         time_slew_[0].snap(time_ms_);
-        time_slew_[1].snap(time_ms_ * time_offset_);
+        time_slew_[1].snap(right_time_ms());
         update_control_rate();
     }
 
@@ -255,6 +346,7 @@ public:
             }
 
             const double character_amount = character_.process(character_target_);
+            diffusion_amount_value_ = diffusion_amount_.process(diffusion_amount_target_);
             const double freeze = freeze_.process(freeze_on_ ? 1.0 : 0.0);
             duck_.process(duck_target_);
 
@@ -296,14 +388,45 @@ public:
             channels_[1].wet = process_character(channels_[1], line_in_right, time_right,
                                                  character_amount, chardelay::kStereoDecorr);
 
+            // The player's tone stage sits on the delay's OUTPUT, which is also
+            // what the feedback tap reads. So the very first repeat is filtered
+            // once — a high cut at its minimum really does mute the character —
+            // and every recirculation is filtered again on top, which is what
+            // makes the tail keep darkening. Filtering only the feedback path
+            // would leave that first repeat unfiltered and let the character
+            // through no matter where the cut sits.
+            channels_[0].wet = apply_loop_tone(channels_[0], channels_[0].wet, freeze);
+            channels_[1].wet = apply_loop_tone(channels_[1], channels_[1].wet, freeze);
+
             // Ducking is applied to the WET output only, sidechained from the
             // dry input before the loop — so repeats bloom in the gaps rather
             // than being pushed down along with the source.
             duck_gain_ = std::clamp(duck_gain_ + duck_gain_step_, 0.0, 1.0);
             const double gain = duck_gain_;
 
-            left[i] = static_cast<SampleType>(channels_[0].wet * gain);
-            right[i] = static_cast<SampleType>(channels_[1].wet * gain);
+            // Cross-character diffusion on the OUTPUT only (post-loop, post-duck):
+            // applied to out_* rather than channels_[c].wet, so the feedback tap
+            // — which reads channels_[c].wet next sample — stays clean and the
+            // repeats don't recirculate through the network. One-pass smear.
+            double out_l = channels_[0].wet * gain;
+            double out_r = channels_[1].wet * gain;
+            if (character_type_ == Character::diffusion) {
+                // The character's cloud: every repeat leaving the loop excites
+                // the tank afresh, so the cloud still blooms per repeat, but
+                // its energy never re-enters the line. The in-loop path above
+                // already ran the diffuser and ticked the LFOs this sample.
+                out_l = channels_[0].diffusion.process_cloud(out_l, 1.0);
+                out_r = channels_[1].diffusion.process_cloud(out_r, chardelay::kStereoDecorr);
+            } else if (diffusion_amount_value_ > 0.0) {
+                out_l += diffusion_amount_value_ *
+                         (channels_[0].diffusion.process(out_l, 1.0) - out_l);
+                channels_[0].diffusion.tick_modulation();
+                out_r += diffusion_amount_value_ *
+                         (channels_[1].diffusion.process(out_r, chardelay::kStereoDecorr) - out_r);
+                channels_[1].diffusion.tick_modulation();
+            }
+            left[i] = static_cast<SampleType>(out_l);
+            right[i] = static_cast<SampleType>(out_r);
         }
     }
 
@@ -342,8 +465,67 @@ private:
         chardelay::TapeInstability instability;
         chardelay::OnePole loop_highpass;
         chardelay::OnePole loop_lowpass;
+        // Player-facing in-loop tone (see set_loop_low_cut_hz). Separate from
+        // loop_highpass/loop_lowpass above, which the character owns.
+        Svf64 tone_high_pass;
+        Svf64 tone_low_pass;
         double wet = 0.0;
     };
+
+    /// Retune both loop-tone filters and latch whether the stage does anything.
+    /// Fully-open controls bypass it so an untouched delay stays bit-exact.
+    void update_loop_tone() noexcept {
+        const bool low_cut_active = loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz;
+        const bool high_cut_active = loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz;
+        const bool low_cut_boundary_crossed = low_cut_active != loop_low_cut_active_;
+        const bool high_cut_boundary_crossed = high_cut_active != loop_high_cut_active_;
+        loop_tone_active_ = low_cut_active || high_cut_active;
+        const double guarded_nyquist = chardelay::kLoopToneNyquistFraction * sample_rate_;
+        const double effective_low_cut = std::clamp(loop_low_cut_hz_, 0.1, guarded_nyquist);
+        const double effective_high_cut = std::clamp(loop_high_cut_hz_, 0.1, guarded_nyquist);
+        for (auto& channel : channels_) {
+            channel.tone_high_pass.configure(Svf64::Mode::highpass, sample_rate_, effective_low_cut,
+                                             loop_low_cut_q_);
+            channel.tone_low_pass.configure(Svf64::Mode::lowpass, sample_rate_, effective_high_cut,
+                                            loop_high_cut_q_);
+            // Each bypass is its own abrupt topology change. The other filter
+            // may keep the combined stage active, so reset the integrators
+            // whose individual boundary crossed rather than keying this to the
+            // aggregate loop_tone_active_ flag.
+            if (low_cut_boundary_crossed) channel.tone_high_pass.reset();
+            if (high_cut_boundary_crossed) channel.tone_low_pass.reset();
+        }
+        loop_low_cut_active_ = low_cut_active;
+        loop_high_cut_active_ = high_cut_active;
+
+        const auto peak_bound = [](double q) noexcept {
+            constexpr double kButterworthQ = 0.7071067811865476;
+            if (q <= kButterworthQ) return 1.0;
+            // Worst-case magnitude of a normalized second-order LP/HP with Q
+            // above Butterworth. Cascaded active stages multiply their bounds.
+            return q / std::sqrt(1.0 - 1.0 / (4.0 * q * q));
+        };
+        double tone_gain_bound = 1.0;
+        if (loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz)
+            tone_gain_bound *= peak_bound(loop_low_cut_q_);
+        if (loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz)
+            tone_gain_bound *= peak_bound(loop_high_cut_q_);
+        loop_tone_feedback_ceiling_ = chardelay::kUnsaturatedFeedbackMax / tone_gain_bound;
+    }
+
+    /// One pass of the player's tone stage over the recirculating signal.
+    /// @p freeze crossfades back to the unfiltered signal so a frozen loop
+    /// keeps the exactly-unity gain it needs to hold, while the filter states
+    /// stay warm for the moment freeze releases.
+    double apply_loop_tone(ChannelState& channel, double x, double freeze) noexcept {
+        if (!loop_tone_active_) return x;
+        double y = x;
+        if (loop_low_cut_hz_ > chardelay::kLoopToneHpMinHz)
+            y = channel.tone_high_pass.process(y);
+        if (loop_high_cut_hz_ < chardelay::kLoopToneLpMaxHz)
+            y = channel.tone_low_pass.process(y);
+        return freeze >= 1.0 ? x : y + freeze * (x - y);
+    }
 
     bool physical_tape() const noexcept {
         return character_type_ == Character::tape && tape_tier_ == TapeTier::physical;
@@ -362,7 +544,7 @@ private:
             case Character::clean:
             case Character::diffusion:
             default:
-                return chardelay::kUnsaturatedFeedbackMax;
+                return std::min(chardelay::kUnsaturatedFeedbackMax, loop_tone_feedback_ceiling_);
         }
     }
 
@@ -440,7 +622,6 @@ private:
                 for (auto& channel : channels_) {
                     channel.loop_highpass.set_cutoff(chardelay::kDiffusionLoopHpHz, sample_rate_);
                     channel.loop_lowpass.set_cutoff(chardelay::kDiffusionLoopLpHz, sample_rate_);
-                    channel.diffusion.update(amount);
                 }
                 break;
             case Character::tape:
@@ -465,6 +646,20 @@ private:
                 for (auto& channel : channels_) channel.vintage.update(amount);
                 break;
         }
+
+        // The diffusion network serves two masters, never both at once. When the
+        // diffusion CHARACTER is selected, its chain (and tank) are tuned by the
+        // character amount — the knob that has always shaped the cloud. For every
+        // other character the same chain is the cross-character output smear,
+        // tuned by the diffusion amount. Hoisting this update out of the
+        // diffusion-only case and sourcing it ONLY from diffusion_amount_ severed
+        // the diffusion character's amount control: a host that never calls
+        // set_diffusion_amount() ran the character at zero — minimum smear, tank
+        // silent — no matter where its knob sat.
+        for (auto& channel : channels_)
+            channel.diffusion.update(character_type_ == Character::diffusion
+                                         ? amount
+                                         : diffusion_amount_.current());
     }
 
     void advance_modulation(double character_amount) noexcept {
@@ -483,7 +678,7 @@ private:
     /// motion: it has to pass through the same transport inertia the time knob
     /// does.
     double modulated_time_ms(std::size_t channel, double character_amount) noexcept {
-        double target = (channel == 0) ? time_ms_ : time_ms_ * time_offset_;
+        double target = (channel == 0) ? time_ms_ : right_time_ms();
         const double decorrelation = (channel == 0) ? 1.0 : chardelay::kStereoDecorr;
 
         if (character_type_ == Character::bbd) {
@@ -501,19 +696,26 @@ private:
     double process_character(ChannelState& channel, double x, double time_ms,
                              double character_amount, double decorrelation) noexcept {
         const double base_samples = time_ms * 0.001 * sample_rate_;
+        double y = 0.0;
         switch (character_type_) {
             case Character::clean: {
-                double y = read_line(channel, x, base_samples, base_samples, 0.0);
+                y = read_line(channel, x, base_samples, base_samples, 0.0);
                 y = channel.loop_highpass.highpass(y);
                 if (!clean_lowpass_bypassed_) y = channel.loop_lowpass.lowpass(y);
-                return y;
+                break;
             }
             case Character::diffusion: {
-                double y = read_line(channel, x, base_samples, base_samples, 0.0);
-                y = channel.diffusion.process(y, decorrelation);
+                y = read_line(channel, x, base_samples, base_samples, 0.0);
+                // Diffuser ONLY in the loop: an allpass is unity-safe to
+                // recirculate, so the progressive per-repeat smear is kept.
+                // The tank is applied on the OUTPUT stage — a recirculating
+                // reverb inside a recirculating delay composes into growth
+                // even when both individually decay (see process_cloud).
+                y = channel.diffusion.process_diffuser(y, decorrelation);
                 channel.diffusion.tick_modulation();
                 y = channel.loop_highpass.highpass(y);
-                return channel.loop_lowpass.lowpass(y);
+                y = channel.loop_lowpass.lowpass(y);
+                break;
             }
             case Character::tape: {
                 channel.instability.tick();
@@ -536,12 +738,14 @@ private:
                     const double pre = channel.tape_physical.pre_process(x);
                     const double delayed =
                         read_line(channel, pre, folded + offset_samples, folded, offset_samples);
-                    return channel.tape_physical.post_process(delayed);
+                    y = channel.tape_physical.post_process(delayed);
+                } else {
+                    const double pre = channel.tape.pre_process(x);
+                    const double delayed = read_line(channel, pre, base_samples + offset_samples,
+                                                     base_samples, offset_samples);
+                    y = channel.tape.post_process(delayed);
                 }
-                const double pre = channel.tape.pre_process(x);
-                const double delayed = read_line(channel, pre, base_samples + offset_samples,
-                                                 base_samples, offset_samples);
-                return channel.tape.post_process(delayed);
+                break;
             }
             case Character::bbd: {
                 // Clock-domain characters own their own line, so reverse runs
@@ -553,7 +757,14 @@ private:
                 const double v = reverse_on_
                                      ? channel.reverse.process(x, base_samples, 0.0)
                                      : x;
-                return channel.bbd.process(v);
+                // The Mod LFO drives the bucket clock directly — a varying clock
+                // is how a BBD choruses (delay + pitch wobble together). The
+                // modulated time_ms is not used here because the bucket chain
+                // owns its clock, set at control rate in update().
+                const double clock_mod =
+                    mod_depth_ * decorrelation * std::sin(2.0 * chardelay::kPi * lfo_phase_);
+                y = channel.bbd.process(v, clock_mod);
+                break;
             }
             case Character::vintage_digital: {
                 const double v = reverse_on_
@@ -561,10 +772,17 @@ private:
                                      : x;
                 const double line_ms =
                     reverse_on_ ? chardelay::kReverseLineMs : time_ms;
-                return channel.vintage.process(v, line_ms * 0.001);
+                y = channel.vintage.process(v, line_ms * 0.001);
+                break;
             }
         }
-        return 0.0;
+
+        // Cross-character diffusion is applied to the wet OUTPUT in process(),
+        // NOT here: this value is the feedback tap, so smearing it in-loop would
+        // recirculate through the diffusion network every repeat and dissipate
+        // the echo train. The diffusion *character* (above) keeps its in-loop
+        // cloud; the diffusion *amount* colors the output only.
+        return y;
     }
 
     /// Forward read from the shared line, or a reversed segment when reverse is
@@ -591,6 +809,7 @@ private:
     chardelay::Smoother duck_;
     chardelay::Smoother freeze_;
     chardelay::Smoother character_;
+    chardelay::Smoother diffusion_amount_;
     chardelay::EnvelopeFollower duck_follower_;
 
     Character character_type_ = Character::clean;
@@ -599,15 +818,29 @@ private:
     double sample_rate_ = 48000.0;
     double time_ms_ = 350.0;
     double time_offset_ = 1.0;
+    double right_time_ms_ = 350.0;
+    bool right_time_absolute_ = false;
     double feedback_target_ = 0.35;
     double crossfeed_target_ = 0.0;
     double character_target_ = 0.5;
+    double diffusion_amount_target_ = 0.0;
+    double diffusion_amount_value_ = 0.0;   // smoothed once per sample in process()
     double duck_target_ = 0.0;
     double mod_rate_hz_ = 0.5;
     double mod_depth_ = 0.0;
     double tape_speed_ips_ = 7.5;
     bool freeze_on_ = false;
     bool reverse_on_ = false;
+
+    // Player-facing in-loop tone. Defaults are fully open, which bypasses.
+    double loop_low_cut_hz_ = chardelay::kLoopToneHpMinHz;
+    double loop_low_cut_q_ = 0.707;
+    double loop_high_cut_hz_ = chardelay::kLoopToneLpMaxHz;
+    double loop_high_cut_q_ = 0.707;
+    bool loop_low_cut_active_ = false;
+    bool loop_high_cut_active_ = false;
+    bool loop_tone_active_ = false;
+    double loop_tone_feedback_ceiling_ = chardelay::kUnsaturatedFeedbackMax;
     bool clean_lowpass_bypassed_ = true;
 
     double lfo_phase_ = 0.0;

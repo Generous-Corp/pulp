@@ -10,7 +10,7 @@
     "Every other authored timeline concept is either refused on import or",
     "reported through the export plan before the adapter may omit it."
   ],
-  "writer": false,
+  "writer": true,
   "import": {
     "track.flat": { "level": "full" },
     "clip.musical": {

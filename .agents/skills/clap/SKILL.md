@@ -832,6 +832,25 @@ CLAP plugin whose UI uses Three.js or raw WebGPU JS renders black —
 the JS shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section.
 
+**Updated (WAH-1): subscribe, do not sample.** The one-shot
+`attach_gpu_surface(host->gpu_surface())` read this section used to
+describe is GONE. It only worked on hosts that build their surface in
+the constructor; the Windows host creates its Dawn surface inside
+`attach_to_parent()`, so the read returned `nullptr` forever and every
+Windows editor fell back to mock WebGPU. Adapters now call the shared
+helper once:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host, bridge->scripted_ui(),
+                                        gpu_decision, "CLAP");
+```
+
+It follows `PluginViewHost::observe_gpu_surface()`, forwards creation
+AND teardown into the session, and owns the CPU-fallback diagnostic
+(which no longer fires on a pre-attach `pending` state). Reset the
+returned subscription in the editor-close path, before the bridge that
+owns the session is destroyed.
+
 ## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
