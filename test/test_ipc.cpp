@@ -1425,6 +1425,55 @@ TEST_CASE("IPC socket write timeout bounds the complete frame",
     REQUIRE(send_duration < std::chrono::seconds(2));
 }
 
+TEST_CASE("IPC timeout disconnect serializes with explicit teardown",
+          "[events][ipc][socket][regression][concurrency]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket && !release_peer.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(30));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    std::thread teardown([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        client.disconnect();
+    });
+    const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+    const bool sent = client.send_message(payload.data(), payload.size());
+    teardown.join();
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable())
+        peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    CHECK_FALSE(sent);
+    CHECK_FALSE(client.is_connected());
+}
+
 TEST_CASE("IPC socket server observes client disconnect",
           "[events][ipc][socket]") {
     CapturingServer server;

@@ -127,6 +127,26 @@ TEST_CASE("discovery reader does not harden an insecure runtime directory",
     REQUIRE(::stat(temporary.path.c_str(), &info) == 0);
     CHECK((info.st_mode & 077) == 055);
 }
+
+TEST_CASE("discovery publisher rejects a runtime symlink without chmod",
+          "[inspect][discovery][security][symlink]") {
+    TemporaryDirectory temporary;
+    const auto target = temporary.path / "target";
+    const auto runtime = temporary.path / "runtime";
+    std::filesystem::create_directories(target);
+    REQUIRE(::chmod(target.c_str(), 0755) == 0);
+    std::filesystem::create_directory_symlink(target, runtime);
+
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(runtime);
+    CHECK_FALSE(publisher.publish(
+        fixture_record("symlink-runtime"), *token, 5s));
+
+    struct stat info {};
+    REQUIRE(::stat(target.c_str(), &info) == 0);
+    CHECK((info.st_mode & 077) == 055);
+}
 #endif
 
 TEST_CASE("discovery rejects expired, insecure, and ambiguous records",

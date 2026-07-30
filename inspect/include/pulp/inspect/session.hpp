@@ -78,12 +78,18 @@ public:
     std::chrono::milliseconds remaining();
 
 private:
+    friend class InspectorSession;
+
     void expire_if_needed();
+    bool begin_operation(std::string_view owner);
+    void end_operation(std::string_view owner);
 
     std::chrono::milliseconds ttl_;
     Clock clock_;
     std::string owner_;
     std::chrono::steady_clock::time_point expires_at_{};
+    std::size_t active_operations_ = 0;
+    bool release_pending_ = false;
 };
 
 struct InspectorSessionInfo {

@@ -199,6 +199,61 @@ TEST_CASE("InspectorSession invokes domain handlers outside its lease mutex",
     CHECK_FALSE(response.is_error);
 }
 
+TEST_CASE("controller lease handoff waits for an admitted mutation",
+          "[inspect][session][lease][concurrency]") {
+    auto now = std::chrono::steady_clock::time_point{};
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool release = false;
+    InspectorSession session(
+        {"session-fenced", "instance-1", "fixture"},
+        policy(InspectorProfile::Develop),
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            entered = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(request.id, R"({"applied":true})");
+        },
+        100ms,
+        [&] { return now; });
+
+    REQUIRE_FALSE(
+        session.handle("alpha",
+                       make_request(1, "Session.acquireController"))
+            .is_error);
+
+    pulp::inspect::InspectorMessage mutation;
+    std::thread mutator([&] {
+        mutation = session.handle(
+            "alpha", make_request(2, "State.setParameter"));
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return entered; }));
+    }
+
+    now += 101ms;
+    session.disconnect("alpha");
+    const auto fenced = session.handle(
+        "beta", make_request(3, "Session.acquireController"));
+    CHECK(fenced.is_error);
+    CHECK(fenced.error_code == "controller_lease_conflict");
+
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    cv.notify_all();
+    mutator.join();
+    CHECK_FALSE(mutation.is_error);
+
+    const auto acquired = session.handle(
+        "beta", make_request(4, "Session.acquireController"));
+    CHECK_FALSE(acquired.is_error);
+}
+
 TEST_CASE("InspectorSession contains exceptions from domain handlers",
           "[inspect][session][dispatch][exception]") {
     auto config = policy(InspectorProfile::Develop);
