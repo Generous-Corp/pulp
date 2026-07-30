@@ -51,3 +51,49 @@ visual work before that was noticed.
 | 1 — the seam | **done**, 3 changes, 3 products byte-identical, each proven live |
 | 2 — Forge Modular runs Forge's UI | next |
 | 3–8 | not started; see `../SPEC-forge-modular.md` |
+
+## Open: a crash in rebuild_marketplace_cards
+
+Reported from a windowed launch of the worktree build on 2026-07-29 23:43,
+`SIGBUS` on a wild pointer (`0x700000408`, inside the GPU carveout):
+
+```
+View::~View  ←  Label::~Label  ←  View::~View (recursive)
+ForgeChrome::rebuild_marketplace_cards + 152
+ForgeChrome::refresh_marketplace_screen + 2352
+ForgeChrome::build + 2200
+ForgeShell::create_view + 1320
+```
+
+**Not reproducible on the current binary** — 25 s windowed, no crash. The report
+is from an intermediate build taken mid-iteration, most likely the one where the
+described-row branch still returned early from `build_home()` and left the home
+half-constructed. `rebuild_marketplace_cards` starts by destroying every existing
+card, which is exactly where a half-built tree would fail.
+
+**Do not treat that as closed.** What it establishes:
+
+- Forge Modular is the first shell to reach this path with a *described*
+  composer row, and a half-built home tree kills it in the destructor rather
+  than at the point of the mistake — which is a bad place to learn about it.
+- The no-leak baselines, the seam tests and the compiler were all green while
+  that build was broken. Only running it windowed showed anything.
+- `--screenshot` sets `headless = true` and is **not** the same path as a
+  windowed launch. Everything here had only ever been screenshotted.
+
+**Owed:** a windowed launch as part of the routine check, not just a screenshot;
+and a look at whether `rebuild_marketplace_cards` should tolerate a partial tree
+rather than trusting it.
+
+## Also open: Skia is dropping draws
+
+Present on every run here, including the current good one:
+
+```
+[skia] WARNING - Couldn't convert SkImage to a Graphite-backed representation
+[skia] WARNING - Key context creation failed in Device::drawGeometry, draw dropped!
+```
+
+Draws are being **discarded**, which is worth chasing before judging any render's
+fidelity — a missing element may be a dropped draw rather than a layout bug. Seen
+in Forge Instrument's run too, so it is not something Forge Modular introduced.
