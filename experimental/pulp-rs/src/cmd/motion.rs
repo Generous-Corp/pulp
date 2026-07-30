@@ -34,11 +34,11 @@
 //! in Rust would duplicate logic that already lives in the inspect
 //! adapter. The shell-out is what the MCP wrapper does too.
 //!
-//! # Reachability gate (off-by-default ergonomics)
+//! # Authenticated discovery (off-by-default ergonomics)
 //!
 //! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
-//! filter and gets a quick reachability probe. Without one, the C++ client
-//! performs authenticated ephemeral discovery. If no session is available it
+//! filter. The C++ client performs authenticated ephemeral discovery and the
+//! real protocol connection is the only connection opened. If no session is available it
 //! prints a clear
 //! "no inspector running — start with `PULP_MOTION_SERVER=1
 //! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
@@ -47,10 +47,8 @@
 //! discovery + connect cycle to fail.
 
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use crate::error::{CliError, Result};
 
@@ -471,8 +469,7 @@ pub trait InspectorTalker {
         -> Result<String>;
 }
 
-/// Production talker — checks reachability via `TcpStream::connect`
-/// against `127.0.0.1:<port>` first, then shells out to `pulp-cpp
+/// Production talker — shells out to `pulp-cpp
 /// inspect --command METHOD --params JSON`. Captures stdout and
 /// returns it verbatim.
 #[derive(Debug, Default, Clone, Copy)]
@@ -485,11 +482,6 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // An explicit port is only a discovery filter. With no filter, let
-        // the authenticated C++ client select the exact ephemeral session.
-        if port != 0 && !inspector_reachable(port) {
-            return Err(CliError::Other(no_inspector_hint(port)));
-        }
         let bin = resolve_inspect_binary().ok_or_else(|| {
             CliError::Other(
                 "pulp motion: could not find `pulp-cpp` or `pulp` binary \
@@ -561,30 +553,6 @@ fn resolve_inspect_binary() -> Option<PathBuf> {
     // Last resort — fall through to `pulp` on PATH and hope its
     // fallthrough routes the `inspect` verb to `pulp-cpp`.
     crate::proc::which("pulp")
-}
-
-/// Probe whether something is listening on `127.0.0.1:<port>`. Short
-/// timeout (250ms) so the wait is invisible to the user when the
-/// inspector is alive on the local box.
-#[must_use]
-pub fn inspector_reachable(port: u16) -> bool {
-    let addr = format!("127.0.0.1:{port}");
-    let parsed = match addr.parse() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&parsed, Duration::from_millis(250)).is_ok()
-}
-
-/// The clear "no inspector" hint string — surfaced both on
-/// reachability failure and in `pulp motion` help text.
-fn no_inspector_hint(port: u16) -> String {
-    format!(
-        "pulp motion: no inspector listening on port {port}.\n\
-         Start the host with the motion server enabled, e.g.:\n  \
-         PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview\n\
-         (override the port with --port N or $PULP_INSPECTOR_PORT)."
-    )
 }
 
 /// Resolve the explicit port filter from CLI flags + env. Zero delegates
@@ -1223,21 +1191,6 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pulp motion — wrappers"));
         assert!(t.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn inspector_reachable_returns_false_for_unused_port() {
-        // Pick a port unlikely to be bound in CI. Worst case this
-        // flakes if the port IS bound — the assertion is just
-        // "function returns a bool quickly", not the value itself.
-        let _ = inspector_reachable(1);
-    }
-
-    #[test]
-    fn no_inspector_hint_mentions_port_and_env_knob() {
-        let s = no_inspector_hint(9200);
-        assert!(s.contains("port 9200"), "{s}");
-        assert!(s.contains("PULP_MOTION_SERVER=1"));
     }
 
     #[test]

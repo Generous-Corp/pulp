@@ -102,6 +102,33 @@ struct AuthenticatedFixture {
 
 } // namespace
 
+TEST_CASE("server rejects unsupported protocol versions before publishing",
+          "[inspect][client][protocol-version]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-future-version", "instance", "plugin", "2"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    CHECK_FALSE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    CHECK(server.port() == 0);
+    CHECK(reader.list().empty());
+}
+
 TEST_CASE("authenticated client completes read and controlled mutation",
           "[inspect][client][authentication]") {
     AuthenticatedFixture fixture;
@@ -399,6 +426,77 @@ TEST_CASE("server can be released from a request callback",
     REQUIRE(client.connect(records.front(), reader));
     CHECK(client.request("State.getParameters").is_error);
     CHECK_FALSE(server);
+}
+
+TEST_CASE("server can be destroyed by a callback while another thread stops it",
+          "[inspect][client][teardown][owner-lifetime][concurrency]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Observe;
+    config.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    std::unique_ptr<InspectorServer> server =
+        std::make_unique<InspectorServer>();
+    auto* server_raw = server.get();
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool callback_entered = false;
+    bool destroy_server = false;
+    InspectorSession session(
+        {"session-concurrent-destroy", "instance", "plugin", "1"},
+        config,
+        [&](const auto& request) {
+            {
+                std::unique_lock lock(mutex);
+                callback_entered = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return destroy_server; });
+            }
+            server.reset();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server->start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+
+    std::thread requester([&] {
+        (void)client.request("State.getParameters");
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1),
+                            [&] { return callback_entered; }));
+    }
+    std::atomic<bool> stop_returned{false};
+    std::thread stopper([&] {
+        server_raw->stop();
+        stop_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_FALSE(stop_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        destroy_server = true;
+    }
+    cv.notify_all();
+    requester.join();
+    stopper.join();
+    CHECK_FALSE(server);
+    CHECK(stop_returned.load(std::memory_order_acquire));
+    CHECK(reader.list().empty());
 }
 
 TEST_CASE("concurrent callback stop requests do not deadlock",

@@ -50,23 +50,11 @@ public:
     int client_count() const;
 
     /// The port we're actually listening on (may differ from requested if 0 was passed).
-    int port() const { return port_; }
+    int port() const;
 
 private:
     class Impl;
     std::shared_ptr<Impl> impl_;
-    int port_ = 0;
-    InspectorSession* session_ = nullptr;
-    InspectorDiscoveryPublisher* discovery_ = nullptr;
-    std::vector<std::uint8_t> token_;
-    std::chrono::milliseconds authentication_timeout_ =
-        std::chrono::seconds(3);
-    mutable std::mutex lifecycle_mutex_;
-    mutable std::recursive_mutex transition_mutex_;
-    std::atomic<bool> stop_requested_{false};
-    std::atomic<bool> transition_waiting_for_callbacks_{false};
-    void stop_locked();
-    void on_message_received(const std::string& data, events::InterprocessConnection* sender);
 };
 
 } // namespace pulp::inspect

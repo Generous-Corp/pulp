@@ -166,11 +166,15 @@ class InspectorTruthCheckTests(unittest.TestCase):
     def test_rejects_legacy_rust_wrapper_port_defaults(self) -> None:
         root = self.make_root()
         (root / "experimental/pulp-rs/src/cmd/motion.rs").write_text(
-            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n",
+            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n"
+            "use std::net::TcpStream;\n"
+            "fn inspector_reachable(port: u16) -> bool { port > 0 }\n",
             encoding="utf-8",
         )
         (root / "experimental/pulp-rs/src/cmd/trace.rs").write_text(
-            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n",
+            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n"
+            "use std::net::TcpStream;\n"
+            "fn inspector_reachable(port: u16) -> bool { port > 0 }\n",
             encoding="utf-8",
         )
         (root / ".claude/commands/trace.md").write_text(

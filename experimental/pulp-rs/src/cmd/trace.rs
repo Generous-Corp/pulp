@@ -42,11 +42,11 @@
 //! lives in the inspect adapter. The shell-out is what the MCP wrapper
 //! does too.
 //!
-//! # Reachability gate (off-by-default ergonomics)
+//! # Authenticated discovery (off-by-default ergonomics)
 //!
 //! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
-//! filter and gets a quick reachability probe. Without one, the C++ client
-//! performs authenticated ephemeral discovery. If no session is available it
+//! filter. The C++ client performs authenticated ephemeral discovery and the
+//! real protocol connection is the only connection opened. If no session is available it
 //! prints a clear
 //! "no inspector running — start with `PULP_TRACE_SERVER=1
 //! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
@@ -55,10 +55,8 @@
 //! binary's own discovery + connect cycle to fail.
 
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use crate::cmd::trace_open::{run_open, OpenArgs};
 use crate::cmd::trace_query::run_offline_query;
@@ -537,8 +535,7 @@ pub trait InspectorTalker {
         -> Result<String>;
 }
 
-/// Production talker — checks reachability via `TcpStream::connect`
-/// against `127.0.0.1:<port>` first, then shells out to `pulp-cpp
+/// Production talker — shells out to `pulp-cpp
 /// inspect --command METHOD --params JSON`. Captures stdout and
 /// returns it verbatim.
 #[derive(Debug, Default, Clone, Copy)]
@@ -551,11 +548,6 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // An explicit port is only a discovery filter. With no filter, let
-        // the authenticated C++ client select the exact ephemeral session.
-        if port != 0 && !inspector_reachable(port) {
-            return Err(CliError::Other(no_inspector_hint(port)));
-        }
         let bin = resolve_inspect_binary().ok_or_else(|| {
             CliError::Other(
                 "pulp trace: could not find `pulp-cpp` or `pulp` binary \
@@ -621,24 +613,16 @@ fn resolve_inspect_binary() -> Option<PathBuf> {
     crate::proc::which("pulp")
 }
 
-/// Probe whether something is listening on `127.0.0.1:<port>`. Short
-/// timeout (250ms) so the wait is invisible to the user when the
-/// inspector is alive on the local box.
-#[must_use]
-pub fn inspector_reachable(port: u16) -> bool {
-    let addr = format!("127.0.0.1:{port}");
-    let parsed = match addr.parse() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&parsed, Duration::from_millis(250)).is_ok()
-}
-
-/// The clear "no inspector" hint string — surfaced both on
-/// reachability failure and in `pulp trace` help text.
+/// The clear "no inspector" hint string surfaced after an authenticated
+/// inspector request fails and in `pulp trace` help text.
 fn no_inspector_hint(port: u16) -> String {
+    let target = if port == 0 {
+        "authenticated discovery".to_owned()
+    } else {
+        format!("port {port}")
+    };
     format!(
-        "pulp trace: no inspector listening on port {port}.\n\
+        "pulp trace: no inspector available through {target}.\n\
          Start the host with the tracing server enabled, e.g.:\n  \
          PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview\n\
          (override the port with --port N or $PULP_INSPECTOR_PORT)."
@@ -905,7 +889,7 @@ pub fn resolve_trace_processor() -> TraceProcessorStatus {
 }
 
 /// Run `pulp trace doctor`: aggregate client-side readiness probes
-/// (inspector reachability, `trace_processor` availability) with the
+/// (an authenticated `Trace.snapshot`, `trace_processor` availability) with the
 /// inspector's own `Trace.snapshot` facts, then print a report.
 ///
 /// # Errors
@@ -919,13 +903,7 @@ pub fn run_doctor<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let snapshot = if port == 0 {
-        talker.call(port, "Trace.snapshot", "{}").ok()
-    } else if inspector_reachable(port) {
-        talker.call(port, "Trace.snapshot", "{}").ok()
-    } else {
-        None
-    };
+    let snapshot = talker.call(port, "Trace.snapshot", "{}").ok();
     let reachable = snapshot.is_some();
     let tp = resolve_trace_processor();
     let report =
@@ -1599,11 +1577,6 @@ mod tests {
     }
 
     #[test]
-    fn inspector_reachable_returns_quickly_for_unused_port() {
-        let _ = inspector_reachable(1);
-    }
-
-    #[test]
     fn parse_doctor_verb() {
         let (sub, _) = parse(&s(&["doctor"])).unwrap();
         assert!(matches!(sub, Sub::Doctor));
@@ -1769,16 +1742,18 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_doctor_reports_unreachable_without_a_call_mapping() {
-        // Port 1 is never a live inspector, so this is deterministic:
-        // run_doctor prints the report; no Trace.* call mapping is needed.
+    fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
         let t = RecordingTalker::new(vec![]);
         let mut buf: Vec<u8> = Vec::new();
         let flags = GlobalFlags { json: false, port: Some(1) };
         dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pulp trace doctor"), "{out}");
-        assert!(out.contains("UNREACHABLE"), "{out}");
+        assert!(out.contains("reachable"), "{out}");
+        assert_eq!(
+            &*t.calls.borrow(),
+            &[(1, "Trace.snapshot".to_owned(), "{}".to_owned())]
+        );
     }
 
     #[test]

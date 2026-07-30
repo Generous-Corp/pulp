@@ -1374,7 +1374,7 @@ Subcommands:
 | `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
 | `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
 | `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
-| `doctor` | client-side + `Trace.snapshot` | Readiness check. Aggregates inspector reachability and `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) with the inspector's `compiled_in` / `active` / `last_trace_path`, then reports `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
+| `doctor` | client-side + `Trace.snapshot` | Readiness check. Uses the authenticated `Trace.snapshot` request as its inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 
