@@ -27,6 +27,11 @@ catch_discover_tests(pulp-test-hot-reload
         RESOURCE_LOCK hot-reload-file-watcher
         LABELS slow)
 
+# Inspector component tests exist only when the optional SDK component is
+# present. A gate-off build must not compile inspector implementation sources
+# back into its test artifacts.
+if(PULP_ENABLE_INSPECTOR)
+
 # Non-GPU inspector helpers. The full inspector-domain suite is GPU-gated
 # because it exercises View/Render integration, but these domain helpers are
 # plain data/StateStore contracts and should stay covered in CPU-only builds.
@@ -186,6 +191,32 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     target_link_libraries(pulp-test-agent-request-queue PRIVATE pulp::inspect Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-agent-request-queue
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+endif()
+endif()
+
+# An ordinary pulp-format consumer is the Phase 1 stripped-artifact fixture.
+# The post-build scan is non-vacuous when inspector components are present:
+# it first proves their archive contains pulp::inspect symbols, then rejects
+# every defined pulp::inspect symbol in this consumer.
+add_executable(pulp-test-inspector-stripped-artifact
+    fixtures/inspector_stripped_artifact.cpp)
+target_link_libraries(pulp-test-inspector-stripped-artifact PRIVATE
+    pulp::format)
+add_test(NAME inspector-stripped-artifact-runs
+    COMMAND pulp-test-inspector-stripped-artifact)
+if(CMAKE_NM)
+    set(_pulp_inspector_archive "")
+    if(TARGET pulp-inspect-runtime)
+        set(_pulp_inspector_archive "$<TARGET_FILE:pulp-inspect-runtime>")
+    endif()
+    add_custom_command(TARGET pulp-test-inspector-stripped-artifact POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNM=${CMAKE_NM}"
+            "-DSTRIPPED_ARTIFACT=$<TARGET_FILE:pulp-test-inspector-stripped-artifact>"
+            "-DINSPECTOR_ARCHIVE=${_pulp_inspector_archive}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_inspector_stripped_artifact.cmake"
+        COMMENT "Checking ordinary format consumers contain no inspector symbols")
+    unset(_pulp_inspector_archive)
 endif()
 
 # Widget bridge tests

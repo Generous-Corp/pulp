@@ -83,6 +83,21 @@ REQUIRED_CLAIMS = {
     ),
 }
 
+REQUIRED_BUILD_CONTRACTS = {
+    "CMakeLists.txt": (
+        "if(PULP_ENABLE_INSPECTOR)\n    add_subdirectory(inspect)\nendif()",
+        "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)",
+    ),
+    "tools/cli/CMakeLists.txt": (
+        "cmd_inspect_unavailable.cpp",
+        "cmd_tweaks_unavailable.cpp",
+    ),
+    "test/cmake/view_widget_bridge_tests.cmake": (
+        "pulp-test-inspector-stripped-artifact",
+        "check_inspector_stripped_artifact.cmake",
+    ),
+}
+
 
 def check_root(root: pathlib.Path) -> list[str]:
     errors: list[str] = []
@@ -152,6 +167,14 @@ def check_root(root: pathlib.Path) -> list[str]:
         for claim in claims:
             if claim not in text:
                 errors.append(f"{relative_path} omits required claim: {claim}")
+
+    for relative_path, contracts in REQUIRED_BUILD_CONTRACTS.items():
+        text = (root / relative_path).read_text(encoding="utf-8")
+        for contract in contracts:
+            if contract not in text:
+                errors.append(
+                    f"{relative_path} omits inspector build contract: {contract}"
+                )
 
     mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")
     for tool_name, description in MCP_TOOL_RE.findall(mcp_source):

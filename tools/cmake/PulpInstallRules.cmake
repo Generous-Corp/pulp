@@ -97,6 +97,9 @@ endif()
 if(TARGET pulp-inspect-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-runtime)
 endif()
+if(TARGET pulp-inspect-authoring)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
+endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
@@ -284,6 +287,7 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
 endif()
 

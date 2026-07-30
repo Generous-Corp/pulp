@@ -109,8 +109,12 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     REQUIRE(records.size() == 2);
     std::string selection_error;
     CHECK_FALSE(select_inspector_session(
-        records, "shared-session", &selection_error).has_value());
+        records, "shared-session", {}, &selection_error).has_value());
     CHECK(selection_error.find("Multiple") != std::string::npos);
+    const auto selected = select_inspector_session(
+        records, "shared-session", "instance-b", &selection_error);
+    REQUIRE(selected.has_value());
+    CHECK(selected->instance_id == "instance-b");
     CHECK(records[0].record_path != records[1].record_path);
     CHECK(records[0].credential_path != records[1].credential_path);
     for (const auto& record : records) {
@@ -129,6 +133,34 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     REQUIRE(remaining.size() == 1);
     CHECK(remaining.front().instance_id == "instance-b");
     CHECK(reader.read_credential(remaining.front()) == second_token);
+}
+
+TEST_CASE("discovery reserves a live session and instance identity",
+          "[inspect][discovery][identity][ownership]") {
+    TemporaryDirectory temporary;
+    const auto first_token = generate_inspector_secret();
+    const auto second_token = generate_inspector_secret();
+    REQUIRE(first_token.has_value());
+    REQUIRE(second_token.has_value());
+
+    InspectorDiscoveryPublisher first(temporary.path);
+    InspectorDiscoveryPublisher competing(temporary.path);
+    const auto record = fixture_record("owned-session");
+    REQUIRE(first.publish(record, *first_token, 5s));
+    CHECK_FALSE(competing.publish(record, *second_token, 5s));
+
+    InspectorDiscoveryReader reader(temporary.path);
+    auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(reader.read_credential(records.front()) == first_token);
+    REQUIRE(first.refresh(5s));
+    CHECK(reader.read_credential(reader.list().front()) == first_token);
+
+    first.remove();
+    REQUIRE(competing.publish(record, *second_token, 5s));
+    records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(reader.read_credential(records.front()) == second_token);
 }
 
 TEST_CASE("discovery rejects a stale record after process id reuse",
@@ -212,9 +244,10 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
     auto records = reader.list();
     REQUIRE(records.size() == 2);
     std::string error;
-    CHECK_FALSE(select_inspector_session(records, "", &error).has_value());
+    CHECK_FALSE(select_inspector_session(records, "", {}, &error).has_value());
     CHECK(error.find("Multiple") != std::string::npos);
-    REQUIRE(select_inspector_session(records, "second", &error).has_value());
+    REQUIRE(select_inspector_session(
+        records, "second", {}, &error).has_value());
 
 #ifndef _WIN32
     REQUIRE(::chmod(first.record()->credential_path.c_str(), 0644) == 0);

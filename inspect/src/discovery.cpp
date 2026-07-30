@@ -6,6 +6,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <fstream>
 #include <limits>
@@ -421,6 +422,70 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
     return true;
 }
 
+bool write_private_file_exclusive(const std::filesystem::path& destination,
+                                  std::string_view contents) {
+    const auto random = pulp::runtime::secure_random_bytes(8);
+    if (!random)
+        return false;
+    const auto temporary = destination.string() + ".tmp-" +
+                           pulp::runtime::hex_encode(*random);
+    if (!write_private_file_atomic(temporary, contents))
+        return false;
+#ifdef _WIN32
+    const bool installed =
+        MoveFileExW(std::filesystem::path(temporary).c_str(),
+                    destination.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+    if (!installed)
+        DeleteFileW(std::filesystem::path(temporary).c_str());
+#else
+    const bool installed =
+        ::link(temporary.c_str(), destination.c_str()) == 0;
+    ::unlink(temporary.c_str());
+#endif
+    return installed;
+}
+
+std::optional<std::string> read_private_text_file(
+    const std::filesystem::path& path) {
+    if (!private_regular_file(path))
+        return std::nullopt;
+    std::ifstream input(path, std::ios::binary);
+    std::string contents((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    if ((!input.good() && !input.eof()) || contents.size() > 1024)
+        return std::nullopt;
+    return contents;
+}
+
+std::optional<std::pair<std::int64_t, std::string>>
+decode_ownership_marker(std::string_view marker) {
+    const auto first = marker.find('\n');
+    const auto second =
+        first == std::string_view::npos ? first : marker.find('\n', first + 1);
+    if (first == std::string_view::npos ||
+        second == std::string_view::npos || second + 1 >= marker.size())
+        return std::nullopt;
+    std::int64_t process_id = 0;
+    const auto [end, error] =
+        std::from_chars(marker.data(), marker.data() + first, process_id);
+    if (error != std::errc{} || end != marker.data() + first ||
+        process_id <= 0)
+        return std::nullopt;
+    return std::pair{
+        process_id,
+        std::string(marker.substr(first + 1, second - first - 1))};
+}
+
+bool ownership_is_live(const std::filesystem::path& path) {
+    const auto marker = read_private_text_file(path);
+    if (!marker)
+        return false;
+    const auto owner = decode_ownership_marker(*marker);
+    return owner &&
+           process_start_identity(owner->first) ==
+               std::optional<std::string>(owner->second);
+}
+
 std::string encode_record(const InspectorDiscoveryRecord& record) {
     auto value = choc::value::createObject("");
     value.addMember("sessionId",
@@ -605,6 +670,31 @@ bool InspectorDiscoveryPublisher::publish(
     record.record_path = runtime_directory_ / (file_stem + ".json");
     record.credential_path =
         runtime_directory_ / (file_stem + ".token");
+    ownership_path_ = runtime_directory_ / (file_stem + ".lock");
+    const auto ownership_id = pulp::runtime::secure_random_bytes(16);
+    if (!ownership_id)
+        return false;
+    ownership_marker_ =
+        std::to_string(record.process_id) + "\n" +
+        record.process_start_id + "\n" +
+        pulp::runtime::hex_encode(*ownership_id);
+    if (!write_private_file_exclusive(ownership_path_, ownership_marker_)) {
+        if (ownership_is_live(ownership_path_)) {
+            ownership_path_.clear();
+            ownership_marker_.clear();
+            return false;
+        }
+        if (!write_private_file_atomic(ownership_path_, ownership_marker_) ||
+            read_private_text_file(ownership_path_) !=
+                std::optional<std::string>(ownership_marker_)) {
+            ownership_path_.clear();
+            ownership_marker_.clear();
+            return false;
+        }
+        std::error_code error;
+        std::filesystem::remove(record.record_path, error);
+        std::filesystem::remove(record.credential_path, error);
+    }
     credential_.assign(credential.begin(), credential.end());
     if (!write_private_file_atomic(
             record.credential_path,
@@ -613,6 +703,11 @@ bool InspectorDiscoveryPublisher::publish(
         std::error_code error;
         std::filesystem::remove(record.record_path, error);
         std::filesystem::remove(record.credential_path, error);
+        if (read_private_text_file(ownership_path_) ==
+            std::optional<std::string>(ownership_marker_))
+            std::filesystem::remove(ownership_path_, error);
+        ownership_path_.clear();
+        ownership_marker_.clear();
         credential_.clear();
         return false;
     }
@@ -622,7 +717,9 @@ bool InspectorDiscoveryPublisher::publish(
 
 bool InspectorDiscoveryPublisher::refresh(std::chrono::milliseconds ttl) {
     if (!record_ || credential_.size() != 32 ||
-        ttl <= std::chrono::milliseconds(0))
+        ttl <= std::chrono::milliseconds(0) ||
+        read_private_text_file(ownership_path_) !=
+            std::optional<std::string>(ownership_marker_))
         return false;
     record_->expires_at_unix_ms = unix_ms_now() + ttl.count();
     return write_private_file_atomic(record_->record_path,
@@ -630,12 +727,17 @@ bool InspectorDiscoveryPublisher::refresh(std::chrono::milliseconds ttl) {
 }
 
 void InspectorDiscoveryPublisher::remove() {
-    if (record_) {
+    if (record_ &&
+        read_private_text_file(ownership_path_) ==
+            std::optional<std::string>(ownership_marker_)) {
         std::error_code error;
         std::filesystem::remove(record_->record_path, error);
         std::filesystem::remove(record_->credential_path, error);
-        record_.reset();
+        std::filesystem::remove(ownership_path_, error);
     }
+    record_.reset();
+    ownership_path_.clear();
+    ownership_marker_.clear();
     std::fill(credential_.begin(), credential_.end(), std::uint8_t{0});
     credential_.clear();
 }
@@ -643,16 +745,18 @@ void InspectorDiscoveryPublisher::remove() {
 std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::span<const InspectorDiscoveryRecord> records,
     std::string_view session_id,
+    std::string_view instance_id,
     std::string* error) {
-    if (!session_id.empty()) {
+    if (!session_id.empty() || !instance_id.empty()) {
         std::optional<InspectorDiscoveryRecord> match;
         for (const auto& record : records) {
-            if (record.session_id != session_id)
+            if ((!session_id.empty() && record.session_id != session_id) ||
+                (!instance_id.empty() && record.instance_id != instance_id))
                 continue;
             if (match) {
                 if (error)
                     *error = "Multiple live inspector instances match the "
-                             "requested session ID";
+                             "requested selection";
                 return std::nullopt;
             }
             match = record;
@@ -660,7 +764,7 @@ std::optional<InspectorDiscoveryRecord> select_inspector_session(
         if (match)
             return match;
         if (error)
-            *error = "No live inspector session matches the requested session ID";
+            *error = "No live inspector session matches the requested selection";
         return std::nullopt;
     }
     if (records.size() == 1)

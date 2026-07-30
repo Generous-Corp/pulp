@@ -28,13 +28,11 @@
 #include <TargetConditionals.h>
 #endif
 
-// The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
-// compile flag (root CMake option, default ON for dev/examples builds;
-// release/standalone-ship builds set it OFF) so a shipped standalone app does
-// not expose the developer inspector to end users. It additionally requires
-// PULP_HAS_INSPECT (GPU + desktop, the link gate) and a non-Android platform.
-// PULP_STANDALONE_INSPECTOR folds all three into one condition used by every
-// inspector block below.
+// The root component gate defines PULP_ENABLE_INSPECTOR for this standalone
+// authoring target and links the visual overlay here, never through
+// pulp-format. PULP_HAS_INSPECT records that the desktop GPU overlay target
+// actually exists. PULP_STANDALONE_INSPECTOR folds those conditions with the
+// platform guard for every inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
 #endif

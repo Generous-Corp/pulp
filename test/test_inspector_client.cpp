@@ -221,6 +221,38 @@ TEST_CASE("client can be released from its event handler",
     CHECK_FALSE(client);
 }
 
+TEST_CASE("client disconnect during event writes does not deadlock",
+          "[inspect][client][events][teardown][concurrency]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+    const std::string payload =
+        R"({"id":"gain","padding":")" + std::string(256 * 1024, 'x') +
+        R"("})";
+
+    for (int iteration = 0; iteration < 8; ++iteration) {
+        InspectorClient client;
+        REQUIRE(client.connect(records.front(), fixture.reader));
+        std::atomic<bool> started{false};
+        std::thread broadcaster([&] {
+            started.store(true, std::memory_order_release);
+            for (int event = 0; event < 16; ++event) {
+                fixture.server.broadcast(pulp::inspect::make_event(
+                    "State.parameterChanged", payload));
+            }
+        });
+        while (!started.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        client.disconnect();
+        broadcaster.join();
+    }
+
+    InspectorClient replacement;
+    REQUIRE(replacement.connect(records.front(), fixture.reader));
+    CHECK_FALSE(
+        replacement.request("State.getParameters").is_error);
+}
+
 TEST_CASE("server stop is reentrant from a request callback",
           "[inspect][client][teardown][reentrant]") {
     TemporaryDirectory temporary;
@@ -349,6 +381,12 @@ TEST_CASE("concurrent callback stop requests do not deadlock",
     });
     first_request.join();
     second_request.join();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!reader.list().empty() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     CHECK(reader.list().empty());
 }
 
