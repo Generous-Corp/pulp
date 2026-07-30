@@ -29,6 +29,14 @@ InspectorMessage connection_error(std::int64_t request_id,
 
 class InspectorClient::Impl {
 public:
+    struct EventState {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::deque<InspectorMessage> events;
+        EventHandler handler;
+        bool stopping = false;
+    };
+
     events::InterprocessConnection connection;
     std::mutex send_mutex;
     std::mutex mutex;
@@ -36,26 +44,24 @@ public:
     std::map<std::int64_t, InspectorMessage> responses;
     std::set<std::int64_t> in_flight;
     std::optional<InspectorAuthChallenge> challenge;
-    EventHandler event_handler;
-    std::deque<InspectorMessage> events;
-    std::condition_variable event_cv;
+    std::shared_ptr<EventState> event_state = std::make_shared<EventState>();
     std::thread event_thread;
-    bool stopping_events = false;
     std::atomic<std::int64_t> next_request_id{2};
     bool disconnected = true;
 
     Impl() {
-        event_thread = std::thread([this] {
-            std::unique_lock lock(mutex);
-            while (!stopping_events) {
-                event_cv.wait(lock, [this] {
-                    return stopping_events || !events.empty();
+        const auto state = event_state;
+        event_thread = std::thread([state] {
+            std::unique_lock lock(state->mutex);
+            while (!state->stopping) {
+                state->cv.wait(lock, [&] {
+                    return state->stopping || !state->events.empty();
                 });
-                if (stopping_events)
+                if (state->stopping)
                     break;
-                auto event = std::move(events.front());
-                events.pop_front();
-                auto handler = event_handler;
+                auto event = std::move(state->events.front());
+                state->events.pop_front();
+                auto handler = state->handler;
                 lock.unlock();
                 if (handler) {
                     try {
@@ -70,12 +76,15 @@ public:
 
     ~Impl() {
         {
-            std::lock_guard lock(mutex);
-            stopping_events = true;
-            events.clear();
+            std::lock_guard lock(event_state->mutex);
+            event_state->stopping = true;
+            event_state->events.clear();
         }
-        event_cv.notify_all();
-        if (event_thread.joinable())
+        event_state->cv.notify_all();
+        if (event_thread.joinable() &&
+            event_thread.get_id() == std::this_thread::get_id())
+            event_thread.detach();
+        else if (event_thread.joinable())
             event_thread.join();
     }
 
@@ -110,11 +119,14 @@ public:
                 }
                 return;
             }
-            if (events.size() >= 256)
-                events.pop_front();
-            events.push_back(std::move(message));
         }
-        event_cv.notify_one();
+        {
+            std::lock_guard lock(event_state->mutex);
+            if (event_state->events.size() >= 256)
+                event_state->events.pop_front();
+            event_state->events.push_back(std::move(message));
+        }
+        event_state->cv.notify_one();
     }
 
     InspectorMessage wait_for_response(std::int64_t id,
@@ -287,8 +299,8 @@ InspectorMessage InspectorClient::request(
 }
 
 void InspectorClient::set_event_handler(EventHandler handler) {
-    std::lock_guard lock(impl_->mutex);
-    impl_->event_handler = std::move(handler);
+    std::lock_guard lock(impl_->event_state->mutex);
+    impl_->event_state->handler = std::move(handler);
 }
 
 } // namespace pulp::inspect

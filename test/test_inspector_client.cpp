@@ -192,6 +192,35 @@ TEST_CASE("client event handlers can issue follow-up requests",
     CHECK_FALSE(follow_up->is_error);
 }
 
+TEST_CASE("client can be released from its event handler",
+          "[inspect][client][events][teardown]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool released = false;
+    auto client = std::make_unique<InspectorClient>();
+    client->set_event_handler([&](const auto&) {
+        client.reset();
+        {
+            std::lock_guard lock(mutex);
+            released = true;
+        }
+        cv.notify_all();
+    });
+    REQUIRE(client->connect(records.front(), fixture.reader));
+    fixture.server.broadcast(
+        pulp::inspect::make_event("State.parameterChanged", "{}"));
+
+    std::unique_lock lock(mutex);
+    REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+        return released;
+    }));
+    CHECK_FALSE(client);
+}
+
 TEST_CASE("server stop is reentrant from a request callback",
           "[inspect][client][teardown][reentrant]") {
     TemporaryDirectory temporary;
@@ -421,4 +450,56 @@ TEST_CASE("unauthenticated connections are closed at the authentication deadline
     std::unique_lock lock(mutex);
     CHECK(cv.wait_for(lock, std::chrono::seconds(1),
                       [&] { return disconnected; }));
+}
+
+TEST_CASE("server bounds pending unauthenticated clients",
+          "[inspect][authentication][resource-limit]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    InspectorSession session(
+        {"session-client-cap", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.max_clients = 2;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::vector<std::unique_ptr<pulp::events::InterprocessConnection>> pending;
+    for (int index = 0; index < 2; ++index) {
+        auto connection =
+            std::make_unique<pulp::events::InterprocessConnection>();
+        connection->set_on_text_message([](std::string_view) {});
+        REQUIRE(connection->connect(
+            records.front().endpoint,
+            pulp::events::IpcTransport::Socket));
+        pending.push_back(std::move(connection));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    InspectorClient rejected;
+    CHECK_FALSE(rejected.connect(
+        records.front(), reader, std::chrono::milliseconds(250)));
+
+    pending.front()->disconnect();
+    pending.erase(pending.begin());
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    InspectorClient admitted;
+    CHECK(admitted.connect(records.front(), reader));
 }

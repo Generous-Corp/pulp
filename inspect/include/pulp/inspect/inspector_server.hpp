@@ -24,6 +24,7 @@ struct InspectorServerConfig {
     std::chrono::milliseconds authentication_timeout =
         std::chrono::seconds(3);
     std::size_t max_message_bytes = 1024u * 1024u;
+    std::size_t max_clients = 16;
 };
 
 /// TCP server exposing the inspector protocol to external tools.
