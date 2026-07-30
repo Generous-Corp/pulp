@@ -38,6 +38,14 @@ void write_text(const fs::path& path, const std::string& content) {
     file.close();
 }
 
+struct CurrentPathGuard {
+    fs::path original = fs::current_path();
+    ~CurrentPathGuard() {
+        std::error_code error;
+        fs::current_path(original, error);
+    }
+};
+
 bool wait_for_reload(const std::function<bool()>& poller) {
     for (int i = 0; i < 30; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(125));
@@ -311,6 +319,56 @@ TEST_CASE("ScriptedUiSession resolves reviewed kit asset roots", "[view][scripte
     REQUIRE(traversal->text() == "404");
 
     fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession resolves imported assets beside load and reload scripts",
+          "[view][scripted-ui][assets][reload]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-relative-assets");
+    const auto other_cwd = temp_dir / "other-cwd";
+    const auto first_dir = temp_dir / "first";
+    const auto second_dir = temp_dir / "second";
+    fs::create_directories(other_cwd);
+    fs::create_directories(first_dir / "assets");
+    fs::create_directories(second_dir / "assets");
+    write_text(first_dir / "assets/hero.png", "first");
+    write_text(second_dir / "assets/hero.png", "second");
+    const auto script =
+        "createImage('img', '');\n"
+        "setImageSource('img', 'assets/hero.png');\n";
+    write_text(first_dir / "ui.js", script);
+    write_text(second_dir / "ui.js", script);
+
+    CurrentPathGuard current_path;
+    fs::current_path(other_cwd);
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    ScriptedUiSession session(
+        root, store,
+        {.script_path = first_dir / "ui.js",
+         .enable_theme_reload = false});
+    std::string error;
+    REQUIRE(session.load(&error));
+    auto* first =
+        dynamic_cast<ImageView*>(session.bridge()->widget("img"));
+    REQUIRE(first);
+    CHECK(
+        first->image_path() ==
+        "file://" +
+            (first_dir / "assets/hero.png")
+                .lexically_normal()
+                .generic_string());
+
+    REQUIRE(session.reload_from(second_dir / "ui.js", &error));
+    auto* second =
+        dynamic_cast<ImageView*>(session.bridge()->widget("img"));
+    REQUIRE(second);
+    CHECK(
+        second->image_path() ==
+        "file://" +
+            (second_dir / "assets/hero.png")
+                .lexically_normal()
+                .generic_string());
 }
 
 TEST_CASE("ScriptedUiSession blocks reviewed kit asset root escape hatches", "[view][scripted-ui][assets]") {

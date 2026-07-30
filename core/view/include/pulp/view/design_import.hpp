@@ -24,6 +24,7 @@
 #include <pulp/view/design_shortcuts.hpp>
 #include <pulp/view/design_codegen.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -120,6 +121,10 @@ struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
+    /// Resolve relative manifest local_path values against the DesignIR
+    /// document directory. Serialized DesignIR stays relocatable; loaders pass
+    /// `document_path.parent_path()` here instead of depending on process CWD.
+    std::filesystem::path asset_base_directory;
 };
 
 struct NativeImportBindingOptions {

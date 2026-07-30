@@ -1,10 +1,12 @@
 ---
 name: inspect
-description: Connect to a running Pulp inspector server
+description: Use the experimental inspector client with an explicitly hosted fixture
 ---
 
-Connect to a running plugin's inspector server to query the view tree,
-widget state, layout, and runtime diagnostics.
+`pulp inspect` is currently a low-level client, not a normal `pulp run` or
+plugin-format workflow. Normal Pulp launches do not start an inspector
+endpoint. Use these commands only with a custom host/test fixture that
+explicitly constructs `InspectorServer`.
 
 ```bash
 ./build/pulp inspect
@@ -13,9 +15,10 @@ widget state, layout, and runtime diagnostics.
 ./build/pulp inspect --command State.getParameters
 ```
 
-`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`
-currently return explicit unavailable errors until script-engine and
-host-capture wiring lands.
+`Capture.screenshot` and `Capture.screenshotNode` currently return explicit
+unavailable errors until host-capture wiring lands. `Runtime.evaluate` is
+unavailable in normal launches, but an explicitly wired custom fixture can
+enable it; treat that opt-in as remote code execution.
 
 The inspector exposes:
 - View hierarchy with bounds, flex properties, and styles
@@ -23,4 +26,6 @@ The inspector exposes:
 - Theme tokens and computed colors
 - Layout debug information
 
-Use `--port` when auto-discovery cannot find a running inspector.
+Auto-discovery is a transitional port-file hint without authenticated session
+identity. Prefer an explicit loopback port for a controlled fixture. Do not use
+the current transport for privileged mutation or runtime evaluation.

@@ -1413,7 +1413,8 @@ TEST_CASE("pulp import-design --from claude writes JS + bridge handler scaffold"
     fs::remove(tokens_path);
     fs::remove(bridge_path);
 
-    auto r = run_pulp({"import-design", "--from", "claude", "--file", html_path.string(),
+    auto r = run_pulp({"import-design", "--from", "claude", "--offline",
+                       "--file", html_path.string(),
                        "--output", js_path.string(), "--tokens", tokens_path.string(),
                        "--bridge-output", bridge_path.string()},
                       30000);
@@ -1460,7 +1461,8 @@ TEST_CASE("pulp import-design --from claude --no-bridge-scaffold writes only the
     fs::remove(js_path);
     fs::remove(bridge_path);
 
-    auto r = run_pulp({"import-design", "--from", "claude", "--file", html_path.string(),
+    auto r = run_pulp({"import-design", "--from", "claude", "--offline",
+                       "--file", html_path.string(),
                        "--output", js_path.string(), "--no-bridge-scaffold"},
                       30000);
     REQUIRE_FALSE(r.timed_out);

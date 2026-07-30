@@ -131,6 +131,34 @@ one design into all three. (The CLI flags that select these — `--mode live` vs
 `--mode baked`, `--emit js|ir-json|cpp` — are documented in the
 [Design Import API Reference](design-import.md).)
 
+## Authority boundaries for runnable HTML
+
+Runnable HTML has four explicit owners:
+
+- Chromium is the authoritative import-time evaluator of DOM, CSS, JavaScript,
+  SVG, canvas, fonts, and layout.
+- DesignIR is the authoritative portable document and records the captured
+  visual, assets, tokens, provenance, and semantic evidence.
+- Pulp's Yoga/Skia/Dawn stack is the authoritative generated runtime and
+  validation renderer.
+- Static parsing and QuickJS remain explicit lower-fidelity fallbacks and
+  diagnostic/source-analysis tools; they do not compete with Chromium for
+  visual truth.
+
+This does not convert arbitrary JavaScript into C++. A live JavaScript output
+can still run JavaScript, and a Three.js project still needs the existing
+Three.js/Dawn runtime bridge when native interactivity is required. The
+faithful-capture route preserves the evaluated default visual and captures
+control candidates separately; it does not claim that inferred pixels are a
+verified interaction contract. CSS custom properties remain DesignIR tokens,
+so choosing the browser as evaluator does not replace the token system.
+
+For portable assets, ownership stays with the artifact loader: JavaScript uses
+the script directory, native DesignIR materialization receives the DesignIR
+document directory, and generated C++ production callers pass their deployed
+resource directory to the generated factory overload. The zero-argument C++
+factory is only a source-tree convenience.
+
 ---
 
 ## Where the contract lives (cross-links)

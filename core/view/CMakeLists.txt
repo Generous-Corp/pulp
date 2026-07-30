@@ -622,6 +622,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/jsx_lock.cpp
         src/design_import_shortcuts.cpp
         src/design_import_designmd.cpp
+        src/design_import_designmd_schema.cpp
         src/token_lock.cpp
     )
     target_sources(pulp-view-script PRIVATE

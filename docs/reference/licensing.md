@@ -33,10 +33,35 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 
 These packages are npm-installed for design-import tooling and validation. They are not bundled into Pulp's C++ runtime.
 
+Faithful runnable-HTML import can also invoke a user-installed Google Chrome or
+Chromium browser and Node.js 22. Pulp does not bundle, link, or redistribute
+either program with Pulp or generated plugins. The importer launches Chromium with a temporary
+isolated profile, serves only the authorized input folder over tokenized
+loopback HTTP, denies external requests by default, captures the evaluated
+design, and then exits. Generated plugins and applications do not require
+Chrome, Chromium, or Node.
+
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Babel parser** | MIT | JSX/TSX source-contract extraction for `tools/import-design/jsx-runtime/jsx-contract-audit.mjs` | [github.com/babel/babel/tree/main/packages/babel-parser](https://github.com/babel/babel/tree/main/packages/babel-parser) |
 | **css-tree** | MIT | CSS value parsing and lexer validation for JSX source-contract extraction | [github.com/csstree/csstree](https://github.com/csstree/csstree) |
+
+### Optional Externally Licensed Machine Tools
+
+Pulp can manage a pinned copy of **Google Chrome for Testing** when a developer
+explicitly runs `pulp tool install chrome-for-testing`. It is a separate
+machine-local tool governed by the [Google Chrome Terms of
+Service](https://www.google.com/chrome/terms/), not by Pulp's MIT license.
+Review those terms before installing it.
+
+Pulp downloads the complete official versioned archive from Google's
+Chrome-for-Testing storage, verifies Pulp's committed SHA-256 pin, and installs
+it under `$PULP_HOME/tools/chrome-for-testing/`. It is not part of a Pulp
+release archive, SDK, plugin, or generated application. Design import never
+downloads it silently; system Chrome/Chromium remains sufficient, and the
+managed copy is used only after explicit installation. Normal agent operation
+does not require a special enable switch: the user-visible `pulp tool install`
+command is the opt-in action.
 
 ### Design Formats and Test Fixtures
 
@@ -44,7 +69,7 @@ Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) 
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.3.0`. | [github.com/google-labs-code/design.md @ 0.3.0](https://github.com/google-labs-code/design.md/releases/tag/0.3.0) |
+| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.4.0`. | [github.com/google-labs-code/design.md @ 0.4.0](https://github.com/google-labs-code/design.md/releases/tag/0.4.0) |
 | **Khronos Box Textured fixture** | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture at `test/fixtures/scene3d/BoxTextured/BoxTextured.glb`. | [github.com/KhronosGroup/glTF-Sample-Assets/Models/BoxTextured](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoxTextured) |
 
 ### Embedded Fonts

@@ -188,9 +188,23 @@ reproduces the design; the others below do NOT and waste hours:
 - ❌ **Do NOT hand-write a C++ `paint()`** to mimic the design. It is never 1:1
   (SVG icons, gradients, shadows, pills) and is pure slop. The framework exists
   to render the design, not to re-draw it by hand.
-- ❌ **Do NOT use `--from claude` for layout.** On a standalone/bundled HTML it
-  falls back to regex *text* extraction ("0 widgets, N labels", ~58% and it even
-  scrapes CSS comments) — no CSS layout, no geometry.
+- For runnable HTML, including Claude project exports, `.dc.html` components,
+  standalone bundles, and ordinary HTML, use `pulp import-design --file
+  <path>`. The CLI auto-detects the shape and evaluates it with isolated
+  Chromium; do not choose a parser by filename or add `--execute-bundle`.
+  `--from claude` remains accepted but is no longer needed for HTML.
+  The result is a pixel-exact static default frame. Semantic evidence is
+  diagnostic; live browser interactions require a runtime bridge. Captured CSS
+  variables describe only the active light / no-preference computed mode, and
+  only values visible on `documentElement` or `body` are promoted as global
+  tokens; component-scoped values remain capture evidence.
+  Browser selection is automatic and deterministic: explicit `--browser`,
+  then `PULP_DESIGN_BROWSER`, then `PULP_DESIGN_BROWSER_MODE` /
+  `import_design.browser`, then an explicitly installed managed Chrome for
+  Testing, then system Chrome/Chromium. Imports never download a browser.
+  If system discovery is insufficient, run
+  `pulp tool install chrome-for-testing`; use
+  `pulp tool doctor chrome-for-testing --run` for diagnostics.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
@@ -1102,7 +1116,11 @@ Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
 3. If Pencil MCP is available (mcp__pencil__*), offer to read the current editor state
-4. If the user mentions Claude Design or hands over a manually-exported HTML file from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — Anthropic has no public API; manual file export is the supported path, and Spectr's `editor.html` mapping is the precedent)
+4. If the user mentions Claude Design or hands over exported HTML, pass the
+   file directly with no `--from` flag. The CLI fingerprints Claude bundle
+   shapes versus generic HTML, assigns honest source provenance, and routes
+   both through the same Chromium evaluator. Anthropic has no public design
+   import API; manual file export remains the supported handoff.
 5. If the user provides a file path or URL, use that directly
 6. If none of the above, ask the user for a source and file
 
@@ -3175,7 +3193,7 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - Run `pulp import-design --from designmd --file path/to/DESIGN.md --tokens tokens.json`. **No `ui.js` is written** — the dispatch arm skips the codegen step. No bridge scaffold either.
 - Detection is strict (all-of fingerprint, 95% min-confidence): filename `DESIGN.md` + `---` frontmatter fence + `name:` key + at least one of `colors`/`typography`/`rounded`/`spacing`/`components`. Generic Jekyll/Hugo blog posts will not match.
 - Diagnostics: structured `[severity] code at path (line:col): message` on stderr. Exit codes — 0 OK, 1 usage/write, 2 detect-only no match, 3 parse error (malformed YAML, duplicate `##` section heading), 4 unsupported.
-- **Format spec pin: tag `0.3.0`** (`paws-and-paths` fixture is byte-identical across 0.1.1→0.3.0, so only the pin strings move — provenance/NOTICE/licensing/compat.json). Frontmatter format coverage tracking 0.3.0: (1) `colors.*` values are **any valid CSS color**, not just hex — `looks_like_css_color()` accepts hex (3/4/6/8-digit), named keywords, and functional `rgb()/hsl()/hwb()/oklch()/oklab()/lch()/lab()/color-mix()`; a real non-color value still emits `color-shape`. (2) `colors`/`rounded`/`spacing` nest to **arbitrary depth** — `walk_color_node`/`walk_dimension_node` recurse and key on the **dot-joined** path (`background.light`, not dashed), matching the `{colors.background.light}` reference syntax that `lookup_color`/`lookup_dimension` already resolve. (3) `spacing` accepts a **bare number** (`base: 8` → 8px) because `parse_dimension`'s unit is optional. (4) **Unknown top-level keys warn** (`unknown-key`, warning-not-error) — catches typo'd keys like `color:`/`typgrphy:`. Numeric/boolean component scalars (`fontWeight: 600`, `enabled: true`) already flow through as strings via yaml-cpp coercion.
+- **Format spec pin: tag `0.4.0`** (`paws-and-paths` remains byte-identical, so the fixture is still a valid upstream control). Coverage includes all 0.3 behavior plus 0.4's `omitted` frontmatter (bare section names or `{section, reason?}` objects), unknown typography sub-property warnings, flattened dot/nested token collision errors, and bounded malformed input (20 token levels; 64-character dimension recognition). Pulp preserves CSS color strings rather than evaluating them, so upstream's `grad`/`color-mix()` evaluator fixes do not require a parallel parser change. Pulp's existing `--format css-variables` is the equivalent of upstream's new `css-vars`; upstream `--prefix` is not part of Pulp's import contract.
 - **Markdown body sections are ALWAYS scanned** — with or without frontmatter. `parse_designmd` reads `name: value` list items and `| name | value |` table rows under `## Colors` (color tokens), `## Spacing` (`spacing-*` dims), `## Border Radius`/`## Rounded` (`rounded-*` dims), and `## Shadows`/`## Elevation` (`shadow-*` strings). **Frontmatter wins on conflict** (compared by normalized name, since frontmatter keys are dot-joined and case-preserving while body keys are lowercased and dash-joined); the body only fills gaps. This used to run **only** when a doc had no `---` frontmatter, which meant adding frontmatter to a prose-authored DESIGN.md silently dropped every body token — total and invisible for `## Shadows`, whose frontmatter key did not exist. `shadows:` is now a real frontmatter group. Table header/separator rows are skipped by requiring the value cell to be a real color/dimension/shadow. A `### Light Mode`/`### Dark Mode` subsection under `## Colors` routes to the bare name (light/default) or a `<name>.dark` suffix (dark) — the **same multi-mode convention the Figma plugin uses** (`tools/figma-plugin/src/tokens.ts`), so dark themes survive into the flat token maps. Emits a `body-tokens` info diagnostic when it recovers any.
 - See `docs/reference/imports/designmd.md` for the full reference (supported subset, reference-resolution rules, attribution).
 
@@ -3215,9 +3233,48 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 
 **Claude Design (manual HTML export)**:
 - Anthropic Labs has no MCP / public API. The user runs Claude Design, exports the canvas as Standalone HTML (or "Send to Local Coding Agent"), and hands you the resulting file.
-- Run `pulp import-design --from claude --file <path>` — the parser delegates to the Stitch HTML pipeline and tags the IR as Claude. **This is the static path** — it sees only the loader-shell HTML wrapping the bundled React app (~9 elements: title, bundler placeholders, inline styles, the `<script>` blob).
-- Add `--execute-bundle` to invoke the **native-runtime path**: Pulp parses the JSON envelope, decodes the gzip+base64 asset map, evaluates the React + React-DOM + app payloads in a headless `ScriptEngine`, then walks the materialized DOM into the `DesignIR`. Falls back to the static path on any harness failure (engine error, walker output below the 9-node loader-shell floor, JS payload too large). Use this when the user's Claude export is a real bundled-React app and they need the actual editor tree, not just the shell.
-- The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (override path with `--bridge-output`, skip with `--no-bridge-scaffold`). The scaffold demonstrates registering `pulp::view::EditorBridge` handlers and attaching to a `WebViewPanel` (or future `JsRuntime`).
+- Run `pulp import-design --file <path>`. No `--from`, `--execute-bundle`, or
+  export-shape incantation is needed. Pulp distinguishes project bundles,
+  design components, standalone bundles, and generic HTML for diagnostics, but
+  all runnable HTML uses the same authoritative Chromium evaluator.
+- Chromium captures the settled visual at DPR 2, CSS custom-property tokens,
+  semantic candidates, and provenance. The portable DesignIR uses the captured
+  visual as a `faithful_capture` backing and Pulp immediately renders it through
+  Skia for browser-vs-DesignIR A/B validation. That proof is a required adoption
+  gate even without `--validate`; the flag additionally publishes convenient
+  render/diff copies beside the primary output. Authored controls and knob art
+  remain pixels; never replace them with Pulp's silver/vector fallback.
+- External browser requests are denied by default. If the export depends on a
+  CDN runtime and the health gate reports `capture-source-unresolved`, review
+  the listed URLs and retry with `--allow-browser-network`. The opt-in permits
+  only public HTTPS origins declared by the source; private/local destinations,
+  WebSockets, and undeclared redirects remain blocked, and successful response
+  content is hashed into capture provenance. Local relative assets are served
+  from the input folder without this opt-in.
+- If authored async initialization has a real completion boundary, the page
+  may expose `globalThis.__pulpCaptureReady` as a Promise or function returning
+  one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
+- If the requested screen is not the landing state, pass
+  `--browser-interactions <plan.json>`. The
+  `pulp-browser-interactions-v1` plan accepts only bounded `click`, `type`,
+  `wait-for`, and `wait-ms` actions. End navigation sequences with
+  `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
+  script source do not prove which screen rendered. Capture records action
+  results and typed-text length without retaining the text or a per-action
+  text hash in the interaction report. Typed text remains live rendered state
+  and may appear in screenshot, DOM/semantic, or token evidence, so never put
+  passwords, credentials, private drafts, or other secrets in a plan. Popup
+  pages are rejected. For a distinct post-action asynchronous completion
+  boundary, expose `globalThis.__pulpInteractionReady`; capture awaits it after
+  the plan without calling the initial `__pulpCaptureReady` contract twice.
+  Never add an arbitrary JavaScript action.
+- If Chrome/Chromium is missing, install it from the URL printed by the CLI or
+  pass `--browser <path>`. `--offline` explicitly selects the legacy partial
+  static/QuickJS fallback. Chrome and Node are import-time tools only; generated
+  plugins do not embed or require either one.
+- The semantic report is evidence, not permission to promote visual controls.
+  Only explicit source contracts such as `data-pulp-role` may become native
+  interaction overlays in a later stage.
 
 **Inline `<script>` evaluation in `--execute-bundle`**: The harness evaluates inline `<script type="text/javascript">` (and untyped `<script>`) blocks AFTER the src-loaded payloads, then compiles + evaluates inline `<script type="text/babel">` (and `text/jsx`) blocks via the bundle's own Babel-standalone (looked up as `globalThis.Babel.transform`). After both, the harness dispatches a `readystatechange` → `DOMContentLoaded` → `readystatechange(complete)` → `window.load` sequence and pumps four message-loop / frame-callback cycles for async settling. This is what makes a real Spectr-style Claude bundle (where the actual React app lives in inline `text/babel` blocks, not src-loaded payloads) materialize beyond the 9-element shell. Per-script soft-fail matches the existing src-loaded payload pattern. Inline `application/json` (and other `*/json`) blocks are intentionally skipped — they're config blobs, not executable code.
 
@@ -4007,8 +4064,9 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
-pulp import-design --from claude --file design.html   # writes ui.js + tokens.json + classnames.json + bridge_handlers.cpp (static parser — loader-shell only)
-pulp import-design --from claude --file design.html --execute-bundle   # runs the bundled React app in QuickJS, walks the materialized DOM (#468)
+pulp import-design --file design.html                 # auto-detects HTML shape, Chromium → DesignIR → Skia A/B
+pulp import-design --file design.html --allow-browser-network  # reviewed opt-in for CDN-dependent exports
+pulp import-design --file design.html --offline       # explicit lower-fidelity fallback
 
 # With validation
 pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png
@@ -4102,7 +4160,7 @@ NOT match `linear-gradient`); gradient stop-colour extraction must respect
 parens so `rgba(0, 0, 0, .5)` isn't truncated at its internal space;
 `parse_rgb_color` must reject partial numeric parses (`1px`) via the `std::stod`
 consumed-index check.
-- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"` and `import_design.default_emit = "js|ir-json|cpp|swiftui"`, set through `pulp config set import_design.default_mode ...` and `pulp config set import_design.default_emit ...`. `PULP_IMPORT_DESIGN_DEFAULT_MODE` and `PULP_IMPORT_DESIGN_DEFAULT_EMIT` override config for one environment/session, and direct CLI flags override the matching preference. If only `default_mode=baked` is set, `ir-json` is implied.
+- Persistent defaults live in `~/.pulp/config.toml` as `import_design.default_mode = "live|baked"`, `import_design.default_emit = "js|ir-json|cpp|swiftui"`, and `import_design.browser = "auto|managed|system"`, set through `pulp config set`. `PULP_IMPORT_DESIGN_DEFAULT_MODE`, `PULP_IMPORT_DESIGN_DEFAULT_EMIT`, and `PULP_DESIGN_BROWSER_MODE` override config for one environment/session. Direct CLI flags win; `PULP_DESIGN_BROWSER` is the explicit browser-path override. If only `default_mode=baked` is set, `ir-json` is implied.
 - The standalone import helper and MCP status helper each have a small config reader for these defaults; keep them compatible with TOML single-quoted and double-quoted strings, matching the main CLI config reader.
 - Mental model: live/runtime import means "run the original app"; baked DesignIR means "save the materialized UI tree"; baked C++ means "compile that saved tree into native code". You can move live iteration -> baked IR -> baked C++; you cannot reconstruct live React from baked IR because hooks, closures, loops, and arbitrary JS logic were not preserved.
 - JSX baked snapshots accept both DOM-walked bundles and live/native bundles. Native bundles freeze through the `WidgetBridge` tree and record `snapshotSource=native-view`; generated baked C++ still constructs direct `View`/`Label` trees and should only require `pulp::view-core`.

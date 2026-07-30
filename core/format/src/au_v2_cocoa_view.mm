@@ -18,6 +18,7 @@
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_version.hpp>
 #include <pulp/format/processor.hpp>
@@ -117,7 +118,7 @@ struct PulpAUEditorOwnership {
         // the explicit close in this dealloc path.
         //
         // Teardown MUST run on the main thread. The GPU host's CVDisplayLink
-        // idle pump (make_scripted_idle_pump) is dispatched to the MAIN queue
+        // idle pump (make_editor_idle_pump) is dispatched to the MAIN queue
         // and dereferences the bridge. If Logic's AU XPC tears the view down on
         // a background thread, destroying host+bridge here races a main-queue
         // idle block already past its liveness check → the pump touches a freed
@@ -217,10 +218,11 @@ static const char kOwnershipKey = 0;
         host->set_design_viewport_top_align(true);
     }
 
-    // Pump the scripted UI session per vsync. Captures the ViewBridge object
+    // Run editor automation, restore/reload, and scripted work per vsync.
+    // Captures the ViewBridge object
     // by address (stable across the unique_ptr move into the ownership wrapper
     // below); the wrapper destroys host (stops the display link) before bridge.
-    host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
+    host->set_idle_callback(format::make_editor_idle_pump(*bridge));
 
     // Follow the host's GpuSurface so JS navigator.gpu /
     // canvas.getContext('webgpu') routes through Pulp's Dawn instance, and so

@@ -10,6 +10,7 @@
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
 
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/input_events.hpp>
 
@@ -466,6 +467,13 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
         emit_web_text_runs(ss, ind, var, node);
     else if (!node.text_content.empty())
         ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";
+    if (node.type == "image") {
+        if (auto image = node.attributes.find("asset_path");
+            image != node.attributes.end() && !image->second.empty()) {
+            ss << ind << var << ".src = '"
+               << js_single_quote_escape(image->second) << "';\n";
+        }
+    }
 
     // Append to parent
     if (!parent_var.empty())
@@ -2577,8 +2585,10 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         }
     } else {
         // Web-compat DOM API
+        DesignIR web_ir = ir;
+        lower_faithful_captures_in_place(web_ir.root);
         int var_counter = 0;
-        generate_node(ss, ir.root, opts, 0, var_counter, "");
+        generate_node(ss, web_ir.root, opts, 0, var_counter, "");
         ss << "document.body.appendChild(" << opts.root_variable << ");\n";
     }
 

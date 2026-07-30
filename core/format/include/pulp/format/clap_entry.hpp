@@ -19,6 +19,7 @@
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
@@ -336,6 +337,11 @@ inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream
     // to notice. Reconcile here or the audio thread renders the OLD state for
     // the rest of the session. Default no-op for processors that don't opt in.
     self->processor->on_non_realtime_tick();
+    // CLAP hosts cache parameter values. A successful state restore changes
+    // those values without emitting automation, so invalidate that cache.
+    if (ok && self->host && self->host_params && self->host_params->rescan) {
+        self->host_params->rescan(self->host, CLAP_PARAM_RESCAN_VALUES);
+    }
     return ok;
 }
 
@@ -567,8 +573,8 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
     p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
-        // Pump the scripted UI session (async results, timers, rAF) per vsync.
-        p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
+        // Run editor automation, restore/reload, and scripted work per vsync.
+        p->editor_host->set_idle_callback(make_editor_idle_pump(*p->bridge));
         // Route navigator.gpu / canvas.getContext('webgpu') through the host's
         // live GpuSurface instead of the JS mock path — and keep following it.
         // The Windows host does not have a surface until gui_set_parent()

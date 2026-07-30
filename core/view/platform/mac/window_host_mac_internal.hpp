@@ -294,11 +294,9 @@ private:
 
 /// Should the CPU plugin-view host drive a per-vsync render link?
 ///
-/// Yes whenever the editor is in a window. It used to additionally require a
-/// scripted idle callback, which ONLY a JS/scripted editor installs
-/// (`make_scripted_idle_pump`, wired in clap_entry / vst3_plug_view /
-/// au_v2_cocoa_view / au_view_controller_mac — all guarded on a script bridge).
-/// A native C++ editor installs none, so it got no render link, no FrameClock
+/// Yes whenever the editor is in a window. It used to additionally require an
+/// idle callback; before the shared `make_editor_idle_pump` was installed for
+/// every editor, a native C++ editor could get no render link, no FrameClock
 /// tick, no widget or CSS animation, and a caret that never blinked.
 ///
 /// The GPU plugin host has always started its link on window attach alone; this

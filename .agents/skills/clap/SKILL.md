@@ -418,8 +418,8 @@ in the `view-bridge` skill.
 
 `gui_create` calls
 `pulp::format::decide_gpu_host(*bridge)` so a Skia/Dawn/scripted editor
-auto-selects the GPU `PluginViewHost`, wires the per-vsync scripted idle pump
-(`make_scripted_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
+auto-selects the GPU `PluginViewHost`, wires the per-vsync editor idle pump
+(`make_editor_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
 on a silent CPU fallback. CLAP's `gui_set_size` already resizes the bridge +
 host, so no extra resize seam is needed (unlike AU v2). Full contract: the
 `view-bridge` skill's "GPU view host auto-selection" section.
@@ -1027,3 +1027,24 @@ main-thread call, so re-reading the processor there needs no gate.
 `flag_note_names_changed()` rides the existing `request_callback` set alongside
 the latency / tail pending flags, and the `clap_host_note_name->changed()` push
 happens in `clap_on_main_thread()` — never from `process()`.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a CLAP
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`PulpClapPlugin::tracing`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.

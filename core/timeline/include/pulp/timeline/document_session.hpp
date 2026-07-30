@@ -13,6 +13,7 @@ namespace pulp::timeline {
  */
 
 namespace detail {
+class DocumentSessionPreviewAccess;
 class WriterTokenTestAccess;
 }
 
@@ -165,6 +166,7 @@ class DocumentSession {
     bool checkpoint(DocumentRevision durable_revision);
 
   private:
+    friend class detail::DocumentSessionPreviewAccess;
     enum class SinkAttachment : std::uint8_t { Initialize, Restore };
 
     static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>

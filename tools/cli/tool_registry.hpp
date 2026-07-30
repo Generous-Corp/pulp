@@ -47,6 +47,7 @@ struct ToolDescriptor {
     std::string pinned_version;
     std::vector<std::string> requires_tools;
     bool managed_by_pulp = true;
+    bool explicit_install_only = false; // excluded from install --all
     bool bundleable = false;
     std::string install_scope;    // "machine", "project", or empty when legacy
     std::string distribution_lane; // "tool_addon", "core", "pulp_add", etc.

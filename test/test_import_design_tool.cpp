@@ -319,7 +319,7 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
         auto r = run_import_design({});
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.exit_code != 0);
-        REQUIRE(r.stderr_output.find("--from <source> is required") != std::string::npos);
+        REQUIRE(r.stderr_output.find("could not infer the design source") != std::string::npos);
         REQUIRE(r.stdout_output.find("Usage:") != std::string::npos);
     }
 
@@ -515,6 +515,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         const auto source_url = std::string("https://example.test/screens/screen.json");
         const auto asset_url = std::string("https://example.test/screens/assets/icon.svg");
         auto fetched = run_import_design({"--from", "stitch",
+                                          "--offline",
                                           "--url", source_url,
                                           "--emit", "ir-json",
                                           "--output", ir_output.string(),
@@ -775,6 +776,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(snapshot.stderr_output.find("unsupported --snapshot-semantics value") != std::string::npos);
 
         auto baked = run_import_design({"--from", "stitch",
+                                        "--offline",
                                         "--file", input.string(),
                                         "--mode", "baked",
                                         "--snapshot-semantics", "warn"});
@@ -795,6 +797,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
 
         const auto baked_output = tmp.path / "config-default.out.json";
         auto baked = run_import_design({"--from", "stitch",
+                                        "--offline",
                                         "--file", input.string(),
                                         "--output", baked_output.string()});
         REQUIRE_FALSE(baked.timed_out);
@@ -804,6 +807,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
 
         const auto live_output = tmp.path / "config-default-live.js";
         auto live_override = run_import_design({"--from", "stitch",
+                                                "--offline",
                                                 "--file", input.string(),
                                                 "--mode", "live",
                                                 "--emit", "js",
@@ -827,6 +831,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         const auto cpp_output = tmp.path / "env-default.cpp";
         const auto header_output = tmp.path / "env-default.hpp";
         auto cpp = run_import_design({"--from", "stitch",
+                                      "--offline",
                                       "--file", input.string(),
                                       "--output", cpp_output.string()});
         REQUIRE_FALSE(cpp.timed_out);
@@ -986,6 +991,7 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
     SECTION("legacy classnames emit vocabulary remains accepted") {
         const auto output = tmp.path / "generated" / "legacy.js";
         auto r = run_import_design({"--from", "stitch",
+                                    "--offline",
                                     "--file", input.string(),
                                     "--output", output.string(),
                                     "--emit", "classnames",
@@ -1030,6 +1036,7 @@ TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested output
                "</body></html>");
 
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--file", input.string(),
                                 "--output", output.string(),
                                 "--emit", "js",
@@ -1068,7 +1075,8 @@ TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs
             tmp.path / "design (1) [draft]! $not-expanded.html";
         write_text(literal, "<div>literal path</div>");
 
-        auto r = run_import_design({"--from", "stitch", "--file", literal.string(),
+        auto r = run_import_design({"--from", "stitch", "--offline",
+                                    "--file", literal.string(),
                                     "--dry-run"});
 
         REQUIRE_FALSE(r.timed_out);
@@ -1082,6 +1090,7 @@ TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs
         write_text(input, "<!doctype html><h1>Literal path</h1>");
 
         auto r = run_import_design({"--from", "stitch",
+                                    "--offline",
                                     "--file", input.string(),
                                     "--output", output.string(),
                                     "--no-comments",
@@ -1147,6 +1156,7 @@ TEST_CASE("pulp-import-design URL fetch uses a unique temp file and argv-safe cu
     auto old_path = read_env_var("PATH").value_or("");
     ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--url", "https://example.test/screen.html?node-id=1&mode=dev",
                                 "--output", output.string(),
                                 "--no-comments",
@@ -1177,6 +1187,7 @@ TEST_CASE("pulp-import-design debug report names the default bridge-native mode"
                "</body></html>");
 
     auto r = run_import_design({"--from", "stitch",
+                                "--offline",
                                 "--file", input.string(),
                                 "--output", output.string(),
                                 "--debug-output", debug.string(),
@@ -3320,6 +3331,7 @@ TEST_CASE("pulp-import-design --fail-below requires --reference to compare again
     const auto output = tmp.path / "ui.js";
 
     auto r = run_import_design({"--from", "claude",
+                               "--offline",
                                "--file", input.string(),
                                "--output", output.string(),
                                "--validate",

@@ -174,7 +174,7 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
             return;
         }
 
-        host->set_idle_callback(format::make_scripted_idle_pump(bridge));
+        host->set_idle_callback(format::make_editor_idle_pump(bridge));
         // Attach seam: a real parent must report attached so a foreign embedder
         // knows it is safe to fire notify_attached().
         REQUIRE_FALSE(host->is_attached());

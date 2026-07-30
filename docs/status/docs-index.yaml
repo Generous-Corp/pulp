@@ -487,6 +487,11 @@ docs:
     kind: reference
     summary: All current capabilities organized by area with status
 
+  - slug: development-inspector-capabilities
+    path: reference/development-inspector-capabilities.md
+    kind: reference
+    summary: Checked development-inspector capability contract and current runtime reality
+
   - slug: web-plugin-support
     path: reference/web-plugin-support.md
     kind: reference
