@@ -51,7 +51,42 @@ visual work before that was noticed.
 | 1 — the seam | **done**, 3 changes, 3 products byte-identical, each proven live |
 | 2 — Forge Modular runs Forge's UI | **done**, 7.2/255 vs Forge Instrument, verified windowed |
 | 3 — the tabs | **done** — centred, switch both ways, negative-controlled |
-| 4–8 | not started; see `../SPEC-forge-modular.md` |
+| 4 — the `@` overlay | groundwork done, not built; see below |
+| 5–8 | not started; see `../SPEC-forge-modular.md` |
+
+## Phase 4 groundwork — the overlay is reachable, and C++ was the right call
+
+The open question was whether chrome can host a dropdown that sits **over** the
+composer. It can, and Forge already does it:
+
+```cpp
+// ForgeChrome::build(), last line
+build_publish_sheet(*root);   // "marketplace authoring is the topmost sheet"
+
+// PublishSheet::build()
+scrim->set_position(View::Position::absolute);
+```
+
+So an overlay is a view added to `*root` last, positioned absolutely. **Both
+axes work here**, which is the thing the widget bridge could not do — it exposes
+`start`/`end` and nothing vertical. That was the original argument for building
+this in C++ and it holds up.
+
+**The seam addition it needs:** one more hook, called where
+`build_publish_sheet` is, returning `nullptr` for the other three products. Same
+shape as `home_accessory()`, same no-leak guarantee, and it should be
+live-proved the same way — give Forge FX one temporarily, watch FX's baseline
+fail while Instrument and MIDI pass.
+
+**What the composer already gives you:** `ForgeChrome::prompt_input()` is public
+and returns the `TextEditor`, which has `on_text_input()` and `on_key_event()`
+(`pulp/view/text_editor.hpp:284-285`). That is enough to see the `@`, capture
+the token being typed, and take arrow/Enter/Escape before the field does.
+
+**Still to decide:** where the 4,705-module index comes from at runtime. It
+lives in the Rack repo today (`tools/rack/`), and the app resolves that
+directory via `FORGE_MODULAR_TOOLS`/bundled `Resources/tools`. The overlay
+should read it through the same path rather than inventing a second one.
 
 ## Phase 3, exactly where it stands
 
