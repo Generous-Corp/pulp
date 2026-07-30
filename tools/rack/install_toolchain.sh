@@ -23,6 +23,7 @@ DEST="${FORGE_MODULAR_HOME:-$HOME/Library/Application Support/Forge Modular}"
 # Everything the generator reaches for, relative to the repo root.
 PARTS=(
   "tools/rack"                 # the generator itself
+  "tools/dsp_vocabulary.py"    # the list of DSP the model is allowed to use
   "external/fonts"             # shape_text loads Inter from here
   "examples/forge-modular"     # the module pack it edits and rebuilds
   # The pack compiles against Pulp headers. Without these the generator gets
@@ -48,10 +49,14 @@ for part in "${PARTS[@]}"; do
     exit 1
   fi
   mkdir -p "$DEST/$(dirname "$part")"
-  rsync -a --delete \
-    --exclude __pycache__ --exclude '*.pyc' \
-    --exclude build --exclude '*.o' \
-    "$SRC/$part/" "$DEST/$part/"
+  if [ -d "$SRC/$part" ]; then
+    rsync -a --delete \
+      --exclude __pycache__ --exclude '*.pyc' \
+      --exclude build --exclude '*.o' \
+      "$SRC/$part/" "$DEST/$part/"
+  else
+    cp "$SRC/$part" "$DEST/$part"
+  fi
   printf '  %-26s %s\n' "$part" "$(du -sh "$DEST/$part" | awk '{print $1}')"
 done
 
@@ -73,6 +78,18 @@ if [ -z "${SAMPLE:-}" ]; then
   echo "  no module manifest to verify against" >&2
   exit 1
 fi
+
+# The DSP vocabulary is injected into the contract at call time. When it comes
+# back empty the model is handed a prompt with no list of available DSP, so it
+# invents headers that do not exist and hand-rolls everything -- and the run
+# dies at the compiler, three model calls later. An empty string is a silent
+# failure, so it is checked here rather than discovered there.
+VOCAB_LINES="$(cd "$DEST/tools/rack" && python3 ../dsp_vocabulary.py 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${VOCAB_LINES:-0}" -lt 20 ]; then
+  echo "  FAILED: the DSP vocabulary is empty or tiny ($VOCAB_LINES lines)" >&2
+  exit 1
+fi
+echo "  DSP vocabulary: $VOCAB_LINES lines"
 
 if (cd "$DEST/tools/rack" && python3 forge_modular.py panels "$PLUGIN" "$SAMPLE" >/dev/null 2>&1); then
   echo "  emitted a panel — toolchain is complete"
