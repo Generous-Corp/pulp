@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -76,6 +77,11 @@ struct InterprocessConnection::Impl {
     NamedPipe pipe;
     Socket socket;
     std::mutex write_mutex;
+    std::mutex lifecycle_mutex;
+    std::condition_variable lifecycle_cv;
+    bool disconnecting = false;
+    std::thread::id disconnect_owner;
+    std::thread::id read_thread_id;
 
     int raw_write(const uint8_t* data, size_t size) {
         if (transport == IpcTransport::NamedPipe)
@@ -246,9 +252,27 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
 }
 
 void InterprocessConnection::disconnect() {
+    const auto caller = std::this_thread::get_id();
+    {
+        std::unique_lock lifecycle_lock(impl_->lifecycle_mutex);
+        if (impl_->disconnecting) {
+            if (impl_->disconnect_owner == caller ||
+                impl_->read_thread_id == caller) {
+                return;
+            }
+            impl_->lifecycle_cv.wait(lifecycle_lock, [this] {
+                return !impl_->disconnecting;
+            });
+            return;
+        }
+        impl_->disconnecting = true;
+        impl_->disconnect_owner = caller;
+    }
+
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
     impl_->interrupt_blocking_io();
+    std::unique_lock write_lock(impl_->write_mutex);
     if (read_thread_.joinable()) {
         if (read_thread_.get_id() == std::this_thread::get_id())
             read_thread_.detach();
@@ -256,6 +280,7 @@ void InterprocessConnection::disconnect() {
             read_thread_.join();
     }
     impl_->close();
+    write_lock.unlock();
 
     if (was_connected) {
         connection_lost();
@@ -266,6 +291,14 @@ void InterprocessConnection::disconnect() {
         }
         if (disconnected_callback) disconnected_callback();
     }
+
+    {
+        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
+        impl_->disconnecting = false;
+        impl_->disconnect_owner = {};
+        impl_->read_thread_id = {};
+    }
+    impl_->lifecycle_cv.notify_all();
 }
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {
@@ -358,6 +391,7 @@ void InterprocessConnection::set_write_timeout(
     std::chrono::milliseconds timeout) {
     const auto value = std::max(timeout, std::chrono::milliseconds(0));
     write_timeout_ms_.store(value.count(), std::memory_order_relaxed);
+    std::lock_guard write_lock(impl_->write_mutex);
     if (impl_->transport == IpcTransport::Socket && impl_->socket.is_open())
         impl_->socket.set_write_timeout(value);
 }
@@ -365,7 +399,17 @@ void InterprocessConnection::set_write_timeout(
 
 void InterprocessConnection::start_read_thread() {
     running_.store(true);
-    read_thread_ = std::thread([this]() { read_loop(); });
+    const auto start_gate = std::make_shared<std::atomic<bool>>(false);
+    read_thread_ = std::thread([this, start_gate]() {
+        while (!start_gate->load(std::memory_order_acquire))
+            std::this_thread::yield();
+        read_loop();
+    });
+    {
+        std::lock_guard lifecycle_lock(impl_->lifecycle_mutex);
+        impl_->read_thread_id = read_thread_.get_id();
+    }
+    start_gate->store(true, std::memory_order_release);
 }
 
 void InterprocessConnection::read_loop() {

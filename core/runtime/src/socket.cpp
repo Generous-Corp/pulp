@@ -67,6 +67,13 @@ bool Socket::create(SocketType type) {
     int sock_type = (type == SocketType::TCP) ? SOCK_STREAM : SOCK_DGRAM;
     int protocol = (type == SocketType::TCP) ? IPPROTO_TCP : IPPROTO_UDP;
     fd_ = static_cast<decltype(fd_)>(::socket(AF_INET, sock_type, protocol));
+#ifdef SO_NOSIGPIPE
+    if (fd_ != kInvalidSocketHandle) {
+        const int enabled = 1;
+        ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_NOSIGPIPE,
+                     &enabled, sizeof(enabled));
+    }
+#endif
     return fd_ != kInvalidSocketHandle;
 }
 
@@ -107,6 +114,11 @@ std::optional<Socket> Socket::accept() {
     Socket client;
     client.fd_ = static_cast<decltype(client.fd_)>(client_fd);
     client.type_ = SocketType::TCP;
+#ifdef SO_NOSIGPIPE
+    const int enabled = 1;
+    ::setsockopt(NATIVE_SOCKET(client.fd_), SOL_SOCKET, SO_NOSIGPIPE,
+                 &enabled, sizeof(enabled));
+#endif
     return client;
 }
 
@@ -124,8 +136,12 @@ bool Socket::connect(std::string_view address, uint16_t port) {
 
 int Socket::send(const uint8_t* data, size_t length) {
     if (fd_ == kInvalidSocketHandle) return -1;
+    int flags = 0;
+#ifdef MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif
     return static_cast<int>(::send(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
-                                   static_cast<int>(length), 0));
+                                   static_cast<int>(length), flags));
 }
 
 int Socket::send(std::string_view data) {
@@ -142,8 +158,12 @@ int Socket::send_to(const uint8_t* data, size_t length,
     std::string addr_str(address);
     inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
 
+    int flags = 0;
+#ifdef MSG_NOSIGNAL
+    flags |= MSG_NOSIGNAL;
+#endif
     return static_cast<int>(::sendto(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
-                                     static_cast<int>(length), 0,
+                                     static_cast<int>(length), flags,
                                      reinterpret_cast<struct sockaddr*>(&addr),
                                      sizeof(addr)));
 }

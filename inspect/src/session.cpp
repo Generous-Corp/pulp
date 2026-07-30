@@ -130,8 +130,11 @@ InspectorControllerLease::InspectorControllerLease(
       clock_(std::move(clock)) {}
 
 void InspectorControllerLease::expire_if_needed() {
-    if (!owner_.empty() && clock_() >= expires_at_)
+    if (!owner_.empty() && active_operations_ == 0 &&
+        clock_() >= expires_at_) {
         owner_.clear();
+        release_pending_ = false;
+    }
 }
 
 ControllerLeaseResult InspectorControllerLease::acquire(
@@ -139,7 +142,7 @@ ControllerLeaseResult InspectorControllerLease::acquire(
     if (owner.empty())
         return ControllerLeaseResult::InvalidOwner;
     expire_if_needed();
-    if (!owner_.empty() && owner_ != owner)
+    if (release_pending_ || (!owner_.empty() && owner_ != owner))
         return ControllerLeaseResult::HeldByOther;
     const bool renewing = owner_ == owner;
     owner_ = std::string(owner);
@@ -153,7 +156,7 @@ ControllerLeaseResult InspectorControllerLease::renew(
     if (owner.empty())
         return ControllerLeaseResult::InvalidOwner;
     expire_if_needed();
-    if (owner_ != owner)
+    if (release_pending_ || owner_ != owner)
         return ControllerLeaseResult::HeldByOther;
     expires_at_ = clock_() + ttl_;
     return ControllerLeaseResult::Renewed;
@@ -163,7 +166,12 @@ bool InspectorControllerLease::release(std::string_view owner) {
     expire_if_needed();
     if (owner.empty() || owner_ != owner)
         return false;
+    if (active_operations_ != 0) {
+        release_pending_ = true;
+        return true;
+    }
     owner_.clear();
+    release_pending_ = false;
     return true;
 }
 
@@ -173,7 +181,7 @@ void InspectorControllerLease::disconnect(std::string_view owner) {
 
 bool InspectorControllerLease::owns(std::string_view owner) {
     expire_if_needed();
-    return !owner.empty() && owner_ == owner;
+    return !owner.empty() && owner_ == owner && !release_pending_;
 }
 
 std::optional<std::string> InspectorControllerLease::owner() {
@@ -187,8 +195,29 @@ std::chrono::milliseconds InspectorControllerLease::remaining() {
     expire_if_needed();
     if (owner_.empty())
         return std::chrono::milliseconds(0);
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        expires_at_ - clock_());
+    return std::max(
+        std::chrono::milliseconds(0),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            expires_at_ - clock_()));
+}
+
+bool InspectorControllerLease::begin_operation(std::string_view owner) {
+    expire_if_needed();
+    if (owner.empty() || owner_ != owner || release_pending_)
+        return false;
+    ++active_operations_;
+    return true;
+}
+
+void InspectorControllerLease::end_operation(std::string_view owner) {
+    if (active_operations_ == 0 || owner_.empty() || owner_ != owner)
+        return;
+    --active_operations_;
+    if (active_operations_ == 0 &&
+        (release_pending_ || clock_() >= expires_at_)) {
+        owner_.clear();
+        release_pending_ = false;
+    }
 }
 
 InspectorSession::InspectorSession(InspectorSessionInfo info,
@@ -204,6 +233,7 @@ InspectorSession::InspectorSession(InspectorSessionInfo info,
 InspectorMessage InspectorSession::handle(std::string_view client_id,
                                           const InspectorMessage& request) {
     RequestHandler handler;
+    bool controller_operation = false;
     {
         std::lock_guard lock(mutex_);
         if (auto invalid = validate_request_shape(request))
@@ -211,23 +241,48 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
         if (request.method.rfind("Session.", 0) == 0)
             return handle_session_method(client_id, request);
 
-        if (auto denied = policy_.authorize(request, lease_.owns(client_id)))
+        const auto* method = find_inspector_method(request.method);
+        const bool requires_controller =
+            method &&
+            capability_requires_controller_lease(method->capability);
+        if (auto denied =
+                policy_.authorize(request, lease_.owns(client_id))) {
             return std::move(*denied);
+        }
+        if (requires_controller) {
+            if (!lease_.begin_operation(client_id)) {
+                return make_error(request.id,
+                                  "A controller lease is required",
+                                  "controller_lease_required");
+            }
+            controller_operation = true;
+        }
         handler = handler_;
     }
+    const auto finish_controller_operation = [&] {
+        if (!controller_operation)
+            return;
+        std::lock_guard lock(mutex_);
+        lease_.end_operation(client_id);
+    };
     if (!handler) {
+        finish_controller_operation();
         return make_error(request.id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
     try {
-        return handler(request);
+        auto response = handler(request);
+        finish_controller_operation();
+        return response;
     } catch (const std::exception& error) {
+        finish_controller_operation();
         return make_error(request.id,
                           std::string("Inspector dispatch failed: ") +
                               error.what(),
                           "dispatch_failed");
     } catch (...) {
+        finish_controller_operation();
         return make_error(request.id,
                           "Inspector dispatch failed",
                           "dispatch_failed");

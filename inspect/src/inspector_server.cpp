@@ -32,10 +32,38 @@ public:
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
     bool stopping_cleanup = false;
+    bool stopping_callbacks = true;
+    std::size_t active_callbacks = 0;
     std::atomic<std::uint64_t> next_client_id{1};
     InspectorServer* owner = nullptr;
     std::function<void()> heartbeat;
     std::chrono::steady_clock::time_point next_heartbeat{};
+
+    class CallbackGuard {
+    public:
+        explicit CallbackGuard(Impl* candidate) {
+            std::lock_guard lock(candidate->clients_mutex);
+            if (!candidate->stopping_callbacks) {
+                impl = candidate;
+                ++impl->active_callbacks;
+            }
+        }
+
+        ~CallbackGuard() {
+            if (!impl)
+                return;
+            {
+                std::lock_guard lock(impl->clients_mutex);
+                --impl->active_callbacks;
+            }
+            impl->cleanup_cv.notify_all();
+        }
+
+        explicit operator bool() const { return impl != nullptr; }
+
+    private:
+        Impl* impl = nullptr;
+    };
 
     Impl() {
         cleanup_thread = std::thread([this]() { cleanup_loop(); });
@@ -48,11 +76,17 @@ public:
                 const auto keep_alive = weak.lock();
                 if (!keep_alive)
                     return;
+                CallbackGuard callback(this);
+                if (!callback)
+                    return;
                 on_message(std::string(msg), raw);
             });
             raw->set_on_disconnected([this, weak, raw]() {
                 const auto keep_alive = weak.lock();
                 if (!keep_alive)
+                    return;
+                CallbackGuard callback(this);
+                if (!callback)
                     return;
                 std::string authenticated_client;
                 {
@@ -77,6 +111,10 @@ public:
             });
             {
                 std::lock_guard lock(clients_mutex);
+                if (stopping_callbacks) {
+                    client.reset();
+                    return;
+                }
                 owned_clients.push_back(client);
             }
             if (owner && owner->session_) {
@@ -202,6 +240,10 @@ bool InspectorServer::start_authenticated(InspectorServerConfig config) {
         std::clamp<std::size_t>(config.max_message_bytes, 1,
                                 16u * 1024u * 1024u));
     impl_->server.set_write_timeout(std::chrono::seconds(3));
+    {
+        std::lock_guard lock(impl_->clients_mutex);
+        impl_->stopping_callbacks = false;
+    }
     if (!impl_->server.start("127.0.0.1:0",
                              events::IpcTransport::Socket)) {
         stop();
@@ -236,24 +278,38 @@ void InspectorServer::stop() {
     {
         std::lock_guard lock(impl_->clients_mutex);
         impl_->heartbeat = {};
+        impl_->stopping_callbacks = true;
     }
     impl_->server.stop();
     std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
+    std::vector<std::string> authenticated_clients;
     {
         std::lock_guard lock(impl_->clients_mutex);
         clients = std::move(impl_->owned_clients);
+        for (const auto& [client, state] : impl_->authentication) {
+            (void)client;
+            if (state.authenticated)
+                authenticated_clients.push_back(state.client_id);
+        }
     }
     for (const auto& client : clients) {
         if (client)
             client->disconnect();
     }
     {
-        std::lock_guard lock(impl_->clients_mutex);
+        std::unique_lock lock(impl_->clients_mutex);
+        impl_->cleanup_cv.wait(lock, [this] {
+            return impl_->active_callbacks == 0;
+        });
         impl_->authentication.clear();
     }
     clients.clear();
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex_);
+        if (session_) {
+            for (const auto& client_id : authenticated_clients)
+                session_->disconnect(client_id);
+        }
         if (discovery_)
             discovery_->remove();
         discovery_ = nullptr;

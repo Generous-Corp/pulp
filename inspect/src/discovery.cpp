@@ -202,15 +202,49 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
     return create_owner_only_windows_directory(directory);
 #else
     std::error_code error;
-    std::filesystem::create_directories(directory, error);
-    if (error)
+    const auto parent = directory.parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent, error);
+    if (error ||
+        (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST)) {
         return false;
-    if (::chmod(directory.c_str(), 0700) != 0)
+    }
+
+    struct stat before {};
+    if (::lstat(directory.c_str(), &before) != 0 ||
+        !S_ISDIR(before.st_mode) || S_ISLNK(before.st_mode) ||
+        before.st_uid != ::geteuid()) {
         return false;
-    struct stat info {};
-    return ::lstat(directory.c_str(), &info) == 0 &&
-           S_ISDIR(info.st_mode) && !S_ISLNK(info.st_mode) &&
-           info.st_uid == ::geteuid() && (info.st_mode & 077) == 0;
+    }
+
+    int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+#ifdef O_DIRECTORY
+    flags |= O_DIRECTORY;
+#endif
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    const int descriptor = ::open(directory.c_str(), flags);
+    if (descriptor < 0)
+        return false;
+    struct stat opened {};
+    const bool same_directory =
+        ::fstat(descriptor, &opened) == 0 &&
+        S_ISDIR(opened.st_mode) &&
+        opened.st_uid == ::geteuid() &&
+        opened.st_dev == before.st_dev &&
+        opened.st_ino == before.st_ino;
+    const bool secured =
+        same_directory && ::fchmod(descriptor, 0700) == 0 &&
+        ::fstat(descriptor, &opened) == 0 &&
+        S_ISDIR(opened.st_mode) &&
+        opened.st_uid == ::geteuid() &&
+        (opened.st_mode & 077) == 0;
+    ::close(descriptor);
+    return secured;
 #endif
 }
 
