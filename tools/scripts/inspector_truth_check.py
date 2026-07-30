@@ -140,10 +140,7 @@ REQUIRED_SECURITY_CONTRACTS = {
         "if (info.pbi_status == SZOMB)",
         "record && read_credential(*record).has_value()",
     ),
-    "experimental/pulp-rs/src/cmd/motion.rs": (
-        "must be an integer from 1 to 65535",
-    ),
-    "experimental/pulp-rs/src/cmd/trace.rs": (
+    "experimental/pulp-rs/src/cmd/inspector.rs": (
         "must be an integer from 1 to 65535",
     ),
 }

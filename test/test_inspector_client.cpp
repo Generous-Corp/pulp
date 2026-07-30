@@ -223,6 +223,7 @@ TEST_CASE("client reconnect discards queued events from the prior session",
     bool first_entered = false;
     bool release_first = false;
     std::vector<int> delivered;
+    std::optional<pulp::inspect::InspectorMessage> stale_follow_up;
     InspectorClient client;
     client.set_event_handler([&](const auto& event) {
         const auto params = choc::json::parse(event.params_json);
@@ -235,6 +236,11 @@ TEST_CASE("client reconnect discards queued events from the prior session",
             cv.notify_all();
             cv.wait_for(lock, std::chrono::seconds(2),
                         [&] { return release_first; });
+            lock.unlock();
+            auto response =
+                client.request("Session.getCapabilities");
+            lock.lock();
+            stale_follow_up = std::move(response);
         }
         cv.notify_all();
     });
@@ -263,9 +269,13 @@ TEST_CASE("client reconnect discards queued events from the prior session",
     {
         std::unique_lock lock(mutex);
         REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
-            return delivered.size() >= 2;
+            return delivered.size() >= 2 &&
+                   stale_follow_up.has_value();
         }));
         CHECK(delivered == std::vector<int>{1, 3});
+        REQUIRE(stale_follow_up->is_error);
+        CHECK(stale_follow_up->error_code ==
+              "stale_event_callback");
     }
 }
 

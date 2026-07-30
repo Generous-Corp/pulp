@@ -28,6 +28,36 @@ struct InspectorDiscoveryRecord {
     std::filesystem::path credential_path;
 };
 
+/// Move-only inspector credential whose storage is wiped on every exit path.
+class InspectorCredential {
+public:
+    explicit InspectorCredential(std::span<const std::uint8_t> bytes);
+    ~InspectorCredential();
+
+    InspectorCredential(const InspectorCredential&) = delete;
+    InspectorCredential& operator=(const InspectorCredential&) = delete;
+    InspectorCredential(InspectorCredential&& other) noexcept;
+    InspectorCredential& operator=(InspectorCredential&& other) noexcept;
+
+    std::span<const std::uint8_t> bytes() const {
+        return bytes_;
+    }
+
+    friend bool operator==(const InspectorCredential& credential,
+                           const std::vector<std::uint8_t>& bytes) {
+        return credential.bytes_ == bytes;
+    }
+
+    friend bool operator==(const std::vector<std::uint8_t>& bytes,
+                           const InspectorCredential& credential) {
+        return credential == bytes;
+    }
+
+private:
+    void clear() noexcept;
+    std::vector<std::uint8_t> bytes_;
+};
+
 /// Returns the owner-private directory used by standalone inspector sessions.
 /// PULP_INSPECTOR_RUNTIME_DIR is honored for deterministic installed-tool tests.
 std::filesystem::path default_inspector_runtime_directory();
@@ -46,7 +76,7 @@ public:
     }
 
     std::vector<InspectorDiscoveryRecord> list() const;
-    std::optional<std::vector<std::uint8_t>> read_credential(
+    std::optional<InspectorCredential> read_credential(
         const InspectorDiscoveryRecord& record) const;
 
 private:
