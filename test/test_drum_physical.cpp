@@ -1408,9 +1408,11 @@ TEST_CASE("A second hit adds to the ringing string by default",
     voice.reset();
     voice.note_on(1.0f);
     std::vector<float> doubled(24000, 0.0f);
-    for (int i = 0; i < 6000; i += 64) voice.process(doubled.data() + i, 64);
+    for (int i = 0; i < 6000; i += 64)
+        voice.process(doubled.data() + i, std::min(64, 6000 - i));
     voice.note_on(1.0f);
-    for (int i = 6000; i < 24000; i += 64) voice.process(doubled.data() + i, 64);
+    for (int i = 6000; i < 24000; i += 64)
+        voice.process(doubled.data() + i, std::min(64, 24000 - i));
 
     bool differs = false;
     for (std::size_t i = 6000; i < doubled.size(); ++i) {

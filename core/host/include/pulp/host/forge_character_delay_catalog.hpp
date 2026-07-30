@@ -27,6 +27,7 @@
 // deliberate choice, because at five characters and 1.1 feedback the useful
 // dry/wet balance is a per-patch decision, not a fixed sum.
 
+#include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/character_delay.hpp>
@@ -183,6 +184,71 @@ inline CustomNodeType make_character_delay_node(Character character,
         }
     };
     return t;
+}
+
+inline ForgeNodeDescriptor character_delay_descriptor() {
+    ForgeNodeDescriptor d;
+    d.key = "character_delay";
+    d.label = "Character Delay";
+    d.description = "Stereo wet-only delay spanning clean, vintage digital, tape, bucket-brigade, "
+                    "and diffused echoes.";
+    d.axes = {{"character",
+               "Character",
+               "Delay-line and coloration topology fixed when the node is built.",
+               {{"clean", "Clean", 0.0f},
+                {"vintage", "Vintage Digital", 1.0f},
+                {"tape", "Tape", 2.0f},
+                {"tape_physical", "Tape (Physical)", 3.0f},
+                {"bbd", "BBD", 4.0f},
+                {"diffusion", "Diffusion", 5.0f}}}};
+    d.realizations = {
+        {"clean", kCleanTypeId, {{"character", "clean"}}},
+        {"vintage", kVintageTypeId, {{"character", "vintage"}}},
+        {"tape", kTapeTypeId, {{"character", "tape"}}},
+        {"tape_physical", kTapePhysicalTypeId, {{"character", "tape_physical"}}},
+        {"bbd", kBbdTypeId, {{"character", "bbd"}}},
+        {"diffusion", kDiffusionTypeId, {{"character", "diffusion"}}},
+    };
+    d.params = {
+        {"time_ms", kTimeMs, "Time", "ms", "Base delay time.", ForgeParamKind::continuous,
+         ForgeParamCurve::logarithmic},
+        {"time_offset", kTimeOffset, "Time Offset", "x",
+         "Right-channel delay-time multiplier for stereo offset.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"feedback", kFeedback, "Feedback", "%",
+         "Amount of delayed signal returned to the delay input.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"crossfeed", kCrossfeed, "Crossfeed", "%",
+         "Amount of each channel fed into the opposite channel's feedback path.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"character", kCharacter, "Character", "%",
+         "Intensity of the selected delay topology's coloration.", ForgeParamKind::continuous,
+         ForgeParamCurve::linear},
+        {"mod_rate", kModRate, "Modulation Rate", "%",
+         "Rate of delay-time instability within the selected character.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"mod_depth", kModDepth, "Modulation Depth", "%", "Depth of delay-time instability.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"duck", kDuck, "Duck", "%", "Reduces delayed output while the input is active.",
+         ForgeParamKind::continuous, ForgeParamCurve::linear},
+        {"freeze",
+         kFreeze,
+         "Freeze",
+         "",
+         "Holds the current delay contents in a sustaining feedback loop.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+        {"reverse",
+         kReverse,
+         "Reverse",
+         "",
+         "Reads completed delay segments in reverse.",
+         ForgeParamKind::stepped,
+         ForgeParamCurve::linear,
+         {{"off", "Off", 0.0f}, {"on", "On", 1.0f}}},
+    };
+    return d;
 }
 
 }  // namespace pulp::host::character_delay

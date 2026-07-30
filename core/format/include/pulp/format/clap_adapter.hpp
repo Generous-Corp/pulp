@@ -231,6 +231,9 @@ struct PulpClapPlugin {
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     std::unique_ptr<ViewBridge> bridge;
     std::unique_ptr<view::PluginViewHost> editor_host;
+    // Forwards editor_host's GPU-surface transitions into bridge's scripted UI
+    // session. Reset in gui_destroy() before either of them dies.
+    view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
 #endif
     bool editor_visible = false;
 

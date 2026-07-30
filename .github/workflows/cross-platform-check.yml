@@ -131,6 +131,89 @@ jobs:
   # Mirrors build.yml's Windows matrix leg: same bootstrap, same Release
   # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
   # windows-latest only.
+  linux-arm64:
+    name: Linux ARM64 build + test
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      PULP_BUILD_DIR: build-linux-arm64
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install Linux dependencies
+        run: |
+          # Dependency set mirrors build.yml's "Install Linux
+          # dependencies" step (libfontconfig1-dev included — chrome/m144
+          # Skia exposes fontconfig symbols the Linux link step needs).
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libdbus-1-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxss-dev \
+            libxtst-dev \
+            libwayland-dev \
+            wayland-protocols \
+            ccache
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build "$PULP_BUILD_DIR" --config Release 2>&1 | tee build-linux.log
+
+      - name: Test
+        shell: bash
+        # Mirrors build.yml's "Test (non-Windows)" filters: exclude the
+        # `validation` and `slow` label groups, plus the GPU / harness
+        # tests that need a display the GitHub-hosted runner lacks.
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -LE 'validation|slow' -j8 --timeout 120 \
+            --exclude-regex 'STFT|VisualizationBridge|Clipboard|Toolbar add items' \
+            2>&1 | tee test-linux.log
+
+      - name: Upload Linux build + test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-platform-linux-arm64-logs
+          path: |
+            build-linux.log
+            test-linux.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ── Windows build + test ───────────────────────────────────────────────
+  # Mirrors build.yml's Windows matrix leg: same bootstrap, same Release
+  # configure, same UTF-8-code-page-wrapped ctest. GitHub-hosted
+  # windows-latest only.
+
   windows:
     name: Windows build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
@@ -289,13 +372,14 @@ jobs:
   # keyed by exact title, never a fresh issue per night.
   tracking-issues:
     name: Maintain per-platform tracking issues
-    needs: [linux, windows, android]
+    needs: [linux, linux-arm64, windows, android]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       LINUX_RESULT: ${{ needs.linux.result }}
+      LINUX_ARM64_RESULT: ${{ needs['linux-arm64'].result }}
       WINDOWS_RESULT: ${{ needs.windows.result }}
       ANDROID_RESULT: ${{ needs.android.result }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -430,6 +514,10 @@ jobs:
           maintain_platform linux \
             "Cross-platform Linux check is broken" \
             "$LINUX_RESULT" platform:linux cross-platform-linux-logs
+
+          maintain_platform linux-arm64 \
+            "Cross-platform Linux ARM64 check is broken" \
+            "$LINUX_ARM64_RESULT" platform:linux cross-platform-linux-arm64-logs
 
           maintain_platform windows \
             "Cross-platform Windows check is broken" \

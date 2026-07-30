@@ -26,6 +26,17 @@ on:
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/release_artifact_contents.py'
+      - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/required_gate_liveness.py'
+      - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
+      - 'tools/scripts/release_product_matrix.json'
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
+      - 'tools/scripts/resign_macos_release_tree.py'
+      - 'tools/scripts/test_resign_macos_release_tree.py'
   push:
     branches: [main]
     paths:
@@ -36,6 +47,17 @@ on:
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/test_windows_runner_policy.py'
+      - 'tools/scripts/release_artifact_contents.py'
+      - 'tools/scripts/test_release_artifact_contents.py'
+      - 'tools/scripts/required_gate_liveness.py'
+      - 'tools/scripts/test_required_gate_liveness.py'
+      - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
+      - 'tools/scripts/release_product_matrix.json'
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
+      - 'tools/scripts/resign_macos_release_tree.py'
+      - 'tools/scripts/test_resign_macos_release_tree.py'
 
 permissions:
   contents: read
@@ -134,6 +156,10 @@ jobs:
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
           python3 tools/scripts/test_release_checksum_manifest.py
+          python3 tools/scripts/test_release_artifact_contents.py
+          python3 tools/scripts/test_required_gate_liveness.py
+          python3 tools/scripts/test_release_breakage_watchdog_wiring.py
+          python3 tools/scripts/test_resign_macos_release_tree.py
           python3 tools/scripts/test_workflow_build_dirs.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_resolve_provider_busy_probe.py

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.759.0
+    VERSION 0.764.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -177,23 +177,15 @@ if(PULP_ENABLE_SWIFT)
         "helpers such as pulp_add_ios_host_app(), which enable Swift when "
         "Swift sources are present.")
 endif()
-# Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
-# dev/examples builds. Release / standalone-ship builds should configure
-# with -DPULP_ENABLE_INSPECTOR=OFF so a shipped standalone app does not
-# expose the developer inspector to end users. Plugin formats never link
-# the inspector, so this is standalone-only. The inspector also requires
-# GPU + desktop (PULP_HAS_INSPECT), which gates linking; this flag gates
-# the source-side wiring on top of that.
+# Visual Cmd+I inspector overlay in the standalone host. Default ON for
+# dev/examples builds. This option currently gates only standalone overlay
+# construction; it does not create a TCP inspector endpoint and does not prove
+# that inspector archive code is absent from a final artifact.
 #
-# Authoring-strip policy (§6a): the inspector is the in-plugin authoring /
-# MCP-reachable surface. The SDK release build (`pulp` CLI cli_sdk.cpp) and the
-# scaffolded project templates default it OFF so shipped plugins don't carry it
-# (smaller binary, smaller attack surface). A developer who deliberately wants an
-# inspectable / MCP-reachable plugin opts back in with -DPULP_ENABLE_INSPECTOR=ON
-# in their own plugin build. The standalone `pulp` CLI and the MCP server are
-# separate binaries and are NOT affected by this flag — bundling them alongside a
-# plugin distribution is a packaging choice, not a compile-time strip.
-option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF; the in-plugin authoring/MCP surface)" ON)
+# The inspector library is still a transitive desktop-GPU dependency of
+# pulp-format. Until target separation lands, release configurations must not
+# infer endpoint reachability or binary stripping from this option alone.
+option(PULP_ENABLE_INSPECTOR "Wire the visual dev inspector overlay into the standalone host" ON)
 # RT output-boundary audio probe in the standalone host — the data source for
 # the dev Audio Inspector window. Default ON for dev/examples; release /
 # standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
@@ -399,6 +391,7 @@ add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
+    add_subdirectory(tools/design-ab)
     add_subdirectory(tools/timeline)
 endif()
 

@@ -1,10 +1,12 @@
 # Character Delay
 
 `pulp::signal::CharacterDelay` is a stereo, wet-only delay engine with five
-feedback-loop characters: clean, vintage digital, tape, BBD, and diffusion.
-The delay frame is shared; the selected character changes what each repeat
-passes through before it re-enters the loop. Color therefore accumulates from
-repeat to repeat instead of being applied once after the delay.
+characters: clean, vintage digital, tape, BBD, and diffusion. The delay frame
+is shared; the selected character changes what each repeat passes through
+before it re-enters the loop. Diffusion is deliberately split: its allpass
+diffuser stays in the loop so smear accumulates per repeat, while its
+recirculating reverb tank is mixed on the wet output so two feedback systems
+cannot multiply into a runaway.
 
 ```cpp
 #include <pulp/signal/character_delay.hpp>
@@ -19,9 +21,14 @@ delay.set_tape_tier(pulp::signal::CharacterDelay::TapeTier::standard);
 // On the audio thread, before process().
 delay.set_time_ms(375.0f);
 delay.set_time_offset(1.01f);
+// Or select an independent right-channel time instead:
+// delay.set_right_time_ms(510.0f);
 delay.set_feedback(0.55f);
 delay.set_crossfeed(0.25f);
 delay.set_character_amount(0.7f);
+delay.set_diffusion_amount(0.2f); // output smear for non-diffusion characters
+delay.set_loop_low_cut_hz(80.0f);
+delay.set_loop_high_cut_hz(9000.0f);
 delay.set_mod(0.3f, 0.15f);
 delay.set_duck(0.2f);
 
@@ -70,6 +77,12 @@ modulation rate, modulation depth, duck, freeze, and reverse. Catalog nodes are
 also stereo and wet-only; compose them with `make_drywet_node()` instead of
 instancing two mono delays or assuming a built-in mix.
 
+The independent right-channel time, cross-character diffusion amount, and four
+loop-tone controls are currently direct `CharacterDelay` API controls, not
+additional catalog ports. Do not silently expand the stable ten-parameter graph
+schema when using them; extend the catalog deliberately, with migration and
+generated-patch coverage, if those controls need to become injectable.
+
 ## Choosing a character
 
 | Character | Feedback-loop behavior | Good starting point |
@@ -78,11 +91,14 @@ instancing two mono delays or assuming a built-in mix.
 | `vintage_digital` | Reduced-rate converter loop, emphasis, quantization, and dither | Early rack-delay grit and pitch-gliding time changes |
 | `tape` | Wow, flutter, saturation, head bump, and progressive loss | Dub echoes and unstable repeats; select `physical` for hysteresis and physics-derived loss |
 | `bbd` | Clock-dependent bandwidth, companding, noise, and clock artifacts | Dark analog repeats whose bandwidth follows delay time |
-| `diffusion` | Modulated allpass diffusion inside the loop | Echoes that smear toward a soft reverb cloud |
+| `diffusion` | Modulated allpass diffusion inside the loop plus an output-only recirculating tank | Echoes that progressively smear and bloom into a stable reverb cloud |
 
 `set_character_amount(0)` is the least colored calibration point for the
 selected character; `1` is the most colored. It does not crossfade between the
-five character types.
+five character types. When diffusion is selected, this control owns both its
+in-loop diffuser and output tank. For every other character,
+`set_diffusion_amount()` independently adds that output diffusion network
+without changing the selected character or feeding the cloud back into it.
 
 ## Complete API reference
 
@@ -111,10 +127,12 @@ floating-point input.
 |---|---|
 | Character / tape tier | `clean` / `standard` |
 | Sample rate | 48,000 Hz; call `set_sample_rate()` before rendering even when this matches the host |
-| Left time / right offset | 350 ms / `1.0` |
+| Left time / right mode | 350 ms / ratio mode at `1.0` (350 ms) |
 | Feedback / crossfeed | `0.35` / `0.0` |
-| Character amount / duck | `0.5` / `0.0` |
+| Character amount / cross-character diffusion / duck | `0.5` / `0.0` / `0.0` |
 | Modulation rate / depth | 0.5 Hz / `0.0` |
+| Loop low cut / Q | 20 Hz / `0.707` |
+| Loop high cut / Q | 20,000 Hz / `0.707` |
 | Tape speed | 7.5 ips |
 | Freeze / reverse | off / off |
 
@@ -122,7 +140,7 @@ floating-point input.
 
 | Type | Values | Meaning |
 |---|---|---|
-| `Character` | `clean`, `vintage_digital`, `tape`, `bbd`, `diffusion` | Selects the processor placed inside the feedback loop. |
+| `Character` | `clean`, `vintage_digital`, `tape`, `bbd`, `diffusion` | Selects the loop processor; diffusion additionally owns an output-only tank. |
 | `TapeTier` | `standard`, `physical` | Selects the tape implementation. `physical` adds 8x-oversampled hysteresis, physics-derived loss, and wear artifacts. |
 
 ### Configuration methods
@@ -139,27 +157,48 @@ These methods belong to the stopped-processing/configuration phase.
 ### Realtime parameter methods
 
 Call these on the same audio thread as `process()`. Normalized inputs are
-clamped. Delay time, feedback, crossfeed, character amount, ducking, and freeze
-use internal smoothing; modulation controls update directly.
+clamped. Delay time, feedback, crossfeed, character amount, cross-character
+diffusion, ducking, and freeze use internal smoothing. Modulation controls and
+loop-tone coefficients update directly; diffusion tank tap positions glide for
+5 ms after a character/diffusion amount update.
 
 | Method | Range and behavior |
 |---|---|
 | `set_time_ms(SampleType left_ms)` | Sets left-channel delay time in milliseconds, clamped to `[1, 2000]`. Time changes slew continuously and produce pitch motion rather than a crossfade jump. |
-| `set_time_offset(SampleType multiplier)` | Sets right time as a multiple of left time, clamped to `[0.5, 1.5]`. The largest addressable right delay is therefore 3,000 ms. |
-| `set_feedback(SampleType feedback)` | Sets requested feedback, clamped to `[0, 1.1]`. Tape, BBD, and vintage digital use in-loop saturation and retain the over-unity range for self-oscillation. Clean and diffusion are bounded to `0.98` internally. Physical tape applies age-dependent stability compensation. |
+| `set_time_offset(SampleType multiplier)` | Selects ratio mode and sets right time as a multiple of left time, clamped to `[0.5, 1.5]`. The right target follows subsequent left-time changes. The largest addressable right delay is 3,000 ms. |
+| `set_right_time_ms(SampleType right_ms)` | Selects absolute mode and sets an independent right-channel target in milliseconds, clamped to `[1, 3000]`. Subsequent left-time changes do not move it. |
+| `right_time_is_absolute() const noexcept` | Reports the currently selected right-time mode. |
+| `right_time_ms() const noexcept` | Returns the current right-channel target in milliseconds: the stored absolute target or the current left target multiplied by the ratio. |
+| `set_feedback(SampleType feedback)` | Sets requested feedback, clamped to `[0, 1.1]`. Tape, BBD, and vintage digital use in-loop saturation and retain the over-unity range for self-oscillation. Clean and diffusion are bounded to at most `0.98`; active resonant loop-tone filters lower that ceiling further by their worst-case peak gain. Physical tape applies age-dependent stability compensation. |
 | `set_crossfeed(SampleType crossfeed)` | Sets stereo crossfeed in `[0, 1]`; `0` keeps channels independent and `1` exchanges their feedback taps. Reverse mode smoothly forces effective crossfeed to zero because its channel segments are independent. |
-| `set_character_amount(SampleType amount)` | Sets the selected character's intensity in `[0, 1]`. The parameter is smoothed and updates character coefficients at control rate. |
+| `set_character_amount(SampleType amount)` | Sets the selected character's intensity in `[0, 1]`. The parameter is smoothed and updates character coefficients at control rate. For the diffusion character it tunes both the in-loop diffuser and output tank. |
+| `set_diffusion_amount(SampleType amount)` | Adds output-only diffusion in `[0, 1]` to clean, vintage, tape, or BBD. It is smoothed, cannot dissipate or destabilize the echo train, and is ignored as a separate source while the diffusion character is selected. |
 | `set_mod(SampleType rate01, SampleType depth01)` | Sets two independent normalized controls. `rate01` maps exponentially from 0.05 to 10 Hz. `depth01` maps linearly to at most 5% delay-time modulation. If one argument is non-finite, only that argument is ignored. |
 | `set_duck(SampleType amount01)` | Sets wet-output ducking in `[0, 1]`. The detector reads dry input before the feedback loop, uses a 5 ms attack and 250 ms release, and lets repeats bloom between source phrases. |
 | `set_freeze(bool on)` | Smoothly suppresses new input and forces the feedback scalar to unity, overriding the ordinary per-character feedback ceiling. This is unity recirculation, not a promise of bit-exact hold: tape, BBD, vintage-digital, and diffusion stages continue evolving the material inside the loop. |
 | `set_reverse(bool on)` | Enables independently segmented reverse playback for each channel. The forward line continues recording, so disabling reverse resumes current material rather than stale buffered audio. |
+| `set_loop_low_cut_hz(SampleType hz)` | Sets the resonant 12 dB/oct high-pass in the recirculation path, clamped to `[20, 2000]` Hz. At 20 Hz this half of the player tone stage is bypassed. |
+| `set_loop_low_cut_resonance(SampleType q)` | Sets low-cut Q in `[0.5, 2.0]`. Resonance above Butterworth reduces the maximum unsaturated feedback available to clean and diffusion. |
+| `set_loop_high_cut_hz(SampleType hz)` | Sets the resonant 12 dB/oct low-pass in the recirculation path, clamped to `[200, 20000]` Hz. At 20,000 Hz this half of the stage is bypassed. |
+| `set_loop_high_cut_resonance(SampleType q)` | Sets high-cut Q in `[0.5, 2.0]`, with the same feedback stability compensation. |
+| `loop_tone_active() const noexcept` | Reports whether either tone filter is away from its explicit bypass endpoint. |
+
+`set_time_offset()` and `set_right_time_ms()` select mutually exclusive modes:
+the last **valid** call wins. Do not push both unconditionally every block.
+A non-finite write is ignored and does not switch modes. The tone controls are
+the player's filters, independent of each character's own calibrated bandwidth.
+Their effective cutoff is guarded to `0.45 * sample_rate` before prewarping on
+low-rate hosts. Crossing either filter's bypass boundary clears that filter's
+integrators so old resonant energy cannot return even when the other filter
+keeps the combined stage active; freeze bypasses this player tone stage to
+preserve unity recirculation.
 
 ### Runtime methods
 
 | Method | Behavior |
 |---|---|
 | `latency_samples() const noexcept` | Always returns `0`. Internal physical-tape delay is compensated inside the requested echo time rather than reported to the host. |
-| `reset() noexcept` | Allocation-free. Clears delay, reverse, filter, solver, modulation, and detector state; reseeds noise sources; and snaps smoothing state to current targets. Repeated renders after reset are deterministic. Call on the audio thread between blocks or while stopped, never concurrently with `process()`. |
+| `reset() noexcept` | Allocation-free. Clears delay, reverse, tone, solver, modulation, diffusion-tank, and detector state; reseeds noise sources; and snaps smoothing state and initial tank tap positions to current targets. Repeated renders after reset are deterministic. Call on the audio thread between blocks or while stopped, never concurrently with `process()`. |
 | `process(SampleType* left, SampleType* right, int num_samples) noexcept` | Processes stereo buffers in place and writes wet-only output. It is allocation-free after preparation. A null channel pointer is a no-op. Non-positive sample counts process no samples. |
 
 ### Diagnostic and validation methods
@@ -211,6 +250,15 @@ delay.set_crossfeed(0.65f);
 The offset decorrelates otherwise identical repeats. Reverse mode intentionally
 removes crossfeed, so use forward playback for a conventional ping-pong pattern.
 
+For unrelated left/right times, select absolute mode instead:
+
+```cpp
+delay.set_time_ms(375.0f);
+delay.set_right_time_ms(510.0f);
+```
+
+Calling `set_time_offset()` later returns to ratio mode.
+
 ### Dub hold and release
 
 Tape, BBD, and vintage digital can accept feedback above unity because their
@@ -237,5 +285,11 @@ CPU cost or sub-millisecond loop behavior matters more than magnetic detail.
 - Reporting extra host latency for the physical tape tier even though
   `latency_samples()` already returns the complete contract.
 - Expecting `set_character_amount()` to morph between character enum values.
+- Calling both right-time setters every block and accidentally letting call
+  order choose ratio versus absolute mode.
+- Assuming cross-character diffusion recirculates through the delay, or feeding
+  the output-only tank back externally without a separate stability analysis.
+- Treating player loop tone as the character's built-in bandwidth model, or
+  expecting the requested cutoff to exceed the guarded host-rate limit.
 - Treating diagnostic hooks as stable user parameters or passing a channel
   index other than `0` or `1`.

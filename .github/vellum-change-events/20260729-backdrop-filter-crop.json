@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-backdrop-filter-crop",
+  "kind": "change",
+  "created_at": "2026-07-29T09:20:00Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "`backdrop-filter` must affect what is behind the element declaring it and nothing else. SkiaCanvas::save_backdrop_filter built its SkImageFilters::Blur with no crop rect, so the filter sampled and wrote outside the layer bounds it was given: a frosted control deck at the bottom of a plugin panel smeared the title several hundred pixels above it, and every panel that took the designed-panel prompt's advice to use a frosted deck was blurring its own wordmark. What identified it as escape rather than misplacement was that the reach tracked the radius — at blur(4px) the text was faintly soft, at blur(24px) unreadable — after the coordinate space and the layer bounds had both been checked and were correct. The change is one argument: the node's rect is passed as the blur's crop rect, which is the same rect already handed to SaveLayerRec. No signature, no call-site, no behaviour for any caller that was already correct; a blur that stayed inside its bounds renders identically. This is a Pulp rendering-correctness fix with no counterpart framework behaviour to backport.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-native-filter-render"
+  ],
+  "disposition": "pulp-only"
+}

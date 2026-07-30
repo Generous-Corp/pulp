@@ -69,10 +69,11 @@ modules:
       - runtime
     docs: reference/modules.md#sample_bank_manifest
   - name: smf
-    summary: Fail-closed Standard MIDI File format 0/1 import and export against the tempo and meter maps with exact canonical tick conversion on dividing grids and reported rounding otherwise
+    summary: Fail-closed Standard MIDI File format 0/1 import and a raw codec strict for visited clip event and grid shapes plus a census-complete consent-gated adapter with a central per-concept loss manifest
     status: experimental
     dependencies:
       - timeline
+      - interchange
       - runtime
     docs: reference/modules.md#smf
   - name: sequence

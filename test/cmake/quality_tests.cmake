@@ -55,6 +55,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Development-inspector truth gate: mutation tests prove capability/profile
+    # and user-facing runtime claims fail when either side drifts.
+    add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_inspector_truth_check.py")
+
     # Governed-build wrapper: the bound on Shipyard's `local` mac backend, which
     # runs the build string directly on the host and so never sees the pulp
     # CLI's lease integration. Pins the lease-denial contract (back off to the
@@ -156,6 +161,15 @@ if(Python3_Interpreter_FOUND)
     # the advisory selector.
     add_test(NAME advisory-macos-runner-policy COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_advisory_macos_runner_policy.py")
+
+    # DSP vocabulary: derives what pulp::signal exposes by parsing its headers,
+    # for anything that has to tell a model or a generator which DSP exists.
+    # The parse is regex-based, so a break would shrink the vocabulary silently
+    # and its consumers would quietly stop reaching for the SDK -- which has
+    # happened. The self-test pins a floor on the totals and on the classes
+    # that are actually depended on.
+    add_test(NAME dsp-vocabulary-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_dsp_vocabulary.py")
 
     # Version-at-land: single-writer version assignment on main. Drives
     # plan_assignments over throwaway git ranges, asserting it reproduces the

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -79,9 +80,15 @@ inline std::optional<std::string> first_asset_id(const IRNode& node) {
 // already-self-contained original URI (data / resource / memory). A remote URI
 // is NOT returned — nothing downstream fetches it — so the caller sees "" and
 // treats the asset as unresolved.
-inline std::string asset_uri(const IRAssetRef& asset) {
-    if (asset.local_path && !asset.local_path->empty())
-        return "file://" + *asset.local_path;
+inline std::string asset_uri(
+    const IRAssetRef& asset,
+    const std::filesystem::path& asset_base_directory = {}) {
+    if (asset.local_path && !asset.local_path->empty()) {
+        auto path = std::filesystem::path(*asset.local_path);
+        if (path.is_relative() && !asset_base_directory.empty())
+            path = asset_base_directory / path;
+        return "file://" + path.lexically_normal().generic_string();
+    }
     if (!asset.original_uri.empty() &&
         (asset.original_uri.rfind("data:", 0) == 0 ||
          asset.original_uri.rfind("resource:", 0) == 0 ||

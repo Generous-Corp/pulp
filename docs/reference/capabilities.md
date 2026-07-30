@@ -21,7 +21,7 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `timeline_engine.dawproject_import` | DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-importer) |
 | `timeline_engine.dawproject_export` | DAWproject export is a bounded writer, not Tier-1 support: it emits flat tracks, beats-timed clips, inline notes, referenced audio, and a single tempo and meter. Markers, clip gain and fades, embedded media, mixer state, automation, devices, take lanes, and freeze are declared lost in the capability table and refused unless the caller accepts each concept by name. A neutral channel is emitted so a receiving DAW can register the track; that is not an export of the document's authored mixer state, which is still reported as dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-exporter) |
 | `timeline_engine.smf_interop` | Standard MIDI File import accepts format 0/1 with a metrical division, note on/off, and the tempo, time-signature, track-name, and end-of-track meta events; SMPTE divisions, format 2, and any other event fail the import unless the caller opts into ignoring non-note events. | [link](../guides/timeline-sdk.md#optional-standard-midi-file-interop) |
-| `timeline_engine.smf_interop` | SMF export covers note content plus the tempo and meter maps; device chains, automation, takes, freezes, and media assets have no SMF representation, and a tempo ramp or a tick the requested division cannot represent exactly is an error rather than an approximation. | [link](../guides/timeline-sdk.md#optional-standard-midi-file-interop) |
+| `timeline_engine.smf_interop` | Raw SMF export strictly rejects unsupported clip, event, and time-grid shapes it visits, but it is not a project-wide loss audit. The separate smf-interchange adapter performs the full concept census and requires per-concept consent before omitting unsupported containers or project state, stripping note modifiers, quantizing velocity, or stepping tempo ramps; run_export appends a versioned loss manifest. | [link](../guides/timeline-sdk.md#optional-standard-midi-file-interop) |
 | `timeline_engine.capture` | Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities. | [link](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) |
 | `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | `planning/production-readiness/01-format-adapters.md#1.1` |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | `planning/production-readiness/01-format-adapters.md#1.1` |
@@ -477,7 +477,7 @@ device I/O, media publication, plugin instantiation, and UI ownership.
 | Bounded audio/MIDI capture and recording commit | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
 | DAWproject linear-subset import | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-importer) | [SDK consumer source](https://github.com/Generous-Corp/pulp/tree/main/examples/timeline-sdk-consumer) |
 | DAWproject bounded export (per-concept consent + loss manifest) | experimental | [dawproject](modules.md#dawproject) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-exporter) | [interchange matrix](interchange-matrix.md#dawproject) |
-| Standard MIDI File import/export against the tempo map | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-standard-midi-file-interop) | |
+| Standard MIDI File strict import/export plus consent-gated export | experimental | [smf](modules.md#smf) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-standard-midi-file-interop) | [interchange matrix](interchange-matrix.md#standard-midi-file) |
 | `pulp seq` validate/explain/apply and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
 | Five Timeline MCP operations + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |
 | `SequenceProcessor` plugin-format adapter | experimental | [sequence](modules.md#sequence) | [Timeline SDK](../guides/timeline-sdk.md#optional-plugin-format-adapter) | |
@@ -491,6 +491,10 @@ downgrading arbitrary sessions.
 ---
 
 ## Agent / Automation
+
+The checked baseline and stable capability IDs for the in-progress development
+inspector are documented in
+[Development inspector capabilities](development-inspector-capabilities.md).
 
 | Capability | Status | Docs | Notes |
 |---|---|---|---|
@@ -519,7 +523,7 @@ The `pulp` CLI wraps common development workflows.
 | `pulp run` (launch standalone binary) | usable | [cli](cli.md) |
 | `pulp upgrade` (self-update) | usable | [cli](cli.md) |
 | `pulp doctor` (check system dependencies) | usable | [cli](cli.md) |
-| `pulp inspect` (component inspector) | usable | [cli](cli.md) |
+| `pulp inspect` (low-level client; no normal runtime endpoint yet) | experimental | [cli](cli.md) |
 | `pulp audit` (dependency license check) | usable | [cli](cli.md) |
 | `pulp add` (add dependency) | usable | [cli](cli.md) |
 | `pulp cache` (build cache management) | usable | [cli](cli.md) |

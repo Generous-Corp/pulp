@@ -128,3 +128,13 @@ add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-export
     PROPERTIES LABELS "parser-import")
+
+# Filters and blend modes reaching pixels in the native view tree. Asserts on
+# rendered bytes rather than on setters being called: a value that reaches the
+# View but never a paint would pass the latter and still draw a hard edge.
+pulp_add_test_suite(pulp-test-native-filter-render LIBRARIES pulp::view)
+
+# A design's accent reaching its controls. Tokens are copied by name, so a
+# design naming `primary` leaves `knob.arc` unset and every knob falls back to
+# the built-in blue whatever the design said.
+pulp_add_test_suite(pulp-test-design-token-widget-derive LIBRARIES pulp::view)

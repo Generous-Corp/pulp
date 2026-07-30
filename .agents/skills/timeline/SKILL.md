@@ -961,6 +961,27 @@ cannot back this path, and the byte-stream traps (running-status cancellation,
 system-exclusive framing, FIFO note matching) a hand-rolled decoder must get
 right.
 
+The committed interchange capability data is the authority for both SMF and
+DAWproject admission and loss accounting. Each format JSON carries a stable,
+contiguous `ordinal`; never infer `Format` ABI order from filenames. Reader and
+writer implementations keep compile-time lists of the concepts they actually
+support, so widening a generated table row without matching code must fail the
+build. When the model gains a detectable semantic distinction, add a concept,
+teach the census to name it, and declare both formats' behavior in the same
+change before claiming a lossless path.
+
+SMF has two deliberately separate export surfaces. `pulp::timeline::export_smf`
+strictly checks the clip, event, and time-grid shapes it visits, but does not
+census unrelated project state. `pulp::smf::writer()` is a non-callable,
+format-bound adapter for `interchange::run_export()`: it serializes the project
+snapshot owned by the plan, and only the central runner appends
+`pulp-loss-manifest.json`. Never capture or pass a second `Project` into an
+interchange writer, and never add a direct adapter invocation path. The
+deprecated `dawproject::writer(project, options)` compatibility overload is the
+sole exception at the source boundary: it deliberately ignores `project` and
+delegates to `writer(options)`. Only the interchange adapter is the
+project-wide consent surface.
+
 ## Asset confinement is two layers, and they are not redundant
 
 A `PackageRelative` asset locator is checked twice, by checks with different

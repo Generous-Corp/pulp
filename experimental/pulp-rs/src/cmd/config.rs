@@ -170,6 +170,7 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "Supported keys (import_design section):",
         "  import_design.default_mode    live | baked                  (default: live)",
         "  import_design.default_emit    js | ir-json | cpp            (default: js)",
+        "  import_design.browser         auto | managed | system       (default: auto)",
         "",
         "Supported keys (claude section):",
         "  claude.send_user_file         on | off                      (default: on)",
@@ -179,13 +180,15 @@ fn do_help(out: &mut impl Write) -> Result<()> {
         "  pulp config set update.mode manual",
         "  pulp config set import_design.default_mode baked",
         "  pulp config set import_design.default_emit ir-json",
+        "  pulp config set import_design.browser managed",
         "  pulp config set claude.send_user_file off",
         "  pulp config get update.mode",
         "",
         "Notes:",
         "  Changing update.mode clears the 24h snooze at ~/.pulp/update-snooze",
         "  so the new mode takes effect on the next invocation.",
-        "  PULP_IMPORT_DESIGN_DEFAULT_MODE and PULP_IMPORT_DESIGN_DEFAULT_EMIT",
+        "  PULP_IMPORT_DESIGN_DEFAULT_MODE, PULP_IMPORT_DESIGN_DEFAULT_EMIT,",
+        "  and PULP_DESIGN_BROWSER_MODE",
         "  override import_design defaults for one environment/session.",
     ];
     for line in lines {
@@ -355,6 +358,8 @@ mod tests {
         assert!(s.contains("update.bump_projects"));
         assert!(s.contains("import_design.default_mode"));
         assert!(s.contains("import_design.default_emit"));
+        assert!(s.contains("import_design.browser"));
+        assert!(s.contains("PULP_DESIGN_BROWSER_MODE"));
         assert!(s.contains("Clears the 24h snooze") || s.contains("clears the 24h snooze"));
     }
 

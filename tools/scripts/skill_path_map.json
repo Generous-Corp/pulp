@@ -159,12 +159,29 @@
         "docs/status/cli-commands.yaml"
       ]
     },
+    "contrib-intake": {
+      "paths": [
+        ".agents/skills/contrib-intake/**"
+      ]
+    },
+    "contribute": {
+      "paths": [
+        "tools/scripts/contributor_check.sh",
+        "tools/scripts/test_contributor_check.sh"
+      ]
+    },
     "daw-smoke": {
       "paths": [
         ".agents/skills/daw-smoke/**",
         "tools/testing/daw-smoke/**",
         "docs/guides/daw-smoke.md"
       ]
+    },
+    "decide": {
+      "paths": [],
+      "_doc": {
+        "empty-ok": "Intentionally empty. `decide` governs how an agent surfaces a blocked decision to the user -- it maps to no source tree, so no code change can make it stale. It is updated when the ASKING changes (a new tool affordance, a fallback for an agent without one), not when a subsystem does."
+      }
     },
     "engine": {
       "paths": [
@@ -539,11 +556,21 @@
     },
     "timeline": {
       "paths": [
+        "core/interchange/**",
+        "core/dawproject/**",
+        "core/smf/**",
         "core/timeline/**",
         "test/test_timeline_*.cpp",
+        "test/test_interchange_*.cpp",
+        "test/test_dawproject_*.cpp",
+        "test/test_smf_*.cpp",
         "test/fixtures/timeline/**",
         "test/timeline_command_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/cmake/test_timeline_sdk_consumer.cmake",
         "test/cmake/sampler_runtime_tests.cmake",
+        "tools/timeline/**",
+        "tools/mcp/mcp_timeline_tools.cpp",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
         ".agents/skills/timeline/**"
       ]

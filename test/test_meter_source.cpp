@@ -1102,6 +1102,53 @@ TEST_CASE("VectorSource survives a concurrent writer and reader",
     CHECK(torn.load() == 0);
 }
 
+TEST_CASE("EventSource preserves frame offsets and makes zero an occurrence",
+          "[view][value-channel]") {
+    EventSource source;
+
+    // An empty frame has no occurrence.
+    source.publish(nullptr, 0);
+    CHECK(source.read().count == 0);
+
+    // A zero payload is still present because count and the occupied slot carry
+    // presence; consumers never infer it from the payload value.
+    const ValueEvent occurrences[] = {
+        {.frame_index = 7, .value = 0.0f},
+        {.frame_index = 63, .value = -2.5f},
+    };
+    source.publish(occurrences, 2);
+    const auto frame = source.read();
+    REQUIRE(frame.count == 2);
+    CHECK(frame.events[0].frame_index == 7);
+    CHECK(frame.events[0].value == Catch::Approx(0.0f));
+    CHECK(frame.events[1].frame_index == 63);
+    CHECK(frame.events[1].value == Catch::Approx(-2.5f));
+}
+
+TEST_CASE("EventSource publish is bounded and alloc-free",
+          "[view][value-channel][rt-safety]") {
+    EventSource source;
+    std::vector<ValueEvent> occurrences(EventFrame::kMaxEvents + 16);
+    for (std::size_t i = 0; i < occurrences.size(); ++i) {
+        occurrences[i] = {
+            .frame_index = static_cast<std::uint32_t>(i),
+            .value = static_cast<float>(i),
+        };
+    }
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        source.publish(occurrences.data(), static_cast<int>(occurrences.size()));
+        CHECK(probe.allocation_count() == 0);
+    }
+
+    const auto frame = source.read();
+    REQUIRE(frame.count == EventFrame::kMaxEvents);
+    CHECK(frame.events[0].frame_index == 0);
+    CHECK(frame.events[EventFrame::kMaxEvents - 1].frame_index ==
+          static_cast<std::uint32_t>(EventFrame::kMaxEvents - 1));
+}
+
 TEST_CASE("ValueChannelSet resolves declared channels by exact name",
           "[view][value-channel]") {
     ValueChannelSet channels;
@@ -1109,13 +1156,16 @@ TEST_CASE("ValueChannelSet resolves declared channels by exact name",
     auto* gr = channels.declare_scalar("gain_reduction", "dB", 0.0f);
     auto* out = channels.declare_meter("output", "", 0.0f);
     auto* env = channels.declare_vector("envelope", "", 0.0f);
+    auto* onsets = channels.declare_events("onsets");
     REQUIRE(gr != nullptr);
     REQUIRE(out != nullptr);
     REQUIRE(env != nullptr);
+    REQUIRE(onsets != nullptr);
 
     CHECK(channels.scalar("gain_reduction") == gr);
     CHECK(channels.meter("output") == out);
     CHECK(channels.vector("envelope") == env);
+    CHECK(channels.events("onsets") == onsets);
 
     // Verbatim: no case folding, no separator smoothing. A lookup key that
     // resolved loosely would silently bind a UI to the wrong channel the day a
@@ -1128,12 +1178,14 @@ TEST_CASE("ValueChannelSet resolves declared channels by exact name",
     // time rather than reading a plausible wrong value.
     CHECK(channels.vector("gain_reduction") == nullptr);
     CHECK(channels.scalar("envelope") == nullptr);
+    CHECK(channels.vector("onsets") == nullptr);
 
-    REQUIRE(channels.size() == 3);
+    REQUIRE(channels.size() == 4);
     CHECK(channels.infos()[0].name == "gain_reduction");
     CHECK(channels.infos()[0].unit == "dB");
     CHECK(channels.infos()[0].shape == ValueChannelShape::scalar);
     CHECK(channels.infos()[2].shape == ValueChannelShape::vector);
+    CHECK(channels.infos()[3].shape == ValueChannelShape::events);
 }
 
 TEST_CASE("ValueChannelSet refuses declarations that would break lookup",
@@ -1175,4 +1227,5 @@ TEST_CASE("a processor that declares no channels holds nothing",
     CHECK(channels.scalar("anything") == nullptr);
     CHECK(channels.meter("anything") == nullptr);
     CHECK(channels.vector("anything") == nullptr);
+    CHECK(channels.events("anything") == nullptr);
 }

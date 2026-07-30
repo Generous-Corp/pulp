@@ -948,6 +948,9 @@ public:
             // Current render API: create the Dawn surface, then build the
             // Skia Graphite surface from it (mirrors the mac host). GpuSurface
             // gets PHYSICAL pixels; SkiaSurface gets LOGICAL size + scale.
+            // "Not yet" until the pair below actually exists, so a consumer
+            // observing mid-construction never reads the null as "CPU host".
+            mark_gpu_surface_pending();
             gpu_surface_ = render::GpuSurface::create_dawn();
             if (gpu_surface_) {
                 render::GpuSurface::Config gpu_cfg{};
@@ -965,6 +968,11 @@ public:
                     gpu_surface_.reset();
                 }
             }
+            // Publish the decided state exactly once, either way.
+            publish_gpu_surface(gpu_surface_.get(),
+                                gpu_surface_ && skia_surface_
+                                    ? GpuSurfaceState::ready
+                                    : GpuSurfaceState::unavailable);
         }
     }
 
@@ -983,6 +991,10 @@ public:
             metal_view_.onLayout = nil;
             [drag_drop_ invalidate];
         }
+        // Publish the teardown while the surfaces are still alive, so a
+        // consumer holding the raw pointer drops it here rather than on its
+        // next frame.
+        publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
         skia_surface_.reset();
         gpu_surface_.reset();
         root_.set_frame_clock(nullptr);

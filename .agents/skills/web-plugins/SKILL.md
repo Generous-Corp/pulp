@@ -681,6 +681,13 @@ not to `PulpWebUi.cmake`, and `view.cpp` — already in the wasm list — refere
 UI module link-failed and blocked the queue. Whoever adds a `core/view/**` or `core/canvas/**`
 `.cpp` must mirror it into `PulpWebUi.cmake` in the same change, or the whole PR queue wedges.
 
+This includes small internal policy/helper TUs, not only visible widget or renderer splits.
+`yoga_layout.cpp` was refactored to call `yoga_measurement_internal.cpp`; native view-core and
+all native tests stayed green, but the required WebCLAP build failed at `wasm-ld` with undefined
+`sanitize_yoga_measurement` / `resolve_yoga_measure_dimension` until the helper was added to
+`_PULP_WEBUI_VIEW_SOURCES`. Treat every new out-of-line dependency of an already-listed wasm UI
+source as a paired `PulpWebUi.cmake` edit, even when the helper has no web-specific code.
+
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
 compiles** (`core/view/CMakeLists.txt`, `core/canvas/…`) rather than adding files piecemeal —
@@ -915,3 +922,21 @@ The failure mode is what makes this expensive: it is invisible locally and on
 the required macOS gate, and surfaces only in the `Build + prove` lane. When you
 add ANY dependency to a TU on this list — not just a new TU — check whether its
 definition is in the list too.
+
+## The Ganesh/WebGL surface reports a frame outcome now (WAH-2)
+
+`SkiaSurface::end_frame()` returns `render::FrameOutcome` instead of
+`void`. On the browser backend (`skia_surface_ganesh.cpp`):
+
+- a normal flush reports `presented` — the browser composites the canvas
+  element itself, so a successful `flushAndSubmit()` IS the frame
+  reaching its output;
+- a LOST WebGL context reports `recreate`, not `failed`: the caller must
+  rebuild against the restored context before the frame means anything;
+- `has_presentable_target()` is always `true` here — there is no
+  offscreen-by-design mode on this backend.
+
+Hosts gate damage retirement on `render::frame_reached_output(outcome)`,
+so a backend that misreports makes the UI either repaint forever
+(false failure) or go stale (false success). If you add a web render
+path, return an honest outcome rather than defaulting to `presented`.

@@ -199,6 +199,18 @@ through an SSH tunnel. `test_inspector_server.cpp`'s `[security]` case pins
 this: loopback must connect (the control) and the host's real IPv4 must be
 refused.
 
+Normal Pulp standalone and plugin-format launches do **not** construct this
+server. `pulp inspect` is currently an experimental client for an explicitly
+hosted custom/test fixture, and the inspector-proxy MCP tools additionally
+shell through a Pulp source checkout's build-tree CLI. Do not describe either
+surface as an installed-user or ordinary `pulp run` workflow. Keep
+`tools/cli/pulp_cli.cpp`, `cmd_inspect.cpp`,
+`experimental/pulp-rs/src/help.rs`, the slash commands, MCP tool descriptions,
+`docs/reference/cli.md`, and
+`docs/reference/development-inspector-capabilities.md` aligned; the
+`inspector_truth_check.py` mutation gate protects selected documentation and
+client-description claims, but does not prove runtime construction sites.
+
 **Inspector-proxy MCP tools use a different, lighter pattern than the
 `mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
 have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
@@ -246,6 +258,26 @@ from `experimental/pulp-rs/src/main.rs`. `check_cli_mcp_parity.py` uses the
 same installed-command model by default, so a Rust-only command still needs
 either a matching `pulp_<command>` MCP tool or an explicit
 `tools/scripts/cli_mcp_parity_baseline.json` reason.
+
+### `pulp forge catalog export` — selected-SDK semantic catalog
+
+This repo-maintenance command joins `ForgeNodeDescriptor` vocabulary to the
+constructed node's `CustomNodeBakedParam` ranges/defaults and emits
+`pulp.forge-catalog.v1` JSON. Descriptors must remain number-free; adding a
+range or default there creates a second authority and defeats the export.
+The JSON keeps one numeric contract per applicable concrete realization,
+explicit realization-axis settings, and realization-scoped named choices; do
+not collapse differing factory defaults/ranges into one representative row.
+
+`--json` is checkout-independent and prints the compiled projection. `--check`
+and `--write` operate on `docs/status/forge-catalog.json`; the install rules
+copy that checked snapshot to `share/pulp/forge-catalog.json`, which Forge reads
+from its selected SDK prefix. Keep `cmd_forge.cpp`,
+`forge_catalog_json.{hpp,cpp}`, `docs/status/cli-commands.yaml`,
+`docs/reference/cli.md`, the Rust help inventory, the installed artifact, and
+the hosting skill's descriptor contract aligned. The command intentionally has
+no MCP tool: agents consume the committed/installed artifact, so keep its
+`cli_only` parity reason current.
 
 ### 8. Decide: does this need an MCP tool?
 
@@ -331,6 +363,23 @@ the tool takes arguments:
   `getCapabilities` reports `canBreak/canStep/canInspectLocals=false`. Cover these
   in `test_inspector_domains.cpp`. See `docs/reference/scripted-ui-inspector.md`
   and the `engine` skill's interrupt section.
+- **A read-only inspector tool that describes something the scripted-UI bridge
+  ALSO describes must share one serializer.** `State.getValueChannels` and the
+  bridge's `listValueChannels()` both emit `{name, unit, shape, neutral}` and
+  both call `core/view/value_channel_json` — the bridge's hand-rolled copy was
+  deleted when the inspector gained the method. Two implementations drift the
+  day either side gains a field, and a UI built against one shape then silently
+  mis-reads the other; the same reason `param_json` backs both
+  `getParamMetadata` and `State.getParameters`. Assert the two payloads are
+  byte-identical (and not vacuously equal on two empty results) in
+  `test_inspector_domains.cpp`. Keep its binder guidance complete as shapes
+  land: `meter` → `bindMeter`, `vector` → `bindScope`, and `events` →
+  `bindEvents`.
+- **An inspector-proxy tool that reads an optional processor surface returns the
+  EMPTY value, not an error, when the processor declares none** — e.g.
+  `State.getValueChannels` yields `[]` for a processor that never overrode
+  `value_channels()`, which is most of them. An error there would make callers
+  special-case the common case.
 - **Mutating tools must go through a typed inspector method** (e.g.
   `State.setParameter`) with validation + gesture wrapping in
   `StateInspector`/`DomainHandler` — never via `Runtime.evaluate`. Cover the
@@ -459,6 +508,15 @@ on PATH for installed users and `./build/pulp` for source-tree examples.
 Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
+
+Config keys consumed by a C++ leaf command still require user-surface parity
+across `experimental/pulp-rs/src/config.rs`,
+`experimental/pulp-rs/src/cmd/config.rs`, and `tools/cli/cmd_config.cpp`.
+For example, browser-backed design import owns
+`import_design.browser=auto|managed|system`; its one-session override is
+`PULP_DESIGN_BROWSER_MODE`, while an explicit executable path remains a
+separate higher-precedence override. Update both help implementations and add
+validation tests when introducing a cross-language key.
 
 ### `pulp import` — framework-importer substrate
 
@@ -1118,28 +1176,29 @@ Reference: `feature/ship-oneoff-notarize` (2026-06-01). Files:
 selection, `share`), `test/test_cli_ship_shellout.cpp` `[oneoff]` cases,
 `.claude/commands/ship.md`, `.agents/skills/ship/SKILL.md`.
 
-### SDK build strips the dev authoring surface (§6a)
+### SDK build disables dev authoring features (§6a)
 
-`cli_sdk.cpp`'s release configure deliberately disables the developer-only
-surfaces so shipped SDKs / plugins don't carry them: it passes
-`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF` (the
-inspector is the in-plugin authoring / MCP-reachable surface). The scaffolded
-project templates (`tools/templates/.../build.gradle.kts.template`) mirror this.
+`cli_sdk.cpp`'s release configure passes
+`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF`. The
+scaffolded project templates (`tools/templates/.../build.gradle.kts.template`)
+mirror this. These flags disable their guarded behavior; they do not by
+themselves prove archive stripping, unlinkage, or endpoint reachability.
 
 Keep the two flags together when editing the SDK configure command. A developer
-who deliberately wants an inspectable / MCP-reachable plugin re-enables it in
-their own plugin build with `-DPULP_ENABLE_INSPECTOR=ON`. The standalone `pulp`
-CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are **separate binaries** —
-not compiled into a plugin — so this flag never strips them; bundling them
-alongside a plugin distribution is a packaging choice.
+can re-enable the guarded inspector components with
+`-DPULP_ENABLE_INSPECTOR=ON`, but that still does not create a normal runtime
+endpoint: a custom host must explicitly construct and own `InspectorServer`.
+The standalone `pulp` CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are
+**separate binaries** — not compiled into a plugin — so this flag never strips
+them; bundling them alongside a plugin distribution is a packaging choice.
 
 The SDK build also passes `-DPULP_ENABLE_DESIGN_IMPORT=OFF`, which strips the
 design-import authoring cluster (importers, codegen, `lock_to_source`,
 `jsx_lock`, `token_lock`, runtime design-import) from shipped plugins. The
 runtime W3C token pair (`importDesignTokens` / `exportDesignTokens`, via
 `core/view/src/w3c_tokens.cpp`) stays compiled; `WidgetBridge::install_runtime_import_handlers()`
-becomes a no-op stub. Keep all three strip flags (audio-probes / inspector /
-design-import) together in the SDK configure command. Building the test suite
+becomes a no-op stub. Keep all three feature-configuration flags (audio-probes /
+inspector / design-import) together in the SDK configure command. Building the test suite
 requires `PULP_ENABLE_DESIGN_IMPORT=ON` (the CMake gate hard-errors otherwise);
 a stripped build uses `PULP_BUILD_TESTS=OFF`.
 

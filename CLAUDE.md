@@ -148,6 +148,7 @@ it through the governor), not the machine's core count.
 ./build/pulp version             # show SDK and project version
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
+./build/pulp forge catalog export --json  # emit selected-SDK Forge metadata
 ./build/pulp sdk install --local --profile forge-dev --print-path
                                 # immutable arm64 SDK for local Forge iteration
                                 # Forge configure must opt in; ship/release refuses it
@@ -1543,7 +1544,10 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
 | `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
 | `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
+| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
+| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
+| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
 | `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
 | `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
 | `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |

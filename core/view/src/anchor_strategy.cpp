@@ -261,6 +261,7 @@ AnchorStrategy default_anchor_strategy(DesignSource source) {
         case DesignSource::v0:       return AnchorStrategy::content_hash;
         case DesignSource::stitch:   return AnchorStrategy::content_hash;
         case DesignSource::claude:   return AnchorStrategy::content_hash;
+        case DesignSource::html:     return AnchorStrategy::content_hash;
         case DesignSource::jsx:      return AnchorStrategy::content_hash;
         case DesignSource::designmd: return AnchorStrategy::content_hash;
         case DesignSource::figma_plugin: return AnchorStrategy::adapter;

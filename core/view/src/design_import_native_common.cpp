@@ -8,6 +8,7 @@
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -29,6 +30,8 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <pulp/view/css_effect_parse.hpp>
+
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1260,6 +1263,27 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_opacity(*style.opacity);
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
+
+    // Filters, backdrop filters and blend modes. The JS lane already parses
+    // these — web-compat-style-decl-paint.js pulls the blur radius out and
+    // routes it to setBackdropFilter -> View::set_backdrop_blur — but the
+    // native tree did not, so the same document rendered soft through one lane
+    // and hard-edged through the other. An atmospheric design lives or dies on
+    // this: a 60px bloom with no blur is a solid shape sitting on the panel.
+    if (style.filter) {
+        if (const auto radius = css_blur_radius(*style.filter))
+            view.set_filter_blur(*radius);
+    }
+    if (style.backdrop_filter) {
+        if (const auto radius = css_blur_radius(*style.backdrop_filter))
+            view.set_backdrop_blur(*radius);
+    }
+    if (style.mix_blend_mode) {
+        if (const auto mode = css_blend_mode(*style.mix_blend_mode))
+            view.set_mix_blend_mode(*mode);
+    }
+    if (style.clip_path)
+        view.set_clip_path(*style.clip_path);
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
     // the source stroke as border_color/border_width, but the stroke is already
     // baked into the raster. Drawing it again paints a spurious box outline —
@@ -1641,7 +1665,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             const IRAssetRef* asset = manifest.resolve(*asset_id);
             if (asset == nullptr)
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
-            auto uri = asset_uri(*asset);
+            auto uri = asset_uri(
+                *asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
             auto image = std::make_unique<ImageView>();
@@ -1725,7 +1750,6 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
         if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
             return frame;
     }
-
     // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
     // view) — it's a design-system placeholder the design never shows.
     if (is_unconfigured_dropdown_template(node)) {
@@ -2150,6 +2174,10 @@ void NativeImportBindingContext::reset_import_binding_claims() {
 
 DesignIR prepare_native_design_ir(const DesignIR& ir) {
     DesignIR prepared = ir;
+    // Capture authority is resolved before widget recognition or geometry
+    // normalization. Otherwise a semantic hint such as "knob" can win first
+    // and replace the authored capture with a silver native widget.
+    lower_faithful_captures_in_place(prepared.root);
     normalize_border_shorthand(prepared.root);
     reconnect_slider_fill(prepared.root);
     synthesize_primitive_paths(prepared.root);

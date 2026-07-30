@@ -40,9 +40,69 @@ firehose.
 | 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
 | 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it** | ≤30 min |
+| 5. Release content gate | each native release leg + release finalizer | correctly named archives containing missing, stale, wrong-version, non-executable, or invalidly signed products | pre-publish |
 
 Layers 0-3 are prevention and detection. Layer 4 is the only one that changes
 release state, and it can only ever drive a release *forward*.
+
+## Layer 5 — Published-product content gate
+
+**Files:** `tools/scripts/release_artifact_contents.py` and the versioned
+`tools/scripts/release_product_matrix.json`, wired into
+`.github/workflows/release-cli.yml`.
+
+An outer asset name and checksum do not prove the archive contains the product
+users expect. Each release platform therefore validates its CLI and SDK archives
+against one checked-in product matrix before upload. The final release job runs
+the same matrix against the assets it downloads back from the GitHub release
+draft immediately before publication.
+
+The contract is deliberately exact where stale build output is dangerous:
+
+- CLI archives contain only `pulp`, `pulp-cpp`, `pulp-mcp`, and the platform
+  WebGPU runtime (with `.exe`/DLL names on Windows).
+- Every SDK carries the complete public `pulp-*` library target set plus the
+  VST3, CLAP, and LV2 development surfaces; Darwin also requires Audio Unit.
+- A vanished target is missing, while a target left over from an old staging
+  directory is rejected as stale/unexpected.
+- `version.txt`, `sdk_build_type.txt`, safe archive paths, and Unix executable
+  modes are verified from the archive bytes.
+- Darwin re-signs installed Mach-O files after CMake's install-time RPATH rewrite
+  and runs `codesign --verify --strict` on every shipped executable and dylib.
+
+The negative controls in `test_release_artifact_contents.py` remove the format
+library, inject a retired target, add an unexpected CLI payload, substitute the
+wrong version, and force code-signature verification to fail. The watchdog is
+only considered wired while all of those broken fixtures are observed failing.
+The content contract begins above the current `v0.759.0` release (`v0.759.1` is
+the SemVer floor); older backfills predate this matrix
+and remain governed by their historical outer-asset contract. A backfill uses
+the tag's own matrix when present, so future product-matrix evolution is
+evaluated against the contract versioned with the source being rebuilt. A
+manual dispatch with `source_ref` resolves the matrix from that source ref
+rather than from the version label.
+
+## Required gate liveness (post-merge coverage)
+
+**Files:** `.github/workflows/required-gate-liveness.yml` and
+`tools/scripts/required_gate_liveness.py`.
+
+Ruleset drift checks prove which contexts GitHub is configured to require. They
+do not prove a workflow or job still matches any commit. On every push to `main`
+(with a twice-hourly scheduled backstop), the liveness audit loads required
+contexts from `.github/rulesets/main-protection.json` and queries GitHub's
+check-runs for the exact merged SHA. Every required context must have a completed
+successful check-run on that SHA. A path filter that silently stops matching, a
+renamed job, a pending check, or a failed check makes the workflow fail and opens
+or updates one stable incident; the incident closes on recovery. A skipped
+duplicate from a separate cache-warming push does not shadow a real executed
+gate on the same SHA, but an only-skipped context still fails closed.
+
+`test_required_gate_liveness.py` supplies the negative controls: an absent
+path-filtered gate, a check attached only to another SHA, pending and failed
+checks, an only-skipped context, and an empty required-check contract must all
+fail. A regression control also proves that a later skipped duplicate cannot
+erase an executed success.
 
 ## Layer 4 — Release reconciler (detection AND repair)
 
@@ -100,8 +160,12 @@ idempotent: the finalizer no-ops on an already-published tag.
 
 **File:** `.github/workflows/workflow-lint.yml`
 
-Runs on any PR that touches `.github/workflows/**` or `.github/actions/**`.
-Executes three checks:
+Runs on any PR that touches workflows/actions or a release-policy input covered
+by its regression suite. In particular, changes to
+any `CMakeLists.txt` or `tools/cmake/**` run the SDK archive/matrix parity test,
+so a new installed library—or a target changing between interface-only and
+archive-bearing—cannot survive until the multi-platform release build before
+being rejected as unexpected. Executes three checks:
 
 1. **`yamllint`** against `relaxed` profile. Catches syntactic errors
    and flags most structural issues.
@@ -402,4 +466,3 @@ contributors who touch CI workflows frequently.
   (tag was created), but the `feedback_silent_release_failure` memory
   in `~/.claude` documents the shape; a future Layer 4 could smoke-test
   the produced binary.
-

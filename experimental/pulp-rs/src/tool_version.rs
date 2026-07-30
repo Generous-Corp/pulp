@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CliError, Result};
-use crate::tool_registry::{pulp_home, ToolDescriptor};
+use crate::tool_registry::{tools_install_home, ToolDescriptor};
 
 /// Where the active version came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +74,7 @@ pub struct OverrideFile {
 /// Path to the durable override file, `$PULP_HOME/tool-overrides.json`.
 #[must_use]
 pub fn override_file_path() -> PathBuf {
-    pulp_home().join("tool-overrides.json")
+    tools_install_home().join("tool-overrides.json")
 }
 
 /// Env var name for a tool id: `PULP_TOOL_<SANITIZED>_VERSION`, where the id is

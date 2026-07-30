@@ -11,6 +11,8 @@ cmake --build build/timeline-sdk-consumer
 ./build/timeline-sdk-consumer/pulp-timeline-sdk-consumer
 ./build/timeline-sdk-consumer/pulp-timeline-cookbook-consumer
 ./build/timeline-sdk-consumer/pulp-dawproject-import-sdk-consumer
+./build/timeline-sdk-consumer/pulp-dawproject-export-sdk-consumer
+./build/timeline-sdk-consumer/pulp-smf-interchange-sdk-consumer
 ```
 
 Its configure step audits both the engine target closure and the optional

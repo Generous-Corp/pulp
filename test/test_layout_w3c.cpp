@@ -5,6 +5,10 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include "../core/view/src/yoga_measurement_internal.hpp"
+
+#include <cmath>
+#include <limits>
 
 using namespace pulp::view;
 using pulp::canvas::RecordingCanvas;
@@ -354,6 +358,50 @@ TEST_CASE("Layout: Label intrinsic height in column", "[layout][w3c][intrinsic]"
 
     // Label should get intrinsic height (explicit 19.6, Yoga may round)
     REQUIRE_THAT(lp->bounds().height, Catch::Matchers::WithinAbs(19.6f, 1.0f));
+}
+
+TEST_CASE("Layout: widthless intrinsic Label does not return Yoga's undefined width",
+          "[layout][w3c][intrinsic][nan]") {
+    const float undefined = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE(resolve_yoga_measure_dimension(0.0f, undefined, false) == 0.0f);
+    REQUIRE(resolve_yoga_measure_dimension(0.0f, 200.0f, true) == 200.0f);
+    REQUIRE(resolve_yoga_measure_dimension(40.0f, undefined, false) == 40.0f);
+
+    View root;
+    root.set_bounds({0, 0, 200, 80});
+    root.flex().direction = FlexDirection::row;
+
+    auto label = std::make_unique<Label>("");
+    label->set_id("empty-absolute-label");
+    label->set_line_height(22.435547f);
+    label->set_position(View::Position::absolute);
+    auto* lp = label.get();
+    root.add_child(std::move(label));
+
+    root.layout_children();
+
+    REQUIRE(std::isfinite(lp->bounds().width));
+    REQUIRE(std::isfinite(lp->bounds().height));
+    REQUIRE_THAT(lp->bounds().width, Catch::Matchers::WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(lp->bounds().height,
+                 Catch::Matchers::WithinAbs(22.435547f, 1.0f));
+}
+
+TEST_CASE("Layout: non-finite measurements are rejected before reaching Yoga",
+          "[layout][w3c][intrinsic][nan]") {
+    const auto measured = sanitize_yoga_measurement(
+        std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity());
+
+    REQUIRE(measured.rejected_non_finite);
+    REQUIRE(std::isfinite(measured.width));
+    REQUIRE(std::isfinite(measured.height));
+    REQUIRE(measured.width == 0.0f);
+    REQUIRE(measured.height == 0.0f);
+
+    const auto valid = sanitize_yoga_measurement(37.0f, 19.0f);
+    REQUIRE_FALSE(valid.rejected_non_finite);
+    REQUIRE(valid.width == 37.0f);
+    REQUIRE(valid.height == 19.0f);
 }
 
 TEST_CASE("View: paint_all with background renders without crash", "[view][w3c]") {

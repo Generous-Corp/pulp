@@ -142,7 +142,7 @@ struct StandaloneConfig {
     // was never installed.
     //
     // Once enabled, the keyboard stays hidden until the user picks
-    // "Musical Typing Keyboard" from the application menu or presses Cmd+K
+    // "Musical Typing Keyboard" from the application or Window menu, or presses Cmd+K
     // (Ctrl+K off Apple). Notes enter through the standalone host's lock-free
     // UI MIDI path, so they reach the processor only if it accepts MIDI input;
     // on a processor that ignores MIDI the keys are silent by construction.

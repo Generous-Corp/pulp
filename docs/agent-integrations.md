@@ -64,18 +64,21 @@ The plugin extends Claude Code with:
 - **Slash commands**: `/build`, `/test`, `/create`, `/design`, `/ship`,
   `/import-design`, `/version`, `/upgrade` — convenience wrappers over
   the CLI.
-- **MCP server**: Claude can call build/test/inspect tools as MCP
-  tool calls instead of shell-and-parse. Highest value for the
-  inspector tools (`pulp_inspect_dom`, `pulp_inspect_params`,
-  etc.) which wrap the running-plugin inspector socket protocol.
+- **MCP server**: Claude can call build/test and other installed tools as MCP
+  calls instead of shell-and-parse. The `pulp_inspect_*` entries currently wrap
+  an experimental source-tree CLI client and therefore require a Pulp source
+  checkout plus a custom server fixture; normal and installed-user launches do
+  not start the required endpoint.
   For project screenshot artifacts, call `pulp_validate` with
   `screenshot=true` or run `pulp run --headless --screenshot <png>`;
   both use the same capture contract documented for the CLI. The
   `pulp_screenshot` MCP tool is a demo/script fixture renderer, not a
   live plugin capture API.
-  `pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently
-  return explicit unavailable errors until script-engine and
-  host-capture wiring lands.
+  `pulp_inspect_screenshot` currently returns an explicit unavailable error
+  until host-capture wiring lands. `pulp_inspect_evaluate` is
+  unavailable in normal launches, but an explicitly wired custom fixture can
+  enable it; that
+  opt-in is remote code execution.
   Timeline projects have five native tools:
   `pulp_timeline_project_open`, `pulp_timeline_command_apply`,
   `pulp_timeline_validate`, `pulp_timeline_explain`, and

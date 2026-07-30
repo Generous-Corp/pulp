@@ -1,4 +1,4 @@
-// cmd_inspect.cpp — pulp inspect: connect to a running plugin's inspector server
+// cmd_inspect.cpp — experimental client for an explicitly hosted inspector fixture
 // Interactive REPL or one-shot command mode.
 
 #include <pulp/inspect/protocol.hpp>
@@ -151,7 +151,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
 
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp inspect — connect to a running plugin's inspector\n\n";
+            std::cout << "pulp inspect — experimental client for an explicitly hosted fixture\n\n";
             std::cout << "Usage: pulp inspect [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --host HOST       Connect to HOST (default: 127.0.0.1)\n";
@@ -164,12 +164,14 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "  pulp inspect --command DOM.getDocument     # One-shot query\n";
             std::cout << "  pulp inspect --command State.getParameters # Parameter snapshot\n";
             std::cout << "  pulp inspect --command Runtime.getCapabilities  # Debug-console capabilities\n";
-            std::cout << "  pulp inspect --command Runtime.evaluate --params '{\"code\":\"1+1\"}'  # Evaluate in the live UI\n";
+            std::cout << "  pulp inspect --command Runtime.evaluate --params '{\"code\":\"1+1\"}'  # Custom fixture only\n";
             std::cout << "  pulp inspect --command Console.getMessages --params '{\"sinceSeq\":0}'  # Tail device logs\n";
             std::cout << "\n";
-            std::cout << "Note: Runtime.evaluate / Runtime.interrupt reach the live scripted UI only\n";
-            std::cout << "when the host wired the runtime inspector AND opted into eval (off by\n";
-            std::cout << "default — eval is RCE over an unauthenticated transport). Runtime reports\n";
+            std::cout << "Note: normal Pulp standalone and plugin-format launches do not start an\n";
+            std::cout << "inspector endpoint. This client requires a custom host/test fixture that\n";
+            std::cout << "constructs InspectorServer. Its transitional transport is unauthenticated.\n";
+            std::cout << "Runtime.evaluate is RCE and additionally requires explicit custom-host\n";
+            std::cout << "wiring and opt-in. Runtime reports\n";
             std::cout << "honest capabilities via Runtime.getCapabilities; source-line\n";
             std::cout << "breakpoints/stepping are not offered (mainline QuickJS has no debug protocol).\n";
             std::cout << "Capture.screenshot reports unavailable until host-capture wiring lands.\n";
@@ -212,7 +214,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
         port = discover_port();
         if (port == 0) {
             std::cerr << "Error: no running Pulp inspector found.\n";
-            std::cerr << "  Launch a plugin with inspector enabled, or specify --port.\n";
+            std::cerr << "  Start an explicitly wired custom-host fixture, or specify --port.\n";
             return 1;
         }
         std::cout << ic_dim() << "Found inspector on port " << port << ic_reset() << "\n";

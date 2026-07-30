@@ -4,11 +4,13 @@
 #include "smf_error.hpp"
 #include "smf_tick_scale.hpp"
 
+#include <pulp/interchange/capability.hpp>
 #include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timebase/tick.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <limits>
@@ -34,6 +36,35 @@ using runtime::Err;
 using runtime::Ok;
 
 using ImportResult = runtime::Result<SmfImport, SmfError>;
+
+using interchange::Concept;
+
+constexpr std::array kImplementedImports{
+    Concept::TrackFlat,   Concept::ClipMusical, Concept::ClipNote,
+    Concept::TempoSingle, Concept::TempoMap,    Concept::MeterSingle,
+    Concept::MeterMap,
+};
+
+constexpr bool implemented(Concept concept_value) noexcept {
+    return std::find(kImplementedImports.begin(), kImplementedImports.end(), concept_value) !=
+           kImplementedImports.end();
+}
+
+static_assert([] {
+    for (std::size_t index = 0; index < interchange::kConceptCount; ++index) {
+        const auto concept_value = static_cast<Concept>(index);
+        if (interchange::import_supports(interchange::Format::Smf, concept_value) &&
+            !implemented(concept_value))
+            return false;
+    }
+    return true;
+}(), "an SMF import row is declared supported but this reader does not implement it");
+
+std::optional<SmfError> admit(Concept concept_value, std::string message) {
+    if (interchange::import_supports(interchange::Format::Smf, concept_value))
+        return std::nullopt;
+    return smf_error(SmfErrorCode::UnsupportedFeature, std::move(message));
+}
 
 constexpr double kMinimumBpm = 1.0;
 constexpr double kMaximumBpm = 1'000.0;
@@ -183,6 +214,13 @@ std::optional<SmfError> Importer::collect_maps() {
             meter_points.push_back({timebase::TickPosition{merged.canonical_tick}, signature});
     }
 
+    if (auto failure = admit(tempo_points.size() > 1 ? Concept::TempoMap : Concept::TempoSingle,
+                             "the SMF capability table refuses the decoded tempo map"))
+        return failure;
+    if (auto failure = admit(meter_points.size() > 1 ? Concept::MeterMap : Concept::MeterSingle,
+                             "the SMF capability table refuses the decoded meter map"))
+        return failure;
+
     auto tempo_map = timebase::TempoMap::create(tempo_points);
     if (!tempo_map)
         return smf_error(SmfErrorCode::TempoMapRejected,
@@ -275,6 +313,13 @@ runtime::Result<std::optional<Clip>, SmfError> Importer::build_track_clip(std::s
     if (notes.empty())
         return ClipResult(Ok(std::optional<Clip>{}));
 
+    if (auto failure = admit(Concept::ClipNote,
+                             "the SMF capability table refuses decoded note content"))
+        return ClipResult(Err(*failure));
+    if (auto failure = admit(Concept::ClipMusical,
+                             "the SMF capability table refuses musical clip placement"))
+        return ClipResult(Err(*failure));
+
     // Notes are stored relative to their clip, so the clip spans exactly the
     // track's sounding range and every note start stays inside it.
     for (auto& note : notes) {
@@ -325,6 +370,9 @@ ImportResult Importer::run() {
         // export always writes such a chunk as the conductor track.
         if (!clip.value() && name.empty())
             continue;
+        if (auto failure = admit(Concept::TrackFlat,
+                                 "the SMF capability table refuses flat tracks"))
+            return Err(*failure);
         std::vector<Clip> clips;
         if (clip.value())
             clips.push_back(std::move(*clip.value()));

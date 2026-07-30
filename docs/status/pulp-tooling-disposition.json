@@ -1647,6 +1647,31 @@
         "subcommands": []
       },
       {
+        "name": "forge",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "catalog export",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--check",
+                "kind": "flag"
+              },
+              {
+                "name": "--write",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -1891,7 +1916,7 @@
           {
             "name": "--from",
             "kind": "option",
-            "required": true
+            "required": false
           },
           {
             "name": "--outline",
@@ -1935,6 +1960,18 @@
           },
           {
             "name": "--allow-network-fetch",
+            "kind": "flag"
+          },
+          {
+            "name": "--browser",
+            "kind": "option"
+          },
+          {
+            "name": "--offline",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-browser-network",
             "kind": "flag"
           },
           {
@@ -4071,8 +4108,20 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "contrib-intake",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "contribute",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "daw-smoke",
         "disposition": "excluded"
+      },
+      {
+        "name": "decide",
+        "disposition": "pulp-owned"
       },
       {
         "name": "engine",
@@ -4373,6 +4422,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "pulp_inspect_value_channels",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_kit",
         "disposition": "pulp-owned"
       },
@@ -4505,7 +4558,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.394.2",
+        "version": "0.400.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4520,13 +4573,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.394.2",
+        "catalog_version": "0.400.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.394.2",
+        "version": "0.400.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

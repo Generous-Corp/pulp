@@ -601,7 +601,19 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
 // view leaves hosts like Logic with dead keyboard routing (Musical Typing
 // stays silent after a type-in commit until the user resets the track).
 static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
-    if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
+    if (win.contentView == nil) return nil;
+    // Nothing worth restoring — but NOT nothing to restore TO. Handing the
+    // keyboard to nil makes the window itself first responder, and a window is
+    // the end of the line: Logic's Musical Typing never sees the key. That is
+    // invisible while the editor is backgrounded (the host's own window is key
+    // and routes normally) and dead the moment it comes forward, which is
+    // exactly how it was reported.
+    //
+    // `saved == win` is the common way in: foreground the editor with nothing
+    // focused, click the composer, and the responder captured at grab time IS
+    // the window. Falling back to the host's content view puts the keyboard
+    // back inside the host's own responder chain instead of at its end.
+    if (saved == nil || saved == (NSResponder*)win) return win.contentView;
     NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
     while (stack.count > 0) {
         NSView* v = stack.lastObject;
@@ -609,7 +621,10 @@ static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindo
         if (v == (NSView*)saved) return saved;
         [stack addObjectsFromArray:v.subviews];
     }
-    return nil;
+    // The saved responder is gone from the tree (the host tore down whatever
+    // held it). Same rule as above: hand the keyboard back into the host's
+    // chain, never to the window.
+    return win.contentView;
 }
 
 // Keep CPU and GPU embedded views on one responder-transfer contract. A text
@@ -1798,6 +1813,10 @@ public:
                 this->on_native_frame_changed(w, h);
             };
 
+            // This host builds its surface right here, but say "not yet"
+            // first so a consumer that observes mid-construction never reads
+            // the null as "this editor is CPU".
+            mark_gpu_surface_pending();
             init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
         }
     }
@@ -1819,6 +1838,10 @@ public:
             metal_view_.onBackingChange = nil;
             metal_view_.onResize = nil;
         }
+        // Publish the teardown while the surfaces are still alive, so a
+        // consumer holding the raw pointer drops it here rather than on its
+        // next frame.
+        publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
         skia_surface_.reset();
         gpu_surface_.reset();
         metal_view_.rootView = nullptr;
@@ -2051,6 +2074,7 @@ private:
         if (!gpu_surface_) {
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=create_dawn_null "
                             "falling_back=cpu-paint\n");
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2069,6 +2093,7 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=initialize "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
 
@@ -2082,8 +2107,12 @@ private:
             fprintf(stderr, "[plugin-gpu-host] gpu init failed reason=skia_create_null "
                             "falling_back=cpu-paint\n");
             gpu_surface_.reset();
+            publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
+        // The surface is live. Consumers subscribed via observe_gpu_surface()
+        // learn about it here rather than having to poll gpu_surface().
+        publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
         fprintf(stderr, "[plugin-gpu-host] init requested size=%.0fx%.0f scale=%.1f "
                         "gpu=%ux%u\n", width, height, scale, phys_w, phys_h);
     }

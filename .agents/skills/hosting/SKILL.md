@@ -1105,9 +1105,21 @@ registry header. Use the family header that owns the DSP you are exposing:
   `forge_tape_catalog.hpp` for nonlinear/color processors.
 - `forge_dynamics_catalog.hpp` for feed-forward, VCA, FET, and diode-bridge
   compressors.
+- `forge_multiband_catalog.hpp` for the two-band Linkwitz-Riley plus compressor
+  composition, and `forge_sidechain_catalog.hpp` for the two-input compressor
+  whose port 0 is signal and port 1 is the external detector/key.
+- `forge_wavetable_catalog.hpp` for the zero-input, one-output fixed-bank
+  wavetable source. Source-node consumers must preserve that 0 -> 1 shape; do
+  not invent a dummy audio input in an application registry.
 - `forge_effect_modulation_catalog.hpp`, `forge_pitch_catalog.hpp`,
   `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
   `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
+
+The sidechain HPF setter resets its biquad when the cutoff changes. Cache the
+last applied cutoff in any baked adapter and call the setter only on an actual
+change; calling it unconditionally per block manufactures a fresh detector
+transient and prevents the HPF state from ever settling. Keep a regression that
+runs enough unchanged blocks for a DC key to disappear through the HPF.
 
 Each header owns its stable type/parameter IDs, declared ranges, and `make_*_node`
 factory. Consumers should use those constants and factories rather than duplicate
@@ -1830,7 +1842,7 @@ it with the index, so adding an unindexed pack or retaining an entry for a
 removed pack fails closed. Downstream consumers should derive their Pulp catalog
 header set from this index instead of maintaining another manual list.
 
-Two things bite when adding a pack:
+Three things bite when adding a pack:
 
 - **A control signal is an ordinary audio port.** The convention across every
   pack is a unipolar `[0, 1]` signal on a normal port — a source declares
@@ -1843,6 +1855,13 @@ Two things bite when adding a pack:
   header is invisible to that check — the nodes exist, nothing reaches them, and
   every test stays green — until the consumer's header list learns about it.
   When you add a pack, add its header to that list in the same change.
+- **Gain metadata belongs to the catalog that owns the DSP.** A downstream
+  registry must call a catalog helper, not reconstruct a bound from engine
+  constants. When the runtime helper depends on sample rate but the registry
+  stores one fixed number, expose a second catalog helper for the all-rate
+  ceiling (for example, `vocoder_all_sample_rates_worst_case_gain()`) and test
+  that it bounds the rate-specific helper. Otherwise DSP math leaks into the
+  importer/generator layer and the two formulas drift independently.
 
 Reconfiguring state (a filter's cutoff range, an envelope's stage lengths) is a
 per-block-on-change read of `BakedParamView::value_at(id, 0)`, not a per-sample
@@ -2045,3 +2064,50 @@ initializers. Two rules bind when you add or move a binder:
 
 `tools/scripts/designated_initializer_lint.py` guards the duplicate case; adding
 a binder out of order is still only caught by an MSVC build.
+
+## A Forge-exposed parameter needs a descriptor, not just a baked range
+
+`CustomNodeBakedParam` carries id, min, max and default — everything the audio
+graph needs, and nothing an agent choosing the node can read. The rest of the
+vocabulary (stable key, label, unit, stepped-vs-continuous, named states,
+description, and the finite construction axes) lives in
+`ForgeNodeDescriptor` (`pulp/host/forge_param_descriptor.hpp`), authored as an
+`inline ForgeNodeDescriptor descriptor()` next to the node it describes.
+`forge_fuzz_catalog.hpp` is the worked example.
+
+Two rules that are easy to get wrong:
+
+- **Descriptors carry no range or default.** Those are joined from the baked
+  node at export time so a number exists in exactly one place. Adding them back
+  reintroduces the drift the descriptor was built to end.
+- **A parameter absent on some realizations is expressed with
+  `realization_modes`, not by dropping it.** Some families deliberately omit a
+  control that would be inert (an Ampex deck has no selectable EQ standard), and
+  an inert control presented as live is a worse answer than an absent one.
+- **A named choice that exists only on some realizations carries its own
+  `realization_modes`.** Tape EQ is the worked example: Studer exposes NAB/CCIR
+  while cassette exposes Type I/II. A single unscoped four-choice list lies
+  about both baked ranges.
+- **Each concrete realization explicitly selects every finite axis.** Do not
+  make a consumer parse an opaque mode like `silicon_x4`; its `settings` pairs
+  machine keys (`device=silicon`, `oversampling=x4`) with the exact `type_id`.
+
+`audit_forge_descriptor()` joins descriptors against the node in both
+directions, so a node that gains a control with no descriptor fails as loudly
+as a descriptor for a control that was removed — the two ways a catalog goes
+quietly stale. `tools/scripts/forge_descriptor_coverage.py` holds the other
+half: its independent 77-key semantic manifest must agree with the 19-pack
+index, descriptor sources, expected-node inventory, and explicit export
+registrations. There is no `PENDING` escape hatch, so a newly indexed pack
+cannot land undescribed.
+
+`forge_catalog_export_nodes()` is the runtime projection used by
+`pulp forge catalog export`. It constructs each registered semantic node and
+copies `baked_params` beside its descriptor; JSON serialization joins by
+`ParamID` and realization, so each `min`/`max`/`default` always comes from that
+concrete DSP declaration rather than one representative preset.
+`audit_forge_catalog_export()` checks both descriptor parity and an independent
+expected-node inventory. Keep the missing-node negative control: removing a
+registry entry must fail instead of emitting a shorter, superficially valid
+document. SDK installs carry the checked projection at
+`share/pulp/forge-catalog.json`; consumers read it from the selected SDK.

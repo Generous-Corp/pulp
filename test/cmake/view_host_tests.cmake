@@ -101,6 +101,38 @@ pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
 # unclipped for a full one, clearing the pending region after each paint.
 pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
 
+# PendingDamage's take()/restore() consume-and-return contract — the operation
+# that stops a host from reading three accessors and then clearing a different
+# logical state, and that lets a frame which never reached the screen keep its
+# damage for the retry.
+pulp_add_test_suite(pulp-test-pending-damage LIBRARIES pulp::view)
+
+# PluginViewHost GPU-surface lifecycle notification: delayed creation (the
+# Windows attach-time ordering), detach, destruction, reattach, mid-session
+# recreation, and no-callback-after-unsubscribe. Deliberately does NOT link
+# pulp::render — the contract is about pointer publication, so the suite runs
+# in no-GPU configurations too.
+pulp_add_test_suite(pulp-test-gpu-surface-lifecycle LIBRARIES pulp::view)
+
+# The SHARED adapter binding (bind_gpu_surface) that wires a host's surface
+# lifecycle into a scripted UI session, plus the CPU-fallback diagnostic that
+# must stay silent while the surface is merely `pending`. Five format adapters
+# depend on this one helper.
+pulp_add_test_suite(pulp-test-gpu-surface-binding
+    LIBRARIES pulp::format pulp::view pulp::state)
+
+# The PURE half of the shared Windows/Linux frame pipeline: the damage -> clip
+# decision (hazard model, design-viewport mapping, pixel snapping) and the
+# scene paint body. Skia-free on purpose, so the logic the Windows and Linux
+# hosts share is exercised by the macOS gate.
+pulp_add_test_suite(pulp-test-plugin-frame-clip LIBRARIES pulp::view pulp::canvas)
+
+# The GPU drive on top of it: the visible-frame success contract (a failed
+# native wrap / blit / submit is never a rendered frame), damage retention
+# across a failed frame, and the bounded surface-recreate policy. Compiles to a
+# sentinel without Skia.
+pulp_add_test_suite(pulp-test-plugin-frame-renderer LIBRARIES pulp::view pulp::canvas)
+
 # paint_all compositing-layer contract (WI-27). After the FU-4 decomposition,
 # pins the push_effect_layers / pop_effect_layers save-depth invariant across
 # the full layer-inducing config matrix (opacity / filter / mask / blend /

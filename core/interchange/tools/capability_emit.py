@@ -88,7 +88,9 @@ def load_concepts(capability_dir: Path) -> list[dict]:
 
 def load_formats(capability_dir: Path, concept_ids: set[str]) -> list[dict]:
     formats = []
+    seen_formats: set[str] = set()
     seen_enums: set[str] = set()
+    seen_ordinals: set[int] = set()
     for path in sorted(capability_dir.glob("*.json")):
         if path.name == "concepts.json":
             continue
@@ -96,14 +98,23 @@ def load_formats(capability_dir: Path, concept_ids: set[str]) -> list[dict]:
         name = data.get("format")
         if not isinstance(name, str) or not name:
             raise EmitError(f"{path}: 'format' must be a non-empty string")
+        if name in seen_formats:
+            raise EmitError(f"{path}: duplicate format id {name!r}")
+        seen_formats.add(name)
         enum = data.get("enumerator")
         if not isinstance(enum, str) or not enum.isidentifier():
             raise EmitError(f"{path}: 'enumerator' must be a C++ identifier")
         if enum in seen_enums:
             raise EmitError(f"{path}: duplicate enumerator {enum!r}")
         seen_enums.add(enum)
-        if not isinstance(data.get("display_name"), str):
-            raise EmitError(f"{path}: 'display_name' must be a string")
+        ordinal = data.get("ordinal")
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
+            raise EmitError(f"{path}: 'ordinal' must be a non-negative integer")
+        if ordinal in seen_ordinals:
+            raise EmitError(f"{path}: duplicate format ordinal {ordinal}")
+        seen_ordinals.add(ordinal)
+        if not isinstance(data.get("display_name"), str) or not data["display_name"]:
+            raise EmitError(f"{path}: 'display_name' must be a non-empty string")
         if not isinstance(data.get("writer"), bool):
             raise EmitError(f"{path}: 'writer' must be a bool")
 
@@ -145,6 +156,12 @@ def load_formats(capability_dir: Path, concept_ids: set[str]) -> list[dict]:
         formats.append(data)
     if not formats:
         raise EmitError(f"{capability_dir}: no format capability files found")
+    formats.sort(key=lambda fmt: fmt["ordinal"])
+    ordinals = [fmt["ordinal"] for fmt in formats]
+    if ordinals != list(range(len(formats))):
+        raise EmitError(
+            f"{capability_dir}: format ordinals must be contiguous from zero; got {ordinals}"
+        )
     return formats
 
 
@@ -239,8 +256,8 @@ def emit_tables(concepts: list[dict], formats: list[dict]) -> str:
 
     out.append("/// Interchange formats with a committed capability declaration.\n")
     out.append("enum class Format : std::uint8_t {\n")
-    for index, fmt in enumerate(formats):
-        out.append(f"    {fmt['enumerator']} = {index},\n")
+    for fmt in formats:
+        out.append(f"    {fmt['enumerator']} = {fmt['ordinal']},\n")
     out.append("};\n\n")
     out.append(f"inline constexpr std::size_t kFormatCount = {len(formats)};\n\n")
 
@@ -437,8 +454,9 @@ def emit_docs(concepts: list[dict], formats: list[dict]) -> str:
 
     out.append("## Adding a format\n\n")
     out.append(
-        "1. Write `core/interchange/capabilities/<format>.json` declaring an\n"
-        "   `enumerator`, a `display_name`, a `writer` flag, and the `import` and\n"
+        "1. Write `core/interchange/capabilities/<format>.json` declaring the next\n"
+        "   stable contiguous `ordinal`, an `enumerator`, a `display_name`, a\n"
+        "   `writer` flag, and the `import` and\n"
         "   `export` rows the format supports.\n"
         "2. Regenerate: `capability_emit.py --emit concepts|tables|docs`, or let\n"
         "   the drift gate print the diff.\n"

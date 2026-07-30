@@ -3,12 +3,25 @@
 #include <pulp/timeline/assets.hpp>
 #include <pulp/timeline/automation_lane.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <cmath>
 #include <variant>
 
 namespace pulp::interchange {
 namespace {
 
 using timeline::ItemId;
+
+constexpr std::uint8_t velocity_16_to_7(std::uint16_t value) noexcept {
+    return static_cast<std::uint8_t>((static_cast<std::uint32_t>(value) * 127u + 0x7fffu) /
+                                     0xffffu);
+}
+
+constexpr std::uint16_t velocity_7_to_16(std::uint8_t value) noexcept {
+    return static_cast<std::uint16_t>((static_cast<std::uint32_t>(value) * 0xffffu + 63u) /
+                                      127u);
+}
 
 void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLimits& limits) {
     const ItemId id = clip.id();
@@ -18,11 +31,15 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
 
     std::visit(
         timeline::ClipContentCases{
-            // EmptyContent is the absence of content, not a concept to carry.
-            [&](const timeline::EmptyContent&) {},
+            [&](const timeline::EmptyContent&) { out.record(Concept::ClipEmpty, id, limits); },
             [&](const timeline::MediaRef&) { out.record(Concept::ClipMedia, id, limits); },
             [&](const timeline::NoteContent& notes) {
                 out.record(Concept::ClipNote, id, limits);
+                if (std::any_of(notes.notes().begin(), notes.notes().end(), [](const auto& note) {
+                        const auto encoded = velocity_16_to_7(note.velocity);
+                        return encoded == 0 || velocity_7_to_16(encoded) != note.velocity;
+                    }))
+                    out.record(Concept::ClipNoteVelocityQuantized, id, limits);
                 // Modifiers decide whether a note sounds at all, so a format
                 // that cannot carry them loses audible content. A seed with no
                 // modifiers still selects a replay, so it counts too. Recording
@@ -176,6 +193,14 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
     // map, and formats that carry only a constant lose the difference.
     out.record(project.tempo_map().points().size() > 1 ? Concept::TempoMap : Concept::TempoSingle,
                project_id, limits);
+    for (const timebase::TempoPoint& point : project.tempo_map().points()) {
+        if (point.curve_to_next != timebase::TempoCurve::Constant)
+            out.record(Concept::TempoRamp, project_id, limits);
+        const auto microseconds = std::llround(60'000'000.0 / point.bpm);
+        if (microseconds <= 0 || microseconds > 0xff'ffff ||
+            60'000'000.0 / static_cast<double>(microseconds) != point.bpm)
+            out.record(Concept::TempoValueQuantized, project_id, limits);
+    }
     out.record(project.meter_map().points().size() > 1 ? Concept::MeterMap : Concept::MeterSingle,
                project_id, limits);
 

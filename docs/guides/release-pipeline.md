@@ -65,11 +65,13 @@ PR merge to main
 │                                                          │
 │ For each platform: configure → build → strip → fix       │
 │ rpaths → package `pulp-${PLATFORM}.tar.gz` → repackage   │
-│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → attest →      │
+│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → verify the    │
+│ exact product/format matrix → attest →                   │
 │ upload as an Actions artifact. The `smoke-cli` matrix    │
 │ then extracts each tarball on a fresh runner and runs    │
-│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version` to    │
-│ catch missing-symbol / bad-rpath bugs before publish.    │
+│ `pulp help`, `pulp-cpp help`, `pulp-mcp --version`, and  │
+│ `pulp import-design --help`; it also checks the browser  │
+│ capture runtime, catching missing delegates/rpaths.      │
 │                                                          │
 │ Final `release` job — the SOLE writer of the release:    │
 │   1. Download all 12 matrix artifacts.                   │
@@ -81,8 +83,10 @@ PR merge to main
 │   4. Create the release as a DRAFT and attach all 13     │
 │      assets. (A published release is immutable, so       │
 │      assets can only land while it is still a draft.)    │
-│   5. Verify the EXACT required asset set, generate and   │
-│      upload SHA256SUMS.                                  │
+│   5. Download the draft assets back and verify their     │
+│      internal product matrix (targets, formats, version, │
+│      executable modes); verify the EXACT outer asset set,│
+│      generate and upload SHA256SUMS.                     │
 │   6. Publish — claiming /releases/latest only if this    │
 │      tag is the greatest published SemVer.               │
 │                                                          │
@@ -237,7 +241,7 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | Asset | Purpose |
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
-| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, and runtime library) |
+| `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, browser-capture runtime, and GPU runtime library) |
 | `pulp-darwin-x64.tar.gz` | Intel (x86_64) CLI tarball — cross-compiled on Apple Silicon |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |
@@ -250,6 +254,17 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | `pulp-sdk-windows-arm64.tar.gz` | " |
 | `pulp-sdk-windows-x64.tar.gz` | " |
 | `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above (13 base) |
+
+The asset table is only the outer contract. Before publication,
+`release_artifact_contents.py` opens those exact downloaded draft assets and
+enforces the internal product matrix: the complete public Pulp library target
+set, VST3/CLAP/LV2 development surfaces on every SDK, Audio Unit on Darwin,
+matching version and Release markers, exact CLI payloads, safe paths, and Unix
+executable modes. Each native build leg runs the same verifier before upload;
+Darwin additionally performs real strict code-signature verification after
+re-signing installed Mach-O files whose RPATHs changed during install. This is
+what prevents a green publisher from shipping a correctly named archive full of
+stale or incomplete products.
 
 **Intel `darwin-x64` — cross-compiled, required.** `release-cli.yml`'s
 `darwin-x64` build+smoke legs (`os: macos-15-xcompile`) cross-compile the x86_64

@@ -13,6 +13,7 @@
 
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -46,6 +47,10 @@
     std::unique_ptr<pulp::format::ViewBridge> _bridge;
     std::unique_ptr<pulp::view::View> _fallbackView;
     std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
+    // Forwards _viewHost's GPU-surface transitions into _bridge's scripted UI
+    // session. Declared AFTER _viewHost so reverse-order destruction drops it
+    // before the host it observes; the teardown paths reset it explicitly too.
+    pulp::view::PluginViewHost::GpuSurfaceSubscription _gpuSurfaceBinding;
 }
 
 - (void)viewDidLoad {
@@ -145,6 +150,7 @@
         _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
         _resizeProcessor = nullptr;
     }
+    _gpuSurfaceBinding.reset();
     _viewHost.reset();
     _fallbackView.reset();
     _bridge.reset();
@@ -194,19 +200,13 @@
         mode = gpu.mode;
         _viewHost = pulp::view::PluginViewHost::create(*root, opts);
         if (_viewHost) {
-            pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
-            _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
-            // Hand the host's live GpuSurface to the scripted-UI session so
-            // JS navigator.gpu / canvas.getContext('webgpu') routes through
-            // Pulp's Dawn instance instead of mocks.
-            if (auto* scripted = _bridge->scripted_ui()) {
-                scripted->attach_gpu_surface(_viewHost->gpu_surface());
-                if (_viewHost->gpu_surface()) {
-                    pulp::runtime::log_info(
-                        "[plugin-gpu-host] GpuSurface attached to WidgetBridge "
-                        "via ScriptedUiSession (iOS AUv3)");
-                }
-            }
+            _viewHost->set_idle_callback(pulp::format::make_editor_idle_pump(*_bridge));
+            // Follow the host's GpuSurface so JS navigator.gpu /
+            // canvas.getContext('webgpu') routes through Pulp's Dawn instance
+            // instead of mocks — and so the session drops the pointer when the
+            // host tears the surface down. Also owns the CPU-fallback warning.
+            _gpuSurfaceBinding = pulp::format::bind_gpu_surface(
+                *_viewHost, _bridge->scripted_ui(), gpu, "iOS AUv3");
         }
     } else {
         _viewHost = pulp::view::PluginViewHost::create(*root, opts);
@@ -339,6 +339,9 @@
                 (const void *)self, nullptr);
             self->_resizeProcessor = nullptr;
         }
+        // Before the host publishes its surface teardown, and before the
+        // scripted session the observer writes into can go away.
+        self->_gpuSurfaceBinding.reset();
         self->_viewHost.reset();
     };
     if ([NSThread isMainThread]) {

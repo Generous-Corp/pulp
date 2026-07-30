@@ -896,4 +896,5 @@ inline CustomNodeType make_univibe_node() {
 
 }  // namespace pulp::host::modulation
 
+#include <pulp/host/detail/forge_effect_modulation_catalog_descriptor.hpp>
 #include <pulp/host/detail/forge_effect_modulation_extended_catalog.hpp>

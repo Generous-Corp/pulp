@@ -18,6 +18,7 @@ target_sources(pulp-inspect PRIVATE
     src/state_inspector.cpp
     src/console_capture.cpp
     src/protocol.cpp
+    src/capabilities.cpp
     src/inspector_server.cpp
     src/audio_inspector.cpp
     src/domain_handler.cpp

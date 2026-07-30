@@ -738,6 +738,12 @@ TEST_CASE("VST3 retained editor observes processor-owner teardown",
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
     disable_editor.unset();
     headless.unset();
     test_mode.unset();
@@ -812,6 +818,12 @@ TEST_CASE("VST3 editor removed mid-gesture releases the open beginEdit",
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
     disable_editor.unset();
     headless.unset();
     test_mode.unset();

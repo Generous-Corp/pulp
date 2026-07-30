@@ -233,19 +233,6 @@ public:
                (-d0 * d1 * d3 * 0.5) * s2 + (d0 * d1 * d2 / 6.0) * s3;
     }
 
-    /// Linear interpolation between adjacent taps. Used by the vintage
-    /// character's internal-rate line, where the signal has already been
-    /// band-limited to 0.45× that grid and a higher-order kernel would model
-    /// precision the modeled converter never had.
-    double read_linear(double delay_samples) const noexcept {
-        const double d = std::clamp(delay_samples, 0.0, max_delay());
-        const auto integer = static_cast<std::size_t>(d);
-        const double frac = d - static_cast<double>(integer);
-        const double s0 = tap(integer);
-        const double s1 = tap(integer + 1u);
-        return s0 + frac * (s1 - s0);
-    }
-
 private:
     std::vector<float> buffer_;
     std::size_t capacity_ = 8;
