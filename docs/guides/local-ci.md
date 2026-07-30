@@ -17,13 +17,23 @@ than relocating it, silently deleting the only x64 Linux coverage.
 
 ```
 ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
-qm list                          # 9001 = pulp-linux-golden (template)
+qm list                          # 9xxx = pulp-linux-golden* (templates)
 systemctl status 'pulp-ephemeral-pool@*'
 journalctl -u 'pulp-ephemeral-pool@1' -f
 ```
 
-**Golden + disposable clone.** Template `9001` carries the dependency set, prebuilt
-Skia (`external/skia-build/.../libskia.a`), and a warm ccache. Each job gets a
+The supervisor and its systemd unit are versioned here as
+`tools/ci/proxmox-ephemeral-runner-linux.sh` and `tools/ci/pulp-ephemeral-pool@.service`;
+the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The script's
+`GOLDEN=` names the template in use — read it rather than trusting a number written
+down here, since re-baking a warmer golden mints a new id.
+
+**Golden + disposable clone.** The golden carries the dependency set, prebuilt
+Skia (`external/skia-build/.../libskia.a`), a warm ccache, and the shared
+FetchContent **source** cache that `setup.sh` consults via
+`PULP_SHARED_FETCHCONTENT_SOURCE_DIR`. That last one is not optional: with it
+empty, every job re-clones three.js (~2.2 GB of history) before it can compile.
+Each job gets a
 linked clone (copy-on-write, ~28 s to boot), registers a `--ephemeral` runner, takes
 exactly one job, and the clone is destroyed. Nothing accumulates, so nothing needs
 cleaning — and the cache a job inherits cannot be poisoned by the job before it.

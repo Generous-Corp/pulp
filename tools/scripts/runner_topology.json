@@ -167,6 +167,7 @@
       ],
       "provisioning": "ephemeral",
       "severity": "advisory",
+      "supervisor": "proxmox-systemd",
       "hosts": [
         "macpro"
       ]
