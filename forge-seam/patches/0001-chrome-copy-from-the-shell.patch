@@ -89,7 +89,7 @@ index 0863f43..3f2931d 100644
      pulp::view::View* shell_body_ = nullptr;
      pulp::view::View* shell_rail_ = nullptr;
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..3a27c47 100644
+index c8101e1..433eb33 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -148,7 +148,7 @@ index c8101e1..3a27c47 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +392,61 @@ public:
+@@ -343,6 +392,78 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -206,12 +206,29 @@ index c8101e1..3a27c47 100644
 +    /// an external generator is immediately.
 +    virtual bool busy() const { return false; }
 +
++    /// True when this shell runs its own generator and Forge's DSP+UI pipeline
++    /// must not run at all.
++    ///
++    /// Forge Modular produces VCV Rack modules and patches, which are not
++    /// audio plugins. Left to Forge's pipeline, a prompt for a Eurorack module
++    /// spends six model calls and two minutes generating a plugin -- the model
++    /// correctly protesting that "a plugin has no CV jacks" -- before failing
++    /// at an install step that could never have applied.
++    virtual bool owns_generation() const { return false; }
++
++    /// Where a prompt goes when the shell owns generation. Return a reason it
++    /// could not start, or empty.
++    virtual std::string submit_own(const std::string& prompt) {
++        (void)prompt;
++        return {};
++    }
++
 +
      virtual bool has_build() const = 0;
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..c02d5ca 100644
+index 1c3814e..e340362 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,75 @@ private:
@@ -516,7 +533,24 @@ index 1c3814e..c02d5ca 100644
      enter_home();
  }
  
-@@ -6189,6 +6284,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -5920,6 +6015,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+     // reduced, so it owns the mutation transaction for that whole interval.
+     if (marketplace_open_worker_.joinable()) return false;
+     const std::string text = trim_copy(prompt);
++
++    // A shell with its own generator takes the prompt here and Forge's
++    // DSP+UI pipeline never starts. Checked before any project or transcript
++    // bookkeeping, so a Rack prompt cannot leave half a plugin build behind.
++    if (shell_.owns_generation()) {
++        if (text.empty()) return false;
++        const auto why = shell_.submit_own(text);
++        if (!why.empty()) append_agent_line(why, /*error=*/true);
++        return why.empty();
++    }
+     std::optional<RecoverableTurn> pending_replay;
+     bool replaying_pending_submission = false;
+     const RecoverableTurn* pending_submission =
+@@ -6189,6 +6294,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
  }
  
  void ForgeChrome::poll() {
@@ -527,7 +561,7 @@ index 1c3814e..c02d5ca 100644
      // Publication callbacks may arrive on arbitrary provider threads. They
      // write only to a shared mailbox; the host's UI-thread tick owns every
      // ForgeChrome and widget mutation.
-@@ -6379,7 +6478,7 @@ void ForgeChrome::schedule_poll() {
+@@ -6379,7 +6488,7 @@ void ForgeChrome::schedule_poll() {
              if (!alive->load(std::memory_order_acquire)) return;
              poll_armed_ = false;
              poll();
@@ -536,7 +570,7 @@ index 1c3814e..c02d5ca 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -8630,6 +8729,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8739,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -556,7 +590,7 @@ index 1c3814e..c02d5ca 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9019,7 +9131,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9141,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(

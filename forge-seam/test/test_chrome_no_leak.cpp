@@ -1678,3 +1678,59 @@ TEST_CASE("the toolchain path is not on a volume macOS gates", "[phase8][tcc]") 
     CHECK(engine.available());
     CHECK(engine.log_path().find("/Volumes/") == std::string::npos);
 }
+
+TEST_CASE("no prompt route can reach Forge's plugin pipeline", "[phase7][routing]") {
+    // A prompt for a Eurorack module once spent six model calls and two
+    // minutes inside Forge's DSP+UI pipeline -- the model correctly protesting
+    // that "a plugin has no CV jacks" -- before failing at an install step
+    // that could never have applied. Every route must reach the Rack
+    // generator instead.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+
+    CHECK(shell.owns_generation());
+
+    // Route 1: the composer's Build button.
+    chrome->prompt_input()->set_text("a 2 HP random module");
+    auto row = shell.composer_row();
+    REQUIRE(row.right.size() >= 2);
+    REQUIRE(row.right[1].on_click);
+    row.right[1].on_click();
+    REQUIRE(engine.submissions.size() == 1);
+    CHECK(engine.submissions[0].first == "a 2 HP random module");
+
+    // Route 2: submit_prompt — what Enter in the prompt field calls, and the
+    // route that actually reached Forge's pipeline in the field.
+    chrome->submit_prompt("a 4 HP clock divider",
+                          forge::ForgeChrome::PromptOrigin::home);
+    REQUIRE(engine.submissions.size() == 2);
+    CHECK(engine.submissions[1].first == "a 4 HP clock divider");
+
+    // Route 3: a follow-up from inside the project.
+    chrome->submit_prompt("make it 6 HP",
+                          forge::ForgeChrome::PromptOrigin::project);
+    REQUIRE(engine.submissions.size() == 3);
+    CHECK(engine.submissions[2].first == "make it 6 HP");
+
+    // Forge's own generation must never have started on any of them.
+    CHECK_FALSE(chrome->generating());
+
+    // A refusal is reported rather than silently dropping the prompt.
+    engine.installed = false;
+    chrome->submit_prompt("anything at all",
+                          forge::ForgeChrome::PromptOrigin::home);
+    CHECK(engine.submissions.size() == 3);      // nothing new submitted
+    CHECK(chrome->chat_line_count() > 0);       // but the user was told
+}

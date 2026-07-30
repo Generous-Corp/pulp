@@ -504,6 +504,13 @@ void ForgeModularShell::begin_mention() {
     mentions_.handle_text(text, text.size());
 }
 
+std::string ForgeModularShell::submit_own(const std::string& prompt) {
+    // Every route into a build lands here -- the Build button, Enter in the
+    // prompt, a follow-up in the transcript -- so none of them can reach
+    // Forge's plugin pipeline by a path this shell forgot about.
+    return start_build_with(prompt);
+}
+
 std::string ForgeModularShell::start_build() {
     auto* c = chrome();
     if (!c) return "no editor is open";
@@ -512,6 +519,13 @@ std::string ForgeModularShell::start_build() {
     // An empty prompt is a no-op with a reason, not a silent nothing.
     if (prompt.find_first_not_of(" \t\n") == std::string::npos)
         return "type what you want first";
+    return start_build_with(prompt);
+}
+
+std::string ForgeModularShell::start_build_with(const std::string& prompt) {
+    auto* c = chrome();
+    if (!c) return "no editor is open";
+    auto* input = c->prompt_input();
     if (!engine_) return "the generator is not connected";
     if (!engine_->available())
         return "the generator is not installed";

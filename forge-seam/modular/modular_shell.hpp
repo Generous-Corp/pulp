@@ -98,6 +98,9 @@ public:
     /// once -- so the refusal is a value the caller must handle, not a log line.
     std::string start_build();
 
+    /// The one path every build route funnels through.
+    std::string start_build_with(const std::string& prompt);
+
     /// Ask about the artifact without changing it. Distinct from Build because
     /// an Ask that could rewrite the artifact would destroy work on a misread
     /// intent.
@@ -175,6 +178,8 @@ public:
 
     void on_poll() override;
     bool busy() const override;
+    bool owns_generation() const override { return true; }
+    std::string submit_own(const std::string& prompt) override;
 
     /// Put a wired patch on the Build stage, replacing the skeleton.
     void show_rack(std::vector<RackModule> modules,
