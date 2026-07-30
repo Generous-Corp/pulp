@@ -24,7 +24,17 @@ inline std::optional<IRNode> lower_faithful_capture_to_image(
     // a native silver knob/fader and overwrite the authored pixels.
     image.audio_widget = AudioWidgetType::none;
     image.render_mode = NodeRenderMode::normal;
+    // Children of a capture would double-draw: the bitmap already contains
+    // them, so re-emitting them paints the same pixels twice. Control overlays
+    // are the exception the composition contract depends on — a lowered knob
+    // paints ONLY its value geometry (ring, pointer) over the captured body, so
+    // it adds what the still image cannot show rather than repeating it. Drop
+    // everything else, which is what the double-draw rule is actually for.
+    auto controls = std::move(image.children);
     image.children.clear();
+    for (auto& child : controls)
+        if (child.audio_widget != AudioWidgetType::none)
+            image.children.push_back(std::move(child));
     image.alternate_frames.clear();
     image.attributes["asset_ref"] = *node.capture_asset_id;
     return image;
