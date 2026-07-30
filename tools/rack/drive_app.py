@@ -243,6 +243,13 @@ def main(argv: list[str]) -> int:
             sys.exit("build needs a prompt")
         prompt = argv[2]
         focus()
+        # Never start on top of a live run. Deleting the log of an in-flight
+        # generation does not stop it -- the process keeps writing to the
+        # unlinked file -- so the driver ends up reporting on a run that has
+        # no log and a prompt nobody typed.
+        if log_state()["generating"]:
+            sys.exit("a generation is already running — wait for it or "
+                     "`pkill -f generate.py` first")
         ensure_home()
         # A fresh log, so the verdict describes THIS run and cannot inherit a
         # previous one's success.
@@ -251,6 +258,13 @@ def main(argv: list[str]) -> int:
         if os.path.isdir(DIAGNOSTICS):
             shutil.rmtree(DIAGNOSTICS, ignore_errors=True)
         click("prompt")
+        # Clear whatever is there. The field keeps its previous contents, so
+        # typing alone submits the old prompt with the new one appended -- the
+        # run then answers a question nobody asked.
+        subprocess.run(["osascript", "-e",
+                        'tell application "System Events" to keystroke "a" '
+                        'using command down'], check=False)
+        time.sleep(0.3)
         type_text(prompt)
         click("build")
         time.sleep(10)

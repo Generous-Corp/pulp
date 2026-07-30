@@ -630,10 +630,12 @@ TEST_CASE("Random fills the composer, and never repeats itself", "[seam]") {
     CHECK(seen.size() > 1);              // not one value forever
 }
 
-TEST_CASE("what the generator says reaches the transcript", "[buildlog][seam]") {
-    // The failure this closes: a real capability refusal went to a log file
-    // nobody opens while the screen showed one unchanging word, and read to a
-    // human as a hang. The refusal has to arrive in the chat, marked.
+TEST_CASE("a run reports itself on the status card, not in the chat",
+          "[buildlog][seam]") {
+    // Forge narrates a build on the status card and keeps the transcript for
+    // things worth reading afterwards. Pushing every generator line into the
+    // chat produced dozens of low-value bubbles per build -- gate notes,
+    // retries, compiler paths -- and buried the one message that mattered.
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
     pulp::state::StateStore store;
@@ -645,45 +647,49 @@ TEST_CASE("what the generator says reaches the transcript", "[buildlog][seam]") 
     shell.prepare(pc);
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
 
     const auto log = std::filesystem::temp_directory_path() /
                      "forge-modular-narration.log";
     std::filesystem::remove(log);
     shell.watch_build_log(log.string());
+    const int before = chrome->chat_line_count();
 
-    const int before = shell.chrome()->chat_line_count();
-
-    // Written in two goes, because a generation writes over minutes and the
-    // pump has to pick up the tail without repeating the head.
+    // Ordinary progress and gate rejections: the card moves, the chat does not.
     {
         std::ofstream f(log);
-        f << "Planning a patch from your prompt\n"
-          << "Rejected at the behaviour gate: TONE defaults to the top of its range\n";
+        f << "  asking the model\n"
+          << "  generated FOLDR (6HP, 5 params, 2 in, 1 out)\n"
+          << "  FOLDR: param MIX_PARAM defaults to the TOP of its range\n"
+          << "  asking the model (retry 1)\n";
     }
-    const int first = shell.pump_build_log();
-    CHECK(first == 2);
-    CHECK(shell.chrome()->chat_line_count() == before + 2);
-    // A gate rejection is the pipeline working, so the run is still running.
-    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::running);
+    CHECK(shell.pump_build_log() == 4);
+    CHECK(chrome->chat_line_count() == before);        // nothing dumped
+    CHECK_FALSE(chrome->status_detail_text().empty()); // but the card says so
+    CHECK(chrome->status_detail_text().find("MIX_PARAM") != std::string::npos);
 
+    // A refusal DOES earn the transcript: the run stopped, and the reason
+    // names something the user can act on.
     {
         std::ofstream f(log, std::ios::app);
-        f << "Asking the model again with that note\n"
-          << "Hold on -- this asks for something you don't have installed\n"
-          << "Install one in Rack's Library and I'll wire it\n";
+        f << "  Hold on -- this asks for something you don't have installed\n";
     }
-    const int second = shell.pump_build_log();
-    CHECK(second == 3);                                   // the tail only
-    CHECK(shell.chrome()->chat_line_count() == before + 5);
+    CHECK(shell.pump_build_log() == 1);
+    CHECK(chrome->chat_line_count() == before + 1);
     CHECK(shell.build_outcome() == forge_modular::BuildOutcome::refused);
-    // The headline names what is missing, not the bare remedy.
-    CHECK(shell.monitor().headline().find("don't have installed") !=
-          std::string::npos);
 
-    // Nothing new to say means nothing new in the transcript: a pump on a UI
-    // tick must not re-append the log every frame.
+    // An idle tick adds nothing anywhere.
     CHECK(shell.pump_build_log() == 0);
-    CHECK(shell.chrome()->chat_line_count() == before + 5);
+    CHECK(chrome->chat_line_count() == before + 1);
+
+    // The card's note is trimmed: a 200-character compiler path would push
+    // everything else out of a two-line card.
+    {
+        std::ofstream f(log, std::ios::app);
+        f << "      " << std::string(300, 'x') << "\n";
+    }
+    shell.pump_build_log();
+    CHECK(chrome->status_detail_text().size() <= 130);
 
     std::filesystem::remove(log);
 }

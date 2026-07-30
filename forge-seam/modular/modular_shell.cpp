@@ -75,6 +75,17 @@ using pulp::view::View;
 
 namespace color = forge::design::color;
 
+/// Leading whitespace off, and long lines cut. The status card is one or two
+/// lines tall; a 200-character compiler path pushes everything else out of it.
+std::string trimmed(std::string text) {
+    const auto first = text.find_first_not_of(" \t");
+    if (first == std::string::npos) return {};
+    text = text.substr(first);
+    constexpr std::size_t kMax = 120;
+    if (text.size() > kMax) text = text.substr(0, kMax) + "\u2026";
+    return text;
+}
+
 // The prototype names --accent-soft but never defines it, so its selected pill
 // falls back to transparent and reads only as accent-coloured text. A faint
 // accent wash makes the selection unambiguous. Kept local rather than added to
@@ -541,7 +552,11 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // its old conversation.
     if (c->mode() == forge::ForgeChrome::Mode::Home) {
         c->begin_new_session();
+        c->set_status_note({});
+        c->set_status_activity({});
+        c->set_active_stage(-1);
         reported_outcome_ = BuildOutcome::running;
+        reported_stage_ = -2;
     reported_stage_ = -2;
         open_patch_.clear();
     }
@@ -667,16 +682,31 @@ void ForgeModularShell::on_poll() {
         outcome != reported_outcome_) {
         reported_outcome_ = outcome;
         if (auto* c = chrome()) {
+            // The verdict is the one line worth keeping, so it goes to both:
+            // the stage for someone watching, the transcript for someone
+            // coming back later.
             switch (outcome) {
                 case BuildOutcome::done:
                     c->set_skeleton_caption("built \u00b7 open it in Rack");
+                    c->set_status_activity({});
+                    c->narrate("Built. Open it in Rack to play it.");
                     break;
                 case BuildOutcome::refused:
-                    c->set_skeleton_caption("stopped \u2014 see the reason above");
+                    c->set_skeleton_caption("stopped");
+                    c->set_status_activity({});
+                    break;   // the refusal itself already went to the chat
+                case BuildOutcome::failed: {
+                    c->set_skeleton_caption("build failed");
+                    c->set_status_activity({});
+                    // Say what stopped it, once, rather than the whole log.
+                    auto why = monitor_.headline();
+                    c->narrate(why.empty()
+                                   ? std::string("The build failed and nothing "
+                                                 "was installed.")
+                                   : trimmed(why),
+                               /*alarming=*/true);
                     break;
-                case BuildOutcome::failed:
-                    c->set_skeleton_caption("build failed \u2014 nothing was installed");
-                    break;
+                }
                 case BuildOutcome::running:
                     break;
             }
@@ -705,6 +735,13 @@ bool ForgeModularShell::busy() const {
 void ForgeModularShell::watch_build_log(const std::string& path) {
     monitor_.watch(path);
     watching_ = true;
+    // Clear the card. Its note outlived the run that wrote it, so a fresh
+    // build opened showing the previous one's gate rejection.
+    if (auto* c = chrome()) {
+        c->set_status_note({});
+        c->set_status_activity({});
+        c->set_active_stage(-1);
+    }
     reported_outcome_ = BuildOutcome::running;
     reported_stage_ = -2;
 }
@@ -715,16 +752,41 @@ int ForgeModularShell::pump_build_log() {
     if (!c) return static_cast<int>(added.size());
 
     for (const auto& line : added) {
-        // A refusal and an error are the two a person must not miss, so they
-        // are the two the chat marks. A gate rejection is deliberately NOT an
-        // error: it is the pipeline working, and marking it red teaches people
-        // to ignore the colour.
-        const bool alarming = line.kind == BuildLine::Kind::refusal ||
-                              line.kind == BuildLine::Kind::error;
-        c->narrate(line.text, alarming);
+        switch (line.kind) {
+            // A refusal is the one thing a person must not scroll past: the
+            // run stopped, and the reason names something they can act on.
+            // It earns a place in the transcript.
+            case BuildLine::Kind::refusal:
+                c->narrate(line.text, /*alarming=*/true);
+                break;
+
+            // Everything else belongs on the status card. A gate rejection is
+            // the pipeline working; a retry is it recovering. Both were being
+            // pushed into the chat as separate bubbles, so a build produced
+            // dozens of low-value messages and buried whatever mattered. The
+            // note line shows the latest and replaces itself.
+            case BuildLine::Kind::gate:
+                c->set_status_note(trimmed(line.text));
+                break;
+            case BuildLine::Kind::retry:
+                c->set_status_activity(trimmed(line.text));
+                break;
+            case BuildLine::Kind::progress:
+            case BuildLine::Kind::success:
+                c->set_status_activity(trimmed(line.text));
+                break;
+
+            // A traceback is a defect in the toolchain rather than in what was
+            // asked for. Its first line goes to the note so it is visible, and
+            // the whole thing stays in the log for whoever debugs it.
+            case BuildLine::Kind::error:
+                c->set_status_note(trimmed(line.text));
+                break;
+        }
     }
     return static_cast<int>(added.size());
 }
+
 
 void ForgeModularShell::offer_random() {
     // Fills the composer rather than building. A suggestion you cannot read
