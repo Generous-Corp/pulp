@@ -59,7 +59,8 @@ target_link_libraries(pulp-format
         pulp::native-components
 )
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
-    # Inspector is desktop-only AND GPU-only — pulp-inspect is added in
+    # The current monolithic inspector archive is desktop-only and GPU-only —
+    # pulp-inspect is added in
     # the root CMakeLists.txt under `if(PULP_ENABLE_GPU AND NOT ANDROID)`.
     # Linking it here without the same guard breaks PULP_ENABLE_GPU=OFF
     # builds (the sanitizer matrix in .github/workflows/sanitizers.yml
@@ -71,12 +72,12 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     target_compile_definitions(pulp-format PRIVATE PULP_HAS_INSPECT=1)
 endif()
 
-# PULP_ENABLE_INSPECTOR gates whether standalone.cpp actually wires the
-# dev inspector (creation + install_inspector_hooks + idle paint pump).
+# PULP_ENABLE_INSPECTOR gates whether standalone.cpp wires the visual
+# Cmd+I overlay (creation + install_inspector_hooks + idle paint pump).
 # Defined unconditionally as 0/1 so source can `#if PULP_ENABLE_INSPECTOR`
-# even on builds that don't link pulp-inspect. Release/standalone-ship
-# builds configure with -DPULP_ENABLE_INSPECTOR=OFF to keep the dev
-# inspector out of shipped apps.
+# even on builds that don't link pulp-inspect. Set it OFF to disable that
+# overlay.
+# This does not currently remove the transitive pulp::inspect archive link.
 if(PULP_ENABLE_INSPECTOR)
     target_compile_definitions(pulp-format PRIVATE PULP_ENABLE_INSPECTOR=1)
 else()

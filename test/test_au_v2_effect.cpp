@@ -961,6 +961,34 @@ TEST_CASE("AU v2 effect clears OutputIsSilence when the processor generates outp
     effect.DoCleanup();
 }
 
+TEST_CASE("AU v2 shared state restore publishes a UI reconciliation edge",
+          "[au][au-v2][state-restore]")
+{
+    DcEffectProcessor processor;
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {-24.0f, 24.0f, 0.0f, 0.1f},
+    });
+    pulp::format::StateRestoreGate gate;
+
+    store.set_value(1, -12.0f);
+    CFPropertyListRef preset = nullptr;
+    REQUIRE(pulp::format::au::save_pulp_state(
+                store, processor, &preset) == noErr);
+    REQUIRE(preset != nullptr);
+
+    store.set_value(1, 6.0f);
+    const auto restore_revision = store.state_restore_revision();
+    REQUIRE(pulp::format::au::restore_pulp_state(
+                store, processor, gate, preset) == noErr);
+    REQUIRE(store.state_restore_revision() == restore_revision + 1);
+    REQUIRE(store.get_value(1) == -12.0f);
+
+    CFRelease(preset);
+}
+
 // ===========================================================================
 // #6190 — the real AU v2 adapter's bypass is latency-compensated.
 //

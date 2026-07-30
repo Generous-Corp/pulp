@@ -247,7 +247,7 @@ notarization, PlugInKit diagnostics) is in
 
 The same off-main hazard applies to `-dealloc`. A GPU-backed
 `PluginViewHost` owns a `CVDisplayLink` whose idle pump
-(`make_scripted_idle_pump`) is `dispatch_async`'d to the **main queue**
+(`make_editor_idle_pump`) is `dispatch_async`'d to the **main queue**
 and dereferences the `ViewBridge`. If the last controller release lands
 on the XPC connection queue (it can — `createAudioUnit…` and the rebuild
 bounce arrive off-main), destroying the host + bridge off-main races a
@@ -646,7 +646,7 @@ and look like it worked.
    `MacGpuWindowHost::paint_scene` overlay-inside-transform rule.
 9. **A GPU display-link idle pump can outlive its `ViewBridge` — guard on
    `ViewBridge::alive_token()`, not the host's own `alive_`.** The GPU
-   scripted-idle pump (`gpu_host_select.hpp::make_scripted_idle_pump`) is
+   editor idle pump (`gpu_host_select.hpp::make_editor_idle_pump`) is
    dispatched to the main queue by `CVDisplayLink` and captures the bridge by
    raw pointer. Two ways it runs after the bridge is gone: (a) a host reloading
    the embedded view REPLACES the bridge (`_bridge = make_unique<…>`) while the
@@ -727,7 +727,7 @@ and look like it worked.
 - `"ViewBridge destructor closes view"`
 - `"ViewBridge cross-format lifecycle invariants"` (VST3 / CLAP / AU v2 /
   AU v3 / Standalone / failed-attach replay)
-- `"scripted idle pump no-ops after the ViewBridge is destroyed"`
+- `"editor idle pump no-ops after the ViewBridge is destroyed"`
   (`[idle-pump][crash]`) — the GPU display-link pump liveness-token guard
   (pitfall 9); build the pump, `reset()` the bridge, call the pump → no UAF.
 
@@ -1079,7 +1079,7 @@ Rules when touching an adapter's editor-attach path:
 - A custom `Processor::create_view()` that owns a `ScriptedUiSession` MUST
   override `Processor::active_scripted_ui()` so `ViewBridge` reports
   `uses_script_ui()`, adapters log `mode=scripted`, select the GPU host, and
-  `make_scripted_idle_pump` can poll that session. Chainer-style generated
+  `make_editor_idle_pump` can poll that session. Chainer-style generated
   processors use this path.
 - A custom non-scripted GPU view (WebGPU/Three.js canvas, hand-built Skia view)
   MUST call `view->set_requires_gpu_host(true)` on its root, or
@@ -1088,10 +1088,10 @@ Rules when touching an adapter's editor-attach path:
 - After `PluginViewHost::create(...)`, call
   `format::warn_if_unexpected_cpu_fallback(decision, host.get())` — it screams
   (`runtime::log_error`) if GPU was requested but the host fell back to CPU.
-- Wire the per-vsync scripted pump: `host->set_idle_callback(make_scripted_idle_pump(bridge))`.
+- Wire the per-vsync editor pump: `host->set_idle_callback(make_editor_idle_pump(bridge))`.
   Without it a JS UI paints its first frame but `requestAnimationFrame` /
   timers / async results never fire.
-- `make_scripted_idle_pump` captures the `ViewBridge` by raw pointer, so the
+- `make_editor_idle_pump` captures the `ViewBridge` by raw pointer, so the
   host MUST be destroyed before the bridge. In AU/VST3/CLAP the bridge is
   declared before the host (reverse-destruction → host first); keep that order.
 - AU v2 has no host resize callback — use `host->set_resize_callback(...)` to
@@ -1264,10 +1264,61 @@ through Pulp's real Dawn instance. Without it, those shims fall through
 to mocks and any JS-rendered WebGPU output (Three.js, raw WebGPU) is
 black.
 
+### Subscribe, do not sample (the Windows trap)
+
+**Never read `host->gpu_surface()` once and hand the result to the
+session.** That read is only correct on hosts that build their surface in
+the constructor (Apple, Linux). The Windows host CANNOT: Dawn configures
+presentation for the HWND's native-window shape, and the editor HWND is a
+hidden `WS_POPUP` until `attach_to_parent()` reparents it into the DAW. A
+read taken at editor-open time returns `nullptr` and never becomes
+non-null on its own — so `navigator.gpu` fell through to mocks on every
+Windows editor while the CPU-fallback diagnostic screamed about a host
+that was about to run on the GPU. The same one-shot read also had nowhere
+to learn about DETACH, so a consumer kept a raw pointer to a destroyed
+surface.
+
+Use the shared helper instead — one call, every format:
+
+```cpp
+// core/format/include/pulp/format/gpu_host_select.hpp
+gpu_surface_binding_ =
+    bind_gpu_surface(*editor_host_, bridge_.scripted_ui(), gpu, "VST3");
+```
+
+It subscribes to `PluginViewHost::observe_gpu_surface()`, forwards each
+transition into `ScriptedUiSession::attach_gpu_surface()` (including the
+`nullptr` on teardown), and owns the CPU-fallback diagnostic so it can
+only fire once the state is genuinely decided.
+
+**Surface availability is THREE states**, not two — collapsing them is
+what produced the false warning:
+
+| State | Meaning | Correct reaction |
+|---|---|---|
+| `pending` | will be created, not yet | wait; say nothing |
+| `ready` | live; `gpu_surface()` non-null | attach it |
+| `unavailable` | CPU host, or GPU init failed | detach; NOW a CPU-fallback warning is true |
+
+**Lifetime rule:** the returned `GpuSurfaceSubscription` must be
+`reset()` before the `ScriptedUiSession` it writes into is destroyed.
+Declare it AFTER the host member (reverse-destruction order drops it
+first) AND reset it explicitly in the adapter's close/removed path — the
+bridge that owns the session usually outlives both. Dropping the
+subscription is sufficient: no callback can fire afterwards, even from
+the host's destructor.
+
+Contract tests: `pulp-test-gpu-surface-lifecycle` (delayed creation,
+detach, destruction, reattach, mid-session recreation,
+no-callback-after-unsubscribe, self-unsubscribe from inside a callback).
+
+### The underlying attach points
+
 The order is fixed by the adapter editor lifecycle: `ViewBridge::open()`
 constructs the `ScriptedUiSession` (and its `WidgetBridge`) BEFORE
-`PluginViewHost::create()` allocates the `GpuSurface`. Two new API
-points close that gap:
+`PluginViewHost::create()` allocates the `GpuSurface`. Two API points
+close that gap (both now driven BY the subscription above rather than
+called directly from adapters):
 
 - `pulp::view::WidgetBridge::attach_gpu_surface(GpuSurface*)` — idempotent
   late-attach; nullable. Stores the pointer + lazily allocates the
@@ -1291,10 +1342,21 @@ The expected log line on success:
 [plugin-gpu-host] GpuSurface attached to WidgetBridge via ScriptedUiSession (<format>)
 ```
 
-`PluginViewHost::gpu_surface()` is a new virtual mirroring
-`WindowHost::gpu_surface()` (CPU hosts inherit the nullptr default; GPU
-hosts on iOS/macOS override). Future Windows/Linux factory hosts that
-want WebGPU JS plumbing must override the virtual too.
+`PluginViewHost::gpu_surface()` mirrors `WindowHost::gpu_surface()` (CPU
+hosts inherit the nullptr default; GPU hosts override). A host that
+overrides it MUST also publish its transitions:
+
+- `mark_gpu_surface_pending()` in the constructor when it intends to
+  create a surface later;
+- `publish_gpu_surface(surface, GpuSurfaceState::ready)` once the pair is
+  live;
+- `publish_gpu_surface(nullptr, GpuSurfaceState::unavailable)` BEFORE the
+  surface objects are destroyed — publishing after the reset leaves a
+  window in which consumers hold a dangling pointer they still believe is
+  current.
+
+A host that does neither reports `unavailable` forever, which is the
+correct answer for a genuinely CPU-only host.
 
 Coverage: `pulp-test-widget-bridge "[gpu-surface-plumbing]"` (ctor +
 late-attach + idempotence + detach) and `pulp-test-scripted-ui
@@ -1473,7 +1535,7 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   colors with `Color::rgba8(r,g,b,a)`, NOT `Color{26,26,32,255}` brace-init,
   which Skia clamps to opaque white (the white-on-white panel bug).
 - **The editor idle pump drains the param store (automation → widgets).**
-  `make_scripted_idle_pump(bridge)` (in `gpu_host_select.hpp`, set as every
+  `make_editor_idle_pump(bridge)` (in `editor_idle_pump.hpp`, set as every
   format's `set_idle_callback`) calls `bridge.store().pump_listeners()` each
   vsync. This is what makes `bind_parameter`-bound widgets follow host
   automation playback / host-side edits: `ListenerThread::Main` store changes
@@ -1483,6 +1545,16 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   host's frame loop alive (`has_idle`), so the pump runs even when nothing
   else is animating. A custom view that reads the store directly each frame
   (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.
+- **Listener-silent state restore schedules one native reconciliation frame.**
+  `StateStore::deserialize()` publishes `state_restore_revision()` only after a
+  successful restore. The editor idle pump consumes that edge on the main
+  thread, reconciles only listeners that opted into
+  `ListenerRestoreBehavior::Reconcile`, and requests one root repaint. Ordinary
+  Main and Audio listeners remain silent, and a store-wide consumed revision
+  prevents multiple ViewBridges from replaying the same reconciliation.
+  Compare revisions for inequality: a failed plugin-envelope restore can
+  advance once for the candidate parameters and again for rollback, and the
+  pump intentionally coalesces both into one refresh of the final state.
 - **A native `create_view()` sizes the host window from its own layout bounds.**
   In `ViewBridge::open`, when the editor is native (not a scripted UI) and the
   view reports non-zero `bounds()`, those bounds override the processor's
@@ -1607,9 +1679,9 @@ The mechanism is format-agnostic and driven by the shared idle pump:
   paint gets children+bg refreshed but not the subclass identity (fine for the
   common container-root editor).
 - **Repaint after rebuild.** The CPU (CoreGraphics) mac host only repaints on
-  `setNeedsDisplay`, so `make_scripted_idle_pump` calls `View::request_repaint()`
+  `setNeedsDisplay`, so `make_editor_idle_pump` calls `View::request_repaint()`
   after a rebuild. Mutating the tree alone does NOT repaint on CPU.
-- **One wiring point.** `make_scripted_idle_pump` (gpu_host_select.hpp) covers AU
+- **One wiring point.** `make_editor_idle_pump` (gpu_host_select.hpp) covers AU
   v2/v3, VST3, CLAP, and both the CPU CVDisplayLink tick and GPU display link.
   `set_idle_callback` reads "GPU only" in the base header, but the mac CPU host
   (plugin_view_host_mac.mm) runs it via its own CVDisplayLink — so the pump does
@@ -1774,7 +1846,7 @@ easy to miss:
   listener at all**. Nothing pushes to it. It has to be pulled with
   `sync_from_host_params()`.
 
-The editor idle pump (`make_scripted_idle_pump`) drives both — `pump_listeners()`
+The editor idle pump (`make_editor_idle_pump`) drives both — `pump_listeners()`
 and the bridge's private `sync_design_frames_from_host()`, which it reaches as a
 `friend` — so every plugin editor gets both channels. The pull is deliberately
 NOT public: the pump is its only production caller, and a view-side enrolment

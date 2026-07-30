@@ -8,6 +8,7 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE(parse_design_source("v0") == DesignSource::v0);
     REQUIRE(parse_design_source("pencil") == DesignSource::pencil);
     REQUIRE(parse_design_source("claude") == DesignSource::claude);
+    REQUIRE(parse_design_source("html") == DesignSource::html);
     REQUIRE(parse_design_source("designmd") == DesignSource::designmd);
     REQUIRE(parse_design_source("jsx") == DesignSource::jsx);
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
@@ -43,8 +44,25 @@ TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
     REQUIRE(std::string(design_source_name(DesignSource::claude)) == "Claude Design");
+    REQUIRE(std::string(design_source_name(DesignSource::html)) == "HTML");
     REQUIRE(std::string(design_source_name(DesignSource::designmd)) == "DESIGN.md");
     REQUIRE(std::string(design_source_name(DesignSource::jsx)) == "JSX instrument");
+}
+
+TEST_CASE("generic HTML source identity survives canonical IR serialization",
+          "[view][import][ir-v1]") {
+    DesignIR ir;
+    ir.source = DesignSource::html;
+    ir.source_file = "screen.html";
+    ir.root.type = "frame";
+    ir.root.name = "Screen";
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+
+    REQUIRE(parsed.source == DesignSource::html);
+    REQUIRE(parsed.source_file == "screen.html");
+    REQUIRE(serialize_design_ir(parsed) == canonical);
 }
 
 TEST_CASE("DesignIR v1 canonical JSON round-trips source metadata and assets",

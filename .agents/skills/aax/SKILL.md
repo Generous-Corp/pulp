@@ -341,6 +341,28 @@ helper; a shared bit-exact fixture in `test_adapter_boundary_parity.cpp`
 (`[bypass]`) covers it since the real AAX runtime can't build without the Avid
 SDK.
 
+### The editor's GPU surface is a SUBSCRIPTION, not a one-shot read
+
+`aax_effect_gui.cpp` must not sample `host_->gpu_surface()` once and hand
+the result to the scripted UI session. That read is only valid on hosts
+which build their surface in the constructor; the Windows host — the one
+Pro Tools loads — creates its Dawn surface inside
+`try_attach_to_parent()`, so a read taken before that call returns
+`nullptr` forever and the editor's WebGPU JS silently renders through
+mocks.
+
+Use the shared helper, BEFORE the attach:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host_, bridge_->scripted_ui(),
+                                        gpu, "AAX");
+if (!host_->try_attach_to_parent(parent)) { gpu_surface_binding_.reset(); ... }
+```
+
+Reset the subscription in `teardown()` before `bridge_->close()` — the
+observer writes into the session that call destroys. Full contract:
+the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge".
+
 ## Review Checklist
 
 ### Parameter semantics and declared layouts

@@ -60,7 +60,8 @@ bind_parameter(Knob& knob, state::StateStore& store, state::ParamID id) {
         [&knob, &store, id](state::ParamID changed, float) {
             if (changed == id) knob.set_value(store.get_normalized(id));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// Fader ↔ parameter (normalized).
@@ -74,7 +75,8 @@ bind_parameter(Fader& fader, state::StateStore& store, state::ParamID id) {
         [&fader, &store, id](state::ParamID changed, float) {
             if (changed == id) fader.set_value(store.get_normalized(id));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// XY pad ↔ two parameters (normalized). A single drag drives both.
@@ -97,7 +99,8 @@ bind_parameter(XYPad& pad, state::StateStore& store, state::ParamID x_id, state:
             if (changed == x_id) pad.set_x(store.get_normalized(x_id));
             if (changed == y_id) pad.set_y(store.get_normalized(y_id));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// Range slider ↔ parameter (normalized).
@@ -111,7 +114,8 @@ bind_parameter(RangeSlider& slider, state::StateStore& store, state::ParamID id)
         [&slider, &store, id](state::ParamID changed, float) {
             if (changed == id) slider.set_value(store.get_normalized(id));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// ComboBox ↔ stepped/index parameter. A selection is a one-shot gesture so
@@ -129,7 +133,8 @@ bind_parameter(ComboBox& combo, state::StateStore& store, state::ParamID id) {
         [&combo, &store, id](state::ParamID changed, float) {
             if (changed == id) combo.set_selected_silent(static_cast<int>(store.get_value(id)));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// DesignStepper ↔ stepped/index parameter (same contract as ComboBox):
@@ -147,7 +152,8 @@ bind_parameter(DesignStepper& stepper, state::StateStore& store, state::ParamID 
         [&stepper, &store, id](state::ParamID changed, float) {
             if (changed == id) stepper.set_selected_silent(static_cast<int>(store.get_value(id)));
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// Toggle (switch) ↔ parameter, as a one-shot gesture per flip.
@@ -163,7 +169,8 @@ bind_parameter(Toggle& toggle, state::StateStore& store, state::ParamID id) {
         [&toggle, &store, id](state::ParamID changed, float) {
             if (changed == id) toggle.set_on(store.get_value(id) >= 0.5f);
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// Checkbox ↔ parameter, as a one-shot gesture per flip.
@@ -179,7 +186,8 @@ bind_parameter(Checkbox& box, state::StateStore& store, state::ParamID id) {
         [&box, &store, id](state::ParamID changed, float) {
             if (changed == id) box.set_checked(store.get_value(id) >= 0.5f);
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 /// Toggle button ↔ parameter. A press is a complete one-shot gesture so
@@ -196,7 +204,8 @@ bind_parameter(ToggleButton& button, state::StateStore& store, state::ParamID id
         [&button, &store, id](state::ParamID changed, float) {
             if (changed == id) button.set_on(store.get_value(id) >= 0.5f);
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
 }
 
 } // namespace pulp::view

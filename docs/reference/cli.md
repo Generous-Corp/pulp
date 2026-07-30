@@ -1244,9 +1244,11 @@ Remaining limitation:
 
 **Status**: experimental
 
-Connect to a running Pulp inspector server. With no `--port`, the CLI
-auto-discovers the newest `pulp-inspector-*.port` file in the system temp
-directory.
+Experimental low-level client for a custom host/test fixture that explicitly
+constructs an inspector server. Normal `pulp run` and plugin-format launches do
+not currently start an endpoint. With no `--port`, the client chooses the
+newest `pulp-inspector-*.port` temp-file hint; that transitional discovery
+mechanism does not authenticate or identify an exact session.
 
 ```bash
 pulp inspect
@@ -1263,19 +1265,25 @@ Options:
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
 
-`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode` are
-reserved inspector protocol methods, but currently return explicit unavailable
-errors until script-engine and host-capture references are wired into the
-inspector domain.
+The current transport is loopback-only but unauthenticated. Do not use it for
+privileged mutation or runtime evaluation. Authenticated, exact-session
+discovery is not yet implemented.
+
+`Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
+protocol methods that currently return explicit unavailable errors until
+host-capture references are wired into the inspector domain.
+`Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
+and enabled custom fixture can evaluate code; treat that opt-in as remote code
+execution.
 
 ### motion
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Motion.*` protocol. Start the
-host with `PULP_MOTION_SERVER=1`, then use `pulp motion` to record traces,
-inspect active traces, replay `.motion.jsonl` fixtures, and toggle motion-cost
-sampling from a terminal.
+Experimental wrappers around the inspector `Motion.*` protocol. Normal Pulp
+launches do not start this endpoint, and `PULP_MOTION_SERVER` is not
+implemented. The live commands require a Pulp source checkout plus a custom
+fixture that explicitly constructs and wires the inspector server.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
@@ -1316,11 +1324,11 @@ runtime trace, fixture replay, and cost-attribution workflow.
 
 **Status**: experimental
 
-Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing
-protocol. Start the host with `PULP_TRACE_SERVER=1`, then use `pulp trace` to
-start/stop a tracing session, run SQL over the captured `.pftrace`, run L0
-preset queries, or ask for a one-shot narrated root cause. Motion tells you
-*what changed* on screen; tracing tells you *where the time went*.
+The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
+not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
+require a Pulp source checkout plus a custom inspector fixture. Offline
+`query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
+inspector session.
 
 ```bash
 pulp trace start --categories dsp,render --out /tmp/x.pftrace
@@ -1423,8 +1431,9 @@ file error.
 **Status**: partial
 
 Import designs from local Figma `.fig` files, Figma REST/file JSON, the Pulp
-Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google DESIGN.md
-source files into generated Pulp UI code.
+Figma plugin, Stitch, v0, Pencil, Claude Design, generic runnable HTML, React
+JSX, or Google DESIGN.md source files into generated Pulp UI code. Runnable
+HTML auto-detects its source, so `--from` is optional for that lane.
 
 ```bash
 pulp import-design --from fig --file design.fig --outline
@@ -1437,12 +1446,14 @@ pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --output ui.js
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`,
+`pencil`, `claude`, `html`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1455,7 +1466,8 @@ per-stage timing breakdown on stdout:
 
 `decode` covers everything that produces the parseable envelope content (for
 `--from fig` that includes the offline Node decode subprocess); `render`
-appears only when `--validate` actually rendered. Durations print as `123ms`
+appears whenever validation rendered. Runnable browser-backed HTML validates
+automatically; other lanes require `--validate`. Durations print as `123ms`
 below one second and `4.47s` at or above it; the total is measured to the
 moment of printing, so it also absorbs writes and reports.
 
@@ -1474,6 +1486,9 @@ exit codes, diagnostics, and current limitations).
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
+| `--browser <path>` | Explicit Chromium/Chrome executable for browser-solved HTML import; overrides `PULP_DESIGN_BROWSER`, browser mode, managed Chrome for Testing, and system discovery. |
+| `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
+| `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
 | `--asset-timeout-ms <ms>` | Per-request network asset timeout. |
 | `--asset-hash <uri=sha256>` | Expected content hash for an asset URI; may be repeated. |
@@ -1482,7 +1497,8 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--emit-w3c-tokens <path>` | Additionally write the imported tokens as a W3C Design Tokens (DTCG) document (`-` = stdout). `/` in token names nests into DTCG groups, dimensions use the `{"value": N, "unit": "px"}` object form, and variable provenance (id/collection/mode/adapter) lands under `$extensions["dev.pulp.source"]`. String tokens whose names clearly denote a font family (segments like `fontFamily`/`typeface`/`font`, split on `/` or `.`) emit as `$type: "fontFamily"` (comma-separated stacks become the DTCG array form); all other strings are parked losslessly under the document-root `$extensions["dev.pulp.nonStandardTokens"]` with their provenance, so every emitted token carries a standard DTCG `$type`. Additive — no other output changes. |
-| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--validate` | Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output. |
+| `--screenshot-backend {skia\|coregraphics}` | Validation render backend; browser-backed HTML uses it for the automatic A/B gate. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
 | `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
 | `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
@@ -1505,6 +1521,13 @@ Set `import_design.default_emit cpp` for baked C++ by default. If only
 session overrides, use `PULP_IMPORT_DESIGN_DEFAULT_MODE` and
 `PULP_IMPORT_DESIGN_DEFAULT_EMIT`; direct CLI flags override the matching
 config and environment value. `pulp status` shows the effective defaults.
+
+Browser selection is `--browser` > `PULP_DESIGN_BROWSER` >
+`PULP_DESIGN_BROWSER_MODE` / `import_design.browser` > an explicitly installed
+managed Chrome for Testing > system Chrome/Chromium. The default is `auto`;
+imports never download a browser. Use `pulp tool install
+chrome-for-testing`, `pulp tool doctor chrome-for-testing --run`, and `pulp
+tool uninstall chrome-for-testing` for the opt-in managed lifecycle.
 
 With `--from jsx --mode live --emit js`, the CLI writes the precompiled JSX
 runtime bundle verbatim for runtime import. That pass-through path rejects
@@ -2118,6 +2141,9 @@ Supported import-design keys:
   `--emit`. `PULP_IMPORT_DESIGN_DEFAULT_EMIT` overrides this value for one
   environment/session. If the default mode is `baked` and this key is unset,
   Pulp implies `ir-json`.
+- `import_design.browser` — `auto | managed | system` (default `auto`).
+  `PULP_DESIGN_BROWSER_MODE` overrides the config value; `PULP_DESIGN_BROWSER`
+  and `--browser` are higher-precedence explicit executable paths.
 
 Supported Claude Code plugin keys:
 

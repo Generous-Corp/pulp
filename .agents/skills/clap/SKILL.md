@@ -418,8 +418,8 @@ in the `view-bridge` skill.
 
 `gui_create` calls
 `pulp::format::decide_gpu_host(*bridge)` so a Skia/Dawn/scripted editor
-auto-selects the GPU `PluginViewHost`, wires the per-vsync scripted idle pump
-(`make_scripted_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
+auto-selects the GPU `PluginViewHost`, wires the per-vsync editor idle pump
+(`make_editor_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
 on a silent CPU fallback. CLAP's `gui_set_size` already resizes the bridge +
 host, so no extra resize seam is needed (unlike AU v2). Full contract: the
 `view-bridge` skill's "GPU view host auto-selection" section.
@@ -831,6 +831,25 @@ right after `PluginViewHost::create()` succeeds. Without this, a
 CLAP plugin whose UI uses Three.js or raw WebGPU JS renders black —
 the JS shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section.
+
+**Updated (WAH-1): subscribe, do not sample.** The one-shot
+`attach_gpu_surface(host->gpu_surface())` read this section used to
+describe is GONE. It only worked on hosts that build their surface in
+the constructor; the Windows host creates its Dawn surface inside
+`attach_to_parent()`, so the read returned `nullptr` forever and every
+Windows editor fell back to mock WebGPU. Adapters now call the shared
+helper once:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host, bridge->scripted_ui(),
+                                        gpu_decision, "CLAP");
+```
+
+It follows `PluginViewHost::observe_gpu_surface()`, forwards creation
+AND teardown into the session, and owns the CPU-fallback diagnostic
+(which no longer fires on a pre-attach `pending` state). Reset the
+returned subscription in the editor-close path, before the bridge that
+owns the session is destroyed.
 
 ## Host-quirks consumption
 

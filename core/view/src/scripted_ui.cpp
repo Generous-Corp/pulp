@@ -184,6 +184,7 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         }
         auto probe_bridge = std::make_unique<WidgetBridge>(*probe_engine, probe_root, probe_store);
         probe_bridge->set_asset_roots(asset_roots_);
+        probe_bridge->set_script_base_dir(script_path_.parent_path());
         probe_bridge->load_script(code);
         const auto t_probe = clock::now();
 
@@ -217,6 +218,7 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         // owned by the processor and outlives it.
         next_bridge->set_value_channels(value_channels_);
         next_bridge->set_asset_roots(asset_roots_);
+        next_bridge->set_script_base_dir(script_path_.parent_path());
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }

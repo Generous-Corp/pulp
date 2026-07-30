@@ -158,6 +158,7 @@ catch_discover_tests(pulp-test-ui-preview-viewport
 # detector tests do not require linking the whole pulp-import-design CLI.
 add_executable(pulp-test-design-import-designmd
     test_design_import_designmd.cpp
+    test_design_import_designmd_040.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp)
 target_include_directories(pulp-test-design-import-designmd PRIVATE
     ${CMAKE_SOURCE_DIR}

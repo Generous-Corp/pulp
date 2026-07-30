@@ -346,11 +346,9 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         + " -DPULP_BUILD_TESTS=OFF"
         + " -DPULP_BUILD_EXAMPLES=OFF"
         + " -DPULP_ENABLE_AUDIO_PROBES=OFF"
-        // Strip the dev inspector (the in-plugin authoring / MCP-reachable
-        // surface) from the shipped SDK. A developer who deliberately wants an
-        // inspectable / MCP-reachable plugin re-enables it in their own plugin
-        // build with -DPULP_ENABLE_INSPECTOR=ON. The pulp CLI / MCP server are
-        // separate binaries and are unaffected by this flag.
+        // Disable the standalone visual Cmd+I overlay in this local SDK build.
+        // This option does not itself prove endpoint or archive stripping; GPU
+        // is disabled separately below.
         + " -DPULP_ENABLE_INSPECTOR=OFF"
         // Strip the design-import authoring subsystem (importers, codegen, lock,
         // runtime design-import) from the shipped SDK. The runtime W3C token API

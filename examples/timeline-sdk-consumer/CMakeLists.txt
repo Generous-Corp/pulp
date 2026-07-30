@@ -196,11 +196,11 @@ set(_expected_importer_closure
     Pulp::sample-bank-manifest
     Pulp::dawproject-import
     Pulp::events
-    Pulp::everest
-    Pulp::hwy
     # The importer's refusal sites derive from the interchange capability table,
     # so interchange is part of its installed closure, not an internal detail.
     Pulp::interchange
+    Pulp::everest
+    Pulp::hwy
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
@@ -213,6 +213,9 @@ set(_expected_importer_closure
     Pulp::timebase
     Pulp::timeline
 )
+# Normalize both sides identically. The actual closure is de-duplicated above,
+# so an accidentally repeated entry here would make the comparison unsatisfiable
+# — which is exactly what a second `Pulp::interchange` used to do.
 list(REMOVE_DUPLICATES _expected_importer_closure)
 list(SORT _expected_importer_closure)
 if(NOT _actual_importer_closure STREQUAL _expected_importer_closure)

@@ -19,6 +19,7 @@
 // drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Linux host
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/platform/win_pointer_input.hpp>
@@ -265,6 +266,11 @@ class WinPluginViewHost : public PluginViewHost {
 public:
     WinPluginViewHost(View& root, Size size, bool use_gpu)
         : root_(root), size_(size), use_gpu_(use_gpu) {
+        // Dawn cannot configure presentation until attach_to_parent() gives the
+        // HWND its final parent and style, so gpu_surface() is legitimately
+        // null for the whole window between create() and attach. Say so, rather
+        // than letting that null read as "this host is CPU".
+        if (use_gpu_) mark_gpu_surface_pending();
         ensure_window_class();
         // Create a hidden TOP-LEVEL window first (WS_POPUP). A WS_CHILD window
         // with a null parent is not a valid creation shape; we flip the style to
@@ -288,8 +294,10 @@ public:
         root_.set_plugin_view_host(nullptr);
         shutdown_drag_drop();
 #ifdef PULP_HAS_SKIA
-        skia_surface_.reset();
-        gpu_surface_.reset();
+        // Publish the teardown before the surfaces die, so a consumer holding
+        // the raw pointer drops it here instead of on its next frame. This host
+        // is going away for good, hence `unavailable`.
+        release_gpu_surfaces(GpuSurfaceState::unavailable);
 #endif
         if (hwnd_) {
             DestroyWindow(hwnd_);
@@ -351,8 +359,21 @@ public:
         if (use_gpu_ && surface_lifecycle_.note_attached()) {
             init_gpu(static_cast<float>(size_.width),
                      static_cast<float>(size_.height));
-            if (!gpu_surface_ || !skia_surface_)
+            // Reset the recreate budget on a FRESH editor session only. Doing
+            // it inside init_gpu() would also reset it on the recreate path,
+            // and a surface that rebuilds cleanly but never presents would then
+            // recreate forever instead of falling back to CPU raster.
+            if (gpu_surface_ && skia_surface_)
+                frame_renderer_.note_surfaces_created();
+            if (!gpu_surface_ || !skia_surface_) {
                 surface_lifecycle_.note_creation_failed();
+                // GPU init failed for real (no adapter, no Skia surface). This
+                // is the ONLY point at which "silently fell back to CPU" is a
+                // true statement about this host, so it is the only point that
+                // may publish `unavailable` — a consumer that sees it can now
+                // legitimately warn.
+                release_gpu_surfaces(GpuSurfaceState::unavailable);
+            }
         }
 #endif
         repaint();
@@ -381,8 +402,12 @@ public:
             // The presentation surface is tied to the attached native-window
             // shape. Recreate it on the next attach rather than carrying a
             // surface configured for the old parent across a detach/reparent.
-            skia_surface_.reset();
-            gpu_surface_.reset();
+            // `pending`, NOT `unavailable`: this host rebuilds the surface the
+            // moment it is reattached, so consumers must wait rather than
+            // conclude the editor is CPU-only — and the CPU-fallback
+            // diagnostic must not fire on an ordinary editor close.
+            release_gpu_surfaces(use_gpu_ ? GpuSurfaceState::pending
+                                          : GpuSurfaceState::unavailable);
         }
 #endif
         ShowWindow(hwnd_, SW_HIDE);
@@ -405,9 +430,15 @@ public:
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
         } else if (dc) {
+            // Same contract as the GPU path: consume the damage for this frame
+            // and put it back if the blit never happens, so a failed raster
+            // frame does not silently retire a region nobody painted.
+            const PendingDamage::Snapshot consumed = damage_.take();
             uint32_t w = 0, h = 0;
             auto pixels = raster_render_rgba(&w, &h);
-            if (!pixels.empty()) {
+            if (pixels.empty()) {
+                damage_.restore(consumed);
+            } else {
                 // BI_RGB's 32-bit DIB byte order is BGRA on little-endian
                 // Windows. Skia readback is RGBA, so swap red/blue before the
                 // blit. A negative height makes the DIB top-down, matching the
@@ -421,11 +452,12 @@ public:
                 info.bmiHeader.biPlanes = 1;
                 info.bmiHeader.biBitCount = 32;
                 info.bmiHeader.biCompression = BI_RGB;
-                StretchDIBits(dc, 0, 0, static_cast<int>(w),
-                              static_cast<int>(h), 0, 0,
-                              static_cast<int>(w), static_cast<int>(h),
-                              pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
-                clear_pending_dirty();
+                if (StretchDIBits(dc, 0, 0, static_cast<int>(w),
+                                  static_cast<int>(h), 0, 0,
+                                  static_cast<int>(w), static_cast<int>(h),
+                                  pixels.data(), &info, DIB_RGB_COLORS,
+                                  SRCCOPY) == GDI_ERROR)
+                    damage_.restore(consumed);
             }
         }
 #endif
@@ -1063,6 +1095,36 @@ private:
 #ifdef PULP_HAS_SKIA
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
+    PluginFrameRenderer frame_renderer_;
+
+    // Tear the surface pair down and tell every consumer BEFORE the objects
+    // die. Consumers hold a raw GpuSurface*; publishing after the reset would
+    // hand them a window in which the pointer is dangling but still "current".
+    //
+    // `next_state` is not cosmetic. `unavailable` means "there will never be a
+    // surface", which is what the CPU-fallback diagnostic warns on — so a
+    // detach that is going to rebuild on the next attach must publish
+    // `pending` instead, or closing an editor logs a false gpu-init-failed
+    // error every time.
+    void release_gpu_surfaces(GpuSurfaceState next_state) {
+        publish_gpu_surface(nullptr, next_state);
+        skia_surface_.reset();
+        gpu_surface_.reset();
+    }
+
+    // Rebuild the surface pair in place, for a drawable that went bad while the
+    // editor stayed attached (device lost, a resize race). The HWND already has
+    // its final parent and style, so this is safe to do mid-session — which is
+    // exactly what makes it different from the attach-time creation path.
+    void recreate_gpu_surfaces() {
+        release_gpu_surfaces(GpuSurfaceState::pending);
+        init_gpu(static_cast<float>(size_.width),
+                 static_cast<float>(size_.height));
+        if (!gpu_surface_ || !skia_surface_) {
+            release_gpu_surfaces(GpuSurfaceState::unavailable);
+            surface_lifecycle_.note_creation_failed();
+        }
+    }
 
     void init_gpu(float width, float height) {
         runtime::log_info(
@@ -1123,51 +1185,35 @@ private:
         }
         // A newly created surface has no previous frame to preserve.
         damage_.mark_full();
+        // The surface is live: tell the scripted UI (navigator.gpu) and anyone
+        // else waiting. Publishing here rather than making consumers poll is
+        // what fixes the Windows case — every format adapter read
+        // gpu_surface() at editor-open time, which on Windows is BEFORE this
+        // point, got null, and never looked again.
+        publish_gpu_surface(gpu_surface_.get(), GpuSurfaceState::ready);
         runtime::log_info("WinPluginViewHost: GPU and Skia surfaces ready");
     }
 
-    // Shared scene paint (matches the macOS plugin GPU host).
-    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
-        // Background fill + layout + view-tree paint. The nested
-        // layout/layout_children span from View::layout_children() lands inside
-        // this one, which is what makes layout-vs-paint attribution possible.
-        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
-        // FU-2: clip the ENTIRE body, background fill included. Everything
-        // outside the clip must remain the retained scene's previous pixels;
-        // filling the background unclipped would erase them.
-        const int clip_save = canvas.save_count();
-        if (clip) {
-            canvas.save();
-            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
-        }
-        const float w = static_cast<float>(size_.width);
-        const float h = static_cast<float>(size_.height);
-        canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
-        canvas.fill_rect(0, 0, w, h);
+    // The size/scale/viewport this frame paints against. One value so the
+    // shared renderer's paint body and clip mapping cannot disagree.
+    FrameGeometry frame_geometry() const {
+        FrameGeometry g;
+        g.width = static_cast<float>(size_.width);
+        g.height = static_cast<float>(size_.height);
+        g.scale = scale_;
+        g.design_width = design_viewport_w_;
+        g.design_height = design_viewport_h_;
+        g.design_top_align = design_top_align_;
+        return g;
+    }
 
-        float sx, sy, tx, ty;
-        const bool has_viewport =
-            design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
-            WindowHost::compute_design_viewport_transform(
-                w, h, design_viewport_w_, design_viewport_h_, sx, sy, tx, ty,
-                design_top_align_);
-        if (has_viewport) {
-            root_.set_bounds({0, 0, design_viewport_w_, design_viewport_h_});
-            root_.layout_children();
-            const int saved = canvas.save_count();
-            canvas.save();
-            canvas.translate(tx, ty);
-            canvas.scale(sx, sy);
-            root_.paint_all(canvas);
-            View::paint_overlays(canvas, &root_);
-            canvas.restore_to_count(saved);
-        } else {
-            root_.set_bounds({0, 0, w, h});
-            root_.layout_children();
-            root_.paint_all(canvas);
-            View::paint_overlays(canvas, &root_);
-        }
-        if (clip) canvas.restore_to_count(clip_save);
+    // Scene paint. The body lives in the shared PluginFrameRenderer so Windows
+    // and Linux paint identically; the trace scope stays here because the
+    // nested layout/paint spans must land inside THIS host's frame span for
+    // layout-vs-paint attribution to work in a Windows trace.
+    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
+        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+        paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
@@ -1177,89 +1223,47 @@ private:
         // gpu_present and there was no frame span to attribute them to.
         PULP_TRACE_SCOPE_NAMED("render", "frame");
         if (!gpu_surface_ || !skia_surface_) return false;
-        if (idle_callback_) idle_callback_();
-        // Swapchain acquire, instrumented because it is the one part of the
-        // frame that BLOCKS: under a Fifo (vsync) present mode
-        // GetCurrentTexture() waits for the next refresh. Without this span a
-        // trace shows a frame whose children sum to ~2 ms but whose total is
-        // 20-45 ms, and the missing time has nowhere to be attributed.
-        bool acquired = false;
-        {
-            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
-            acquired = gpu_surface_->begin_frame();
+
+        PluginFrameRenderer::Request request;
+        request.root = &root_;
+        request.geometry = frame_geometry();
+        request.partial_repaint = partial_repaint_enabled_;
+        request.idle = idle_callback_;
+        request.capture = cap;
+        request.capture_width = cap_w;
+        request.capture_height = cap_h;
+
+        const auto frame =
+            frame_renderer_.render(*gpu_surface_, *skia_surface_, damage_, request);
+
+        // A frame that never reached the drawable must not be reported as a
+        // rendered frame, and must not retire its damage — the shared renderer
+        // already put the damage back. React to a broken drawable here, where
+        // the native surface lives.
+        if (frame.should_recreate_surface) {
+            runtime::log_warn(
+                "WinPluginViewHost: frame did not reach the drawable "
+                "(attempt {} of {}); recreating GPU surfaces",
+                frame_renderer_.consecutive_recreates(),
+                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            recreate_gpu_surfaces();
+        } else if (frame.gpu_path_exhausted) {
+            runtime::log_error(
+                "WinPluginViewHost: GPU presentation failed {} times in a row; "
+                "falling back to CPU raster for this editor",
+                PluginFrameRenderer::kMaxConsecutiveRecreates);
+            release_gpu_surfaces(GpuSurfaceState::unavailable);
+            // Keep the lifecycle state honest: there are no surfaces now, so a
+            // later detach/attach cycle must rebuild rather than assume a live
+            // pair.
+            surface_lifecycle_.note_creation_failed();
+            if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
         }
-        if (!acquired) return false;
-        auto* canvas = skia_surface_->begin_frame();
-        if (!canvas) {
-            gpu_surface_->end_frame();
-            return false;
-        }
-        // Decide whether this frame can be clipped losslessly. The hazard model
-        // (compute_effective_damage) escalates to a full repaint if anything
-        // that SAMPLES at a distance — backdrop-filter, blur, mask, sampling
-        // effect, render transform — reaches the damage, which is what makes a
-        // clipped repaint pixel-identical to a full one.
-        //
-        // Skipped entirely under a design viewport: paint applies a letterbox
-        // scale+translate there, so root-space damage does not map to the
-        // clip space without further work.
-        Rect clip_rect{};
-        const Rect* clip = nullptr;
-        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
-            has_pending_dirty_bounds()) {
-            const auto b = pending_dirty_bounds();
-            // Hazard model runs in ROOT space (where the damage was produced).
-            const auto decision = compute_effective_damage(root_, b, scale_);
-            if (!decision.full) {
-                clip_rect = decision.bounds;
-                // Under a design viewport the paint body applies
-                // translate(tx,ty) + scale(sx,sy), but the clip below is
-                // installed in SURFACE space, before that transform. Map the
-                // root-space damage through the same letterbox transform so
-                // the two agree; without this the clip lands in the wrong
-                // place (which is why plug-in editors — which always set a
-                // design viewport — previously had to skip partial repaint
-                // entirely).
-                float sx, sy, tx, ty;
-                if (design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
-                    WindowHost::compute_design_viewport_transform(
-                        static_cast<float>(size_.width),
-                        static_cast<float>(size_.height),
-                        design_viewport_w_, design_viewport_h_,
-                        sx, sy, tx, ty, design_top_align_) &&
-                    sx > 0.0f && sy > 0.0f) {
-                    clip_rect = Rect{tx + clip_rect.x * sx,
-                                     ty + clip_rect.y * sy,
-                                     clip_rect.width * sx,
-                                     clip_rect.height * sy};
-                    // Re-snap OUT to whole surface pixels after scaling: a
-                    // fractional edge would clip a partially covered pixel.
-                    const float x0 = std::floor(clip_rect.x);
-                    const float y0 = std::floor(clip_rect.y);
-                    clip_rect = Rect{x0, y0,
-                                     std::ceil(clip_rect.x + clip_rect.width) - x0,
-                                     std::ceil(clip_rect.y + clip_rect.height) - y0};
-                }
-                clip = &clip_rect;
-            }
-        }
-        paint_scene(*canvas, clip);
-        bool readback_ok = true;
-        if (cap) {
-            // read_current_rgba finalizes + submits the open frame's recording
-            // before readback (see SkiaSurface contract), so no separate flush.
-            uint32_t pw = 0, ph = 0;
-            readback_ok = skia_surface_->read_current_rgba(*cap, pw, ph) &&
-                          !cap->empty() && pw > 0 && ph > 0;
-            if (cap_w) *cap_w = pw;
-            if (cap_h) *cap_h = ph;
-        }
-        skia_surface_->end_frame();
-        gpu_surface_->end_frame();
-        clear_pending_dirty();  // frame painted + submitted (mirrors DirtyTracker::clear)
+
+        if (!frame.reached_output()) return false;
         // A failed/empty readback must report false so capture_back_buffer_png()
         // falls back to the raster path instead of returning a blank frame.
-        return cap ? readback_ok : true;
+        return cap ? frame.readback_ok : true;
     }
 
     // Pure-CPU raster capture, GPU-independent — the VM proof path. Sized at

@@ -1309,6 +1309,25 @@ ScriptedUiSession (iOS AUv3)`.
 Full cross-platform contract lives in the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section.
 
+**Updated (WAH-1): subscribe, do not sample.** The one-shot
+`attach_gpu_surface(host->gpu_surface())` read this section used to
+describe is GONE. It only worked on hosts that build their surface in
+the constructor; the Windows host creates its Dawn surface inside
+`attach_to_parent()`, so the read returned `nullptr` forever and every
+Windows editor fell back to mock WebGPU. Adapters now call the shared
+helper once:
+
+```cpp
+gpu_surface_binding_ = bind_gpu_surface(*host, bridge->scripted_ui(),
+                                        gpu_decision, "mac AUv3 / iOS AUv3");
+```
+
+It follows `PluginViewHost::observe_gpu_surface()`, forwards creation
+AND teardown into the session, and owns the CPU-fallback diagnostic
+(which no longer fires on a pre-attach `pending` state). Reset the
+returned subscription in the editor-close path, before the bridge that
+owns the session is destroyed.
+
 - `docs/guides/ios-auv3-guidance.md` — the human-facing iOS AUv3 guide.
 - `docs/guides/formats.md` — user-facing format overview + auval
   recipes.

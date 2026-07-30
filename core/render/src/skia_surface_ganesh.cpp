@@ -246,13 +246,24 @@ public:
         return canvas_.get();
     }
 
-    void end_frame() override {
+    FrameOutcome end_frame() override {
         PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
         canvas_.reset();
-        if (lost_ || !context_) return;
-        // No present call: the browser composites the canvas element itself.
+        // A lost WebGL context is a recreate, not a retry: the caller must
+        // rebuild against the restored context before the frame means anything.
+        if (lost_) return last_outcome_ = FrameOutcome::recreate;
+        if (!context_) return last_outcome_ = FrameOutcome::failed;
+        // No present call: the browser composites the canvas element itself,
+        // so a successful flush IS the frame reaching its output.
         context_->flushAndSubmit();
+        return last_outcome_ = FrameOutcome::presented;
     }
+
+    FrameOutcome last_frame_outcome() const override { return last_outcome_; }
+
+    // The browser canvas element is always the presentation target — there is
+    // no offscreen-by-design mode on this backend.
+    bool has_presentable_target() const override { return true; }
 
     void resize(uint32_t width, uint32_t height, float scale) override {
         if (scale != scale_) {
@@ -360,6 +371,7 @@ private:
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE gl_context_ = 0;
     sk_sp<GrDirectContext> context_;
     bool lost_ = false;   // true between webglcontextlost and webglcontextrestored
+    FrameOutcome last_outcome_ = FrameOutcome::presented;
 
     sk_sp<SkSurface> frame_surface_;
     sk_sp<SkSurface> offscreen_surface_;

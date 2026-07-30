@@ -3,10 +3,9 @@ name: trace
 description: Profile a Pulp plugin/app with Perfetto — start/stop a tracing session, run SQL over the .pftrace, run L0 presets, or ask "why is this slow?" for a one-shot narrated root cause
 ---
 
-Answer "why is this slow?" the framework's way: attach a Perfetto tracing
-session over the inspector wire, reproduce, and read where the time went —
-don't guess from source. Motion tells you *what changed* on screen; tracing
-tells you *where the time went* (span timeline, `.pftrace`, SQL).
+Answer "why is this slow?" from Perfetto evidence. Offline `.pftrace` analysis
+is usable today. The live inspector path is reserved but not wired into normal
+Pulp launches; `PULP_TRACE_SERVER` is not implemented.
 
 Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 
@@ -14,16 +13,16 @@ Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 
 | You have | Path | Tool |
 |---|---|---|
-| Running app + want a DSP flamegraph | **Live trace** | `pulp trace start --categories dsp` → reproduce → `pulp trace stop` |
+| Custom source-checkout fixture + want a DSP flamegraph | **Experimental live trace** | Explicitly construct the inspector server, then start/stop |
 | A `.pftrace` + a question | **Query** | `pulp trace query "<sql>"` (or a `--preset`) |
 | Want to hand an agent / human the raw file | **Return the path** | `pulp trace stop` prints it; open in ui.perfetto.dev |
 | A UI hitch to correlate | **Frame trace + motion join** | trace `render,layout` while a motion trace runs; query on shared `trace_id` |
 
-## Fastest path — quick trace via the standalone host
+## Experimental live path — custom fixture only
 
 ```bash
-# 1. Launch the host with the tracing inspector server up.
-PULP_TRACE_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
+# Normal standalone and preview hosts do not start this endpoint.
+# A custom source-checkout fixture must construct and wire it first.
 
 # 2. Start a session, reproduce the slow thing, then stop.
 pulp trace start --categories dsp,render
@@ -60,7 +59,8 @@ pulp trace query --preset dsp-hotspots
 
 Every verb honors `--port N` / `$PULP_INSPECTOR_PORT` (default 9147) and
 `--json` for the raw inspector response. If nothing is listening, the CLI
-prints a clear "no inspector — launch with `PULP_TRACE_SERVER=1`" hint.
+prints a legacy no-inspector hint; that environment variable does not currently
+activate a server.
 
 ## Category taxonomy (the query vocabulary)
 

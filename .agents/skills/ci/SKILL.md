@@ -541,6 +541,49 @@ fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
 checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
 it was fired from, and the inventory steps would then validate `main` instead of
 the PR.
+## Codecov "missing lines" is usually a leg that never uploaded
+
+When Codecov shows fewer lines than the repo has, look for a coverage leg
+that produced **no report at all** before suspecting the ignore list or the
+flag/component config. The failure is quiet by construction:
+
+- The build fails, so no instrumented binary is linked and no
+  `coverage.cobertura.xml` is written.
+- The upload step still runs. The Codecov CLI logs
+  `Some files were not found` and returns **200** — `fail_ci_if_error` is
+  `false`, so nothing turns red there.
+- `after_n_builds` (4) then waits forever for an upload that will never
+  arrive, so the report stays *incomplete* rather than visibly broken.
+
+So the symptom appears in Codecov's UI while the cause is a compile error in
+a workflow log. Check per-OS legs first:
+
+```sh
+gh run list --repo Generous-Corp/pulp --workflow coverage.yml --branch main --limit 10 \
+  --json conclusion,headSha,createdAt
+# then, on a failing run, find the step that actually failed:
+gh api repos/Generous-Corp/pulp/actions/runs/<id>/jobs \
+  --jq '.jobs[] | select(.conclusion=="failure") | "\(.name) :: \([.steps[]|select(.conclusion=="failure")|.name]|join(", "))"'
+```
+
+Concretely (2026-07-29): the Linux leg was missing `libfontconfig1-dev`.
+Skia's `SkFontMgr_fontconfig.h` includes `<fontconfig/fontconfig.h>`, so
+`core/canvas/src/sdf_atlas.cpp` failed to compile and the build exited 2.
+
+**The underlying hazard is that thirteen workflows hand-maintain the same
+Linux apt list with no shared source.** They drift silently, and a drift only
+surfaces when some workflow happens to compile the translation unit that needs
+the missing package. When adding a Linux dependency, grep the whole
+`.github/workflows/` tree rather than editing the one lane in front of you:
+
+```sh
+grep -ln "libxkbcommon-dev" .github/workflows/*.yml   # every lane carrying the list
+grep -L "libfontconfig1-dev" $(grep -ln "libxkbcommon-dev" .github/workflows/*.yml)
+```
+
+A run being `cancelled` on `main` is different and usually benign: coverage
+sets `cancel-in-progress: false`, and GitHub queues only ONE run per group, so
+a burst of merges replaces the queued run and only the latest head runs.
 
 ## GitHub workflow gotchas
 
@@ -888,6 +931,17 @@ the PR.
   exported with a library while its public headers are accidentally omitted
   from the install manifest. Keep `tools/validation/sdk-smoke` in sync so the
   same proof is runnable locally without GitHub Actions.
+- **The release archive matrix must match every archive-bearing SDK target.**
+  `test_release_artifact_contents.py` derives the installed target set from
+  `tools/cmake/PulpInstallRules.cmake`, removes interface-only libraries, and
+  requires exact equality with `release_product_matrix.json`. The
+  `workflow-lint.yml` path filter deliberately covers every `CMakeLists.txt`
+  plus `tools/cmake/**`, because target definitions also live in the repo root,
+  `inspect/`, and CMake helpers—not only under `core/`. When adding an installed
+  library, update the matrix in the same PR; when changing how
+  `PULP_SDK_TARGETS` is assembled or consumed, keep the canonical literal
+  `set` / `list(APPEND)` / `install(TARGETS ...)` forms or extend the
+  fail-closed parser and its negative controls together.
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS

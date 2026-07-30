@@ -55,7 +55,7 @@ static const Command commands[] = {
     {"version",  "Show, bump, or check version info",     cmd_version},
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
     {"loop",     "Leveraged-prototype focus marker + watch loop", cmd_loop},
-    {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
+    {"inspect",  "Connect to an explicitly hosted inspector fixture", cmd_inspect},
     {"scan",     "List VST3 / AU / AUv3 / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"import",   "Detect a framework project and emit a Pulp migration scaffold", cmd_import},

@@ -28,6 +28,7 @@
 //! [import_design]
 //!   default_mode           = live | baked                       (default live)
 //!   default_emit           = js | ir-json | cpp                 (default js)
+//!   browser                = auto | managed | system            (default auto)
 //!
 //! [claude]
 //!   send_user_file         = on | off                           (default on)
@@ -83,17 +84,30 @@ pub fn config_path() -> Option<PathBuf> {
 /// has the same helper-split tension.
 #[must_use]
 pub fn pulp_home() -> Option<PathBuf> {
-    if let Some(v) = std::env::var_os("PULP_HOME") {
-        if !v.is_empty() {
-            return Some(PathBuf::from(v));
-        }
+    pulp_home_from(
+        std::env::consts::OS,
+        std::env::var_os("PULP_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("USERPROFILE").map(PathBuf::from),
+    )
+}
+
+fn pulp_home_from(
+    os: &str,
+    pulp_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+    user_profile: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let non_empty = |path: Option<PathBuf>| path.filter(|value| !value.as_os_str().is_empty());
+    if let Some(override_home) = non_empty(pulp_home) {
+        return Some(override_home);
     }
-    let home = if cfg!(windows) {
-        std::env::var_os("USERPROFILE")
+    let platform_home = if os == "windows" {
+        non_empty(user_profile)
     } else {
-        std::env::var_os("HOME")
+        non_empty(home)
     }?;
-    Some(PathBuf::from(home).join(".pulp"))
+    Some(platform_home.join(".pulp"))
 }
 
 /// One row in `pulp-rs config list` output. The `default` flag is
@@ -120,6 +134,7 @@ pub const KNOWN_KEYS: &[(&str, &str)] = &[
     ("update.bump_projects", "prompt"),
     ("import_design.default_mode", "live"),
     ("import_design.default_emit", "js"),
+    ("import_design.browser", "auto"),
     ("claude.send_user_file", "on"),
 ];
 
@@ -214,6 +229,15 @@ pub fn validate_value(section: &str, key: &str, value: &str) -> Result<()> {
             } else {
                 Err(bad(
                     "import_design.default_emit must be one of: js, ir-json, cpp",
+                ))
+            }
+        }
+        ("import_design", "browser") => {
+            if matches!(value, "auto" | "managed" | "system") {
+                Ok(())
+            } else {
+                Err(bad(
+                    "import_design.browser must be one of: auto, managed, system",
                 ))
             }
         }
@@ -530,6 +554,32 @@ pub fn list_all(doc: &DocumentMut) -> Vec<ListEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pulp_home_ignores_empty_override_and_uses_windows_user_profile() {
+        let td = tempfile::tempdir().unwrap();
+        let user_profile = td.path().join("user-profile");
+        let resolved = pulp_home_from(
+            "windows",
+            Some(PathBuf::new()),
+            Some(td.path().join("home-must-not-win")),
+            Some(user_profile.clone()),
+        );
+        assert_eq!(resolved, Some(user_profile.join(".pulp")));
+    }
+
+    #[test]
+    fn pulp_home_nonempty_override_wins_on_every_platform() {
+        let td = tempfile::tempdir().unwrap();
+        let override_home = td.path().join("override");
+        let resolved = pulp_home_from(
+            "windows",
+            Some(override_home.clone()),
+            Some(td.path().join("home")),
+            Some(td.path().join("user-profile")),
+        );
+        assert_eq!(resolved, Some(override_home));
+    }
 
     #[test]
     fn dotted_split_rejects_leading_or_trailing_dot() {
