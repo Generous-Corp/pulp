@@ -86,6 +86,26 @@ export function semanticExpression(snapshotClickableIndexes = []) {
     }
     return result;
   };
+  // The painted control box, when the author marked it with data-pulp-paint.
+  // Null when unmarked: the component box is NOT a safe fallback for value
+  // geometry, so a consumer must decide what to do rather than be handed a
+  // plausible wrong rectangle. Bounds are page coordinates, same frame as the
+  // candidate's own, so the two are directly comparable.
+  const paintBox = element => {
+    try {
+      const painted = element.querySelector('[data-pulp-paint]');
+      if (!painted) return null;
+      const box = painted.getBoundingClientRect();
+      return {
+        left: box.left + window.scrollX,
+        top: box.top + window.scrollY,
+        width: box.width,
+        height: box.height
+      };
+    } catch (e) {
+      return null;
+    }
+  };
   // A design-system component states what it is in its class. A pulp-knob is a
   // styled div whose drag handlers sit on an ancestor, so it has no native tag,
   // no ARIA role and no inline handler -- every signal below walks past it, and
@@ -238,6 +258,17 @@ export function semanticExpression(snapshotClickableIndexes = []) {
         width: rect.width,
         height: rect.height
       },
+      // The box a live widget must paint its value geometry into, which is NOT
+      // the component box: a knob's component includes its caption (measured
+      // 116x139.9 where the dial is 116x116), and a fader's track is inset and
+      // far narrower (633,274.9,26x150 vs 643,274.9,6x150). Painting a value
+      // ring into the component box puts it ~12px below the dial centre -- it
+      // renders, it looks almost right, and no gate can see it.
+      //
+      // The author declares it, exactly as they declare the binding, because
+      // only the author knows which child is the painted control. Inferring it
+      // would hard-code one design system's class vocabulary into the importer.
+      paint_bounds: paintBox(element),
       data_pulp: data,
       evidence,
       confidence,
