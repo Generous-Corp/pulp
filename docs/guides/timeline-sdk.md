@@ -292,8 +292,13 @@ refuses an authored non-default value rather than discarding it.
 Playback consumes `Resample` as bounded realtime varispeed: source phase spans
 the clip's musical tick interval, so tempo ramps and precise host beat mapping
 change duration and pitch together. `None` retains native-rate playback.
-`Stretch` remains persisted intent and currently renders through the same
-native-rate path as `None`; tempo-preserving stretch is not implemented here.
+`Stretch` compiles off the audio thread. The compiler takes the exact slice from
+the decoded asset pool, converts it to the compiled timeline sample rate,
+applies the authored tempo schedule at stretch-analysis boundaries, and
+publishes an immutable audio artifact with exactly the clip's compiled timeline
+frame count. The realtime
+renderer consumes that artifact 1:1. Capacity, ratio, or exact-length failures
+fail program compilation; playback never falls back to `None` or `Resample`.
 
 ### Reusing and diverging sequences
 

@@ -88,8 +88,10 @@ artifact is needed. Never modify canonical project JSON text directly.
   Playback consumes `Resample` as pitch-coupled varispeed by mapping source
   phase across the authored musical tick interval, including tempo ramps and
   precise host beat mapping. `None` retains native-rate playback. `Stretch`
-  remains intent-only and currently uses the same native-rate playback path as
-  `None`; do not claim tempo-preserving stretch is implemented.
+  compiles a timeline-rate immutable artifact off the audio thread with exactly
+  the authored frame count, then plays it 1:1. A missing, over-capacity, or
+  length-mismatched Stretch artifact fails compilation; it never degrades to
+  native-rate playback.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another

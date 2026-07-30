@@ -66,8 +66,13 @@ readable. This is scheduling latency, not a silence prefix:
 `output_alignment_samples()` is zero, so output frame zero corresponds to input
 frame zero. All streaming calls are allocation-free after `prepare()` and are
 bounded by `RealtimePitchTimeConfig::max_block` and the prepared output ring.
-This is the DSP prerequisite for future clip integration; no Timeline renderer
-selects it yet.
+`TimeConform::Stretch` uses the finite stream during Timeline program
+compilation, never in the audio callback. The compiler materializes the source
+slice at timeline rate, drives ratios at analysis boundaries, and accepts only
+the exact authored target count. Offline compilation uses scalar double DSP and
+a bounded deterministic conversion into the immutable float artifact, which is
+then read 1:1 by playback. Live transport-driven realtime stretching remains a
+separate lifecycle.
 
 For control-thread preprocessing that must yield between bounded units, use
 `FiniteStretchBuilder64` for reproducible offline artifacts. It keeps the
@@ -96,7 +101,8 @@ longer produces `FiniteStretchFailure::output_too_short` or
 trajectory. It is evaluated at exact analysis-frame boundaries, independent of
 the builder's `max_block`; EOF padding holds the callback's endpoint ratio.
 The callback is part of the allocation-free step path and must be `noexcept`
-and allocation-free. Playback/Timeline still owns no instance of this builder.
+and allocation-free. Timeline's control-thread program compiler owns the builder;
+the playback audio callback never does.
 
 ## Character modes — an "engine per job"
 

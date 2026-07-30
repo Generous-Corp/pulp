@@ -16,6 +16,7 @@ target_include_directories(pulp-audio
 target_sources(pulp-audio PRIVATE
     src/analyzer_provider.cpp
     src/audio_file.cpp
+    src/finite_time_stretch.cpp
     ${_PULP_AUDIO_WAV_SOURCES}
     src/audio_focus.cpp
     src/audio_probe_json.cpp

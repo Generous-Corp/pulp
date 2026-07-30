@@ -3,21 +3,24 @@
 #include "audio_renderer_internal.hpp"
 
 #include <pulp/audio/sample_rate_conversion.hpp>
+#include <pulp/playback/offline_stretch_artifact.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <tuple>
 
 namespace pulp::playback {
 
-bool AudioClipConversionArtifact::matches(
-    const std::shared_ptr<const audio::AudioFileData>& source, std::uint64_t source_start,
-    std::uint64_t source_frames, double source_frames_per_timeline_frame,
-    bool requires_host) const noexcept {
-    return source_ == source && source_start_ == source_start &&
-           source_frames_ == source_frames &&
+bool AudioClipConversionArtifact::matches(const std::shared_ptr<const audio::AudioFileData>& source,
+                                          std::uint64_t source_start, std::uint64_t source_frames,
+                                          double source_frames_per_timeline_frame,
+                                          bool requires_host) const noexcept {
+    return source_ == source && source_start_ == source_start && source_frames_ == source_frames &&
            source_frames_per_timeline_frame_ == source_frames_per_timeline_frame &&
            (!sample_rate_converter_ || sample_rate_converter_->ready()) &&
            static_cast<bool>(host_rate_converter_) == requires_host &&
@@ -66,6 +69,38 @@ bool valid_audio(const audio::AudioFileData& value, const AudioRendererLimits& l
     const auto frames = value.channels.front().size();
     return std::all_of(value.channels.begin(), value.channels.end(),
                        [frames](const auto& channel) { return channel.size() == frames; });
+}
+
+std::optional<timeline::ContentHash>
+decoded_audio_content_hash(const audio::AudioFileData& value) noexcept {
+#if defined(__cpp_exceptions)
+    try {
+#endif
+        std::vector<std::uint8_t> identity;
+        identity.reserve(24u + value.channels.size() * 40u);
+        const auto append_u64 = [&identity](std::uint64_t number) {
+            for (unsigned shift = 0; shift < 64; shift += 8)
+                identity.push_back(static_cast<std::uint8_t>(number >> shift));
+        };
+        append_u64(value.sample_rate);
+        append_u64(value.channels.size());
+        append_u64(value.num_frames());
+        for (const auto& channel : value.channels) {
+            append_u64(channel.size());
+            const auto digest = runtime::sha256(
+                reinterpret_cast<const std::uint8_t*>(channel.data()),
+                channel.size() * sizeof(float));
+            identity.insert(identity.end(), digest.begin(), digest.end());
+        }
+        return timeline::ContentHash::from_hex(
+            runtime::sha256_hex(identity.data(), identity.size()));
+#if defined(__cpp_exceptions)
+    } catch (const std::bad_alloc&) {
+        return std::nullopt;
+    } catch (const std::length_error&) {
+        return std::nullopt;
+    }
+#endif
 }
 
 struct ResolvedAudioMedia {
@@ -144,11 +179,36 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         return error(AudioRendererErrorCode::InvalidClipRange);
     switch (clip.source_time_mapping) {
     case AudioClipRendererProgram::SourceTimeMapping::NativeRate:
+        if (clip.offline_stretch_artifact || clip.offline_stretch_provenance)
+            return error(AudioRendererErrorCode::InvalidAsset);
         break;
     case AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample:
         if (clip.time_domain != AudioClipRendererProgram::TimeDomain::Musical ||
-            clip.renderable_timeline_frames != clip.timeline_frame_count)
+            clip.renderable_timeline_frames != clip.timeline_frame_count ||
+            clip.offline_stretch_artifact || clip.offline_stretch_provenance)
             return error(AudioRendererErrorCode::InvalidClipRange);
+        break;
+    case AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact:
+        if (clip.time_domain != AudioClipRendererProgram::TimeDomain::Musical ||
+            !clip.offline_stretch_artifact || clip.audio != clip.offline_stretch_artifact->audio ||
+            !clip.offline_stretch_provenance ||
+            clip.offline_stretch_provenance->clip_id != clip.id ||
+            clip.source_start != 0 || clip.source_frame_count != clip.timeline_frame_count ||
+            clip.renderable_timeline_frames != clip.timeline_frame_count ||
+            clip.source_frame_offset != 0.0 || clip.source_frames_per_timeline_frame != 1.0 ||
+            clip.offline_stretch_artifact->key.target_frame_count != clip.timeline_frame_count ||
+            clip.offline_stretch_artifact->key.channel_count != clip.audio->num_channels() ||
+            clip.offline_stretch_artifact->key.musical_tick_start != clip.musical_tick_start ||
+            clip.offline_stretch_artifact->key.musical_tick_end != clip.musical_tick_end ||
+            clip.offline_stretch_artifact->key.timeline_sample_rate.denominator != 1 ||
+            clip.offline_stretch_artifact->key.algorithm !=
+                OfflineStretchAlgorithmConfig{limits.offline_stretch_algorithm_version,
+                                              limits.offline_stretch_max_time_ratio} ||
+            clip.audio->sample_rate !=
+                clip.offline_stretch_artifact->key.timeline_sample_rate.numerator ||
+            clip.audio->num_frames() != clip.timeline_frame_count ||
+            clip.uses_sample_rate_conversion())
+            return error(AudioRendererErrorCode::InvalidAsset);
         break;
     default:
         return error(AudioRendererErrorCode::InvalidClipRange);
@@ -158,10 +218,10 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         clip.fade_out_frames > clip.timeline_frame_count)
         return error(AudioRendererErrorCode::InvalidFade);
     if (!clip.conversion_artifact ||
-        !clip.conversion_artifact->matches(
-            clip.audio, clip.source_start, clip.source_frame_count,
-            clip.source_frames_per_timeline_frame,
-            clip.time_domain == AudioClipRendererProgram::TimeDomain::Musical))
+        !clip.conversion_artifact->matches(clip.audio, clip.source_start, clip.source_frame_count,
+                                           clip.source_frames_per_timeline_frame,
+                                           clip.time_domain ==
+                                               AudioClipRendererProgram::TimeDomain::Musical))
         return error(AudioRendererErrorCode::InvalidAsset);
     switch (clip.time_domain) {
     case AudioClipRendererProgram::TimeDomain::Musical:
@@ -292,12 +352,10 @@ std::optional<std::uint64_t> scale_duration_ceil(std::uint64_t value, timebase::
     return static_cast<std::uint64_t>(std::ceil(scaled));
 }
 
-std::optional<std::uint64_t>
-scale_duration_ceil_from_offset(std::uint64_t value, double offset,
-                                timebase::RationalRate from,
-                                timebase::RationalRate to) noexcept {
-    const auto remaining =
-        static_cast<long double>(value) - static_cast<long double>(offset);
+std::optional<std::uint64_t> scale_duration_ceil_from_offset(std::uint64_t value, double offset,
+                                                             timebase::RationalRate from,
+                                                             timebase::RationalRate to) noexcept {
+    const auto remaining = static_cast<long double>(value) - static_cast<long double>(offset);
     const auto scaled = remaining * to.as_long_double() / from.as_long_double();
     if (!std::isfinite(scaled) || scaled <= 0.0L ||
         scaled > static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
@@ -315,7 +373,7 @@ DecodedAudioAssetPool::create(std::vector<DecodedAudioAsset> assets, AudioRender
     std::sort(assets.begin(), assets.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; });
     for (std::size_t index = 0; index < assets.size(); ++index) {
-        const auto& asset = assets[index];
+        auto& asset = assets[index];
         if (!asset.id.valid())
             return fail<std::shared_ptr<const DecodedAudioAssetPool>>(
                 AudioRendererErrorCode::InvalidIdentity, asset.id);
@@ -325,6 +383,11 @@ DecodedAudioAssetPool::create(std::vector<DecodedAudioAsset> assets, AudioRender
         if (!asset.audio || !valid_audio(*asset.audio, limits))
             return fail<std::shared_ptr<const DecodedAudioAssetPool>>(
                 AudioRendererErrorCode::InvalidAsset, asset.id);
+        const auto decoded_hash = decoded_audio_content_hash(*asset.audio);
+        if (!decoded_hash)
+            return fail<std::shared_ptr<const DecodedAudioAssetPool>>(
+                AudioRendererErrorCode::CapacityExceeded, asset.id);
+        asset.decoded_content_hash = *decoded_hash;
     }
     return runtime::Ok(
         std::shared_ptr<const DecodedAudioAssetPool>(new DecodedAudioAssetPool(std::move(assets))));
@@ -338,8 +401,12 @@ DecodedAudioAssetPool::decode_wav(timeline::ItemId id, std::span<const std::uint
     auto decoded = audio::decode_wav(bytes, decode_limits);
     if (!decoded)
         return fail<DecodedAudioAsset>(AudioRendererErrorCode::InvalidAsset, id);
-    return runtime::Ok(
-        DecodedAudioAsset{id, std::make_shared<const audio::AudioFileData>(std::move(*decoded))});
+    const auto content_hash =
+        timeline::ContentHash::from_hex(runtime::sha256_hex(bytes.data(), bytes.size()));
+    if (!content_hash)
+        return fail<DecodedAudioAsset>(AudioRendererErrorCode::InvalidAsset, id);
+    return runtime::Ok(DecodedAudioAsset{
+        id, std::make_shared<const audio::AudioFileData>(std::move(*decoded)), *content_hash, {}});
 }
 
 const DecodedAudioAsset* DecodedAudioAssetPool::find(timeline::ItemId id) const noexcept {
@@ -371,6 +438,16 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
                                           const AudioRendererLimits& limits,
                                           AudioSampleRateConverterCache& cache,
                                           double source_frame_offset) {
+    return detail::compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
+                                                     cache, source_frame_offset, nullptr);
+}
+
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+detail::compile_audio_clip_program_cached(
+    const timeline::Clip& clip, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
+    double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
@@ -392,9 +469,6 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     std::uint64_t fade_out_frames = 0;
     const auto source_rate = resolved->source_rate;
     const auto timeline_rate = tempo_map.sample_rate().normalized();
-    auto converter = cache.get(source_rate, timeline_rate, clip.id(), media->asset_id, limits);
-    if (!converter)
-        return runtime::Err(converter.error());
     const auto native_renderable_frames =
         source_frame_offset == 0.0
             ? scale_duration_ceil(media->frame_count, source_rate, timeline_rate)
@@ -437,7 +511,7 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
         const auto projected_fade_out_start =
             scale_position(fade_out_position, clip.absolute_sample_rate(), timeline_rate);
         if (!projected_start || !projected_end || !projected_fade_in_end ||
-            !projected_fade_out_start || *projected_end < *projected_start ||
+            !projected_fade_out_start || *projected_end <= *projected_start ||
             *projected_fade_in_end < *projected_start || *projected_fade_out_start > *projected_end)
             return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                                   clip.id(), media->asset_id);
@@ -452,21 +526,87 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f ||
         fade_in_frames > timeline_frames || fade_out_frames > timeline_frames)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade, clip.id());
+    if (clip.time_conform() == timeline::TimeConform::Stretch) {
+        if (!stretch_artifact)
+            return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchRequired,
+                                                  clip.id(), media->asset_id);
+        const auto* metadata = project.find_asset(media->asset_id);
+        const auto& key = stretch_artifact->key;
+        const auto scaled_input = static_cast<long double>(media->frame_count) *
+                                  timeline_rate.as_long_double() /
+                                  resolved->source_rate.as_long_double();
+        const auto expected_input_frames =
+            std::isfinite(scaled_input) && scaled_input > 0.0L &&
+                    scaled_input <=
+                        static_cast<long double>(std::numeric_limits<std::uint64_t>::max())
+                ? static_cast<std::uint64_t>(std::ceil(scaled_input))
+                : 0;
+        const auto tempo_points = project.tempo_map().points();
+        if (!metadata || expected_input_frames == 0 || !stretch_artifact->audio ||
+            key.source_content_hash != metadata->content_hash ||
+            key.decoded_content_hash != resolved->decoded->decoded_content_hash ||
+            key.source_start != resolved->source_start ||
+            key.source_frame_count != media->frame_count ||
+            key.source_sample_rate != resolved->source_rate ||
+            key.timeline_input_frame_count != expected_input_frames ||
+            key.channel_count != resolved->decoded->audio->num_channels() ||
+            key.algorithm != OfflineStretchAlgorithmConfig{limits.offline_stretch_algorithm_version,
+                                                           limits.offline_stretch_max_time_ratio} ||
+            key.tempo_points.size() != tempo_points.size() ||
+            !std::equal(key.tempo_points.begin(), key.tempo_points.end(), tempo_points.begin()) ||
+            key.musical_tick_start != clip.start() || key.musical_tick_end != clip.end() ||
+            key.timeline_sample_rate != timeline_rate ||
+            key.target_frame_count != timeline_frames ||
+            stretch_artifact->audio->sample_rate != timeline_rate.numerator ||
+            stretch_artifact->audio->num_frames() != timeline_frames)
+            return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchFailed,
+                                                  clip.id(), media->asset_id);
+        auto host_rate_converter = cache.get_host(stretch_artifact->audio, 0, timeline_frames,
+                                                  clip.id(), media->asset_id, limits);
+        if (!host_rate_converter)
+            return runtime::Err(host_rate_converter.error());
+        return runtime::Ok(AudioClipRendererProgram{
+            clip.id(),
+            media->asset_id,
+            stretch_artifact->audio,
+            timeline_start,
+            timeline_frames,
+            0,
+            timeline_frames,
+            0.0,
+            timeline_frames,
+            1.0,
+            std::make_shared<AudioClipConversionArtifact>(stretch_artifact->audio, 0,
+                                                          timeline_frames, 1.0, nullptr,
+                                                          std::move(host_rate_converter).value()),
+            playback.gain_linear,
+            fade_in_frames,
+            fade_out_frames,
+            AudioClipRendererProgram::SourceKind::ArrangementClip,
+            0,
+            AudioClipRendererProgram::TimeDomain::Musical,
+            clip.start(),
+            clip.end(),
+            AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact,
+            std::move(stretch_artifact),
+            nullptr});
+    }
+    auto converter = cache.get(source_rate, timeline_rate, clip.id(), media->asset_id, limits);
+    if (!converter)
+        return runtime::Err(converter.error());
     const auto source_time_mapping =
         clip.time_conform() == timeline::TimeConform::Resample
             ? AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample
             : AudioClipRendererProgram::SourceTimeMapping::NativeRate;
-    if (source_time_mapping ==
-        AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
+    if (source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
         const auto tick_span = static_cast<long double>(clip.end().value) -
                                static_cast<long double>(clip.start().value);
         const auto source_span = static_cast<long double>(media->frame_count) -
                                  static_cast<long double>(source_frame_offset);
         const auto maximum_tempo = tempo_map.maximum_tempo_between(clip.start(), clip.end());
-        const auto maximum_ticks_per_sample =
-            static_cast<long double>(maximum_tempo) *
-            static_cast<long double>(timebase::kTicksPerQuarter) /
-            (timeline_rate.as_long_double() * 60.0L);
+        const auto maximum_ticks_per_sample = static_cast<long double>(maximum_tempo) *
+                                              static_cast<long double>(timebase::kTicksPerQuarter) /
+                                              (timeline_rate.as_long_double() * 60.0L);
         const auto maximum_source_step = source_span / tick_span * maximum_ticks_per_sample;
         if (!std::isfinite(maximum_source_step) ||
             maximum_source_step >
@@ -514,7 +654,9 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
                                                                 : timebase::TickPosition{},
         clip.time_anchor() == timeline::ClipTimeAnchor::Musical ? clip.end()
                                                                 : timebase::TickPosition{},
-        source_time_mapping});
+        source_time_mapping,
+        nullptr,
+        nullptr});
 }
 
 runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate_converters(
@@ -527,6 +669,8 @@ runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate
     auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
     if (!resolved)
         return runtime::Err(resolved.error());
+    if (clip.time_conform() == timeline::TimeConform::Stretch)
+        return runtime::Ok(true);
     if (resolved->decoded->audio->sample_rate > timebase::kMaximumCompiledSampleRate ||
         tempo_map.sample_rate().as_long_double() >
             static_cast<long double>(timebase::kMaximumCompiledSampleRate))
@@ -670,8 +814,7 @@ detail::compile_take_comp_segment_program_cached(
         timeline_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         std::make_shared<AudioClipConversionArtifact>(
-            resolved->decoded->audio, resolved->source_start + offset,
-            segment.range.sample_count,
+            resolved->decoded->audio, resolved->source_start + offset, segment.range.sample_count,
             static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
             std::move(converter).value(), nullptr),
         1.0f,
@@ -682,6 +825,9 @@ detail::compile_take_comp_segment_program_cached(
         AudioClipRendererProgram::TimeDomain::Absolute,
         {},
         {},
+        AudioClipRendererProgram::SourceTimeMapping::NativeRate,
+        nullptr,
+        nullptr,
     });
 }
 
@@ -753,6 +899,9 @@ detail::compile_track_freeze_program_cached(const timeline::Track& track,
         AudioClipRendererProgram::TimeDomain::Absolute,
         {},
         {},
+        AudioClipRendererProgram::SourceTimeMapping::NativeRate,
+        nullptr,
+        nullptr,
     });
 }
 
