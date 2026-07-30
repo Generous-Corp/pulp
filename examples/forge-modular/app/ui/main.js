@@ -116,7 +116,10 @@ setFlex("shell", "flex_grow", 1);
 setFlex("shell", "width", "100%");
 
 const rail = createCol("rail", "shell");
-setBackground("rail", C.appBg);
+// Forge's rail is a darker column than the app behind it, and only the ACTIVE
+// item carries a raised tile -- the rest are bare glyphs. Tiling every item is
+// what made ours look like a toolbar rather than a rail.
+setBackground("rail", "#12161C");
 setFlex("rail", "width", G.railWidth);
 setFlex("rail", "align_items", "center");
 setFlex("rail", "padding_top", 14);
@@ -221,9 +224,9 @@ function railIcon(id, glyph, active, marginTop) {
     // The rail reads as icons, not buttons. An unselected tile takes the rail's
     // own colour on both background and border, or the rail becomes a grid of
     // boxes -- which is what it looked like before these were set.
-    setToggleBackground(id, C.appBg, C.raised);
-    setToggleBorderColor(id, C.appBg, C.raised);
-    setBackground(id, active ? C.raised : C.appBg);
+    setToggleBackground(id, "#12161C", C.raised);
+    setToggleBorderColor(id, "#12161C", C.raised);
+    setBackground(id, active ? C.raised : "#12161C");
     setCornerRadius(id, G.iconTileRadius);
     setFlex(id, "width", G.iconTile);
     setFlex(id, "height", G.iconTile);
@@ -261,6 +264,7 @@ setCornerRadius("main", "BottomRight", 14);
 // ── top bar ──────────────────────────────────────────────────────────────────
 
 const topbar = createRow("topbar", "main");
+setVisible("topbar", false);   // Forge has no title bar; see the caption below
 setFlex("topbar", "align_items", "center");
 setFlex("topbar", "padding_left", 18);
 setFlex("topbar", "padding_right", 18);
@@ -408,20 +412,37 @@ setFlex("composer", "width", G.promptWidth);
 setFlex("composer", "max_width", G.promptWidth);
 setFlex("composer", "flex_grow", 0);
 setFlex("composer", "flex_shrink", 0);
-setFlex("composer", "padding", 20);
+setFlex("composer", "height", G.promptHeight);
+setFlex("composer", "direction", "row");
+setFlex("composer", "align_items", "center");
+setFlex("composer", "padding_left", 12);
+setFlex("composer", "padding_right", 10);
+setFlex("composer", "gap", 10);
+
+const promptTiles = createRow("actions", "composer");
+setFlex("actions", "align_items", "center");
+setFlex("actions", "gap", 8);
+setFlex("actions", "flex_shrink", 0);
 
 const prompt = createTextEditor("prompt", "composer");
 setFontFamily("prompt", FONT);
 setFontSize("prompt", 16);
 setTextColor("prompt", C.muted);
 setBackground("prompt", C.raised);
-setFlex("prompt", "min_height", 30);
+setFlex("prompt", "flex_grow", 1);
+setFlex("prompt", "flex_shrink", 1);
+setFlex("prompt", "min_width", 0);
+setFlex("prompt", "height", 34);
+setBorder("prompt", C.line, 1);
+setCornerRadius("prompt", 10);
+setFlex("prompt", "padding_left", 10);
 setPlaceholder("prompt",
     "A 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount.");
 
-const actions = createRow("actions", "composer");
-setFlex("actions", "align_items", "center");
-setFlex("actions", "margin_top", 18);
+const actionsRight = createRow("actions-right", "composer");
+setFlex("actions-right", "align_items", "center");
+setFlex("actions-right", "gap", 8);
+setFlex("actions-right", "flex_shrink", 0);
 
 /// A composer button: glyph then label, because the render's buttons read as an
 /// icon and a word rather than as text alone.
@@ -452,6 +473,9 @@ function button(id, parent, glyph, label, kind, width) {
          kind === "primary" ? C.onAccent : C.muted);
 
     createLabel(id + "-label", label, id);
+    // Icon-only tiles keep the element -- setMode still writes to it, and it is
+    // what a test reads -- but must not paint a clipped word inside 30px.
+    if (label === "") setVisible(id + "-label", false);
     setFontFamily(id + "-label", FONT);
     setFontSize(id + "-label", 14);
     setFontWeight(id + "-label", 600);
@@ -461,24 +485,23 @@ function button(id, parent, glyph, label, kind, width) {
     return b;
 }
 
-button("btn-mention", "actions", "at", "", "icon", G.iconTile + 14);
-setFlex("btn-mention", "margin_right", 9);
-button("btn-random", "actions", "dice", "Random module", "ghost", 186);
-
-const actionsGap = createRow("actions-gap", "actions");
-setFlex("actions-gap", "flex_grow", 1);
+// Forge's prompt row is tiles, then the input, then a pill, then the primary
+// button. Labelled buttons could not fit 720px beside the input, and the row
+// overflowed with the hint text printed straight through them -- so the two
+// utilities are tiles and the caption below says what they do.
+button("btn-mention", "actions", "at", "", "icon", G.iconTile);
+button("btn-random", "actions", "dice", "", "icon", G.iconTile);
 
 // Two labelled buttons rather than an inferred intent chip: a chip guesses and
 // the user still has to notice the guess, while an unwanted rebuild rewrites
 // their work and an unwanted answer costs nothing.
-button("btn-ask", "actions", "ask", "Ask", "ghost", 96);
-setFlex("btn-ask", "margin_right", 10);
-button("btn-build", "actions", "hammer", "Build module", "primary", 176);
+button("btn-ask", "actions-right", "ask", "Ask", "ghost", 76);
+button("btn-build", "actions-right", "hammer", "Build module", "primary", 158);
 setBoxShadow("btn-build", 0, 0, 18, 2, "#16DAC255");
 
 createLabel("composer-hint",
-            "↵  ASK ANSWERS · BUILD REWRITES. TWO BUTTONS SO NOTHING IS INFERRED.",
-            "composer");
+            "@ mention · \u2684 random · ask answers · build rewrites",
+            "hero");
 setFontFamily("composer-hint", MONO);
 setFontSize("composer-hint", 9.5);
 setLetterSpacing("composer-hint", 0.06);
@@ -507,15 +530,16 @@ function shelfTab(id, title, active) {
     setToggleBackground(id, C.appBg, C.appBg);
     setToggleBorderColor(id, C.appBg, C.appBg);
     textLabel(id + "-text", title, id);
-    setFontFamily(id + "-text", FONT);
-    setFontSize(id + "-text", 16);
-    setFontWeight(id + "-text", 600);
+    setFontFamily(id + "-text", MONO);
+    setFontSize(id + "-text", 11);
+    setFontWeight(id + "-text", 500);
+    setLetterSpacing(id + "-text", 0.14);
     setTextColor(id + "-text", active ? C.textStrong : C.faint);
     return t;
 }
 
-shelfTab("shelf-patches", "Patches", true);
-shelfTab("shelf-modules", "My modules", false);
+shelfTab("shelf-patches", "MY PATCHES", true);
+shelfTab("shelf-modules", "MY MODULES", false);
 
 const shelfGap = createRow("shelf-gap", "shelf-bar");
 setFlex("shelf-gap", "flex_grow", 1);
@@ -592,6 +616,9 @@ function setMode(next) {
         ? "A whole rack — modules, cables, and why each one is there."
         : "One Eurorack panel — knobs, jacks and the DSP behind them.");
     setText("btn-random-label", isPatch ? "Random patch" : "Random module");
+    setText("composer-hint", isPatch
+        ? "@ mention \u00b7 \u2684 random patch \u00b7 ask answers \u00b7 build rewires"
+        : "@ mention \u00b7 \u2684 random module \u00b7 ask answers \u00b7 build rewrites");
     setText("btn-build-label", isPatch ? "Build patch" : "Build module");
     setText("chip-artifact-text", isPatch ? "PATCH · A WHOLE RACK"
                                           : "MODULE · 12 HP");
