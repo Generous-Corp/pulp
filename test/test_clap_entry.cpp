@@ -356,6 +356,8 @@ struct ParamFlushHost {
     clap_host_t host{};
     clap_host_params_t params{};
     int flush_requests = 0;
+    int rescan_requests = 0;
+    clap_param_rescan_flags last_rescan_flags = 0;
 
     ParamFlushHost() {
         host.clap_version = CLAP_VERSION;
@@ -372,6 +374,12 @@ struct ParamFlushHost {
         params.request_flush = [](const clap_host_t* host) {
             auto* self = static_cast<ParamFlushHost*>(host->host_data);
             ++self->flush_requests;
+        };
+        params.rescan = [](const clap_host_t* host,
+                           clap_param_rescan_flags flags) {
+            auto* self = static_cast<ParamFlushHost*>(host->host_data);
+            ++self->rescan_requests;
+            self->last_rescan_flags = flags;
         };
     }
 };
@@ -1034,7 +1042,9 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
     clap_ostream_t out_stream{.ctx = &sink, .write = stream_write};
     REQUIRE(state1->save(plugin1, &out_stream));
 
-    const clap_plugin_t* plugin2 = factory->create_plugin(factory, nullptr, desc->id);
+    ParamFlushHost restore_host;
+    const clap_plugin_t* plugin2 =
+        factory->create_plugin(factory, &restore_host.host, desc->id);
     REQUIRE(plugin2 != nullptr);
     REQUIRE(plugin2->init(plugin2));
     auto* proc2 = test_clap::g_last_processor;
@@ -1055,6 +1065,16 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
             restore_revision + 1);
     REQUIRE_THAT(proc2->state().get_value(1), WithinAbs(-12.5, 0.01));
     REQUIRE(proc2->plugin_state == "snapshots=A|B");
+    REQUIRE(restore_host.rescan_requests == 1);
+    REQUIRE(restore_host.last_rescan_flags == CLAP_PARAM_RESCAN_VALUES);
+
+    MemoryStream invalid_source;
+    clap_istream_t invalid_stream{
+        .ctx = &invalid_source,
+        .read = stream_read,
+    };
+    REQUIRE_FALSE(state2->load(plugin2, &invalid_stream));
+    REQUIRE(restore_host.rescan_requests == 1);
 
     plugin1->destroy(plugin1);
     plugin2->destroy(plugin2);

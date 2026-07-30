@@ -337,6 +337,11 @@ inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream
     // to notice. Reconcile here or the audio thread renders the OLD state for
     // the rest of the session. Default no-op for processors that don't opt in.
     self->processor->on_non_realtime_tick();
+    // CLAP hosts cache parameter values. A successful state restore changes
+    // those values without emitting automation, so invalidate that cache.
+    if (ok && self->host && self->host_params && self->host_params->rescan) {
+        self->host_params->rescan(self->host, CLAP_PARAM_RESCAN_VALUES);
+    }
     return ok;
 }
 
