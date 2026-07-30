@@ -22,6 +22,7 @@
 #include <forge/midi_shell.hpp>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/view.hpp>
@@ -245,6 +246,16 @@ TEST_CASE("Forge Modular's view tree can be walked", "[.crash]") {
     // so this now runs against the same isolated store the baselines use.
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
+
+    // The host attaches a store and declares parameters before opening an
+    // editor; create_view() registers a listener on it. Skipping this
+    // dereferenced a null store -- a test that had not set the stage, not a
+    // product bug, which two rounds of bisecting the SHELL never would have
+    // found. A stack trace answered it in one run.
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+
     pulp::format::PrepareContext pc;
     pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
     pc.input_channels = 1; pc.output_channels = 2;

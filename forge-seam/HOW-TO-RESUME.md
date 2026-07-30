@@ -126,9 +126,14 @@ already says otherwise.
 Verified: Forge's store held at 118 entries across a full Forge Modular run,
 where it previously grew.
 
-**The guard is hermetic now too.** It renders against a private temp store, so a
-baseline means what it says rather than describing whatever was on disk that day.
-Proven by running it twice and getting the same digests. The baselines were
+**The guard is hermetic-ish now.** It points `FORGE_PROJECTS_DIR` at a private
+temp store, and three consecutive runs give identical digests.
+
+**But only projects are isolated.** Forge Instrument's baseline still shifted
+once after that change, deterministically, which means something else ambient
+under `~/Library/Application Support/Forge/` — marketplace packs, trust data,
+settings — also reaches the render. Isolate the whole storage root, not just
+projects, before trusting a baseline across machines or across days. The baselines were
 regenerated under those conditions — that is why they changed.
 
 **Still to clean up:** the ~118 project directories in Forge's store include the
@@ -155,9 +160,38 @@ difference that chrome depends on. It also explains the crash a human hit in
 `rebuild_marketplace_cards`: the same missing graph, reached through a different
 path.
 
-**Confirmed, not fixed.** Isolating the project store did not help — it still
-segfaults — which rules the store out and leaves `ensure_default_build()` as the
-cause.
+**It was never `ensure_default_build()`. It was a null StateStore, and it was
+the TEST's fault.**
+
+A stack trace answered in one run what two rounds of bisecting the shell had
+not:
+
+```
+StateStore::add_listener(...)          ← EXC_BAD_ACCESS, address 0xe0
+ForgeShell::create_view() + 1484
+```
+
+The host attaches a store and declares parameters before opening an editor;
+`create_view()` registers a listener on it. The test skipped that, so a null
+store was dereferenced. Adding
+
+```cpp
+pulp::state::StateStore store;
+shell.set_state_store(&store);
+shell.define_parameters(store);
+```
+
+before `create_view()` and the walk completes.
+
+**The lesson is about method, not the bug.** Two sessions of narrowing by
+elimination — accessory, composer row, stock FX comparison, project store —
+produced a confident, wrong diagnosis, written into this file as fact. `lldb -b
+-o run -o bt` would have been right the first time. Reach for the debugger
+before the bisect.
+
+**What this does NOT explain** is the crash a human hit in
+`rebuild_marketplace_cards` in the real app, where the host does attach a store.
+That one is still open, and the fix above does not touch it.
 
 There is now a regression test for it: `"Forge Modular's view tree can be
 walked"`, tagged `[.crash]` so it is hidden by default and the suite stays
