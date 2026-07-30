@@ -3,6 +3,8 @@
   "$id": "https://www.generouscorp.com/pulp/schemas/pulp-browser-interactions-v1.json",
   "title": "Pulp browser capture interaction plan",
   "type": "object",
+  "x-pulp-max-document-bytes": 65536,
+  "x-pulp-max-total-wait-ms": 30000,
   "required": ["schema", "version", "actions"],
   "properties": {
     "schema": { "const": "pulp-browser-interactions-v1" },

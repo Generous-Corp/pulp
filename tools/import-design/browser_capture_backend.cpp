@@ -802,7 +802,11 @@ CaptureResult capture_document(
         *output_directory / "browser.png",
         *output_directory / "semantic-report.json",
         *output_directory / "tokens.json",
-        *output_directory / "dom-snapshot.json"};
+        *output_directory / "dom-snapshot.json",
+        request.interaction_plan
+            ? std::optional<fs::path>{
+                  *output_directory / "interaction-report.json"}
+            : std::nullopt};
     const std::pair<const char*, fs::path> required[] = {
         {"capture envelope", artifacts.envelope},
         {"browser reference", artifacts.reference_png},
@@ -820,6 +824,15 @@ CaptureResult capture_document(
             failure.process = std::move(process);
             return failure;
         }
+    }
+    if (artifacts.interaction_report &&
+        !nonempty_regular_file(*artifacts.interaction_report)) {
+        auto failure = capture_failure(
+            "browser-capture-incomplete", "capture-artifacts",
+            "browser capture did not emit a non-empty interaction report",
+            *output_directory);
+        failure.process = std::move(process);
+        return failure;
     }
 
     CaptureResult result;

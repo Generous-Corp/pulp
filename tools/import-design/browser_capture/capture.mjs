@@ -52,7 +52,10 @@ import {
   installCaptureHealthMonitor,
   verifyCaptureHealth,
 } from "./health.mjs";
-import { executeInteractionPlan } from "./interaction_executor.mjs";
+import {
+  createMainFrameNavigationGuard,
+  executeInteractionPlan,
+} from "./interaction_executor.mjs";
 import { readInteractionPlan } from "./interaction_plan.mjs";
 import { armCleanupDeadline } from "./lifecycle.mjs";
 import { evaluateDesignTokens } from "./tokens.mjs";
@@ -230,8 +233,12 @@ function pngDimensions(bytes) {
   };
 }
 
+function serializeJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 async function writeJson(file, value) {
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(file, serializeJson(value));
 }
 
 async function configurePage(cdp, width, height, dpr) {
@@ -482,9 +489,12 @@ async function runCapture(options) {
       networkIdle: () => pendingNetwork.size === 0,
     });
     let interactionReport = null;
+    let interactionNavigationGuard = null;
     let interactionSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
     if (interactionPlan) {
       phase = "browser-interactions";
+      interactionNavigationGuard =
+        await createMainFrameNavigationGuard(cdp);
       const settleAfterInteraction = async () => {
         const settled = await waitForStable(cdp, {
           networkIdle: () => pendingNetwork.size === 0,
@@ -496,9 +506,11 @@ async function runCapture(options) {
       };
       interactionReport = await executeInteractionPlan(
         cdp, interactionPlan, {
+          navigationGuard: interactionNavigationGuard,
           settle: settleAfterInteraction,
         });
       await settleAfterInteraction();
+      await interactionNavigationGuard.assertUnchanged();
       phase = "page-settle";
     }
     // Keep the viewport that authored the responsive layout. Resizing it to the
@@ -591,6 +603,7 @@ async function runCapture(options) {
     });
 
     phase = "same-frame-capture";
+    await interactionNavigationGuard?.assertUnchanged();
     // Pause page virtual time before collecting any sidecar. Canvas/WebGL
     // requestAnimationFrame callbacks and timers must not advance while DOM,
     // semantics, tokens, health, and the authoritative pixels are read.
@@ -651,6 +664,7 @@ async function runCapture(options) {
       error.code = "capture-frame-not-deterministic";
       throw error;
     }
+    await interactionNavigationGuard?.assertUnchanged();
     const pixels = pngDimensions(screenshotBytes);
     if (pixels.width !== captureWidth * dpr ||
         pixels.height !== captureHeight * dpr) {
@@ -664,15 +678,21 @@ async function runCapture(options) {
     phase = "artifact-write";
     const sanitizedSnapshot = sanitizeSnapshot(
       snapshot, server.privatePrefix);
+    const interactionReportBytes = interactionReport
+      ? serializeJson(interactionReport)
+      : "";
+    const interactionReportSha256 = interactionReport
+      ? sha256(Buffer.from(interactionReportBytes, "utf8"))
+      : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
       writeJson(path.join(outputDir, "dom-snapshot.json"), sanitizedSnapshot),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       ...(interactionReport
-        ? [writeJson(
+        ? [writeFile(
             path.join(outputDir, "interaction-report.json"),
-            interactionReport)]
+            interactionReportBytes)]
         : []),
     ]);
 
@@ -742,6 +762,7 @@ async function runCapture(options) {
                 schema: interactionReport.schema,
                 version: interactionReport.version,
                 report: "interaction-report.json",
+                report_sha256: interactionReportSha256,
                 plan_sha256: interactionReport.plan_sha256,
                 action_count: interactionReport.action_count,
               },

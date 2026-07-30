@@ -640,6 +640,9 @@ TEST_CASE("capture passes paths as exact argv and cleans its isolated profile",
     CHECK(fs::exists(output / "browser.png"));
     CHECK(fs::exists(output / "semantic-report.json"));
     CHECK(fs::exists(output / "dom-snapshot.json"));
+    REQUIRE(result.artifacts->interaction_report);
+    CHECK(*result.artifacts->interaction_report ==
+          output / "interaction-report.json");
 }
 
 TEST_CASE("capture preserves the runtime diagnostic code",
@@ -754,6 +757,7 @@ TEST_CASE("non-interactive reuse clears prior interaction evidence",
     const auto interactive =
         capture::capture_document(fixture_browser(), request);
     REQUIRE(interactive.ok());
+    REQUIRE(interactive.artifacts->interaction_report);
     CHECK(fs::exists(
         request.output_directory / "interaction-report.json"));
     CHECK(read_file(request.output_directory / "capture.json")
@@ -763,10 +767,32 @@ TEST_CASE("non-interactive reuse clears prior interaction evidence",
     const auto initial =
         capture::capture_document(fixture_browser(), request);
     REQUIRE(initial.ok());
+    CHECK_FALSE(initial.artifacts->interaction_report);
     CHECK_FALSE(fs::exists(
         request.output_directory / "interaction-report.json"));
     CHECK(read_file(request.output_directory / "capture.json")
           .find("\"interactions\"") == std::string::npos);
+}
+
+TEST_CASE("interactive capture requires a fresh interaction report",
+          "[import-design][browser-capture][interactions][security]") {
+    TempTree tree("missing-interaction-report");
+    const auto script =
+        tree.write("omit-interaction.mjs", "// fixture");
+    auto request = fixture_request(tree, script);
+    request.interaction_plan = tree.write(
+        "interactions.json",
+        R"({"schema":"pulp-browser-interactions-v1","version":1,"actions":[{"action":"click","selector":"#open"}]})");
+
+    const auto result =
+        capture::capture_document(fixture_browser(), request);
+
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.code == "browser-capture-incomplete");
+    CHECK(result.diagnostic.message.find("interaction report") !=
+          std::string::npos);
+    CHECK_FALSE(fs::exists(
+        request.output_directory / "interaction-report.json"));
 }
 
 TEST_CASE("capture never accepts a stale token report",

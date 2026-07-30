@@ -7,12 +7,17 @@ import { fileURLToPath } from "node:url";
 import {
   MAX_INTERACTION_ACTIONS,
   MAX_ACTION_TIMEOUT_MS,
+  MAX_INTERACTION_PLAN_BYTES,
   MAX_SELECTOR_LENGTH,
+  MAX_TOTAL_WAIT_MS,
   MAX_TYPE_TEXT_LENGTH,
   MAX_WAIT_MS,
   parseInteractionPlan,
 } from "./interaction_plan.mjs";
-import { executeInteractionPlan } from "./interaction_executor.mjs";
+import {
+  createMainFrameNavigationGuard,
+  executeInteractionPlan,
+} from "./interaction_executor.mjs";
 
 function plan(actions) {
   return parseInteractionPlan(JSON.stringify({
@@ -43,6 +48,12 @@ test("published interaction schema matches enforced parser bounds", async () => 
   const schema = JSON.parse(await readFile(fileURLToPath(
     new URL("./interaction_plan_protocol.json", import.meta.url)), "utf8"));
   const actions = schema.properties.actions;
+  assert.equal(
+    schema["x-pulp-max-document-bytes"],
+    MAX_INTERACTION_PLAN_BYTES);
+  assert.equal(
+    schema["x-pulp-max-total-wait-ms"],
+    MAX_TOTAL_WAIT_MS);
   assert.equal(actions.maxItems, MAX_INTERACTION_ACTIONS);
 
   const definitions = Object.fromEntries(actions.items.oneOf.map(
@@ -82,6 +93,16 @@ test("interaction plan rejects executable or unbounded inputs", () => {
   assert.throws(() => plan([
     { action: "type", selector: "input", text: "x".repeat(4097) },
   ]), /no longer than 4096/);
+  assert.throws(() => parseInteractionPlan(JSON.stringify({
+    schema: "pulp-browser-interactions-v1",
+    version: 1,
+    actions: [{ action: "wait-ms", milliseconds: 0 }],
+    padding: "x".repeat(MAX_INTERACTION_PLAN_BYTES),
+  })), /file must contain 1 to 65536 bytes/);
+  assert.throws(() => plan(Array.from(
+    { length: 7 },
+    () => ({ action: "wait-ms", milliseconds: 5000 }))),
+  /wait-ms actions total 35000ms; maximum is 30000ms/);
 });
 
 test("executor records reproducible evidence without typed plaintext", async () => {
@@ -161,3 +182,36 @@ test("executor rejects a covered click target", async () => {
     ]), { delay: async () => {} }),
     /covered by another rendered element/);
 });
+
+test("main-frame navigation guard rejects navigation and ignores subframes",
+  async () => {
+    const listeners = new Map();
+    const calls = [];
+    const cdp = {
+      async call(method) {
+        calls.push(method);
+        if (method === "Page.getFrameTree") {
+          return {
+            frameTree: {
+              frame: { id: "main", url: "http://127.0.0.1/editor.html" },
+            },
+          };
+        }
+        return {};
+      },
+      on(method, listener) {
+        listeners.set(method, listener);
+      },
+    };
+    const guard = await createMainFrameNavigationGuard(cdp);
+    listeners.get("Page.frameRequestedNavigation")({
+      frameId: "subframe",
+    });
+    await guard.assertUnchanged();
+    listeners.get("Page.navigatedWithinDocument")({ frameId: "main" });
+    await assert.rejects(
+      guard.assertUnchanged(),
+      (error) => error.code ===
+        "browser-interaction-navigation-rejected");
+    assert.equal(calls.includes("Page.stopLoading"), true);
+  });

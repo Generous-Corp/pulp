@@ -130,6 +130,8 @@ bool validate_localized_asset_destinations(
     std::vector<fs::path> protected_paths = request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
     protected_paths.push_back(request.input_file);
+    if (request.browser_interactions)
+        protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
     for (const auto& asset : ir.asset_manifest.assets) {
@@ -542,6 +544,8 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
         request.reserved_output_paths;
     protected_paths.push_back(request.output_file);
     protected_paths.push_back(request.input_file);
+    if (request.browser_interactions)
+        protected_paths.push_back(*request.browser_interactions);
     if (!request.reference_image.empty())
         protected_paths.emplace_back(request.reference_image);
 

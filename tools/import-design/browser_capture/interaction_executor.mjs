@@ -31,12 +31,45 @@ function selectorProbeExpression(selector, operation) {
     if (!element) return { ok: false, state: "detached" };
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    const inert = Boolean(element.closest("[inert]"));
-    const visible = !element.hidden && !inert &&
-      style.display !== "none" && style.visibility !== "hidden" &&
-      Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+    let visualTreeVisible = true;
+    for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+      const ancestorStyle = getComputedStyle(ancestor);
+      if (ancestor.hidden || ancestor.inert ||
+          ancestorStyle.display === "none" ||
+          ancestorStyle.visibility === "hidden" ||
+          ancestorStyle.visibility === "collapse" ||
+          Number(ancestorStyle.opacity) <= 0) {
+        visualTreeVisible = false;
+        break;
+      }
+    }
+    const hasUncoveredPoint = (candidate) => {
+      const left = Math.max(0, candidate.left);
+      const top = Math.max(0, candidate.top);
+      const right = Math.min(innerWidth, candidate.right);
+      const bottom = Math.min(innerHeight, candidate.bottom);
+      if (right <= left || bottom <= top) return false;
+      const insetX = Math.min(1, (right - left) / 4);
+      const insetY = Math.min(1, (bottom - top) / 4);
+      const points = [
+        [(left + right) / 2, (top + bottom) / 2],
+        [left + insetX, top + insetY],
+        [right - insetX, top + insetY],
+        [left + insetX, bottom - insetY],
+        [right - insetX, bottom - insetY],
+      ];
+      return points.some(([x, y]) => {
+        const hit = document.elementFromPoint(x, y);
+        return Boolean(hit && (element === hit || element.contains(hit) ||
+                               hit.contains(element)));
+      });
+    };
+    const visible = visualTreeVisible && rect.width > 0 && rect.height > 0;
     if (${JSON.stringify(operation)} === "observe") {
-      return { ok: true, state: visible ? "visible" : "hidden" };
+      return {
+        ok: true,
+        state: visible && hasUncoveredPoint(rect) ? "visible" : "hidden"
+      };
     }
     if (!visible) return { ok: false, state: "hidden" };
     element.scrollIntoView({ block: "center", inline: "center" });
@@ -119,9 +152,59 @@ function publicActionEvidence(action) {
   return evidence;
 }
 
+function navigationFailure() {
+  const error = new Error(
+    "main-frame navigation is forbidden while browser interactions run");
+  error.code = "browser-interaction-navigation-rejected";
+  return error;
+}
+
+export async function createMainFrameNavigationGuard(cdp) {
+  const initialTree = await cdp.call("Page.getFrameTree");
+  const initialFrame = initialTree?.frameTree?.frame;
+  if (!initialFrame?.id || typeof initialFrame.url !== "string") {
+    throw navigationFailure();
+  }
+
+  let violation = false;
+  const rejectMainFrame = (frameId) => {
+    if (frameId !== initialFrame.id) return;
+    violation = true;
+    Promise.resolve(cdp.call("Page.stopLoading")).catch(() => {});
+  };
+  cdp.on("Page.frameRequestedNavigation", ({ frameId }) => {
+    rejectMainFrame(frameId);
+  });
+  cdp.on("Page.navigatedWithinDocument", ({ frameId }) => {
+    rejectMainFrame(frameId);
+  });
+  cdp.on("Page.frameNavigated", ({ frame }) => {
+    if (frame?.id === initialFrame.id || !frame?.parentId) {
+      violation = true;
+      Promise.resolve(cdp.call("Page.stopLoading")).catch(() => {});
+    }
+  });
+
+  return {
+    async assertUnchanged() {
+      if (violation) throw navigationFailure();
+      const currentTree = await cdp.call("Page.getFrameTree");
+      const currentFrame = currentTree?.frameTree?.frame;
+      if (violation || currentFrame?.id !== initialFrame.id ||
+          currentFrame?.url !== initialFrame.url) {
+        throw navigationFailure();
+      }
+    },
+  };
+}
+
 export async function executeInteractionPlan(cdp, plan, options = {}) {
   const wait = options.delay ?? delay;
   const settle = options.settle ?? (async () => {});
+  const navigationGuard = options.navigationGuard ??
+    (typeof cdp.on === "function"
+      ? await createMainFrameNavigationGuard(cdp)
+      : null);
   const completed = [];
 
   for (let index = 0; index < plan.actions.length; index += 1) {
@@ -156,6 +239,7 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
       await cdp.call("Input.insertText", { text: action.text });
       await settle();
     }
+    await navigationGuard?.assertUnchanged();
     completed.push(publicActionEvidence(action));
   }
 
