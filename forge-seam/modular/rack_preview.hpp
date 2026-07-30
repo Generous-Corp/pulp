@@ -1,0 +1,67 @@
+#pragma once
+
+// The rack, drawn.
+//
+// Panels composited at their true widths with cables hanging between real jack
+// centres. All the arithmetic lives in rack_layout.hpp, which is asserted
+// exactly; this file only paints what that returns.
+//
+// Hovering a line of the explanation lights its cable. That is the whole reason
+// the preview is worth drawing rather than listing the connections as text: the
+// sentence "the LFO is what makes it move" means nothing until the cable it
+// refers to is the one glowing.
+
+#include "forge/rack_layout.hpp"
+
+#include <pulp/view/view.hpp>
+
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace forge_modular {
+
+class RackPreview : public pulp::view::View {
+public:
+    void set_rack(std::vector<RackModule> modules,
+                  std::vector<Connection> connections);
+
+    const std::vector<RackModule>& modules() const { return modules_; }
+    const std::vector<Connection>& connections() const { return connections_; }
+
+    /// Light one cable, by its index in `connections()`. No value dims nothing
+    /// -- with no hover every cable is drawn at full strength, because an
+    /// unhovered rack is the normal state and must not look faded.
+    void set_highlight(std::optional<std::size_t> index);
+    std::optional<std::size_t> highlight() const { return highlight_; }
+
+    /// Highlight whichever cable a role owns, for hovering a role group rather
+    /// than a single line.
+    void highlight_role(std::optional<SignalRole> role);
+
+    /// How far the patch has been wired in, 0..1. Cables reach across as the
+    /// build proceeds rather than appearing all at once.
+    void set_progress(float t);
+    float progress() const { return progress_; }
+
+    /// The layout for a given viewport. Exposed so a test can assert what will
+    /// be painted without painting it.
+    RackLayout layout_for(float width, float height) const;
+
+    /// How strongly a cable is drawn: 1 when it is the highlight or nothing is
+    /// highlighted, dimmed otherwise.
+    float cable_alpha(std::size_t index) const;
+
+    void paint(pulp::canvas::Canvas& canvas) override;
+
+private:
+    std::vector<RackModule> modules_;
+    std::vector<Connection> connections_;
+    std::optional<std::size_t> highlight_;
+    std::optional<SignalRole> highlight_role_;
+    float progress_ = 1.0f;
+
+    const RackModule* find(const std::string& id) const;
+};
+
+}  // namespace forge_modular

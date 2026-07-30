@@ -18,6 +18,12 @@
 
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
+#include <forge/rack_layout.hpp>
+#include <forge/rack_preview.hpp>
+
+#include <catch2/catch_approx.hpp>
+
+using Catch::Approx;
 #include <forge/fx_shell.hpp>
 #include <forge/instrument_shell.hpp>
 #include <forge/midi_shell.hpp>
@@ -761,4 +767,269 @@ TEST_CASE("the patch composer renders its depth tabs", "[depth][render]") {
         shot.string(), /*scale=*/1.0f, pulp::view::ScreenshotBackend::skia));
     // A blank frame is not a passing frame.
     CHECK(std::filesystem::file_size(shot) > 20000);
+}
+
+namespace {
+
+/// A small rack: a 12 HP source into an 8 HP filter into a 6 HP output.
+std::vector<forge_modular::RackModule> sample_rack() {
+    using forge_modular::Port;
+    using forge_modular::RackModule;
+    RackModule vco{"VCO", "Fundamental", "VCO-1", 12,
+                   {Port{"out", "OUT", 0.5f, 318.0f, false}}, true, true};
+    RackModule vcf{"VCF", "Fundamental", "VCF", 8,
+                   {Port{"in", "IN", 0.25f, 300.0f, true},
+                    Port{"cv", "CV", 0.5f, 300.0f, true},
+                    Port{"out", "OUT", 0.75f, 340.0f, false}}, true, true};
+    RackModule out{"OUT", "Fundamental", "Audio", 6,
+                   {Port{"l", "L", 0.3f, 320.0f, true},
+                    Port{"r", "R", 0.7f, 320.0f, true}}, true, true};
+    return {vco, vcf, out};
+}
+
+}  // namespace
+
+TEST_CASE("panels butt together at their true widths", "[rack]") {
+    // A preview that fudges a panel's width to tidy a row is lying about the
+    // rack the user will get, so this asserts the arithmetic exactly.
+    const auto mods = sample_rack();
+    const auto L = forge_modular::layout_rack(mods, 1000.0f, 600.0f);
+
+    REQUIRE(L.panels.size() == 3);
+    CHECK(L.total_width == Approx((12 + 8 + 6) * forge_modular::kHorizontalPitch));
+
+    // No gutters: each panel starts exactly where the previous one ended.
+    for (std::size_t i = 1; i < L.panels.size(); ++i) {
+        INFO("seam " << i);
+        CHECK(L.panels[i].x == Approx(L.panels[i - 1].x + L.panels[i - 1].width));
+    }
+    // Widths stay in proportion to HP -- 12 HP is exactly twice 6 HP.
+    CHECK(L.panels[0].width == Approx(L.panels[2].width * 2.0f));
+    // And the strip is centred rather than pinned left.
+    const float right = L.panels.back().x + L.panels.back().width;
+    CHECK(L.panels.front().x == Approx(1000.0f - right).margin(0.01));
+}
+
+TEST_CASE("a small rack is not blown up past life size", "[rack]") {
+    // Two modules stretched to fill a wide window stop looking like Eurorack.
+    const std::vector<forge_modular::RackModule> two{sample_rack()[0], sample_rack()[2]};
+    const auto L = forge_modular::layout_rack(two, 4000.0f, 3000.0f);
+    CHECK(L.scale <= 1.05f);
+
+    // A cramped viewport shrinks to fit rather than overflowing.
+    const auto tight = forge_modular::layout_rack(sample_rack(), 300.0f, 600.0f);
+    CHECK(tight.scale < 1.0f);
+    CHECK(tight.total_width * tight.scale <= 300.0f);
+}
+
+TEST_CASE("a jack lands on its captured centre", "[rack]") {
+    const auto mods = sample_rack();
+    const auto L = forge_modular::layout_rack(mods, 1000.0f, 600.0f);
+
+    const auto p = forge_modular::port_point(L, mods, "VCF", "cv", "VCO");
+    const auto* box = L.panel("VCF");
+    REQUIRE(box != nullptr);
+    CHECK_FALSE(p.docked);                       // a placed module never docks
+    CHECK(p.x == Approx(box->x + 0.5f * box->width));
+    CHECK(p.y == Approx(box->y + 300.0f * L.scale));
+    CHECK(p.name == "CV");
+}
+
+TEST_CASE("an unplaced module docks at the edge facing its partner", "[rack]") {
+    // The honest degradation: no coordinates were ever captured, so ending at
+    // the panel edge beats guessing a position that looks authoritative and is
+    // wrong. It resolves the first time the module is placed.
+    auto mods = sample_rack();
+    mods[1].placed = false;                      // VCF, the middle panel
+    const auto L = forge_modular::layout_rack(mods, 1000.0f, 600.0f);
+    const auto* box = L.panel("VCF");
+    REQUIRE(box != nullptr);
+
+    // Partner on the left -> dock on the left edge; on the right -> right edge.
+    const auto from_left = forge_modular::port_point(L, mods, "VCF", "in", "VCO");
+    const auto from_right = forge_modular::port_point(L, mods, "VCF", "out", "OUT");
+    CHECK(from_left.docked);
+    CHECK(from_right.docked);
+    CHECK(from_left.x == Approx(box->x + 3.0f));
+    CHECK(from_right.x == Approx(box->x + box->width - 3.0f));
+
+    // Several docked ends must not stack on one spot.
+    const auto cv = forge_modular::port_point(L, mods, "VCF", "cv", "VCO");
+    CHECK(from_left.y != Approx(cv.y));
+    CHECK(std::abs(from_left.y - cv.y) >= 11.0f);
+
+    // The name still comes through, so the explanation can still say "IN".
+    CHECK(from_left.name == "IN");
+}
+
+TEST_CASE("a cable hangs, and hangs lower the further it spans", "[rack]") {
+    forge_modular::JackPoint a{0.0f, 100.0f, "OUT", false};
+    forge_modular::JackPoint near{100.0f, 100.0f, "IN", false};
+    forge_modular::JackPoint far{800.0f, 100.0f, "IN", false};
+
+    const auto short_cable = forge_modular::cable_curve(a, near);
+    const auto long_cable = forge_modular::cable_curve(a, far);
+
+    // Below both endpoints: a cable hangs, it does not arc over the rack.
+    CHECK(short_cable.cy > 100.0f);
+    CHECK(long_cable.cy > short_cable.cy);
+
+    // Capped, or a very wide rack draws a coil on the floor.
+    forge_modular::JackPoint miles{9000.0f, 100.0f, "IN", false};
+    CHECK(forge_modular::cable_curve(a, miles).cy <= 100.0f + 160.0f);
+
+    // Mid-build a cable has only reached partway across, and is not already at
+    // full droop.
+    const auto half = forge_modular::cable_curve(a, far, 0.5f);
+    CHECK(half.x2 == Approx(400.0f));
+    CHECK(half.cy < long_cable.cy);
+    const auto unstarted = forge_modular::cable_curve(a, far, 0.0f);
+    CHECK(unstarted.x2 == Approx(a.x));
+}
+
+TEST_CASE("cable colours are the ones Rack will show", "[rack]") {
+    // Written into the patch's colour field at generation, so the preview is
+    // not a private convention that diverges once the patch is opened.
+    using forge_modular::SignalRole;
+    CHECK(forge_modular::role_color(SignalRole::audio) == 0x00B56E);
+    CHECK(forge_modular::role_color(SignalRole::pitch) == 0x3695EF);
+    CHECK(forge_modular::role_color(SignalRole::clock) == 0xFFB437);
+    CHECK(forge_modular::role_color(SignalRole::mod) == 0x8B4ADE);
+
+    // All four distinct, or the roles stop being readable at a glance.
+    std::set<std::uint32_t> seen;
+    for (auto r : {SignalRole::audio, SignalRole::pitch,
+                   SignalRole::clock, SignalRole::mod})
+        seen.insert(forge_modular::role_color(r));
+    CHECK(seen.size() == 4);
+}
+
+TEST_CASE("a degenerate viewport does not produce garbage", "[rack]") {
+    // A window mid-resize can be zero-sized; the layout must stay finite.
+    const auto L = forge_modular::layout_rack(sample_rack(), 0.0f, 0.0f);
+    CHECK(L.scale > 0.0f);
+    for (const auto& p : L.panels) {
+        CHECK(std::isfinite(p.x));
+        CHECK(std::isfinite(p.width));
+        CHECK(p.width > 0.0f);
+    }
+    // And an empty rack lays out to nothing rather than dividing by zero.
+    const auto empty = forge_modular::layout_rack({}, 800.0f, 600.0f);
+    CHECK(empty.panels.empty());
+    CHECK(std::isfinite(empty.scale));
+}
+
+namespace {
+
+std::vector<forge_modular::Connection> sample_patch() {
+    using forge_modular::Connection;
+    using forge_modular::SignalRole;
+    return {
+        Connection{"VCO", "out", "VCF", "in", SignalRole::audio,
+                   "The oscillator's output is the sound; everything else shapes it."},
+        Connection{"VCF", "out", "OUT", "l", SignalRole::audio,
+                   "Into the output, or there is silence."},
+        Connection{"VCO", "out", "VCF", "cv", SignalRole::mod,
+                   "A slow sweep of the cutoff, so the tone moves."},
+    };
+}
+
+}  // namespace
+
+TEST_CASE("hovering a line lights its cable and dims the rest", "[rack][hover]") {
+    // The reason the preview is worth drawing at all: "the LFO is what makes it
+    // move" means nothing until the cable it names is the one glowing.
+    forge_modular::RackPreview preview;
+    preview.set_rack(sample_rack(), sample_patch());
+
+    // No hover is the normal state, and it must not look faded.
+    for (std::size_t i = 0; i < 3; ++i) {
+        INFO("cable " << i);
+        CHECK(preview.cable_alpha(i) == Approx(1.0f));
+    }
+
+    preview.set_highlight(1);
+    CHECK(preview.cable_alpha(1) == Approx(1.0f));
+    CHECK(preview.cable_alpha(0) < 1.0f);
+    CHECK(preview.cable_alpha(2) < 1.0f);
+
+    // Letting go restores every cable, rather than leaving the rack dimmed.
+    preview.set_highlight(std::nullopt);
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK(preview.cable_alpha(i) == Approx(1.0f));
+
+    // A role hover lights every cable of that role -- two audio cables here.
+    preview.highlight_role(forge_modular::SignalRole::audio);
+    CHECK(preview.cable_alpha(0) == Approx(1.0f));
+    CHECK(preview.cable_alpha(1) == Approx(1.0f));
+    CHECK(preview.cable_alpha(2) < 1.0f);       // the modulation cable dims
+    preview.highlight_role(std::nullopt);
+
+    // An index past the end must not light nothing-at-all or read out of range.
+    preview.set_highlight(99);
+    CHECK_FALSE(preview.highlight().has_value());
+    CHECK(preview.cable_alpha(0) == Approx(1.0f));
+}
+
+TEST_CASE("cables reach across as the patch is wired", "[rack][hover]") {
+    forge_modular::RackPreview preview;
+    preview.set_rack(sample_rack(), sample_patch());
+    preview.set_bounds({0, 0, 900, 500});
+
+    const auto L = preview.layout_for(900, 500);
+    const auto mods = sample_rack();
+    const auto from = forge_modular::port_point(L, mods, "VCO", "out", "VCF");
+    const auto to = forge_modular::port_point(L, mods, "VCF", "in", "VCO");
+
+    preview.set_progress(0.0f);
+    CHECK(preview.progress() == Approx(0.0f));
+    CHECK(forge_modular::cable_curve(from, to, 0.0f).x2 == Approx(from.x));
+
+    preview.set_progress(1.0f);
+    CHECK(forge_modular::cable_curve(from, to, 1.0f).x2 == Approx(to.x));
+
+    // Out-of-range progress is clamped rather than drawing past the jack.
+    preview.set_progress(3.0f);
+    CHECK(preview.progress() == Approx(1.0f));
+    preview.set_progress(-1.0f);
+    CHECK(preview.progress() == Approx(0.0f));
+}
+
+TEST_CASE("the rack preview paints", "[rack][render]") {
+    forge_modular::RackPreview preview;
+    preview.set_rack(sample_rack(), sample_patch());
+    preview.set_bounds({0, 0, 900, 500});
+    preview.set_highlight(2);   // the modulation cable lit, the audio pair dimmed
+
+    const auto shot = std::filesystem::temp_directory_path() / "modular-rack-preview.png";
+    REQUIRE(pulp::view::render_to_file(preview, 900, 500, shot.string(),
+                                       /*scale=*/1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    CHECK(std::filesystem::file_size(shot) > 8000);   // a blank frame is not a pass
+}
+
+TEST_CASE("the preview names its panels", "[rack][render]") {
+    // Assert the ink, not the box it sits in: a rack of anonymous rectangles
+    // cannot be checked against what was asked for. Rendering the same rack
+    // with and without names must produce different frames.
+    auto render = [](const std::vector<forge_modular::RackModule>& mods,
+                     const char* tag) {
+        forge_modular::RackPreview preview;
+        preview.set_rack(mods, sample_patch());
+        preview.set_bounds({0, 0, 900, 500});
+        const auto path = std::filesystem::temp_directory_path() /
+                          (std::string("rack-names-") + tag + ".png");
+        REQUIRE(pulp::view::render_to_file(preview, 900, 500, path.string(), 1.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        return read_all(path);
+    };
+
+    auto anonymous = sample_rack();
+    for (auto& m : anonymous) { m.name.clear(); m.brand.clear(); }
+
+    const auto named = render(sample_rack(), "named");
+    const auto blank = render(anonymous, "blank");
+    CHECK(named.size() > 8000);          // neither frame may be empty
+    CHECK(blank.size() > 8000);
+    CHECK(named != blank);               // the names actually reached the canvas
 }
