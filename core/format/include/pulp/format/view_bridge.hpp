@@ -282,6 +282,12 @@ public:
     ViewRole role_at(size_t index) const;
 
 private:
+    /// Consume a successful StateStore deserialize edge on the editor's
+    /// main-thread idle tick, reconciling Main listeners with the restored
+    /// parameter snapshot. Returns true once per edge while the bridge is open;
+    /// the caller schedules the repaint.
+    bool poll_state_restore();
+
     /// Pump every owner-backed host-to-UI path while the adapter owner is
     /// alive. This guards both the StateStore and the routed design surface;
     /// either may otherwise retain references past Processor teardown.
@@ -311,7 +317,7 @@ private:
     std::size_t sync_design_frames_from_host();
 
     /// The editor idle pump — the sole production caller of the host pull.
-    friend std::function<void()> make_scripted_idle_pump(ViewBridge&);
+    friend std::function<void()> make_editor_idle_pump(ViewBridge&);
     /// Test-only reach-in, mirroring `StandaloneRenderTestAccess`.
     friend struct ViewBridgeTestAccess;
     Processor& processor_;
@@ -341,6 +347,7 @@ private:
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
     uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)
+    uint64_t last_state_restore_revision_ = 0;
     /// Cross-thread liveness (see alive_token()). Flipped false in ~ViewBridge.
     std::shared_ptr<std::atomic<bool>> alive_ =
         std::make_shared<std::atomic<bool>>(true);

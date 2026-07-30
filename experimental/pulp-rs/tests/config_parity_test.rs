@@ -87,6 +87,7 @@ fn list_human_lane_reports_keys_with_resolved_values() {
     assert!(s.contains("update.channel = stable")); // defaulted
     assert!(s.contains("import_design.default_mode = live")); // defaulted
     assert!(s.contains("import_design.default_emit = js")); // defaulted
+    assert!(s.contains("import_design.browser = auto")); // defaulted
     assert!(s.contains("claude.send_user_file = on")); // defaulted
 }
 

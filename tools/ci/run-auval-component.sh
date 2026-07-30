@@ -10,6 +10,10 @@
 
 set -euo pipefail
 
+# Shared with tools/ci/test_run_auval_component.py so the launchd-exec predicate
+# is tested as the code the script actually runs, not a copy of it.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auval-exec-check.sh"
+
 if [[ ${1:-} == "--gui-worker" ]]; then
   if [[ $# -ne 7 ]]; then
     echo "invalid AU validation worker invocation" >&2
@@ -149,8 +153,21 @@ plutil -insert StandardErrorPath -string "$stderr_log" "$agent_plist"
 launchctl bootstrap "gui/$uid" "$agent_plist"
 agent_loaded=1
 
+# launchd may be unable to execute the worker at all — most commonly because the
+# checkout lives somewhere launchd is not permitted to read (a worktree under
+# /Volumes needs Full Disk Access for launchd; the directory stats fine from the
+# shell, so this is invisible until the exec fails). That is not a validation
+# result, and waiting the full deadline for a status file that can never appear
+# turns it into a misleading "timed out" 55 seconds later.
+#
+# Detect it precisely: bash reporting it could not execute THIS script. A plugin
+# that genuinely fails validation writes a status file and is reported below, so
+# this cannot swallow a real failure.
 deadline=$((SECONDS + 55))
 while [[ ! -f "$status_file" ]] && (( SECONDS < deadline )); do
+  if auval_worker_exec_failed "$stderr_log" "$script_path"; then
+    break
+  fi
   sleep 0.2
 done
 
@@ -158,6 +175,15 @@ cat "$inventory_log" 2>/dev/null || true
 cat "$validation_log" 2>/dev/null || true
 cat "$stdout_log" 2>/dev/null || true
 cat "$stderr_log" 2>/dev/null || true
+
+if [[ ! -f "$status_file" ]] && auval_worker_exec_failed "$stderr_log" "$script_path"; then
+  echo "AU validation SKIPPED: launchd could not execute $script_path" >&2
+  echo "  The AU host has to be launched from the user's GUI session, and launchd" >&2
+  echo "  cannot read this path. A checkout under /Volumes is the usual cause —" >&2
+  echo "  grant launchd Full Disk Access, or run this validation from a checkout" >&2
+  echo "  under your home directory." >&2
+  exit 77
+fi
 
 if [[ ! -f "$status_file" ]]; then
   echo "AU GUI-bootstrap validation timed out for: $component_type $component_subtype $component_manufacturer" >&2

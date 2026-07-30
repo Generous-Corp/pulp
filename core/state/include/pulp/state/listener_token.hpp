@@ -25,6 +25,17 @@ enum class ListenerThread {
     Audio,
 };
 
+/// Whether a Main listener participates in the UI refresh that follows a
+/// successful state restore.
+///
+/// Deserialization remains silent for ordinary listeners. View bindings that
+/// cache parameter values opt into @c Reconcile so the editor can refresh
+/// those caches later, on its main-thread idle tick.
+enum class ListenerRestoreBehavior {
+    Silent,
+    Reconcile,
+};
+
 /// RAII handle for a registered parameter-change listener.
 ///
 /// The token owns the subscription. When it is destroyed (or

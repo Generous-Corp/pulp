@@ -64,6 +64,7 @@ examples rather than the full source-tree inventory.
 | `/create <name>` | Scaffold a new plugin or app project |
 | `/status` | Show project status, build state, configuration |
 | `/validate` | Run plugin format validators and validation reports |
+| `/seq` | Inspect, validate, edit, explain, import, or consent-gated export of a timeline project |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
 | `/import-design` | Import from Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX |
@@ -103,11 +104,9 @@ clients) can drive them in one turn instead of multiple shell calls.
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
-| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot` (currently returns the inspector unavailable error until host-capture wiring lands), `pulp_inspect_evaluate` (currently returns the inspector unavailable error until ScriptEngine wiring lands), `pulp_inspect_performance`, `pulp_inspect_audio` |
-| Motion tracing + fixture replay | `pulp_motion_start_trace`, `pulp_motion_stop_trace`, `pulp_motion_snapshot`, `pulp_motion_list_traces`, `pulp_motion_load_fixture`, `pulp_motion_scrub_to`, `pulp_motion_play`, `pulp_motion_pause`, `pulp_motion_enable_cost`, `pulp_motion_disable_cost` |
-| Perfetto tracing (live-session inspector RPCs) | `pulp_trace_start`, `pulp_trace_stop`, `pulp_trace_snapshot`, `pulp_trace_query`, `pulp_trace_explain` (client-side `pulp trace doctor` / `open` / `fetch` and offline `query --trace` have no inspector RPC, so no MCP tool) |
+| Experimental inspector clients | `pulp_inspect_*`, `pulp_motion_*`, and live-session `pulp_trace_*` wrappers currently require a Pulp source checkout plus a custom host/test fixture that explicitly constructs the server. Normal and installed-user launches do not expose these RPCs. Offline trace query remains usable without an inspector session. |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
-| Timeline project editing + rendering | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render` |
+| Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
@@ -147,11 +146,35 @@ The inspection/render/validate workflow is built into Pulp. Audio Quality Lab is
 only the richer advisory comparison step; its absence never blocks inspection or
 rendering and the compare tool returns an explicit install command.
 
-The five timeline tools are generated from the committed timeline schema
-manifest. They accept a project path or inline canonical project JSON; command
-application accepts only the generated typed command envelopes. Use
+The ten timeline tools are generated from the committed timeline schema
+manifest. Seven retain stateless timeline-tool entry points; diff, undo, and
+redo are MCP-local `DocumentSession` operations with no `pulp seq` session
+subcommands.
+Opening a project returns a bounded in-process session identifier;
+pass it to command application, diff, undo, and redo to iterate without
+re-reading whole documents. Command application accepts only the generated
+typed command envelopes. The MCP process admits at most 32 sessions and applies
+a 64 MiB aggregate admission charge equal to twice each canonical JSON size plus
+its fixed history reservation. This deterministic charge is a resource proxy,
+not a direct heap measurement. Each complete encoded result is independently
+capped at 64 MiB, and the oldest session is evicted first when admitting a
+session would cross the count or aggregate charge. Sessions expire on eviction or process
+restart, and a session whose bounded journal is full refuses the next edit
+atomically. Diff reports the engine's exact dirty set and before/after revisions
+for the latest successful apply, undo, or redo transition; it is not a
+since-revision query. Use
 `pulp_timeline_render` for deterministic Float32 WAV output, then optionally pass
-before/after renders to `pulp_audio_compare` for an advisory judgment.
+before/after renders to `pulp_audio_compare` for an advisory judgment. Export
+requires explicit consent for every reported lossy concept; its accepted-loss
+enum is generated from the committed interchange concept authority and offers
+no force or accept-all escape hatch. Call it first with outputless
+`plan_only: true` (and no `accept_losses`) to receive the canonical manifest and
+`required_consent` without writing; publishing requires `output`; refusal
+and successful export return the same manifest shape. SMF export publishes a
+new artifact directory and SMF import consumes a MIDI file. DAWproject export
+atomically publishes a standard `.dawproject` ZIP, and DAWproject import consumes
+that container while rejecting unsafe entries before sealing referenced media
+into the new canonical project directory.
 
 The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 

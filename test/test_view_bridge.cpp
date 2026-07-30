@@ -1,7 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
-#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/detail/au_v2_editor_resize.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
@@ -10,9 +11,11 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
+#include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -78,6 +81,18 @@ private:
     std::optional<std::string> previous_;
 };
 
+class CountingWindowHost final : public view::WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaint_count; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+
+    int repaint_count = 0;
+};
+
 class StubProcessor : public format::Processor {
 public:
     int opened_count = 0;
@@ -112,6 +127,36 @@ public:
         last_w = w;
         last_h = h;
     }
+};
+
+class BoundControlsView final : public view::View {
+public:
+    explicit BoundControlsView(state::StateStore& store) {
+        auto knob = std::make_unique<view::Knob>();
+        knob_ = knob.get();
+        bindings_.push_back(view::bind_parameter(*knob_, store, 1));
+        add_child(std::move(knob));
+
+        auto fader = std::make_unique<view::Fader>();
+        fader_ = fader.get();
+        bindings_.push_back(view::bind_parameter(*fader_, store, 1));
+        add_child(std::move(fader));
+    }
+
+    view::Knob* knob_ = nullptr;
+    view::Fader* fader_ = nullptr;
+    std::vector<view::ParameterBinding> bindings_;
+};
+
+class MultiBoundProcessor final : public StubProcessor {
+public:
+    std::unique_ptr<view::View> create_view() override {
+        auto controls = std::make_unique<BoundControlsView>(state());
+        views.push_back(controls.get());
+        return controls;
+    }
+
+    std::vector<BoundControlsView*> views;
 };
 
 class ScriptedCustomViewProcessor : public StubProcessor {
@@ -664,6 +709,129 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     REQUIRE(p.closed_count == 1);
 }
 
+TEST_CASE("ViewBridge idle pump reconciles bound widgets after state restore",
+          "[view_bridge][state-restore][repaint]") {
+    StubProcessor processor;
+    state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    auto controls = std::make_unique<BoundControlsView>(store);
+    auto* knob = controls->knob_;
+    auto* fader = controls->fader_;
+    processor.custom_view = std::move(controls);
+
+    format::ViewBridge bridge(processor, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    CountingWindowHost host;
+    bridge.view()->set_window_host(&host);
+
+    store.set_value(1, -12.0f);
+    const auto preset =
+        format::plugin_state_io::serialize(store, processor);
+    store.set_value(1, 6.0f);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
+    const auto revision = store.state_restore_revision();
+    host.repaint_count = 0;
+
+    REQUIRE(format::plugin_state_io::deserialize(
+        preset, store, processor));
+    REQUIRE(store.state_restore_revision() == revision + 1);
+    REQUIRE(host.repaint_count == 0);
+    REQUIRE(knob->value() != Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() != Catch::Approx(store.get_normalized(1)));
+
+    int audio_callbacks = 0;
+    auto audio_listener = store.add_audio_listener(
+        [&audio_callbacks](state::ParamID, float) { ++audio_callbacks; });
+
+    state::ListenerToken removed_listener;
+    int removed_callbacks = 0;
+    auto removing_listener = store.add_listener(
+        [&removed_listener](state::ParamID, float) {
+            removed_listener.reset();
+        },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+    removed_listener = store.add_listener(
+        [&removed_callbacks](state::ParamID, float) { ++removed_callbacks; },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+
+    auto pump = format::make_editor_idle_pump(bridge);
+    pump();
+    REQUIRE(host.repaint_count > 0);
+    REQUIRE(knob->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(fader->value() == Catch::Approx(store.get_normalized(1)));
+    REQUIRE(audio_callbacks == 0);
+    REQUIRE(removed_callbacks == 0);
+    const auto repaint_count = host.repaint_count;
+    pump();
+    REQUIRE(host.repaint_count == repaint_count);
+}
+
+TEST_CASE("shared StateStore reconciles one restore once across ViewBridges",
+          "[view_bridge][state-restore][multi-view]") {
+    MultiBoundProcessor processor;
+    state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+
+    format::ViewBridge first(processor, store);
+    format::ViewBridge second(processor, store);
+    REQUIRE(first.open());
+    REQUIRE(second.open());
+    REQUIRE(processor.views.size() == 2);
+
+    CountingWindowHost first_host;
+    CountingWindowHost second_host;
+    first.view()->set_window_host(&first_host);
+    second.view()->set_window_host(&second_host);
+
+    store.set_value(1, -18.0f);
+    const auto preset = store.serialize();
+    store.set_value(1, 6.0f);
+
+    int restore_callbacks = 0;
+    const auto restore_probe = store.add_listener(
+        [&restore_callbacks](state::ParamID, float) {
+            ++restore_callbacks;
+        },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+    int ordinary_callbacks = 0;
+    const auto ordinary_probe = store.add_listener(
+        [&ordinary_callbacks](state::ParamID, float) {
+            ++ordinary_callbacks;
+        },
+        state::ListenerThread::Main);
+
+    first_host.repaint_count = 0;
+    second_host.repaint_count = 0;
+    REQUIRE(store.deserialize(preset));
+    auto first_pump = format::make_editor_idle_pump(first);
+    auto second_pump = format::make_editor_idle_pump(second);
+    first_pump();
+
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    for (const auto* controls : processor.views) {
+        REQUIRE(controls->knob_->value()
+                == Catch::Approx(store.get_normalized(1)));
+        REQUIRE(controls->fader_->value()
+                == Catch::Approx(store.get_normalized(1)));
+    }
+    REQUIRE(first_host.repaint_count > 0);
+    REQUIRE(second_host.repaint_count > 0);
+
+    const auto second_repaints_before_own_pump = second_host.repaint_count;
+    second_pump();
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(second_host.repaint_count > second_repaints_before_own_pump);
+}
+
 TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",
           "[view_bridge][crash][lifecycle]") {
     // AU gives the audio unit (the Processor) and the view controller (which
@@ -684,7 +852,7 @@ TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge
     REQUIRE(bridge.open());
     bridge.notify_attached();  // editor open + attached, as in a host
 
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
 
     // The adapter's contract: signal death BEFORE freeing the Processor.
     bridge.notify_processor_destroyed();
@@ -889,12 +1057,12 @@ TEST_CASE("ViewBridge editor reload is inert for a normal processor", "[view_bri
 // liveness token, the pump dereferenced the freed bridge (store()/scripted_ui())
 // → EXC_BAD_ACCESS crash embedding the AU in Ableton Live. The pump must now
 // read the token and no-op once the bridge is gone.
-TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
+TEST_CASE("editor idle pump no-ops after its bridge is destroyed (no UAF)",
           "[view_bridge][idle-pump][crash]") {
     StubProcessor p;
     state::StateStore store;
     auto bridge = std::make_unique<format::ViewBridge>(p, store);
-    auto pump = format::make_scripted_idle_pump(*bridge);
+    auto pump = format::make_editor_idle_pump(*bridge);
     pump();                 // bridge alive: safe
     bridge.reset();         // destroy the bridge out from under the pump
     pump();                 // must NOT touch the freed bridge — token is false
@@ -905,7 +1073,7 @@ TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
 // retain its editor after destroying that instance. The bridge itself is still
 // alive in this ordering, so its bridge-lifetime token cannot protect the store.
 // The adapter-owned token must fail closed before either referenced object dies.
-TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
+TEST_CASE("editor idle pump no-ops after its processor owner is destroyed",
           "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle]") {
     struct Owner {
         state::StateStore store;
@@ -916,7 +1084,7 @@ TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
     auto owner = std::make_unique<Owner>();
     auto bridge = std::make_unique<format::ViewBridge>(
         owner->processor, owner->store, owner->alive.capture());
-    auto pump = format::make_scripted_idle_pump(*bridge);
+    auto pump = format::make_editor_idle_pump(*bridge);
 
     pump();
     owner.reset();  // Processor + StateStore are now dangling bridge references.
@@ -942,7 +1110,7 @@ TEST_CASE("scripted editor teardown-order matrix rejects every stale callback",
         std::unique_ptr<format::ViewBridge> bridge =
             std::make_unique<format::ViewBridge>(
                 *processor, *store, owner_alive.capture());
-        std::function<void()> pump = format::make_scripted_idle_pump(*bridge);
+        std::function<void()> pump = format::make_editor_idle_pump(*bridge);
 
         void retire_owner() { owner_alive.retire(); }
     };
@@ -1244,7 +1412,7 @@ TEST_CASE("host automation moves an imported design's control",
     store.set_normalized_rt(1, 0.75f);
 
     // The production editor idle pump runs on the UI thread.
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.75f));
@@ -1262,7 +1430,7 @@ TEST_CASE("the host pull reaches a design frame nested below the root",
     REQUIRE(proc.last_frame != nullptr);
 
     store.set_normalized_rt(1, 0.5f);
-    format::make_scripted_idle_pump(bridge)();
+    format::make_editor_idle_pump(bridge)();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.5f));
     // ...and reached exactly that one frame, not the containers above it.
@@ -1286,7 +1454,7 @@ TEST_CASE("the host pull is silent: it never echoes back as a gesture",
     proc.last_frame->on_gesture_end = [&](int) { ++ends; };
 
     store.set_normalized_rt(1, 0.4f);
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     CHECK(proc.last_frame->element_value(0) == Catch::Approx(0.4f));
@@ -1309,7 +1477,7 @@ TEST_CASE("repeated pulls converge and do not drift the host value",
 
     // A value that does NOT sit on a quantization boundary.
     store.set_normalized_rt(1, 0.3f);
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     const float settled_view = proc.last_frame->element_value(0);
@@ -1331,7 +1499,7 @@ TEST_CASE("a user gesture still wins while the pull is live",
     proc.define_parameters(store);
     format::ViewBridge bridge(proc, store);
     REQUIRE(bridge.open());
-    auto pump = format::make_scripted_idle_pump(bridge);
+    auto pump = format::make_editor_idle_pump(bridge);
     pump();
 
     proc.last_frame->simulate_drag({20, 20}, {20, 5});   // user turns the knob up
@@ -1410,7 +1578,7 @@ TEST_CASE("a discrete pull settles on the host's own value, across the range",
         proc.define_parameters(store);
         format::ViewBridge bridge(proc, store);
         REQUIRE(bridge.open());
-        auto pump = format::make_scripted_idle_pump(bridge);
+        auto pump = format::make_editor_idle_pump(bridge);
 
         for (int step = 0; step <= 200; ++step) {
             const float v = step / 200.0f;

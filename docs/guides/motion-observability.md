@@ -21,6 +21,13 @@ scalar is observable.
 
 The system is off by default — there is zero overhead when tracing is disabled.
 
+> **Current runtime status:** the coordinator, fixtures, protocol domain, CLI,
+> and MCP wrappers exist, but no normal Pulp standalone or preview application
+> constructs the inspector server. `PULP_MOTION_SERVER` is not implemented.
+> Use fixture/test integration today. The live-wire commands below describe the
+> reserved experimental client surface and fail unless a custom host explicitly
+> constructs and wires `InspectorServer` plus `DomainHandler`.
+
 ## End-to-end flow
 
 From "I have a bug" to "I have evidence":
@@ -28,7 +35,9 @@ From "I have a bug" to "I have evidence":
 1. **Define expected behavior in measurable terms** — settling time, monotonicity, final value, overshoot bound, scroll content offset.
 2. **Locate the views or state values that drive the behavior.**
 3. **Attach a focused trace** — `motion::trace(...).value(...)` for scalars, `.geometry(...)` for layout/presentation rects, `.scrollGeometry(...)` for `ScrollView` offset/visible-rect/content-size.
-4. **Reproduce the issue and capture evidence**: (a) a live event stream over the inspector wire (port 9147), (b) a `.motion.jsonl` fixture for offline replay, or (c) frames + the visual analyzer.
+4. **Reproduce the issue and capture evidence**: (a) a `.motion.jsonl` fixture
+   for offline replay, or (b) frames + the visual analyzer. A live inspector
+   stream remains unavailable in normal hosts.
 5. **Read the numbers** — assert with `settling_time_seconds`, `overshoot`, `final_value`, `is_monotonic`, `local_step_outlier_ratio`. Cite frame indices and metric values in the report.
 6. **Apply the fix, re-run validation, remove the temporary instrumentation.** Land a golden fixture so the next regression fails in CI, not after a user reports it.
 
@@ -39,16 +48,13 @@ same `pulp::view::motion::Coordinator` so fixtures, the scrubber, cost
 attribution, reduced-motion gating, and provenance envelopes work identically
 regardless of which surface launched the trace.
 
-- **`pulp` CLI** — the `/motion` Claude Code slash command surfaces the
-  inspector-wire quick start. From any Pulp source tree:
-  `pulp build && PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview`.
-  Dedicated `pulp motion *` subcommands cover every Motion.* method
-  end-to-end:
+- **`pulp` CLI** — dedicated `pulp motion *` subcommands encode the reserved
+  `Motion.*` client methods:
   `record` / `stop` / `snapshot` / `list-traces` / `load-fixture` /
   `scrub` / `play` / `pause` / `cost {enable|disable}`. Quick example
-  — kick off a background record alongside the host:
+  They are not connected to a normal Pulp host. A custom test host is required:
   ```bash
-  PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
+  # Custom fixture starts and wires InspectorServer first.
   pulp motion record --view Card --out card-fade.jsonl
   # → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
   #   in the app or test when you need an on-disk JSONL artifact.
@@ -56,13 +62,12 @@ regardless of which surface launched the trace.
   pulp motion stop --trace-id 1
   ```
   See the **CLI subcommands** section below for the full reference.
-- **`pulp-mcp` server** — the MCP server exposes `pulp_inspect_*` (live trees,
-  screenshots, evaluate) and a first-class `pulp_motion_*` wrapper set covering
+- **`pulp-mcp` server** — the MCP server exposes an experimental
+  `pulp_motion_*` wrapper set covering
   every Motion.* inspector method (start_trace / stop_trace / snapshot /
   list_traces / load_fixture / scrub_to / play / pause / enable_cost /
   disable_cost).
-  Agents on MCP can call these directly without driving the JS bridge through
-  `pulp_inspect_evaluate` or shelling out to `nc localhost 9147`. Example
+  These wrappers need the same custom-host fixture. Example
   tools/call payload for the equivalent of the inspector-wire start_trace
   shown in the quick start below:
 
@@ -101,22 +106,14 @@ regardless of which surface launched the trace.
 Three ways to land your first trace.
 
 ```bash
-# 1. CLI + standalone host (fastest path).
-PULP_MOTION_SERVER=1 PULP_MOTION_LOG=1 ./build/examples/ui-preview/pulp-ui-preview &
+# Normal standalone/preview hosts do not start this endpoint.
+# A custom fixture must explicitly construct and wire InspectorServer.
 
-# 2. Inspector wire (TCP, line-delimited JSON, port 9147).
-echo '{"id":1,"method":"Motion.startTrace","params":{
-  "view_name":"Card","fps":30,
-  "metrics":[{"kind":"geometry","name":"frame","node_id":"card",
-    "properties":["minX","minY","width","height"],
-    "space":"window","source":"presentation"}]}}' \
-  | nc -w 30 localhost 9147
+# The wire uses length-prefixed frames; raw line-delimited `nc` is not a
+# compatible client. Use the experimental CLI only after a custom fixture
+# constructs the server.
 
-# 3. Stop the trace + read events as JSONL on the same socket.
-echo '{"id":2,"method":"Motion.stopTrace","params":{"trace_id":1}}' \
-  | nc -w 5 localhost 9147
-
-# 4. /motion slash command in Claude Code — same workflow, links to this guide.
+# /motion links to this guide; it cannot activate the missing runtime.
 /motion
 ```
 
@@ -125,12 +122,11 @@ paths see the dedicated sections below.
 
 ## CLI subcommands
 
-`pulp motion *` wraps every inspector `Motion.*` method as a terminal
-subcommand. Each one runs a 250ms TCP reachability probe against
-`127.0.0.1:9147` first; if nothing is listening it exits 1 with a clear
-"start the host with `PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview`"
-hint. Override the port with `--port N` or the `PULP_INSPECTOR_PORT`
-env var.
+`pulp motion *` wraps the experimental `Motion.*` methods as terminal
+subcommands. Each one probes `127.0.0.1:9147`; without a custom fixture it
+exits because no normal Pulp launch owns that endpoint. `PULP_MOTION_SERVER`
+does not activate it. Override the client port with `--port N` or the
+`PULP_INSPECTOR_PORT` environment variable.
 
 | Command | Forwards to | Common use |
 |---|---|---|
@@ -149,8 +145,7 @@ verbatim (useful for piping into `jq`). The default output is a
 pretty-printed line plus the raw JSON for human readers.
 
 ```bash
-# Background the host + record from a terminal.
-PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview &
+# After a custom test host starts the endpoint:
 pulp motion record --view Card --fps 60 --out card-fade.jsonl
 # →   note: --out is a fixture-path hint; use make_fixture_sink(path)
 #       in the app or test to create the on-disk JSONL.
@@ -170,9 +165,8 @@ pulp motion snapshot --json | jq '.cost_samples_emitted'
 ```
 
 The CLI delegates each call to `pulp inspect --command Motion.<verb>
---params <JSON>` so the wire format and discovery story match the
-MCP `pulp_motion_*` wrappers and the raw `nc localhost 9147` path —
-all three terminate at the same `Coordinator`.
+--params <JSON>`. The MCP wrappers shell out through the same source-tree
+client. Raw `nc` is not compatible with the length-prefixed transport.
 
 ## When to use it
 
@@ -387,13 +381,12 @@ Coordinator::instance().add_sink([](const SampleEvent& e) {
 
 ## Runtime attach via the inspector
 
-The `Motion.*` inspector domain lets agents attach traces over TCP without
-editing source. The standalone preview app exposes it behind
-`PULP_MOTION_SERVER=1`:
+The `Motion.*` domain implements the protocol-side operations, but the
+standalone preview app does not construct its server. The following is reserved
+custom-host wiring, not a working preview command:
 
 ```bash
-PULP_MOTION_SERVER=1 ./build/examples/ui-preview/pulp-ui-preview
-# "Motion inspector listening on port 9147"
+# No PULP_MOTION_SERVER implementation exists in pulp-ui-preview.
 ```
 
 Protocol requests:
@@ -427,7 +420,7 @@ and CI artifact triage (live overlay drawing is a future phase).
 | Variable | Effect |
 |---|---|
 | `PULP_MOTION_LOG=1` | Install the default log sink and enable tracing |
-| `PULP_MOTION_SERVER=1` | Start the inspector server + Motion domain on port 9147 |
+| `PULP_MOTION_SERVER=1` | Reserved by older documentation; currently does not start a server |
 | `PULP_MOTION_FIREHOSE=1` | Enable the publish firehose so every `publish_value`/`publish_components` call broadcasts to all sinks |
 
 ## The publish channel

@@ -455,6 +455,8 @@ target_sources(pulp-view-core PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/native_view_host.cpp
+    src/gpu_surface_observer.cpp
+    src/plugin_frame_renderer.cpp
     src/design_frame_view.cpp
     src/design_param_binding.cpp
     src/svg_fragment.cpp
@@ -620,6 +622,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/jsx_lock.cpp
         src/design_import_shortcuts.cpp
         src/design_import_designmd.cpp
+        src/design_import_designmd_schema.cpp
         src/token_lock.cpp
     )
     target_sources(pulp-view-script PRIVATE

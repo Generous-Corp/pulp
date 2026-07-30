@@ -24,12 +24,15 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/theme_contrast.hpp>
 
+#include "design_import_designmd_schema.hpp"
+
 #include <yaml-cpp/yaml.h>
 
 #include <choc/text/choc_StringUtilities.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -83,13 +86,20 @@ FrontmatterSlice split_frontmatter(const std::string& markdown) {
 // Convert a dimension string ("48px", "1.5rem", "0.1em") to a float in px.
 // Returns std::nullopt for values that aren't dimensions (e.g. plain strings).
 std::optional<float> parse_dimension(const std::string& raw) {
-    if (raw.empty()) return std::nullopt;
+    if (raw.empty() || raw.size() > 64) return std::nullopt;
     static const std::regex re(R"(^\s*(-?\d+(?:\.\d+)?)\s*(px|em|rem)?\s*$)");
     std::smatch m;
     if (!std::regex_match(raw, m, re)) return std::nullopt;
-    float value = std::stof(m[1]);
+    float value = 0.0f;
+    try {
+        value = std::stof(m[1]);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    if (!std::isfinite(value)) return std::nullopt;
     std::string unit = m[2].matched ? m[2].str() : "px";
     if (unit == "em" || unit == "rem") value *= 16.0f; // canonical 1rem == 16px
+    if (!std::isfinite(value)) return std::nullopt;
     return value;
 }
 
@@ -251,10 +261,12 @@ int yaml_line(const YAML::Node& node, int fallback) {
 // to arbitrary depth, joining segments with `.` so the emitted token key
 // matches the `{path.to.token}` reference syntax (e.g. a nested
 // `colors.background.light` resolves a `{colors.background.light}` reference).
-// (DESIGN.md 0.3.0 added arbitrary-depth nested token declarations.)
+// DESIGN.md permits 20 nested objects plus the scalar leaf (21 path segments).
 void walk_color_node(const std::string& path,
                      const YAML::Node& node,
-                     DesignMdParseResult& result) {
+                     DesignMdParseResult& result,
+                     int depth) {
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         std::string value = node.as<std::string>("");
         if (is_token_reference(value) || looks_like_css_color(value)) {
@@ -271,7 +283,7 @@ void walk_color_node(const std::string& path,
             std::string key = sub->first.as<std::string>("");
             if (key.empty()) continue;
             walk_color_node(path.empty() ? key : path + "." + key,
-                            sub->second, result);
+                            sub->second, result, depth + 1);
         }
     }
 }
@@ -282,7 +294,7 @@ void walk_colors_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string name = it->first.as<std::string>("");
         if (name.empty()) continue;
-        walk_color_node(name, it->second, result);
+        walk_color_node(name, it->second, result, 1);
     }
 }
 
@@ -306,7 +318,7 @@ void walk_typography_map(const YAML::Node& node,
 }
 
 // Walk one `rounded`/`spacing` node. Scalars become dimension tokens named
-// `prefix-subpath` (e.g. `rounded-sm`); nested maps recurse to arbitrary depth,
+// `prefix-subpath` (e.g. `rounded-sm`); nested maps recurse up to 20 levels,
 // joining deeper segments with `.` so `{spacing.scale.lg}` resolves to the
 // `spacing-scale.lg` token via `lookup_dimension`. A `spacing` value may be a
 // bare number per spec (e.g. `base: 8`); `parse_dimension`'s unit is optional,
@@ -314,7 +326,9 @@ void walk_typography_map(const YAML::Node& node,
 void walk_dimension_node(const std::string& prefix,
                          const std::string& subpath,
                          const YAML::Node& node,
-                         DesignMdParseResult& result) {
+                         DesignMdParseResult& result,
+                         int depth) {
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         std::string raw = node.as<std::string>("");
         std::string token_name = prefix + "-" + subpath;
@@ -331,7 +345,7 @@ void walk_dimension_node(const std::string& prefix,
             if (key.empty()) continue;
             walk_dimension_node(prefix,
                                 subpath.empty() ? key : subpath + "." + key,
-                                sub->second, result);
+                                sub->second, result, depth + 1);
         }
     }
 }
@@ -343,7 +357,7 @@ void walk_dimension_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string key = it->first.as<std::string>("");
         if (key.empty()) continue;
-        walk_dimension_node(prefix, key, it->second, result);
+        walk_dimension_node(prefix, key, it->second, result, 1);
     }
 }
 
@@ -355,7 +369,9 @@ void walk_dimension_map(const YAML::Node& node,
 // matching `walk_dimension_node`.
 void walk_shadow_node(const std::string& subpath,
                       const YAML::Node& node,
-                      DesignMdParseResult& result) {
+                      DesignMdParseResult& result,
+                      int depth) {
+    if (depth > kDesignMdMaxTokenPathSegments) return;
     if (node.IsScalar()) {
         result.ir.tokens.strings.emplace("shadow-" + subpath, node.as<std::string>(""));
     } else if (node.IsMap()) {
@@ -363,7 +379,7 @@ void walk_shadow_node(const std::string& subpath,
             std::string key = sub->first.as<std::string>("");
             if (key.empty()) continue;
             walk_shadow_node(subpath.empty() ? key : subpath + "." + key,
-                             sub->second, result);
+                             sub->second, result, depth + 1);
         }
     }
 }
@@ -374,7 +390,7 @@ void walk_shadow_map(const YAML::Node& node,
     for (auto it = node.begin(); it != node.end(); ++it) {
         std::string key = it->first.as<std::string>("");
         if (key.empty()) continue;
-        walk_shadow_node(key, it->second, result);
+        walk_shadow_node(key, it->second, result, 1);
     }
 }
 
@@ -742,6 +758,8 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     if (root["description"]) result.ir.tokens.strings.emplace("description", root["description"].as<std::string>(""));
     if (root["version"])     result.ir.tokens.strings.emplace("version",     root["version"].as<std::string>(""));
 
+    apply_designmd_frontmatter_schema(root, result);
+
     walk_colors_map(root["colors"],       result);
     walk_typography_map(root["typography"], result);
     walk_dimension_map(root["rounded"],   "rounded", result);
@@ -833,8 +851,8 @@ DesignMdParseResult parse_designmd(const std::string& markdown) {
     // that a key was silently ignored. (DESIGN.md 0.3.0 added this lint.)
     static const std::unordered_set<std::string> known_keys = {
         "version", "name", "description",
-        "colors", "typography", "rounded", "spacing", "components",
-        // `shadows` is a Pulp extension, not an upstream 0.3.0 key. The
+        "omitted", "colors", "typography", "rounded", "spacing", "components",
+        // `shadows` is a Pulp extension, not an upstream 0.4.0 key. The
         // `shadow-*` token namespace already exists (the `## Shadows` body
         // scanner emits into it) but upstream frontmatter has no door to it,
         // so a structured DESIGN.md had no way to declare a shadow at all.
@@ -952,7 +970,8 @@ std::vector<DesignMdDiagnostic> lint_designmd(const DesignMdParseResult& parsed)
     for (const auto& [k, _] : tokens.strings) {
         if (k.rfind("typography.", 0) == 0) { has_typography = true; break; }
     }
-    if (!tokens.colors.empty() && !has_typography) {
+    if (!tokens.colors.empty() && !has_typography &&
+        !designmd_section_is_omitted(parsed, "typography")) {
         out.push_back(make_diag(
             DesignMdSeverity::warning, "missing-typography", "typography", 0, 0,
             "colors defined but no typography tokens — agents will use default fonts"));
@@ -964,12 +983,14 @@ std::vector<DesignMdDiagnostic> lint_designmd(const DesignMdParseResult& parsed)
         if (k.rfind("rounded-", 0) == 0) has_rounded = true;
         if (k.rfind("spacing-", 0) == 0) has_spacing = true;
     }
-    if (!tokens.colors.empty() && !has_rounded) {
+    if (!tokens.colors.empty() && !has_rounded &&
+        !designmd_section_is_omitted(parsed, "rounded")) {
         out.push_back(make_diag(
             DesignMdSeverity::info, "missing-sections", "rounded", 0, 0,
             "no `rounded` token group present"));
     }
-    if (!tokens.colors.empty() && !has_spacing) {
+    if (!tokens.colors.empty() && !has_spacing &&
+        !designmd_section_is_omitted(parsed, "spacing")) {
         out.push_back(make_diag(
             DesignMdSeverity::info, "missing-sections", "spacing", 0, 0,
             "no `spacing` token group present"));
@@ -984,6 +1005,8 @@ std::vector<DesignMdDiagnostic> lint_designmd(const DesignMdParseResult& parsed)
         out.push_back(make_diag(
             DesignMdSeverity::info, "token-summary", "<root>", 0, 0, summary.str()));
     }
+
+    append_designmd_omitted_findings(parsed, out);
 
     // ── orphaned-tokens (warning) ─────────────────────────────────────
     // Uses parse-time reference recording rather than post-resolution

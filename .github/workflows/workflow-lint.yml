@@ -32,6 +32,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/release_product_matrix.json'
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
       - 'tools/scripts/resign_macos_release_tree.py'
       - 'tools/scripts/test_resign_macos_release_tree.py'
   push:
@@ -50,6 +53,9 @@ on:
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
       - 'tools/scripts/release_product_matrix.json'
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
       - 'tools/scripts/resign_macos_release_tree.py'
       - 'tools/scripts/test_resign_macos_release_tree.py'
 

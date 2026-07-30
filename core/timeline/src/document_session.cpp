@@ -1,5 +1,7 @@
 #include <pulp/timeline/document_session.hpp>
 
+#include "document_session_internal.hpp"
+
 #include "journal_internal.hpp"
 #include "session_nonce_test_access.hpp"
 #include "transaction_internal.hpp"
@@ -568,6 +570,47 @@ bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     }
     impl_->journal = std::move(checkpointed);
     return true;
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::undo(const DocumentSession& session) {
+    return preview(session, Direction::Undo);
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::redo(const DocumentSession& session) {
+    return preview(session, Direction::Redo);
+}
+
+runtime::Result<ReducedTransaction, TransactionError>
+detail::DocumentSessionPreviewAccess::preview(const DocumentSession& session,
+                                              Direction direction) {
+    std::lock_guard lock(session.impl_->mutex);
+    const auto current =
+        std::atomic_load_explicit(&session.impl_->published, std::memory_order_relaxed);
+    if (session.impl_->open_gesture) {
+        TransactionError value;
+        value.code = ConflictCode::GestureState;
+        value.current_revision = current->revision;
+        return failure<ReducedTransaction>(value);
+    }
+    const bool is_undo = direction == Direction::Undo;
+    const auto& history = is_undo ? session.impl_->undo : session.impl_->redo;
+    if (history.empty()) {
+        TransactionError value;
+        value.code = is_undo ? ConflictCode::NothingToUndo : ConflictCode::NothingToRedo;
+        value.current_revision = current->revision;
+        return failure<ReducedTransaction>(value);
+    }
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.expected_revision = current->revision;
+    const auto& commands = is_undo ? history.back().inverse : history.back().forward;
+    transaction.commands.reserve(commands.size());
+    std::uint64_t sequence = 1;
+    for (const auto& command : commands)
+        transaction.commands.push_back({{{1}, sequence++}, command});
+    return detail::reduce_transaction(*current->snapshot, transaction, true);
 }
 
 } // namespace pulp::timeline

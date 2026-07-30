@@ -731,10 +731,17 @@ TEST_CASE("plugin_state_io rolls back StateStore when plugin payload restore fai
     restored.store.set_value(2, 12.0f);
     restored.processor.plugin_state = "keep";
     restored.processor.rejected_payload = "snapshot-b";
+    const auto restore_revision =
+        restored.store.state_restore_revision();
 
     REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(blob,
                                                              restored.store,
                                                              restored.processor));
+    // Applying the candidate state and then restoring the snapshot are both
+    // successful StateStore deserializations. The editor pump observes their
+    // coalesced inequality edge and repaints the final rolled-back state.
+    REQUIRE(restored.store.state_restore_revision() ==
+            restore_revision + 2);
     REQUIRE_THAT(restored.store.get_value(1), WithinAbs(5.0, 0.01));
     REQUIRE_THAT(restored.store.get_value(2), WithinAbs(12.0, 0.01));
     REQUIRE(restored.processor.plugin_state == "keep");

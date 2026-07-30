@@ -53,5 +53,6 @@ if(PULP_HAS_AUSDK AND APPLE AND NOT PULP_IOS)
     set_tests_properties(auval-PulpTranspose PROPERTIES
         LABELS "validation;au"
         TIMEOUT 90
-        RESOURCE_LOCK pulp_au_discovery)
+        RESOURCE_LOCK pulp_au_discovery
+        SKIP_RETURN_CODE 77)
 endif()

@@ -14,6 +14,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGS = (ROOT / ".claude/settings.json", ROOT / ".codex/hooks.json")
 TIMEOUT_CONFIGS = (*CONFIGS, ROOT / "hooks/hooks.json")
+POST_TOOL_HOOKS = (
+    ROOT / "hooks/scripts/docs-reminder.sh",
+    ROOT / "hooks/scripts/cli-plugin-sync.sh",
+)
 
 
 def configured_hooks(config_path: Path) -> list[dict[str, object]]:
@@ -75,7 +79,84 @@ def make_nested_submodule_fixture(temp_root: Path) -> tuple[Path, Path]:
     return superproject, superproject / "planning"
 
 
+def check_post_tool_input_channels() -> None:
+    """Prove advisory hooks drain Codex stdin and accept Claude input."""
+    cases = (
+        (POST_TOOL_HOOKS[0], ROOT / "core/example.cpp", "DOCS REMINDER:"),
+        (
+            POST_TOOL_HOOKS[1],
+            Path("/tmp/pulp-hook-test/tools/cli/pulp_cli.cpp"),
+            "CLI SYNC:",
+        ),
+    )
+    padding = "x" * (1024 * 1024)
+    for hook, file_path, expected in cases:
+        process = subprocess.Popen(
+            ("bash", str(hook)),
+            cwd=ROOT,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if key != "TOOL_INPUT"
+            },
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdin is not None
+        try:
+            process.stdin.write(json.dumps({
+                "file_path": str(file_path),
+                "padding": padding,
+            }))
+            process.stdin.close()
+        except BrokenPipeError as error:
+            process.kill()
+            process.wait()
+            raise RuntimeError(
+                f"{hook.name} exited before consuming Codex stdin"
+            ) from error
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stdout = process.stdout.read()
+        stderr = process.stderr.read()
+        returncode = process.wait(timeout=15)
+        if returncode != 0 or expected not in stdout:
+            raise RuntimeError(
+                f"{hook.name} rejected Codex stdin: exit={returncode}, "
+                f"stdout={stdout!r}, stderr={stderr!r}"
+            )
+
+        environment = os.environ.copy()
+        environment["TOOL_INPUT"] = json.dumps(
+            {"file_path": str(file_path)}
+        )
+        result = subprocess.run(
+            ("bash", str(hook)),
+            cwd=ROOT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        if result.returncode != 0 or expected not in result.stdout:
+            raise RuntimeError(
+                f"{hook.name} rejected Claude TOOL_INPUT: "
+                f"exit={result.returncode}, stdout={result.stdout!r}, "
+                f"stderr={result.stderr!r}"
+            )
+
+
 def main() -> int:
+    try:
+        check_post_tool_input_channels()
+    except RuntimeError as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        return 1
+
     environment = os.environ.copy()
     environment["TOOL_INPUT"] = json.dumps(
         {"file_path": str(ROOT / "docs/guides/claude-code-plugin.md")}
@@ -154,7 +235,10 @@ def main() -> int:
     if checked == 0:
         print("FAIL: no project hook commands were discovered", file=sys.stderr)
         return 1
-    print(f"agent-hook-paths: ok ({checked} initialized-submodule commands)")
+    print(
+        f"agent-hook-paths: ok ({checked} initialized-submodule commands; "
+        f"{len(POST_TOOL_HOOKS)} advisory hooks accept stdin + TOOL_INPUT)"
+    )
     return 0
 
 

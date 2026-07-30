@@ -2445,7 +2445,7 @@ private:
             pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
 
-        skia_surface_->end_frame();   // submit Graphite recording
+        const auto outcome = skia_surface_->end_frame();  // submit Graphite recording
 
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
@@ -2456,14 +2456,14 @@ private:
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
-        // Clear the tracker AFTER present so the next frame starts clean.
-        // The current render gate still uses needs_repaint_ / animation state.
-        tracker_.clear();
-        // FU-2: the mac host consumes the base dirty accumulator directly (it
-        // never calls paint_root), so it must clear it too — otherwise the
-        // bounded region sticks and the next repaint() reads stale bounds.
-        if (partial_repaint_enabled_) clear_pending_dirty();
-        return captured;
+        // Retire damage only for a frame that REACHED the drawable (see render::FrameOutcome).
+        if (pulp::render::frame_reached_output(outcome)) {
+            tracker_.clear();  // next frame starts clean
+            if (partial_repaint_enabled_) clear_pending_dirty();  // FU-2: no paint_root here
+        } else if (partial_repaint_enabled_) {
+            mark_dirty();  // failed present → drawable undefined → repaint in full
+        }
+        return captured;  // the READBACK result; the present outcome is handled above
     }
 
     // CVDisplayLink callback — fires on the display's vsync

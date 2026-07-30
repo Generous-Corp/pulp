@@ -730,6 +730,39 @@ Steinberg's SDK does not guarantee a fresh `ProcessSetup` on each
 active — if you need to recompute anything per-activation, hook it
 into `setActive` instead.
 
+### Editor parameter edits go through `HostParameterEditBridge`
+
+The adapter no longer decides "did the editor write this?" by checking
+whether a gesture is OPEN. That inference is wrong in a case users hit
+constantly — host automation arriving while the user holds a knob
+satisfied the test, so the host's own value was echoed straight back at
+it through `performEdit()`. The callback also read `get_normalized(id)`
+TWICE per reported edit (once for `performEdit`, once for
+`setParamNormalized`), so a write landing between the two reads reported
+one logical change as two different values.
+
+Provenance is now recorded WHERE IT IS KNOWN — at the write
+(`host_parameter_edit.hpp`):
+
+- host-originated writes run inside `ScopedHostParameterWrite`;
+- processor output-parameter writes run inside
+  `ScopedProcessorParameterWrite`;
+- anything else on the editor thread is, by elimination, an editor edit.
+
+**If you add a new path that writes the host's value into the
+StateStore, wrap it.** `setState` already is. A path that forgets the
+mark and runs on the MAIN thread will be echoed back at the host as user
+automation; one that runs on the audio thread is still caught by the
+bridge's editor-thread check, so main-thread host writes are the risky
+ones.
+
+The bridge's store listener is deliberately `ListenerThread::Audio`
+(inline on the writing thread). A Main-thread listener is marshalled,
+which erases the writing thread and the enclosing origin scope — exactly
+how the echo got through. Do not "fix" it to Main.
+
+Coverage: `pulp-test-host-parameter-edit`.
+
 ### `param_snapshot_` is **post-input-events, pre-process**
 
 Same contract as CLAP — host events are applied first, then snapshot,

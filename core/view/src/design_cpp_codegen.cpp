@@ -10,6 +10,7 @@
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 
+#include <filesystem>
 #include "design_binding_metadata.hpp"
 #include "design_import_native_common.hpp"
 #include "design_ir_helpers.hpp"
@@ -285,6 +286,19 @@ std::string asset_uri(const IRAssetManifest& manifest, std::string_view asset_id
     if (asset == nullptr)
         return {};
     return pulp::view::asset_uri(*asset);
+}
+
+std::string asset_uri_expression(const IRAssetManifest& manifest,
+                                 std::string_view asset_id) {
+    const auto* asset = manifest.resolve(asset_id);
+    if (asset && asset->local_path &&
+        std::filesystem::path(*asset->local_path).is_relative()) {
+        return "std::string(\"file://\") + "
+               "(asset_base_directory / " +
+               cpp_string_literal(*asset->local_path) + ").string()";
+    }
+    const auto uri = asset_uri(manifest, asset_id);
+    return uri.empty() ? std::string{} : cpp_string_literal(uri);
 }
 
 std::string flex_direction_expr(LayoutDirection direction) {
@@ -1084,9 +1098,12 @@ void emit_widget_specific(std::ostringstream& out,
             break;
         case NativeWidgetKind::image_view:
             if (auto asset_id = first_asset_id(node)) {
-                const auto uri = asset_uri(manifest, *asset_id);
-                if (!uri.empty())
-                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_image_source(" + cpp_string_literal(uri) + ");");
+                const auto expression =
+                    asset_uri_expression(manifest, *asset_id);
+                if (!expression.empty())
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_image_source(" +
+                                  expression + ");");
             }
             if (auto sizing = imported_image_sizing_override(node)) {
                 const auto flex_var = std::string(var) + "_image_flex";
@@ -1487,7 +1504,8 @@ void emit_node(std::ostringstream& out,
                 const std::string child_var = "child_" + std::to_string(counter++);
                 emit_line(out, depth, ctx.opts.indent_spaces, "{");
                 emit_line(out, depth + 1, ctx.opts.indent_spaces,
-                          "auto " + child_var + " = " + found->second + "();");
+                          "auto " + child_var + " = " + found->second +
+                              "(asset_base_directory);");
                 if (child_hit_policy == PromotedChildHitPolicy::disabled) {
                     emit_line(out, depth + 1, ctx.opts.indent_spaces,
                               child_var + "->set_hit_testable(false);");
@@ -1500,7 +1518,8 @@ void emit_node(std::ostringstream& out,
                 emit_line(out, depth, ctx.opts.indent_spaces, "}");
             } else {
                 emit_line(out, depth, ctx.opts.indent_spaces,
-                          var + "->add_child(" + found->second + "());");
+                          var + "->add_child(" + found->second +
+                              "(asset_base_directory));");
             }
         } else {
             emit_node(out,
@@ -1540,7 +1559,8 @@ void emit_function(std::ostringstream& out,
                    std::string_view comment = {}) {
     if (ctx.opts.include_comments && !comment.empty())
         out << "// " << comment << "\n";
-    out << "std::unique_ptr<pulp::view::View> " << function_name << "() {\n";
+    out << "std::unique_ptr<pulp::view::View> " << function_name
+        << "(const std::filesystem::path& asset_base_directory) {\n";
     int counter = 0;
     emit_node(out, ctx, node, resolved, "", 1, parent_direction, counter);
     out << "}\n\n";
@@ -2210,11 +2230,19 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     {
         std::ostringstream header;
         header << "#pragma once\n\n"
+               << "#include <filesystem>\n"
                << "#include <memory>\n"
                << "#include <pulp/view/design_import.hpp>\n"
                << "#include <pulp/view/view.hpp>\n\n";
         emit_namespace_open(header, opts.namespace_name);
-        header << "std::unique_ptr<pulp::view::View> " << opts.function_name << "();\n"
+        header << "// Production: pass the deployed resource directory for "
+                  "portable assets.\n"
+               << "std::unique_ptr<pulp::view::View> " << opts.function_name
+               << "(const std::filesystem::path& asset_base_directory);\n"
+               << "// Source-tree development convenience; do not use as a "
+                  "deployment resource lookup.\n"
+               << "std::unique_ptr<pulp::view::View> " << opts.function_name
+               << "();\n"
                << "pulp::view::IRAssetManifest bake_asset_manifest();\n";
         if (emit_binding_helpers) {
             header << "void " << opts.binding_function_name
@@ -2229,6 +2257,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
         source << "// Generated by Pulp import-design baked C++ exporter.\n";
     source << "#include " << cpp_string_literal(opts.header_filename) << "\n\n"
            << "#include <algorithm>\n"
+           << "#include <filesystem>\n"
            << "#include <memory>\n"
            << "#include <string>\n"
            << "#include <string_view>\n"
@@ -2251,7 +2280,9 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     emit_manifest(source, effective_manifest, ctx);
 
     for (const auto& component : ctx.components)
-        source << "std::unique_ptr<pulp::view::View> " << component.function_name << "();\n";
+        source << "std::unique_ptr<pulp::view::View> "
+               << component.function_name
+               << "(const std::filesystem::path& asset_base_directory);\n";
     if (!ctx.components.empty())
         source << "\n";
 
@@ -2265,6 +2296,11 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
                       component.rule_comment);
 
     emit_function(source, ctx, opts.function_name, prepared.root, resolved, std::nullopt);
+    source << "std::unique_ptr<pulp::view::View> " << opts.function_name
+           << "() {\n"
+           << "    return " << opts.function_name
+           << "(std::filesystem::path(__FILE__).parent_path());\n"
+           << "}\n\n";
     if (emit_binding_helpers)
         emit_binding_context_helpers(source, opts, binding_helper_routes);
     emit_namespace_close(source, opts.namespace_name);

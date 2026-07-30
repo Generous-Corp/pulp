@@ -90,6 +90,11 @@ struct DesignMdDiagnostic {
     std::string message;
 };
 
+struct DesignMdOmittedSection {
+    std::string section;
+    std::string reason;
+};
+
 struct DesignMdParseResult {
     DesignIR ir;
     std::vector<DesignMdDiagnostic> diagnostics;
@@ -104,6 +109,10 @@ struct DesignMdParseResult {
     // orphaned-tokens rule. The rule consumes this set directly
     // instead of re-scanning post-resolution strings.
     std::vector<std::string> referenced_color_tokens;
+    // DESIGN.md 0.4 `omitted` declarations. These are metadata rather than
+    // design tokens; lint uses them to suppress intentional missing-section
+    // findings and to report unknown or redundant declarations.
+    std::vector<DesignMdOmittedSection> omitted_sections;
 };
 
 /// Parse a DESIGN.md file (YAML frontmatter + Markdown body) into a DesignIR.
@@ -120,11 +129,11 @@ DesignIR parse_designmd_yaml(const std::string& markdown);
 //
 // These surfaces let DESIGN.md slot into CI gates the same way
 // @google/design.md's TypeScript CLI does, without taking on its JS
-// dependency surface. The lint rule set mirrors the upstream CLI's
-// seven rules plus section-order (which upstream uses as a warning).
+// dependency surface. The lint rule set tracks the format rules Pulp consumes,
+// including DESIGN.md 0.4 omitted-section and token-schema validation.
 
-/// Run the seven Google design.md lint rules + section-order against a
-/// parsed DESIGN.md. Findings carry severity (info/warning/error).
+/// Run Pulp's Google design.md compatibility lint against a parsed DESIGN.md.
+/// Findings carry severity (info/warning/error).
 std::vector<DesignMdDiagnostic> lint_designmd(const DesignMdParseResult& parsed);
 
 struct DesignMdTokenDiff {

@@ -80,6 +80,8 @@ int delegate_to_build_binary(const fs::path& relative_binary,
             preferred_config = cli_dir.filename().string();
             cli_dir = cli_dir.parent_path();
         }
+        // Release archives install delegate helpers beside `pulp`.
+        add_candidate(cli_dir / relative_binary.filename());
         auto tools_dir = cli_dir.parent_path();
         auto build_dir = tools_dir.parent_path();
         if (cli_dir.filename() == "cli" && tools_dir.filename() == "tools" &&
