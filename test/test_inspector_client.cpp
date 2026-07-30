@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #ifndef _WIN32
@@ -160,6 +161,77 @@ TEST_CASE("server broadcasts only registered events granted by policy",
     }));
     REQUIRE(events.size() == 1);
     CHECK(events.front() == "State.parameterChanged");
+}
+
+TEST_CASE("client event handlers can issue follow-up requests",
+          "[inspect][client][events][reentrant]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::optional<pulp::inspect::InspectorMessage> follow_up;
+    InspectorClient client;
+    client.set_event_handler([&](const auto&) {
+        auto response = client.request("State.getParameters");
+        {
+            std::lock_guard lock(mutex);
+            follow_up = std::move(response);
+        }
+        cv.notify_all();
+    });
+    REQUIRE(client.connect(records.front(), fixture.reader));
+    fixture.server.broadcast(
+        pulp::inspect::make_event("State.parameterChanged", "{}"));
+
+    std::unique_lock lock(mutex);
+    REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+        return follow_up.has_value();
+    }));
+    CHECK_FALSE(follow_up->is_error);
+}
+
+TEST_CASE("server stop is reentrant from a request callback",
+          "[inspect][client][teardown][reentrant]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Observe;
+    config.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    InspectorServer server;
+    InspectorSession session(
+        {"session-reentrant-stop", "instance", "plugin", "1"},
+        config,
+        [&](const auto& request) {
+            server.stop();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    const auto response = client.request("State.getParameters");
+    CHECK(response.is_error);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!reader.list().empty() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(reader.list().empty());
 }
 
 TEST_CASE("server stop releases leases before a session restart",

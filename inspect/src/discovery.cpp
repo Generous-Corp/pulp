@@ -641,12 +641,20 @@ std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::string_view session_id,
     std::string* error) {
     if (!session_id.empty()) {
-        const auto match =
-            std::find_if(records.begin(), records.end(), [&](const auto& record) {
-                return record.session_id == session_id;
-            });
-        if (match != records.end())
-            return *match;
+        std::optional<InspectorDiscoveryRecord> match;
+        for (const auto& record : records) {
+            if (record.session_id != session_id)
+                continue;
+            if (match) {
+                if (error)
+                    *error = "Multiple live inspector instances match the "
+                             "requested session ID";
+                return std::nullopt;
+            }
+            match = record;
+        }
+        if (match)
+            return match;
         if (error)
             *error = "No live inspector session matches the requested session ID";
         return std::nullopt;
