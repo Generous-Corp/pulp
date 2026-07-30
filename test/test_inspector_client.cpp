@@ -339,7 +339,10 @@ TEST_CASE("server stop is reentrant from a request callback",
     InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
     const auto response = client.request("State.getParameters");
-    CHECK(response.is_error);
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "connection_closed");
+    CHECK(response.error_data_json.find("\"mayHaveApplied\":true") !=
+          std::string::npos);
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (!reader.list().empty() &&
@@ -588,7 +591,10 @@ TEST_CASE("authentication rejects a replaced credential and teardown removes dis
         server.stop();
         CHECK(reader.list().empty());
     }
-    CHECK(std::filesystem::is_empty(temporary.path));
+    for (const auto& entry :
+         std::filesystem::directory_iterator(temporary.path)) {
+        CHECK(entry.path().extension() == ".lock");
+    }
 }
 
 TEST_CASE("unauthenticated connections are closed at the authentication deadline",

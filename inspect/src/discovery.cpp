@@ -23,6 +23,7 @@
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
@@ -422,29 +423,6 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
     return true;
 }
 
-bool write_private_file_exclusive(const std::filesystem::path& destination,
-                                  std::string_view contents) {
-    const auto random = pulp::runtime::secure_random_bytes(8);
-    if (!random)
-        return false;
-    const auto temporary = destination.string() + ".tmp-" +
-                           pulp::runtime::hex_encode(*random);
-    if (!write_private_file_atomic(temporary, contents))
-        return false;
-#ifdef _WIN32
-    const bool installed =
-        MoveFileExW(std::filesystem::path(temporary).c_str(),
-                    destination.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
-    if (!installed)
-        DeleteFileW(std::filesystem::path(temporary).c_str());
-#else
-    const bool installed =
-        ::link(temporary.c_str(), destination.c_str()) == 0;
-    ::unlink(temporary.c_str());
-#endif
-    return installed;
-}
-
 std::optional<std::string> read_private_text_file(
     const std::filesystem::path& path) {
     if (!private_regular_file(path))
@@ -455,35 +433,6 @@ std::optional<std::string> read_private_text_file(
     if ((!input.good() && !input.eof()) || contents.size() > 1024)
         return std::nullopt;
     return contents;
-}
-
-std::optional<std::pair<std::int64_t, std::string>>
-decode_ownership_marker(std::string_view marker) {
-    const auto first = marker.find('\n');
-    const auto second =
-        first == std::string_view::npos ? first : marker.find('\n', first + 1);
-    if (first == std::string_view::npos ||
-        second == std::string_view::npos || second + 1 >= marker.size())
-        return std::nullopt;
-    std::int64_t process_id = 0;
-    const auto [end, error] =
-        std::from_chars(marker.data(), marker.data() + first, process_id);
-    if (error != std::errc{} || end != marker.data() + first ||
-        process_id <= 0)
-        return std::nullopt;
-    return std::pair{
-        process_id,
-        std::string(marker.substr(first + 1, second - first - 1))};
-}
-
-bool ownership_is_live(const std::filesystem::path& path) {
-    const auto marker = read_private_text_file(path);
-    if (!marker)
-        return false;
-    const auto owner = decode_ownership_marker(*marker);
-    return owner &&
-           process_start_identity(owner->first) ==
-               std::optional<std::string>(owner->second);
 }
 
 std::string encode_record(const InspectorDiscoveryRecord& record) {
@@ -565,6 +514,104 @@ std::optional<InspectorDiscoveryRecord> decode_record(
 }
 
 } // namespace
+
+struct InspectorDiscoveryPublisher::OwnershipLease {
+#ifdef _WIN32
+    HANDLE handle = INVALID_HANDLE_VALUE;
+#else
+    int descriptor = -1;
+#endif
+
+    ~OwnershipLease() {
+#ifdef _WIN32
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+#else
+        if (descriptor >= 0) {
+            ::flock(descriptor, LOCK_UN);
+            ::close(descriptor);
+        }
+#endif
+    }
+
+    static std::unique_ptr<OwnershipLease> acquire(
+        const std::filesystem::path& path,
+        std::string_view marker) {
+        auto lease = std::make_unique<OwnershipLease>();
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES &&
+            !owner_only_windows_path(path, false)) {
+            return nullptr;
+        }
+        OwnerOnlySecurity security;
+        if (!security.valid())
+            return nullptr;
+        lease->handle = CreateFileW(
+            path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+            security.attributes(), OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (lease->handle == INVALID_HANDLE_VALUE)
+            return nullptr;
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(lease->handle, &info) ||
+            (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
+                                      FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+            return nullptr;
+        }
+        LARGE_INTEGER start{};
+        if (!SetFilePointerEx(lease->handle, start, nullptr, FILE_BEGIN) ||
+            !SetEndOfFile(lease->handle)) {
+            return nullptr;
+        }
+        std::size_t written = 0;
+        while (written < marker.size()) {
+            const auto remaining = std::min<std::size_t>(
+                marker.size() - written,
+                static_cast<std::size_t>(
+                    std::numeric_limits<DWORD>::max()));
+            DWORD count = 0;
+            if (!WriteFile(lease->handle, marker.data() + written,
+                           static_cast<DWORD>(remaining), &count, nullptr) ||
+                count == 0) {
+                return nullptr;
+            }
+            written += count;
+        }
+        if (!FlushFileBuffers(lease->handle))
+            return nullptr;
+#else
+        int flags = O_RDWR | O_CREAT | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+        flags |= O_NOFOLLOW;
+#endif
+        lease->descriptor = ::open(path.c_str(), flags, 0600);
+        if (lease->descriptor < 0 ||
+            ::flock(lease->descriptor, LOCK_EX | LOCK_NB) != 0) {
+            return nullptr;
+        }
+        struct stat info {};
+        if (::fstat(lease->descriptor, &info) != 0 ||
+            !S_ISREG(info.st_mode) || info.st_uid != ::geteuid() ||
+            ::fchmod(lease->descriptor, 0600) != 0 ||
+            ::ftruncate(lease->descriptor, 0) != 0) {
+            return nullptr;
+        }
+        std::size_t written = 0;
+        while (written < marker.size()) {
+            const auto count =
+                ::write(lease->descriptor, marker.data() + written,
+                        marker.size() - written);
+            if (count <= 0)
+                return nullptr;
+            written += static_cast<std::size_t>(count);
+        }
+        if (::fsync(lease->descriptor) != 0)
+            return nullptr;
+#endif
+        return lease;
+    }
+};
 
 std::filesystem::path default_inspector_runtime_directory() {
     if (const auto configured =
@@ -678,23 +725,16 @@ bool InspectorDiscoveryPublisher::publish(
         std::to_string(record.process_id) + "\n" +
         record.process_start_id + "\n" +
         pulp::runtime::hex_encode(*ownership_id);
-    if (!write_private_file_exclusive(ownership_path_, ownership_marker_)) {
-        if (ownership_is_live(ownership_path_)) {
-            ownership_path_.clear();
-            ownership_marker_.clear();
-            return false;
-        }
-        if (!write_private_file_atomic(ownership_path_, ownership_marker_) ||
-            read_private_text_file(ownership_path_) !=
-                std::optional<std::string>(ownership_marker_)) {
-            ownership_path_.clear();
-            ownership_marker_.clear();
-            return false;
-        }
-        std::error_code error;
-        std::filesystem::remove(record.record_path, error);
-        std::filesystem::remove(record.credential_path, error);
+    ownership_ =
+        OwnershipLease::acquire(ownership_path_, ownership_marker_);
+    if (!ownership_) {
+        ownership_path_.clear();
+        ownership_marker_.clear();
+        return false;
     }
+    std::error_code error;
+    std::filesystem::remove(record.record_path, error);
+    std::filesystem::remove(record.credential_path, error);
     credential_.assign(credential.begin(), credential.end());
     if (!write_private_file_atomic(
             record.credential_path,
@@ -703,9 +743,7 @@ bool InspectorDiscoveryPublisher::publish(
         std::error_code error;
         std::filesystem::remove(record.record_path, error);
         std::filesystem::remove(record.credential_path, error);
-        if (read_private_text_file(ownership_path_) ==
-            std::optional<std::string>(ownership_marker_))
-            std::filesystem::remove(ownership_path_, error);
+        ownership_.reset();
         ownership_path_.clear();
         ownership_marker_.clear();
         credential_.clear();
@@ -716,7 +754,7 @@ bool InspectorDiscoveryPublisher::publish(
 }
 
 bool InspectorDiscoveryPublisher::refresh(std::chrono::milliseconds ttl) {
-    if (!record_ || credential_.size() != 32 ||
+    if (!record_ || !ownership_ || credential_.size() != 32 ||
         ttl <= std::chrono::milliseconds(0) ||
         read_private_text_file(ownership_path_) !=
             std::optional<std::string>(ownership_marker_))
@@ -727,15 +765,15 @@ bool InspectorDiscoveryPublisher::refresh(std::chrono::milliseconds ttl) {
 }
 
 void InspectorDiscoveryPublisher::remove() {
-    if (record_ &&
+    if (record_ && ownership_ &&
         read_private_text_file(ownership_path_) ==
             std::optional<std::string>(ownership_marker_)) {
         std::error_code error;
         std::filesystem::remove(record_->record_path, error);
         std::filesystem::remove(record_->credential_path, error);
-        std::filesystem::remove(ownership_path_, error);
     }
     record_.reset();
+    ownership_.reset();
     ownership_path_.clear();
     ownership_marker_.clear();
     std::fill(credential_.begin(), credential_.end(), std::uint8_t{0});

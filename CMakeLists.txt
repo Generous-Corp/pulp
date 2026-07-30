@@ -392,7 +392,7 @@ endif()
 # The visual Cmd+I overlay belongs only to the standalone authoring target.
 # Keeping this dependency off pulp-format is what prevents ordinary plugin
 # targets from inheriting inspector archives through the format SDK.
-if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect)
+if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
     target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
     target_compile_definitions(pulp-standalone PRIVATE
         PULP_ENABLE_INSPECTOR=1

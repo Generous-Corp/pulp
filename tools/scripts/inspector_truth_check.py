@@ -86,7 +86,11 @@ REQUIRED_CLAIMS = {
 REQUIRED_BUILD_CONTRACTS = {
     "CMakeLists.txt": (
         "if(PULP_ENABLE_INSPECTOR)\n    add_subdirectory(inspect)\nendif()",
+        "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)",
         "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)",
+    ),
+    "inspect/CMakeLists.txt": (
+        "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
     ),
     "tools/cli/CMakeLists.txt": (
         "cmd_inspect_unavailable.cpp",
