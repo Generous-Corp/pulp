@@ -67,16 +67,33 @@ bool updating() { return std::getenv("FORGE_NO_LEAK_UPDATE") != nullptr; }
 /// real failure here was Forge Modular having written 121 projects into Forge's
 /// store, which is a genuine product bug but made the guard cry wolf about the
 /// wrong thing. Pinned to a temp directory so a baseline means what it says.
+/// An empty, private store for everything the Home screen reads.
+///
+/// Pinning only FORGE_PROJECTS_DIR was not enough: the shelf also renders
+/// MARKETPLACE listings, whose titles come from a directory the fixture did not
+/// control. The guard failed three times on cards drifting between "Untitled",
+/// "Split Stereo Echo" and "Dual Time Delay" while Forge's chrome was untouched
+/// -- and a guard that cries wolf on its own fixtures is one people stop
+/// reading. Both roots are pinned, and both are wiped, so a Home frame is a
+/// function of the code and nothing else.
 struct HermeticProjects {
     HermeticProjects() {
-        dir = std::filesystem::temp_directory_path() / "forge-no-leak-projects";
+        const auto base = std::filesystem::temp_directory_path() / "forge-no-leak";
+        dir = base / "projects";
+        market = base / "marketplace";
         std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
+        std::filesystem::remove_all(base, ec);
         std::filesystem::create_directories(dir, ec);
+        std::filesystem::create_directories(market, ec);
         ::setenv("FORGE_PROJECTS_DIR", dir.string().c_str(), /*overwrite=*/1);
+        ::setenv("FORGE_MARKETPLACE_DIR", market.string().c_str(), /*overwrite=*/1);
     }
-    ~HermeticProjects() { ::unsetenv("FORGE_PROJECTS_DIR"); }
+    ~HermeticProjects() {
+        ::unsetenv("FORGE_PROJECTS_DIR");
+        ::unsetenv("FORGE_MARKETPLACE_DIR");
+    }
     std::filesystem::path dir;
+    std::filesystem::path market;
 };
 
 std::vector<unsigned char> read_all(const std::filesystem::path& p) {
@@ -1874,4 +1891,34 @@ TEST_CASE("the stage card follows the generator", "[phase7][stage]") {
     m.poll();
     CHECK(m.stage() == 3);          // not back to 0
     std::filesystem::remove(log);
+}
+
+TEST_CASE("the Home guard reads nothing outside its own fixture", "[no-leak]") {
+    // The marketplace root defaults to the projects root's PARENT plus
+    // "marketplace", so pinning only FORGE_PROJECTS_DIR pointed it at a shared
+    // /tmp/marketplace that every product and every run wrote to. The guard
+    // then failed three times on card titles drifting between "Untitled",
+    // "Split Stereo Echo" and "Dual Time Delay" while Forge's chrome was
+    // untouched.
+    HermeticProjects isolated;
+
+    const char* projects = std::getenv("FORGE_PROJECTS_DIR");
+    const char* market = std::getenv("FORGE_MARKETPLACE_DIR");
+    REQUIRE(projects != nullptr);
+    REQUIRE(market != nullptr);
+
+    // Both inside the fixture, and NOT one derived from the other's parent --
+    // which is how the shared path was reached.
+    const std::filesystem::path p(projects), m(market);
+    CHECK(p.string().find("forge-no-leak") != std::string::npos);
+    CHECK(m.string().find("forge-no-leak") != std::string::npos);
+    const bool market_is_inside_the_fixture =
+        m.string().find("forge-no-leak") != std::string::npos;
+    CHECK(market_is_inside_the_fixture);
+
+    // And both start empty, so a Home frame is a function of the code alone.
+    CHECK(std::filesystem::is_directory(m));
+    const auto listings = std::distance(std::filesystem::directory_iterator(m),
+                                        std::filesystem::directory_iterator{});
+    CHECK(listings == 0);
 }
