@@ -52,6 +52,12 @@ bool safe_component(std::string_view value) {
            });
 }
 
+std::string discovery_file_stem(std::string_view session_id,
+                                std::string_view instance_id) {
+    return std::to_string(session_id.size()) + "-" +
+           std::string(session_id) + "-" + std::string(instance_id);
+}
+
 #ifdef _WIN32
 class OwnerOnlySecurity {
 public:
@@ -465,8 +471,12 @@ std::optional<InspectorDiscoveryRecord> decode_record(
         record.record_path = path;
         const auto credential_name =
             std::string(value["credentialFile"].getString());
+        const auto file_stem =
+            discovery_file_stem(record.session_id, record.instance_id);
         if (!safe_component(record.session_id) ||
-            credential_name != record.session_id + ".token" ||
+            !safe_component(record.instance_id) ||
+            path.filename() != file_stem + ".json" ||
+            credential_name != file_stem + ".token" ||
             record.endpoint.rfind("127.0.0.1:", 0) != 0 ||
             record.protocol_version != "1" ||
             record.expires_at_unix_ms <= unix_ms_now() ||
@@ -574,7 +584,8 @@ bool InspectorDiscoveryPublisher::publish(
     std::span<const std::uint8_t> credential,
     std::chrono::milliseconds ttl) {
     remove();
-    if (!safe_component(record.session_id) || credential.size() != 32 ||
+    if (!safe_component(record.session_id) ||
+        !safe_component(record.instance_id) || credential.size() != 32 ||
         ttl <= std::chrono::milliseconds(0) ||
         !ensure_private_directory(runtime_directory_)) {
         return false;
@@ -585,9 +596,11 @@ bool InspectorDiscoveryPublisher::publish(
         return false;
     record.process_start_id = *process_start_id;
     record.expires_at_unix_ms = unix_ms_now() + ttl.count();
-    record.record_path = runtime_directory_ / (record.session_id + ".json");
+    const auto file_stem =
+        discovery_file_stem(record.session_id, record.instance_id);
+    record.record_path = runtime_directory_ / (file_stem + ".json");
     record.credential_path =
-        runtime_directory_ / (record.session_id + ".token");
+        runtime_directory_ / (file_stem + ".token");
     credential_.assign(credential.begin(), credential.end());
     if (!write_private_file_atomic(
             record.credential_path,

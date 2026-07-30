@@ -31,7 +31,7 @@ trip.
 | `state.write` | no | yes | Authenticated dispatch and response-after-main-thread-apply primitive are implemented; standalone attachment lands in Phase 2 |
 | `test.input` | no | yes | Reserved capability; typed MIDI/transport methods are not implemented |
 | `authoring.tweaks` | no | yes | Partial domain component; filesystem and editor-launch methods are classified unavailable and runtime dispatch enforces that classification |
-| `telemetry.stream` | no | yes | Reserved capability; safe multi-consumer fan-out is not implemented |
+| `telemetry.stream` | no | yes | Registered events are filtered through effective capability policy before authenticated multi-client fan-out; production sources land in later phases |
 | `runtime.eval` | no | no | High-risk separate opt-in; not enabled by any profile |
 | `unavailable` | no | no | Filesystem-backed tweak/fixture operations and editor launch are classified unavailable for the future policy |
 
@@ -46,7 +46,7 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Build/link/install | CPU-only protocol, discovery, client, and runtime targets are separate from the GPU overlay | Final installed-consumer and ordinary-target strip proof |
 | Threading | Bounded owning-thread RPC responds after application and cancels queued work during teardown | Production standalone attachment |
 | Discovery/security | owner-private ephemeral record/token files, exact session identity, nonce/HMAC proof, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | Production standalone activation |
-| CLI | Shared typed client performs authenticated exact-session discovery and method requests | Profiles/list/capabilities/doctor stable JSON and installed MCP parity |
+| CLI | Shared typed client performs authenticated exact-session discovery and acquires a same-connection controller lease for one-shot mutations | Profiles/list/capabilities/doctor stable JSON and installed MCP parity |
 | MCP | Source-tree shell wrapper | Direct installed shared client and session-aware schemas |
 | Capture/telemetry | Standalone capture seam and value-channel sources exist | Live session attachment and independent bounded telemetry fan-out |
 | Shipping | Overlay option exists | Per-target declaration, manifest, binary strip/override proof |

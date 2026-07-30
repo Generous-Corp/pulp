@@ -38,6 +38,9 @@ FORBIDDEN_CLAIMS = {
     ),
     "docs/reference/scripted-ui-inspector.md": (
         "binds all interfaces",
+        "transport is unauthenticated",
+        "currently unauthenticated",
+        "port-file hint",
     ),
     ".claude/commands/inspect.md": (
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
@@ -50,6 +53,10 @@ FORBIDDEN_CLAIMS = {
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
+        "safe multi-consumer fan-out is not implemented",
+    ),
+    "tools/mcp/pulp_mcp.cpp": (
+        "lacks authenticated main-thread dispatch",
     ),
 }
 
@@ -69,6 +76,10 @@ REQUIRED_CLAIMS = {
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
         "Capability dispatch is fail-closed",
+    ),
+    "docs/reference/scripted-ui-inspector.md": (
+        "nonce/HMAC",
+        "owner-private per-session credential",
     ),
 }
 

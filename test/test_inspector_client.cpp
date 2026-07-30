@@ -129,6 +129,39 @@ TEST_CASE("authenticated client completes read and controlled mutation",
             .is_error);
 }
 
+TEST_CASE("server broadcasts only registered events granted by policy",
+          "[inspect][client][events][policy]") {
+    AuthenticatedFixture fixture;
+    const auto records = fixture.reader.list();
+    REQUIRE(records.size() == 1);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::vector<std::string> events;
+    InspectorClient client;
+    client.set_event_handler([&](const auto& event) {
+        std::lock_guard lock(mutex);
+        events.push_back(event.method);
+        cv.notify_all();
+    });
+    REQUIRE(client.connect(records.front(), fixture.reader));
+
+    fixture.server.broadcast(
+        pulp::inspect::make_event("Audio.levels", R"({"peak":0.9})"));
+    fixture.server.broadcast(
+        pulp::inspect::make_event("Unknown.event", "{}"));
+    fixture.server.broadcast(
+        pulp::inspect::make_event("State.parameterChanged",
+                                  R"({"id":"gain","value":0.75})"));
+
+    std::unique_lock lock(mutex);
+    REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+        return !events.empty();
+    }));
+    REQUIRE(events.size() == 1);
+    CHECK(events.front() == "State.parameterChanged");
+}
+
 TEST_CASE("server stop releases leases before a session restart",
           "[inspect][client][teardown][lease]") {
     AuthenticatedFixture fixture;
