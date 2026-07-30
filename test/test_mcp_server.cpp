@@ -940,8 +940,54 @@ TEST_CASE("MCP inspector families execute the shared pulp-cpp delegate",
         require_contains(response,
                          std::string("fake-inspector [inspect] [--command] [") +
                              method + "] [--params] [{}]");
+        REQUIRE(response.find(R"JSON("isError":true)JSON") ==
+                std::string::npos);
     }
 #endif
+}
+
+TEST_CASE("MCP inspector families preserve subprocess failure status",
+          "[mcp][tools][inspect][delegate][failure]") {
+#if defined(_WIN32)
+    SUCCEED("Nonzero native process status is covered by the shared process runner");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n";
+    const auto cli = make_fake_inspector_cli(project.path);
+    std::ofstream failing(cli, std::ios::trunc);
+    failing << "#!/bin/sh\n"
+            << "printf 'authenticated inspector failure' >&2\n"
+            << "exit 7\n";
+    failing.close();
+    ScopedCurrentPath cwd(project.path);
+
+    for (const char* tool : {
+             "pulp_inspect_dom",
+             "pulp_motion_snapshot",
+             "pulp_trace_snapshot",
+         }) {
+        INFO("tool=" << tool);
+        const auto response = handle_request(tool_call("64", tool));
+        require_contains(response, "authenticated inspector failure");
+        require_contains(response, R"JSON("isError":true)JSON");
+    }
+#endif
+}
+
+TEST_CASE("MCP inspector spawn failures are tool errors",
+          "[mcp][tools][inspect][delegate][failure][spawn]") {
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n";
+    ScopedCurrentPath cwd(project.path);
+
+    const auto response =
+        handle_request(tool_call("65", "pulp_inspect_dom"));
+    require_contains(response, R"JSON("isError":true)JSON");
+    require_contains(response, "pulp inspect subprocess failed");
 }
 
 TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mcp][tools][audio]") {
