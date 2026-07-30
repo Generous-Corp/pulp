@@ -1,0 +1,279 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 63b40c2..dfd6d60 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -645,6 +645,15 @@ if(FORGE_BUILD_TESTS)
+             forge_core Catch2::Catch2WithMain)
+         catch_discover_tests(forge-test-chrome)
+ 
++        # The no-leak guard: every product's Home frame against a committed
++        # baseline, so a change made for one cannot silently move another.
++        add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
++        target_include_directories(forge-test-chrome-no-leak PRIVATE
++            ${CMAKE_CURRENT_SOURCE_DIR}/test)
++        target_link_libraries(forge-test-chrome-no-leak PRIVATE
++            forge_core Catch2::Catch2WithMain)
++        catch_discover_tests(forge-test-chrome-no-leak)
++
+         add_executable(forge-test-audio-asset-coordinator
+             test/test_audio_asset_coordinator.cpp)
+         target_include_directories(forge-test-audio-asset-coordinator PRIVATE
+diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
+index 528e598..b724d1c 100644
+--- a/include/forge/fx_shell.hpp
++++ b/include/forge/fx_shell.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include "forge/brand.hpp"
+ #include "forge/lofi_delay.hpp"
+ #include "forge/gen/tempo_division.hpp"  // DeriveUnit, Division for derived macros
+ #include "forge/param_map.hpp"
+@@ -166,6 +167,15 @@ public:
+     const pulp::format::reload::ProcessorHotSwapSlot& slot() const { return slot_; }
+ 
+     // ── ForgeShell hooks (effect-specific DSP) ───────────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " FX",
++                 .prompt_placeholder = "Build a lo-fi multi-fx plugin \u2014 reverb, delay, chorus. Nocturne, dreamy, a visualizer per effect.",
++                 .followup_placeholder = "refine it \u2014 e.g. darker feedback tail",
++                 .default_build_title = "Lo-Fi Delay" };
++    }
++
+     bool has_build() const override { return slot_.has_active(); }
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
+diff --git a/include/forge/instrument_shell.hpp b/include/forge/instrument_shell.hpp
+index d4b60cd..e048d16 100644
+--- a/include/forge/instrument_shell.hpp
++++ b/include/forge/instrument_shell.hpp
+@@ -24,6 +24,7 @@
+ //    current value — the SAME contract the FX chrome + generated ui.js read, so
+ //    an instrument inherits the art-directed believable UI automatically.
+ 
++#include "forge/brand.hpp"
+ #include "forge/param_map.hpp"
+ #include "forge/prepared_bank_exchange.hpp"
+ #include "forge/shell.hpp"
+@@ -252,6 +253,15 @@ public:
+     }
+ 
+     // ── ForgeShell hooks (instrument-specific DSP) ───────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " INST",
++                 .prompt_placeholder = "a warm analog pad with a slow filter sweep\u2026",
++                 .followup_placeholder = "refine it \u2014 e.g. faster attack, brighter tone",
++                 .default_build_title = "Subtractive Synth" };
++    }
++
+     bool has_build() const override { return true; }  // the poly engine always renders
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
+diff --git a/include/forge/midi_shell.hpp b/include/forge/midi_shell.hpp
+index 27f98d0..ac2e51f 100644
+--- a/include/forge/midi_shell.hpp
++++ b/include/forge/midi_shell.hpp
+@@ -24,6 +24,7 @@
+ //  * process() runs the chain over midi_in → midi_out, reading its macros from
+ //    the BOUND state() each block (the instrument BUG-A discipline).
+ 
++#include "forge/brand.hpp"
+ #include "forge/midi_transform.hpp"
+ #include "forge/gen/midi_chain_loader.hpp"  // ResolvedMidiMacro
+ #include "forge/param_map.hpp"
+@@ -79,6 +80,15 @@ public:
+                                  std::string& err);
+ 
+     // ── ForgeShell hooks (MIDI-specific) ─────────────────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " MIDI",
++                 .prompt_placeholder = "a scale-locked up-down arpeggiator\u2026",
++                 .followup_placeholder = "refine it \u2014 e.g. swing the offbeats",
++                 .default_build_title = "Note Pass" };
++    }
++
+     bool has_build() const override { return true; }  // a chain is always installed
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
+diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
+index c8101e1..108db34 100644
+--- a/include/forge/shell.hpp
++++ b/include/forge/shell.hpp
+@@ -59,6 +59,23 @@ class ProjectStore;
+ // re-bake into an effect shell), and used to select the generation vocabulary.
+ enum class ShellKind { effect, instrument, midi_effect };
+ 
++/// The product-facing words the chrome shows.
++///
++/// These used to be four `switch (kind)` functions inside chrome.cpp, which put
++/// product copy in the layout code and meant a new product could not supply its
++/// own without editing the chrome. Each shell answers for itself now; the chrome
++/// asks rather than decides.
++struct ChromeCopy {
++    /// The title-bar badge — "FORGE INST", "FORGE MIDI", "FORGE FX".
++    std::string badge;
++    /// What the empty composer suggests.
++    std::string prompt_placeholder;
++    /// What the composer suggests once something has been built.
++    std::string followup_placeholder;
++    /// The name of the build a fresh install opens with.
++    std::string default_build_title;
++};
++
+ const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
+ ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
+ 
+@@ -343,6 +360,12 @@ public:
+     // ── Kind-specific hooks each concrete shell fills in ─────────────────────
+ 
+     // Whether a build is installed and processing.
++    /// The words this product shows in the chrome.
++    ///
++    /// Pure virtual on purpose: a new product that forgets to answer will not
++    /// compile, rather than silently inheriting another product's copy.
++    virtual ChromeCopy chrome_copy() const = 0;
++
+     virtual bool has_build() const = 0;
+ 
+     // One descriptor per bound macro of the ACTIVE build, current values.
+diff --git a/src/chrome.cpp b/src/chrome.cpp
+index 1c3814e..b45bc3f 100644
+--- a/src/chrome.cpp
++++ b/src/chrome.cpp
+@@ -1151,44 +1151,26 @@ private:
+ // these has an answer for all three kinds — a fall-through would show effect
+ // wording ("darker feedback tail", "Lo-Fi Delay") inside the instrument or
+ // MIDI-effect plugin.
+-const char* default_build_title(ShellKind kind) {
+-    switch (kind) {
+-        case ShellKind::instrument: return "Subtractive Synth";
+-        case ShellKind::midi_effect: return "Note Pass";
+-        case ShellKind::effect: break;
+-    }
+-    return "Lo-Fi Delay";
++// Product copy comes from the shell, which answers for itself. These four used
++// to switch on ShellKind here, which put product words in the layout code and
++// meant a new product could not supply its own without editing this file.
++//
++// std::string rather than const char*: the copy lives in a value the shell
++// returns, so handing back a pointer into a temporary would dangle.
++std::string default_build_title(const ForgeShell& shell) {
++    return shell.chrome_copy().default_build_title;
+ }
+ 
+-const char* prompt_placeholder(ShellKind kind) {
+-    switch (kind) {
+-        case ShellKind::instrument: return "a warm analog pad with a slow filter sweep…";
+-        case ShellKind::midi_effect: return "a scale-locked up-down arpeggiator…";
+-        case ShellKind::effect: break;
+-    }
+-    return "Build a lo-fi multi-fx plugin — reverb, delay, chorus. "
+-           "Nocturne, dreamy, a visualizer per effect.";
++std::string prompt_placeholder(const ForgeShell& shell) {
++    return shell.chrome_copy().prompt_placeholder;
+ }
+ 
+-const char* followup_placeholder(ShellKind kind) {
+-    switch (kind) {
+-        case ShellKind::instrument: return "refine it — e.g. faster attack, brighter tone";
+-        case ShellKind::midi_effect: return "refine it — e.g. swing the offbeats";
+-        case ShellKind::effect: break;
+-    }
+-    return "refine it — e.g. darker feedback tail";
++std::string followup_placeholder(const ForgeShell& shell) {
++    return shell.chrome_copy().followup_placeholder;
+ }
+ 
+-std::string shell_kind_badge(ShellKind kind) {
+-    switch (kind) {
+-        case ShellKind::instrument:
+-            return std::string(brand::kProductNameUpper) + " INST";
+-        case ShellKind::midi_effect:
+-            return std::string(brand::kProductNameUpper) + " MIDI";
+-        case ShellKind::effect:
+-            return std::string(brand::kProductNameUpper) + " FX";
+-    }
+-    return std::string(brand::kProductNameUpper);
++std::string shell_kind_badge(const ForgeShell& shell) {
++    return shell.chrome_copy().badge;
+ }
+ 
+ std::string trim_copy(const std::string& s) {
+@@ -1350,7 +1332,7 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
+     // shell ships a lo-fi delay; the instrument shell a subtractive synth; the
+     // MIDI-effect shell a pass-through transform chain). A generated build
+     // overrides this with its own name at install.
+-    project_title_ = default_build_title(shell_.kind());
++    project_title_ = default_build_title(shell_);
+ }
+ 
+ ForgeChrome::~ForgeChrome() {
+@@ -1683,7 +1665,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+     player_title_ = title.get();
+     title->flex().flex_shrink = 0;
+     identity->add_child(std::move(title));
+-    auto tag = make_label(shell_kind_badge(shell_.kind()), kFontMono, 10, 500,
++    auto tag = make_label(shell_kind_badge(shell_), kFontMono, 10, 500,
+                           kFaint, 0.8f);
+     shell_kind_badge_ = tag.get();
+     tag->set_border(kLine, 1, 5);
+@@ -1946,7 +1928,7 @@ void ForgeChrome::build_home(View& parent) {
+         kHomePromptTextWidth, design::geometry::composer_max_text_lines,
+         design::geometry::composer_text_line_height);
+     prompt_input_ = input.get();
+-    input->placeholder = prompt_placeholder(shell_.kind());
++    input->placeholder = prompt_placeholder(shell_);
+     input->set_font_family(kFontDisplay);
+     // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
+     // shaping is fractionally wider, so a half-point optical compensation
+@@ -3401,7 +3383,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+     follow->add_child(std::move(attachment_error));
+     auto input = std::make_unique<TextEditor>();
+     followup_input_ = input.get();
+-    input->placeholder = followup_placeholder(shell_.kind());
++    input->placeholder = followup_placeholder(shell_);
+     input->set_font_family(kFontDisplay);
+     input->set_font_size(14);
+     input->set_background_color(kRaised);
+@@ -4268,7 +4250,7 @@ void ForgeChrome::apply_build_view() {
+     if (followup_input_) {
+         followup_input_->placeholder =
+             code ? "Describe an edit to the live source"
+-                 : followup_placeholder(shell_.kind());
++                 : followup_placeholder(shell_);
+     }
+     if (designer_pane_) designer_pane_->set_visible(design);
+     if (code_tab_button_) {
+@@ -5726,7 +5708,7 @@ void ForgeChrome::on_project_restored() {
+         // An empty host payload is a real reset to the hand-fed default build,
+         // not merely a source change. Drop the departed project's identity and
+         // conversation before rematerializing the default DSP.
+-        project_title_ = default_build_title(shell_.kind());
++        project_title_ = default_build_title(shell_);
+         clear_chat_rail();
+     }
+     refresh_shelf();
+@@ -5859,7 +5841,7 @@ void ForgeChrome::confirm_delete_project() {
+     // The deleted default tile stays gone; saved entries keep showing.
+     default_tile_alive_ = false;
+     // Back to this kind's default build's name, for a fresh start.
+-    project_title_ = default_build_title(shell_.kind());
++    project_title_ = default_build_title(shell_);
+     enter_home();
+ }
+ 
+@@ -9019,7 +9001,7 @@ void ForgeChrome::refresh_shelf() {
+                              : Color::rgba8(0x10, 0x16, 0x2E)},
+             {0.0f, 1.0f});
+         auto format = make_label(
+-            shell_kind_badge(shell_.kind()),
++            shell_kind_badge(shell_),
+             kFontMono, 9, 500, Color::rgba8(0xFF, 0xFF, 0xFF, 0xB3), 0.9f);
+         art->add_child(std::move(format));
+         tile->add_child(std::move(art));

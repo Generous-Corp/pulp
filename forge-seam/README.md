@@ -44,6 +44,34 @@ FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 
 and commit the changed PNGs with the reason.
 
+### `patches/0001-chrome-copy-from-the-shell.patch`
+
+**Phase 1, step 1 of 3, and it is done.** The four `switch (kind)` functions in
+`chrome.cpp` — badge, prompt placeholder, follow-up placeholder, default build
+title — become one `ChromeCopy` the shell returns. The chrome asks instead of
+deciding.
+
+84 insertions, 40 deletions, across 5 files. Net effect on the three existing
+products: **none**.
+
+| Check | Result |
+|---|---|
+| `forge-test-chrome-no-leak` | 3 of 3 byte-identical |
+| `forge-test-chrome` | 4,711 assertions, 126 cases, all pass |
+
+Two things this cost that are worth knowing:
+
+- **The helpers had to return `std::string`, not `const char*`.** The copy now
+  lives in a value the shell returns, so handing back a pointer into that
+  temporary would dangle. The compiler does not catch it; the switch statements
+  returned string literals and were safe by accident.
+- **`chrome_copy()` is pure virtual on purpose.** A new product that forgets to
+  answer fails to compile rather than silently inheriting another product's
+  words.
+
+Still to do in Phase 1: the composer action row as a description (the one
+genuinely shared change), and the two optional view hooks.
+
 ## Applying it to a Forge checkout
 
 The test needs one registration in Forge's `CMakeLists.txt`, beside
