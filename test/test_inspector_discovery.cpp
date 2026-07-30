@@ -96,6 +96,26 @@ TEST_CASE("discovery publishes owner-private ephemeral credentials and cleans up
         temporary.path / "11-session-one-instance-1.token"));
 }
 
+#ifdef _WIN32
+TEST_CASE("discovery publication preserves Unicode runtime paths on Windows",
+          "[inspect][discovery][windows][unicode]") {
+    TemporaryDirectory temporary;
+    const auto runtime =
+        temporary.path / std::filesystem::path(L"runtime-\u03a9-\u65e5\u672c");
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+
+    InspectorDiscoveryPublisher publisher(runtime);
+    REQUIRE(publisher.publish(
+        fixture_record("unicode-runtime"), *token, 5s));
+    InspectorDiscoveryReader reader(runtime);
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().session_id == "unicode-runtime");
+    CHECK(reader.read_credential(records.front()) == token);
+}
+#endif
+
 TEST_CASE("discovery rejects records and credentials above their fixed bounds",
           "[inspect][discovery][resource-limit]") {
     TemporaryDirectory temporary;

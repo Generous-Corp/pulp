@@ -133,6 +133,7 @@ TEST_CASE("custom policy is an exact allow-list and runtime eval is separately g
     InspectorPolicyConfig config;
     config.profile = InspectorProfile::Custom;
     config.custom_capabilities = {
+        InspectorCapability::SessionControl,
         InspectorCapability::StateRead,
         InspectorCapability::RuntimeEval,
     };
@@ -153,6 +154,46 @@ TEST_CASE("custom policy is an exact allow-list and runtime eval is separately g
     CHECK(lease_required->error_code == "controller_lease_required");
     CHECK_FALSE(acknowledged.authorize(
         make_request(2, "Runtime.evaluate"), true).has_value());
+}
+
+TEST_CASE("lease-requiring capabilities need effective session control",
+          "[inspect][session][policy][controller-prerequisite]") {
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Custom;
+    config.custom_capabilities = {
+        InspectorCapability::StateWrite,
+        InspectorCapability::TraceControl,
+    };
+    config.available_capabilities = {
+        InspectorCapability::StateWrite,
+        InspectorCapability::TraceControl,
+        InspectorCapability::SessionControl,
+    };
+
+    InspectorAccessPolicy missing_grant(config);
+    CHECK(missing_grant.is_available(InspectorCapability::StateWrite));
+    CHECK_FALSE(missing_grant.is_granted(InspectorCapability::StateWrite));
+    CHECK_FALSE(missing_grant.is_granted(InspectorCapability::TraceControl));
+
+    config.custom_capabilities.push_back(
+        InspectorCapability::SessionControl);
+    InspectorAccessPolicy executable(config);
+    CHECK(executable.is_granted(InspectorCapability::SessionControl));
+    CHECK(executable.is_granted(InspectorCapability::StateWrite));
+    CHECK(executable.is_granted(InspectorCapability::TraceControl));
+
+    config.available_capabilities.erase(
+        std::remove(config.available_capabilities.begin(),
+                    config.available_capabilities.end(),
+                    InspectorCapability::SessionControl),
+        config.available_capabilities.end());
+    InspectorAccessPolicy unavailable_controller(config);
+    CHECK_FALSE(
+        unavailable_controller.is_granted(InspectorCapability::SessionControl));
+    CHECK_FALSE(
+        unavailable_controller.is_granted(InspectorCapability::StateWrite));
+    CHECK_FALSE(
+        unavailable_controller.is_granted(InspectorCapability::TraceControl));
 }
 
 TEST_CASE("controller lease has one owner, expires, and releases on disconnect",
