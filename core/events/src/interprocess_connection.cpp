@@ -165,7 +165,10 @@ void InterprocessConnection::release_first_dispatch_gate() {
     }
 }
 
-bool InterprocessConnection::connect(std::string_view name, IpcTransport transport) {
+bool InterprocessConnection::connect(
+    std::string_view name,
+    IpcTransport transport,
+    std::chrono::milliseconds timeout) {
     disconnect();
     write_poisoned_.store(false, std::memory_order_release);
     impl_->transport = transport;
@@ -186,7 +189,8 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
         impl_->socket.set_write_timeout(
             std::chrono::milliseconds(
                 write_timeout_ms_.load(std::memory_order_relaxed)));
-        ok = impl_->socket.connect(endpoint->host, endpoint->port);
+        ok = impl_->socket.connect(
+            endpoint->host, endpoint->port, timeout);
     }
 
     if (ok) {

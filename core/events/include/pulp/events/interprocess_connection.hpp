@@ -38,7 +38,11 @@ public:
     /// Connect as client to a named pipe or TCP socket.
     /// For pipes: name is the pipe name (e.g., "pulp_scanner").
     /// For sockets: name is "host:port" (e.g., "127.0.0.1:9100").
-    bool connect(std::string_view name, IpcTransport transport = IpcTransport::NamedPipe);
+    /// A positive timeout bounds the TCP connect phase.
+    bool connect(
+        std::string_view name,
+        IpcTransport transport = IpcTransport::NamedPipe,
+        std::chrono::milliseconds timeout = {});
 
     /// Create a server that listens for one client connection.
     /// Blocks until a client connects (or timeout_ms expires, 0 = infinite).
