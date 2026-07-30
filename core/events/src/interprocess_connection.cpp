@@ -398,6 +398,12 @@ void InterprocessConnection::set_write_timeout(
         impl_->socket.set_write_timeout(value);
 }
 
+void InterprocessConnection::set_frame_read_timeout(
+    std::chrono::milliseconds timeout) {
+    frame_read_timeout_ms_.store(
+        std::max(timeout, std::chrono::milliseconds(0)).count(),
+        std::memory_order_relaxed);
+}
 
 void InterprocessConnection::start_read_thread() {
     running_.store(true);
@@ -431,13 +437,34 @@ void InterprocessConnection::read_loop() {
         }
     };
 
-    auto read_exact = [this](uint8_t* dst, size_t size) {
+    using Clock = std::chrono::steady_clock;
+    std::optional<Clock::time_point> frame_deadline;
+    auto clear_read_timeout = [this] {
+        if (impl_->transport == IpcTransport::Socket)
+            (void)impl_->socket.set_read_timeout(std::chrono::milliseconds(0));
+    };
+    auto read_exact = [this, &frame_deadline](uint8_t* dst, size_t size) {
         size_t read_so_far = 0;
         while (read_so_far < size && running_.load()) {
+            if (frame_deadline && impl_->transport == IpcTransport::Socket) {
+                const auto remaining = std::chrono::duration_cast<
+                    std::chrono::milliseconds>(*frame_deadline - Clock::now());
+                if (remaining <= std::chrono::milliseconds(0))
+                    return false;
+                if (!impl_->socket.set_read_timeout(
+                        std::max(remaining, std::chrono::milliseconds(1))))
+                    return false;
+            }
             int got = impl_->raw_read(dst + read_so_far, size - read_so_far);
             if (got <= 0)
                 return false;
             read_so_far += static_cast<size_t>(got);
+            if (!frame_deadline) {
+                const auto timeout = std::chrono::milliseconds(
+                    frame_read_timeout_ms_.load(std::memory_order_relaxed));
+                if (timeout > std::chrono::milliseconds(0))
+                    frame_deadline = Clock::now() + timeout;
+            }
         }
         return read_so_far == size;
     };
@@ -471,6 +498,8 @@ void InterprocessConnection::read_loop() {
                 notify_lost();
             return;
         }
+        clear_read_timeout();
+        frame_deadline.reset();
 
         std::function<void(const void*, size_t)> message_callback;
         std::function<void(std::string_view)> text_callback;
@@ -537,6 +566,13 @@ void InterprocessConnectionServer::set_write_timeout(
         std::memory_order_relaxed);
 }
 
+void InterprocessConnectionServer::set_frame_read_timeout(
+    std::chrono::milliseconds timeout) {
+    frame_read_timeout_ms_.store(
+        std::max(timeout, std::chrono::milliseconds(0)).count(),
+        std::memory_order_relaxed);
+}
+
 bool InterprocessConnectionServer::start(std::string_view name, IpcTransport transport) {
     stop();
     server_impl_->transport = transport;
@@ -575,6 +611,8 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 conn->impl_->socket = std::move(*client_sock);
                 conn->set_write_timeout(std::chrono::milliseconds(
                     write_timeout_ms_.load(std::memory_order_relaxed)));
+                conn->set_frame_read_timeout(std::chrono::milliseconds(
+                    frame_read_timeout_ms_.load(std::memory_order_relaxed)));
                 conn->state_.store(IpcState::Connected);
                 conn->write_poisoned_.store(false, std::memory_order_release);
                 conn->defer_first_dispatch_until_callback_.store(true);

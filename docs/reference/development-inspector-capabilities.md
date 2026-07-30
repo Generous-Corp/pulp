@@ -58,6 +58,10 @@ escapes, and ambiguous selection.
 Capability dispatch is fail-closed before a domain handler runs. The old
 unauthenticated direct-handler server exists only as a non-installed test
 fixture for transport regression coverage.
+Authenticated connections may wait idle for their next frame, but once any
+header byte arrives the complete length-prefixed frame must arrive within a
+bounded cumulative deadline. Partial headers and payloads are disconnected so
+they cannot retain every bounded client slot.
 After a complete request frame is sent, a response timeout or disconnect is
 explicitly reported as `mayHaveApplied`; timeouts fence the connection so a
 late response cannot be mistaken for a safe retry boundary.

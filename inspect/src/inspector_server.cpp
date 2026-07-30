@@ -420,6 +420,8 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::clamp<std::size_t>(config.max_message_bytes, 1,
                                 16u * 1024u * 1024u));
     server.set_write_timeout(std::chrono::seconds(3));
+    server.set_frame_read_timeout(
+        std::max(config.frame_read_timeout, std::chrono::milliseconds(1)));
     {
         std::lock_guard lock(clients_mutex);
         max_clients =

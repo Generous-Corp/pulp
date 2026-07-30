@@ -77,6 +77,11 @@ public:
     /// appended to a truncated stream.
     void set_write_timeout(std::chrono::milliseconds timeout);
 
+    /// Bound a frame once its first byte arrives. Idle connections may wait
+    /// indefinitely for the next frame, but a partial header or payload is
+    /// disconnected when this cumulative deadline expires.
+    void set_frame_read_timeout(std::chrono::milliseconds timeout);
+
     // ── Callbacks (override or set) ─────────────────────────────────────
 
     /// Called when a connection is established.
@@ -124,6 +129,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<std::int64_t> write_timeout_ms_{0};
+    std::atomic<std::int64_t> frame_read_timeout_ms_{0};
     std::atomic<bool> write_poisoned_{false};
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
     std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;
@@ -151,6 +157,7 @@ public:
     /// Apply a framing ceiling to every subsequently accepted connection.
     void set_max_message_bytes(std::size_t bytes);
     void set_write_timeout(std::chrono::milliseconds timeout);
+    void set_frame_read_timeout(std::chrono::milliseconds timeout);
 
     /// Whether the server is running.
     bool is_running() const { return running_.load(); }
@@ -174,6 +181,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<std::int64_t> write_timeout_ms_{0};
+    std::atomic<std::int64_t> frame_read_timeout_ms_{0};
     std::thread accept_thread_;
     std::vector<std::unique_ptr<InterprocessConnection>> clients_;
     struct ServerImpl;

@@ -3,15 +3,24 @@
 #include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/client.hpp>
 #include <pulp/inspect/inspector_server.hpp>
+#include <pulp/inspect/protocol.hpp>
+#include <pulp/runtime/socket.hpp>
 
-#include <filesystem>
-#include <fstream>
+#include <choc/text/choc_JSON.h>
+
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
+#include <type_traits>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -30,8 +39,108 @@ using pulp::inspect::InspectorSession;
 using pulp::inspect::InspectorSessionInfo;
 using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::make_response;
+using pulp::runtime::Socket;
+using pulp::runtime::SocketType;
+
+static_assert(!std::is_copy_constructible_v<InspectorServer>);
+static_assert(!std::is_copy_assignable_v<InspectorServer>);
+static_assert(!std::is_move_constructible_v<InspectorServer>);
+static_assert(!std::is_move_assignable_v<InspectorServer>);
 
 namespace {
+
+bool send_all(Socket& socket, std::span<const std::uint8_t> bytes) {
+    std::size_t sent = 0;
+    while (sent < bytes.size()) {
+        const auto count = socket.send(bytes.data() + sent, bytes.size() - sent);
+        if (count <= 0)
+            return false;
+        sent += static_cast<std::size_t>(count);
+    }
+    return true;
+}
+
+bool send_frame(Socket& socket, std::string_view payload) {
+    if (payload.size() > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    const auto size = static_cast<std::uint32_t>(payload.size());
+    const std::array<std::uint8_t, 4> header{
+        static_cast<std::uint8_t>(size),
+        static_cast<std::uint8_t>(size >> 8),
+        static_cast<std::uint8_t>(size >> 16),
+        static_cast<std::uint8_t>(size >> 24),
+    };
+    return send_all(socket, header) &&
+           send_all(socket, std::span(
+               reinterpret_cast<const std::uint8_t*>(payload.data()),
+               payload.size()));
+}
+
+std::optional<std::string> receive_frame(Socket& socket) {
+    auto read_exact = [&socket](std::span<std::uint8_t> bytes) {
+        std::size_t received = 0;
+        while (received < bytes.size()) {
+            const auto count =
+                socket.receive(bytes.data() + received, bytes.size() - received);
+            if (count <= 0)
+                return false;
+            received += static_cast<std::size_t>(count);
+        }
+        return true;
+    };
+    std::array<std::uint8_t, 4> header{};
+    if (!read_exact(header))
+        return std::nullopt;
+    const auto size = static_cast<std::uint32_t>(header[0]) |
+                      (static_cast<std::uint32_t>(header[1]) << 8) |
+                      (static_cast<std::uint32_t>(header[2]) << 16) |
+                      (static_cast<std::uint32_t>(header[3]) << 24);
+    if (size > 1024u * 1024u)
+        return std::nullopt;
+    std::string payload(size, '\0');
+    if (!read_exact(std::span(
+            reinterpret_cast<std::uint8_t*>(payload.data()), payload.size())))
+        return std::nullopt;
+    return payload;
+}
+
+bool authenticate_raw(Socket& socket,
+                      std::span<const std::uint8_t> token) {
+    const auto challenge_frame = receive_frame(socket);
+    if (!challenge_frame)
+        return false;
+    pulp::inspect::InspectorMessage challenge_message;
+    if (!pulp::inspect::decode_message(*challenge_frame, challenge_message) ||
+        challenge_message.method != "Session.authChallenge")
+        return false;
+    pulp::inspect::InspectorAuthChallenge challenge;
+    try {
+        const auto params = choc::json::parse(challenge_message.params_json);
+        challenge.scheme = std::string(params["scheme"].getString());
+        challenge.nonce_hex = std::string(params["nonce"].getString());
+        challenge.session_id = std::string(params["sessionId"].getString());
+        challenge.instance_id = std::string(params["instanceId"].getString());
+        challenge.protocol_version =
+            std::string(params["protocolVersion"].getString());
+    } catch (...) {
+        return false;
+    }
+    const auto proof =
+        pulp::inspect::make_inspector_auth_proof(token, challenge);
+    if (!proof)
+        return false;
+    const auto request = pulp::inspect::make_request(
+        1, "Session.authenticate",
+        std::string("{\"proof\":\"") + *proof + "\"}");
+    if (!send_frame(socket, pulp::inspect::encode_message(request)))
+        return false;
+    const auto response_frame = receive_frame(socket);
+    if (!response_frame)
+        return false;
+    pulp::inspect::InspectorMessage response;
+    return pulp::inspect::decode_message(*response_frame, response) &&
+           response.id == 1 && !response.is_error;
+}
 
 class TemporaryDirectory {
 public:
@@ -881,6 +990,59 @@ TEST_CASE("server bounds pending unauthenticated clients",
     pending.front()->disconnect();
     pending.erase(pending.begin());
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    InspectorClient admitted;
+    CHECK(admitted.connect(records.front(), reader));
+}
+
+TEST_CASE("authenticated partial frames expire without consuming the client pool",
+          "[inspect][authentication][resource-limit][timeout]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-frame-timeout", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.max_clients = 1;
+    config.frame_read_timeout = std::chrono::milliseconds(40);
+    REQUIRE(server.start_authenticated(std::move(config)));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    Socket partial;
+    REQUIRE(partial.create(SocketType::TCP));
+    REQUIRE(partial.set_read_timeout(std::chrono::seconds(1)));
+    REQUIRE(partial.connect("127.0.0.1",
+                            static_cast<std::uint16_t>(server.port())));
+    REQUIRE(authenticate_raw(partial, *token));
+    REQUIRE(server.client_count() == 1);
+
+    // Declare a 64-byte frame but send only one payload byte. The timeout is
+    // cumulative from the first header byte, so drip-feeding cannot retain
+    // this sole slot indefinitely.
+    const std::array<std::uint8_t, 5> partial_frame{64, 0, 0, 0, '{'};
+    REQUIRE(send_all(partial, partial_frame));
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (server.client_count() != 0 &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    REQUIRE(server.client_count() == 0);
+
     InspectorClient admitted;
     CHECK(admitted.connect(records.front(), reader));
 }
