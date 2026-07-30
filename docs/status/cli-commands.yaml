@@ -2028,7 +2028,7 @@ commands:
           - name: --out
             kind: option
       - name: export
-        summary: Export a canonical project into a new SMF or unpacked DAWproject artifact directory
+        summary: Export a canonical project into a new SMF directory or standard .dawproject ZIP
         args:
           - name: project
             kind: positional
@@ -2040,7 +2040,7 @@ commands:
           - name: --out
             kind: option
             required: false
-            description: New artifact directory; existing paths are never overwritten
+            description: New SMF directory or .dawproject file; existing paths are never overwritten
           - name: --accept-loss
             kind: option
             description: Repeat once for each exact loss concept reported by export planning
@@ -2048,7 +2048,7 @@ commands:
             kind: flag
             description: Return the canonical loss manifest without --out or --accept-loss; publishing requires --out
       - name: import
-        summary: Import an SMF file or unpacked DAWproject project.xml into a new canonical project directory
+        summary: Import an SMF file or standard .dawproject ZIP into a new canonical project directory
         args:
           - name: input
             kind: positional

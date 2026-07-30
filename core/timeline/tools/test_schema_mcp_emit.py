@@ -245,8 +245,8 @@ def main() -> int:
         ],
     )
     check(
-        "import documents the unpacked DAWproject boundary",
-        "project.xml" in _tool(document, "pulp_timeline_import")["description"]
+        "import documents the packaged DAWproject boundary",
+        ".dawproject ZIP" in _tool(document, "pulp_timeline_import")["description"]
         and _tool(document, "pulp_timeline_import")["inputSchema"]["properties"]["format"]["enum"]
         == ["dawproject", "smf"],
     )

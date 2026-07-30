@@ -14,6 +14,7 @@ target_include_directories(pulp-tool-timeline
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE
         ${PROJECT_SOURCE_DIR}/core/playback/src
+        ${PROJECT_SOURCE_DIR}/external/miniz
 )
 
 target_link_libraries(pulp-tool-timeline

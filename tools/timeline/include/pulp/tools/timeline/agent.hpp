@@ -73,20 +73,21 @@ OperationResult plan_export_project(const ProjectSource& project, std::string_vi
 
 /// Export a canonical project through the consent-gated interchange planner.
 ///
-/// `format` is `smf` or `dawproject`. `output_directory` must not exist. Every
-/// model concept the selected format loses must be named individually in
-/// `accepted_losses`; unknown names and blanket consent are rejected. Success
-/// atomically publishes the whole artifact directory.
+/// `format` is `smf` or `dawproject`. SMF publishes a new artifact directory;
+/// DAWproject publishes a standard `.dawproject` ZIP file. The output must not
+/// exist. Every model concept the selected format loses must be named
+/// individually in `accepted_losses`; unknown names and blanket consent are
+/// rejected. Publication is atomic and never replaces an existing path.
 OperationResult export_project(const ProjectSource& project, std::string_view format,
                                const std::filesystem::path& output_directory,
                                const std::vector<std::string>& accepted_losses);
 
 /// Import a foreign timeline file into a new canonical project directory.
 ///
-/// SMF input is one file. DAWproject input is the unpacked `project.xml` file;
-/// referenced sibling media is sealed and copied into the published directory.
+/// SMF input is one file. DAWproject input is a standard `.dawproject` ZIP;
+/// referenced media entries are sealed and copied into the published directory.
 /// `output_directory` must not exist and is published atomically with
-/// `project.json` plus any imported sibling media.
+/// `project.json` plus any imported media.
 OperationResult import_project(const std::filesystem::path& input, std::string_view format,
                                const std::filesystem::path& output_directory);
 

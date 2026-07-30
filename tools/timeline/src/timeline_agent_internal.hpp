@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -48,9 +49,26 @@ std::optional<std::vector<std::uint8_t>>
 read_verified_asset_bytes(const LoadedProject& project, const pulp::timeline::MediaAsset& asset,
                           std::uint64_t max_bytes = kMaxAssetWorkingSetBytes);
 
-bool add_dawproject_media(const LoadedProject& loaded,
-                          pulp::interchange::ExportArtifacts& artifacts,
-                          std::uint64_t max_total_media_bytes = kMaxAssetWorkingSetBytes);
+enum class DawProjectMediaErrorCode : std::uint8_t {
+    MissingRootSequence,
+    MissingAsset,
+    InvalidAssetName,
+    DuplicateArchivePath,
+    ByteLimitExceeded,
+    AssetReadFailed,
+};
+
+struct DawProjectMediaError {
+    DawProjectMediaErrorCode code = DawProjectMediaErrorCode::MissingAsset;
+    std::uint64_t asset_id = 0;
+    std::string asset_name;
+    std::string reason;
+};
+
+runtime::Result<std::size_t, DawProjectMediaError>
+add_dawproject_media(const LoadedProject& loaded,
+                     pulp::interchange::ExportArtifacts& artifacts,
+                     std::uint64_t max_total_media_bytes = kMaxAssetWorkingSetBytes);
 
 runtime::Result<std::unordered_set<std::uint64_t>, playback::CompileError>
 reachable_assets(const pulp::timeline::Project& project,

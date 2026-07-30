@@ -1570,10 +1570,10 @@ pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
 pulp seq export song.pulpseq.json --format smf --plan
 pulp seq export song.pulpseq.json --format smf --out song-smf \
   [--accept-loss concept-id]...
-pulp seq export song.pulpseq.json --format dawproject --out song-dawproject \
+pulp seq export song.pulpseq.json --format dawproject --out song.dawproject \
   [--accept-loss concept-id]...
 pulp seq import song.mid --format smf --out imported-song
-pulp seq import unpacked/project.xml --format dawproject --out imported-song
+pulp seq import song.dawproject --format dawproject --out imported-song
 ```
 
 `apply` accepts an array of typed command envelopes. It prints the committed
@@ -1592,20 +1592,18 @@ reviewed. Unknown concept IDs are rejected. `--plan` rejects `--out` and
 export immediately. Publishing requires `--out`. Normal refusal and successful
 export results carry the same manifest object.
 
-Import and export publish only to a new directory. The destination and even a
-symlink at that path must not already exist. Files are staged in a private
-sibling directory and the complete directory is atomically published; a
-failure removes the staging directory and never replaces an existing result.
-An SMF export contains `project.mid` plus the canonical interchange manifest.
-A DAWproject export is intentionally an unpacked interchange directory with
-`project.xml`, the canonical manifest, and referenced sibling media (for
-example under `audio/`), not a packaged `.dawproject` ZIP file.
+Import publishes only to a new directory. SMF export likewise publishes a new
+artifact directory containing `project.mid` and the canonical interchange
+manifest. DAWproject export instead publishes one standard `.dawproject` ZIP
+containing root `project.xml`, the manifest, and referenced media entries (for
+example under `audio/`). Every destination, including a symlink, must not
+already exist. Staging is private and publication is atomic and no-replace.
 
-SMF import accepts a MIDI file. DAWproject import accepts an unpacked file
-named exactly `project.xml` and resolves only confined sibling media from its
-directory. Both create `project.json` in the new destination, plus sealed
-sibling media/artifacts where the import produced them. This is the honest
-current boundary; container packing and unpacking remain the caller's job.
+SMF import accepts a MIDI file. DAWproject import accepts a `.dawproject` ZIP,
+requires a bounded root `project.xml`, rejects unsafe, duplicate, encrypted, or
+symlink entries, and resolves media only from safe package-relative entries.
+Both imports create `project.json` in the new destination plus sealed media
+where the imported document references it.
 
 `explain` reports the compiled track plan, including clip IDs, note-event and
 audio-region counts, and automation presence. Plugin latency is a host-binding

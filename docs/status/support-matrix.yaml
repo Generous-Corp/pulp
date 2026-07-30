@@ -1010,7 +1010,7 @@ timeline_engine:
     notes: Fail-closed Standard MIDI File import and a raw exporter that strictly checks visited clip event and tick-grid shapes but does not audit unrelated project state. The separate Format::Smf adapter performs the project-wide census, requires per-concept consent, and emits a versioned central loss manifest.
   cli_mcp:
     status: experimental
-    notes: pulp seq validate/explain/apply, pulp render, five generated MCP operations, and the Claude Timeline skill share one headless implementation.
+    notes: pulp seq validate/explain/apply/import/export, pulp render, and the generated MCP operations share one headless implementation. The shared boundary consumes and produces standard .dawproject ZIP containers atomically without replacing existing outputs.
   sequence_adapter:
     status: experimental
     notes: SequenceProcessor projects host transport and a caller-owned immutable playback program into plugin-format processing without owning editing, media resolution, devices, or UI.

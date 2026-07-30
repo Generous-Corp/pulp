@@ -13,6 +13,8 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline/smf.hpp>
 
+#include <miniz.h>
+
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -57,15 +59,6 @@ std::optional<Format> parse_format(std::string_view value) noexcept {
     return std::nullopt;
 }
 
-bool path_is_beneath(const fs::path& base, const fs::path& candidate) {
-    auto left = base.begin();
-    auto right = candidate.begin();
-    for (; left != base.end() && right != candidate.end(); ++left, ++right)
-        if (*left != *right)
-            return false;
-    return left == base.end() && right != candidate.end();
-}
-
 std::optional<std::vector<std::uint8_t>> read_file_bounded(const fs::path& path,
                                                            std::uint64_t maximum_bytes) {
     std::error_code error;
@@ -89,7 +82,7 @@ std::optional<std::vector<std::uint8_t>> read_file_bounded(const fs::path& path,
     }
 }
 
-bool publish_directory_no_replace(const fs::path& source, const fs::path& destination) noexcept {
+bool publish_path_no_replace(const fs::path& source, const fs::path& destination) noexcept {
 #ifdef _WIN32
     return ::MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
 #elif defined(__APPLE__)
@@ -195,7 +188,7 @@ class DirectoryPublisher {
     }
 
     bool commit() noexcept {
-        if (!publish_directory_no_replace(staging_, destination_))
+        if (!publish_path_no_replace(staging_, destination_))
             return false;
         committed_ = true;
         return true;
@@ -209,6 +202,181 @@ class DirectoryPublisher {
     fs::path staging_;
     bool committed_ = false;
 };
+
+bool publish_file_no_replace(const fs::path& destination,
+                             std::span<const std::uint8_t> bytes) noexcept {
+    if (destination.empty())
+        return false;
+    std::error_code error;
+    const auto status = fs::symlink_status(destination, error);
+    if ((!error && status.type() != fs::file_type::not_found) ||
+        (error && error != std::errc::no_such_file_or_directory))
+        return false;
+    error.clear();
+    fs::path parent = destination.parent_path();
+    if (parent.empty())
+        parent = fs::current_path(error);
+    if (error || !fs::is_directory(parent, error) || error)
+        return false;
+
+    static std::atomic<std::uint64_t> counter{0};
+    const auto seed =
+        static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    for (std::uint64_t attempt = 0; attempt < 64; ++attempt) {
+        const auto suffix = seed ^ (++counter) ^ attempt;
+        const fs::path staging_directory =
+            parent / ("." + destination.filename().string() + ".pulp-staging-" +
+                      std::to_string(suffix));
+        if (!fs::create_directory(staging_directory, error)) {
+            if (error == std::errc::file_exists) {
+                error.clear();
+                continue;
+            }
+            return false;
+        }
+        const fs::path staging = staging_directory / "artifact";
+        try {
+            std::ofstream stream(staging, std::ios::binary | std::ios::trunc);
+            if (!stream) {
+                fs::remove(staging_directory, error);
+                return false;
+            }
+            if (!bytes.empty())
+                stream.write(reinterpret_cast<const char*>(bytes.data()),
+                             static_cast<std::streamsize>(bytes.size()));
+            stream.flush();
+            if (!stream) {
+                fs::remove_all(staging_directory, error);
+                return false;
+            }
+            stream.close();
+        } catch (...) {
+            fs::remove_all(staging_directory, error);
+            return false;
+        }
+        if (publish_path_no_replace(staging, destination)) {
+            fs::remove(staging_directory, error);
+            return true;
+        }
+        fs::remove_all(staging_directory, error);
+        return false;
+    }
+    return false;
+}
+
+runtime::Result<std::vector<std::uint8_t>, std::string>
+make_zip_archive(const pulp::interchange::ExportArtifacts& artifacts) {
+    mz_zip_archive zip{};
+    if (!mz_zip_writer_init_heap(&zip, 0, 128 * 1024))
+        return runtime::Result<std::vector<std::uint8_t>, std::string>(
+            runtime::Err(std::string("could not initialize DAWproject ZIP writer")));
+
+    bool ok = true;
+    std::set<std::string> names;
+    for (const auto& artifact : artifacts.artifacts) {
+        if (!pulp::timeline::package_relative_path_is_lexically_safe(artifact.name) ||
+            !names.insert(artifact.name).second ||
+            !mz_zip_writer_add_mem(&zip, artifact.name.c_str(), artifact.bytes.data(),
+                                   artifact.bytes.size(), MZ_DEFAULT_COMPRESSION)) {
+            ok = false;
+            break;
+        }
+    }
+    void* data = nullptr;
+    std::size_t size = 0;
+    if (ok)
+        ok = mz_zip_writer_finalize_heap_archive(&zip, &data, &size) != 0;
+    mz_zip_writer_end(&zip);
+    if (!ok || data == nullptr) {
+        if (data != nullptr)
+            mz_free(data);
+        return runtime::Result<std::vector<std::uint8_t>, std::string>(
+            runtime::Err(std::string("could not build DAWproject ZIP container")));
+    }
+    std::vector<std::uint8_t> bytes(static_cast<std::uint8_t*>(data),
+                                    static_cast<std::uint8_t*>(data) + size);
+    mz_free(data);
+    return runtime::Result<std::vector<std::uint8_t>, std::string>(
+        runtime::Ok(std::move(bytes)));
+}
+
+runtime::Result<std::map<std::string, std::vector<std::uint8_t>>, std::string>
+read_zip_archive(std::span<const std::uint8_t> archive, std::uint64_t max_total_bytes,
+                 std::size_t max_file_entries, std::size_t max_archive_entries,
+                 std::size_t max_path_bytes) {
+    mz_zip_archive zip{};
+    if (!mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
+        return runtime::Result<std::map<std::string, std::vector<std::uint8_t>>, std::string>(
+            runtime::Err(std::string("input is not a readable DAWproject ZIP container")));
+
+    std::map<std::string, std::vector<std::uint8_t>> entries;
+    std::uint64_t retained = 0;
+    const auto count = mz_zip_reader_get_num_files(&zip);
+    bool ok = count <= max_archive_entries;
+    std::string message = ok ? std::string{} : "DAWproject ZIP has too many entries";
+    std::size_t file_entries = 0;
+    for (mz_uint index = 0; ok && index < count; ++index) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&zip, index, &stat)) {
+            message = "could not inspect a DAWproject ZIP entry";
+            ok = false;
+            break;
+        }
+        const auto name_size = mz_zip_reader_get_filename(&zip, index, nullptr, 0);
+        std::vector<char> name_buffer(name_size);
+        if (name_size == 0 || name_size - 1 > max_path_bytes ||
+            mz_zip_reader_get_filename(&zip, index, name_buffer.data(), name_buffer.size()) !=
+                name_size ||
+            name_buffer.back() != '\0' || stat.m_is_encrypted) {
+            message = "DAWproject ZIP contains an unsupported or unsafe entry";
+            ok = false;
+            break;
+        }
+        std::string name(name_buffer.data(), name_size - 1);
+        std::string safe_name = name;
+        if (stat.m_is_directory && !safe_name.empty() && safe_name.back() == '/')
+            safe_name.pop_back();
+        if (safe_name.empty() ||
+            !pulp::timeline::package_relative_path_is_lexically_safe(safe_name)) {
+            message = "DAWproject ZIP contains an unsupported or unsafe entry";
+            ok = false;
+            break;
+        }
+        const auto unix_mode = static_cast<unsigned>((stat.m_external_attr >> 16) & 0xffffu);
+        if ((unix_mode & 0170000u) == 0120000u) {
+            message = "DAWproject ZIP must not contain symbolic links";
+            ok = false;
+            break;
+        }
+        if (stat.m_is_directory)
+            continue;
+        if (++file_entries > max_file_entries) {
+            message = "DAWproject ZIP has too many files";
+            ok = false;
+            break;
+        }
+        if (stat.m_uncomp_size > max_total_bytes || retained > max_total_bytes - stat.m_uncomp_size ||
+            stat.m_uncomp_size > std::numeric_limits<std::size_t>::max()) {
+            message = "DAWproject ZIP exceeds the retained-byte limit";
+            ok = false;
+            break;
+        }
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(stat.m_uncomp_size));
+        if (!mz_zip_reader_extract_to_mem(&zip, index, bytes.data(), bytes.size(), 0) ||
+            !entries.emplace(name, std::move(bytes)).second) {
+            message = "DAWproject ZIP contains a duplicate or unreadable entry: " + name;
+            ok = false;
+            break;
+        }
+        retained += stat.m_uncomp_size;
+    }
+    mz_zip_reader_end(&zip);
+    if (!ok)
+        return runtime::Result<std::map<std::string, std::vector<std::uint8_t>>, std::string>(
+            runtime::Err(std::move(message)));
+    return runtime::Result<std::map<std::string, std::vector<std::uint8_t>>, std::string>(
+        runtime::Ok(std::move(entries)));
+}
 
 std::string output_json(std::string_view format, const fs::path& output,
                         std::string_view extra = {}) {
@@ -286,33 +454,20 @@ OperationResult export_error_result(std::string_view format,
     return {1, std::move(result)};
 }
 
-std::optional<std::vector<std::uint8_t>> read_package_file(const fs::path& canonical_base,
-                                                           std::string_view relative,
-                                                           std::uint64_t max_bytes) {
-    if (!pulp::timeline::package_relative_path_is_lexically_safe(relative))
-        return std::nullopt;
-    fs::path path;
-    try {
-        path = filesystem_path_from_utf8(relative);
-    } catch (...) {
-        return std::nullopt;
-    }
-    if (path.is_absolute() || path.has_root_name() || path.has_root_directory())
-        return std::nullopt;
-    std::error_code error;
-    const auto candidate = fs::canonical(canonical_base / path, error);
-    if (error || !path_is_beneath(canonical_base, candidate) ||
-        !fs::is_regular_file(candidate, error) || error)
-        return std::nullopt;
-    return read_file_bounded(candidate, max_bytes);
-}
-
-bool add_dawproject_media_impl(const detail::LoadedProject& loaded,
-                               pulp::interchange::ExportArtifacts& artifacts,
-                               std::uint64_t max_total_media_bytes) {
+runtime::Result<std::size_t, detail::DawProjectMediaError>
+add_dawproject_media_impl(const detail::LoadedProject& loaded,
+                          pulp::interchange::ExportArtifacts& artifacts,
+                          std::uint64_t max_total_media_bytes) {
+    const auto fail = [](detail::DawProjectMediaErrorCode code, std::uint64_t asset_id,
+                         std::string asset_name, std::string reason) {
+        return runtime::Result<std::size_t, detail::DawProjectMediaError>(runtime::Err(
+            detail::DawProjectMediaError{code, asset_id, std::move(asset_name),
+                                         std::move(reason)}));
+    };
     const auto* root = loaded.value.find_sequence(loaded.value.root_sequence_id());
     if (root == nullptr)
-        return false;
+        return fail(detail::DawProjectMediaErrorCode::MissingRootSequence, 0, {},
+                    "project root sequence is missing");
     std::set<std::string> artifact_names;
     for (const auto& artifact : artifacts.artifacts)
         artifact_names.insert(artifact.name);
@@ -327,19 +482,31 @@ bool add_dawproject_media_impl(const detail::LoadedProject& loaded,
             if (media == nullptr || !seen_assets.insert(media->asset_id.value).second)
                 continue;
             const auto* asset = loaded.value.find_asset(media->asset_id);
-            if (asset == nullptr || asset->name.empty())
-                return false;
+            if (asset == nullptr)
+                return fail(detail::DawProjectMediaErrorCode::MissingAsset,
+                            media->asset_id.value, {}, "referenced asset is missing");
+            if (asset->name.empty())
+                return fail(detail::DawProjectMediaErrorCode::InvalidAssetName,
+                            media->asset_id.value, {}, "asset name is empty");
             if (!pulp::timeline::package_relative_path_is_lexically_safe(asset->name))
-                return false;
+                return fail(detail::DawProjectMediaErrorCode::InvalidAssetName,
+                            media->asset_id.value, asset->name,
+                            "asset name is not a safe package-relative path");
             const std::string artifact_name = "audio/" + asset->name;
             if (!artifact_names.insert(artifact_name).second)
-                return false;
+                return fail(detail::DawProjectMediaErrorCode::DuplicateArchivePath,
+                            media->asset_id.value, asset->name,
+                            "archive path collides with another export artifact");
             if (retained_media_bytes > max_total_media_bytes)
-                return false;
+                return fail(detail::DawProjectMediaErrorCode::ByteLimitExceeded,
+                            media->asset_id.value, asset->name,
+                            "cumulative media byte limit is already exhausted");
             auto bytes = detail::read_verified_asset_bytes(
                 loaded, *asset, max_total_media_bytes - retained_media_bytes);
             if (!bytes)
-                return false;
+                return fail(detail::DawProjectMediaErrorCode::AssetReadFailed,
+                            media->asset_id.value, asset->name,
+                            "asset bytes are unavailable, invalid, or exceed the remaining limit");
             retained_media_bytes += static_cast<std::uint64_t>(bytes->size());
             media_artifacts.push_back({artifact_name, std::move(*bytes)});
         }
@@ -347,16 +514,18 @@ bool add_dawproject_media_impl(const detail::LoadedProject& loaded,
     artifacts.artifacts.insert(artifacts.artifacts.end(),
                                std::make_move_iterator(media_artifacts.begin()),
                                std::make_move_iterator(media_artifacts.end()));
-    return true;
+    return runtime::Result<std::size_t, detail::DawProjectMediaError>(
+        runtime::Ok(media_artifacts.size()));
 }
 
 } // namespace
 
 namespace detail {
 
-bool add_dawproject_media(const LoadedProject& loaded,
-                          pulp::interchange::ExportArtifacts& artifacts,
-                          std::uint64_t max_total_media_bytes) {
+runtime::Result<std::size_t, DawProjectMediaError>
+add_dawproject_media(const LoadedProject& loaded,
+                     pulp::interchange::ExportArtifacts& artifacts,
+                     std::uint64_t max_total_media_bytes) {
     return add_dawproject_media_impl(loaded, artifacts, max_total_media_bytes);
 }
 
@@ -385,6 +554,9 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
     if (!format || output_directory.empty())
         return detail::failure("arguments", "format (smf or dawproject) and output are required",
                                {}, 2);
+    if (*format == Format::DawProject && output_directory.extension() != ".dawproject")
+        return detail::failure("arguments", "DAWproject output must end in .dawproject",
+                               filesystem_path_to_utf8(output_directory), 2);
 
     pulp::interchange::ExportOptions options;
     std::set<Concept> unique_losses;
@@ -413,10 +585,30 @@ OperationResult export_project(const ProjectSource& project, std::string_view fo
         return export_error_result(format_text, plan, "export", exported.error().message, path,
                                    exported.error().concepts);
     }
-    if (*format == Format::DawProject &&
-        !detail::add_dawproject_media(loaded.value(), exported.value()))
-        return export_error_result(format_text, plan, "export",
-                                   "could not materialize referenced DAWproject media");
+    if (*format == Format::DawProject) {
+        // Artifacts, miniz's finalized heap, and the returned archive vector
+        // coexist briefly. Give each at most one third of the shared budget.
+        auto media_result = detail::add_dawproject_media(
+            loaded.value(), exported.value(), detail::kMaxAssetWorkingSetBytes / 3);
+        if (!media_result) {
+            const auto& error = media_result.error();
+            const auto asset = error.asset_name.empty()
+                                   ? std::string("asset id ") + std::to_string(error.asset_id)
+                                   : std::string("asset '") + error.asset_name + "'";
+            return export_error_result(format_text, plan, "export",
+                                       "could not add DAWproject media " + asset + ": " +
+                                           error.reason,
+                                       error.asset_name);
+        }
+        auto archive = make_zip_archive(exported.value());
+        if (!archive)
+            return export_error_result(format_text, plan, "export", archive.error());
+        if (!publish_file_no_replace(output_directory, archive.value()))
+            return export_error_result(format_text, plan, "publish",
+                                       "output file appeared before atomic publication",
+                                       filesystem_path_to_utf8(output_directory));
+        return {0, export_result_json(format_text, output_directory, plan)};
+    }
 
     auto publisher = DirectoryPublisher::create(output_directory);
     if (!publisher)
@@ -442,7 +634,8 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                                "input, format (smf or dawproject), and output are required", {}, 2);
 
     std::optional<pulp::timeline::Project> imported;
-    std::map<std::string, std::vector<std::uint8_t>> media;
+    std::set<std::string> media_paths;
+    std::map<std::string, std::vector<std::uint8_t>> archive_entries;
     std::string fidelity;
     if (*format == Format::Smf) {
         auto bytes = read_file_bounded(input, pulp::timeline::SmfImportLimits{}.max_file_bytes);
@@ -458,33 +651,54 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                    std::to_string(result.value().max_tick_rounding_error) + "\"";
         imported.emplace(std::move(result).value().project);
     } else {
-        if (input.filename() != "project.xml")
-            return detail::failure("arguments",
-                                   "DAWproject import requires an unpacked project.xml input",
+        if (input.extension() != ".dawproject")
+            return detail::failure("arguments", "DAWproject input must end in .dawproject",
                                    filesystem_path_to_utf8(input), 2);
         const auto limits = pulp::timeline::DawProjectImportLimits{};
-        auto xml = read_file_bounded(input, limits.max_xml_bytes);
-        if (!xml)
-            return detail::failure("import", "could not read bounded project.xml input",
+        constexpr std::uint64_t kZipOverheadAllowance = 16ull * 1024ull * 1024ull;
+        // Opening temporarily retains the compressed archive beside extracted
+        // entries; resolving then returns one owning entry copy. A one-third
+        // ceiling keeps both peak phases within the shared-agent working set.
+        constexpr std::uint64_t kMaxArchiveEntriesBytes =
+            detail::kMaxAssetWorkingSetBytes / 3;
+        const auto max_archive_file_bytes = kMaxArchiveEntriesBytes + kZipOverheadAllowance;
+        auto archive = read_file_bounded(input, max_archive_file_bytes);
+        if (!archive)
+            return detail::failure("import", "could not read bounded .dawproject input",
                                    filesystem_path_to_utf8(input));
-        std::error_code error;
-        const auto base = fs::canonical(input.parent_path(), error);
-        if (error)
-            return detail::failure("import", "could not resolve the DAWproject input directory");
+        if (limits.max_media_assets > std::numeric_limits<std::size_t>::max() - 2)
+            return detail::failure("import", "DAWproject media asset limit is invalid");
+        const auto max_files = limits.max_media_assets + 2; // project.xml + loss manifest
+        if (max_files > std::numeric_limits<std::size_t>::max() / 2)
+            return detail::failure("import", "DAWproject archive entry limit is invalid");
+        const auto max_entries = max_files * 2; // permit one explicit directory per file
+        auto read_entries = read_zip_archive(*archive, kMaxArchiveEntriesBytes, max_files,
+                                             max_entries, limits.max_package_path_bytes);
+        if (!read_entries)
+            return detail::failure("import", read_entries.error(), filesystem_path_to_utf8(input));
+        archive_entries = std::move(read_entries).value();
+        archive.reset();
+        const auto xml_entry = archive_entries.find("project.xml");
+        if (xml_entry == archive_entries.end() || xml_entry->second.size() > limits.max_xml_bytes)
+            return detail::failure("import",
+                                   "DAWproject ZIP must contain a bounded root project.xml entry",
+                                   filesystem_path_to_utf8(input));
         std::uint64_t total_media = 0;
         auto resolver = [&](std::string_view relative) -> std::optional<std::vector<std::uint8_t>> {
-            auto bytes =
-                read_package_file(base, relative, limits.max_media_bytes_per_resolver_call);
-            if (!bytes || total_media > limits.max_total_media_bytes ||
-                bytes->size() > limits.max_total_media_bytes - total_media)
+            const auto entry = archive_entries.find(std::string(relative));
+            if (entry == archive_entries.end() ||
+                entry->second.size() > limits.max_media_bytes_per_resolver_call ||
+                total_media > limits.max_total_media_bytes ||
+                entry->second.size() > limits.max_total_media_bytes - total_media)
                 return std::nullopt;
-            total_media += bytes->size();
-            media[std::string(relative)] = *bytes;
-            return bytes;
+            total_media += entry->second.size();
+            media_paths.insert(std::string(relative));
+            return entry->second;
         };
         auto result = pulp::timeline::import_dawproject_xml(
-            std::string_view(reinterpret_cast<const char*>(xml->data()), xml->size()), resolver,
-            limits);
+            std::string_view(reinterpret_cast<const char*>(xml_entry->second.data()),
+                             xml_entry->second.size()),
+            resolver, limits);
         if (!result)
             return detail::failure("import", result.error().message);
         imported.emplace(std::move(result).value());
@@ -505,8 +719,8 @@ OperationResult import_project(const fs::path& input, std::string_view format_te
                                filesystem_path_to_utf8(output_directory));
     if (!publisher->write("project.json", serialized.value().json))
         return detail::failure("publish", "could not stage canonical project.json");
-    for (const auto& [path, bytes] : media)
-        if (!publisher->write(path, bytes))
+    for (const auto& path : media_paths)
+        if (!publisher->write(path, archive_entries.at(path)))
             return detail::failure("publish", "could not stage imported sibling media", path);
     if (!publisher->commit())
         return detail::failure("publish", "output directory appeared before atomic publication",

@@ -191,7 +191,8 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_export",
             "description": (
-                "Export a timeline project into a new atomic artifact directory. "
+                "Export a timeline project to a new atomic artifact. DAWproject output is a "
+                "standard .dawproject ZIP; SMF output is an artifact directory. "
                 "Loss must be accepted by exact concept id; there is no blanket override."
             ),
             "inputSchema": _input_schema(
@@ -200,7 +201,10 @@ def generate(manifest: dict) -> str:
                     "format": {"type": "string", "enum": ["dawproject", "smf"]},
                     "output": {
                         "type": "string",
-                        "description": "New destination directory; it must not exist.",
+                        "description": (
+                            "New destination path; use a .dawproject file for DAWproject or a "
+                            "directory for SMF. It must not exist."
+                        ),
                     },
                     "accept_losses": {
                         "type": "array",
@@ -242,14 +246,14 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_import",
             "description": (
-                "Import SMF or an unpacked DAWproject project.xml into a new atomic "
-                "directory containing canonical project.json and sibling media."
+                "Import an SMF file or standard .dawproject ZIP into a new atomic directory "
+                "containing canonical project.json and sealed media."
             ),
             "inputSchema": _input_schema(
                 {
                     "input": {
                         "type": "string",
-                        "description": "SMF file or unpacked DAWproject project.xml path.",
+                        "description": "SMF file or .dawproject ZIP path.",
                     },
                     "format": {"type": "string", "enum": ["dawproject", "smf"]},
                     "output": {

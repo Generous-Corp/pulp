@@ -32,7 +32,7 @@ void print_seq_usage() {
                  "  explain <project.json> [--sample-rate <hz>]\n"
                  "  apply <project.json> <commands.json> [--out <project.json>]\n"
                  "  export <project.json> --format <smf|dawproject> --plan\n"
-                 "  export <project.json> --format <smf|dawproject> --out <new-directory>\n"
+                 "  export <project.json> --format <smf|dawproject> --out <new-artifact>\n"
                  "         [--accept-loss <concept>]...\n"
                  "  import <input> --format <smf|dawproject> --out <new-directory>\n";
 }

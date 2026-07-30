@@ -80,6 +80,8 @@ target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
 # pulp_audio_compare resolves its delegated CLI from a project root.
 target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(pulp-test-mcp-timeline-tools PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/miniz)
 catch_discover_tests(pulp-test-mcp-timeline-tools)
 
 # MIDI tests

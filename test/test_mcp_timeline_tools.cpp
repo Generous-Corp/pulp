@@ -9,6 +9,8 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
 
+#include <miniz.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -62,6 +64,31 @@ std::string make_timeline_project_json(
         Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}}));
     auto registry = require_timeline_result(make_builtin_timeline_registry());
     return require_timeline_result(serialize_project(project, registry)).json;
+}
+
+void write_zip(const std::filesystem::path& path,
+               const std::vector<std::pair<std::string, std::vector<std::uint8_t>>>& entries) {
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_writer_init_file(&zip, path.string().c_str(), 0));
+    for (const auto& [name, bytes] : entries)
+        REQUIRE(mz_zip_writer_add_mem(&zip, name.c_str(), bytes.data(), bytes.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+    REQUIRE(mz_zip_writer_finalize_archive(&zip));
+    mz_zip_writer_end(&zip);
+}
+
+std::vector<std::uint8_t> read_zip_entry(const std::filesystem::path& path,
+                                         const char* name) {
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_reader_init_file(&zip, path.string().c_str(), 0));
+    std::size_t size = 0;
+    void* data = mz_zip_reader_extract_file_to_heap(&zip, name, &size, 0);
+    REQUIRE(data != nullptr);
+    std::vector<std::uint8_t> bytes(static_cast<std::uint8_t*>(data),
+                                    static_cast<std::uint8_t*>(data) + size);
+    mz_free(data);
+    mz_zip_reader_end(&zip);
+    return bytes;
 }
 
 /// Builds a project whose sole asset carries the given locator, and returns the
@@ -598,27 +625,28 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
     require_contains(handle_timeline_import(malformed_args), R"JSON("isError":true)JSON");
     REQUIRE_FALSE(std::filesystem::exists(failed_output));
 
-    // Exercise the media-bearing DAWproject path through the same MCP boundary.
-    // This proves the unpacked project.xml contract, sibling-media sealing, and
-    // the writer's media-duration metadata as one externally visible round trip.
-    const auto unpacked = temp.path / "unpacked-dawproject";
-    REQUIRE(std::filesystem::create_directories(unpacked / "audio"));
+    // Exercise a standard media-bearing .dawproject ZIP through the same MCP
+    // boundary, including media sealing and atomic file publication.
     pulp::audio::AudioFileData daw_media;
     daw_media.sample_rate = 44'100;
     daw_media.channels = {std::vector<float>(44'100, 0.25f)};
-    const auto daw_media_path = unpacked / "audio/source.wav";
+    const auto daw_media_path = temp.path / "source.wav";
     REQUIRE(pulp::audio::write_wav_file(daw_media_path.string(), daw_media,
                                         pulp::audio::WavBitDepth::Float32));
-    {
-        std::ofstream stream(unpacked / "project.xml", std::ios::binary);
-        REQUIRE(stream);
-        stream << R"xml(<Project version="1.0"><Structure><Track contentType="audio" id="audio" name="Audio"/></Structure><Arrangement><Lanes timeUnit="beats"><Lanes track="audio"><Clips><Clip time="0" duration="4"><Audio channels="1" duration="1" sampleRate="44100"><File path="audio/source.wav"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement></Project>)xml";
-    }
+    const std::string daw_xml = R"xml(<Project version="1.0"><Structure><Track contentType="audio" id="audio" name="Audio"/></Structure><Arrangement><Lanes timeUnit="beats"><Lanes track="audio"><Clips><Clip time="0" duration="4"><Audio channels="1" duration="1" sampleRate="44100"><File path="audio/source.wav"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement></Project>)xml";
+    std::ifstream daw_media_stream(daw_media_path, std::ios::binary);
+    REQUIRE(daw_media_stream);
+    const std::vector<std::uint8_t> daw_media_bytes{
+        std::istreambuf_iterator<char>(daw_media_stream), std::istreambuf_iterator<char>()};
+    const std::vector<std::uint8_t> daw_xml_bytes(daw_xml.begin(), daw_xml.end());
+    const auto daw_archive = temp.path / "source.dawproject";
+    write_zip(daw_archive, {{"project.xml", daw_xml_bytes},
+                            {"audio/source.wav", daw_media_bytes}});
     const auto daw_imported = temp.path / "daw-imported";
     const auto daw_import_args =
         "{\"format\":\"dawproject\",\"input\":" +
         pulp::timeline::quote_json_string(pulp::tools::timeline::filesystem_path_to_utf8(
-            unpacked / "project.xml")) +
+            daw_archive)) +
         ",\"output\":" + pulp::timeline::quote_json_string(
                                    pulp::tools::timeline::filesystem_path_to_utf8(daw_imported)) +
         "}";
@@ -626,7 +654,7 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
     REQUIRE(std::filesystem::is_regular_file(daw_imported / "project.json"));
     REQUIRE(std::filesystem::is_regular_file(daw_imported / "audio/source.wav"));
 
-    const auto daw_exported = temp.path / "daw-exported";
+    const auto daw_exported = temp.path / "daw-exported.dawproject";
     const auto daw_export_args =
         "{\"accept_losses\":[\"media.provenance\",\"media.provenance\"],"
         "\"format\":\"dawproject\",\"output\":" +
@@ -637,13 +665,15 @@ TEST_CASE("timeline MCP export and import publish new directories atomically",
                                        daw_imported / "project.json")) +
         "}";
     require_contains(handle_timeline_export(daw_export_args), R"JSON("ok":true)JSON");
-    REQUIRE(std::filesystem::is_regular_file(daw_exported / "project.xml"));
-    REQUIRE(std::filesystem::is_regular_file(daw_exported / "audio/audio/source.wav"));
-    std::ifstream exported_xml_stream(daw_exported / "project.xml", std::ios::binary);
-    REQUIRE(exported_xml_stream);
-    const std::string exported_xml{std::istreambuf_iterator<char>(exported_xml_stream),
-                                   std::istreambuf_iterator<char>()};
+    REQUIRE(std::filesystem::is_regular_file(daw_exported));
+    const auto exported_xml_bytes = read_zip_entry(daw_exported, "project.xml");
+    REQUIRE_FALSE(read_zip_entry(daw_exported, "pulp-loss-manifest.json").empty());
+    REQUIRE_FALSE(read_zip_entry(daw_exported, "audio/audio/source.wav").empty());
+    const std::string exported_xml(exported_xml_bytes.begin(), exported_xml_bytes.end());
     REQUIRE(exported_xml.find("duration=\"1\"") != std::string::npos);
+    require_contains(handle_timeline_export(daw_export_args), R"JSON("isError":true)JSON");
+    REQUIRE(std::filesystem::is_regular_file(daw_exported));
+    REQUIRE(read_zip_entry(daw_exported, "project.xml") == exported_xml_bytes);
 }
 
 TEST_CASE("timeline MCP interchange rejects malformed boundaries without publishing",
@@ -693,21 +723,39 @@ TEST_CASE("timeline MCP interchange rejects malformed boundaries without publish
     REQUIRE(dishonest.exit_code == 2);
     REQUIRE_FALSE(std::filesystem::exists(temp.path / "dishonest"));
 
-    const auto missing_input = temp.path / "missing" / "project.xml";
+    const auto missing_input = temp.path / "missing" / "project.dawproject";
     const auto missing = pulp::tools::timeline::import_project(
         missing_input, "dawproject", temp.path / "missing-output");
     REQUIRE(missing.exit_code == 1);
     REQUIRE_FALSE(std::filesystem::exists(temp.path / "missing-output"));
 
-    const auto malformed_directory = temp.path / "malformed-dawproject";
-    REQUIRE(std::filesystem::create_directory(malformed_directory));
+    const auto not_zip = temp.path / "not-zip.dawproject";
     {
-        std::ofstream stream(malformed_directory / "project.xml", std::ios::binary);
+        std::ofstream stream(not_zip, std::ios::binary);
         REQUIRE(stream);
-        stream << "not xml";
+        stream << "not a zip";
     }
+    const auto unreadable = pulp::tools::timeline::import_project(
+        not_zip, "dawproject", temp.path / "not-zip-output");
+    REQUIRE(unreadable.exit_code == 1);
+    REQUIRE(unreadable.json.find("ZIP container") != std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "not-zip-output"));
+
+    const auto missing_project = temp.path / "missing-project.dawproject";
+    write_zip(missing_project, {{"metadata.xml", std::vector<std::uint8_t>{'x'}}});
+    const auto no_project = pulp::tools::timeline::import_project(
+        missing_project, "dawproject", temp.path / "missing-project-output");
+    REQUIRE(no_project.exit_code == 1);
+    REQUIRE(no_project.json.find("root project.xml") != std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "missing-project-output"));
+
+    const auto malformed_archive = temp.path / "malformed.dawproject";
+    const std::string malformed_xml = "not xml";
+    const std::vector<std::uint8_t> malformed_xml_bytes(malformed_xml.begin(),
+                                                        malformed_xml.end());
+    write_zip(malformed_archive, {{"project.xml", malformed_xml_bytes}});
     const auto malformed = pulp::tools::timeline::import_project(
-        malformed_directory / "project.xml", "dawproject", temp.path / "malformed-output");
+        malformed_archive, "dawproject", temp.path / "malformed-output");
     REQUIRE(malformed.exit_code == 1);
     REQUIRE_FALSE(std::filesystem::exists(temp.path / "malformed-output"));
 
@@ -766,13 +814,19 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
     const auto first_bytes = std::filesystem::file_size(first_path);
     const auto second_bytes = std::filesystem::file_size(second_path);
     pulp::interchange::ExportArtifacts refused;
-    REQUIRE_FALSE(pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, refused, std::max(first_bytes, second_bytes)));
+    const auto refusal = pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, refused, std::max(first_bytes, second_bytes));
+    REQUIRE_FALSE(refusal);
+    REQUIRE(refusal.error().asset_id == 7);
+    REQUIRE(refusal.error().asset_name == "second.wav");
+    REQUIRE_FALSE(refusal.error().reason.empty());
     REQUIRE(refused.artifacts.empty());
 
     pulp::interchange::ExportArtifacts accepted;
-    REQUIRE(pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, accepted, first_bytes + second_bytes));
+    const auto accumulated = pulp::tools::timeline::detail::add_dawproject_media(
+        loaded, accepted, first_bytes + second_bytes);
+    REQUIRE(accumulated);
+    REQUIRE(accumulated.value() == 2);
     REQUIRE(accepted.artifacts.size() == 2);
 }
 

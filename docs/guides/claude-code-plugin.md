@@ -156,10 +156,11 @@ enum is generated from the committed interchange concept authority and offers
 no force or accept-all escape hatch. Call it first with outputless
 `plan_only: true` (and no `accept_losses`) to receive the canonical manifest and
 `required_consent` without writing; publishing requires `output`; refusal
-and successful export return the same manifest shape. Import/export publish new
-directories only. SMF interchange uses a MIDI file, while the current DAWproject boundary
-is an unpacked `project.xml` with confined sibling media rather than a packaged
-`.dawproject` container.
+and successful export return the same manifest shape. SMF export publishes a
+new artifact directory and SMF import consumes a MIDI file. DAWproject export
+atomically publishes a standard `.dawproject` ZIP, and DAWproject import consumes
+that container while rejecting unsafe entries before sealing referenced media
+into the new canonical project directory.
 
 The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 
