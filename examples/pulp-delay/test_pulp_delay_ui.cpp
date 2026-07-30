@@ -8,6 +8,7 @@
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/headless.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -119,6 +120,43 @@ TEST_CASE("Pulp Delay native editor binds every stable parameter",
         auto* knob = dynamic_cast<DelayKnob*>(editor.control_for(id));
         REQUIRE(knob != nullptr);
         REQUIRE(knob->render_style() == view::WidgetRenderStyle::standard);
+    }
+}
+
+TEST_CASE("Pulp Delay authored geometry survives standalone tab layout",
+          "[pulp-delay][ui][standalone][layout]") {
+    state::StateStore store;
+    define_delay_parameters(store);
+    auto editor_root = build_pulp_delay_editor(store);
+    auto* editor = dynamic_cast<PulpDelayEditor*>(editor_root.get());
+    REQUIRE(editor != nullptr);
+
+    editor_root->flex().flex_grow = 1.0f;
+    view::TabPanel tabs;
+    tabs.set_show_tab_bar(false);
+    tabs.add_tab("Editor", std::move(editor_root));
+    tabs.set_bounds({0, 0, 1120, 740});
+    tabs.layout_children();
+
+    const std::array<view::Rect, 9> expected = {{
+        {0, 0, 1120, 65},
+        {19, 79, 700, 322},
+        {19, 413, 378, 222},
+        {409, 413, 310, 222},
+        {735, 79, 366, 247},
+        {735, 339, 366, 296},
+        {19, 649, 387, 72},
+        {418, 649, 387, 72},
+        {817, 649, 284, 72},
+    }};
+    REQUIRE(editor->child_count() == expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        CAPTURE(index);
+        const auto actual = editor->child_at(index)->bounds();
+        REQUIRE_THAT(actual.x, WithinAbs(expected[index].x, 1.0e-6));
+        REQUIRE_THAT(actual.y, WithinAbs(expected[index].y, 1.0e-6));
+        REQUIRE_THAT(actual.width, WithinAbs(expected[index].width, 1.0e-6));
+        REQUIRE_THAT(actual.height, WithinAbs(expected[index].height, 1.0e-6));
     }
 }
 
