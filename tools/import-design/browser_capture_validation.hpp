@@ -16,6 +16,16 @@ struct BrowserCaptureValidationOptions {
     int width = 0;
     int height = 0;
     float fail_below_percent = -1.0f;
+    /// Region of the REFERENCE to compare, in reference pixels. Set when the
+    /// design was cropped out of a larger capture: our render is then the panel
+    /// alone while the reference is still the whole document, and comparing
+    /// them whole reports a meaningless similarity that never passes. A gate
+    /// that permanently says NEEDS is worse than no gate, because people learn
+    /// to ignore it. Zero width or height compares the whole image.
+    int reference_crop_x = 0;
+    int reference_crop_y = 0;
+    int reference_crop_width = 0;
+    int reference_crop_height = 0;
     pulp::view::ScreenshotBackend backend =
         pulp::view::ScreenshotBackend::skia;
 };
