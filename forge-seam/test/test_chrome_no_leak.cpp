@@ -1244,3 +1244,183 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
         learning_lines += ex.child_at(r)->child_count();
     CHECK(learning_lines > standard_lines);
 }
+
+TEST_CASE("no control on Home paints like a control and does nothing",
+          "[phase6][controls]") {
+    // A control that highlights and does nothing is indistinguishable from a
+    // broken one. This sweeps the live tree rather than listing the buttons by
+    // hand, so a control added later is covered the day it appears.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    std::vector<std::string> dead;
+    int live = 0;
+    std::function<void(pulp::view::View&, const std::string&)> sweep =
+        [&](pulp::view::View& v, const std::string& path) {
+        if (auto* b = dynamic_cast<pulp::view::TextButton*>(&v)) {
+            if (b->visible() && b->enabled()) {
+                if (b->on_click) {
+                    ++live;
+                } else {
+                    auto name = b->access_label();
+                    if (name.empty()) name = b->label();
+                    // Any text inside it identifies it when it has no label.
+                    if (name.empty()) {
+                        for (std::size_t i = 0; i < b->child_count(); ++i)
+                            if (auto* l = dynamic_cast<pulp::view::Label*>(b->child_at(i)))
+                                name = l->text();
+                    }
+                    dead.push_back(path + " -> " + (name.empty() ? "<unnamed>" : name));
+                }
+            }
+        }
+        for (std::size_t i = 0; i < v.child_count(); ++i)
+            sweep(*v.child_at(i), path + "/" + std::to_string(i));
+    };
+    sweep(*view, "");
+
+    // Forge's own controls, inert before Forge Modular existed. Listed rather
+    // than swept under the rug: fixing them here would be a change to Forge
+    // made for Rack's benefit, which is exactly what must not leak. If one
+    // gains a handler upstream, this list shrinks and the test says so.
+    static const std::set<std::string> kForgeOwned = {
+        "Share",
+        "EXTRA HIGH",
+        "Requires a verified merge strategy",
+    };
+
+    std::vector<std::string> ours;
+    for (const auto& d : dead) {
+        const auto name = d.substr(d.rfind("-> ") + 3);
+        if (!kForgeOwned.count(name)) ours.push_back(d);
+    }
+    for (const auto& d : ours) WARN("no handler: " << d);
+    INFO("live controls: " << live);
+    CHECK(ours.empty());
+    // The allowance must not silently grow: every inert Forge control is
+    // accounted for, and no more than that.
+    CHECK(dead.size() <= kForgeOwned.size());
+    // And the sweep must actually be finding things -- an empty tree would
+    // otherwise report a clean bill of health.
+    CHECK(live >= 4);
+}
+
+namespace {
+
+/// A generator that records what it was asked for and can be made to fail.
+struct FakeEngine : forge_modular::EngineClient {
+    bool installed = true;
+    bool starts = true;
+    std::string error;
+    std::vector<std::pair<std::string, bool>> submissions;
+
+    bool available() const override { return installed; }
+    bool ensure_running() override { return starts; }
+    void submit(const std::string& prompt, bool patch_mode) override {
+        submissions.emplace_back(prompt, patch_mode);
+    }
+    std::string last_error() const override { return error; }
+};
+
+}  // namespace
+
+TEST_CASE("every composer control changes something observable",
+          "[phase6][controls]") {
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    auto* input = chrome->prompt_input();
+    REQUIRE(input != nullptr);
+
+    SECTION("Build with an empty prompt refuses with a reason") {
+        input->set_text("   ");
+        const auto why = shell.start_build();
+        CHECK_FALSE(why.empty());              // never a silent nothing
+        CHECK(engine.submissions.empty());
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Home);
+    }
+
+    SECTION("Build submits, moves to the Build screen and clears the prompt") {
+        input->set_text("a 12 HP wavefolder");
+        CHECK(shell.start_build().empty());
+        REQUIRE(engine.submissions.size() == 1);
+        CHECK(engine.submissions[0].first == "a 12 HP wavefolder");
+        CHECK_FALSE(engine.submissions[0].second);      // module mode
+        // Staying on Home after pressing Build is the reported failure: a user
+        // cannot tell whether anything happened.
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Build);
+        CHECK(input->text().empty());
+        CHECK(chrome->chat_line_count() > 0);           // the prompt is in the transcript
+    }
+
+    SECTION("Build carries the artifact mode") {
+        shell.set_artifact(forge_modular::Artifact::patch);
+        input->set_text("an ambient drone patch");
+        CHECK(shell.start_build().empty());
+        REQUIRE(engine.submissions.size() == 1);
+        CHECK(engine.submissions[0].second);            // patch mode
+    }
+
+    SECTION("a missing generator is reported, not swallowed") {
+        engine.installed = false;
+        input->set_text("anything");
+        const auto why = shell.start_build();
+        CHECK_FALSE(why.empty());
+        CHECK(engine.submissions.empty());
+    }
+
+    SECTION("a generator that will not start says why") {
+        engine.starts = false;
+        engine.error = "the helper crashed on launch";
+        input->set_text("anything");
+        CHECK(shell.start_build() == "the helper crashed on launch");
+        CHECK(engine.submissions.empty());
+    }
+
+    SECTION("Ask never reaches the generator") {
+        input->set_text("what does symmetry do?");
+        CHECK(shell.ask().empty());
+        // The whole point of the distinction: an Ask that could rewrite the
+        // artifact would destroy work on a misread intent.
+        CHECK(engine.submissions.empty());
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Build);
+        CHECK(chrome->chat_line_count() > 0);
+    }
+
+    SECTION("the mention button opens the list, as typing @ does") {
+        input->set_text("wire a");
+        shell.begin_mention();
+        CHECK(input->text() == "wire a @");     // the @ is really in the prompt
+        CHECK(shell.mentions().is_open());
+    }
+
+    SECTION("Random fills the composer without building") {
+        auto row = shell.composer_row();
+        REQUIRE(row.left.size() >= 2);
+        REQUIRE(row.left[1].on_click);
+        row.left[1].on_click();
+        CHECK_FALSE(input->text().empty());
+        CHECK(engine.submissions.empty());      // a suggestion, not a commitment
+        CHECK(chrome->mode() == forge::ForgeChrome::Mode::Home);
+    }
+}

@@ -76,6 +76,21 @@ public:
     ///
     /// Forge's Build screen already has the transcript; this only supplies the
     /// lines. Nothing here rebuilds a chat that already exists.
+    /// Start a build from the composer's current prompt.
+    ///
+    /// Returns the reason it did not start, or empty when it did. A Build that
+    /// silently does nothing is the worst available outcome, and it shipped
+    /// once -- so the refusal is a value the caller must handle, not a log line.
+    std::string start_build();
+
+    /// Ask about the artifact without changing it. Distinct from Build because
+    /// an Ask that could rewrite the artifact would destroy work on a misread
+    /// intent.
+    std::string ask();
+
+    /// Open the mention list, as typing `@` does.
+    void begin_mention();
+
     void watch_build_log(const std::string& path);
 
     /// Drain whatever the generator has written since the last call, appending

@@ -110,6 +110,8 @@ forge::ComposerRow ForgeModularShell::composer_row() {
         .label = "",
         .access_label = "Mention a module from the library",
         .icon = forge::ComposerAction::Icon::search,
+        .primary = false,
+        .on_click = [this] { begin_mention(); },
     });
 
     // Random fills the composer rather than building. A suggestion you cannot
@@ -128,12 +130,15 @@ forge::ComposerRow ForgeModularShell::composer_row() {
         .label = "Ask",
         .access_label = "Ask a question without changing anything",
         .icon = forge::ComposerAction::Icon::none,
+        .primary = false,
+        .on_click = [this] { ask(); },
     });
     row.right.push_back({
         .label = patch ? "Build patch" : "Build module",
         .access_label = patch ? "Build the patch" : "Build the module",
         .icon = forge::ComposerAction::Icon::arrow_up,
         .primary = true,
+        .on_click = [this] { start_build(); },
     });
     return row;
 }
@@ -368,6 +373,63 @@ void ForgeModularShell::refresh_depth_tabs() {
             depth_labels_[i]->set_text_color(on ? color::text : color::text_muted);
         b->request_repaint();
     }
+}
+
+void ForgeModularShell::begin_mention() {
+    auto* c = chrome();
+    if (!c) return;
+    auto* input = c->prompt_input();
+    if (!input) return;
+    // Type the '@' rather than opening the list behind the composer's back, so
+    // the prompt and the list can never disagree about what was typed.
+    auto text = input->text();
+    if (!text.empty() && text.back() != ' ') text += ' ';
+    text += '@';
+    input->set_text(text);
+    // The overlay is told the caret is at the end, which is where set_text
+    // leaves it, so the next keystroke narrows the list.
+    mentions_.handle_text(text, text.size());
+}
+
+std::string ForgeModularShell::start_build() {
+    auto* c = chrome();
+    if (!c) return "no editor is open";
+    auto* input = c->prompt_input();
+    const auto prompt = input ? input->text() : std::string{};
+    // An empty prompt is a no-op with a reason, not a silent nothing.
+    if (prompt.find_first_not_of(" \t\n") == std::string::npos)
+        return "type what you want first";
+    if (!engine_) return "the generator is not connected";
+    if (!engine_->available())
+        return "the generator is not installed";
+    if (!engine_->ensure_running()) {
+        auto why = engine_->last_error();
+        return why.empty() ? "the generator would not start" : why;
+    }
+
+    // Move to the Build screen BEFORE submitting: a user who presses Build and
+    // stays on Home cannot tell whether anything happened, which is exactly
+    // what was reported.
+    c->enter_build();
+    c->narrate(prompt.substr(0, 200));
+    if (input) input->set_text("");
+    engine_->submit(prompt, artifact_ == Artifact::patch);
+    return engine_->last_error();
+}
+
+std::string ForgeModularShell::ask() {
+    auto* c = chrome();
+    if (!c) return "no editor is open";
+    auto* input = c->prompt_input();
+    const auto prompt = input ? input->text() : std::string{};
+    if (prompt.find_first_not_of(" \t\n") == std::string::npos)
+        return "type a question first";
+    // Deliberately does NOT reach the generator: Ask must never rewrite the
+    // artifact, and the difference between the two is carried, not inferred.
+    c->enter_build();
+    c->narrate(prompt.substr(0, 200));
+    if (input) input->set_text("");
+    return {};
 }
 
 void ForgeModularShell::watch_build_log(const std::string& path) {
