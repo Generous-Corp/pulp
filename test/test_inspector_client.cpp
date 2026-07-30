@@ -192,6 +192,60 @@ TEST_CASE("client event handlers can issue follow-up requests",
     CHECK_FALSE(follow_up->is_error);
 }
 
+TEST_CASE("response timeout fences may-have-applied requests",
+          "[inspect][client][timeout][mutation]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateWrite,
+    };
+    std::atomic<bool> applied{false};
+    InspectorSession session(
+        {"session-timeout", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            applied.store(true, std::memory_order_release);
+            return make_response(request.id, R"({"applied":true})");
+        });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    REQUIRE(server.start_authenticated(
+        InspectorServerConfig{&session, &publisher, record, *token}));
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    REQUIRE_FALSE(client.request("Session.acquireController").is_error);
+    const auto response = client.request(
+        "State.setParameter",
+        R"({"id":"gain","value":0.75})",
+        std::chrono::milliseconds(10));
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "request_timeout");
+    CHECK(response.error_data_json.find("\"mayHaveApplied\":true") !=
+          std::string::npos);
+    CHECK_FALSE(client.is_connected());
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!applied.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    CHECK(applied.load(std::memory_order_acquire));
+}
+
 TEST_CASE("client can be released from its event handler",
           "[inspect][client][events][teardown]") {
     AuthenticatedFixture fixture;
