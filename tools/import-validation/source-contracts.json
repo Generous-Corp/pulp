@@ -87,6 +87,77 @@
       }
     },
     {
+      "source": "html",
+      "display_name": "Runnable HTML",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "2026-07-29",
+      "recheck_interval_days": 180,
+      "compat": {
+        "mode": "not-applicable",
+        "source": null,
+        "parser_version_owner": "browser-capture-protocol"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "html"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "browser-solved-html-import",
+        "notes": "The import-design CLI evaluates authorized runnable HTML in isolated Chromium and lowers a versioned capture envelope to portable DesignIR."
+      },
+      "upstream": [
+        {
+          "url": "https://html.spec.whatwg.org/",
+          "kind": "spec",
+          "proves": "Authoritative HTML document and browser execution semantics.",
+          "last_verified": "2026-07-29",
+          "recheck_interval_days": 180
+        }
+      ],
+      "detected_artifact_shape": "HTML or HTM document, including extensionless documents with an HTML root element.",
+      "runtime_export_shape": "A pulp-browser-capture-v1 evidence envelope lowered to DesignIR with faithful-capture backing.",
+      "runtime_requirements": {
+        "sdk_min": "v0.762.0",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime_file": "tools/import-design/browser_html_import.cpp",
+        "runtime": "import_browser_html",
+        "static": null
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [],
+        "roundtrip_script": null,
+        "test_targets": [
+          "pulp-test-browser-capture-backend",
+          "pulp-test-browser-capture-import"
+        ],
+        "test_files": [
+          "test/test_html_intake.cpp",
+          "test/test_browser_capture_backend.cpp",
+          "test/test_browser_import_cli.cpp"
+        ],
+        "test_tags": [
+          "[import-design][browser-capture][intake]"
+        ],
+        "pulp_render_reference": {
+          "status": "not-applicable",
+          "path": null
+        }
+      }
+    },
+    {
       "source": "stitch",
       "display_name": "Google Stitch",
       "kind": "screen-export",

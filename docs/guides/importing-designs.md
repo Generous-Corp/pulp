@@ -24,6 +24,66 @@ pulp import-design --from pencil --file design.json --dry-run
 pulp export-tokens --tokens tokens.json
 ```
 
+### Runnable HTML and Claude Design
+
+For Claude project archives, `.dc.html` design components, standalone HTML, or
+ordinary runnable HTML, pass the file directly:
+
+```bash
+pulp import-design --file design.html
+```
+
+The CLI detects the export shape and uses one path: isolated Chromium evaluates
+the real DOM, CSS, fonts, canvas, SVG, and JavaScript; Pulp records a DPR-2
+reference plus CSS custom-property tokens and semantic evidence; DesignIR keeps
+that evaluated visual as a portable `faithful_capture`; and Skia immediately
+renders it for A/B comparison. That validation is required even without
+`--validate`, and its proof remains in the durable browser-capture evidence
+directory. Pass `--validate` to additionally publish convenient render and diff
+copies beside the requested output. Authored controls—including custom knob
+artwork—remain authored pixels and are not replaced by Pulp widget skins.
+
+The default artifact is deliberately a **pixel-exact static frame**. Semantic
+evidence is captured for future reconstruction, but browser interactions do not
+become live Pulp controls unless a runtime bridge is added. Extracted CSS custom
+properties describe the active light / no-preference computed capture mode;
+they are not presented as a complete multi-theme authored token system.
+Only custom properties whose active computed value is visible on
+`documentElement` or `body` are promoted; component-scoped values remain in the
+captured source evidence rather than being misrepresented as global tokens.
+
+Local relative assets load from the input folder. External requests are denied
+by default. If the health report identifies a reviewed CDN dependency, retry
+with `--allow-browser-network`. That consent is limited to public HTTPS origins
+declared by the source; loopback, private/link-local addresses, WebSockets, and
+undeclared redirect origins remain blocked. Successful external response
+content is hashed into capture provenance. Use `--browser <path>` for a
+nonstandard Chrome/Chromium installation. `--offline` explicitly selects the
+older partial static/QuickJS fallback and may lose layout or runtime content.
+
+Runnable sources with asynchronous initialization may expose
+`globalThis.__pulpCaptureReady` as a Promise or a function returning one. Pulp
+awaits it after the initial layout observation window and fails the import if
+it rejects. This is optional; sources without the contract use bounded
+DOM/network/compositor settling.
+
+Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
+JavaScript, and C++ artifacts do not embed or require them.
+
+Portable image paths are resolved by the runtime that opens the artifact.
+`ScriptedUiSession` anchors JavaScript assets to the generated script directory,
+and native DesignIR callers pass the document directory through
+`NativeMaterializeOptions::asset_base_directory`. Generated C++ exposes
+`build_imported_ui(asset_base_directory)` for production plugins and apps; pass
+the deployed resource directory there. Its zero-argument overload resolves
+beside the generated source and is a source-tree development convenience, not
+a deployment resource lookup.
+
+For browser-backed HTML, `--dry-run` is a diagnostic preview: its printed
+capture paths and absolute backing-image path are transient and disappear when
+the command exits. Run without `--dry-run` to publish a portable artifact and
+its verified evidence.
+
 ## How It Works
 
 The import pipeline has three layers:
@@ -33,6 +93,7 @@ Local Figma .fig file --.
 Figma REST/file JSON ----.
 Figma plugin .pulp.zip --|
 Stitch HTML / directory -|--> Normalized IR --> JS / DesignIR / baked native artifacts
+Runnable HTML ------------|    (Chromium-evaluated faithful capture)
 v0 / Figma Make TSX ----|
 Pencil/OpenPencil JSON --'
 
@@ -207,17 +268,26 @@ for the full reference.
 
 ### Claude Design
 
-Claude Design exports are standalone HTML files with an inline bundler
-script tag. Pulp detects them via the `__bundler/template` script type
-and parses the loader shell:
+Claude Design can export project folders, `.dc.html` design components, and
+standalone HTML bundles. Pass any of those HTML files directly; Pulp detects
+the shape and evaluates the runnable page in isolated Chromium:
 
 ```bash
-pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --validate --screenshot-backend skia
 ```
 
-The `classnames.json` artifact maps every plain-classname `<style>`
-rule to its camelCase CSS properties, for downstream merge into
-inline styles. See [`reference/cli.md#import-design`](../reference/cli.md#import-design).
+This produces a pixel-exact default frame in portable DesignIR, a browser
+reference image, a Skia render, a visual diff, computed CSS tokens, and
+semantic evidence. Browser validation itself is automatic; `--validate` in the
+example requests convenient render/diff copies beside the primary output.
+`--from claude` remains accepted for compatibility but is not required.
+External browser requests remain denied unless the reviewed source requires an
+explicit `--allow-browser-network` retry.
+
+The older static/QuickJS parser remains available through `--offline` for
+diagnostics and environments without Chromium. Its optional
+`classnames.json` sidecar maps plain-classname rules for that legacy path; it
+is not the authoritative layout evaluator.
 
 ## Audio Widget Detection
 

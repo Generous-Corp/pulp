@@ -1296,15 +1296,16 @@ commands:
     status: partial
     summary: >
       Import designs from local Figma .fig files, Figma REST/file JSON, the
-      Pulp Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google
-      DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The designmd
+      Pulp Figma plugin, Stitch, v0, Pencil, Claude Design, generic HTML,
+      React JSX, or Google DESIGN.md into Pulp JS, DesignIR, or baked C++
+      artifacts. Runnable HTML auto-detects its source. The designmd
       source is tokens-only (no ui.js); other sources can emit a full ui.js +
       tokens.json.
     args:
       - name: --from
         kind: option
-        required: true
-        description: "Design source: figma, figma-plugin, fig, stitch, v0, pencil, claude, designmd, jsx"
+        required: false
+        description: "Design source: figma, figma-plugin, fig, stitch, v0, pencil, claude, html, designmd, jsx; optional for runnable HTML"
       - name: --outline
         kind: flag
         description: "With --from fig: print a read-only inventory of the .fig file's pages and top-level frames (name, guid, size, node count) and exit. Use it to pick a frame before importing a large file. Add --json for machine-readable output."
@@ -1338,6 +1339,15 @@ commands:
       - name: --allow-network-fetch
         kind: flag
         description: "Allow DesignIR asset-manifest HTTP(S) fetches at import time"
+      - name: --browser
+        kind: option
+        description: "Chromium/Chrome executable for browser-solved HTML import; defaults to system discovery"
+      - name: --offline
+        kind: flag
+        description: "Explicitly use the lower-fidelity static HTML parser instead of Chromium"
+      - name: --allow-browser-network
+        kind: flag
+        description: "Permit only source-declared public HTTPS origins during browser evaluation; local/private destinations remain blocked and fetched content is recorded in provenance"
       - name: --asset-cache
         kind: option
         description: "Asset cache directory for DesignIR HTTP(S) asset imports"
@@ -1370,10 +1380,10 @@ commands:
         description: Use DOM API instead of native Pulp API
       - name: --validate
         kind: flag
-        description: Render generated JS and validate layout
+        description: "Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output."
       - name: --screenshot-backend
         kind: option
-        description: "--validate render backend: skia (default; composites file-backed images) or coregraphics (draws image filename placeholders — not faithful for asset-rich designs)"
+        description: "Validation render backend; browser-backed HTML uses it for the automatic A/B gate. skia is the default and composites file-backed images; coregraphics draws image filename placeholders and is not faithful for asset-rich designs."
       - name: --fidelity-report
         kind: option
         description: "Write the run's import-fidelity findings as a JSON ledger (named taxonomy + per-kind counts + per-finding severity). Emitted regardless of --strict-fidelity, so an import's fidelity is a durable, diffable artifact for review or a CI gate."

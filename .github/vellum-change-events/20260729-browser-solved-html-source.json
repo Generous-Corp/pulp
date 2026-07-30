@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260729-browser-solved-html-source",
+  "kind": "change",
+  "created_at": "2026-07-29T20:17:01Z",
+  "slices": [
+    "design-schema-compiler"
+  ],
+  "rationale": "Pulp's import-design CLI now classifies ordinary runnable HTML as its own source instead of pretending every browser-evaluated document is a Claude Design export. The transferred anchor-strategy switch gains the corresponding DesignSource::html case so generic HTML receives the same stable content-hash anchoring as other runtime-evaluated document sources. This is Pulp-specific importer provenance and compatibility plumbing: it does not change the transferred design schema, code-generation contract, or Vellum source authority.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-browser-capture-import",
+    "pulp-test-design-import"
+  ],
+  "disposition": "pulp-only"
+}

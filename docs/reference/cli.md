@@ -1431,8 +1431,9 @@ file error.
 **Status**: partial
 
 Import designs from local Figma `.fig` files, Figma REST/file JSON, the Pulp
-Figma plugin, Stitch, v0, Pencil, Claude Design, React JSX, or Google DESIGN.md
-source files into generated Pulp UI code.
+Figma plugin, Stitch, v0, Pencil, Claude Design, generic runnable HTML, React
+JSX, or Google DESIGN.md source files into generated Pulp UI code. Runnable
+HTML auto-detects its source, so `--from` is optional for that lane.
 
 ```bash
 pulp import-design --from fig --file design.fig --outline
@@ -1445,12 +1446,14 @@ pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
+pulp import-design --file design.html --output ui.js
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
 pulp import-design --from jsx --file bundle.js --mode live --emit js --output live-ui.js
 pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
-Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
+Accepted `--from` values: `fig`, `figma`, `figma-plugin`, `stitch`, `v0`,
+`pencil`, `claude`, `html`, `designmd`, `jsx`.
 
 Supports `--url` (fetched through an argv-safe `curl` invocation into a unique temporary file), `--frame` (Figma frame selection; required guid or name for `--from fig` unless using `--outline`), `--outline` / `--page` for local `.fig` files, and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
@@ -1463,7 +1466,8 @@ per-stage timing breakdown on stdout:
 
 `decode` covers everything that produces the parseable envelope content (for
 `--from fig` that includes the offline Node decode subprocess); `render`
-appears only when `--validate` actually rendered. Durations print as `123ms`
+appears whenever validation rendered. Runnable browser-backed HTML validates
+automatically; other lanes require `--validate`. Durations print as `123ms`
 below one second and `4.47s` at or above it; the total is measured to the
 moment of printing, so it also absorbs writes and reports.
 
@@ -1482,6 +1486,9 @@ exit codes, diagnostics, and current limitations).
 | `--mode {live\|baked}` | Select the import runtime model. Built-in default: `live`; persistent default: `import_design.default_mode`. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
+| `--browser <path>` | Use this Chromium/Chrome executable for browser-solved HTML import instead of system discovery. |
+| `--offline` | Explicitly use the lower-fidelity static HTML parser instead of Chromium. |
+| `--allow-browser-network` | Permit only public HTTPS origins declared by the source document during browser evaluation; local/private destinations remain blocked and fetched content is recorded in capture provenance. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
 | `--asset-timeout-ms <ms>` | Per-request network asset timeout. |
 | `--asset-hash <uri=sha256>` | Expected content hash for an asset URI; may be repeated. |
@@ -1490,7 +1497,8 @@ exit codes, diagnostics, and current limitations).
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
 | `--emit-w3c-tokens <path>` | Additionally write the imported tokens as a W3C Design Tokens (DTCG) document (`-` = stdout). `/` in token names nests into DTCG groups, dimensions use the `{"value": N, "unit": "px"}` object form, and variable provenance (id/collection/mode/adapter) lands under `$extensions["dev.pulp.source"]`. String tokens whose names clearly denote a font family (segments like `fontFamily`/`typeface`/`font`, split on `/` or `.`) emit as `$type: "fontFamily"` (comma-separated stacks become the DTCG array form); all other strings are parked losslessly under the document-root `$extensions["dev.pulp.nonStandardTokens"]` with their provenance, so every emitted token carries a standard DTCG `$type`. Additive — no other output changes. |
-| `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
+| `--validate` | Render generated JS and validate layout. Browser-backed HTML always runs its required browser-to-DesignIR A/B validation; this flag additionally publishes convenience render/diff files beside the primary output. |
+| `--screenshot-backend {skia\|coregraphics}` | Validation render backend; browser-backed HTML uses it for the automatic A/B gate. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
 | `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
 | `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
 | `--meter-style {skin\|skinned\|default\|plain}` | Meter rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |

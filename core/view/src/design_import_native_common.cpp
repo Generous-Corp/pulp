@@ -8,6 +8,7 @@
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/design_capture_lowering.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -1664,7 +1665,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             const IRAssetRef* asset = manifest.resolve(*asset_id);
             if (asset == nullptr)
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
-            auto uri = asset_uri(*asset);
+            auto uri = asset_uri(
+                *asset, options.asset_base_directory);
             if (uri.empty())
                 return make_asset_placeholder(node, path, *asset_id, diagnostics);
             auto image = std::make_unique<ImageView>();
@@ -1748,7 +1750,6 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
         if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
             return frame;
     }
-
     // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
     // view) — it's a design-system placeholder the design never shows.
     if (is_unconfigured_dropdown_template(node)) {
@@ -2173,6 +2174,10 @@ void NativeImportBindingContext::reset_import_binding_claims() {
 
 DesignIR prepare_native_design_ir(const DesignIR& ir) {
     DesignIR prepared = ir;
+    // Capture authority is resolved before widget recognition or geometry
+    // normalization. Otherwise a semantic hint such as "knob" can win first
+    // and replace the authored capture with a silver native widget.
+    lower_faithful_captures_in_place(prepared.root);
     normalize_border_shorthand(prepared.root);
     reconnect_slider_fill(prepared.root);
     synthesize_primitive_paths(prepared.root);
