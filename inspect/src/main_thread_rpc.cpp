@@ -55,6 +55,7 @@ public:
     Post post;
     IsMainThread is_main_thread;
     std::atomic<bool> accepting{true};
+    std::recursive_mutex operation_mutex;
     std::mutex pending_mutex;
     std::vector<std::weak_ptr<PendingCall>> pending;
     std::size_t pending_count = 0;
@@ -140,11 +141,14 @@ InspectorMessage InspectorMainThreadRpc::call(
                           "Inspector dispatch operation is empty",
                           "invalid_dispatch");
     }
+    if (impl_->is_main_thread && impl_->is_main_thread()) {
+        std::lock_guard operation_lock(impl_->operation_mutex);
+        if (!impl_->accepting.load(std::memory_order_acquire))
+            return cancelled(request_id);
+        return run_operation(request_id, operation);
+    }
     if (!impl_->accepting.load(std::memory_order_acquire))
         return cancelled(request_id);
-
-    if (impl_->is_main_thread && impl_->is_main_thread())
-        return run_operation(request_id, operation);
 
     auto pending = std::make_shared<PendingCall>(request_id);
     if (!impl_->register_call(pending)) {
@@ -158,15 +162,21 @@ InspectorMessage InspectorMainThreadRpc::call(
     const auto impl = impl_;
     const bool posted = impl_->post && impl_->post(
         [impl, pending, request_id, operation = std::move(operation)]() mutable {
+            std::lock_guard operation_lock(impl->operation_mutex);
+            {
+                std::lock_guard lock(pending->mutex);
+                if (pending->completed)
+                    return;
+            }
+            if (!impl->accepting.load(std::memory_order_acquire)) {
+                impl->complete_call(pending, cancelled(request_id));
+                return;
+            }
             {
                 std::lock_guard lock(pending->mutex);
                 if (pending->completed)
                     return;
                 pending->started = true;
-            }
-            if (!impl->accepting.load(std::memory_order_acquire)) {
-                impl->complete_call(pending, cancelled(request_id));
-                return;
             }
             impl->complete_call(
                 pending, run_operation(request_id, operation));
@@ -203,8 +213,12 @@ InspectorMessage InspectorMainThreadRpc::call(
 }
 
 void InspectorMainThreadRpc::cancel() {
-    if (!impl_ ||
-        !impl_->accepting.exchange(false, std::memory_order_acq_rel))
+    if (!impl_)
+        return;
+    const bool was_accepting =
+        impl_->accepting.exchange(false, std::memory_order_acq_rel);
+    std::lock_guard operation_lock(impl_->operation_mutex);
+    if (!was_accepting)
         return;
 
     std::vector<std::shared_ptr<PendingCall>> calls;

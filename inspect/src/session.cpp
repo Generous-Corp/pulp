@@ -3,6 +3,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 namespace pulp::inspect {
@@ -219,7 +220,18 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
-    return handler(request);
+    try {
+        return handler(request);
+    } catch (const std::exception& error) {
+        return make_error(request.id,
+                          std::string("Inspector dispatch failed: ") +
+                              error.what(),
+                          "dispatch_failed");
+    } catch (...) {
+        return make_error(request.id,
+                          "Inspector dispatch failed",
+                          "dispatch_failed");
+    }
 }
 
 void InspectorSession::disconnect(std::string_view client_id) {

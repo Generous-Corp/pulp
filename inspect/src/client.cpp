@@ -5,11 +5,13 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <utility>
 
 namespace pulp::inspect {
@@ -26,9 +28,11 @@ InspectorMessage connection_error(std::int64_t request_id,
 class InspectorClient::Impl {
 public:
     events::InterprocessConnection connection;
+    std::mutex send_mutex;
     std::mutex mutex;
     std::condition_variable cv;
     std::map<std::int64_t, InspectorMessage> responses;
+    std::set<std::int64_t> in_flight;
     std::optional<InspectorAuthChallenge> challenge;
     EventHandler event_handler;
     std::atomic<std::int64_t> next_request_id{2};
@@ -60,8 +64,10 @@ public:
                 return;
             }
             if (message.id != 0 && message.method.empty()) {
-                responses.insert_or_assign(message.id, std::move(message));
-                cv.notify_all();
+                if (in_flight.contains(message.id)) {
+                    responses.insert_or_assign(message.id, std::move(message));
+                    cv.notify_all();
+                }
                 return;
             }
             event = event_handler;
@@ -76,18 +82,21 @@ public:
         if (!cv.wait_for(lock, timeout, [&] {
                 return responses.contains(id) || disconnected;
             })) {
+            in_flight.erase(id);
             return connection_error(id,
                                     "Inspector request timed out",
                                     "request_timeout");
         }
         const auto found = responses.find(id);
         if (found == responses.end()) {
+            in_flight.erase(id);
             return connection_error(id,
                                     "Inspector connection closed",
                                     "connection_closed");
         }
         auto response = std::move(found->second);
         responses.erase(found);
+        in_flight.erase(id);
         return response;
     }
 };
@@ -121,7 +130,10 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         impl_->disconnected = false;
         impl_->challenge.reset();
         impl_->responses.clear();
+        impl_->in_flight.clear();
     }
+    impl_->connection.set_write_timeout(
+        std::max(timeout, std::chrono::milliseconds(1)));
     if (!impl_->connection.connect(record.endpoint,
                                    events::IpcTransport::Socket)) {
         std::lock_guard lock(impl_->mutex);
@@ -158,7 +170,15 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         make_request(1,
                      "Session.authenticate",
                      choc::json::toString(params, false));
+    {
+        std::lock_guard lock(impl_->mutex);
+        impl_->in_flight.insert(authentication.id);
+    }
     if (!impl_->connection.send_message(encode_message(authentication))) {
+        {
+            std::lock_guard lock(impl_->mutex);
+            impl_->in_flight.erase(authentication.id);
+        }
         impl_->connection.disconnect();
         return false;
     }
@@ -176,6 +196,7 @@ void InspectorClient::disconnect() {
         std::lock_guard lock(impl_->mutex);
         impl_->disconnected = true;
         impl_->responses.clear();
+        impl_->in_flight.clear();
         impl_->challenge.reset();
     }
     impl_->cv.notify_all();
@@ -198,7 +219,25 @@ InspectorMessage InspectorClient::request(
     }
     const auto message =
         make_request(id, std::move(method), std::move(params_json));
-    if (!impl_->connection.send_message(encode_message(message))) {
+    bool sent = false;
+    {
+        std::lock_guard send_lock(impl_->send_mutex);
+        impl_->connection.set_write_timeout(
+            std::max(timeout, std::chrono::milliseconds(1)));
+        {
+            std::lock_guard lock(impl_->mutex);
+            if (impl_->disconnected) {
+                return connection_error(id,
+                                        "Inspector connection closed",
+                                        "connection_closed");
+            }
+            impl_->in_flight.insert(id);
+        }
+        sent = impl_->connection.send_message(encode_message(message));
+    }
+    if (!sent) {
+        std::lock_guard lock(impl_->mutex);
+        impl_->in_flight.erase(id);
         return connection_error(id,
                                 "Inspector request could not be sent",
                                 "send_failed");
