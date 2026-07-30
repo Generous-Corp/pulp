@@ -53,7 +53,7 @@ public:
 
 private:
     class Impl;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
     int port_ = 0;
     InspectorSession* session_ = nullptr;
     InspectorDiscoveryPublisher* discovery_ = nullptr;
@@ -61,6 +61,7 @@ private:
     std::chrono::milliseconds authentication_timeout_ =
         std::chrono::seconds(3);
     mutable std::mutex lifecycle_mutex_;
+    mutable std::recursive_mutex transition_mutex_;
     void on_message_received(const std::string& data, events::InterprocessConnection* sender);
 };
 
