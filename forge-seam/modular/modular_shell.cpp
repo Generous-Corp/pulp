@@ -64,8 +64,7 @@ void ForgeModularShell::set_artifact(Artifact a) { artifact_ = a; }
 forge::ChromeCopy ForgeModularShell::chrome_copy() const {
     const bool patch = artifact_ == Artifact::patch;
     return {
-        .badge = std::string(forge::brand::kProductNameUpper) +
-                 (patch ? " PATCH" : " MODULE"),
+        .badge = patch ? "PATCH" : "MODULE",
         .prompt_placeholder =
             patch ? "an ambient generative drone that never repeats"
                   : "a 12 HP wavefolder with drive and symmetry, plus a CV input "
@@ -73,6 +72,10 @@ forge::ChromeCopy ForgeModularShell::chrome_copy() const {
         .followup_placeholder =
             patch ? "refine it \xE2\x80\x94 e.g. give the drone a slower filter sweep"
                   : "refine it \xE2\x80\x94 e.g. add a second CV input for symmetry",
+        .hero_eyebrow = std::string(forge::brand::kProductNameUpper) +
+                        " MODULAR \u00b7 FOR VCV RACK",
+        .hero_title = patch ? "What should the patch do?"
+                            : "What should the module do?",
         .default_build_title = patch ? "Ambient Drone" : "Wavefolder",
     };
 }

@@ -1,5 +1,5 @@
 diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
-index 528e598..b724d1c 100644
+index 528e598..2e8e820 100644
 --- a/include/forge/fx_shell.hpp
 +++ b/include/forge/fx_shell.hpp
 @@ -1,5 +1,6 @@
@@ -9,7 +9,7 @@ index 528e598..b724d1c 100644
  #include "forge/lofi_delay.hpp"
  #include "forge/gen/tempo_division.hpp"  // DeriveUnit, Division for derived macros
  #include "forge/param_map.hpp"
-@@ -166,6 +167,15 @@ public:
+@@ -166,6 +167,18 @@ public:
      const pulp::format::reload::ProcessorHotSwapSlot& slot() const { return slot_; }
  
      // ── ForgeShell hooks (effect-specific DSP) ───────────────────────────────
@@ -19,14 +19,17 @@ index 528e598..b724d1c 100644
 +        return { .badge = std::string(brand::kProductNameUpper) + " FX",
 +                 .prompt_placeholder = "Build a lo-fi multi-fx plugin \u2014 reverb, delay, chorus. Nocturne, dreamy, a visualizer per effect.",
 +                 .followup_placeholder = "refine it \u2014 e.g. darker feedback tail",
-+                 .default_build_title = "Lo-Fi Delay" };
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Lo-Fi Delay" };
 +    }
 +
      bool has_build() const override { return slot_.has_active(); }
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/instrument_shell.hpp b/include/forge/instrument_shell.hpp
-index d4b60cd..e048d16 100644
+index d4b60cd..3d2b611 100644
 --- a/include/forge/instrument_shell.hpp
 +++ b/include/forge/instrument_shell.hpp
 @@ -24,6 +24,7 @@
@@ -37,7 +40,7 @@ index d4b60cd..e048d16 100644
  #include "forge/param_map.hpp"
  #include "forge/prepared_bank_exchange.hpp"
  #include "forge/shell.hpp"
-@@ -252,6 +253,15 @@ public:
+@@ -252,6 +253,18 @@ public:
      }
  
      // ── ForgeShell hooks (instrument-specific DSP) ───────────────────────────
@@ -47,14 +50,17 @@ index d4b60cd..e048d16 100644
 +        return { .badge = std::string(brand::kProductNameUpper) + " INST",
 +                 .prompt_placeholder = "a warm analog pad with a slow filter sweep\u2026",
 +                 .followup_placeholder = "refine it \u2014 e.g. faster attack, brighter tone",
-+                 .default_build_title = "Subtractive Synth" };
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Subtractive Synth" };
 +    }
 +
      bool has_build() const override { return true; }  // the poly engine always renders
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/midi_shell.hpp b/include/forge/midi_shell.hpp
-index 27f98d0..ac2e51f 100644
+index 27f98d0..cdecceb 100644
 --- a/include/forge/midi_shell.hpp
 +++ b/include/forge/midi_shell.hpp
 @@ -24,6 +24,7 @@
@@ -65,7 +71,7 @@ index 27f98d0..ac2e51f 100644
  #include "forge/midi_transform.hpp"
  #include "forge/gen/midi_chain_loader.hpp"  // ResolvedMidiMacro
  #include "forge/param_map.hpp"
-@@ -79,6 +80,15 @@ public:
+@@ -79,6 +80,18 @@ public:
                                   std::string& err);
  
      // ── ForgeShell hooks (MIDI-specific) ─────────────────────────────────────
@@ -75,17 +81,20 @@ index 27f98d0..ac2e51f 100644
 +        return { .badge = std::string(brand::kProductNameUpper) + " MIDI",
 +                 .prompt_placeholder = "a scale-locked up-down arpeggiator\u2026",
 +                 .followup_placeholder = "refine it \u2014 e.g. swing the offbeats",
-+                 .default_build_title = "Note Pass" };
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Note Pass" };
 +    }
 +
      bool has_build() const override { return true; }  // a chain is always installed
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..4adc068 100644
+index c8101e1..ac8d716 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
-@@ -59,6 +59,51 @@ class ProjectStore;
+@@ -59,6 +59,55 @@ class ProjectStore;
  // re-bake into an effect shell), and used to select the generation vocabulary.
  enum class ShellKind { effect, instrument, midi_effect };
  
@@ -132,12 +141,16 @@ index c8101e1..4adc068 100644
 +    std::string followup_placeholder;
 +    /// The name of the build a fresh install opens with.
 +    std::string default_build_title;
++    /// The small mono line above the hero question.
++    std::string hero_eyebrow;
++    /// The hero question itself.
++    std::string hero_title;
 +};
 +
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +388,27 @@ public:
+@@ -343,6 +392,27 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -166,10 +179,10 @@ index c8101e1..4adc068 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..0d9b0a1 100644
+index 1c3814e..32975d4 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
-@@ -1151,44 +1151,74 @@ private:
+@@ -1151,44 +1151,75 @@ private:
  // these has an answer for all three kinds — a fall-through would show effect
  // wording ("darker feedback tail", "Lo-Fi Delay") inside the instrument or
  // MIDI-effect plugin.
@@ -206,6 +219,7 @@ index 1c3814e..0d9b0a1 100644
 +        b->flex().preferred_height = 34.0f;
 +    }
 +    if (!spec.primary) b->set_border(kLine, 1, design::radius::medium);
++    b->flex().direction = FlexDirection::row;   // default is column: labels wrapped
 +    b->flex().align_items = FlexAlign::center;
 +    b->flex().justify_content = FlexJustify::center;
 +    if (!icon_only) {
@@ -275,7 +289,7 @@ index 1c3814e..0d9b0a1 100644
  }
  
  std::string trim_copy(const std::string& s) {
-@@ -1350,7 +1380,7 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
+@@ -1350,7 +1381,7 @@ ForgeChrome::ForgeChrome(ForgeShell& shell, gen::GenerationSession& session)
      // shell ships a lo-fi delay; the instrument shell a subtractive synth; the
      // MIDI-effect shell a pass-through transform chain). A generated build
      // overrides this with its own name at install.
@@ -284,7 +298,7 @@ index 1c3814e..0d9b0a1 100644
  }
  
  ForgeChrome::~ForgeChrome() {
-@@ -1683,7 +1713,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1683,7 +1714,7 @@ void ForgeChrome::build_title_bar(View& parent) {
      player_title_ = title.get();
      title->flex().flex_shrink = 0;
      identity->add_child(std::move(title));
@@ -293,7 +307,25 @@ index 1c3814e..0d9b0a1 100644
                            kFaint, 0.8f);
      shell_kind_badge_ = tag.get();
      tag->set_border(kLine, 1, 5);
-@@ -1897,6 +1927,16 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1881,8 +1912,7 @@ void ForgeChrome::build_home(View& parent) {
+ 
+     hero->add_child(make_spacer());
+ 
+-    auto eyebrow = make_label(std::string(brand::kProductNameUpper) +
+-                                  " · AI PLUGIN FACTORY",
++    auto eyebrow = make_label(shell_.chrome_copy().hero_eyebrow,
+                               kFontMono, 11, 400,
+                               kMuted, 1.76f);
+     home_eyebrow_ = eyebrow.get();
+@@ -1890,13 +1920,23 @@ void ForgeChrome::build_home(View& parent) {
+     eyebrow->flex().flex_shrink = 0;
+     hero->add_child(std::move(eyebrow));
+ 
+-    auto title = make_label("What do you want to build?", kFontDisplay,
++    auto title = make_label(shell_.chrome_copy().hero_title, kFontDisplay,
+                             kHeroTitleSize, 700, kTextStrong, -0.84f);
+     home_title_ = title.get();
+     title->flex().margin_bottom = 30;
      title->flex().flex_shrink = 0;
      hero->add_child(std::move(title));
  
