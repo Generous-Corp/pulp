@@ -160,6 +160,7 @@ TEST_CASE("authenticated client rejects a reflected server proof",
 
     pulp::events::InterprocessConnectionServer fake_server;
     std::mutex clients_mutex;
+    std::atomic<int> unauthenticated_events{0};
     std::vector<std::shared_ptr<pulp::events::InterprocessConnection>>
         fake_clients;
     fake_server.on_client_connected =
@@ -182,6 +183,10 @@ TEST_CASE("authenticated client rejects a reflected server proof",
                             std::string(params["proof"].getString());
                     } catch (...) {
                     }
+                    raw->send_message(pulp::inspect::encode_message(
+                        pulp::inspect::make_event(
+                            "State.parameterChanged",
+                            R"({"value":0.9})")));
                     raw->send_message(pulp::inspect::encode_message(
                         make_response(
                             request.id,
@@ -235,8 +240,13 @@ TEST_CASE("authenticated client rejects a reflected server proof",
     REQUIRE(records.size() == 1);
 
     InspectorClient client;
+    client.set_event_handler([&](const auto&) {
+        unauthenticated_events.fetch_add(
+            1, std::memory_order_relaxed);
+    });
     CHECK_FALSE(client.connect(records.front(), reader));
     CHECK_FALSE(client.is_connected());
+    CHECK(unauthenticated_events.load(std::memory_order_relaxed) == 0);
 
     fake_server.stop();
     std::lock_guard lock(clients_mutex);
