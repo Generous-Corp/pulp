@@ -1,0 +1,173 @@
+#include <pulp/playback/realtime_stretch_state_bank.hpp>
+
+#include <pulp/runtime/scoped_no_alloc.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <new>
+#include <stdexcept>
+#include <utility>
+
+namespace pulp::playback {
+namespace {
+
+RealtimeStretchStateBankAdmission reject(
+    RealtimeStretchStateBankError code, timeline::ItemId clip_id = {},
+    std::uint64_t actual = 0, std::uint64_t limit = 0,
+    signal::PitchTimePrepareStatus processor_status =
+        signal::PitchTimePrepareStatus::prepared) noexcept {
+    return {code, clip_id, actual, limit, 0, processor_status};
+}
+
+signal::RealtimePitchTimeConfig processor_config(
+    const RealtimeStretchStateSpec& spec, std::uint32_t maximum_block_frames) noexcept {
+    signal::RealtimePitchTimeConfig config;
+    config.mode = signal::PitchTimeMode::time_stretch;
+    config.quality = spec.quality;
+    config.channels = static_cast<int>(spec.channels);
+    config.max_block = static_cast<int>(maximum_block_frames);
+    config.max_time_ratio = spec.max_time_ratio;
+    return config;
+}
+
+} // namespace
+
+RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
+    std::span<const RealtimeStretchStateSpec> specs, double sample_rate,
+    std::uint32_t maximum_block_frames, const AudioRendererLimits& limits) noexcept {
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || maximum_block_frames == 0 ||
+        maximum_block_frames > limits.max_block_frames ||
+        maximum_block_frames > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        limits.max_realtime_stretch_allocation_bytes == 0)
+        return reject(RealtimeStretchStateBankError::InvalidConfiguration);
+    if (specs.size() > limits.max_realtime_stretch_states)
+        return reject(RealtimeStretchStateBankError::StateLimitExceeded, {}, specs.size(),
+                      limits.max_realtime_stretch_states);
+    if (specs.size() > limits.max_realtime_stretch_state_bytes /
+                           limits.max_realtime_stretch_allocation_bytes)
+        return reject(RealtimeStretchStateBankError::StateBytesExceeded, {},
+                      limits.max_realtime_stretch_allocation_bytes * specs.size(),
+                      limits.max_realtime_stretch_state_bytes);
+
+    for (std::size_t index = 0; index < specs.size(); ++index) {
+        const auto& spec = specs[index];
+        if (!spec.clip_id.valid())
+            return reject(RealtimeStretchStateBankError::InvalidIdentity, spec.clip_id);
+        for (std::size_t prior = 0; prior < index; ++prior)
+            if (specs[prior].clip_id == spec.clip_id)
+                return reject(RealtimeStretchStateBankError::DuplicateIdentity, spec.clip_id);
+        if (spec.channels == 0 || spec.channels > limits.max_channels ||
+            spec.channels > static_cast<std::uint32_t>(signal::kRealtimePitchTimeMaximumChannels))
+            return reject(RealtimeStretchStateBankError::ChannelLimitExceeded, spec.clip_id,
+                          spec.channels,
+                          std::min(limits.max_channels,
+                                   static_cast<std::uint32_t>(
+                                       signal::kRealtimePitchTimeMaximumChannels)));
+        if (!std::isfinite(spec.max_time_ratio) || spec.max_time_ratio < 1.0f ||
+            !std::isfinite(limits.realtime_stretch_max_time_ratio) ||
+            limits.realtime_stretch_max_time_ratio < 1.0f ||
+            spec.max_time_ratio > limits.realtime_stretch_max_time_ratio)
+            return reject(RealtimeStretchStateBankError::TimeRatioLimitExceeded, spec.clip_id);
+
+        signal::RealtimePitchTimePreparedGeometry<float> geometry;
+        const auto status = signal::checked_realtime_pitch_time_prepared_geometry<float>(
+            processor_config(spec, maximum_block_frames), 1.0,
+            limits.max_realtime_stretch_allocation_bytes, geometry);
+        if (status != signal::PitchTimePrepareStatus::prepared)
+            return reject(RealtimeStretchStateBankError::ProcessorPrepareRejected, spec.clip_id, 0,
+                          limits.max_realtime_stretch_allocation_bytes, status);
+    }
+
+    return {RealtimeStretchStateBankError::None, {}, specs.size(),
+            limits.max_realtime_stretch_states,
+            limits.max_realtime_stretch_allocation_bytes * specs.size(),
+            signal::PitchTimePrepareStatus::prepared};
+}
+
+struct RealtimeStretchStateBank::State {
+    explicit State(RealtimeStretchStateSpec state_spec) noexcept : spec(state_spec) {}
+    RealtimeStretchStateSpec spec;
+    signal::RealtimePitchTimeProcessor processor;
+    std::uint64_t playback_epoch = 0;
+    bool has_playback_epoch = false;
+};
+
+RealtimeStretchStateBank::RealtimeStretchStateBank() = default;
+RealtimeStretchStateBank::~RealtimeStretchStateBank() = default;
+RealtimeStretchStateBank::RealtimeStretchStateBank(RealtimeStretchStateBank&&) noexcept = default;
+RealtimeStretchStateBank&
+RealtimeStretchStateBank::operator=(RealtimeStretchStateBank&&) noexcept = default;
+
+RealtimeStretchStateBankAdmission RealtimeStretchStateBank::prepare(
+    std::span<const RealtimeStretchStateSpec> specs, double sample_rate,
+    std::uint32_t maximum_block_frames, const AudioRendererLimits& limits) {
+    const auto admission = admit_realtime_stretch_state_bank(
+        specs, sample_rate, maximum_block_frames, limits);
+    if (!admission)
+        return admission;
+
+#if defined(__cpp_exceptions)
+    try {
+#endif
+        std::vector<std::unique_ptr<State>> candidate;
+        candidate.reserve(specs.size());
+        for (const auto& spec : specs) {
+            auto state = std::make_unique<State>(spec);
+            const auto status = state->processor.prepare(
+                sample_rate, processor_config(spec, maximum_block_frames),
+                limits.max_realtime_stretch_allocation_bytes);
+            if (status != signal::PitchTimePrepareStatus::prepared)
+                return reject(RealtimeStretchStateBankError::ProcessorPrepareRejected,
+                              spec.clip_id, 0,
+                              limits.max_realtime_stretch_allocation_bytes, status);
+            candidate.push_back(std::move(state));
+        }
+        states_.swap(candidate);
+        reserved_state_bytes_ = admission.reserved_state_bytes;
+        return admission;
+#if defined(__cpp_exceptions)
+    } catch (const std::bad_alloc&) {
+        return reject(RealtimeStretchStateBankError::AllocationFailed);
+    } catch (const std::length_error&) {
+        return reject(RealtimeStretchStateBankError::AllocationFailed);
+    }
+#endif
+}
+
+signal::RealtimePitchTimeProcessor* RealtimeStretchStateBank::state_for_epoch(
+    timeline::ItemId clip_id, std::uint64_t playback_epoch) noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    const auto found = std::find_if(states_.begin(), states_.end(), [clip_id](const auto& state) {
+        return state->spec.clip_id == clip_id;
+    });
+    if (found == states_.end())
+        return nullptr;
+    auto& state = **found;
+    if (!state.has_playback_epoch || state.playback_epoch != playback_epoch) {
+        state.processor.reset();
+        state.playback_epoch = playback_epoch;
+        state.has_playback_epoch = true;
+    }
+    return &state.processor;
+}
+
+const signal::RealtimePitchTimeProcessor*
+RealtimeStretchStateBank::find(timeline::ItemId clip_id) const noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    const auto found = std::find_if(states_.begin(), states_.end(), [clip_id](const auto& state) {
+        return state->spec.clip_id == clip_id;
+    });
+    return found == states_.end() ? nullptr : &(*found)->processor;
+}
+
+void RealtimeStretchStateBank::reset() noexcept {
+    runtime::ScopedNoAlloc no_alloc;
+    for (auto& state : states_) {
+        state->processor.reset();
+        state->playback_epoch = 0;
+        state->has_playback_epoch = false;
+    }
+}
+
+} // namespace pulp::playback
