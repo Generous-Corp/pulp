@@ -15,6 +15,8 @@
 #include "forge/brand.hpp"
 #include "forge/shell.hpp"
 
+#include <pulp/view/buttons.hpp>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,6 +119,10 @@ public:
     }
 
 private:
+    void style_tabs();
+
+    pulp::view::TextButton* tab_module_ = nullptr;
+    pulp::view::TextButton* tab_patch_ = nullptr;
     EngineClient* engine_ = nullptr;
     Artifact artifact_ = Artifact::module;
     bool has_build_ = false;

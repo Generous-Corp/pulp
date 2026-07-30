@@ -49,8 +49,38 @@ visual work before that was noticed.
 |---|---|
 | 0 — no-leak guard | **done**, fails on a 1px shared change, passes when reverted |
 | 1 — the seam | **done**, 3 changes, 3 products byte-identical, each proven live |
-| 2 — Forge Modular runs Forge's UI | next |
-| 3–8 | not started; see `../SPEC-forge-modular.md` |
+| 2 — Forge Modular runs Forge's UI | **done**, 7.2/255 vs Forge Instrument, verified windowed |
+| 3 — the tabs | **in progress** — see below |
+| 4–8 | not started; see `../SPEC-forge-modular.md` |
+
+## Phase 3, exactly where it stands
+
+Working, and visible in `design/prototype/modular-tabs-wip.png`:
+
+- Two `TextButton` tabs come through `home_accessory()` and render.
+- The styles are right: the selected tab is the loud one (`ghost`, which paints
+  the accent) and the unselected is the quiet box (`secondary`). That is the
+  opposite of the first guess and only a render showed it.
+- `ForgeChrome::refresh_copy()` re-reads `chrome_copy()` and updates the hero,
+  the badge and the placeholder in place, so switching artifact does not rebuild
+  the tree and drop a half-typed prompt. It leaves a non-empty prompt alone.
+- Clicking the already-active tab is a no-op rather than a redundant rebuild.
+
+**Not working: the row will not centre.** The two tabs sit at opposite edges of
+the hero. Tried, in order: `align_self = center` on the accessory in chrome;
+`dim_width = 100%` plus `justify_content = center` on the row; `flex_grow = 0`
+and `flex_shrink = 0` on each button. None moved them.
+
+**Do not guess at this a fourth time.** Measure it: build the shell's view in a
+test, walk to the accessory and its two children, and print
+`absolute_bounds()` for each. The numbers will say whether the row is full-width
+with the buttons pinned, or the row itself is being stretched and the buttons
+are simply following. `examples/forge-modular/test/shell_interaction.cpp` in the
+Rack repo has the walk-and-measure helpers to copy.
+
+Also still owed for Phase 3: the tabs must drive which generator Build reaches,
+with **both** sides asserted -- checking one side of a boolean is what let
+"Build always made a patch" ship.
 
 ## Open: a crash in rebuild_marketplace_cards
 

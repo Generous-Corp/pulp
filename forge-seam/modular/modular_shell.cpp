@@ -1,5 +1,7 @@
 #include "forge/modular_shell.hpp"
 
+#include <forge/chrome.hpp>
+
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/view/widgets.hpp>
@@ -13,6 +15,7 @@ namespace {
 
 using pulp::view::FlexAlign;
 using pulp::view::FlexDirection;
+using pulp::view::TextButton;
 using pulp::view::View;
 
 // Suggestions the Random button offers. Deliberately concrete: "a filter" is not
@@ -59,7 +62,15 @@ void ForgeModularShell::prepare(const pulp::format::PrepareContext& ctx) {
     block_size_ = ctx.max_buffer_size;
 }
 
-void ForgeModularShell::set_artifact(Artifact a) { artifact_ = a; }
+void ForgeModularShell::set_artifact(Artifact a) {
+    if (artifact_ == a) return;
+    artifact_ = a;
+    style_tabs();
+    // Every string on the home screen depends on this -- the hero, the badge,
+    // the Build label -- so the chrome is told rather than left to disagree
+    // with the tab the user just pressed.
+    if (auto* c = chrome()) c->refresh_copy();
+}
 
 forge::ChromeCopy ForgeModularShell::chrome_copy() const {
     const bool patch = artifact_ == Artifact::patch;
@@ -119,11 +130,57 @@ std::unique_ptr<View> ForgeModularShell::home_accessory() {
     // The Module | Patch tabs. Forge makes one kind of thing and needs no
     // equivalent, which is why this arrives through a hook instead of living in
     // the chrome.
+    //
+    // TextButton rather than a hand-rolled row: it already sets
+    // pointer_events(box_only), so a label centred inside cannot swallow the
+    // click. That exact bug cost this project a shell where nothing was
+    // clickable; the widget had solved it all along.
     auto tabs = std::make_unique<View>();
     tabs->flex().direction = FlexDirection::row;
     tabs->flex().align_items = FlexAlign::center;
+    // Full width, contents centred. Relying on the parent to centre a
+    // content-sized row did not hold -- the hero stretches its children, so the
+    // row spanned the width and threw the two tabs to opposite edges.
+    tabs->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    tabs->flex().justify_content = pulp::view::FlexJustify::center;
     tabs->flex().gap = 8;
+
+    tab_module_ = nullptr;
+    tab_patch_ = nullptr;
+
+    const auto add_tab = [&](const char* label, Artifact which) -> TextButton* {
+        auto b = std::make_unique<TextButton>(label);
+        auto* ptr = b.get();
+        b->flex().preferred_height = 30;
+        b->flex().flex_grow = 0;
+        b->flex().flex_shrink = 0;
+        b->flex().padding_left = 16;
+        b->flex().padding_right = 16;
+        b->on_click = [this, which] {
+            if (artifact_ == which) return;   // clicking the active tab is a no-op
+            set_artifact(which);
+        };
+        tabs->add_child(std::move(b));
+        return ptr;
+    };
+
+    tab_module_ = add_tab("Module", Artifact::module);
+    tab_patch_ = add_tab("Patch", Artifact::patch);
+    style_tabs();
     return tabs;
+}
+
+void ForgeModularShell::style_tabs() {
+    // Only one reads as selected. Two toggles that look exclusive have to BE
+    // exclusive, or the mode becomes whichever was clicked last rather than the
+    // one being shown.
+    const bool patch = artifact_ == Artifact::patch;
+    if (tab_module_)
+        tab_module_->set_style(patch ? TextButton::Style::secondary
+                                     : TextButton::Style::ghost);
+    if (tab_patch_)
+        tab_patch_->set_style(patch ? TextButton::Style::ghost
+                                    : TextButton::Style::secondary);
 }
 
 void ForgeModularShell::process_audio(

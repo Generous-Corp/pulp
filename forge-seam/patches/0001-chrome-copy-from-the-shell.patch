@@ -1,3 +1,22 @@
+diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
+index 0863f43..5df8f84 100644
+--- a/include/forge/chrome.hpp
++++ b/include/forge/chrome.hpp
+@@ -722,6 +722,14 @@ public:
+     // The Home prompt box and the Build rail's follow-up box (tests: pin that
+     // their copy is the hosting shell's kind, not effect wording everywhere).
+     pulp::view::TextEditor* prompt_input() { return prompt_input_; }
++
++    /// Re-read the shell's copy and update what is already on screen.
++    ///
++    /// ChromeCopy is read once while building. A product whose copy changes at
++    /// runtime -- Forge Modular's Module/Patch tabs change every string on the
++    /// home screen -- needs the visible labels refreshed without rebuilding the
++    /// whole tree, which would drop focus and any typed prompt.
++    void refresh_copy();
+     pulp::view::TextEditor* followup_input() { return followup_input_; }
+     std::vector<std::string> followup_suggestions() const;
+     // The hover tooltip's text, or "" when it is not showing. A clamped chip
 diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
 index 528e598..2e8e820 100644
 --- a/include/forge/fx_shell.hpp
@@ -179,7 +198,7 @@ index c8101e1..ac8d716 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..32975d4 100644
+index 1c3814e..35c7faf 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,75 @@ private:
@@ -317,7 +336,7 @@ index 1c3814e..32975d4 100644
                                kFontMono, 11, 400,
                                kMuted, 1.76f);
      home_eyebrow_ = eyebrow.get();
-@@ -1890,13 +1920,23 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1890,13 +1920,27 @@ void ForgeChrome::build_home(View& parent) {
      eyebrow->flex().flex_shrink = 0;
      hero->add_child(std::move(eyebrow));
  
@@ -335,6 +354,10 @@ index 1c3814e..32975d4 100644
 +    // byte-identical.
 +    if (auto accessory = shell_.home_accessory()) {
 +        accessory->flex().flex_shrink = 0;
++        // Centred and content-sized. The hero column stretches its children, so
++        // without this the accessory spanned the full width and pushed its
++        // contents to opposite edges.
++        accessory->flex().align_self = FlexAlign::center;
 +        accessory->flex().margin_bottom = 14;
 +        hero->add_child(std::move(accessory));
 +    }
@@ -342,7 +365,7 @@ index 1c3814e..32975d4 100644
      // Prompt card: a writing row above the composer toolbar. The card has no
      // authored height — it is exactly as tall as the prompt, the attachment
      // strip, and the toolbar need, so it opens compact and grows around the
-@@ -1946,7 +1986,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1946,7 +1990,7 @@ void ForgeChrome::build_home(View& parent) {
          kHomePromptTextWidth, design::geometry::composer_max_text_lines,
          design::geometry::composer_text_line_height);
      prompt_input_ = input.get();
@@ -351,7 +374,7 @@ index 1c3814e..32975d4 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -1993,6 +2033,28 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1993,6 +2037,28 @@ void ForgeChrome::build_home(View& parent) {
      actions->flex().align_items = FlexAlign::center;
      actions->flex().margin_top = 10;
      actions->flex().flex_shrink = 0;
@@ -380,7 +403,7 @@ index 1c3814e..32975d4 100644
      auto attach = std::make_unique<TextButton>();
      home_attach_button_ = attach.get();
      attach->set_style(TextButton::Style::ghost);
-@@ -2047,6 +2109,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -2047,6 +2113,7 @@ void ForgeChrome::build_home(View& parent) {
      };
      actions->add_child(std::move(send));
      box->add_child(std::move(actions));
@@ -388,7 +411,7 @@ index 1c3814e..32975d4 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3401,7 +3464,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3401,7 +3468,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -397,7 +420,7 @@ index 1c3814e..32975d4 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -4268,7 +4331,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4335,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -406,7 +429,7 @@ index 1c3814e..32975d4 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -5726,7 +5789,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5793,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -415,7 +438,7 @@ index 1c3814e..32975d4 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +5922,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +5926,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -424,7 +447,27 @@ index 1c3814e..32975d4 100644
      enter_home();
  }
  
-@@ -9019,7 +9082,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -8630,6 +8697,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+     }
+ }
+ 
++void ForgeChrome::refresh_copy() {
++    const auto copy = shell_.chrome_copy();
++    if (home_eyebrow_) home_eyebrow_->set_text(copy.hero_eyebrow);
++    if (home_title_) home_title_->set_text(copy.hero_title);
++    if (shell_kind_badge_) shell_kind_badge_->set_text(copy.badge);
++    // The placeholder is only a suggestion, so it is replaced only while the
++    // field is empty -- overwriting something half-typed would be worse than
++    // leaving a stale hint.
++    if (prompt_input_ && prompt_input_->text().empty())
++        prompt_input_->placeholder = copy.prompt_placeholder;
++    if (root_) root_->request_repaint();
++}
++
+ void ForgeChrome::rebuild_marketplace_cards(
+     const std::vector<const MarketplaceListing*>& listings,
+     bool reference_catalog) {
+@@ -9019,7 +9099,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
