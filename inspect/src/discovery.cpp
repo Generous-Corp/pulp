@@ -93,6 +93,19 @@ std::int64_t unix_ms_now() {
         .count();
 }
 
+#ifndef PULP_INSPECT_READER_ONLY
+std::optional<std::int64_t> expiry_after(
+    std::chrono::milliseconds ttl) {
+    const auto now = unix_ms_now();
+    if (ttl <= std::chrono::milliseconds(0) || now < 0 ||
+        ttl.count() >
+            std::numeric_limits<std::int64_t>::max() - now) {
+        return std::nullopt;
+    }
+    return now + ttl.count();
+}
+#endif
+
 bool safe_component(std::string_view value) {
     return !value.empty() &&
            std::all_of(value.begin(), value.end(), [](unsigned char c) {
@@ -816,11 +829,12 @@ bool InspectorDiscoveryPublisher::publish(
     std::span<const std::uint8_t> credential,
     std::chrono::milliseconds ttl) {
     remove();
+    const auto expires_at = expiry_after(ttl);
     if (!safe_component(record.session_id) ||
         !safe_component(record.instance_id) ||
         !valid_loopback_endpoint(record.endpoint) ||
         credential.size() != 32 ||
-        ttl <= std::chrono::milliseconds(0) ||
+        !expires_at ||
         !ensure_private_directory(runtime_directory_)) {
         return false;
     }
@@ -829,7 +843,7 @@ bool InspectorDiscoveryPublisher::publish(
     if (!process_start_id)
         return false;
     record.process_start_id = *process_start_id;
-    record.expires_at_unix_ms = unix_ms_now() + ttl.count();
+    record.expires_at_unix_ms = *expires_at;
     const auto file_stem =
         discovery_file_stem(record.session_id, record.instance_id);
     record.record_path = runtime_directory_ / (file_stem + ".json");
@@ -878,12 +892,13 @@ bool InspectorDiscoveryPublisher::publish(
 }
 
 bool InspectorDiscoveryPublisher::refresh(std::chrono::milliseconds ttl) {
+    const auto expires_at = expiry_after(ttl);
     if (!record_ || !ownership_ || credential_.size() != 32 ||
-        ttl <= std::chrono::milliseconds(0) ||
+        !expires_at ||
         read_private_text_file(ownership_path_) !=
             std::optional<std::string>(ownership_marker_))
         return false;
-    record_->expires_at_unix_ms = unix_ms_now() + ttl.count();
+    record_->expires_at_unix_ms = *expires_at;
     return write_private_file_atomic(record_->record_path,
                                      encode_record(*record_));
 }

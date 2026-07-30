@@ -63,10 +63,12 @@ available for offline SQL:
 pulp trace doctor            # human report; add --json for {ready_to_capture, ready_to_query, …}
 ```
 
-`ready_to_capture:false` usually means the inspector is unreachable (start it
-with `PULP_TRACE_SERVER=1`) or tracing was compiled out; `ready_to_query:false`
-means no `trace_processor` (on `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched
-build, or `$PATH`) or no captured trace yet. For zero-install, run
+`ready_to_capture:false` usually means no eligible inspector session was found
+or tracing was compiled out. Normal launches create no endpoint; capture
+requires an explicitly wired custom fixture published through authenticated discovery.
+`ready_to_query:false` means no `trace_processor` (on
+`$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
+captured trace yet. For zero-install, run
 `pulp trace fetch` once — it downloads the pinned `trace_processor_shell`
 (Perfetto v57.2), SHA-256-verified, into `$PULP_HOME`. (`pulp tool install
 trace-processor` fetches the same pinned artifact via the tool registry.)
