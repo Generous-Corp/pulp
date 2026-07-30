@@ -405,3 +405,31 @@ TEST_CASE("discovery lifetime remains longer than a configured heartbeat",
     // 30-second default. The server derives a three-interval TTL instead.
     CHECK(records.front().expires_at_unix_ms - started_at >= 119'000);
 }
+
+TEST_CASE("server rejects heartbeat schedules that cannot be represented",
+          "[inspect][client][heartbeat][resource-limit]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-overflow-heartbeat", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.heartbeat_interval =
+        std::chrono::milliseconds::max() / 3;
+    CHECK_FALSE(server.start_authenticated(std::move(config)));
+    CHECK_FALSE(publisher.record().has_value());
+}

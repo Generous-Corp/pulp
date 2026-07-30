@@ -8,6 +8,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -147,6 +148,27 @@ TEST_CASE("discovery rejects records and credentials above their fixed bounds",
     }
     CHECK(reader.list().empty());
     CHECK_FALSE(reader.read_credential(*publisher.record()).has_value());
+}
+
+TEST_CASE("discovery rejects expiration arithmetic overflow",
+          "[inspect][discovery][resource-limit]") {
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    CHECK_FALSE(publisher.publish(
+        fixture_record("overflow-publication"), *token,
+        std::chrono::milliseconds::max()));
+    CHECK_FALSE(publisher.record().has_value());
+
+    REQUIRE(publisher.publish(
+        fixture_record("bounded-publication"), *token, 5s));
+    const auto original_expiry =
+        publisher.record()->expires_at_unix_ms;
+    CHECK_FALSE(
+        publisher.refresh(std::chrono::milliseconds::max()));
+    REQUIRE(publisher.record().has_value());
+    CHECK(publisher.record()->expires_at_unix_ms == original_expiry);
 }
 
 TEST_CASE("discovery accepts only complete nonzero loopback ports",

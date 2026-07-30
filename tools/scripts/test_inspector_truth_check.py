@@ -46,6 +46,14 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":
                 "authenticated ephemeral discovery\n",
+            ".agents/skills/motion/SKILL.md":
+                "explicitly wired custom fixture; authenticated discovery; "
+                "nonce/HMAC; intentionally unavailable\n",
+            ".agents/skills/trace-analysis/SKILL.md":
+                "explicitly wired custom fixture; authenticated discovery\n",
+            ".agents/skills/cli-maintenance/SKILL.md":
+                "nonce/HMAC; owner-private per-session credential; "
+                "defense-in-depth\n",
             "tools/mcp/pulp_mcp.cpp":
                 '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
             "CMakeLists.txt":
@@ -72,7 +80,13 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "inspect/src/discovery.cpp":
                 "info.kp_proc.p_stat == SZOMB\n"
                 "without a supported start-time identity fail closed\n"
-                "record && read_credential(*record).has_value()\n",
+                "record && read_credential(*record).has_value()\n"
+                "std::numeric_limits<std::int64_t>::max() - now\n",
+            "inspect/src/inspector_publication.hpp":
+                "heartbeat_interval > std::chrono::milliseconds::max() / 3\n"
+                "std::chrono::steady_clock::duration::max()\n"
+                "std::chrono::steady_clock::time_point::max() - interval\n"
+                "!publisher_->refresh(ttl_)\n",
         }
         for relative, text in files.items():
             path = root / relative
@@ -250,6 +264,28 @@ class InspectorTruthCheckTests(unittest.TestCase):
         errors = " ".join(inspector_truth_check.check_root(root))
         self.assertIn("main.rs retains stale claim: PULP_MOTION_SERVER=1", errors)
         self.assertIn("main.rs retains stale claim: PULP_TRACE_SERVER=1", errors)
+
+    def test_rejects_stale_shipped_inspector_workflows(self) -> None:
+        root = self.make_root()
+        (root / ".agents/skills/motion/SKILL.md").write_text(
+            "PULP_MOTION_SERVER=1\nRaw inspector wire\n",
+            encoding="utf-8",
+        )
+        (root / ".agents/skills/trace-analysis/SKILL.md").write_text(
+            "PULP_TRACE_SERVER=1\n", encoding="utf-8"
+        )
+        (root / ".agents/skills/cli-maintenance/SKILL.md").write_text(
+            "inspector transport has no authentication\n",
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn(".agents/skills/motion/SKILL.md retains stale claim", errors)
+        self.assertIn(
+            ".agents/skills/trace-analysis/SKILL.md retains stale claim", errors
+        )
+        self.assertIn(
+            ".agents/skills/cli-maintenance/SKILL.md retains stale claim", errors
+        )
 
     def test_rejects_stale_migration_guide_claim(self) -> None:
         root = self.make_root()

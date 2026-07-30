@@ -91,6 +91,18 @@ FORBIDDEN_CLAIMS = {
     ".claude/commands/trace.md": (
         "(default 9147)",
     ),
+    ".agents/skills/motion/SKILL.md": (
+        "PULP_MOTION_SERVER=1",
+        "Raw inspector wire",
+        "pulp motion load-fixture captures/",
+    ),
+    ".agents/skills/trace-analysis/SKILL.md": (
+        "PULP_TRACE_SERVER=1",
+    ),
+    ".agents/skills/cli-maintenance/SKILL.md": (
+        "inspector transport has no authentication",
+        "transport is unauthenticated",
+    ),
 }
 
 REQUIRED_CLAIMS = {
@@ -113,6 +125,21 @@ REQUIRED_CLAIMS = {
     "docs/reference/scripted-ui-inspector.md": (
         "nonce/HMAC",
         "owner-private per-session credential",
+    ),
+    ".agents/skills/motion/SKILL.md": (
+        "explicitly wired custom fixture",
+        "authenticated discovery",
+        "nonce/HMAC",
+        "intentionally unavailable",
+    ),
+    ".agents/skills/trace-analysis/SKILL.md": (
+        "explicitly wired custom fixture",
+        "authenticated discovery",
+    ),
+    ".agents/skills/cli-maintenance/SKILL.md": (
+        "nonce/HMAC",
+        "owner-private per-session credential",
+        "defense-in-depth",
     ),
 }
 
@@ -144,6 +171,13 @@ REQUIRED_SECURITY_CONTRACTS = {
         "info.kp_proc.p_stat == SZOMB",
         "without a supported start-time identity fail closed",
         "record && read_credential(*record).has_value()",
+        "std::numeric_limits<std::int64_t>::max() - now",
+    ),
+    "inspect/src/inspector_publication.hpp": (
+        "heartbeat_interval > std::chrono::milliseconds::max() / 3",
+        "std::chrono::steady_clock::duration::max()",
+        "std::chrono::steady_clock::time_point::max() - interval",
+        "!publisher_->refresh(ttl_)",
     ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (
         "must be an integer from 1 to 65535",
