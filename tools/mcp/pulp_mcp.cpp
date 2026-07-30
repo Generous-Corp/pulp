@@ -97,9 +97,21 @@ using pulp_mcp::handle_inspect_pending_requests;
 
 namespace {
 
-std::string run_inspector_command(const fs::path& root,
-                                  const std::string& method,
-                                  const std::string& params_json = "{}") {
+struct InspectorCommandResult {
+    pulp::platform::ProcessResult process;
+    std::string output;
+
+    bool succeeded() const {
+        return process.exit_code == 0 &&
+               !process.timed_out &&
+               !process.was_cancelled;
+    }
+};
+
+InspectorCommandResult run_inspector_command(
+    const fs::path& root,
+    const std::string& method,
+    const std::string& params_json = "{}") {
     const auto cli = resolve_inspect_cli_binary(root);
     pulp::platform::ProcessOptions options;
     options.working_directory = root.string();
@@ -108,8 +120,20 @@ std::string run_inspector_command(const fs::path& root,
         cli.string(),
         {"inspect", "--command", method, "--params", params_json},
         options);
-    result.stdout_output += result.stderr_output;
-    return result.stdout_output;
+    auto output = result.stdout_output + result.stderr_output;
+    if (output.empty() && result.exit_code != 0) {
+        output = "pulp inspect subprocess failed with exit code " +
+                 std::to_string(result.exit_code);
+    }
+    return {std::move(result), std::move(output)};
+}
+
+std::string inspector_tool_payload(InspectorCommandResult command) {
+    auto payload = "{\"content\":[{\"type\":\"text\",\"text\":" +
+                   json_string(command.output) + "}]}";
+    if (!command.succeeded())
+        payload.insert(payload.size() - 1, ",\"isError\":true");
+    return payload;
 }
 
 }  // namespace
@@ -464,9 +488,9 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto output =
+                auto command =
                     run_inspector_command(root, inspector_method, inspector_params);
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                result = inspector_tool_payload(std::move(command));
             }
         }
         // Perfetto tracing — inspector Trace.* wrappers (mirror the motion
@@ -500,9 +524,9 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto output =
+                auto command =
                     run_inspector_command(root, inspector_method, inspector_params);
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                result = inspector_tool_payload(std::move(command));
             }
         }
         // Pending agent-request queue — an in-process read of the
@@ -526,9 +550,9 @@ static std::string handle_request_raw(const std::string& json) {
                 std::string params_json = std::string("{\"id\":") + std::to_string(pid) +
                     ",\"value\":" + std::to_string(value) +
                     ",\"normalized\":" + (normalized ? "true" : "false") + "}";
-                auto output =
+                auto command =
                     run_inspector_command(root, "State.setParameter", params_json);
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                result = inspector_tool_payload(std::move(command));
             }
         }
         // Inspector tools — delegate to pulp inspect CLI for now
@@ -559,9 +583,9 @@ static std::string handle_request_raw(const std::string& json) {
             if (root.empty()) {
                 result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
-                auto output =
+                auto command =
                     run_inspector_command(root, inspector_method, inspector_params);
-                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                result = inspector_tool_payload(std::move(command));
             }
         }
         else return json_error(id, -32601, "Unknown tool: " + name);
