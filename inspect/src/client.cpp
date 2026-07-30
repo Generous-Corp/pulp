@@ -63,6 +63,7 @@ public:
     std::thread event_thread;
     std::atomic<std::int64_t> next_request_id{2};
     std::uint64_t connection_generation = 0;
+    bool mutually_authenticated = false;
     bool disconnected = true;
 
     Impl() {
@@ -121,6 +122,8 @@ public:
             if (disconnected || generation != connection_generation)
                 return;
             if (message.method == "Session.authChallenge") {
+                if (mutually_authenticated || challenge)
+                    return;
                 try {
                     const auto value = choc::json::parse(message.params_json);
                     InspectorAuthChallenge parsed;
@@ -147,6 +150,11 @@ public:
                 return;
             }
         }
+        {
+            std::lock_guard lock(mutex);
+            if (!mutually_authenticated)
+                return;
+        }
         const bool lossy = inspector_event_is_lossy(message.method);
         detail::EventQueuePushResult result;
         {
@@ -170,6 +178,7 @@ public:
             if (generation != connection_generation)
                 return;
             disconnected = true;
+            mutually_authenticated = false;
         }
         cv.notify_all();
     }
@@ -188,6 +197,7 @@ public:
             std::lock_guard lock(mutex);
             generation = ++connection_generation;
             disconnected = true;
+            mutually_authenticated = false;
             responses.clear();
             in_flight.clear();
             challenge.reset();
@@ -260,6 +270,7 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
         std::lock_guard lock(impl_->mutex);
         generation = ++impl_->connection_generation;
         impl_->disconnected = false;
+        impl_->mutually_authenticated = false;
         impl_->challenge.reset();
         impl_->responses.clear();
         impl_->in_flight.clear();
@@ -343,6 +354,14 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
             token->bytes(), challenge, *proof, server_proof)) {
         impl_->connection.disconnect();
         return false;
+    }
+    {
+        std::lock_guard lock(impl_->mutex);
+        if (impl_->disconnected ||
+            impl_->connection_generation != generation) {
+            return false;
+        }
+        impl_->mutually_authenticated = true;
     }
     return true;
 }
