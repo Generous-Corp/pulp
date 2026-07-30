@@ -815,7 +815,7 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
     const auto second_bytes = std::filesystem::file_size(second_path);
     pulp::interchange::ExportArtifacts refused;
     const auto refusal = pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, refused, std::max(first_bytes, second_bytes));
+        loaded, refused, first_bytes + second_bytes - 1);
     REQUIRE_FALSE(refusal);
     REQUIRE(refusal.error().asset_id == 7);
     REQUIRE(refusal.error().asset_name == "second.wav");
@@ -824,10 +824,93 @@ TEST_CASE("DAWproject media export enforces one cumulative retained-byte budget"
 
     pulp::interchange::ExportArtifacts accepted;
     const auto accumulated = pulp::tools::timeline::detail::add_dawproject_media(
-        loaded, accepted, first_bytes + second_bytes);
+        loaded, accepted, 1024u * 1024u);
     REQUIRE(accumulated);
     REQUIRE(accumulated.value() == 2);
     REQUIRE(accepted.artifacts.size() == 2);
+}
+
+TEST_CASE("DAWproject ZIP export and import enforce one exact aggregate working set",
+          "[mcp][tools][timeline][interchange]") {
+    namespace detail = pulp::tools::timeline::detail;
+    TempDir temp;
+
+    auto incompressible = [](std::size_t size, std::uint32_t seed) {
+        std::vector<std::uint8_t> bytes(size);
+        for (auto& byte : bytes) {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            byte = static_cast<std::uint8_t>(seed);
+        }
+        return bytes;
+    };
+    auto long_name = [](std::size_t index) {
+        std::string name = "audio/" + std::to_string(index) + "/";
+        while (name.size() + 65 < 4'096)
+            name += std::string(64, 'p') + '/';
+        name.append(4'096 - name.size(), 'x');
+        return name;
+    };
+
+    pulp::interchange::ExportArtifacts artifacts;
+    artifacts.artifacts.push_back(
+        {"project.xml", std::vector<std::uint8_t>{'<', 'p', 'r', 'o', 'j', 'e', 'c', 't', '/', '>'}});
+    constexpr std::size_t kEntryCount = 128;
+    for (std::size_t index = 0; index < kEntryCount; ++index)
+        artifacts.artifacts.push_back(
+            {long_name(index), incompressible(8u * 1024u, static_cast<std::uint32_t>(index + 1))});
+
+    constexpr std::uint64_t kTestLimit = 16u * 1024u * 1024u;
+    const auto archive = temp.path / std::filesystem::path(u8"música-工作集.dawproject");
+    const auto written = detail::write_dawproject_archive_no_replace(
+        artifacts, archive, kTestLimit);
+    REQUIRE(written);
+    REQUIRE(written.value() > 0);
+    REQUIRE(written.value() < kTestLimit);
+    REQUIRE(std::filesystem::exists(archive));
+
+    const auto export_refused = detail::write_dawproject_archive_no_replace(
+        artifacts, temp.path / "export-over-limit.dawproject", written.value() - 1);
+    REQUIRE_FALSE(export_refused);
+    REQUIRE(export_refused.error().code == detail::DawProjectArchiveErrorCode::Export);
+    REQUIRE_FALSE(std::filesystem::exists(temp.path / "export-over-limit.dawproject"));
+
+    const auto inspected = detail::inspect_dawproject_archive(
+        archive, kTestLimit, artifacts.artifacts.size(), artifacts.artifacts.size(), 4'096);
+    REQUIRE(inspected);
+    REQUIRE(inspected.value() > 0);
+    const auto import_refused = detail::inspect_dawproject_archive(
+        archive, inspected.value() - 1, artifacts.artifacts.size(),
+        artifacts.artifacts.size(), 4'096);
+    REQUIRE_FALSE(import_refused);
+    REQUIRE(import_refused.error().find("working-set") != std::string::npos);
+
+    REQUIRE_FALSE(detail::inspect_dawproject_archive(
+        archive, kTestLimit, artifacts.artifacts.size() - 1,
+        artifacts.artifacts.size(), 4'096));
+    REQUIRE_FALSE(detail::inspect_dawproject_archive(
+        archive, kTestLimit, artifacts.artifacts.size(),
+        artifacts.artifacts.size() - 1, 4'096));
+    REQUIRE_FALSE(detail::inspect_dawproject_archive(
+        archive, kTestLimit, artifacts.artifacts.size(),
+        artifacts.artifacts.size(), 4'095));
+
+    const auto occupied = temp.path / "occupied.dawproject";
+    const std::vector<std::uint8_t> sentinel{'k', 'e', 'e', 'p'};
+    {
+        std::ofstream stream(occupied, std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(sentinel.data()),
+                     static_cast<std::streamsize>(sentinel.size()));
+    }
+    const auto publish_refused = detail::write_dawproject_archive_no_replace(
+        artifacts, occupied, kTestLimit);
+    REQUIRE_FALSE(publish_refused);
+    REQUIRE(publish_refused.error().code == detail::DawProjectArchiveErrorCode::Publish);
+    std::ifstream preserved_stream(occupied, std::ios::binary);
+    const std::vector<std::uint8_t> preserved{std::istreambuf_iterator<char>(preserved_stream),
+                                              std::istreambuf_iterator<char>()};
+    REQUIRE(preserved == sentinel);
 }
 
 } // namespace

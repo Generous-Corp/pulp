@@ -70,6 +70,26 @@ add_dawproject_media(const LoadedProject& loaded,
                      pulp::interchange::ExportArtifacts& artifacts,
                      std::uint64_t max_total_media_bytes = kMaxAssetWorkingSetBytes);
 
+enum class DawProjectArchiveErrorCode : std::uint8_t {
+    Export,
+    Publish,
+};
+
+struct DawProjectArchiveError {
+    DawProjectArchiveErrorCode code = DawProjectArchiveErrorCode::Export;
+    std::string message;
+};
+
+runtime::Result<std::uint64_t, DawProjectArchiveError> write_dawproject_archive_no_replace(
+    const pulp::interchange::ExportArtifacts& artifacts,
+    const std::filesystem::path& destination,
+    std::uint64_t max_working_set_bytes = kMaxAssetWorkingSetBytes);
+
+runtime::Result<std::uint64_t, std::string> inspect_dawproject_archive(
+    const std::filesystem::path& input, std::uint64_t max_working_set_bytes,
+    std::size_t max_file_entries, std::size_t max_archive_entries,
+    std::size_t max_path_bytes);
+
 runtime::Result<std::unordered_set<std::uint64_t>, playback::CompileError>
 reachable_assets(const pulp::timeline::Project& project,
                  const pulp::timeline::Sequence& root,
