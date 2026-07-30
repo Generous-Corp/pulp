@@ -36,6 +36,30 @@ inline bool checked_fft_platform_setup_bytes(std::uint64_t fft_size,
     return true;
 }
 
+/// Complete retained-storage contract for one prepared FftT. Keeping this
+/// beside FftT makes callers compose the transform's allocation policy instead
+/// of duplicating its platform-specific backing stores.
+template <typename SampleType>
+inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
+                                       std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+    CheckedRetainedByteCharge charge(target_max_bytes);
+    std::uint64_t platform_setup_bytes = 0;
+    if (!charge.add<std::complex<double>>(fft_size / 2u)
+        || !checked_fft_platform_setup_bytes<SampleType>(fft_size, target_max_bytes,
+                                                         platform_setup_bytes)
+        || !charge.add_retained_bytes(platform_setup_bytes))
+        return false;
+#if PULP_FFT_HAS_VDSP
+    if constexpr (std::is_same_v<SampleType, float>) {
+        if (!charge.add<float>(fft_size) || !charge.add<float>(fft_size))
+            return false;
+    }
+#endif
+    bytes = charge.total();
+    return true;
+}
+
 // Radix-2 FFT — in-place, decimation-in-time.
 // Size must be a power of 2.
 // On Apple platforms, uses vDSP for significantly faster large transforms.

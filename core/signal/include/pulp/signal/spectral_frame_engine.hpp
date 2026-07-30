@@ -63,6 +63,7 @@ struct SpectralFrameEngineGeometry {
     std::uint64_t input_ring_elements = 0;
     std::uint64_t output_ring_elements = 0;
     std::uint64_t frame_elements = 0;
+    std::uint64_t retained_bytes = 0;
 };
 
 inline bool is_valid_spectral_frame_geometry(int fft_size, int analysis_hop) noexcept {
@@ -121,42 +122,25 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
                                      geometry.frame_elements))
         return std::nullopt;
 
-    const bool explicit_buffers_fit =
-        checked_allocation_bytes<SampleType>(geometry.input_ring_elements, target_max_bytes)
-        && checked_allocation_bytes<SampleType>(geometry.output_ring_elements,
-                                                target_max_bytes)
-        && checked_allocation_bytes<SampleType>(ring_size, target_max_bytes) // norm ring
-        && checked_allocation_bytes<SampleType>(fft_size, target_max_bytes) // window
-        && checked_allocation_bytes<SampleType>(fft_size, target_max_bytes) // time scratch
-        && checked_allocation_bytes<std::complex<SampleType>>(
-            geometry.frame_elements, target_max_bytes)
-        && checked_allocation_bytes<std::complex<SampleType>>(fft_size,
-                                                              target_max_bytes) // freq scratch
-        && checked_allocation_bytes<std::complex<SampleType>*>(channels,
-                                                               target_max_bytes); // frame pointers
-    // FftT owns fallback twiddles on every platform. Apple's float backend
-    // additionally owns two fft-sized split buffers; its opaque plan is bounded
-    // by the FFT wrapper's conservative platform policy below.
-    const bool fft_buffers_fit =
-        checked_allocation_bytes<std::complex<double>>(fft_size / 2u, target_max_bytes);
-    std::uint64_t platform_setup_bytes = 0;
-    const bool platform_setup_fits = checked_fft_platform_setup_bytes<SampleType>(
-        fft_size, target_max_bytes, platform_setup_bytes);
-    if (!explicit_buffers_fit || !fft_buffers_fit || !platform_setup_fits)
+    CheckedRetainedByteCharge charge(target_max_bytes);
+    std::uint64_t fft_retained_bytes = 0;
+    if (!charge.add<SampleType>(geometry.input_ring_elements)
+        || !charge.add<SampleType>(geometry.output_ring_elements)
+        || !charge.add<SampleType>(ring_size) // norm ring
+        || !charge.add<SampleType>(fft_size) // window
+        || !charge.add<SampleType>(fft_size) // time scratch
+        || !charge.add<std::complex<SampleType>>(geometry.frame_elements)
+        || !charge.add<std::complex<SampleType>>(fft_size) // freq scratch
+        || !charge.add<std::complex<SampleType>*>(channels) // frame pointers
+        || !checked_fft_retained_bytes<SampleType>(fft_size, target_max_bytes,
+                                                   fft_retained_bytes)
+        || !charge.add_retained_bytes(fft_retained_bytes))
         return std::nullopt;
-#if PULP_FFT_HAS_VDSP
-    if constexpr (std::is_same_v<SampleType, float>) {
-        const bool split_buffers_fit =
-            checked_allocation_bytes<float>(fft_size, target_max_bytes)
-            && checked_allocation_bytes<float>(fft_size, target_max_bytes);
-        if (!split_buffers_fit)
-            return std::nullopt;
-    }
-#endif
 
     geometry.max_synthesis_hop = max_synthesis_hop;
     geometry.num_bins = static_cast<int>(num_bins);
     geometry.ring_size = static_cast<int>(ring_size);
+    geometry.retained_bytes = charge.total();
     return geometry;
 }
 
