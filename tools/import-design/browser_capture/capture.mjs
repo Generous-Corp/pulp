@@ -483,12 +483,13 @@ async function runCapture(options) {
       // window before running completion hooks or freezing the page.
       minimumElapsedMs: 1000,
     });
-    let readiness = await awaitExplicitReadiness(cdp);
+    const readiness = await awaitExplicitReadiness(cdp);
     let rendererHooks = await finalizeKnownRenderers(cdp);
     const rendererSettle = await waitForStable(cdp, {
       networkIdle: () => pendingNetwork.size === 0,
     });
     let interactionReport = null;
+    let interactionReadiness = null;
     let interactionNavigationGuard = null;
     let interactionSettle = { rounds: 0, stableRounds: 0, elapsedMs: 0 };
     if (interactionPlan) {
@@ -509,7 +510,8 @@ async function runCapture(options) {
           navigationGuard: interactionNavigationGuard,
           settle: settleAfterInteraction,
         });
-      readiness = await awaitExplicitReadiness(cdp);
+      interactionReadiness = await awaitExplicitReadiness(
+        cdp, "__pulpInteractionReady");
       rendererHooks = await finalizeKnownRenderers(cdp);
       await settleAfterInteraction();
       await interactionNavigationGuard.assertUnchanged();
@@ -757,6 +759,9 @@ async function runCapture(options) {
         },
         health: captureHealth,
         readiness,
+        ...(interactionReadiness
+          ? { interaction_readiness: interactionReadiness }
+          : {}),
         renderer_hooks: rendererHooks,
         ...(interactionReport
           ? {

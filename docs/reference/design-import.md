@@ -80,7 +80,9 @@ selector timeouts remain bounded by the capture-wide timeout and cannot extend
 it. A `wait-for` action checks the
 live rendered element state, so hidden
 or inert DOM content does not count merely because its strings exist in the
-document.
+document. A source may expose `globalThis.__pulpInteractionReady` for a
+distinct post-action asynchronous completion boundary; the initial
+`__pulpCaptureReady` contract remains one-shot.
 
 ```json
 {

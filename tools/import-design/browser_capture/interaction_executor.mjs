@@ -31,6 +31,17 @@ function selectorProbeExpression(selector, operation) {
     if (!element) return { ok: false, state: "detached" };
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
+    const paintHitAt = (x, y) => {
+      const override = document.createElement("style");
+      override.textContent =
+        "*,:before,:after{pointer-events:auto!important}";
+      (document.head || document.documentElement).append(override);
+      try {
+        return document.elementFromPoint(x, y);
+      } finally {
+        override.remove();
+      }
+    };
     let visualTreeVisible = true;
     for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
       const ancestorStyle = getComputedStyle(ancestor);
@@ -59,7 +70,7 @@ function selectorProbeExpression(selector, operation) {
         [right - insetX, bottom - insetY],
       ];
       return points.some(([x, y]) => {
-        const hit = document.elementFromPoint(x, y);
+        const hit = paintHitAt(x, y);
         return Boolean(hit && (element === hit || element.contains(hit)));
       });
     };
@@ -105,7 +116,7 @@ function selectorProbeExpression(selector, operation) {
     if (element.disabled || style.pointerEvents === "none") {
       return { ok: false, error: "target is disabled or ignores pointer events" };
     }
-    const hit = document.elementFromPoint(x, y);
+    const hit = paintHitAt(x, y);
     if (!hit || !(element === hit || element.contains(hit))) {
       return { ok: false, error: "target is covered by another rendered element" };
     }

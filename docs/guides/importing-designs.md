@@ -114,7 +114,10 @@ Typed text still becomes rendered prototype state and can appear in the
 screenshot, DOM/semantic evidence, or tokens. Never put passwords, credentials,
 private drafts, or other secrets in a plan. Plans cannot execute arbitrary
 JavaScript or open popup pages, and action timeouts cannot extend the
-capture-wide deadline.
+capture-wide deadline. If the final interacted state has a distinct
+asynchronous completion boundary, expose `globalThis.__pulpInteractionReady`
+as a Promise or one-shot function. Pulp awaits it after the final action
+without invoking the initial `__pulpCaptureReady` contract again.
 
 Chrome/Chromium and Node.js 22 are import-time tools only. Generated DesignIR,
 JavaScript, and C++ artifacts do not embed or require them.

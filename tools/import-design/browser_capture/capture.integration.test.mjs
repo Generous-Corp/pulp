@@ -298,7 +298,7 @@ test("real browser wait-for visible rejects invisible ancestors and overlays",
       },
       {
         name: "covering-overlay",
-        style: "#overlay { position:absolute;inset:40px 0 0;z-index:2;background:#000 }",
+        style: "#overlay { position:absolute;inset:40px 0 0;z-index:2;background:#000;pointer-events:none }",
         target: `<div id="target" style="background:rgb(20,210,40)"></div>
           <div id="overlay"></div>`,
         mutation: "document.getElementById('overlay').remove()",

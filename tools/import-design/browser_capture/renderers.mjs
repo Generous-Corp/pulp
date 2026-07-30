@@ -20,16 +20,18 @@ const RENDERER_HOOKS = [
   },
 ];
 
-export async function awaitExplicitReadiness(cdp) {
+export async function awaitExplicitReadiness(
+  cdp, contract = "__pulpCaptureReady") {
   const evaluated = await cdp.call("Runtime.evaluate", {
     expression: `(async () => {
-      let ready = globalThis.__pulpCaptureReady;
+      const contract = ${JSON.stringify(contract)};
+      let ready = globalThis[contract];
       if (typeof ready === 'function') ready = ready();
       if (ready === undefined || ready === null) {
         return { contract: '', awaited: false };
       }
       await Promise.resolve(ready);
-      return { contract: '__pulpCaptureReady', awaited: true };
+      return { contract, awaited: true };
     })()`,
     awaitPromise: true,
     returnByValue: true,

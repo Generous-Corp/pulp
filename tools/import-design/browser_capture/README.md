@@ -41,6 +41,9 @@ fragment routing are allowed; loading another document or opening a popup
 remains forbidden. Typed text still becomes live rendered page state and may
 therefore appear in screenshots, DOM/semantic evidence, or tokens. Never put a
 password, credential, private draft, or other secret in an interaction plan.
+Sources with a distinct asynchronous boundary after the last action may expose
+`globalThis.__pulpInteractionReady` as a Promise or one-shot function; the
+initial `__pulpCaptureReady` contract is never invoked twice.
 Action timeouts remain inside the capture-wide
 `--timeout-ms` deadline and cannot extend it. See
 `interaction_plan_protocol.json` for the exact schema. With no plan, capture

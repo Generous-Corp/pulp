@@ -3264,7 +3264,10 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   text hash in the interaction report. Typed text remains live rendered state
   and may appear in screenshot, DOM/semantic, or token evidence, so never put
   passwords, credentials, private drafts, or other secrets in a plan. Popup
-  pages are rejected. Never add an arbitrary JavaScript action.
+  pages are rejected. For a distinct post-action asynchronous completion
+  boundary, expose `globalThis.__pulpInteractionReady`; capture awaits it after
+  the plan without calling the initial `__pulpCaptureReady` contract twice.
+  Never add an arbitrary JavaScript action.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated
