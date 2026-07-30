@@ -741,11 +741,13 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // `bridge->close()` dispatches Processor::on_view_closed(*view),
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
-    window->set_close_callback([this, bridge_raw]() {
+    auto* window_raw = window.get();
+    window->set_close_callback([this, window_raw, bridge_raw]() {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
-        if (bridge_raw) bridge_raw->close();
+        if (window_raw && bridge_raw)
+            detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
     });
 
@@ -1047,7 +1049,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // processor is torn down; removal is harmless on platforms where no
     // editor-initiated resize handler was installed.
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
-    bridge->close();
+    detail::retire_standalone_editor(*window, *bridge);
     stop();
     return true;
 }

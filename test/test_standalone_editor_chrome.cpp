@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
@@ -1154,6 +1155,26 @@ public:
 };
 
 }  // namespace
+
+TEST_CASE("Standalone editor retirement clears idle work and rejects queued ticks",
+          "[standalone][chrome][idle-pump][lifecycle]") {
+    ResizeProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    StubWindowHost window;
+
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    window.set_idle_callback(make_editor_idle_pump(bridge));
+    auto queued_tick = window.idle_callback_;
+
+    retire_standalone_editor(window, bridge);
+
+    REQUIRE(window.idle_callback_ == nullptr);
+    REQUIRE_FALSE(bridge.owner_is_alive());
+    REQUIRE(bridge.view() == nullptr);
+    queued_tick();
+}
 
 TEST_CASE("Standalone editor resize drives bridge and owned window",
           "[standalone][chrome][resize][editor-request]") {

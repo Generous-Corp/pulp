@@ -169,14 +169,25 @@ class ControlStateView final : public view::View {
 
 class CrossfeedOverrideView final : public view::View {
   public:
-    static constexpr std::string_view display_text = "100% · PING PONG";
-
-    explicit CrossfeedOverrideView(const CharacterPalette& palette)
-        : palette_(&palette) {
+    CrossfeedOverrideView(state::StateStore& store,
+                          const CharacterPalette& palette)
+        : store_(&store), palette_(&palette) {
         set_hit_testable(false);
         set_access_role(view::View::AccessRole::label);
-        set_access_label("Crossfeed overridden by Ping Pong");
-        set_access_value("100 percent");
+        set_access_label("Effective crossfeed routing");
+        update_access_value();
+    }
+
+    static std::string_view display_text(const state::StateStore& store) noexcept {
+        return store.get_value(kReverse) >= 0.5f
+            ? "0% · DUAL REVERSE"
+            : "100% · PING PONG";
+    }
+
+    void update_access_value() {
+        set_access_value(store_->get_value(kReverse) >= 0.5f
+            ? "0 percent, dual reverse"
+            : "100 percent, ping pong");
     }
 
     void layout_children() override {}
@@ -185,7 +196,7 @@ class CrossfeedOverrideView final : public view::View {
         const auto b = local_bounds();
         text(c, "CROSSFEED", 2.0f, 11.0f, 8.5f, color::muted,
              canvas::TextAlign::left, 600, 0.65f);
-        text(c, std::string(display_text), b.width - 2.0f, 11.0f, 9.5f,
+        text(c, std::string(display_text(*store_)), b.width - 2.0f, 11.0f, 9.5f,
              palette_->accent(), canvas::TextAlign::right, 650);
         c.set_stroke_color(palette_->accent());
         c.set_line_width(4.0f);
@@ -196,6 +207,7 @@ class CrossfeedOverrideView final : public view::View {
     }
 
   private:
+    state::StateStore* store_ = nullptr;
     const CharacterPalette* palette_ = nullptr;
 };
 
@@ -301,7 +313,7 @@ PulpDelayEditor::PulpDelayEditor(state::StateStore& store)
         [this](state::ParamID changed, float) {
             if (changed == kSync || changed == kLink || changed == kOffsetMode
                 || changed == kRouting || changed == kTime || changed == kTimeOffset
-                || changed == kOffsetMs) {
+                || changed == kOffsetMs || changed == kReverse) {
                 update_timing_presentation();
             }
         },
@@ -352,7 +364,8 @@ bool PulpDelayEditor::crossfeed_override_visible() const noexcept {
 }
 
 std::string PulpDelayEditor::crossfeed_override_text() const {
-    return crossfeed_override_visible() ? std::string(CrossfeedOverrideView::display_text)
+    return crossfeed_override_visible()
+        ? std::string(CrossfeedOverrideView::display_text(*store_))
                                         : std::string{};
 }
 
@@ -489,7 +502,8 @@ void PulpDelayEditor::build() {
     add_knob(energy, {22, 38, 135, 128}, kFeedback, "FEEDBACK");
     add_knob(energy, {209, 38, 135, 128}, kMix, "MIX");
     add_fader(energy, {16, 178, 160, 50}, kCrossfeed, "CROSSFEED");
-    auto crossfeed_override = std::make_unique<CrossfeedOverrideView>(palette_);
+    auto crossfeed_override =
+        std::make_unique<CrossfeedOverrideView>(*store_, palette_);
     crossfeed_override_ = crossfeed_override.get();
     crossfeed_override->set_bounds({16, 178, 160, 50});
     energy.add_child(std::move(crossfeed_override));
@@ -570,6 +584,9 @@ void PulpDelayEditor::update_timing_presentation() {
         && crossfeed_override_->visible() != ping_pong) {
         crossfeed_override_->set_visible(ping_pong);
     }
+    if (crossfeed_override_)
+        static_cast<CrossfeedOverrideView*>(crossfeed_override_)
+            ->update_access_value();
 }
 
 std::unique_ptr<view::View> build_pulp_delay_editor(

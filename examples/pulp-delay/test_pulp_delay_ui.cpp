@@ -341,6 +341,13 @@ TEST_CASE("Pulp Delay Ping Pong suppresses overridden right and crossfeed contro
                          : "RIGHT = LEFT · 380 ms"));
         REQUIRE_THAT(store.get_value(kCrossfeed), WithinAbs(48.0, 1.0e-6));
     }
+
+    store.set_value(kReverse, 1.0f);
+    REQUIRE(editor.crossfeed_override_visible());
+    REQUIRE(editor.crossfeed_override_text() == "0% · DUAL REVERSE");
+
+    store.set_value(kReverse, 0.0f);
+    REQUIRE(editor.crossfeed_override_text() == "100% · PING PONG");
 }
 
 TEST_CASE("Pulp Delay timing presentation follows live state transitions",
