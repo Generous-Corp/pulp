@@ -122,29 +122,44 @@ def main():
     # else -- and it had drifted on the app background, the rail width, the hero
     # size and a composer 280px too wide, which is what made it read as a
     # different app.
-    forge = "/Volumes/Workshop/Code/forge/src/chrome.cpp"
-    if os.path.exists(forge):
+    # Brand parity against Forge's SEMANTIC token contract, not its chrome.
+    # design_tokens.hpp is what Forge's chrome, chat and Theme all consume, so it
+    # is the one file that cannot drift. Reading chrome.cpp instead compared
+    # against a working tree 431 commits stale and confidently reported a line
+    # colour, a hero size and a composer shape that Forge had long since changed.
+    forge = None
+    for cand in ("/tmp/forge-cur/include/forge/design_tokens.hpp",
+                 "/Volumes/Workshop/Code/forge/include/forge/design_tokens.hpp"):
+        if os.path.exists(cand):
+            forge = cand
+            break
+    if forge:
         ftext = open(forge, errors="replace").read()
         theirs = {}
-        for name, r, g, b in re.findall(
-                r"const Color k(\w+) = Color::rgba8\(0x(\w\w), 0x(\w\w), 0x(\w\w)\)", ftext):
-            theirs[name.lower()] = f"#{r}{g}{b}".upper()
-        ours = dict(re.findall(r'^\s+(\w+):\s*"(#[0-9A-Fa-f]{6})"', text, re.M))
-        # Their token name -> ours. Only the ones both products have.
-        PAIRS = {"appbg": "appBg", "panel": "panel", "raised": "raised",
-                 "line": "line", "accent": "accent", "accentdim": "accentDeep",
-                 "onink": "onAccent", "textstrong": "textStrong", "text": "text",
-                 "muted": "muted", "faint": "faint", "coral": "coral",
-                 "ghost": "ghost"}
+        for name, args in re.findall(
+                r"inline constexpr Color (\w+) = Color::rgba8\(([^)]*)\)", ftext):
+            parts = [x.strip() for x in args.split(",")]
+            hexes = "".join(f"{int(x,16):02X}" for x in parts if x.startswith("0x"))
+            theirs[name] = "#" + hexes
+        ours = dict(re.findall(r'^\s+(\w+):\s*"(#[0-9A-Fa-f]{6,8})"', text, re.M))
+        PAIRS = {"surface_app": "appBg", "surface_sunken": "sunken",
+                 "surface_panel": "panel", "surface_raised": "raised",
+                 "surface_overlay": "overlay", "line": "line",
+                 "line_strong": "lineStrong", "accent": "accent",
+                 "accent_deep": "accentDeep", "accent_text": "onAccent",
+                 "text_strong": "textStrong", "text": "text",
+                 "text_muted": "muted", "text_faint": "faint",
+                 "amber": "amber", "coral": "coral", "violet": "violet",
+                 "indigo": "indigo", "success": "leaf", "skeleton": "ghost"}
         drift = [(t, theirs[t], ours.get(o, "(missing)"))
                  for t, o in PAIRS.items()
                  if t in theirs and ours.get(o, "").upper() != theirs[t]]
         if drift:
-            for t, want, got in drift[:6]:
+            for t, want, got in drift[:8]:
                 print(f"  WRONG  {t}: Forge has {want}, we have {got}")
             bad += 1
         else:
-            print(f"  ok     all {len(PAIRS)} shared tokens match Forge's chrome.cpp")
+            print(f"  ok     all {len(PAIRS)} tokens match Forge's design_tokens.hpp")
 
     # A colour that is not defined evaluates to undefined and the style call
     # silently does nothing. Renaming the palette to Forge's tokens left three

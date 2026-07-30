@@ -12,56 +12,75 @@
 //
 // Ink & Signal throughout, shared with Forge, because these are one brand.
 
-// ── design tokens, taken from Forge ──────────────────────────────────────────
+// ── design tokens, from Forge's design_tokens.hpp ────────────────────────────
 //
-// Copied value-for-value from Forge's src/chrome.cpp, not approximated. Forge
-// Modular is a sibling product, so it should differ where the product differs
-// and nowhere else -- and several of these were quietly wrong before, which is
-// why it read as a different app: the app background, the rail width, the hero
-// size, and a composer nearly 300px too wide.
+// Transcribed from `include/forge/design_tokens.hpp` on Forge's origin/main --
+// the semantic contract its chrome, chat and Theme all consume. Earlier this
+// was copied from a chrome.cpp that was 431 commits stale, which got the line
+// colour, the hero size, the composer shape and the title bar all wrong.
 //
-// The comment on each line is Forge's own token name, so a change there can be
-// found here.
+// Each line carries Forge's own token name so a change there can be found here.
 
 const C = {
-    appBg:      "#161A21",   // kAppBg      --surface-app
-    panel:      "#1E2530",   // kPanel      --surface-panel
-    raised:     "#28303C",   // kRaised     --surface-raised
-    line:       "#2B3340",   // kLine       --line
-    accent:     "#16DAC2",   // kAccent     --ink-signal
-    accentDeep: "#10B6A3",   // kAccentDim  --ink-signal-deep
-    onAccent:   "#052320",   // kOnInk      --on-ink
-    textStrong: "#F3F6F9",   // kTextStrong --text-strong
-    text:       "#D6DCE4",   // kText       --text
-    muted:      "#939CA9",   // kMuted      --text-muted
-    faint:      "#646D7A",   // kFaint      --text-faint
-    coral:      "#FF5C4D",   // kCoral      --ink-coral  (errors; was amber here)
-    ghost:      "#37404D",   // kGhost      skeleton bones
-
-    // Forge Modular's own, because a rack has roles a plugin does not: cable
-    // groups in the chat and the preview are colour-coded by what they carry.
-    violet:     "#8B6CF5",
-    leaf:       "#3FCF77",
+    appBg:      "#161A21",     // surface_app
+    sunken:     "#0E1116",     // surface_sunken   (the rail)
+    panel:      "#1E2530",     // surface_panel
+    raised:     "#28303C",     // surface_raised
+    overlay:    "#2F3743",     // surface_overlay
+    // Lines are TRANSLUCENT light, not dark grey -- they lift off whatever they
+    // sit on. Reading them as opaque #2B3340 is why panels looked flat.
+    line:       "#DCE8FA1F",   // line
+    lineStrong: "#DCE8FA38",   // line_strong
+    accent:     "#16DAC2",     // accent
+    accentDeep: "#10B6A3",     // accent_deep
+    onAccent:   "#052320",     // accent_text
+    textStrong: "#F3F6F9",     // text_strong
+    text:       "#D6DCE4",     // text
+    muted:      "#939CA9",     // text_muted
+    faint:      "#646D7A",     // text_faint
+    amber:      "#F6B847",     // amber
+    coral:      "#FF5C4D",     // coral
+    violet:     "#8B6CF5",     // violet
+    indigo:     "#5E78FF",     // indigo
+    leaf:       "#3FCF77",     // success
+    ghost:      "#37404D",     // skeleton
 };
 
-// Forge's shell geometry. The silhouette is the thing a person recognises, so
-// these are the numbers to match before any styling detail.
+const R = {
+    small:  6,   // radius::small
+    medium: 10,  // radius::medium
+    large:  14,  // radius::large
+    hero:   18,  // radius::hero
+};
+
 const G = {
-    railWidth:      60,      // kShellRailWidth   (was 64)
-    gutter:         48,      // center padding on the home screen
-    promptWidth:    720,     // the prompt row     (was 1000 -- the big one)
-    promptHeight:   58,
-    promptRadius:   16,
-    toolbarHeight:  52,      // kWorkspaceToolbarHeight (was 46)
-    chatWidth:      384,     // kBuildChatWidth    (was 460)
-    heroTitleSize:  32,      // kHeroTitleSize     (was 44)
-    heroSubSize:    14,
-    iconTile:       30,      // Forge's 30x30 radius-8 tile
+    titleBarHeight: 38,   // shell_title_bar_height -- Forge HAS one
+    railWidth:      60,   // shell_rail_width
+    gutter:         60,   // home_horizontal_gutter
+    promptWidth:    680,  // home_prompt_width
+    // The composer is a card that opens at one line and grows to three, centred
+    // in a fixed slot so the hero above it never moves. Not a 58px row -- that
+    // was the stale build.
+    promptHeight:   112,  // home_prompt_collapsed_height
+    promptSlot:     204,  // home_prompt_slot_height
+    promptPadding:  18,   // kHomePromptPadding
+    shelfHeight:    250,  // home_shelf_height
+    shelfInset:     34,   // home_shelf_horizontal_inset
+    cardWidth:      206,  // home_project_card_width
+    cardHeight:     164,  // home_project_card_height
+    cardArtHeight:  112,  // home_project_art_height
+    toolbarHeight:  52,   // workspace_toolbar_height
+    chatWidth:      384,  // build_chat_width
+    heroTitleSize:  42,   // type::hero
+    bodySize:       15,   // type::body
+    secondarySize:  13,   // type::secondary
+    microSize:      11,   // type::micro
+    iconTile:       30,
     iconTileRadius: 8,
 };
 
-const FONT = "Jost";              // kFontDisplay
-const MONO = "JetBrains Mono";    // kFontMono
+const FONT = "Jost";              // type::display
+const MONO = "JetBrains Mono";    // type::mono
 
 let mode = "module";      // "module" | "patch"
 let lastRandom = "";      // so Random never offers the same prompt twice running
@@ -119,7 +138,7 @@ const rail = createCol("rail", "shell");
 // Forge's rail is a darker column than the app behind it, and only the ACTIVE
 // item carries a raised tile -- the rest are bare glyphs. Tiling every item is
 // what made ours look like a toolbar rather than a rail.
-setBackground("rail", "#12161C");
+setBackground("rail", C.sunken);
 setFlex("rail", "width", G.railWidth);
 setFlex("rail", "align_items", "center");
 setFlex("rail", "padding_top", 14);
@@ -224,9 +243,9 @@ function railIcon(id, glyph, active, marginTop) {
     // The rail reads as icons, not buttons. An unselected tile takes the rail's
     // own colour on both background and border, or the rail becomes a grid of
     // boxes -- which is what it looked like before these were set.
-    setToggleBackground(id, "#12161C", C.raised);
-    setToggleBorderColor(id, "#12161C", C.raised);
-    setBackground(id, active ? C.raised : "#12161C");
+    setToggleBackground(id, C.sunken, C.raised);
+    setToggleBorderColor(id, C.sunken, C.raised);
+    setBackground(id, active ? C.raised : C.sunken);
     setCornerRadius(id, G.iconTileRadius);
     setFlex(id, "width", G.iconTile);
     setFlex(id, "height", G.iconTile);
@@ -264,11 +283,11 @@ setCornerRadius("main", "BottomRight", 14);
 // ── top bar ──────────────────────────────────────────────────────────────────
 
 const topbar = createRow("topbar", "main");
-setVisible("topbar", false);   // Forge has no title bar; see the caption below
+
 setFlex("topbar", "align_items", "center");
 setFlex("topbar", "padding_left", 18);
 setFlex("topbar", "padding_right", 18);
-setFlex("topbar", "height", G.toolbarHeight);
+setFlex("topbar", "height", G.titleBarHeight);
 setCornerRadius("topbar", "TopRight", 14);
 
 createLabel("topbar-name", "Forge Modular", "topbar");
@@ -342,9 +361,10 @@ setFlex("hero-title", "margin_top", 12);
 
 createLabel("hero-sub", "One Eurorack panel — knobs, jacks and the DSP behind them.", "hero");
 setFontFamily("hero-sub", FONT);
-setFontSize("hero-sub", G.heroSubSize);
+setFontSize("hero-sub", G.secondarySize);
 setTextColor("hero-sub", C.muted);
 setFlex("hero-sub", "margin_top", 10);
+setVisible("hero-sub", false);   // Forge Instrument has no subtitle here
 
 // ── tabs, joined to the composer ─────────────────────────────────────────────
 //
@@ -407,22 +427,15 @@ setToggleOn("tab-module", true);
 const composer = createCol("composer", "hero");
 setBackground("composer", C.raised);
 setBorder("composer", C.line, 1);
-setCornerRadius("composer", G.promptRadius);
+setCornerRadius("composer", R.hero);
 setFlex("composer", "width", G.promptWidth);
 setFlex("composer", "max_width", G.promptWidth);
 setFlex("composer", "flex_grow", 0);
 setFlex("composer", "flex_shrink", 0);
 setFlex("composer", "height", G.promptHeight);
-setFlex("composer", "direction", "row");
-setFlex("composer", "align_items", "center");
-setFlex("composer", "padding_left", 12);
-setFlex("composer", "padding_right", 10);
-setFlex("composer", "gap", 10);
-
-const promptTiles = createRow("actions", "composer");
-setFlex("actions", "align_items", "center");
-setFlex("actions", "gap", 8);
-setFlex("actions", "flex_shrink", 0);
+setFlex("composer", "direction", "column");
+setFlex("composer", "padding", G.promptPadding);
+setFlex("composer", "gap", 12);
 
 const prompt = createTextEditor("prompt", "composer");
 setFontFamily("prompt", FONT);
@@ -434,12 +447,25 @@ setFlex("prompt", "flex_shrink", 1);
 setFlex("prompt", "min_width", 0);
 setFlex("prompt", "height", 34);
 setBorder("prompt", C.line, 1);
-setCornerRadius("prompt", 10);
+setCornerRadius("prompt", R.medium);
 setFlex("prompt", "padding_left", 10);
 setPlaceholder("prompt",
     "A 12 HP wavefolder with drive and symmetry, plus a CV input for the fold amount.");
 
-const actionsRight = createRow("actions-right", "composer");
+// One row under the text, the way Forge draws it.
+const composerRow = createRow("composer-row", "composer");
+setFlex("composer-row", "align_items", "center");
+setFlex("composer-row", "width", "100%");
+
+const promptTiles = createRow("actions", "composer-row");
+setFlex("actions", "align_items", "center");
+setFlex("actions", "gap", 8);
+setFlex("actions", "flex_shrink", 0);
+
+const composerGap = createRow("composer-gap", "composer-row");
+setFlex("composer-gap", "flex_grow", 1);
+
+const actionsRight = createRow("actions-right", "composer-row");
 setFlex("actions-right", "align_items", "center");
 setFlex("actions-right", "gap", 8);
 setFlex("actions-right", "flex_shrink", 0);
@@ -455,7 +481,7 @@ function button(id, parent, glyph, label, kind, width) {
     setToggleBorderColor(id, edge, edge);
     setBackground(id, fill);
     setBorder(id, edge, 1);
-    setCornerRadius(id, 11);
+    setCornerRadius(id, R.medium);
     setFlex(id, "padding_left", kind === "icon" ? 13 : 17);
     setFlex(id, "padding_right", kind === "icon" ? 13 : 17);
     setFlex(id, "padding_top", 11);
@@ -490,18 +516,19 @@ function button(id, parent, glyph, label, kind, width) {
 // overflowed with the hint text printed straight through them -- so the two
 // utilities are tiles and the caption below says what they do.
 button("btn-mention", "actions", "at", "", "icon", G.iconTile);
-button("btn-random", "actions", "dice", "", "icon", G.iconTile);
+button("btn-random", "actions", "dice", "Random", "ghost", 118);
 
 // Two labelled buttons rather than an inferred intent chip: a chip guesses and
 // the user still has to notice the guess, while an unwanted rebuild rewrites
 // their work and an unwanted answer costs nothing.
-button("btn-ask", "actions-right", "ask", "Ask", "ghost", 76);
-button("btn-build", "actions-right", "hammer", "Build module", "primary", 158);
+button("btn-ask", "actions-right", "ask", "Ask", "ghost", 86);
+button("btn-build", "actions-right", "hammer", "Build module", "primary", 168);
 setBoxShadow("btn-build", 0, 0, 18, 2, "#16DAC255");
 
 createLabel("composer-hint",
             "@ mention · \u2684 random · ask answers · build rewrites",
             "hero");
+setVisible("composer-hint", false);
 setFontFamily("composer-hint", MONO);
 setFontSize("composer-hint", 9.5);
 setLetterSpacing("composer-hint", 0.06);
@@ -530,16 +557,15 @@ function shelfTab(id, title, active) {
     setToggleBackground(id, C.appBg, C.appBg);
     setToggleBorderColor(id, C.appBg, C.appBg);
     textLabel(id + "-text", title, id);
-    setFontFamily(id + "-text", MONO);
-    setFontSize(id + "-text", 11);
-    setFontWeight(id + "-text", 500);
-    setLetterSpacing(id + "-text", 0.14);
+    setFontFamily(id + "-text", FONT);
+    setFontSize(id + "-text", G.bodySize);
+    setFontWeight(id + "-text", 600);
     setTextColor(id + "-text", active ? C.textStrong : C.faint);
     return t;
 }
 
-shelfTab("shelf-patches", "MY PATCHES", true);
-shelfTab("shelf-modules", "MY MODULES", false);
+shelfTab("shelf-patches", "My patches", true);
+shelfTab("shelf-modules", "My modules", false);
 
 const shelfGap = createRow("shelf-gap", "shelf-bar");
 setFlex("shelf-gap", "flex_grow", 1);
@@ -555,8 +581,9 @@ function card(id, kind, title, count, tint) {
     const c = createCol(id, "cards");
     setBackground(id, C.panel);
     setBorder(id, C.line, 1);
-    setCornerRadius(id, 12);
-    setFlex(id, "width", 232);
+    setCornerRadius(id, R.large);
+    setFlex(id, "width", G.cardWidth);
+    setFlex(id, "height", G.cardHeight);
     setFlex(id, "margin_right", 16);
     setFlex(id, "direction", "column");
 
@@ -564,8 +591,8 @@ function card(id, kind, title, count, tint) {
     setBackground(id + "-art", tint);
     setBackgroundGradient(id + "-art",
                           "linear-gradient(160deg, " + tint + " 0%, #12161C 100%)");
-    setCornerRadius(id + "-art", 12);
-    setFlex(id + "-art", "height", 108);
+    setCornerRadius(id + "-art", R.medium);
+    setFlex(id + "-art", "height", G.cardArtHeight);
 
     createLabel(id + "-kind", kind, id);
     setFontFamily(id + "-kind", MONO);
