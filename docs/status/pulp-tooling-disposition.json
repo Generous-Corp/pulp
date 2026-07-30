@@ -3117,11 +3117,15 @@
               {
                 "name": "--out",
                 "kind": "option",
-                "required": true
+                "required": false
               },
               {
                 "name": "--accept-loss",
                 "kind": "option"
+              },
+              {
+                "name": "--plan",
+                "kind": "flag"
               }
             ],
             "subcommands": []
@@ -4070,6 +4074,10 @@
       {
         "name": "run",
         "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "seq",
+        "disposition": "pulp-owned"
       },
       {
         "name": "ship",
