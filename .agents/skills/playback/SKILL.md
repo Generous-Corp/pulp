@@ -214,10 +214,12 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   those Link-specific controls.
 - A configured `TempoSyncSource*` is non-owning and must outlive
   `MasterTransport`. It switches callers to the host-time `begin_block`
-  overload. The timestamp names the first sample at the output boundary, so the
-  audio-device layer must add output latency before entering playback. A
-  missing host time, disabled backend, backend failure, or invalid mapping
-  fails closed and never advances on the document clock.
+  overload. Its opaque `TempoSyncHostTime` is created by the source and tagged
+  with that source's clock domain; a default token or a token from another
+  source fails before capture. The timestamp names the first sample at the
+  output boundary, so the audio-device layer must add output latency before
+  entering playback. A missing host time, disabled backend, backend failure, or
+  invalid mapping fails closed and never advances on the document clock.
 - Joining an external tempo session is passive. `prepare()` does not broadcast
   `initial_position` or `initially_playing`; only later explicit `seek()`,
   `set_playing()`, or `set_tempo_sync_tempo()` calls become one-shot commands
@@ -228,6 +230,10 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   rejects an active sync source: scrubbing owns a private repeated-window clock
   and cannot share authority with a network beat mapping. The audio-thread guard
   rejects any impossible mixed state defensively as well.
+- Both document-tempo and session-tempo blocks publish through the same
+  canonical block/range projection pipeline. Keep flags, meter anchoring,
+  monotonic ticks, host mapping, and previous-state publication there; source
+  paths should only derive their mode-specific projections.
 - A tempo source must preserve the host-clock time at which its reported
   `is_playing` state becomes effective. `project_tempo_sync_playing()` applies a
   transition at or before the first sample and defers one inside or beyond the

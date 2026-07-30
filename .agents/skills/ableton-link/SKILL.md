@@ -50,15 +50,22 @@ CMake cache value is easier to audit.
   Link types and Link-specific peer/enable/start-stop controls out of it.
 - `AbletonLinkTempoSync` owns those Link-specific controls. Call `set_enabled`
   and `set_start_stop_sync_enabled` from a control thread, never from the audio
-  callback. Only `capture_audio_block` is realtime-safe.
-- The block request's host time is the moment its first sample reaches the
-  output boundary, in Link's microsecond clock domain. Add device/output
-  latency before calling `MasterTransport::begin_block`; a callback invocation
-  timestamp without compensation produces a stable audible offset. Where the
-  audio API lacks output host time, derive a filtered system-clock mapping as
-  recommended by Link rather than forwarding a jittery wall-clock read.
+  callback. `output_host_time` and `capture_audio_block` are realtime-safe.
+- Call `output_host_time(output_latency_frames, sample_rate, time)` in the audio
+  callback, then pass its opaque `TempoSyncHostTime` to `MasterTransport`. The
+  adapter reads Link's realtime clock and adds device/output latency so the
+  timestamp names the first sample at the output boundary. A callback timestamp
+  without compensation produces a stable audible offset.
+- `TempoSyncHostTime` is tagged with its producing source. A transport rejects
+  a default token or one from another source before asking its backend to
+  capture a block, preventing Link, device, and wall-clock epochs from mixing.
+- The public desktop adapter models APIs that report output latency from the
+  callback. It does not accept an arbitrary device-host timestamp. A platform
+  integration whose audio API exposes a calibrated future device timestamp
+  needs an explicit Link-clock conversion boundary; do not forward that raw
+  timestamp or a jittery wall-clock read as though it were Link time.
 - A configured `TempoSyncSource` must outlive `MasterTransport`. Use the
-  host-time `begin_block(frame_count, output_host_time_micros, snapshot)`
+  host-time `begin_block(frame_count, output_host_time, snapshot)`
   overload. The ordinary overload returns `TempoSyncHostTimeRequired`.
 - The session mapping is authoritative. Disabled, failed, or invalid sources
   fail the block; they never fall back to the document tempo clock.

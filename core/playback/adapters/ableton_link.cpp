@@ -43,6 +43,22 @@ std::size_t AbletonLinkTempoSync::peer_count() const {
     return impl_->link.numPeers();
 }
 
+TempoSyncError AbletonLinkTempoSync::output_host_time(std::uint32_t output_latency_frames,
+                                                      double sample_rate,
+                                                      TempoSyncHostTime& time) const noexcept {
+    try {
+        std::int64_t output_micros = 0;
+        if (!tempo_sync_add_output_latency(impl_->link.clock().micros().count(),
+                                           output_latency_frames, sample_rate, output_micros))
+            return TempoSyncError::InvalidRequest;
+        time = make_host_time(output_micros);
+        return TempoSyncError::None;
+    } catch (...) {
+        time = {};
+        return TempoSyncError::BackendFailure;
+    }
+}
+
 TempoSyncError AbletonLinkTempoSync::capture_audio_block(const TempoSyncBlockRequest& request,
                                                          TempoSyncBlockState& state) noexcept {
     state = {};

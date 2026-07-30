@@ -166,6 +166,101 @@ bool host_mapped_output_offset_for_tick(const TransportRange& range,
     return true;
 }
 
+struct MasterTransport::BlockProjection {
+    std::uint32_t frame_count = 0;
+    bool playing = false;
+    bool scrubbing = false;
+    bool transport_changed = false;
+    bool transport_started = false;
+    bool reset_requested = false;
+};
+
+struct MasterTransport::RangeProjection {
+    std::uint32_t sample_offset = 0;
+    std::uint32_t frame_count = 0;
+    timebase::SamplePosition timeline_sample_start{};
+    timebase::TickPosition timeline_tick_start{};
+    timebase::TickPosition timeline_tick_end{};
+    double tempo_bpm = 120.0;
+    bool discontinuity = false;
+    bool host_beat_mapping = false;
+    double host_tick_start = 0.0;
+    double host_tick_end = 0.0;
+    bool has_precise_host_ticks = false;
+    std::uint64_t loop_pass_index = 0;
+};
+
+void MasterTransport::begin_projected_block(const DesiredState& desired,
+                                            const BlockProjection& projection,
+                                            timebase::TickPosition anchor_tick,
+                                            TransportSnapshot& snapshot) noexcept {
+    if (desired.meter != meter_anchor_signature_) {
+        if (first_block_) {
+            meter_anchor_tick_ = {};
+            meter_anchor_bar_ = {};
+        } else {
+            meter_anchor_bar_ = bar_at_tick(anchor_tick, meter_anchor_tick_, meter_anchor_bar_,
+                                            meter_anchor_signature_);
+            meter_anchor_tick_ = anchor_tick;
+        }
+        meter_anchor_signature_ = desired.meter;
+    }
+
+    snapshot = {};
+    snapshot.tempo_map = tempo_map_;
+    snapshot.sample_rate = tempo_map_->sample_rate();
+    snapshot.block_index = block_index_++;
+    snapshot.frame_count = projection.frame_count;
+    snapshot.meter = desired.meter;
+    snapshot.loop = desired.loop;
+    snapshot.is_playing = projection.playing;
+    snapshot.scrubbing = projection.scrubbing;
+    snapshot.transport_changed = projection.transport_changed;
+    snapshot.transport_started = projection.transport_started;
+    snapshot.reset_requested = projection.reset_requested;
+    snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
+}
+
+void MasterTransport::append_projected_range(const RangeProjection& projection,
+                                             TransportSnapshot& snapshot) noexcept {
+    const auto index = snapshot.range_count;
+    auto& range = snapshot.ranges[index];
+    range.sample_offset = projection.sample_offset;
+    range.frame_count = projection.frame_count;
+    range.timeline_sample_start = projection.timeline_sample_start;
+    range.timeline_tick_start = projection.timeline_tick_start;
+    range.timeline_tick_end = projection.timeline_tick_end;
+    range.monotonic_start = monotonic_;
+    range.monotonic_end = monotonic_ + (range.timeline_tick_end - range.timeline_tick_start);
+    range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_, meter_anchor_bar_,
+                                  meter_anchor_signature_);
+    range.tempo_bpm = projection.tempo_bpm;
+    range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
+                                     : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
+    range.discontinuity = projection.discontinuity;
+    range.host_beat_mapping = projection.host_beat_mapping;
+    range.host_tick_start = projection.host_tick_start;
+    range.host_tick_end = projection.host_tick_end;
+    range.has_precise_host_ticks = projection.has_precise_host_ticks;
+    range.loop_pass_index = projection.loop_pass_index;
+    monotonic_ = range.monotonic_end;
+    timeline_tick_ = range.timeline_tick_end;
+    timeline_sample_ = tempo_map_->ticks_to_samples(timeline_tick_);
+    ++snapshot.range_count;
+}
+
+void MasterTransport::finish_projected_block(const DesiredState& desired,
+                                             const BlockProjection& projection,
+                                             TransportSnapshot& snapshot) noexcept {
+    snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
+    previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
+    previous_playing_ = projection.playing;
+    previous_scrubbing_ = projection.scrubbing;
+    previous_meter_ = desired.meter;
+    previous_loop_ = desired.loop;
+    first_block_ = false;
+}
+
 TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_map,
                                         const MasterTransportConfig& config) noexcept {
     reset();
@@ -334,11 +429,13 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
 }
 
 TransportError MasterTransport::begin_block(std::uint32_t frame_count,
-                                            std::int64_t output_host_time_micros,
+                                            TempoSyncHostTime output_host_time,
                                             TransportSnapshot& snapshot) noexcept {
     if (tempo_sync_source_ == nullptr)
         return begin_internal_block(frame_count, snapshot);
-    return begin_tempo_synced_block(frame_count, output_host_time_micros, snapshot);
+    if (output_host_time.source_ != tempo_sync_source_)
+        return TransportError::TempoSyncHostTimeRequired;
+    return begin_tempo_synced_block(frame_count, output_host_time.micros_, snapshot);
 }
 
 TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
@@ -386,75 +483,51 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     // Scrubbing moves the playhead whether or not the musical transport rolls.
     const bool advancing = desired.scrubbing || desired.playing;
 
-    if (desired.meter != meter_anchor_signature_) {
-        if (first_block_) {
-            meter_anchor_tick_ = {};
-            meter_anchor_bar_ = {};
-        } else {
-            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_, meter_anchor_bar_,
-                                            meter_anchor_signature_);
-            meter_anchor_tick_ = timeline_tick_;
-        }
-        meter_anchor_signature_ = desired.meter;
-    }
-
-    snapshot = {};
-    snapshot.tempo_map = tempo_map_;
-    snapshot.sample_rate = tempo_map_->sample_rate();
-    snapshot.block_index = block_index_++;
-    snapshot.frame_count = frame_count;
-    snapshot.meter = desired.meter;
-    snapshot.loop = desired.loop;
-    snapshot.is_playing = advancing;
-    snapshot.scrubbing = desired.scrubbing;
-    snapshot.transport_changed = !first_block_ && (advancing != previous_playing_ ||
-                                                   desired.loop.enabled != previous_loop_.enabled);
-    snapshot.transport_started = advancing && (first_block_ || !previous_playing_);
+    BlockProjection projection;
+    projection.frame_count = frame_count;
+    projection.playing = advancing;
+    projection.scrubbing = desired.scrubbing;
+    projection.transport_changed =
+        !first_block_ &&
+        (advancing != previous_playing_ || desired.loop.enabled != previous_loop_.enabled);
+    projection.transport_started = advancing && (first_block_ || !previous_playing_);
     // Entering and leaving scrub are hard repositions. The window restarts in
     // between are not: they recur many times a second, and a per-grain state
     // reset would wipe consumer state that the plain discontinuity already
     // describes correctly.
-    snapshot.reset_requested =
+    projection.reset_requested =
         seeked || scrub_entered || scrub_exited || desired.loop != previous_loop_;
-    snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
-    if (seeked || snapshot.transport_started || scrub_entered || scrub_exited ||
+    if (seeked || projection.transport_started || scrub_entered || scrub_exited ||
         desired.loop != previous_loop_ || !advancing || desired.scrubbing || !desired.loop.enabled)
         loop_pass_index_ = 0;
+    begin_projected_block(desired, projection, timeline_tick_, snapshot);
 
-    auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
-                          bool discontinuity,
+    auto make_range = [&](std::uint32_t offset, std::uint32_t count, bool discontinuity,
                           const timebase::TickPosition* forced_end_tick = nullptr) {
-        auto& range = snapshot.ranges[index];
+        RangeProjection range;
         range.sample_offset = offset;
         range.frame_count = count;
         range.timeline_sample_start = timeline_sample_;
         range.timeline_tick_start = timeline_tick_;
-        range.monotonic_start = monotonic_;
-        range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
-                                      meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
-        range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
-                                         : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
         range.loop_pass_index =
             advancing && !desired.scrubbing && desired.loop.enabled ? loop_pass_index_ : 0;
+        auto end_sample = timeline_sample_;
         if (advancing) {
-            const timebase::SamplePosition end_sample{
-                saturating_add(timeline_sample_.value, count)};
+            end_sample = {saturating_add(timeline_sample_.value, count)};
             range.timeline_tick_end = forced_end_tick != nullptr
                                           ? *forced_end_tick
                                           : tempo_cursor_.advance(end_sample).tick;
             if (range.timeline_tick_end < range.timeline_tick_start)
                 range.timeline_tick_end = range.timeline_tick_start;
-            const auto duration = range.timeline_tick_end - range.timeline_tick_start;
-            range.monotonic_end = monotonic_ + duration;
-            timeline_sample_ = end_sample;
-            timeline_tick_ = range.timeline_tick_end;
-            monotonic_ = range.monotonic_end;
         } else {
             range.timeline_tick_end = range.timeline_tick_start;
-            range.monotonic_end = range.monotonic_start;
         }
+        append_projected_range(range, snapshot);
+        // The internal clock owns an exact sample cursor. Preserve it instead of
+        // round-tripping the projected tick through the tempo map.
+        timeline_sample_ = end_sample;
     };
 
     // Restarting the window is structurally a loop wrap: reposition, mark a
@@ -475,26 +548,22 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
         if (scrub_window_remaining_ == 0)
             start_scrub_window();
         const auto first_count = std::min(frame_count, scrub_window_remaining_);
-        make_range(0, 0, first_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, first_count, pending_discontinuity_);
         pending_discontinuity_ = false;
         scrub_window_remaining_ -= first_count;
 
         const auto remaining = frame_count - first_count;
         if (remaining > 0) {
             start_scrub_window();
-            make_range(1, first_count, remaining, true);
-            snapshot.range_count = 2;
+            make_range(first_count, remaining, true);
             pending_discontinuity_ = false;
             scrub_window_remaining_ -= remaining;
         }
     } else if (!desired.playing) {
-        make_range(0, 0, frame_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, frame_count, pending_discontinuity_);
         pending_discontinuity_ = false;
     } else if (!desired.loop.enabled) {
-        make_range(0, 0, frame_count, pending_discontinuity_);
-        snapshot.range_count = 1;
+        make_range(0, frame_count, pending_discontinuity_);
         pending_discontinuity_ = false;
     } else {
         const auto loop_start = tempo_map_->ticks_to_samples(desired.loop.start);
@@ -512,8 +581,7 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
         if (first_count > 0) {
             const auto* forced_end =
                 static_cast<std::uint64_t>(first_count) == until_wrap ? &desired.loop.end : nullptr;
-            make_range(0, 0, first_count, pending_discontinuity_, forced_end);
-            snapshot.range_count = 1;
+            make_range(0, first_count, pending_discontinuity_, forced_end);
             pending_discontinuity_ = false;
         }
 
@@ -523,8 +591,7 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
             ++loop_pass_index_;
-            make_range(snapshot.range_count, first_count, remaining, true);
-            ++snapshot.range_count;
+            make_range(first_count, remaining, true);
         } else if (timeline_sample_ == loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
@@ -534,13 +601,7 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
         }
     }
 
-    snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
-    previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
-    previous_playing_ = advancing;
-    previous_scrubbing_ = desired.scrubbing;
-    previous_meter_ = desired.meter;
-    previous_loop_ = desired.loop;
-    first_block_ = false;
+    finish_projected_block(desired, projection, snapshot);
     return TransportError::None;
 }
 
@@ -641,49 +702,24 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
     timebase::TickPosition local_start_tick;
     if (!beats_to_ticks(local_beat_start, local_start_tick))
         return TransportError::InvalidTempoSyncState;
-    if (desired.meter != meter_anchor_signature_) {
-        if (first_block_) {
-            meter_anchor_tick_ = {};
-            meter_anchor_bar_ = {};
-        } else {
-            meter_anchor_bar_ = bar_at_tick(local_start_tick, meter_anchor_tick_, meter_anchor_bar_,
-                                            meter_anchor_signature_);
-            meter_anchor_tick_ = local_start_tick;
-        }
-        meter_anchor_signature_ = desired.meter;
-    }
-
-    snapshot = {};
-    snapshot.tempo_map = tempo_map_;
-    snapshot.sample_rate = tempo_map_->sample_rate();
-    snapshot.block_index = block_index_++;
-    snapshot.frame_count = frame_count;
-    snapshot.meter = desired.meter;
-    snapshot.loop = desired.loop;
-    snapshot.is_playing = block_playing;
-    snapshot.transport_changed =
+    BlockProjection projection;
+    projection.frame_count = frame_count;
+    projection.playing = block_playing;
+    projection.transport_changed =
         !first_block_ && (block_playing != previous_playing_ || loop_changed);
-    snapshot.transport_started = transport_started;
-    snapshot.reset_requested = explicit_seek || inferred_jump || loop_changed;
-    snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
+    projection.transport_started = transport_started;
+    projection.reset_requested = explicit_seek || inferred_jump || loop_changed;
+    begin_projected_block(desired, projection, local_start_tick, snapshot);
 
-    auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
-                          double beat_start, double beat_end, bool discontinuity) {
-        auto& range = snapshot.ranges[index];
+    auto make_range = [&](std::uint32_t offset, std::uint32_t count, double beat_start,
+                          double beat_end, bool discontinuity) {
+        RangeProjection range;
         range.sample_offset = offset;
         range.frame_count = count;
         beats_to_ticks(beat_start, range.timeline_tick_start);
         beats_to_ticks(block_playing ? beat_end : beat_start, range.timeline_tick_end);
         range.timeline_sample_start = tempo_map_->ticks_to_samples(range.timeline_tick_start);
-        range.monotonic_start = monotonic_;
-        range.monotonic_end =
-            block_playing ? monotonic_ + (range.timeline_tick_end - range.timeline_tick_start)
-                          : monotonic_;
-        range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
-                                      meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = state.tempo_bpm;
-        range.tempo_changed = index == 0 ? !first_block_ && state.tempo_bpm != previous_tempo_bpm_
-                                         : state.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
         range.host_beat_mapping = true;
         range.host_tick_start = beat_start * static_cast<double>(timebase::kTicksPerQuarter);
@@ -691,16 +727,13 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
                               static_cast<double>(timebase::kTicksPerQuarter);
         range.has_precise_host_ticks = true;
         range.loop_pass_index = block_playing && desired.loop.enabled ? loop_pass_index_ : 0;
-        monotonic_ = range.monotonic_end;
-        timeline_tick_ = range.timeline_tick_end;
-        timeline_sample_ = tempo_map_->ticks_to_samples(timeline_tick_);
+        append_projected_range(range, snapshot);
     };
 
     const bool first_discontinuity = pending_discontinuity_ || explicit_seek || inferred_jump;
     pending_discontinuity_ = false;
     if (!crosses_loop) {
-        make_range(0, 0, frame_count, local_beat_start, local_beat_end, first_discontinuity);
-        snapshot.range_count = 1;
+        make_range(0, frame_count, local_beat_start, local_beat_end, first_discontinuity);
         if (ends_at_loop) {
             ++loop_pass_index_;
             pending_discontinuity_ = true;
@@ -711,26 +744,18 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         auto first_count = static_cast<std::uint32_t>(
             std::ceil(boundary_fraction * static_cast<double>(frame_count)));
         first_count = std::clamp(first_count, std::uint32_t{1}, frame_count);
-        make_range(0, 0, first_count, local_beat_start, loop_end_beat, first_discontinuity);
-        snapshot.range_count = 1;
+        make_range(0, first_count, local_beat_start, loop_end_beat, first_discontinuity);
         const auto remaining = frame_count - first_count;
         ++loop_pass_index_;
         if (remaining > 0) {
             const auto second_end = loop_start_beat + (source_beat_end - next_loop_boundary);
-            make_range(1, first_count, remaining, loop_start_beat, second_end, true);
-            snapshot.range_count = 2;
+            make_range(first_count, remaining, loop_start_beat, second_end, true);
         } else {
             pending_discontinuity_ = true;
         }
     }
 
-    snapshot.tempo_bpm = state.tempo_bpm;
-    previous_tempo_bpm_ = state.tempo_bpm;
-    previous_playing_ = block_playing;
-    previous_scrubbing_ = false;
-    previous_meter_ = desired.meter;
-    previous_loop_ = desired.loop;
-    first_block_ = false;
+    finish_projected_block(desired, projection, snapshot);
     has_expected_tempo_sync_beat_ = block_playing;
     expected_tempo_sync_beat_ = state.beat_end;
     applied_tempo_sync_playing_generation_ = desired.playing_generation;

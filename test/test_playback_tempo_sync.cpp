@@ -28,6 +28,10 @@ class FakeTempoSyncSource final : public TempoSyncSource {
         enabled_ = enabled;
     }
 
+    TempoSyncHostTime time(std::int64_t micros) const noexcept {
+        return make_host_time(micros);
+    }
+
     TempoSyncError capture_audio_block(const TempoSyncBlockRequest& request,
                                        TempoSyncBlockState& state) noexcept override {
         last_request = request;
@@ -132,6 +136,16 @@ TEST_CASE("tempo sync request and state validation fail closed", "[playback][tem
     REQUIRE_FALSE(valid_tempo_sync_state(state));
 }
 
+TEST_CASE("tempo sync output latency conversion is bounded and deterministic",
+          "[playback][tempo-sync]") {
+    std::int64_t output = 0;
+    REQUIRE(tempo_sync_add_output_latency(10'000, 480, 48'000.0, output));
+    REQUIRE(output == 20'000);
+    REQUIRE_FALSE(tempo_sync_add_output_latency(10'000, 1, 0.0, output));
+    REQUIRE_FALSE(tempo_sync_add_output_latency(
+        std::numeric_limits<std::int64_t>::max() - 1, 480, 48'000.0, output));
+}
+
 TEST_CASE("tempo sync playing projection honors half-open block boundaries",
           "[playback][tempo-sync]") {
     TempoSyncBlockRequest request;
@@ -223,18 +237,18 @@ TEST_CASE("master transport defers timestamped start and stop transitions to blo
     REQUIRE(transport.prepare(map, config(source)) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(48, 1'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(48, source.time(1'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(snapshot.is_playing);
 
     source.playing = true;
     source.playing_transition_time_micros = 2'500;
-    REQUIRE(transport.begin_block(48, 2'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(48, source.time(2'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(snapshot.is_playing);
     REQUIRE_FALSE(snapshot.transport_changed);
     REQUIRE_FALSE(snapshot.transport_started);
     REQUIRE(snapshot.ranges[0].host_tick_end == snapshot.ranges[0].host_tick_start);
 
-    REQUIRE(transport.begin_block(48, 3'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(48, source.time(3'000), snapshot) == TransportError::None);
     REQUIRE(snapshot.is_playing);
     REQUIRE(snapshot.transport_changed);
     REQUIRE(snapshot.transport_started);
@@ -242,12 +256,12 @@ TEST_CASE("master transport defers timestamped start and stop transitions to blo
 
     source.playing = false;
     source.playing_transition_time_micros = 4'500;
-    REQUIRE(transport.begin_block(48, 4'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(48, source.time(4'000), snapshot) == TransportError::None);
     REQUIRE(snapshot.is_playing);
     REQUIRE_FALSE(snapshot.transport_changed);
     REQUIRE(snapshot.ranges[0].host_tick_end > snapshot.ranges[0].host_tick_start);
 
-    REQUIRE(transport.begin_block(48, 5'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(48, source.time(5'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(snapshot.is_playing);
     REQUIRE(snapshot.transport_changed);
     REQUIRE_FALSE(snapshot.transport_started);
@@ -282,7 +296,7 @@ TEST_CASE("master transport consumes a backend-independent tempo sync mapping",
 
     TransportSnapshot snapshot;
     REQUIRE(transport.begin_block(256, snapshot) == TransportError::TempoSyncHostTimeRequired);
-    REQUIRE(transport.begin_block(256, 42'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(256, source.time(42'000), snapshot) == TransportError::None);
 
     REQUIRE(source.capture_count == 1);
     REQUIRE(source.last_request.output_host_time_micros == 42'000);
@@ -300,6 +314,12 @@ TEST_CASE("master transport consumes a backend-independent tempo sync mapping",
     REQUIRE(snapshot.ranges[0].host_tick_end > snapshot.ranges[0].host_tick_start);
     REQUIRE(snapshot.ranges[0].timeline_tick_start ==
             TickPosition{static_cast<std::int64_t>(1.25 * kTicksPerQuarter)});
+
+    FakeTempoSyncSource different_clock;
+    const auto captures_before = source.capture_count;
+    REQUIRE(transport.begin_block(256, different_clock.time(43'000), snapshot) ==
+            TransportError::TempoSyncHostTimeRequired);
+    REQUIRE(source.capture_count == captures_before);
 }
 
 TEST_CASE("master transport sends only explicit tempo sync commands", "[playback][tempo-sync]") {
@@ -309,12 +329,12 @@ TEST_CASE("master transport sends only explicit tempo sync commands", "[playback
     REQUIRE(transport.prepare(map, config(source)) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(128, 1'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(1'000), snapshot) == TransportError::None);
     REQUIRE(transport.set_playing(false) == TransportError::None);
     REQUIRE(transport.seek({2 * kTicksPerQuarter}) == TransportError::None);
     REQUIRE(transport.set_tempo_sync_tempo(0.0) == TransportError::InvalidTempo);
     REQUIRE(transport.set_tempo_sync_tempo(135.0) == TransportError::None);
-    REQUIRE(transport.begin_block(128, 2'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(2'000), snapshot) == TransportError::None);
 
     REQUIRE(source.last_request.command.request_playing);
     REQUIRE_FALSE(source.last_request.command.playing);
@@ -325,7 +345,7 @@ TEST_CASE("master transport sends only explicit tempo sync commands", "[playback
     REQUIRE_FALSE(snapshot.is_playing);
     REQUIRE(snapshot.ranges[0].host_tick_end == snapshot.ranges[0].host_tick_start);
 
-    REQUIRE(transport.begin_block(128, 3'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(3'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(source.last_request.command.request_playing);
     REQUIRE_FALSE(source.last_request.command.request_beat);
     REQUIRE_FALSE(source.last_request.command.request_tempo);
@@ -340,14 +360,16 @@ TEST_CASE("tempo sync failure never falls back to the document clock", "[playbac
     TransportSnapshot snapshot;
     REQUIRE(transport.set_playing(false) == TransportError::None);
     source.set_enabled(false);
-    REQUIRE(transport.begin_block(128, 1'000, snapshot) == TransportError::TempoSyncUnavailable);
+    REQUIRE(transport.begin_block(128, source.time(1'000), snapshot) ==
+            TransportError::TempoSyncUnavailable);
     source.set_enabled(true);
-    REQUIRE(transport.begin_block(128, 2'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(2'000), snapshot) == TransportError::None);
     REQUIRE(source.last_request.command.request_playing);
     REQUIRE_FALSE(source.last_request.command.playing);
 
     source.invalid_state = true;
-    REQUIRE(transport.begin_block(128, 3'000, snapshot) == TransportError::InvalidTempoSyncState);
+    REQUIRE(transport.begin_block(128, source.time(3'000), snapshot) ==
+            TransportError::InvalidTempoSyncState);
 }
 
 TEST_CASE("tempo sync rejects beats outside Pulp's signed tick domain", "[playback][tempo-sync]") {
@@ -359,7 +381,8 @@ TEST_CASE("tempo sync rejects beats outside Pulp's signed tick domain", "[playba
     REQUIRE(transport.prepare(map, config(source, 256)) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(128, 1'000, snapshot) == TransportError::InvalidTempoSyncState);
+    REQUIRE(transport.begin_block(128, source.time(1'000), snapshot) ==
+            TransportError::InvalidTempoSyncState);
 }
 
 TEST_CASE("tempo sync projection preserves the two-range loop contract", "[playback][tempo-sync]") {
@@ -375,7 +398,8 @@ TEST_CASE("tempo sync projection preserves the two-range loop contract", "[playb
     REQUIRE(transport.prepare(map, setup) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(4'800, 10'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(4'800, source.time(10'000), snapshot) ==
+            TransportError::None);
     REQUIRE(snapshot.range_count == 2);
     REQUIRE(snapshot.ranges[0].timeline_tick_end == TickPosition{4 * kTicksPerQuarter});
     REQUIRE(snapshot.ranges[1].timeline_tick_start == TickPosition{0});
@@ -392,15 +416,15 @@ TEST_CASE("tempo sync continuity tolerates timestamp quantization but detects ju
     REQUIRE(transport.prepare(map, config(source)) == TransportError::None);
 
     TransportSnapshot snapshot;
-    REQUIRE(transport.begin_block(256, 10'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(256, source.time(10'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(snapshot.reset_requested);
 
     const auto half_sample_beat = 0.5 * source.tempo / (60.0 * 48'000.0);
     source.next_beat += half_sample_beat;
-    REQUIRE(transport.begin_block(256, 20'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(256, source.time(20'000), snapshot) == TransportError::None);
     REQUIRE_FALSE(snapshot.reset_requested);
 
     source.next_beat += 0.25;
-    REQUIRE(transport.begin_block(256, 30'000, snapshot) == TransportError::None);
+    REQUIRE(transport.begin_block(256, source.time(30'000), snapshot) == TransportError::None);
     REQUIRE(snapshot.reset_requested);
 }

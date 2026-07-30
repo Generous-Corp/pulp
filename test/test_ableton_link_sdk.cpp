@@ -1,5 +1,8 @@
 #include <pulp/playback/tempo_sync.hpp>
+#include <pulp/playback/transport.hpp>
+#include <pulp/timebase/compiled_tempo_map.hpp>
 
+#include <array>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -28,24 +31,38 @@ int main() {
         source.set_start_stop_sync_enabled(true);
         source.set_enabled(true);
 
-        pulp::playback::TempoSyncBlockRequest request;
-        request.output_host_time_micros = 42'000;
-        request.frame_count = 64;
-        request.sample_rate = 48'000.0;
-        request.quantum_beats = 4.0;
-        request.command.request_playing = true;
-        request.command.playing = true;
-        pulp::playback::TempoSyncBlockState state;
-        const auto result = source.capture_audio_block(request, state);
+        const std::array points{pulp::timebase::TempoPoint{{0}, 120.0}};
+        auto compiled = pulp::timebase::CompiledTempoMap::compile(
+            points, pulp::timebase::RationalRate{48'000, 1});
+        if (!compiled) {
+            std::cerr << "could not compile Link smoke-test tempo map\n";
+            return 1;
+        }
+        pulp::playback::MasterTransport transport;
+        pulp::playback::MasterTransportConfig config;
+        config.max_buffer_size = 64;
+        config.tempo_sync_source = &source;
+        if (transport.prepare(compiled.value(), config) != pulp::playback::TransportError::None ||
+            transport.set_playing(true) != pulp::playback::TransportError::None) {
+            std::cerr << "could not prepare Link-backed transport\n";
+            return 1;
+        }
+        pulp::playback::TempoSyncHostTime output_time;
+        if (source.output_host_time(64, 48'000.0, output_time) !=
+            pulp::playback::TempoSyncError::None) {
+            std::cerr << "desktop Ableton Link adapter could not produce output host time\n";
+            return 1;
+        }
+        pulp::playback::TransportSnapshot state;
+        const auto result = transport.begin_block(64, output_time, state);
         source.set_enabled(false);
-        if (result != pulp::playback::TempoSyncError::None ||
-            !pulp::playback::valid_tempo_sync_state(state)) {
+        if (result != pulp::playback::TransportError::None ||
+            !pulp::playback::valid_transport_ranges(state)) {
             std::cerr << "desktop Ableton Link adapter returned an invalid block state\n";
             return 1;
         }
-        if (!state.is_playing ||
-            state.is_playing_at_host_time_micros != request.output_host_time_micros) {
-            std::cerr << "desktop Ableton Link adapter discarded the effective start time\n";
+        if (!state.is_playing || !state.ranges[0].host_beat_mapping) {
+            std::cerr << "desktop Ableton Link adapter did not start on its own clock\n";
             return 1;
         }
         std::cout << "desktop Ableton Link adapter available; peers=" << source.peer_count()

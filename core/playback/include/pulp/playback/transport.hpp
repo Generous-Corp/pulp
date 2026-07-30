@@ -166,14 +166,16 @@ class MasterTransport {
     TransportError end_scrub() noexcept;
 
     TransportError begin_block(std::uint32_t frame_count, TransportSnapshot& snapshot) noexcept;
-    /// output_host_time_micros names the first sample's output-boundary time in
-    /// the TempoSyncSource clock domain. Required only when a source is
-    /// configured; the ordinary document-clock path remains unchanged.
-    TransportError begin_block(std::uint32_t frame_count, std::int64_t output_host_time_micros,
+    /// output_host_time names the first sample's output-boundary time and must
+    /// have been produced by the configured TempoSyncSource. Required only when
+    /// a source is configured; the ordinary document-clock path is unchanged.
+    TransportError begin_block(std::uint32_t frame_count, TempoSyncHostTime output_host_time,
                                TransportSnapshot& snapshot) noexcept;
     void reset() noexcept;
 
   private:
+    struct BlockProjection;
+    struct RangeProjection;
     struct DesiredState {
         MeterSignature meter{};
         LoopRegion loop{};
@@ -198,6 +200,13 @@ class MasterTransport {
     TransportError begin_tempo_synced_block(std::uint32_t frame_count,
                                             std::int64_t output_host_time_micros,
                                             TransportSnapshot& snapshot) noexcept;
+    void begin_projected_block(const DesiredState& desired, const BlockProjection& projection,
+                               timebase::TickPosition anchor_tick,
+                               TransportSnapshot& snapshot) noexcept;
+    void append_projected_range(const RangeProjection& projection,
+                                TransportSnapshot& snapshot) noexcept;
+    void finish_projected_block(const DesiredState& desired, const BlockProjection& projection,
+                                TransportSnapshot& snapshot) noexcept;
 
     runtime::SeqLock<DesiredState> desired_{};
     DesiredState control_state_{};

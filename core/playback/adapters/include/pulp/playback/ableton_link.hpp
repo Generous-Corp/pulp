@@ -12,6 +12,9 @@ namespace pulp::playback {
 /// `pulp::ableton-link` target.
 class AbletonLinkTempoSync final : public TempoSyncSource {
   public:
+    static constexpr audio::RtSafetyClass output_host_time_rt_safety_class =
+        audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+
     explicit AbletonLinkTempoSync(double initial_tempo_bpm);
     ~AbletonLinkTempoSync() override;
 
@@ -27,6 +30,11 @@ class AbletonLinkTempoSync final : public TempoSyncSource {
     void set_start_stop_sync_enabled(bool enabled);
     bool start_stop_sync_enabled() const;
     std::size_t peer_count() const;
+    /// Reads Link's realtime-safe platform clock and adds the output latency.
+    /// The returned opaque timestamp can only be consumed by a transport using
+    /// this source, preventing accidental mixing with another clock epoch.
+    TempoSyncError output_host_time(std::uint32_t output_latency_frames, double sample_rate,
+                                    TempoSyncHostTime& time) const noexcept;
     TempoSyncError capture_audio_block(const TempoSyncBlockRequest& request,
                                        TempoSyncBlockState& state) noexcept override;
 

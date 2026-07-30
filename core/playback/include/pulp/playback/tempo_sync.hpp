@@ -6,6 +6,27 @@
 
 namespace pulp::playback {
 
+class MasterTransport;
+class TempoSyncSource;
+
+/// Opaque host-clock timestamp produced by the TempoSyncSource that owns the
+/// corresponding clock domain. Keeping the source identity with the value
+/// prevents a device, wall, or different Link clock from being passed to a
+/// transport accidentally.
+class TempoSyncHostTime {
+  public:
+    TempoSyncHostTime() = default;
+
+  private:
+    friend class MasterTransport;
+    friend class TempoSyncSource;
+    TempoSyncHostTime(std::int64_t micros, const TempoSyncSource* source) noexcept
+        : micros_(micros), source_(source) {}
+
+    std::int64_t micros_ = 0;
+    const TempoSyncSource* source_ = nullptr;
+};
+
 /// Backend-independent command bundle applied at the first output sample of an
 /// audio block. A false request flag means the corresponding value is ignored.
 struct TempoSyncCommand {
@@ -69,6 +90,9 @@ enum class TempoSyncError : std::uint8_t {
 
 bool valid_tempo_sync_request(const TempoSyncBlockRequest& request) noexcept;
 bool valid_tempo_sync_state(const TempoSyncBlockState& state) noexcept;
+bool tempo_sync_add_output_latency(std::int64_t clock_time_micros,
+                                   std::uint32_t output_latency_frames, double sample_rate,
+                                   std::int64_t& output_host_time_micros) noexcept;
 bool tempo_sync_block_end_host_time_micros(const TempoSyncBlockRequest& request,
                                            std::int64_t& block_end) noexcept;
 TempoSyncPlayingProjection project_tempo_sync_playing(const TempoSyncBlockRequest& request,
@@ -88,6 +112,11 @@ class TempoSyncSource {
 
     virtual TempoSyncError capture_audio_block(const TempoSyncBlockRequest& request,
                                                TempoSyncBlockState& state) noexcept = 0;
+
+  protected:
+    TempoSyncHostTime make_host_time(std::int64_t micros) const noexcept {
+        return TempoSyncHostTime{micros, this};
+    }
 };
 
 } // namespace pulp::playback

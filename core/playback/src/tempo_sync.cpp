@@ -5,6 +5,28 @@
 
 namespace pulp::playback {
 
+bool tempo_sync_add_output_latency(std::int64_t clock_time_micros,
+                                   std::uint32_t output_latency_frames, double sample_rate,
+                                   std::int64_t& output_host_time_micros) noexcept {
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0)
+        return false;
+    const auto latency_micros =
+        static_cast<long double>(output_latency_frames) * 1'000'000.0L /
+        static_cast<long double>(sample_rate);
+    if (!std::isfinite(latency_micros) || latency_micros < 0.0L)
+        return false;
+    const auto rounded = std::round(latency_micros);
+    const auto maximum_exclusive =
+        -static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    if (!(rounded < maximum_exclusive))
+        return false;
+    const auto latency = static_cast<std::int64_t>(rounded);
+    if (clock_time_micros > std::numeric_limits<std::int64_t>::max() - latency)
+        return false;
+    output_host_time_micros = clock_time_micros + latency;
+    return true;
+}
+
 bool tempo_sync_block_end_host_time_micros(const TempoSyncBlockRequest& request,
                                            std::int64_t& block_end) noexcept {
     if (request.frame_count == 0 || !std::isfinite(request.sample_rate) ||
