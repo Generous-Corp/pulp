@@ -65,7 +65,8 @@ public:
 
     /// Override the framing ceiling before connecting or accepting work.
     /// Oversized outbound frames are rejected; oversized inbound frames close
-    /// the connection before allocating their declared payload.
+    /// the connection before allocating their declared payload. Values above
+    /// the socket API's INT_MAX transfer-count boundary are clamped.
     void set_max_message_bytes(std::size_t bytes);
     std::size_t max_message_bytes() const {
         return max_message_bytes_.load(std::memory_order_relaxed);

@@ -145,6 +145,32 @@ TEST_CASE("IPC message framing", "[events][ipc]") {
     REQUIRE_FALSE(conn.send_message(std::string_view("binary data")));
 }
 
+TEST_CASE("IPC framing ceiling stays within socket transfer count range",
+          "[events][ipc][socket][bounds]") {
+    InterprocessConnection connection;
+    connection.set_max_message_bytes(
+        std::numeric_limits<std::size_t>::max());
+    CHECK(connection.max_message_bytes() ==
+          static_cast<std::size_t>(std::numeric_limits<int>::max()));
+
+    CapturingServer server;
+    server.set_max_message_bytes(std::numeric_limits<std::size_t>::max());
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port),
+                           IpcTransport::Socket));
+    {
+        std::unique_lock lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return static_cast<bool>(server.accepted);
+        }));
+        CHECK(server.accepted->max_message_bytes() ==
+              static_cast<std::size_t>(std::numeric_limits<int>::max()));
+    }
+}
+
 TEST_CASE("IPC framing ceilings reject oversized writes and reach accepted clients",
           "[events][ipc][socket][bounds]") {
     CapturingServer server;

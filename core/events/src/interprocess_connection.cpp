@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -337,12 +338,11 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
             if (!impl_->socket.set_write_timeout(remaining))
                 return -1;
         }
-        const int written = impl_->raw_write(bytes, byte_count);
-        if (has_frame_deadline &&
-            std::chrono::steady_clock::now() >= frame_deadline) {
-            return -1;
-        }
-        return written;
+        // A positive write has already transferred those bytes. In
+        // particular, a successful final write remains success even if the
+        // clock crosses the deadline while the kernel accepts it. Reporting
+        // failure there would make callers retry an already-delivered frame.
+        return impl_->raw_write(bytes, byte_count);
     };
 
     // Write header with retry for short writes
@@ -383,7 +383,9 @@ bool InterprocessConnection::send_message(std::string_view message) {
 
 void InterprocessConnection::set_max_message_bytes(std::size_t bytes) {
     max_message_bytes_.store(
-        std::clamp<std::size_t>(bytes, 1, UINT32_MAX),
+        std::clamp<std::size_t>(
+            bytes, 1, static_cast<std::size_t>(
+                          std::numeric_limits<int>::max())),
         std::memory_order_relaxed);
 }
 
@@ -522,7 +524,9 @@ std::uint16_t InterprocessConnectionServer::bound_port() const {
 
 void InterprocessConnectionServer::set_max_message_bytes(std::size_t bytes) {
     max_message_bytes_.store(
-        std::clamp<std::size_t>(bytes, 1, UINT32_MAX),
+        std::clamp<std::size_t>(
+            bytes, 1, static_cast<std::size_t>(
+                          std::numeric_limits<int>::max())),
         std::memory_order_relaxed);
 }
 

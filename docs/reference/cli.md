@@ -1270,6 +1270,9 @@ Options:
 
 The transport is loopback-only, token-authenticated, bounded, and
 capability-enforced. Mutations additionally require the controller lease.
+If a sent request times out while awaiting its response, the client closes the
+connection and reports `{"mayHaveApplied":true}`. Do not automatically retry
+that operation: the server may already have executed it.
 
 `Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
 protocol methods that currently return explicit unavailable errors until

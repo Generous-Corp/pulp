@@ -21,8 +21,12 @@ namespace {
 
 InspectorMessage connection_error(std::int64_t request_id,
                                   std::string message,
-                                  std::string code) {
-    return make_error(request_id, std::move(message), std::move(code));
+                                  std::string code,
+                                  std::string data_json = "{}") {
+    return make_error(request_id,
+                      std::move(message),
+                      std::move(code),
+                      std::move(data_json));
 }
 
 } // namespace
@@ -136,9 +140,17 @@ public:
                 return responses.contains(id) || disconnected;
             })) {
             in_flight.erase(id);
+            lock.unlock();
+            // The complete request frame was sent, so a response timeout
+            // cannot prove that its operation did not run. Fence this
+            // connection before returning the explicit ambiguity marker:
+            // late responses are no longer correlated and callers must
+            // reconnect instead of retrying on the same authority.
+            connection.disconnect();
             return connection_error(id,
-                                    "Inspector request timed out",
-                                    "request_timeout");
+                                    "Inspector request timed out; it may have applied",
+                                    "request_timeout",
+                                    R"({"mayHaveApplied":true})");
         }
         const auto found = responses.find(id);
         if (found == responses.end()) {

@@ -58,6 +58,20 @@ target_link_libraries(pulp-format
         pulp::timebase
         pulp::native-components
 )
+
+# Shipping invariant: the ordinary format SDK must never expose any inspector
+# component through its link interface. Static-link dead stripping can hide
+# such a regression from binary symbol scans, so enforce the target graph
+# itself as well as the executable proof in the test suite.
+get_target_property(_pulp_format_link_interface
+    pulp-format INTERFACE_LINK_LIBRARIES)
+if("${_pulp_format_link_interface}" MATCHES "pulp(::|-)inspect")
+    message(FATAL_ERROR
+        "pulp-format must not expose inspector link dependencies: "
+        "${_pulp_format_link_interface}")
+endif()
+unset(_pulp_format_link_interface)
+
 # PULP_ENABLE_AUDIO_PROBES wires the RT output-boundary probe into the
 # standalone host (the dev Audio Inspector's data source). Unlike the
 # inspector flag, this one gates MEMBER declarations in the PUBLIC
