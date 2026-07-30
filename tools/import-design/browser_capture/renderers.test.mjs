@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   awaitExplicitReadiness,
   finalizeKnownRenderers,
+  mergeRendererHooks,
 } from "./renderers.mjs";
 
 test("explicit page readiness is awaited when the source provides it",
@@ -107,4 +108,25 @@ test("renderer registry rejects unresolved Lucide placeholders", async () => {
   await assert.rejects(
     finalizeKnownRenderers(cdp),
     (error) => error.code === "capture-renderer-not-ready");
+});
+
+test("renderer provenance preserves transformations from every phase", () => {
+  assert.deepEqual(mergeRendererHooks(
+    [{
+      name: "lucide",
+      applied: true,
+      placeholders: 30,
+      remaining: 0,
+    }],
+    [{
+      name: "lucide",
+      applied: true,
+      placeholders: 1,
+      remaining: 0,
+    }]), [{
+      name: "lucide",
+      applied: true,
+      placeholders: 31,
+      remaining: 0,
+    }]);
 });

@@ -66,3 +66,19 @@ export async function finalizeKnownRenderers(cdp) {
   }
   return results;
 }
+
+export function mergeRendererHooks(...groups) {
+  const merged = new Map();
+  for (const hooks of groups) {
+    for (const hook of hooks) {
+      const prior = merged.get(hook.name);
+      merged.set(hook.name, prior
+        ? {
+            ...hook,
+            placeholders: prior.placeholders + hook.placeholders,
+          }
+        : { ...hook });
+    }
+  }
+  return [...merged.values()];
+}

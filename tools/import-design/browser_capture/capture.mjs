@@ -40,6 +40,7 @@ import {
 import {
   awaitExplicitReadiness,
   finalizeKnownRenderers,
+  mergeRendererHooks,
 } from "./renderers.mjs";
 import {
   expandAuditedProviderDependencies,
@@ -512,7 +513,8 @@ async function runCapture(options) {
         });
       interactionReadiness = await awaitExplicitReadiness(
         cdp, "__pulpInteractionReady");
-      rendererHooks = await finalizeKnownRenderers(cdp);
+      rendererHooks = mergeRendererHooks(
+        rendererHooks, await finalizeKnownRenderers(cdp));
       await settleAfterInteraction();
       await interactionNavigationGuard.assertUnchanged();
       phase = "page-settle";
