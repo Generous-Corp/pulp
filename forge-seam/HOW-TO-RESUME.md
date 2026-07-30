@@ -103,6 +103,60 @@ Also still owed for Phase 3: the tabs must drive which generator Build reaches,
 with **both** sides asserted -- checking one side of a boolean is what let
 "Build always made a patch" ship.
 
+## THE IMPORTANT ONE: Forge Modular writes into Forge's storage
+
+`FORGE_IDENTITY_STORAGE_DIRECTORY` defaults to `"Forge"`, and Forge Modular
+inherited it. Running the Forge Modular standalone wrote **121 project
+directories** into `~/Library/Application Support/Forge/projects`, which is the
+same store Forge Instrument, MIDI and FX read.
+
+Forge Instrument's home shelf now renders Forge Modular's projects. The no-leak
+guard caught it as a changed baseline — 209,124 bytes against 201,127 — which is
+the guard doing exactly its job, on the one kind of leak that matters most.
+
+**This is a product bug, not a test bug.** A separate SKU must not put its
+artifacts in another product's shelf.
+
+**Fix:** set `FORGE_IDENTITY_STORAGE_DIRECTORY` for the Forge Modular target.
+It is already an `if(NOT DEFINED)` override in `cmake/ForgeIdentity.cmake`, so
+this is a one-line change in `modular/CMakeLists.txt` — the same mechanism that
+makes the product name configurable.
+
+**And the guard needs to be hermetic.** It currently renders against whatever is
+in the shared store, so its baselines are only reproducible on a machine whose
+store has not changed. Point it at a temp storage directory for the duration of
+the run, or the next person will chase a "leak" that is really yesterday's
+projects.
+
+**Clean up before re-baselining:** those 121 directories are Forge Modular's, in
+Forge's store. Decide whether to move or delete them; do not just refresh the
+baseline over them, or Forge Instrument's baseline permanently encodes another
+product's data.
+
+## The two crashes have one root cause
+
+`ForgeShell::create_view()` calls `ensure_default_build()`, with the comment
+"so the editor always maps to a live graph". `ForgeModularShell` overrides it as
+a no-op, so the chrome builds its views against a graph that does not exist.
+
+Narrowed by elimination, one suspect per run:
+
+| Test | Result |
+|---|---|
+| Walk Forge Modular's tree after `create_view()` | **SIGSEGV** |
+| ...with `home_accessory()` returning nullptr | **SIGSEGV** — not the accessory |
+| ...with the stock composer row | **SIGSEGV** — not the row |
+| Walk **stock Forge FX**'s tree, same code | 2,578 views, 203 buttons, **fine** |
+
+So it is the shell, and `ensure_default_build()` is the only remaining
+difference that chrome depends on. It also explains the crash a human hit in
+`rebuild_marketplace_cards`: the same missing graph, reached through a different
+path.
+
+**Fix:** either install a minimal valid build so the contract the base class
+documents is honoured, or make the chrome tolerate a shell with no graph. The
+first is smaller and matches what the other three products do.
+
 ## Open: a crash in rebuild_marketplace_cards
 
 Reported from a windowed launch of the worktree build on 2026-07-29 23:43,

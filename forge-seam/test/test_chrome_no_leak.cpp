@@ -211,3 +211,4 @@ TEST_CASE("Forge Modular reports an unwired install rather than claiming success
     CHECK_FALSE(err.empty());
 }
 
+
