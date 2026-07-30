@@ -58,9 +58,9 @@ escapes, and ambiguous selection.
 Capability dispatch is fail-closed before a domain handler runs. The old
 unauthenticated direct-handler server exists only as a non-installed test
 fixture for transport regression coverage.
-After a complete request frame is sent, a response timeout is explicitly
-reported as `mayHaveApplied` and fences the connection so a late response
-cannot be mistaken for a safe retry boundary.
+After a complete request frame is sent, a response timeout or disconnect is
+explicitly reported as `mayHaveApplied`; timeouts fence the connection so a
+late response cannot be mistaken for a safe retry boundary.
 
 Build presence, host wiring, profile allowance, and current enablement are
 separate facts. `Session.getCapabilities` reports the available and effective

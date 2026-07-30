@@ -3,9 +3,12 @@
 #include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/discovery.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <vector>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -161,6 +164,60 @@ TEST_CASE("discovery reserves a live session and instance identity",
     records = reader.list();
     REQUIRE(records.size() == 1);
     CHECK(reader.read_credential(records.front()) == second_token);
+}
+
+TEST_CASE("stale ownership reclamation has exactly one concurrent winner",
+          "[inspect][discovery][identity][ownership][concurrency]") {
+    TemporaryDirectory temporary;
+    const auto record = fixture_record("raced-session");
+    const auto seed_token = generate_inspector_secret();
+    REQUIRE(seed_token.has_value());
+    {
+        InspectorDiscoveryPublisher seed(temporary.path);
+        REQUIRE(seed.publish(record, *seed_token, 5s));
+    }
+
+    constexpr std::size_t contender_count = 8;
+    std::vector<std::vector<std::uint8_t>> tokens;
+    std::vector<std::unique_ptr<InspectorDiscoveryPublisher>> publishers;
+    tokens.reserve(contender_count);
+    publishers.reserve(contender_count);
+    for (std::size_t index = 0; index < contender_count; ++index) {
+        const auto token = generate_inspector_secret();
+        REQUIRE(token.has_value());
+        tokens.push_back(*token);
+        publishers.push_back(
+            std::make_unique<InspectorDiscoveryPublisher>(temporary.path));
+    }
+
+    std::atomic<std::size_t> ready{0};
+    std::atomic<bool> start{false};
+    std::vector<int> published(contender_count, 0);
+    std::vector<std::thread> contenders;
+    contenders.reserve(contender_count);
+    for (std::size_t index = 0; index < contender_count; ++index) {
+        contenders.emplace_back([&, index] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            published[index] =
+                publishers[index]->publish(record, tokens[index], 5s) ? 1 : 0;
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != contender_count)
+        std::this_thread::yield();
+    start.store(true, std::memory_order_release);
+    for (auto& contender : contenders)
+        contender.join();
+
+    REQUIRE(std::count(published.begin(), published.end(), 1) == 1);
+    const auto winner = static_cast<std::size_t>(
+        std::find(published.begin(), published.end(), 1) -
+        published.begin());
+    InspectorDiscoveryReader reader(temporary.path);
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(reader.read_credential(records.front()) == tokens[winner]);
 }
 
 TEST_CASE("discovery rejects a stale record after process id reuse",

@@ -52,7 +52,7 @@ target_include_directories(pulp-inspect-authoring
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-authoring PUBLIC pulp::runtime)
 
-if(PULP_ENABLE_GPU AND NOT ANDROID)
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
 add_library(pulp-inspect)
 add_library(pulp::inspect ALIAS pulp-inspect)
 

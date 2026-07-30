@@ -38,7 +38,10 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "if(PULP_ENABLE_INSPECTOR)\n"
                 "    add_subdirectory(inspect)\n"
                 "endif()\n"
+                "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)\n"
                 "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)\n",
+            "inspect/CMakeLists.txt":
+                "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)\n",
             "tools/cli/CMakeLists.txt":
                 "cmd_inspect_unavailable.cpp\ncmd_tweaks_unavailable.cpp\n",
             "test/cmake/view_widget_bridge_tests.cmake":

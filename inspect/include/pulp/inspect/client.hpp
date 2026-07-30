@@ -28,9 +28,9 @@ public:
     void disconnect();
     bool is_connected() const;
 
-    /// A response timeout closes the connection and returns
-    /// error_data_json={"mayHaveApplied":true}; the sent operation must not be
-    /// treated as safely retryable.
+    /// A response timeout or disconnect after sending returns
+    /// error_data_json={"mayHaveApplied":true}. A timeout also closes the
+    /// connection; either result must not be treated as safely retryable.
     InspectorMessage request(
         std::string method,
         std::string params_json = "{}",

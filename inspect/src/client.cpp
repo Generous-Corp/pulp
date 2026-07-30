@@ -156,8 +156,9 @@ public:
         if (found == responses.end()) {
             in_flight.erase(id);
             return connection_error(id,
-                                    "Inspector connection closed",
-                                    "connection_closed");
+                                    "Inspector connection closed; request may have applied",
+                                    "connection_closed",
+                                    R"({"mayHaveApplied":true})");
         }
         auto response = std::move(found->second);
         responses.erase(found);

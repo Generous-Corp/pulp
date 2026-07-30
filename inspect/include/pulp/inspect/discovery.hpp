@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -52,8 +53,10 @@ private:
     std::filesystem::path runtime_directory_;
 };
 
-/// Publishing authority held by a live inspector owner. Publication uses
-/// owner-only atomic files. Destruction removes both record and credential.
+/// Publishing authority held by a live inspector owner. Publication holds an
+/// OS-released exclusive lease and uses owner-only atomic data files.
+/// Destruction removes record and credential; the inert lock sentinel remains
+/// available for race-free reuse.
 class InspectorDiscoveryPublisher {
 public:
     explicit InspectorDiscoveryPublisher(
@@ -76,11 +79,13 @@ public:
     }
 
 private:
+    struct OwnershipLease;
     std::filesystem::path runtime_directory_;
     std::optional<InspectorDiscoveryRecord> record_;
     std::vector<std::uint8_t> credential_;
     std::filesystem::path ownership_path_;
     std::string ownership_marker_;
+    std::unique_ptr<OwnershipLease> ownership_;
 };
 
 std::optional<InspectorDiscoveryRecord> select_inspector_session(
