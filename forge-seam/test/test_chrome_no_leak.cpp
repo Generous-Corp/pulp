@@ -1734,3 +1734,48 @@ TEST_CASE("no prompt route can reach Forge's plugin pipeline", "[phase7][routing
     CHECK(engine.submissions.size() == 3);      // nothing new submitted
     CHECK(chrome->chat_line_count() > 0);       // but the user was told
 }
+
+TEST_CASE("the title bar names what is being built", "[phase7][title]") {
+    // It read "Untitled module" for a whole build because the setter refreshed
+    // the copy but not the shell chrome, which is where the title label is
+    // actually painted. Assert the painted text, not the stored string.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+
+    chrome->submit_prompt("a 4 HP sample and hold with an internal noise source",
+                          forge::ForgeChrome::PromptOrigin::home);
+    REQUIRE(engine.submissions.size() == 1);
+
+    const auto title = chrome->project_title();
+    INFO("title: " << title);
+    CHECK_FALSE(title.empty());
+    CHECK(title != "Untitled module");
+    CHECK(title != "Wavefolder");          // never a leftover example name
+
+    // Find the painted title, so a stored-but-unpainted value cannot pass.
+    bool painted = false;
+    std::function<void(pulp::view::View&)> walk = [&](pulp::view::View& v) {
+        if (auto* l = dynamic_cast<pulp::view::Label*>(&v))
+            if (l->text() == title) painted = true;
+        for (std::size_t i = 0; i < v.child_count(); ++i) walk(*v.child_at(i));
+    };
+    walk(*view);
+    CHECK(painted);
+
+    // A second, different prompt renames it rather than keeping the first.
+    chrome->submit_prompt("a 3 HP clock divider",
+                          forge::ForgeChrome::PromptOrigin::home);
+    CHECK(chrome->project_title() != title);
+}

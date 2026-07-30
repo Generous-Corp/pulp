@@ -549,8 +549,7 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // what was reported.
     c->enter_build();
     // Name it from the request until the generator reports the real name.
-    c->set_project_title(prompt.size() > 40 ? prompt.substr(0, 40) + "\u2026"
-                                            : prompt);
+    c->set_project_title_from_prompt(prompt);
     pulp::runtime::log_info("Forge Modular: Build pressed; mode is now {}",
                             c->mode() == forge::ForgeChrome::Mode::Build
                                 ? "Build" : "NOT Build");
