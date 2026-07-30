@@ -23,6 +23,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -257,6 +258,8 @@ private:
     bool watching_ = false;
     BuildOutcome reported_outcome_ = BuildOutcome::running;
     int reported_stage_ = -2;
+    std::chrono::steady_clock::time_point run_started_{};
+    std::chrono::steady_clock::time_point stage_started_{};
     bool standalone_ = false;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;

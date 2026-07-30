@@ -125,8 +125,13 @@ std::string digest(const std::vector<unsigned char>& bytes) {
 /// same scale -- so byte-equality is achievable and anything else is a real
 /// change worth looking at.
 template <typename ShellT>
-void check_home_frame(ShellT& shell, const char* product) {
+void check_home_frame(const char* product) {
+    // The fixture FIRST, then the shell. Constructing the shell before pinning
+    // the store let it capture the real paths in its constructor, so the frame
+    // rendered whatever projects happened to exist on this machine -- which is
+    // why the guard kept failing on card titles nobody had touched.
     HermeticProjects isolated;
+    ShellT shell;
     pulp::format::PrepareContext pc;
     pc.sample_rate = kSr;
     pc.max_buffer_size = kFrames;
@@ -174,21 +179,18 @@ void check_home_frame(ShellT& shell, const char* product) {
 }  // namespace
 
 TEST_CASE("Forge FX's Home frame matches its baseline", "[no-leak]") {
-    forge::ForgeFxShell shell;
-    check_home_frame(shell, "fx");
+    check_home_frame<forge::ForgeFxShell>("fx");
 }
 
 TEST_CASE("Forge Instrument's Home frame matches its baseline", "[no-leak]") {
-    forge::ForgeInstrumentShell shell;
-    check_home_frame(shell, "instrument");
+    check_home_frame<forge::ForgeInstrumentShell>("instrument");
 }
 
 TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
     // MIDI ships CLAP and AU only -- no standalone to screenshot -- which is
     // exactly why this guard renders the chrome directly instead of driving three
     // apps. Every product is covered whether or not it has a window.
-    forge::ForgeMidiShell shell;
-    check_home_frame(shell, "midi");
+    check_home_frame<forge::ForgeMidiShell>("midi");
 }
 
 
@@ -1921,4 +1923,190 @@ TEST_CASE("the Home guard reads nothing outside its own fixture", "[no-leak]") {
     const auto listings = std::distance(std::filesystem::directory_iterator(m),
                                         std::filesystem::directory_iterator{});
     CHECK(listings == 0);
+}
+
+TEST_CASE("a running build shows a clock, not just a word", "[phase7][stage]") {
+    // "asking the model" with nothing moving is indistinguishable from a wedged
+    // process, and a model call takes minutes. Forge's own chips carry a live
+    // time; ours cleared the field.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    chrome->enter_build();
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-clock.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+
+    { std::ofstream f(log); f << "  asking the model\n"; }
+    shell.on_poll();
+    CHECK(chrome->active_chip() == 0);
+    // A time appears on the chip, and the activity line says what is being
+    // waited on and for how long.
+    CHECK_FALSE(chrome->active_stage_elapsed_text().empty());
+    const auto activity = chrome->status_activity_text();
+    INFO("activity: " << activity);
+    CHECK(activity.find("asking the model") != std::string::npos);
+    CHECK(activity.find("elapsed") != std::string::npos);
+
+    // The clock belongs to the STAGE, so moving on restarts it rather than
+    // carrying the previous stage's total.
+    { std::ofstream f(log, std::ios::app); f << "  compiled\n"; }
+    shell.on_poll();
+    CHECK(chrome->active_chip() == 2);
+
+    // A finished run stops claiming to be waiting on anything.
+    { std::ofstream f(log, std::ios::app); f << "  installed -> /tmp/x.vcvplugin\n"; }
+    shell.on_poll();
+    CHECK(shell.build_outcome() == forge_modular::BuildOutcome::done);
+    CHECK(chrome->status_activity_text().empty());
+
+    std::filesystem::remove(log);
+}
+
+TEST_CASE("a finished build can actually open what it says it built",
+          "[phase7][artifact]") {
+    // The failure this closes: the app said "Built. Open it in Rack to play
+    // it." and, in the same transcript, "the generator named a file that is
+    // not there." Two parts of one screen contradicting each other, with a
+    // green suite -- because artifact_path() was never tested against a REAL
+    // generator log line, only around it.
+    //
+    // The line below is copied verbatim from a run. Both paths contain spaces,
+    // which is exactly what the old parser could not survive: it scanned back
+    // to the last separator and returned "/dualatt.vcv", the final segment
+    // alone.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    // Standalone: a hosted build deliberately reports the path instead of
+    // launching another app over a DAW session.
+    shell.set_standalone(true);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "Forge Modular Test" / "examples" / "forge-modular" / "patches";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const auto artifact = dir / "dualatt.vcv";
+    { std::ofstream f(artifact); f << "{\"version\":\"2\"}\n"; }
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-artifact.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+    {
+        std::ofstream f(log);
+        f << "  installed \xE2\x86\x92 /Users/x/Rack2/plugins/ForgeModular.vcvplugin\n"
+          << "  open it with:  \"/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack\" "
+          << artifact.string() << "\n";
+    }
+    shell.on_poll();
+
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+
+    // The whole path, spaces and all -- not its last segment.
+    const auto found = shell.artifact_path();
+    INFO("parsed: " << found);
+    CHECK(found == artifact.string());
+
+    // The invariant that was violated: if the build reports done, the thing it
+    // named must be openable. Saying both at once is worse than saying neither.
+    CHECK(std::filesystem::exists(found));
+    CHECK(shell.open_in_rack().empty());
+
+    // And when the file genuinely is missing, it says so rather than claiming
+    // success -- the same check, with the opposite answer.
+    std::filesystem::remove(artifact);
+    CHECK_FALSE(shell.open_in_rack().empty());
+
+    std::filesystem::remove(log);
+    std::filesystem::remove_all(std::filesystem::temp_directory_path() /
+                                "Forge Modular Test", ec);
+}
+
+TEST_CASE("Open in Rack never offers to open something unsafe",
+          "[phase7][artifact]") {
+    // Three ways this button could lie, all closed here: offering to open
+    // nothing, offering a path the generator named but did not write, and --
+    // the subtle one -- offering a patch while the next build is rewriting it,
+    // which opens a half-written file or the previous module under the new
+    // one's name.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_standalone(true);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.chrome()->enter_build();
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-openrules.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+
+    auto* button = [&]() -> pulp::view::TextButton* {
+        auto* acc = shell.chrome()->build_accessory();
+        if (!acc) return nullptr;
+        for (int i = 0; i < acc->child_count(); ++i) {
+            auto* b = dynamic_cast<pulp::view::TextButton*>(acc->child_at(i));
+            if (b && b->access_label() == "Open in VCV Rack") return b;
+        }
+        return nullptr;
+    }();
+    REQUIRE(button != nullptr);
+
+    // Nothing built: hidden, and refuses if driven anyway.
+    shell.on_poll();
+    CHECK_FALSE(button->visible());
+    CHECK_FALSE(shell.open_in_rack().empty());
+
+    // Mid-build: hidden, and refuses for the RIGHT reason. The real flow
+    // truncates the log on each run, so a path from a previous build does not
+    // survive into the next one -- but the click can still land after a new
+    // build starts, and opening a patch being rewritten gets a half-written
+    // file or the previous module under the new one's name.
+    { std::ofstream f(log); f << "  asking the model\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::running);
+    CHECK_FALSE(button->visible());
+    const auto why = shell.open_in_rack();
+    INFO("refusal: " << why);
+    CHECK(why.find("build is running") != std::string::npos);
+
+    // Finished, but the file was never written: refuses, and names the path so
+    // the refusal is actionable rather than mysterious.
+    {
+        std::ofstream f(log, std::ios::app);
+        f << "  open it with:  \"/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack\""
+             " /tmp/forge-modular-never-written.vcv\n"
+          << "  installed -> /tmp/x.vcvplugin\n";
+    }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+    const auto missing = shell.open_in_rack();
+    CHECK(missing.find("not there") != std::string::npos);
+    CHECK(missing.find(".vcv") != std::string::npos);
+
+    std::filesystem::remove(log);
 }

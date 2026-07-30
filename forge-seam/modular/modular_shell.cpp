@@ -7,6 +7,8 @@
 
 #include <pulp/runtime/log.hpp>
 
+#include <chrono>
+#include <cstdio>
 #include <thread>
 
 #include <cstdlib>
@@ -74,6 +76,20 @@ using pulp::view::TextButton;
 using pulp::view::View;
 
 namespace color = forge::design::color;
+
+/// "12s", "1m 04s". Seconds below a minute, because a model call that has run
+/// for eleven seconds and one that has run for eleven minutes should not look
+/// alike at a glance.
+std::string format_elapsed(std::chrono::steady_clock::time_point since) {
+    using namespace std::chrono;
+    const auto secs = duration_cast<seconds>(steady_clock::now() - since).count();
+    if (secs < 60) return std::to_string(secs) + "s";
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%lldm %02llds",
+                  static_cast<long long>(secs / 60),
+                  static_cast<long long>(secs % 60));
+    return buf;
+}
 
 /// Leading whitespace off, and long lines cut. The status card is one or two
 /// lines tall; a 200-character compiler path pushes everything else out of it.
@@ -385,6 +401,11 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
         auto lbl = std::make_unique<pulp::view::Label>("Open in Rack");
         lbl->set_font_family(forge::design::type::display);
         lbl->set_font_size(13.0f);
+        // Dark ink on the accent fill. A primary button's background is light,
+        // so a label left at its default colour renders white on mint and is
+        // barely readable -- the same treatment Forge's own primary buttons
+        // use for exactly this reason.
+        lbl->set_text_color(forge::design::color::accent_text);
         lbl->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
         lbl->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
         lbl->set_text_align(pulp::view::LabelAlign::center);
@@ -591,22 +612,35 @@ std::string ForgeModularShell::open_patch_file(const std::string& path) {
 std::string ForgeModularShell::artifact_path() const {
     // Read back from what the generator said rather than kept as state: the
     // log is the record, and a second copy could disagree with it.
+    //
+    // The line is:  open it with:  "<rack binary>" <patch path>
+    // Both paths contain spaces, so the patch cannot be found by scanning back
+    // to a separator -- doing that returned "/dualatt.vcv", the last segment
+    // only, and Open in Rack reported a file that was not there. Anchor on the
+    // closing quote of the quoted binary instead: everything after it is the
+    // patch, spaces and all.
     for (const auto& line : monitor_.lines()) {
-        const auto at = line.text.find(".vcv");
-        if (at == std::string::npos) continue;
-        auto start = line.text.rfind('/', at);
-        if (start == std::string::npos) continue;
-        auto end = line.text.find_first_of(" \"", at);
-        auto path = line.text.substr(start, end == std::string::npos
-                                                ? std::string::npos
-                                                : end - start);
-        // .vcvplugin is the installed plugin, not a patch to open.
+        if (line.text.find(".vcv") == std::string::npos) continue;
+        const auto quote = line.text.rfind('"');
+        if (quote == std::string::npos) continue;
+        auto path = line.text.substr(quote + 1);
+        // Trim the single space the generator puts between them, and anything
+        // trailing.
+        const auto first = path.find_first_not_of(" \t");
+        if (first == std::string::npos) continue;
+        const auto last = path.find_last_not_of(" \t\r\n");
+        path = path.substr(first, last - first + 1);
         if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") return path;
     }
     return {};
 }
 
 std::string ForgeModularShell::open_in_rack() {
+    // Re-checked at click time, not just at paint time. A generation can start
+    // between the two, and opening a file being rewritten is worse than
+    // refusing.
+    if (monitor_.outcome() == BuildOutcome::running)
+        return "a build is running — the patch is being rewritten";
     const auto path = artifact_path();
     if (path.empty()) return "nothing has finished building yet";
     // Launching another application from inside a DAW steals focus from a
@@ -616,7 +650,17 @@ std::string ForgeModularShell::open_in_rack() {
         return "installed for VCV Rack: " + path;
     std::error_code ec;
     if (!std::filesystem::exists(path, ec))
-        return "the generator named a file that is not there";
+        return "the generator named a file that is not there: " + path;
+
+    // No Rack, no launch. Show the folder instead so the artifact is still
+    // reachable rather than merely described.
+    if (!std::filesystem::exists("/Applications/VCV Rack 2 Free.app", ec)) {
+        std::thread([path] {
+            std::string out;
+            ProcessEngine::run("open -R '" + path + "' &", out);
+        }).detach();
+        return "VCV Rack is not installed — showing the file in Finder instead";
+    }
     // Detached, and never blocking the UI thread: launching an app touches the
     // filesystem and can take a moment.
     std::thread([path] {
@@ -668,7 +712,19 @@ void ForgeModularShell::on_poll() {
         const int stage = monitor_.stage();
         if (stage != reported_stage_) {
             reported_stage_ = stage;
+            stage_started_ = std::chrono::steady_clock::now();
             if (auto* c = chrome()) c->set_active_stage(stage);
+        }
+        // A live clock on the active chip, and a cumulative one for the whole
+        // run. A model call takes minutes; without something moving, "asking
+        // the model" is indistinguishable from a wedged process, which is
+        // exactly how it read.
+        if (auto* c = chrome();
+            c && monitor_.outcome() == BuildOutcome::running && stage >= 0) {
+            c->set_active_stage_elapsed(format_elapsed(stage_started_));
+            if (stage == 0)
+                c->set_status_activity("asking the model \u00b7 " +
+                                       format_elapsed(run_started_) + " elapsed");
         }
     }
 
@@ -711,9 +767,21 @@ void ForgeModularShell::on_poll() {
         }
     }
 
-    // Reveal Open in Rack the moment there is something to open.
+    // Open in Rack shows only when opening is actually safe.
+    //
+    //   * There must be an artifact. On Home, and before any generation, there
+    //     is nothing to open and the button would be a lie.
+    //   * A run must not be in flight. A generation rewrites the pack and the
+    //     patch it named, so the path is stale the moment the next build
+    //     starts -- opening it mid-rewrite gets a half-written file or the
+    //     PREVIOUS module wearing the new one's name.
+    //
+    // It also lives in the Build title bar, so it cannot appear on Home at
+    // all.
     if (open_button_) {
-        const bool ready = !artifact_path().empty();
+        const bool have = !artifact_path().empty();
+        const bool settled = monitor_.outcome() != BuildOutcome::running;
+        const bool ready = have && settled;
         if (ready != open_button_->visible()) {
             open_button_->set_visible(ready);
             open_button_->request_repaint();
@@ -733,6 +801,8 @@ bool ForgeModularShell::busy() const {
 void ForgeModularShell::watch_build_log(const std::string& path) {
     monitor_.watch(path);
     watching_ = true;
+    run_started_ = std::chrono::steady_clock::now();
+    stage_started_ = run_started_;
     // Clear the card. Its note outlived the run that wrote it, so a fresh
     // build opened showing the previous one's gate rejection.
     if (auto* c = chrome()) {
@@ -771,7 +841,12 @@ int ForgeModularShell::pump_build_log() {
                 break;
             case BuildLine::Kind::progress:
             case BuildLine::Kind::success:
-                c->set_status_activity(trimmed(line.text));
+                // The "open it with: <rack> <patch>" line is two long paths.
+                // Trimmed to fit a two-line card it becomes an unusable stub
+                // that cannot even be copied, and the Open in Rack button
+                // already does the thing it describes. Skip it.
+                if (line.text.find("open it with") == std::string::npos)
+                    c->set_status_activity(trimmed(line.text));
                 break;
 
             // A traceback is a defect in the toolchain rather than in what was
