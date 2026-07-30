@@ -14,7 +14,7 @@ SKIP_SLASH_COMMANDS = {
     "audio", "cache", "clean", "upgrade", "config", "export-tokens",
     "ci-local", "design-debug", "harness", "help", "add", "audit",
     "identity", "inspect", "import-design", "install", "version",
-    "sdk", "fetch", "list", "remove", "render", "search", "seq", "suggest",
+    "sdk", "fetch", "list", "remove", "render", "search", "suggest",
     "target", "update",
     # `pulp macos` and `pulp overflow` are CI runner-pool operator
     # commands. They're covered by the CLI reference, `--help`, the
@@ -41,6 +41,11 @@ SKIP_SLASH_COMMANDS = {
     # Both surfaces are documented in the cli-maintenance and ci skills.
     "coverage",
 }
+
+# These agent workflows are deliberate product surfaces, not advisory parity.
+# Missing one is a strict sync failure even while historical slash-command
+# coverage remains warning-only.
+REQUIRED_SLASH_COMMANDS = {"seq"}
 
 
 def find_repo_root():
@@ -179,6 +184,16 @@ def main():
             continue
         if cmd not in slash_commands:
             missing_slash.add(cmd)
+
+    missing_required_slash = (cli_commands & REQUIRED_SLASH_COMMANDS) - slash_commands
+    if missing_required_slash:
+        msg = (
+            "Missing required slash commands: "
+            + ", ".join(sorted(missing_required_slash))
+        )
+        checks.append(("fail", msg))
+        issues.append(msg)
+        missing_slash -= missing_required_slash
 
     if not missing_slash:
         checks.append(("pass", "All expected commands have slash commands"))

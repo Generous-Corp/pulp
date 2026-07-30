@@ -112,6 +112,7 @@ BrowserHtmlImportResult import_browser_html(
     capture.output_directory = capture_directory;
     capture.initial_width = request.initial_width;
     capture.initial_height = request.initial_height;
+    capture.interaction_plan = request.browser_interactions;
     capture.allow_network = request.allow_browser_network;
 
     std::error_code ec;
@@ -152,7 +153,9 @@ BrowserHtmlImportResult import_browser_html(
         {.source = request.source,
          // The staged capture envelope carries a safe entry basename. Do not
          // serialize the importing machine's absolute path into portable IR.
-         .source_file = {}});
+         .source_file = {},
+         .require_interaction_report =
+             request.browser_interactions.has_value()});
     if (!lowered) {
         return BrowserHtmlFailure{
             3,

@@ -59,9 +59,10 @@ enum class Concept : std::uint16_t {
     TempoRamp = 45,
     ClipNoteVelocityQuantized = 46,
     TempoValueQuantized = 47,
+    ClipMediaWindow = 48,
 };
 
-inline constexpr std::size_t kConceptCount = 48;
+inline constexpr std::size_t kConceptCount = 49;
 
 namespace detail {
 struct ConceptRecord {
@@ -119,6 +120,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"tempo.ramp", "A continuous tempo curve between two tempo-map points.", true},
     {"clip.note-velocity-quantized", "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value.", true},
     {"tempo.value-quantized", "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation.", true},
+    {"clip.media-window", "A media clip that plays a source subrange rather than the referenced asset's complete frame range.", true},
 };
 } // namespace detail
 

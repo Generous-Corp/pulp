@@ -11,12 +11,38 @@ inline constexpr std::string_view kTimelineMcpToolsDocument =
 inline constexpr std::string_view kTimelineMcpToolsArray =
     R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_ARRAY@)PULPTL";
 
-inline constexpr std::array<std::string_view, 5> kTimelineMcpToolNames{
+inline constexpr std::array<std::string_view, 10> kTimelineMcpToolNames{
     "@PULP_TIMELINE_MCP_TOOL_NAME_0@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_1@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_2@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_3@",
     "@PULP_TIMELINE_MCP_TOOL_NAME_4@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_5@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_6@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_7@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_8@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_9@",
 };
+
+inline constexpr std::string_view kTimelineProjectOpenToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_0@";
+inline constexpr std::string_view kTimelineCommandApplyToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_1@";
+inline constexpr std::string_view kTimelineDiffToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_2@";
+inline constexpr std::string_view kTimelineUndoToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_3@";
+inline constexpr std::string_view kTimelineRedoToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_4@";
+inline constexpr std::string_view kTimelineValidateToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_5@";
+inline constexpr std::string_view kTimelineExplainToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_6@";
+inline constexpr std::string_view kTimelineRenderToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_7@";
+inline constexpr std::string_view kTimelineExportToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_8@";
+inline constexpr std::string_view kTimelineImportToolName =
+    "@PULP_TIMELINE_MCP_TOOL_NAME_9@";
 
 } // namespace pulp_mcp

@@ -1027,3 +1027,24 @@ main-thread call, so re-reading the processor there needs no gate.
 `flag_note_names_changed()` rides the existing `request_callback` set alongside
 the latency / tail pending flags, and the `clap_host_note_name->changed()` push
 happens in `clap_on_main_thread()` — never from `process()`.
+
+### Tracing attaches for this format now (WAH-4)
+
+Perfetto tracing used to be wired into **VST3 only**. A capture of a CLAP
+session recorded nothing while `Tracing`'s API described itself as
+process-global — so an empty `.pftrace` looked like an environment problem
+rather than a missing call.
+
+This adapter now holds a `runtime::ScopedTracingAttachment` (`PulpClapPlugin::tracing`). Two
+things follow:
+
+- **It is RAII, not a hand-balanced attach/detach pair.** A leaked attachment
+  is not benign: the `.pftrace` is only written by the FINAL detach, so one
+  unbalanced instance means the capture silently produces nothing.
+- **Declaration order is load-bearing.** It must outlive every span this
+  instance can emit, so it is declared to destroy LAST. The final detach also
+  cancels and JOINS the auto-flush timer, which is what makes plug-in module
+  unload safe — a detached timer thread that wakes after `FreeLibrary` /
+  `dlclose` runs freed code.
+
+No-op unless the build is configured `PULP_TRACING=ON`.

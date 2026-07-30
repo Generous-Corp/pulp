@@ -80,6 +80,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         REQUIRE(counted.count(Concept::ClipAbsolute) == 1);
         REQUIRE(counted.count(Concept::ClipNote) == 1);
         REQUIRE(counted.count(Concept::ClipMedia) == 2);
+        REQUIRE(counted.count(Concept::ClipMediaWindow) == 2);
         REQUIRE(counted.count(Concept::SequenceNested) == 1);
         REQUIRE(counted.count(Concept::ClipGain) == 1);
         REQUIRE(counted.count(Concept::ClipFades) == 1);
@@ -137,6 +138,26 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         REQUIRE(launch_owners.size() == 1);
         REQUIRE(launch_owners[0] == ItemId{16});
     }
+}
+
+TEST_CASE("media windows are census-visible only when they select an asset subrange",
+          "[interchange][census]") {
+    auto full = take_value(Clip::create({4}, {0}, {100}, MediaRef{{11}, {0}, 1'000}));
+    auto offset = take_value(Clip::create({5}, {100}, {100}, MediaRef{{11}, {25}, 975}));
+    auto partial = take_value(Clip::create({6}, {200}, {100}, MediaRef{{11}, {0}, 500}));
+    auto track = take_value(Track::create({7}, "media", {full, offset, partial}));
+    auto sequence =
+        take_value(Sequence::create({3}, "sequence", TickDuration{400}, {track}));
+    const Project project = take_value(Project::create(ProjectInput{
+        {1}, "project", 20, {3}, {asset({11}, AssetStoragePolicy::External, 'a')}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipMedia) == 3);
+    REQUIRE(counted.count(Concept::ClipMediaWindow) == 2);
+    const auto owners = counted.owners(Concept::ClipMediaWindow);
+    REQUIRE(owners.size() == 2);
+    REQUIRE(owners[0] == ItemId{5});
+    REQUIRE(owners[1] == ItemId{6});
 }
 
 TEST_CASE("a census bounds the evidence it keeps without understating it", "[interchange]") {

@@ -2,7 +2,7 @@
 """Generate timeline MCP tool definitions from the schema manifest.
 
 This is a deterministic projection of
-core/timeline/schema/timeline_schema.json into the fixed five-operation MCP
+core/timeline/schema/timeline_schema.json into the fixed ten-operation MCP
 surface. The operation set is an engine API decision; its drift-sensitive type
 vocabularies come from the manifest:
 
@@ -25,6 +25,7 @@ from pathlib import Path
 _THIS = Path(__file__).resolve()
 _REPO_ROOT = _THIS.parents[3]
 DEFAULT_MANIFEST = _REPO_ROOT / "core" / "timeline" / "schema" / "timeline_schema.json"
+CONCEPTS = _REPO_ROOT / "core" / "interchange" / "capabilities" / "concepts.json"
 
 GENERATOR_ID = "schema-mcp-emit"
 MAX_COMPILED_SAMPLE_RATE = 768_000
@@ -61,6 +62,30 @@ def _sample_rate_property() -> dict:
         "minimum": 1,
         "maximum": MAX_COMPILED_SAMPLE_RATE,
         "description": "Render sample rate in Hz. Defaults to 48000.",
+    }
+
+
+def _interchange_concepts() -> list[str]:
+    try:
+        document = json.loads(CONCEPTS.read_bytes())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ManifestError(f"interchange concept authority is unreadable: {exc}") from exc
+    entries = document.get("concepts") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        raise ManifestError("interchange concept authority has no concepts array")
+    names = [entry.get("id") for entry in entries if isinstance(entry, dict)]
+    if any(not isinstance(name, str) or not name for name in names) or len(names) != len(entries):
+        raise ManifestError("interchange concept ids must be non-empty strings")
+    if len(set(names)) != len(names) or not names or names[0] != "unknown":
+        raise ManifestError("interchange concept ids must be unique and begin with unknown")
+    return names[1:]
+
+
+def _session_property() -> dict:
+    return {
+        "type": "string",
+        "minLength": 1,
+        "description": "Session identifier returned by pulp_timeline_project_open.",
     }
 
 
@@ -103,6 +128,7 @@ def generate(manifest: dict) -> str:
     command_types = _domain_type_names(defs, "Command")
     diagnostic_types = _domain_type_names(defs, "Diagnostic")
     document_types = _domain_type_names(defs, "Document")
+    loss_concepts = _interchange_concepts()
 
     tools = [
         {
@@ -115,22 +141,45 @@ def generate(manifest: dict) -> str:
         {
             "name": "pulp_timeline_command_apply",
             "description": (
-                "Apply an ordered list of typed timeline commands to a project. "
+                "Apply an ordered list of typed timeline commands to a project source or "
+                "open session. "
                 "The command vocabulary is the API; each command is a manifest-derived envelope."
             ),
             "inputSchema": _input_schema(
                 {
                     "project": _project_property(),
+                    "session_id": _session_property(),
                     "commands": {
                         "type": "array",
                         "minItems": 1,
                         "items": _command_envelope(command_types),
                     },
                 },
-                ["commands", "project"],
+                ["commands"],
             ),
             "x-pulp-operation": "command.apply",
             "x-pulp-command-types": command_types,
+        },
+        {
+            "name": "pulp_timeline_diff",
+            "description": (
+                "Return the precise dirty set and before/after revisions for the latest "
+                "successful transition in an open timeline session."
+            ),
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.diff",
+        },
+        {
+            "name": "pulp_timeline_undo",
+            "description": "Undo the newest closed edit group in an open timeline session.",
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.undo",
+        },
+        {
+            "name": "pulp_timeline_redo",
+            "description": "Redo the newest undone edit group in an open timeline session.",
+            "inputSchema": _input_schema({"session_id": _session_property()}, ["session_id"]),
+            "x-pulp-operation": "session.redo",
         },
         {
             "name": "pulp_timeline_validate",
@@ -170,6 +219,88 @@ def generate(manifest: dict) -> str:
             ),
             "x-pulp-operation": "project.render",
         },
+        {
+            "name": "pulp_timeline_export",
+            "description": (
+                "Export a timeline project to a new atomic artifact. DAWproject output is a "
+                "standard .dawproject ZIP; SMF output is an artifact directory. "
+                "Loss must be accepted by exact concept id; there is no blanket override."
+            ),
+            "inputSchema": _input_schema(
+                {
+                    "project": _project_property(),
+                    "format": {"type": "string", "enum": ["dawproject", "smf"]},
+                    "output": {
+                        "type": "string",
+                        "description": (
+                            "New destination path; use a .dawproject file for DAWproject or a "
+                            "directory for SMF. It must not exist."
+                        ),
+                    },
+                    "accept_losses": {
+                        "type": "array",
+                        "uniqueItems": True,
+                        "items": {"type": "string", "enum": loss_concepts},
+                        "description": "Exact interchange concepts explicitly accepted as loss.",
+                    },
+                    "plan_only": {
+                        "type": "boolean",
+                        "description": (
+                            "Return the canonical loss manifest and required consent without "
+                            "writing or publishing artifacts."
+                        ),
+                    },
+                },
+                ["format", "project"],
+            )
+            | {
+                "oneOf": [
+                    {
+                        "properties": {"plan_only": {"const": True}},
+                        "required": ["plan_only"],
+                        "not": {
+                            "anyOf": [
+                                {"required": ["output"]},
+                                {"required": ["accept_losses"]},
+                            ]
+                        },
+                    },
+                    {
+                        "properties": {"plan_only": {"const": False}},
+                        "required": ["output"],
+                    },
+                ]
+            },
+            "x-pulp-operation": "project.export",
+            "x-pulp-loss-concepts": loss_concepts,
+        },
+        {
+            "name": "pulp_timeline_import",
+            "description": (
+                "Import an SMF file or standard .dawproject ZIP into a new atomic directory "
+                "containing canonical project.json and sealed media."
+            ),
+            "inputSchema": _input_schema(
+                {
+                    "input": {
+                        "type": "string",
+                        "description": "SMF file or .dawproject ZIP path.",
+                    },
+                    "format": {"type": "string", "enum": ["dawproject", "smf"]},
+                    "output": {
+                        "type": "string",
+                        "description": "New destination directory; it must not exist.",
+                    },
+                },
+                ["format", "input", "output"],
+            ),
+            "x-pulp-operation": "project.import",
+        },
+    ]
+
+    tools[1]["inputSchema"]["oneOf"] = [
+        {"required": ["project"], "not": {"required": ["session_id"]}},
+        {"required": ["session_id"], "not": {"required": ["project"]}},
     ]
 
     document = {

@@ -229,6 +229,119 @@ std::string file_sha256(const fs::path& path) {
     return pulp::runtime::sha256_hex(bytes.data(), bytes.size());
 }
 
+bool is_sha256(std::string_view value) {
+    return value.size() == 64 &&
+           std::all_of(
+               value.begin(), value.end(), [](unsigned char character) {
+                   return (character >= '0' && character <= '9') ||
+                          (character >= 'a' && character <= 'f');
+               });
+}
+
+bool integer_member(const choc::value::ValueView& object,
+                    const char* key,
+                    int minimum,
+                    int maximum,
+                    int& value) {
+    if (!object.isObject() || !object.hasObjectMember(key) ||
+        (!object[key].isInt() && !object[key].isFloat())) {
+        return false;
+    }
+    const auto number = object[key].getWithDefault<double>(
+        std::numeric_limits<double>::quiet_NaN());
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < minimum || number > maximum) {
+        return false;
+    }
+    value = static_cast<int>(number);
+    return true;
+}
+
+bool validate_interaction_report(
+    const fs::path& path,
+    const choc::value::ValueView& provenance,
+    std::string& plan_sha256,
+    std::string& report_sha256,
+    int& action_count,
+    std::string& error) {
+    if (string_member(provenance, "schema") !=
+            "pulp-browser-interactions-v1" ||
+        number_member(provenance, "version", 0.0) != 1.0) {
+        error =
+            "unsupported browser interaction provenance "
+            "(expected pulp-browser-interactions-v1 version 1)";
+        return false;
+    }
+    plan_sha256 = string_member(provenance, "plan_sha256");
+    report_sha256 = string_member(provenance, "report_sha256");
+    if (!is_sha256(plan_sha256) || !is_sha256(report_sha256)) {
+        error =
+            "browser interaction provenance requires lowercase SHA-256 "
+            "plan and report hashes";
+        return false;
+    }
+    if (!integer_member(provenance, "action_count", 1, 32, action_count)) {
+        error =
+            "browser interaction provenance requires an action_count from 1 to 32";
+        return false;
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        error = "could not open browser interaction report: " + path.string();
+        return false;
+    }
+    std::ostringstream bytes;
+    bytes << input.rdbuf();
+    const auto report_bytes = bytes.str();
+    if (pulp::runtime::sha256_hex(report_bytes) != report_sha256) {
+        error =
+            "browser interaction report hash does not match capture envelope";
+        return false;
+    }
+    choc::value::Value report;
+    try {
+        report = choc::json::parse(report_bytes);
+    } catch (const std::exception& exception) {
+        error = std::string("invalid browser interaction JSON: ") +
+                exception.what();
+        return false;
+    }
+    int report_action_count = 0;
+    if (!report.isObject() ||
+        string_member(report, "schema") !=
+            "pulp-browser-interactions-v1" ||
+        number_member(report, "version", 0.0) != 1.0 ||
+        string_member(report, "plan_sha256") != plan_sha256 ||
+        !integer_member(
+            report, "action_count", 1, 32, report_action_count) ||
+        !report.hasObjectMember("actions") ||
+        !report["actions"].isArray() ||
+        report["actions"].size() !=
+            static_cast<uint32_t>(report_action_count) ||
+        report_action_count != action_count) {
+        error =
+            "browser interaction report does not match capture provenance";
+        return false;
+    }
+    const auto actions = report["actions"];
+    for (uint32_t index = 0; index < actions.size(); ++index) {
+        const auto action = actions[static_cast<int>(index)];
+        const auto name = string_member(action, "action");
+        const bool allowed =
+            name == "click" || name == "type" || name == "wait-for" ||
+            name == "wait-ms";
+        if (!action.isObject() || !allowed ||
+            string_member(action, "status") != "completed" ||
+            action.hasObjectMember("text") ||
+            action.hasObjectMember("text_sha256")) {
+            error =
+                "browser interaction report contains invalid or private action evidence";
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<fs::path> contained_sidecar(const fs::path& envelope,
                                           std::string_view authored,
                                           std::string& error) {
@@ -371,6 +484,35 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         contained_sidecar(envelope_path, token_path, result.error);
     if (!token_report) return result;
 
+    std::optional<fs::path> interaction_report;
+    std::string interaction_plan_sha256;
+    std::string interaction_report_sha256;
+    int interaction_action_count = 0;
+    const bool has_interaction_member =
+        provenance.hasObjectMember("interactions");
+    if (options.require_interaction_report && !has_interaction_member) {
+        result.error =
+            "browser capture requested interactions but omitted interaction provenance";
+        return result;
+    }
+    if (has_interaction_member) {
+        if (!provenance["interactions"].isObject()) {
+            result.error = "browser capture interaction provenance must be an object";
+            return result;
+        }
+        const auto interactions = provenance["interactions"];
+        interaction_report = contained_sidecar(
+            envelope_path, string_member(interactions, "report"),
+            result.error);
+        if (!interaction_report) return result;
+        if (!validate_interaction_report(
+                *interaction_report, interactions,
+                interaction_plan_sha256, interaction_report_sha256,
+                interaction_action_count, result.error)) {
+            return result;
+        }
+    }
+
     IRAssetRef backing;
     backing.asset_id = reference_id;
     backing.original_uri = "pulp-capture:///" + reference_path;
@@ -472,6 +614,17 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
         "pulp-capture:///" + semantic_path;
     ir.root.attributes["browser_token_report"] =
         "pulp-capture:///" + token_path;
+    if (interaction_report) {
+        ir.root.attributes["browser_interaction_report"] =
+            "pulp-capture:///" +
+            string_member(provenance["interactions"], "report");
+        ir.root.attributes["browser_interaction_report_sha256"] =
+            interaction_report_sha256;
+        ir.root.attributes["browser_interaction_plan_sha256"] =
+            interaction_plan_sha256;
+        ir.root.attributes["browser_interaction_action_count"] =
+            std::to_string(interaction_action_count);
+    }
     ir.root.attributes["browser_semantic_candidates"] =
         std::to_string(static_cast<int>(
             number_member(semantics, "candidate_count", 0.0)));
@@ -486,6 +639,7 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
 
     result.reference_png = *reference_png;
     result.semantic_report = *semantic_report;
+    result.interaction_report = std::move(interaction_report);
     result.design_ir = std::move(ir);
     return result;
 }

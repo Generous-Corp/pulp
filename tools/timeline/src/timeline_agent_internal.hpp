@@ -1,5 +1,8 @@
 #pragma once
 
+#include "bounded_zip_archive.hpp"
+#include "dawproject_media_packager.hpp"
+
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -10,8 +13,14 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 #include <string>
 #include <unordered_set>
+#include <vector>
+
+namespace pulp::interchange {
+struct ExportArtifacts;
+}
 
 namespace pulp::audio {
 struct AudioFileData;
@@ -38,6 +47,10 @@ struct CompiledProject {
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
 load_project(const ProjectSource& source, const pulp::timeline::SchemaRegistry& registry);
+
+std::optional<std::vector<std::uint8_t>>
+read_verified_asset_bytes(const LoadedProject& project, const pulp::timeline::MediaAsset& asset,
+                          std::uint64_t max_bytes = kMaxAssetWorkingSetBytes);
 
 runtime::Result<std::unordered_set<std::uint64_t>, playback::CompileError>
 reachable_assets(const pulp::timeline::Project& project,

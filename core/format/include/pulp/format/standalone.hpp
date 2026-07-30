@@ -8,6 +8,7 @@
 #endif
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/message_collector.hpp>
@@ -230,6 +231,13 @@ public:
                                       const StandaloneConfig& config);
 
 private:
+    // Declared FIRST so it is destroyed LAST: the final detach cancels and
+    // joins the tracing auto-flush timer and writes the .pftrace, which must
+    // happen after every span this app can still emit. Tracing used to be
+    // wired into VST3 ONLY, so a Perfetto capture of a standalone run
+    // recorded nothing. No-op unless PULP_TRACING=ON.
+    runtime::ScopedTracingAttachment tracing_;
+
     // Tear down the audio + MIDI devices but KEEP the processor instance alive.
     // apply_config() uses this so a settings change does not recreate the
     // Processor out from under an editor ViewBridge holding a Processor&.
