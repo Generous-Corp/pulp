@@ -14,6 +14,7 @@
 #endif
 
 #include <cstring>
+#include <algorithm>
 
 namespace pulp::runtime {
 
@@ -150,6 +151,25 @@ int Socket::receive(uint8_t* buffer, size_t buffer_size) {
     if (fd_ == kInvalidSocketHandle) return -1;
     return static_cast<int>(::recv(NATIVE_SOCKET(fd_), reinterpret_cast<char*>(buffer),
                                    static_cast<int>(buffer_size), 0));
+}
+
+bool Socket::set_write_timeout(std::chrono::milliseconds timeout) {
+    if (fd_ == kInvalidSocketHandle) return false;
+    const auto bounded = std::max(timeout, std::chrono::milliseconds(0));
+#ifdef _WIN32
+    const DWORD value = static_cast<DWORD>(
+        std::min<std::int64_t>(bounded.count(), DWORD_MAX));
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                        reinterpret_cast<const char*>(&value),
+                        sizeof(value)) == 0;
+#else
+    const struct timeval value {
+        static_cast<time_t>(bounded.count() / 1000),
+        static_cast<suseconds_t>((bounded.count() % 1000) * 1000)
+    };
+    return ::setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                        &value, sizeof(value)) == 0;
+#endif
 }
 
 int Socket::receive_from(uint8_t* buffer, size_t buffer_size,

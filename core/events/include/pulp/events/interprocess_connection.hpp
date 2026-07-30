@@ -16,6 +16,7 @@
 #include <thread>
 #include <mutex>
 #include <cstdint>
+#include <chrono>
 
 namespace pulp::events {
 
@@ -70,6 +71,11 @@ public:
         return max_message_bytes_.load(std::memory_order_relaxed);
     }
 
+    /// Apply a blocking write deadline for socket transports. A timed-out
+    /// frame poisons and closes the connection so no later frame can be
+    /// appended to a truncated stream.
+    void set_write_timeout(std::chrono::milliseconds timeout);
+
     // ── Callbacks (override or set) ─────────────────────────────────────
 
     /// Called when a connection is established.
@@ -116,6 +122,8 @@ private:
     std::thread read_thread_;
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
+    std::atomic<std::int64_t> write_timeout_ms_{0};
+    std::atomic<bool> write_poisoned_{false};
     std::atomic<bool> defer_first_dispatch_until_callback_{false};
     std::shared_ptr<std::atomic<bool>> first_dispatch_gate_;
     mutable std::mutex callback_mutex_;
@@ -141,6 +149,7 @@ public:
 
     /// Apply a framing ceiling to every subsequently accepted connection.
     void set_max_message_bytes(std::size_t bytes);
+    void set_write_timeout(std::chrono::milliseconds timeout);
 
     /// Whether the server is running.
     bool is_running() const { return running_.load(); }
@@ -163,6 +172,7 @@ public:
 private:
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
+    std::atomic<std::int64_t> write_timeout_ms_{0};
     std::thread accept_thread_;
     std::vector<std::unique_ptr<InterprocessConnection>> clients_;
     struct ServerImpl;

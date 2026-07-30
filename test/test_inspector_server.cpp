@@ -2,6 +2,7 @@
 
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/inspector_server.hpp>
+#include "unsafe_legacy_inspector_server.hpp"
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/runtime/socket.hpp>
 
@@ -35,7 +36,8 @@
 using pulp::events::InterprocessConnection;
 using pulp::events::IpcTransport;
 using pulp::inspect::InspectorMessage;
-using pulp::inspect::InspectorServer;
+using InspectorServer =
+    pulp::inspect::test::UnsafeLegacyInspectorServer;
 using pulp::inspect::decode_message;
 using pulp::inspect::encode_message;
 using pulp::inspect::make_error;
@@ -650,7 +652,7 @@ TEST_CASE("InspectorServer stop disconnects clients and is idempotent after acti
 
     server.stop();
     REQUIRE(server.client_count() == 0);
-    REQUIRE(server.port() == *port);
+    REQUIRE(server.port() == 0);
 }
 
 // ── Transport reachability ───────────────────────────────────────────────────

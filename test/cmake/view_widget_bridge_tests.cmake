@@ -58,9 +58,11 @@ target_link_libraries(pulp-test-inspector-session PRIVATE
     pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-session)
 
-add_executable(pulp-test-inspector-server test_inspector_server.cpp)
+add_executable(pulp-test-inspector-server
+    test_inspector_server.cpp
+    unsafe_legacy_inspector_server.cpp)
 target_link_libraries(pulp-test-inspector-server PRIVATE
-    pulp::inspect-runtime Catch2::Catch2WithMain)
+    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
 if(WIN32)
     catch_discover_tests(pulp-test-inspector-server
         PROPERTIES
@@ -70,6 +72,16 @@ else()
     catch_discover_tests(pulp-test-inspector-server
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
+
+add_executable(pulp-test-inspector-discovery test_inspector_discovery.cpp)
+target_link_libraries(pulp-test-inspector-discovery PRIVATE
+    pulp::inspect-discovery Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-discovery)
+
+add_executable(pulp-test-inspector-client test_inspector_client.cpp)
+target_link_libraries(pulp-test-inspector-client PRIVATE
+    pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-client)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)

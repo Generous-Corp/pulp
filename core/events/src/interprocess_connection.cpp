@@ -155,6 +155,7 @@ void InterprocessConnection::release_first_dispatch_gate() {
 
 bool InterprocessConnection::connect(std::string_view name, IpcTransport transport) {
     disconnect();
+    write_poisoned_.store(false, std::memory_order_release);
     impl_->transport = transport;
     state_.store(IpcState::Connecting);
 
@@ -170,6 +171,9 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
             return false;
         }
         impl_->socket.create(SocketType::TCP);
+        impl_->socket.set_write_timeout(
+            std::chrono::milliseconds(
+                write_timeout_ms_.load(std::memory_order_relaxed)));
         ok = impl_->socket.connect(endpoint->host, endpoint->port);
     }
 
@@ -193,6 +197,7 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
 bool InterprocessConnection::create_server(std::string_view name, IpcTransport transport,
                                             int /*timeout_ms*/) {
     disconnect();
+    write_poisoned_.store(false, std::memory_order_release);
     impl_->transport = transport;
     state_.store(IpcState::Connecting);
 
@@ -211,6 +216,9 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
                                       ? std::string{"0.0.0.0"}
                                       : endpoint->host;
         impl_->socket.create(SocketType::TCP);
+        impl_->socket.set_write_timeout(
+            std::chrono::milliseconds(
+                write_timeout_ms_.load(std::memory_order_relaxed)));
         if (impl_->socket.bind(host, endpoint->port) && impl_->socket.listen(1)) {
             auto client = impl_->socket.accept();
             if (client) {
@@ -262,9 +270,13 @@ void InterprocessConnection::disconnect() {
 
 bool InterprocessConnection::send_message(const void* data, size_t size) {
     if (!is_connected()) return false;
+    if (write_poisoned_.load(std::memory_order_acquire)) return false;
     if (size > max_message_bytes_.load(std::memory_order_relaxed)) return false;
 
-    std::lock_guard<std::mutex> lock(impl_->write_mutex);
+    std::unique_lock<std::mutex> lock(impl_->write_mutex);
+    if (!is_connected() ||
+        write_poisoned_.load(std::memory_order_acquire))
+        return false;
 
     // Write 4-byte little-endian length header
     uint32_t len = static_cast<uint32_t>(size);
@@ -275,7 +287,12 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
     size_t header_sent = 0;
     while (header_sent < 4) {
         int n = impl_->raw_write(header + header_sent, 4 - header_sent);
-        if (n <= 0) return false;
+        if (n <= 0) {
+            write_poisoned_.store(true, std::memory_order_release);
+            lock.unlock();
+            disconnect();
+            return false;
+        }
         header_sent += static_cast<size_t>(n);
     }
 
@@ -285,7 +302,12 @@ bool InterprocessConnection::send_message(const void* data, size_t size) {
         auto* payload = static_cast<const uint8_t*>(data);
         while (payload_sent < size) {
             int n = impl_->raw_write(payload + payload_sent, size - payload_sent);
-            if (n <= 0) return false;
+            if (n <= 0) {
+                write_poisoned_.store(true, std::memory_order_release);
+                lock.unlock();
+                disconnect();
+                return false;
+            }
             payload_sent += static_cast<size_t>(n);
         }
     }
@@ -300,6 +322,14 @@ void InterprocessConnection::set_max_message_bytes(std::size_t bytes) {
     max_message_bytes_.store(
         std::clamp<std::size_t>(bytes, 1, UINT32_MAX),
         std::memory_order_relaxed);
+}
+
+void InterprocessConnection::set_write_timeout(
+    std::chrono::milliseconds timeout) {
+    const auto value = std::max(timeout, std::chrono::milliseconds(0));
+    write_timeout_ms_.store(value.count(), std::memory_order_relaxed);
+    if (impl_->transport == IpcTransport::Socket && impl_->socket.is_open())
+        impl_->socket.set_write_timeout(value);
 }
 
 
@@ -422,6 +452,13 @@ void InterprocessConnectionServer::set_max_message_bytes(std::size_t bytes) {
         std::memory_order_relaxed);
 }
 
+void InterprocessConnectionServer::set_write_timeout(
+    std::chrono::milliseconds timeout) {
+    write_timeout_ms_.store(
+        std::max(timeout, std::chrono::milliseconds(0)).count(),
+        std::memory_order_relaxed);
+}
+
 bool InterprocessConnectionServer::start(std::string_view name, IpcTransport transport) {
     stop();
     server_impl_->transport = transport;
@@ -458,7 +495,10 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 // Inject the accepted socket via friend access
                 conn->impl_->transport = IpcTransport::Socket;
                 conn->impl_->socket = std::move(*client_sock);
+                conn->set_write_timeout(std::chrono::milliseconds(
+                    write_timeout_ms_.load(std::memory_order_relaxed)));
                 conn->state_.store(IpcState::Connected);
+                conn->write_poisoned_.store(false, std::memory_order_release);
                 conn->defer_first_dispatch_until_callback_.store(true);
                 conn->first_dispatch_gate_ = first_dispatch_gate;
                 conn->connection_made();

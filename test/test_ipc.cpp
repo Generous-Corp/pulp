@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <process.h>
@@ -1306,6 +1307,59 @@ TEST_CASE("IPC socket server receives binary payload frames",
     if (server.accepted) server.accepted->disconnect();
     server.stop();
     REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket write timeout closes a partially written frame",
+          "[events][ipc][socket][regression]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    REQUIRE(listener.bind("127.0.0.1", 0));
+    REQUIRE(listener.listen(1));
+    const auto port = listener.local_port();
+    REQUIRE(port != 0);
+
+    std::atomic<bool> peer_accepted{false};
+    std::atomic<bool> release_peer{false};
+    std::thread peer([&] {
+        auto socket = listener.accept();
+        peer_accepted.store(socket.has_value(), std::memory_order_release);
+        while (socket && !release_peer.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+
+    InterprocessConnection client;
+    client.set_max_message_bytes(32u * 1024u * 1024u);
+    client.set_write_timeout(std::chrono::milliseconds(50));
+    const bool connected = client.connect(
+        "127.0.0.1:" + std::to_string(port), IpcTransport::Socket);
+
+    const auto accept_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!peer_accepted.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < accept_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool first_send = true;
+    std::chrono::steady_clock::duration send_duration{};
+    if (connected && peer_accepted.load(std::memory_order_acquire)) {
+        const std::vector<std::uint8_t> payload(32u * 1024u * 1024u, 0x5a);
+        const auto started = std::chrono::steady_clock::now();
+        first_send = client.send_message(payload.data(), payload.size());
+        send_duration = std::chrono::steady_clock::now() - started;
+    }
+    const bool second_send = client.send_message("must-not-follow-partial-frame");
+
+    release_peer.store(true, std::memory_order_release);
+    listener.shutdown();
+    if (peer.joinable()) peer.join();
+
+    REQUIRE(connected);
+    REQUIRE(peer_accepted.load(std::memory_order_acquire));
+    REQUIRE_FALSE(first_send);
+    REQUIRE_FALSE(client.is_connected());
+    REQUIRE_FALSE(second_send);
+    REQUIRE(send_duration < std::chrono::seconds(2));
 }
 
 TEST_CASE("IPC socket server observes client disconnect",

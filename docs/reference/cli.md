@@ -1244,14 +1244,15 @@ Remaining limitation:
 
 **Status**: experimental
 
-Experimental low-level client for a custom host/test fixture that explicitly
-constructs an inspector server. Normal `pulp run` and plugin-format launches do
-not currently start an endpoint. With no `--port`, the client chooses the
-newest `pulp-inspector-*.port` temp-file hint; that transitional discovery
-mechanism does not authenticate or identify an exact session.
+Authenticated low-level client for an explicitly enabled inspector session.
+Normal `pulp run` and plugin-format launches do not currently start an
+endpoint. The client reads owner-private ephemeral discovery records, requires
+an exact session when more than one is live, and proves possession of the
+session credential before sending a request.
 
 ```bash
 pulp inspect
+pulp inspect --session SESSION_ID
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
 pulp inspect --command State.getParameters
@@ -1259,15 +1260,15 @@ pulp inspect --command State.getParameters
 
 Options:
 
-- `--host HOST` - connect to a host other than `127.0.0.1`
-- `--port PORT` - connect to an explicit inspector port
+- `--session ID` - select the exact live session
+- `--host HOST` - filter discovery by loopback host
+- `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
 
-The current transport is loopback-only but unauthenticated. Do not use it for
-privileged mutation or runtime evaluation. Authenticated, exact-session
-discovery is not yet implemented.
+The transport is loopback-only, token-authenticated, bounded, and
+capability-enforced. Mutations additionally require the controller lease.
 
 `Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
 protocol methods that currently return explicit unavailable errors until

@@ -7,6 +7,7 @@
 #include <vector>
 #include <optional>
 #include <cstdint>
+#include <chrono>
 
 namespace pulp::runtime {
 
@@ -42,6 +43,10 @@ public:
 
     /// Receive data. Returns bytes received, or -1 on error. 0 = connection closed.
     int receive(uint8_t* buffer, size_t buffer_size);
+
+    /// Bound blocking send operations. A non-positive duration clears the
+    /// deadline. Applies to subsequently issued operations.
+    bool set_write_timeout(std::chrono::milliseconds timeout);
 
     /// Receive UDP datagram. Returns bytes received and source address.
     int receive_from(uint8_t* buffer, size_t buffer_size,

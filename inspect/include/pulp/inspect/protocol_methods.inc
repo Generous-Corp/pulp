@@ -4,6 +4,8 @@
 // drift from the constants used by dispatch.
 
 PULP_INSPECT_METHOD(kSessionGetCapabilities, "Session.getCapabilities", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kSessionAuthenticate, "Session.authenticate", SessionDescribe, Request)
+PULP_INSPECT_METHOD(kSessionAuthChallenge, "Session.authChallenge", SessionDescribe, Event)
 PULP_INSPECT_METHOD(kSessionAcquireController, "Session.acquireController", SessionControl, Request)
 PULP_INSPECT_METHOD(kSessionRenewController, "Session.renewController", SessionControl, Request)
 PULP_INSPECT_METHOD(kSessionReleaseController, "Session.releaseController", SessionControl, Request)

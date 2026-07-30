@@ -49,7 +49,7 @@ FORBIDDEN_CLAIMS = {
         "`Runtime.evaluate`, `Capture.screenshot`, and `Capture.screenshotNode`",
     ),
     "docs/reference/development-inspector-capabilities.md": (
-        "filesystem and editor-launch methods are unavailable",
+        "current dispatch does not enforce the registry",
     ),
 }
 
@@ -67,8 +67,8 @@ REQUIRED_CLAIMS = {
         "explicitly wired",
     ),
     "docs/reference/development-inspector-capabilities.md": (
-        "classified unavailable for future policy",
-        "current dispatch does not enforce the registry",
+        "owner-private ephemeral record/token files",
+        "Capability dispatch is fail-closed",
     ),
 }
 

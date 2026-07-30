@@ -1,16 +1,16 @@
 // Focused shell-out coverage for `pulp inspect`.
 //
-// These tests launch the built CLI against a real in-process
-// InspectorServer so cmd_inspect.cpp's one-shot success, discovery,
-// output-file, and protocol-error paths are covered end-to-end.
+// These tests launch the built CLI against a real authenticated, discoverable
+// inspector session so command, output, and structured-error paths are covered.
 
 #include "test_cli_shellout_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/inspect/authentication.hpp>
+#include <pulp/inspect/discovery.hpp>
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/protocol.hpp>
-#include <pulp/runtime/socket.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <optional>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,78 +26,81 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
 using namespace pulp_test_cli;
 using pulp::inspect::InspectorMessage;
+using pulp::inspect::InspectorCapability;
+using pulp::inspect::InspectorDiscoveryPublisher;
+using pulp::inspect::InspectorDiscoveryRecord;
+using pulp::inspect::InspectorPolicyConfig;
+using pulp::inspect::InspectorProfile;
 using pulp::inspect::InspectorServer;
+using pulp::inspect::InspectorServerConfig;
+using pulp::inspect::InspectorSession;
+using pulp::inspect::InspectorSessionInfo;
+using pulp::inspect::generate_inspector_secret;
 using pulp::inspect::make_error;
 using pulp::inspect::make_response;
-using pulp::runtime::Socket;
-using pulp::runtime::SocketType;
 
 namespace {
 
-std::uint16_t inspect_socket_seed() {
-    const auto now = static_cast<std::uint64_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-#ifdef _WIN32
-    const auto pid = static_cast<std::uint64_t>(_getpid());
-#else
-    const auto pid = static_cast<std::uint64_t>(getpid());
-#endif
-    return static_cast<std::uint16_t>((now + pid * 97u) % 20000u);
-}
-
-std::optional<std::uint16_t> start_test_inspector(InspectorServer& server) {
-    const auto seed = inspect_socket_seed();
-    for (std::uint16_t i = 0; i < 200; ++i) {
-        const auto port = static_cast<std::uint16_t>(
-            20000 + ((seed + i) % 20000));
-        if (server.start(port))
-            return port;
-    }
-    return std::nullopt;
-}
-
-std::optional<std::uint16_t> find_unbound_port() {
-    const auto seed = inspect_socket_seed();
-    for (std::uint16_t i = 0; i < 200; ++i) {
-        const auto port = static_cast<std::uint16_t>(
-            20000 + ((seed + i) % 20000));
-        Socket socket;
-        if (socket.create(SocketType::TCP) && socket.bind("127.0.0.1", port))
-            return port;
-    }
-    return std::nullopt;
-}
-
-const char* temp_env_name() {
-#ifdef _WIN32
-    return "TEMP";
-#else
-    return "TMPDIR";
-#endif
+InspectorPolicyConfig fixture_policy() {
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Develop;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateRead,
+        InspectorCapability::StateWrite,
+        InspectorCapability::UiRead,
+        InspectorCapability::DiagnosticsRead,
+        InspectorCapability::LogsRead,
+        InspectorCapability::AuthoringTweaks,
+    };
+    return policy;
 }
 
 struct InspectServerFixture {
     fs::path temp = unique_temp_dir("pulp-cli-inspect-shellout");
-    ScopedEnvVar temp_env{temp_env_name()};
+    ScopedEnvVar runtime_dir{"PULP_INSPECTOR_RUNTIME_DIR"};
     ScopedEnvVar update_disabled{"PULP_UPDATE_CHECK_DISABLED"};
+    InspectorDiscoveryPublisher publisher{temp};
+    InspectorPolicyConfig policy = fixture_policy();
+    std::function<InspectorMessage(const InspectorMessage&)> handler;
+    std::vector<InspectorMessage> seen;
+    InspectorSession session{
+        InspectorSessionInfo{
+            "cli-shellout-session", "cli-shellout-instance",
+            "com.pulp.cli-shellout", "1"},
+        policy,
+        [this](const InspectorMessage& request) {
+            seen.push_back(request);
+            return handler ? handler(request)
+                           : make_response(request.id, "{}");
+        }};
     InspectorServer server;
     std::uint16_t port = 0;
-    std::vector<InspectorMessage> seen;
 
     InspectServerFixture() {
         fs::create_directories(temp);
-        temp_env.set(temp.string());
+#ifndef _WIN32
+        REQUIRE(::chmod(temp.c_str(), 0700) == 0);
+#endif
+        runtime_dir.set(temp.string());
         update_disabled.set("1");
-
-        auto started = start_test_inspector(server);
-        REQUIRE(started.has_value());
-        port = *started;
+        const auto token = generate_inspector_secret();
+        REQUIRE(token.has_value());
+        InspectorDiscoveryRecord record;
+        record.session_id = session.info().session_id;
+        record.instance_id = session.info().instance_id;
+        record.plugin_id = session.info().plugin_id;
+        REQUIRE(server.start_authenticated(
+            InspectorServerConfig{&session, &publisher, record, *token}));
+        port = static_cast<std::uint16_t>(server.port());
     }
 
     ~InspectServerFixture() {
@@ -129,11 +132,10 @@ TEST_CASE("pulp inspect one-shot prints a server response",
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     InspectServerFixture fixture;
-    fixture.server.set_request_handler([&](const InspectorMessage& request) {
-        fixture.seen.push_back(request);
+    fixture.handler = [&](const InspectorMessage& request) {
         return make_response(request.id,
                              R"({"ok":true,"source":"inspect-test"})");
-    });
+    };
 
     auto result = run_pulp({"inspect",
                             "--host", "127.0.0.1",
@@ -154,7 +156,7 @@ TEST_CASE("pulp inspect one-shot prints a server response",
                 .find(R"({"ok":true,"source":"inspect-test"})") !=
             std::string::npos);
     REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].id == 1);
+    REQUIRE(fixture.seen[0].id >= 2);
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE(compact_json_for_assertion(fixture.seen[0].params_json) ==
             R"({"depth":2})");
@@ -165,18 +167,17 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
     InspectServerFixture fixture;
-    fixture.server.set_request_handler([&](const InspectorMessage& request) {
-        fixture.seen.push_back(request);
+    fixture.handler = [&](const InspectorMessage& request) {
         return make_response(request.id, R"({"discovered":true})");
-    });
+    };
 
-    auto result = run_pulp({"inspect", "--command", "Runtime.evaluate"}, 10000);
+    auto result = run_pulp({"inspect", "--command", "DOM.getDocument"}, 10000);
 
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.stderr_output.empty());
-    REQUIRE(result.stdout_output.find("Found inspector on port " +
-                                      fixture.port_string()) !=
+    REQUIRE(result.stdout_output.find("Found inspector session " +
+                                      fixture.session.info().session_id) !=
             std::string::npos);
     REQUIRE(result.stdout_output.find("Connecting to 127.0.0.1:" +
                                       fixture.port_string()) !=
@@ -185,7 +186,7 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
                 .find(R"({"discovered":true})") !=
             std::string::npos);
     REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].method == "Runtime.evaluate");
+    REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE((fixture.seen[0].params_json.empty() ||
              fixture.seen[0].params_json == "{}"));
 }
@@ -197,16 +198,15 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
     InspectServerFixture fixture;
     const auto out = fixture.temp / "inspect-response.json";
 
-    fixture.server.set_request_handler([&](const InspectorMessage& request) {
-        fixture.seen.push_back(request);
-        if (request.method == "Inspector.fail")
+    fixture.handler = [&](const InspectorMessage& request) {
+        if (request.method == "Inspector.getInfo")
             return make_error(request.id, "server rejected request");
         return make_response(request.id, R"({"file":true,"value":42})");
-    });
+    };
 
     auto written = run_pulp({"inspect",
                              "--port", fixture.port_string(),
-                             "--command", "Inspector.snapshot",
+                             "--command", "State.getParameters",
                              "--output", out.string()},
                             10000);
 
@@ -219,11 +219,11 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
     REQUIRE(compact_json_for_assertion(read_text_file(out)) ==
             R"({"file":true,"value":42})");
     REQUIRE(fixture.seen.size() == 1);
-    REQUIRE(fixture.seen[0].method == "Inspector.snapshot");
+    REQUIRE(fixture.seen[0].method == "State.getParameters");
 
     auto failed = run_pulp({"inspect",
                             "--port", fixture.port_string(),
-                            "--command", "Inspector.fail",
+                            "--command", "Inspector.getInfo",
                             "--output", (fixture.temp / "failed.json").string()},
                            10000);
 
@@ -233,7 +233,7 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
             std::string::npos);
     REQUIRE_FALSE(fs::exists(fixture.temp / "failed.json"));
     REQUIRE(fixture.seen.size() == 2);
-    REQUIRE(fixture.seen[1].method == "Inspector.fail");
+    REQUIRE(fixture.seen[1].method == "Inspector.getInfo");
 }
 
 TEST_CASE("pulp inspect validates missing values before connecting",
@@ -243,9 +243,6 @@ TEST_CASE("pulp inspect validates missing values before connecting",
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
     update_disabled.set("1");
 
-    const auto unused_port = find_unbound_port();
-    REQUIRE(unused_port.has_value());
-
     struct Case {
         std::vector<std::string> args;
         std::string diagnostic;
@@ -253,6 +250,7 @@ TEST_CASE("pulp inspect validates missing values before connecting",
 
     const std::vector<Case> cases = {
         {{"inspect", "--host"}, "--host requires a value"},
+        {{"inspect", "--session"}, "--session requires a value"},
         {{"inspect", "--command"}, "--command requires a value"},
         {{"inspect", "--params"}, "--params requires a value"},
         {{"inspect", "--output"}, "--output requires a value"},
