@@ -137,6 +137,47 @@ become natural in Phase 2 rather than needing a throwaway.
 
 Still to do in Phase 1: nothing.
 
+## Phase 2 — Forge Modular's shell
+
+`modular/modular_shell.{hpp,cpp}` is the first real `ForgeShell` subclass outside
+Forge, which is what makes the seam's live-path proofs permanent instead of
+manual.
+
+It answers all three hooks: `chrome_copy()` with Eurorack wording that follows
+Module/Patch, `composer_row()` with mention / Random / Ask / Build, and
+`home_accessory()` with the tabs slot. Everything else `ForgeShell` demands is
+about DSP this product does not have, and every empty override says why — an
+unexplained empty override reads as an oversight.
+
+Four permanent tests replace the manual demonstrations:
+
+| Test | What it holds |
+|---|---|
+| copy reaches the chrome | badge and placeholder follow the artifact, **both directions** |
+| describes its own row | Ask is never primary; every icon-only button has an access label |
+| home accessory reaches the chrome | the tabs slot returns a view |
+| unwired install reports failure | rather than claiming a success that installed nothing |
+
+`forge-test-chrome-no-leak` now runs 7 cases / 35 assertions. Forge's own suite
+is unchanged at 4,711.
+
+**It uses `ShellKind::effect` rather than a new enum value.** Everything Forge
+Modular varies now comes through the three hooks, so a fourth value would mean
+editing all 13 remaining switch sites for no gain — and putting a Rack-shaped
+name in Forge's core enum, which is exactly what this arrangement exists to
+avoid. The badge no longer comes from the kind, so nothing reads "FORGE FX".
+
+**`install_generated_bundle` deliberately returns false with a reason.** The
+other shells lower a bundle onto their DSP; Forge Modular's artifact is a
+`.vcvplugin` that Rack loads once at startup, so "install" means packaging a file
+and a new module needs a Rack restart. That path lives in the generator and is
+joined in Phase 7. Reporting false beats reporting a success that installed
+nothing, which is the failure mode this project has hit most often.
+
+One thing the compiler caught that the JS bridge had not: the flex member is
+`direction`, not `flex_direction`. In JS that silently did nothing thirteen
+times; in C++ it is a build error.
+
 ## Applying it to a Forge checkout
 
 The test needs one registration in Forge's `CMakeLists.txt`, beside

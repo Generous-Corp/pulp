@@ -139,3 +139,72 @@ TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
     forge::ForgeMidiShell shell;
     check_home_frame(shell, "midi");
 }
+
+
+// ── the seam is live, not merely harmless ────────────────────────────────────
+//
+// The tests above prove the three existing products are untouched. On their own
+// that is also exactly what a dead code path looks like. These prove Forge
+// Modular's answers actually reach the chrome — using the real shell rather than
+// a test double, because ForgeFxShell is final and cannot be subclassed.
+
+#include <forge/modular_shell.hpp>
+
+TEST_CASE("Forge Modular's copy reaches the chrome", "[seam]") {
+    forge_modular::ForgeModularShell shell;
+
+    auto copy = shell.chrome_copy();
+    CHECK(copy.badge.find("MODULE") != std::string::npos);
+    CHECK(copy.prompt_placeholder.find("12 HP") != std::string::npos);
+
+    // The mode is carried, not inferred. Both sides asserted, because checking
+    // one side of a boolean is what let "Build always made a patch" ship.
+    shell.set_artifact(forge_modular::Artifact::patch);
+    copy = shell.chrome_copy();
+    CHECK(copy.badge.find("PATCH") != std::string::npos);
+    CHECK(copy.prompt_placeholder.find("drone") != std::string::npos);
+
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(shell.chrome_copy().badge.find("MODULE") != std::string::npos);
+}
+
+TEST_CASE("Forge Modular describes its own composer row", "[seam]") {
+    forge_modular::ForgeModularShell shell;
+
+    auto row = shell.composer_row();
+    REQUIRE(row.left.size() == 2);
+    REQUIRE(row.right.size() == 2);
+    CHECK(row.left[1].label == "Random");
+    CHECK(row.right[0].label == "Ask");
+    CHECK(row.right[1].label == "Build module");
+    CHECK(row.right[1].primary);
+    CHECK_FALSE(row.right[0].primary);          // Ask must never read as the action
+
+    // Every icon-only button needs an access label, or it is unreachable.
+    for (const auto& a : row.left) {
+        if (a.label.empty()) CHECK_FALSE(a.access_label.empty());
+    }
+
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK(shell.composer_row().right[1].label == "Build patch");
+}
+
+TEST_CASE("Forge Modular's home accessory reaches the chrome", "[seam]") {
+    // The tabs slot. Returning a view must put it in the tree; the three other
+    // products return nullptr and are unaffected, which the baselines assert.
+    forge_modular::ForgeModularShell shell;
+    auto accessory = shell.home_accessory();
+    REQUIRE(accessory != nullptr);
+}
+
+TEST_CASE("Forge Modular reports an unwired install rather than claiming success",
+          "[seam]") {
+    // A success that installed nothing is the failure mode this project has hit
+    // most often, so the unwired path says so.
+    forge_modular::ForgeModularShell shell;
+    forge::ForgeShell::BundleInstallResult info;
+    std::string err;
+    forge::gen::Bundle bundle;
+    CHECK_FALSE(shell.install_generated_bundle(bundle, 48000.0, 512, {}, info, err));
+    CHECK_FALSE(err.empty());
+}

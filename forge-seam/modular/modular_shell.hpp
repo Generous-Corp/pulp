@@ -1,0 +1,127 @@
+#pragma once
+
+// Forge Modular as a fourth Forge shell.
+//
+// The three existing shells — FX, Instrument, MIDI — are DSP: they make sound and
+// the chrome shows their controls. This one makes *files*: a Eurorack panel plus
+// its C++, or a whole patch. So most of ForgeShell's pure virtuals are about
+// something this product does not have, and they are answered honestly rather
+// than faked. Every deliberately-empty override says why it is empty, because an
+// unexplained empty override reads as an oversight.
+//
+// It is the first real ForgeShell subclass outside Forge itself, which is what
+// makes the seam's live-path tests permanent instead of manual demonstrations.
+
+#include "forge/brand.hpp"
+#include "forge/shell.hpp"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace forge_modular {
+
+/// What Forge Modular is currently set to build.
+enum class Artifact { module, patch };
+
+/// Where generation actually runs.
+///
+/// The shell never compiles anything itself: it hands a prompt to a helper and
+/// renders what comes back. That keeps a compiler out of a DAW's plugin sandbox
+/// and stops the generation engine existing twice.
+class EngineClient {
+public:
+    virtual ~EngineClient() = default;
+    /// False means not installed, which is a real failure worth reporting —
+    /// unlike merely not-yet-running.
+    virtual bool available() const = 0;
+    virtual bool ensure_running() = 0;
+    virtual void submit(const std::string& prompt, bool patch_mode) = 0;
+    /// Why the last submit did nothing; empty when it started. A Build that
+    /// silently does nothing is the worst available outcome, and it shipped once.
+    virtual std::string last_error() const { return {}; }
+};
+
+class ForgeModularShell final : public forge::ForgeShell {
+public:
+    ForgeModularShell();
+
+    void set_engine(EngineClient* engine) { engine_ = engine; }
+
+    /// Module or patch. The chrome reads this through the copy and the row, so
+    /// there is never a second copy of the mode to disagree with.
+    Artifact artifact() const { return artifact_; }
+    void set_artifact(Artifact a);
+
+    // ── what the chrome asks ─────────────────────────────────────────────────
+
+    forge::ChromeCopy chrome_copy() const override;
+    forge::ComposerRow composer_row() override;
+    std::unique_ptr<pulp::view::View> home_accessory() override;
+
+    /// What a host sees.
+    ///
+    /// An audio effect passing signal through untouched. Rack Pro wants the
+    /// instrument slot, and taking one too would spend a whole track on a chat
+    /// window; an insert puts both on the same track. The full reasoning, and
+    /// what would change it, is in DECISIONS.md.
+    pulp::format::PluginDescriptor descriptor() const override;
+
+    /// None. What this produces is a file on disk, not a sound, so there is
+    /// nothing a host should automate -- and a parameter that did nothing would
+    /// only invite somebody to draw an envelope on it.
+    void define_parameters(pulp::state::StateStore&) override {}
+
+    void prepare(const pulp::format::PrepareContext& ctx) override;
+
+    // ── audio ────────────────────────────────────────────────────────────────
+
+    void process_audio(pulp::audio::BufferView<float>& audio_output,
+                       const pulp::audio::BufferView<const float>& audio_input,
+                       pulp::midi::MidiBuffer& midi_in,
+                       pulp::midi::MidiBuffer& midi_out,
+                       const pulp::format::ProcessContext& context) override;
+
+    double current_sample_rate() const override { return sample_rate_; }
+    int current_block_size() const override { return block_size_; }
+
+    // ── the build ────────────────────────────────────────────────────────────
+
+    bool has_build() const override { return has_build_; }
+
+    /// None. A Rack artifact's controls live on its own panel, inside Rack, and
+    /// a macro here would automate nothing a host could reach.
+    std::vector<forge::MacroDesc> macro_descriptors() const override { return {}; }
+
+    bool install_generated_bundle(
+        const forge::gen::Bundle& bundle, double sample_rate, int block_size,
+        const std::function<void(forge::gen::GenStage, const std::string&)>& progress,
+        BundleInstallResult& info, std::string& err,
+        std::span<const forge::gen::EffectAssetBinding> effect_assets = {},
+        const std::function<bool()>& cancel_requested = {},
+        const std::function<bool()>& try_begin_commit = {}) override;
+
+    void reset_to_default_build() override { has_build_ = false; }
+
+    /// Nothing to install. The other products open on a working default so the
+    /// user hears something immediately; a Eurorack module has nowhere to sound
+    /// until Rack loads it, so opening empty is the honest state.
+    void ensure_default_build() override {}
+
+    // ── macros: none, so these are empty on purpose ──────────────────────────
+
+    void restore_macro(int, float) override {}
+    void apply_macro_from_store(int, float) override {}
+    std::vector<std::pair<int, float>> current_macro_positions() const override {
+        return {};
+    }
+
+private:
+    EngineClient* engine_ = nullptr;
+    Artifact artifact_ = Artifact::module;
+    bool has_build_ = false;
+    double sample_rate_ = 48000.0;
+    int block_size_ = 512;
+};
+
+}  // namespace forge_modular
