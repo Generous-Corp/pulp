@@ -217,8 +217,12 @@ export function semanticExpression(snapshotClickableIndexes = []) {
       element.getAttribute('title') ||
       (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim()
         .slice(0, 200);
+    // A component class is as declarative as an ARIA role -- the author named
+    // the control -- so it scores alongside one rather than falling to the
+    // weak-signal floor, which is where these landed when the recogniser fed
+    // the gate and the kind but not the score.
     const confidence = explicitKind ? 1 :
-      native ? 0.95 : roleKind ? 0.9 : hasEvent ? 0.7 : 0.35;
+      native ? 0.95 : roleKind ? 0.9 : component ? 0.9 : hasEvent ? 0.7 : 0.35;
     candidates.push({
       id: 'browser-node:' + domIndex,
       dom_index: domIndex,
