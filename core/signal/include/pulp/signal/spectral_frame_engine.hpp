@@ -135,11 +135,15 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
         && checked_allocation_bytes<std::complex<SampleType>*>(channels,
                                                                target_max_bytes); // frame pointers
     // FftT owns fallback twiddles on every platform. Apple's float backend
-    // additionally owns two fft-sized split buffers; the opaque vDSP plan is
-    // bounded by the already-validated public FFT limit but exposes no byte size.
+    // additionally owns two fft-sized split buffers; its opaque plan is bounded
+    // by the FFT wrapper's conservative platform policy below.
     const bool fft_buffers_fit =
         checked_allocation_bytes<std::complex<double>>(fft_size / 2u, target_max_bytes);
-    if (!explicit_buffers_fit || !fft_buffers_fit) return std::nullopt;
+    std::uint64_t platform_setup_bytes = 0;
+    const bool platform_setup_fits = checked_fft_platform_setup_bytes<SampleType>(
+        fft_size, target_max_bytes, platform_setup_bytes);
+    if (!explicit_buffers_fit || !fft_buffers_fit || !platform_setup_fits)
+        return std::nullopt;
 #if PULP_FFT_HAS_VDSP
     if constexpr (std::is_same_v<SampleType, float>) {
         const bool split_buffers_fit =
