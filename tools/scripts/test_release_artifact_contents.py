@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import re
 import tarfile
 import tempfile
@@ -141,37 +142,82 @@ def interface_library_targets() -> set[str]:
     return targets
 
 
-def member_payload(name: str) -> bytes:
+SOURCE_SHA = "a" * 40
+
+
+def member_payload(name: str, platform: str = "linux-x64") -> bytes:
     if name == "pulp-sdk/version.txt":
         return f"{VERSION}\n".encode()
     if name == "pulp-sdk/sdk_build_type.txt":
         return b"Release\n"
+    if name == "pulp-sdk/sdk-provenance.json":
+        return (
+            json.dumps(
+                {
+                    "schema": "pulp.sdk-provenance.v1",
+                    "kind": "release",
+                    "profile": "official-release",
+                    "distribution_eligible": True,
+                    "sdk_version": VERSION,
+                    "source_git_ref": f"v{VERSION}",
+                    "source_git_sha": SOURCE_SHA,
+                    "source_git_dirty": False,
+                    "platform": platform,
+                    "build_type": "Release",
+                    "features": {"audio_probes": False, "inspector": False},
+                }
+            )
+            + "\n"
+        ).encode()
     return b"fixture"
 
 
-def write_archive(path: Path, members: set[str], *, as_zip: bool) -> None:
+def write_archive(
+    path: Path,
+    members: set[str],
+    *,
+    as_zip: bool,
+    platform: str = "linux-x64",
+    mode_overrides: dict[str, int] | None = None,
+) -> None:
+    mode_overrides = mode_overrides or {}
     if as_zip:
         with zipfile.ZipFile(path, "w") as archive:
             for name in sorted(members):
                 info = zipfile.ZipInfo(name)
-                info.external_attr = 0o755 << 16
-                archive.writestr(info, member_payload(name))
+                info.external_attr = mode_overrides.get(name, 0o755) << 16
+                archive.writestr(info, member_payload(name, platform))
         return
     with tarfile.open(path, "w:gz") as archive:
         for name in sorted(members):
-            data = member_payload(name)
+            data = member_payload(name, platform)
             info = tarfile.TarInfo(name)
             info.size = len(data)
-            info.mode = 0o755 if "/bin/" in name or name in {"pulp", "pulp-cpp", "pulp-mcp"} else 0o644
+            default_mode = (
+                0o755
+                if "/bin/" in name or name in {"pulp", "pulp-cpp", "pulp-mcp"}
+                else 0o644
+            )
+            info.mode = mode_overrides.get(name, default_mode)
             archive.addfile(info, io.BytesIO(data))
 
 
 def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
     cli = set(rac.cli_members(platform))
-    sdk = set(rac.required_sdk_members(platform, rac.DEFAULT_MATRIX))
-    write_archive(root / rac.cli_asset_name(platform), cli, as_zip=platform.startswith("windows-"))
+    sdk = set(rac.required_sdk_members(platform, rac.DEFAULT_MATRIX, VERSION))
+    write_archive(
+        root / rac.cli_asset_name(platform),
+        cli,
+        as_zip=platform.startswith("windows-"),
+        platform=platform,
+    )
     # Windows SDKs intentionally have a .tar.gz name but ZIP bytes.
-    write_archive(root / rac.sdk_asset_name(platform), sdk, as_zip=platform.startswith("windows-"))
+    write_archive(
+        root / rac.sdk_asset_name(platform),
+        sdk,
+        as_zip=platform.startswith("windows-"),
+        platform=platform,
+    )
     return cli, sdk
 
 
@@ -266,7 +312,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             make_platform(root, "windows-x64")
-            rac.verify_platform(root, "windows-x64", VERSION, native_signatures=False)
+            rac.verify_platform(
+                root, "windows-x64", VERSION, SOURCE_SHA, native_signatures=False
+            )
 
     def test_negative_control_missing_format_library_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -276,17 +324,31 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
             write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
             with self.assertRaisesRegex(rac.ContentError, "libpulp-format"):
-                rac.verify_platform(root, "linux-x64", VERSION, native_signatures=False)
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
 
     def test_negative_control_stale_vanished_target_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cli, sdk = make_platform(root, "darwin-arm64")
             sdk.add("pulp-sdk/lib/libpulp-retired-target.a")
-            write_archive(root / rac.cli_asset_name("darwin-arm64"), cli, as_zip=False)
-            write_archive(root / rac.sdk_asset_name("darwin-arm64"), sdk, as_zip=False)
+            write_archive(
+                root / rac.cli_asset_name("darwin-arm64"),
+                cli,
+                as_zip=False,
+                platform="darwin-arm64",
+            )
+            write_archive(
+                root / rac.sdk_asset_name("darwin-arm64"),
+                sdk,
+                as_zip=False,
+                platform="darwin-arm64",
+            )
             with self.assertRaisesRegex(rac.ContentError, "retired-target"):
-                rac.verify_platform(root, "darwin-arm64", VERSION, native_signatures=False)
+                rac.verify_platform(
+                    root, "darwin-arm64", VERSION, SOURCE_SHA, native_signatures=False
+                )
 
     def test_negative_control_unexpected_cli_payload_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -295,7 +357,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             cli.add("stale-plugin.vst3")
             write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
             with self.assertRaisesRegex(rac.ContentError, "stale-plugin"):
-                rac.verify_platform(root, "linux-x64", VERSION, native_signatures=False)
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
 
     def test_negative_control_invalid_signature_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -313,7 +377,95 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             root = Path(td)
             make_platform(root, "linux-x64")
             with self.assertRaisesRegex(rac.ContentError, "expected '1.2.3'"):
-                rac.verify_platform(root, "linux-x64", "1.2.3", native_signatures=False)
+                rac.verify_platform(
+                    root, "linux-x64", "1.2.3", SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_missing_provenance_fires_at_new_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cli, sdk = make_platform(root, "linux-x64")
+            sdk.remove("pulp-sdk/sdk-provenance.json")
+            write_archive(root / rac.cli_asset_name("linux-x64"), cli, as_zip=False)
+            write_archive(root / rac.sdk_asset_name("linux-x64"), sdk, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "sdk-provenance.json"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_unsafe_provenance_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def unsafe_payload(name: str, platform: str = "linux-x64") -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["features"]["inspector"] = True
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            with mock.patch(__name__ + ".member_payload", side_effect=unsafe_payload):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "unsafe SDK provenance"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_wrong_provenance_commit_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            with self.assertRaisesRegex(rac.ContentError, "source_git_sha"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, "b" * 40, native_signatures=False
+                )
+
+    def test_negative_control_wrong_provenance_platform_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_platform(root, "linux-x64")
+            sdk_path = root / rac.sdk_asset_name("linux-x64")
+            with rac.Archive(sdk_path) as archive:
+                members = set(archive.members)
+            original_payload = member_payload
+
+            def wrong_platform_payload(
+                name: str, platform: str = "linux-x64"
+            ) -> bytes:
+                if name == "pulp-sdk/sdk-provenance.json":
+                    marker = json.loads(original_payload(name, platform))
+                    marker["platform"] = "darwin-arm64"
+                    return json.dumps(marker).encode()
+                return original_payload(name, platform)
+
+            with mock.patch(
+                __name__ + ".member_payload", side_effect=wrong_platform_payload
+            ):
+                write_archive(sdk_path, members, as_zip=False)
+            with self.assertRaisesRegex(rac.ContentError, "platform"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_unreadable_provenance_fires(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _cli, sdk = make_platform(root, "linux-x64")
+            write_archive(
+                root / rac.sdk_asset_name("linux-x64"),
+                sdk,
+                as_zip=False,
+                mode_overrides={"pulp-sdk/sdk-provenance.json": 0o600},
+            )
+            with self.assertRaisesRegex(rac.ContentError, "not world-readable"):
+                rac.verify_platform(
+                    root, "linux-x64", VERSION, SOURCE_SHA, native_signatures=False
+                )
 
     def test_pre_contract_release_is_explicitly_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -325,9 +477,24 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                         "linux-x64",
                         "--version",
                         "0.759.0",
+                        "--source-sha",
+                        SOURCE_SHA,
                     ]
                 ),
                 0,
+            )
+
+    def test_historical_matrix_without_provenance_floor_remains_loadable(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "historical-matrix.json"
+            document = json.loads(rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8"))
+            del document["sdk_provenance_floor"]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            historical = rac.ProductMatrix.load(path)
+            self.assertEqual(historical.sdk_provenance_floor, "999999.0.0")
+            self.assertNotIn(
+                "pulp-sdk/sdk-provenance.json",
+                rac.required_sdk_members("linux-x64", historical, "0.763.0"),
             )
 
 

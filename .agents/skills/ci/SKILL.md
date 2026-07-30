@@ -902,6 +902,16 @@ a burst of merges replaces the queued run and only the latest head runs.
   `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
   checkout-backed SDK configure paths aligned when touching release CMake
   flags.
+- **Official release SDKs carry positive provenance.** Starting at the
+  `sdk_provenance_floor` in `tools/scripts/release_product_matrix.json`,
+  `release-cli.yml` stamps `sdk-provenance.json` only after proving the clean
+  source checkout, exact `v<version>` tag commit, Release build, platform, and
+  disabled audio-probe/inspector features. The downloaded-asset finalizer binds
+  every marker back to that exact tag SHA and archive platform before publish.
+  Keep the marker stamp, `PulpSdkProvenance.cmake` fail-closed consumer cache,
+  archive verifier, and Forge preflight in lockstep. A manual marker-era
+  `source_ref` substitution is forbidden; evaluate its floor from the trusted
+  default-branch matrix before checking out the operator-selected ref.
 - **The install-consumer smoke must compile against the installed prefix, not
   the source tree.** When an exported SDK target gains or exposes public
   headers, add representative `include/pulp/...` existence checks and include

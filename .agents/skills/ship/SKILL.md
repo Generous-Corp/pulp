@@ -892,6 +892,15 @@ standalone artifacts do not ship the dev audio-probe surface. Keep
 and `tools/scripts/release-cli-local.sh` in sync when changing release
 configure flags.
 
+Starting at `tools/scripts/release_product_matrix.json`'s
+`sdk_provenance_floor`, the SDK tarballs also require
+`sdk-provenance.json`: a positive `official-release` marker bound to the exact
+release tag commit and archive platform, with a clean Release source and both
+audio probes and the inspector disabled. `release-cli.yml` stamps the selected
+install prefix, and its downloaded-asset finalizer re-verifies the exact tag
+SHA/platform before publication. Marker-era manual backfills must build the tag
+itself; `source_ref` substitution is reserved for pre-marker history.
+
 ### Shipyard pin drift between local tooling and tag sync
 
 Pulp's release automation depends on the pinned Shipyard CLI in two places:
