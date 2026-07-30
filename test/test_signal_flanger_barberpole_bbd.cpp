@@ -1,5 +1,7 @@
 #include "test_signal_flanger_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("R14 the float and double instantiations place the comb identically",
           "[signal][flanger]") {
     // The comb math is a single-tap feedback loop, not a cascade, so there is
@@ -24,7 +26,7 @@ TEST_CASE("R14 the float and double instantiations place the comb identically",
     auto measure = [&](double hz) {
         for (int k = 0; k < n; ++k)
             in[static_cast<std::size_t>(k)] = static_cast<float>(
-                kProbeAmplitude * std::sin(2.0 * M_PI * hz * k / kSr));
+                kProbeAmplitude * std::sin(2.0 * std::numbers::pi * hz * k / kSr));
         single.reset();
         single.process(in.data(), out.data(), n);
         std::vector<double> segment(out.begin() + kSettle, out.end());
@@ -65,7 +67,7 @@ TEST_CASE("barberpole shifts the wet path instead of sweeping it",
     std::vector<double> out(in.size());
     for (std::size_t k = 0; k < in.size(); ++k)
         in[k] = kProbeAmplitude *
-                std::sin(2.0 * M_PI * kTone * static_cast<double>(k) / kSr);
+                std::sin(2.0 * std::numbers::pi * kTone * static_cast<double>(k) / kSr);
     f.process(in.data(), out.data(), static_cast<int>(in.size()));
     const std::vector<double> segment(out.begin() + kSettle, out.end());
 
@@ -103,7 +105,7 @@ TEST_CASE("barberpole feedback stacks the shift into an endless spiral",
         std::vector<double> out(in.size());
         for (std::size_t k = 0; k < in.size(); ++k)
             in[k] = kProbeAmplitude *
-                    std::sin(2.0 * M_PI * kTone * static_cast<double>(k) / kSr);
+                    std::sin(2.0 * std::numbers::pi * kTone * static_cast<double>(k) / kSr);
         f.process(in.data(), out.data(), static_cast<int>(in.size()));
         return std::vector<double>(out.begin() + kSettle, out.end());
     };
@@ -139,7 +141,7 @@ TEST_CASE("a negative barberpole shift descends instead of climbing",
     std::vector<double> out(in.size());
     for (std::size_t k = 0; k < in.size(); ++k)
         in[k] = kProbeAmplitude *
-                std::sin(2.0 * M_PI * kTone * static_cast<double>(k) / kSr);
+                std::sin(2.0 * std::numbers::pi * kTone * static_cast<double>(k) / kSr);
     f.process(in.data(), out.data(), static_cast<int>(in.size()));
     const std::vector<double> segment(out.begin() + kSettle, out.end());
 
@@ -216,7 +218,7 @@ TEST_CASE("the BBD engine darkens the wet path and stays bounded",
     bool finite = true;
     const int n = static_cast<int>(5.0 * kSr);
     for (int k = 0; k < n; ++k) {
-        const double x = k < 4800 ? 0.5 * std::sin(2.0 * M_PI * 500.0 * k / kSr) : 0.0;
+        const double x = k < 4800 ? 0.5 * std::sin(2.0 * std::numbers::pi * 500.0 * k / kSr) : 0.0;
         double y = 0.0;
         loop.process(&x, &y, 1);
         finite = finite && std::isfinite(y);

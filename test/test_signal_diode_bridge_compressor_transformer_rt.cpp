@@ -1,5 +1,7 @@
 #include "test_signal_diode_bridge_compressor_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("A8 auto release is program-dependent, not just slow",
           "[diode-bridge][ballistics]") {
     // SPEC AMENDMENT, documented in the header: `max(fast, slow)` is
@@ -28,7 +30,7 @@ TEST_CASE("A8 auto release is program-dependent, not just slow",
     reduction.reserve(static_cast<std::size_t>(pre + hold + post));
     for (int n = 0; n < pre + hold + post; ++n) {
         const double amplitude = (n < pre) ? quiet : (n < pre + hold ? 1.0 : quiet);
-        c.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+        c.process(amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
         reduction.push_back(-c.gain_reduction_db());
     }
     const double loud = reduction[static_cast<std::size_t>(pre + hold - 1)];
@@ -67,7 +69,7 @@ TEST_CASE("A9 the sidechain high-pass de-sensitises the low end",
         int count = 0;
         const int total = static_cast<int>(kSr * 3.0);
         for (int n = 0; n < total; ++n) {
-            c.process(0.5 * std::sin(2.0 * M_PI * tone_hz * n / kSr));
+            c.process(0.5 * std::sin(2.0 * std::numbers::pi * tone_hz * n / kSr));
             if (n > total - static_cast<int>(kSr)) {
                 sum += -c.gain_reduction_db();
                 ++count;
@@ -109,7 +111,7 @@ TEST_CASE("A9 the sidechain high-pass de-sensitises the low end",
     int count = 0;
     const int total = static_cast<int>(kSr * 3.0);
     for (int n = 0; n < total; ++n) {
-        wide.process(0.5 * std::sin(2.0 * M_PI * 60.0 * n / kSr));
+        wide.process(0.5 * std::sin(2.0 * std::numbers::pi * 60.0 * n / kSr));
         if (n > total - static_cast<int>(kSr)) {
             sum += -wide.gain_reduction_db();
             ++count;
@@ -166,7 +168,7 @@ TEST_CASE("the bracket generates even harmonics, which needs an asymmetry",
         std::vector<double> out;
         out.reserve(kTonePeriod * 500);
         for (int n = 0; n < 4800 + kTonePeriod * 500; ++n) {
-            const double y = b.process(0.5 * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+            const double y = b.process(0.5 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
             if (n >= 4800) out.push_back(y);
         }
         return out;
@@ -211,7 +213,7 @@ TEST_CASE("the bracket's peak gain is exactly one", "[diode-bridge][transformer]
             double in_peak = 0.0, out_peak = 0.0;
             const int total = static_cast<int>(kSr * 0.3);
             for (int n = 0; n < total; ++n) {
-                const double x = 0.5 * std::sin(2.0 * M_PI * hz * n / kSr);
+                const double x = 0.5 * std::sin(2.0 * std::numbers::pi * hz * n / kSr);
                 const double y = bracket.process(x);
                 if (n < total / 2) continue;
                 in_peak = std::max(in_peak, std::abs(x));
@@ -238,7 +240,7 @@ TEST_CASE("the bracket blocks DC that its own saturation generates",
     int count = 0;
     const int total = static_cast<int>(kSr * 2.0);
     for (int n = 0; n < total; ++n) {
-        const double y = bracket.process(0.8 * std::sin(2.0 * M_PI * 200.0 * n / kSr));
+        const double y = bracket.process(0.8 * std::sin(2.0 * std::numbers::pi * 200.0 * n / kSr));
         if (n > total / 2) {
             mean += y;
             ++count;
@@ -325,7 +327,7 @@ TEST_CASE("A11 the float and double instantiations agree on the gain law",
 
     for (double x : {0.0, 0.413, 2.981, 9.0}) {
         for (int n = 0; n < 4800; ++n) {
-            const double input = 0.25 * std::sin(2.0 * M_PI * 440.0 * n / kSr);
+            const double input = 0.25 * std::sin(2.0 * std::numbers::pi * 440.0 * n / kSr);
             const double a = static_cast<double>(single.process(static_cast<float>(input), x));
             const double b = dual.process(input, x);
             REQUIRE_THAT(a, WithinAbs(b, 1e-6 * (0.25 + std::abs(b))));
@@ -344,7 +346,7 @@ TEST_CASE("A11 the float and double instantiations agree on the gain law",
     node_f.reset();
     node_d.reset();
     for (int n = 0; n < 24000; ++n) {
-        const double input = 0.6 * std::sin(2.0 * M_PI * 220.0 * n / kSr);
+        const double input = 0.6 * std::sin(2.0 * std::numbers::pi * 220.0 * n / kSr);
         REQUIRE_THAT(static_cast<double>(node_f.process(static_cast<float>(input))),
                      WithinAbs(node_d.process(input), 1e-4));
     }
@@ -355,14 +357,14 @@ TEST_CASE("zero-init is a valid fresh instance", "[diode-bridge][lifecycle]") {
     // never-prepared instance must not produce NaN or run away.
     Comp c;
     for (int n = 0; n < 1024; ++n) {
-        const double y = c.process(0.5 * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+        const double y = c.process(0.5 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
         REQUIRE(std::isfinite(y));
     }
 
     Bridge bridge;
     Bracket bracket;
     for (int n = 0; n < 1024; ++n) {
-        const double x = 0.5 * std::sin(2.0 * M_PI * kToneHz * n / kSr);
+        const double x = 0.5 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr);
         REQUIRE(std::isfinite(bridge.process(x, 2.0)));
         REQUIRE(std::isfinite(bracket.process(x)));
     }
@@ -443,7 +445,7 @@ TEST_CASE("non-finite diode-bridge controls retain the last valid configuration"
         const auto continue_exactly = [&](int count) {
             for (int i = 0; i < count; ++i, ++sample_index) {
                 const double input =
-                    0.35 * std::sin(2.0 * M_PI * 997.0 * sample_index / kSr);
+                    0.35 * std::sin(2.0 * std::numbers::pi * 997.0 * sample_index / kSr);
                 REQUIRE(actual.process(input) == reference.process(input));
                 REQUIRE(actual.gain_reduction_db() == reference.gain_reduction_db());
             }
@@ -478,8 +480,10 @@ TEST_CASE("non-finite diode-bridge controls retain the last valid configuration"
         int sample_index = 0;
         const auto continue_exactly = [&](int count) {
             for (int i = 0; i < count; ++i, ++sample_index) {
-                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * sample_index / kSr);
-                const double drive = 1.0 + 0.75 * std::sin(2.0 * M_PI * 7.0 * sample_index / kSr);
+                const double input =
+                    0.7 * std::sin(2.0 * std::numbers::pi * 613.0 * sample_index / kSr);
+                const double drive =
+                    1.0 + 0.75 * std::sin(2.0 * std::numbers::pi * 7.0 * sample_index / kSr);
                 REQUIRE(actual.process(input, drive) == reference.process(input, drive));
             }
         };
@@ -505,7 +509,8 @@ TEST_CASE("non-finite diode-bridge controls retain the last valid configuration"
             for (int i = 0; i < count; ++i, ++sample_index) {
                 // Deliberately cross the character-dependent clamp so the
                 // comparison covers limit_ as well as saturation coefficients.
-                const double input = 8.0 * std::sin(2.0 * M_PI * 431.0 * sample_index / kSr);
+                const double input =
+                    8.0 * std::sin(2.0 * std::numbers::pi * 431.0 * sample_index / kSr);
                 REQUIRE(actual.process(input) == reference.process(input));
             }
         };
@@ -538,7 +543,7 @@ TEST_CASE("public diode colour components recover exactly after non-finite audio
                 bridge->set_character(0.73);
             }
             for (int i = 0; i < 257; ++i) {
-                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * i / kSr);
+                const double input = 0.7 * std::sin(2.0 * std::numbers::pi * 613.0 * i / kSr);
                 (void)poisoned.process(input, 2.0);
             }
 
@@ -546,7 +551,7 @@ TEST_CASE("public diode colour components recover exactly after non-finite audio
             REQUIRE(poisoned.process(0.5, invalid) == 0.0);
             fresh.reset();
             for (int i = 0; i < 1024; ++i) {
-                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * i / kSr);
+                const double input = 0.7 * std::sin(2.0 * std::numbers::pi * 613.0 * i / kSr);
                 REQUIRE(poisoned.process(input, 2.0) == fresh.process(input, 2.0));
             }
         }
@@ -559,13 +564,13 @@ TEST_CASE("public diode colour components recover exactly after non-finite audio
                 bracket->set_character(0.73);
             }
             for (int i = 0; i < 257; ++i) {
-                (void)poisoned.process(0.8 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+                (void)poisoned.process(0.8 * std::sin(2.0 * std::numbers::pi * 431.0 * i / kSr));
             }
 
             REQUIRE(poisoned.process(invalid) == 0.0);
             fresh.reset();
             for (int i = 0; i < 1024; ++i) {
-                const double input = 0.8 * std::sin(2.0 * M_PI * 431.0 * i / kSr);
+                const double input = 0.8 * std::sin(2.0 * std::numbers::pi * 431.0 * i / kSr);
                 REQUIRE(poisoned.process(input) == fresh.process(input));
             }
         }

@@ -1,5 +1,7 @@
 #include "test_signal_flanger_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("flanger retains controls and recovers from non-finite audio",
           "[signal][flanger][nonfinite]") {
     for (double bad : {NAN, INFINITY, -INFINITY}) {
@@ -185,7 +187,7 @@ TEST_CASE("R4 the through-zero crossing cancels the signal completely",
     std::vector<double> in(static_cast<std::size_t>(n)), out(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k)
         in[static_cast<std::size_t>(k)] =
-            kProbeAmplitude * std::sin(2.0 * M_PI * 1000.0 * k / kSr);
+            kProbeAmplitude * std::sin(2.0 * std::numbers::pi * 1000.0 * k / kSr);
     f.process(in.data(), out.data(), n);
 
     double dry_gain = 0.0, wet_gain = 0.0;
@@ -276,7 +278,7 @@ TEST_CASE("R4 the sweeping crossing produces an audible full-band null",
     int crossing = -1;
     double closest = 1e9;
     for (int k = 0; k < n; ++k) {
-        const double x = kProbeAmplitude * std::sin(2.0 * M_PI * kTone * k / kSr);
+        const double x = kProbeAmplitude * std::sin(2.0 * std::numbers::pi * kTone * k / kSr);
         f.process(&x, &out[static_cast<std::size_t>(k)], 1);
         const double distance = std::abs(f.instantaneous_delay_ms() - kOffset);
         if (k > static_cast<int>(0.1 * kSr) && distance < closest) {
@@ -319,7 +321,7 @@ TEST_CASE("R5 the other polarity reinforces the crossing by exactly 6.02 dB",
     std::vector<double> in(static_cast<std::size_t>(n)), out(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k)
         in[static_cast<std::size_t>(k)] =
-            kProbeAmplitude * std::sin(2.0 * M_PI * 1000.0 * k / kSr);
+            kProbeAmplitude * std::sin(2.0 * std::numbers::pi * 1000.0 * k / kSr);
     f.process(in.data(), out.data(), n);
 
     double dry_gain = 0.0, wet_gain = 0.0;
@@ -425,8 +427,8 @@ TEST_CASE("R7 a render is bit-identical after reset, on every mode and engine",
                 std::vector<double> out(static_cast<std::size_t>(n));
                 for (int k = 0; k < n; ++k)
                     in[static_cast<std::size_t>(k)] =
-                        0.4 * std::sin(2.0 * M_PI * 220.0 * k / kSr) +
-                        0.2 * std::sin(2.0 * M_PI * 1310.0 * k / kSr);
+                        0.4 * std::sin(2.0 * std::numbers::pi * 220.0 * k / kSr) +
+                        0.2 * std::sin(2.0 * std::numbers::pi * 1310.0 * k / kSr);
                 f.process(in.data(), out.data(), n);
                 return out;
             };
@@ -551,7 +553,7 @@ TEST_CASE("R11 the classic-mode excursion is clamped against the centre",
     double lowest = 1e9;
     bool finite = true;
     for (int k = 0; k < n; ++k) {
-        const double x = 0.5 * std::sin(2.0 * M_PI * 1000.0 * k / kSr);
+        const double x = 0.5 * std::sin(2.0 * std::numbers::pi * 1000.0 * k / kSr);
         double y = 0.0;
         f.process(&x, &y, 1);
         finite = finite && std::isfinite(y);
@@ -611,8 +613,8 @@ TEST_CASE("R12 a stereo spread decorrelates the two rails without breaking eithe
     std::vector<double> in(static_cast<std::size_t>(n));
     std::vector<double> left(static_cast<std::size_t>(n)), right(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k)
-        in[static_cast<std::size_t>(k)] = 0.4 * std::sin(2.0 * M_PI * 700.0 * k / kSr) +
-                                          0.3 * std::sin(2.0 * M_PI * 1900.0 * k / kSr);
+        in[static_cast<std::size_t>(k)] = 0.4 * std::sin(2.0 * std::numbers::pi * 700.0 * k / kSr) +
+                                          0.3 * std::sin(2.0 * std::numbers::pi * 1900.0 * k / kSr);
     f.process_stereo(in.data(), in.data(), left.data(), right.data(), n);
 
     double difference = 0.0;
@@ -657,7 +659,7 @@ TEST_CASE("R12 stereo spread clamps to the catalog half-cycle range",
     constexpr int n = 8192;
     std::vector<double> in(n), cl(n), cr(n), el(n), er(n);
     for (int i = 0; i < n; ++i)
-        in[static_cast<std::size_t>(i)] = 0.5 * std::sin(2.0 * M_PI * 700.0 * i / kSr);
+        in[static_cast<std::size_t>(i)] = 0.5 * std::sin(2.0 * std::numbers::pi * 700.0 * i / kSr);
     clamped.process_stereo(in.data(), in.data(), cl.data(), cr.data(), n);
     endpoint.process_stereo(in.data(), in.data(), el.data(), er.data(), n);
     for (int i = 0; i < n; ++i) {
@@ -685,7 +687,7 @@ TEST_CASE("R12 saw spread is a phase offset, not an ignored width control",
         right.resize(static_cast<std::size_t>(n));
         for (int i = 0; i < n; ++i)
             in[static_cast<std::size_t>(i)] =
-                0.5 * std::sin(2.0 * M_PI * 700.0 * i / kSr);
+                0.5 * std::sin(2.0 * std::numbers::pi * 700.0 * i / kSr);
         f.process_stereo(in.data(), in.data(), left.data(), right.data(), n);
     };
 
@@ -722,7 +724,7 @@ TEST_CASE("R13 switching mode mid-render steps no faster than the crossfade allo
     const int switch_at = n / 2;
     std::vector<double> in(static_cast<std::size_t>(n)), out(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k)
-        in[static_cast<std::size_t>(k)] = 0.5 * std::sin(2.0 * M_PI * 500.0 * k / kSr);
+        in[static_cast<std::size_t>(k)] = 0.5 * std::sin(2.0 * std::numbers::pi * 500.0 * k / kSr);
 
     for (int k = 0; k < n; ++k) {
         if (k == switch_at) f.set_mode(Mode::through_zero);
@@ -743,8 +745,9 @@ TEST_CASE("R13 switching mode mid-render steps no faster than the crossfade allo
     const double window_samples = mode_switch_window_samples();
     double peak = 0.0;
     for (double v : out) peak = std::max(peak, std::abs(v));
-    const double signal_slew = peak * 2.0 * M_PI * 500.0 / kSr;
-    const double gate_slew = peak * (1.5 * M_PI / 2.0 + M_PI) / window_samples;
+    const double signal_slew = peak * 2.0 * std::numbers::pi * 500.0 / kSr;
+    const double gate_slew =
+        peak * (1.5 * std::numbers::pi / 2.0 + std::numbers::pi) / window_samples;
     const double bound = 1.05 * (signal_slew + gate_slew);
 
     double worst = 0.0;
