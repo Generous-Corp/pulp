@@ -28,8 +28,9 @@ Segmented controls emit one-shot host gestures and hold scoped main-thread
 listeners. Host automation updates are marshalled through the StateStore.
 Because preset/session deserialization deliberately restores state without
 listeners, the shared editor idle pump consumes the restore edge on the UI
-thread and reconciles every main-thread parameter listener from the canonical
-StateStore snapshot. The same ordinary two-way bindings therefore cover user
+thread and reconciles only parameter listeners that explicitly opt into UI
+restore refresh from the canonical StateStore snapshot. Ordinary Main and
+Audio listeners remain silent. The same two-way bindings therefore cover user
 edits, host automation and preset restore; the editor has no paint-time restore
 protocol.
 
@@ -46,9 +47,12 @@ Clean `#16DAC2`, Vintage `#A97BFF`, Tape `#B8E635`, and BBD `#FF4F4F`.
 Reverse keeps its separate warning colour.
 
 Mix and mono/stereo topology changes use per-sample 5 ms ramps. Character
-changes crossfade between two pre-prepared engines without resetting either
-engine in the audio callback, and rapid changes retain the most recently
-requested character.
+changes prime the incoming character-owned delay line from the outgoing wet
+tail, then crossfade between two pre-prepared engines without resetting either
+engine in the audio callback. Rapid changes retain the most recently requested
+character. While Freeze holds a loop, a Character request is deferred until
+unfreeze so frozen audio cannot be replaced by an empty character-specific
+line.
 
 The Stereo Field mirrors the processor's timing branches. Sync swaps raw Time
 editing for the selected beat division, Link swaps independent right timing for

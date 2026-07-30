@@ -175,7 +175,7 @@ bool ViewBridge::poll_state_restore() {
     const auto revision = store_.state_restore_revision();
     if (revision == last_state_restore_revision_) return false;
     last_state_restore_revision_ = revision;
-    store_.reconcile_main_listeners();
+    store_.reconcile_restore_listeners();
     return true;
 }
 

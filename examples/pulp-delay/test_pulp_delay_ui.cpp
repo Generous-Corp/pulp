@@ -452,10 +452,15 @@ TEST_CASE("Pulp Delay idle pump reconciles listener-silent preset restore",
     REQUIRE(control_view(*editor, kCrossfeed).visible());
     REQUIRE_FALSE(editor->crossfeed_override_visible());
 
-    int store_callbacks = 0;
-    const auto callback_probe = store.add_listener(
-        [&store_callbacks](state::ParamID, float) { ++store_callbacks; },
+    int ordinary_callbacks = 0;
+    const auto ordinary_probe = store.add_listener(
+        [&ordinary_callbacks](state::ParamID, float) { ++ordinary_callbacks; },
         state::ListenerThread::Main);
+    int restore_callbacks = 0;
+    const auto restore_probe = store.add_listener(
+        [&restore_callbacks](state::ParamID, float) { ++restore_callbacks; },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
     int gesture_begins = 0;
     int gesture_ends = 0;
     store.set_gesture_callbacks(
@@ -471,7 +476,8 @@ TEST_CASE("Pulp Delay idle pump reconciles listener-silent preset restore",
     REQUIRE(editor->crossfeed_override_visible());
     REQUIRE(editor->crossfeed_override_text() == "100% · PING PONG");
     REQUIRE(host.repaint_count > 0);
-    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(restore_callbacks == static_cast<int>(kParameterCount));
     REQUIRE(gesture_begins == 0);
     REQUIRE(gesture_ends == 0);
     REQUIRE(store.open_gesture_count() == 0);
@@ -480,13 +486,15 @@ TEST_CASE("Pulp Delay idle pump reconciles listener-silent preset restore",
     const int restore_repaint_count = host.repaint_count;
     pump();
     REQUIRE(host.repaint_count == restore_repaint_count);
-    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(restore_callbacks == static_cast<int>(kParameterCount));
 
     host.repaint_count = 0;
     canvas.clear();
     editor->paint_all(canvas);
     REQUIRE(host.repaint_count == 0);
-    REQUIRE(store_callbacks == static_cast<int>(kParameterCount));
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(restore_callbacks == static_cast<int>(kParameterCount));
     REQUIRE(gesture_begins == 0);
     REQUIRE(gesture_ends == 0);
     REQUIRE(store.open_gesture_count() == 0);
@@ -524,7 +532,7 @@ TEST_CASE("Pulp Delay controls follow host automation and preset restore",
     const auto preset = store.serialize();
     store.reset_all_to_defaults();
     REQUIRE(store.deserialize(preset));
-    REQUIRE(store.reconcile_main_listeners() > 0);
+    REQUIRE(store.reconcile_restore_listeners() > 0);
 
     for (state::ParamID id = kTime; id <= kReverse; ++id) {
         INFO("parameter id " << id);

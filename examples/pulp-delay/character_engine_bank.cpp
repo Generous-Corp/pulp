@@ -9,6 +9,7 @@ namespace pulp::examples::delay {
 void CharacterEngineBank::prepare(double sample_rate, Character initial_character) {
     const double valid_rate =
         std::isfinite(sample_rate) && sample_rate >= 1000.0 ? sample_rate : 48000.0;
+    sample_rate_ = valid_rate;
     for (auto& engine : engines_) {
         engine.set_character(to_engine_character(initial_character));
         engine.set_sample_rate(valid_rate);
@@ -16,8 +17,12 @@ void CharacterEngineBank::prepare(double sample_rate, Character initial_characte
     active_index_ = 0;
     active_character_ = initial_character;
     target_character_ = initial_character;
+    priming_character_ = initial_character;
     fade_character_ = initial_character;
+    freeze_active_ = false;
+    priming_ = false;
     crossfading_ = false;
+    prime_samples_remaining_ = 0;
     fade_position_ = 0;
     fade_samples_ = std::max(1, static_cast<int>(std::lround(valid_rate * 0.020)));
 }
@@ -25,17 +30,53 @@ void CharacterEngineBank::prepare(double sample_rate, Character initial_characte
 void CharacterEngineBank::reset() noexcept {
     for (auto& engine : engines_)
         engine.reset();
+    priming_ = false;
     crossfading_ = false;
     target_character_ = active_character_;
     fade_position_ = 0;
 }
 
 void CharacterEngineBank::request_character(Character character) noexcept {
-    target_character_ = character;
-    if (crossfading_ || character == active_character_)
+    if (character == target_character_ && (priming_ || crossfading_))
         return;
+    target_character_ = character;
+    if (crossfading_)
+        return;
+    if (priming_) {
+        if (character == active_character_) {
+            priming_ = false;
+            prime_samples_remaining_ = 0;
+        }
+        return;
+    }
+    if (freeze_active_) {
+        priming_ = false;
+        prime_samples_remaining_ = 0;
+        return;
+    }
 
-    start_crossfade(character);
+    if (character == active_character_) {
+        priming_ = false;
+        prime_samples_remaining_ = 0;
+        return;
+    }
+    begin_priming(character);
+}
+
+void CharacterEngineBank::begin_priming(Character character) noexcept {
+    const int incoming = 1 - active_index_;
+    priming_character_ = character;
+    engines_[incoming].set_character(to_engine_character(character));
+    auto priming_config = config_;
+    priming_config.freeze = false;
+    apply_to(engines_[incoming], priming_config);
+    const float longest_time_ms =
+        std::max(config_.time_ms, config_.right_time_ms);
+    prime_samples_remaining_ = std::max(
+        fade_samples_, static_cast<int>(std::ceil(
+                           static_cast<double>(longest_time_ms) * sample_rate_
+                           * 0.001)));
+    priming_ = true;
 }
 
 void CharacterEngineBank::start_crossfade(Character character) noexcept {
@@ -47,8 +88,21 @@ void CharacterEngineBank::start_crossfade(Character character) noexcept {
 }
 
 void CharacterEngineBank::apply(const CharacterEngineConfig& config) noexcept {
+    const bool was_frozen = freeze_active_;
+    freeze_active_ = config.freeze;
+    config_ = config;
+    if (freeze_active_ && priming_) {
+        priming_ = false;
+        prime_samples_remaining_ = 0;
+    } else if (was_frozen && !freeze_active_ && !crossfading_
+               && target_character_ != active_character_) {
+        begin_priming(target_character_);
+    }
     apply_to(engines_[active_index_], config);
-    apply_to(engines_[1 - active_index_], config);
+    auto incoming_config = config;
+    if (priming_)
+        incoming_config.freeze = false;
+    apply_to(engines_[1 - active_index_], incoming_config);
 }
 
 void CharacterEngineBank::process(float* left, float* right, int num_samples, float* alternate_left,
@@ -56,16 +110,32 @@ void CharacterEngineBank::process(float* left, float* right, int num_samples, fl
     if (left == nullptr || right == nullptr || num_samples <= 0)
         return;
     if (!crossfading_) {
+        if (alternate_left != nullptr && alternate_right != nullptr) {
+            // Keep the inactive engine moving with the authored input. During
+            // a pending character change, also feed it the outgoing wet signal
+            // so character-owned delay lines (BBD/vintage) acquire the live
+            // tail before the crossfade begins.
+            std::copy_n(left, num_samples, alternate_left);
+            std::copy_n(right, num_samples, alternate_right);
+        }
         engines_[active_index_].process(left, right, num_samples);
         if (alternate_left != nullptr && alternate_right != nullptr) {
-            // Keep the inactive timeline moving so A -> B -> A cannot resume
-            // a tail that was paused at the first switch. This intentionally
-            // costs a second CharacterDelay pass; the Release benchmark guards
-            // both its relative cost and its share of the callback budget.
-            std::fill_n(alternate_left, num_samples, 0.0f);
-            std::fill_n(alternate_right, num_samples, 0.0f);
+            if (priming_) {
+                for (int index = 0; index < num_samples; ++index) {
+                    alternate_left[index] += left[index];
+                    alternate_right[index] += right[index];
+                }
+            }
             engines_[1 - active_index_].process(alternate_left, alternate_right,
                                                 num_samples);
+            if (priming_) {
+                prime_samples_remaining_ -= num_samples;
+                if (prime_samples_remaining_ <= 0) {
+                    priming_ = false;
+                    apply_to(engines_[1 - active_index_], config_);
+                    start_crossfade(priming_character_);
+                }
+            }
         }
         return;
     }
@@ -94,8 +164,8 @@ void CharacterEngineBank::process(float* left, float* right, int num_samples, fl
         active_character_ = fade_character_;
         crossfading_ = false;
         fade_position_ = 0;
-        if (target_character_ != active_character_)
-            start_crossfade(target_character_);
+        if (!freeze_active_ && target_character_ != active_character_)
+            begin_priming(target_character_);
     }
 }
 

@@ -1535,7 +1535,7 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   colors with `Color::rgba8(r,g,b,a)`, NOT `Color{26,26,32,255}` brace-init,
   which Skia clamps to opaque white (the white-on-white panel bug).
 - **The editor idle pump drains the param store (automation → widgets).**
-  `make_editor_idle_pump(bridge)` (in `gpu_host_select.hpp`, set as every
+  `make_editor_idle_pump(bridge)` (in `editor_idle_pump.hpp`, set as every
   format's `set_idle_callback`) calls `bridge.store().pump_listeners()` each
   vsync. This is what makes `bind_parameter`-bound widgets follow host
   automation playback / host-side edits: `ListenerThread::Main` store changes
@@ -1548,11 +1548,13 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
 - **Listener-silent state restore schedules one native reconciliation frame.**
   `StateStore::deserialize()` publishes `state_restore_revision()` only after a
   successful restore. The editor idle pump consumes that edge on the main
-  thread and requests one root repaint; native controls reconcile from the
-  store at the next paint boundary without running UI listeners on the host's
-  restore thread. Compare revisions for inequality: a failed plugin-envelope
-  restore can advance once for the candidate parameters and again for rollback,
-  and the pump intentionally coalesces both into one repaint of the final state.
+  thread, reconciles only listeners that opted into
+  `ListenerRestoreBehavior::Reconcile`, and requests one root repaint. Ordinary
+  Main and Audio listeners remain silent, and a store-wide consumed revision
+  prevents multiple ViewBridges from replaying the same reconciliation.
+  Compare revisions for inequality: a failed plugin-envelope restore can
+  advance once for the candidate parameters and again for rollback, and the
+  pump intentionally coalesces both into one refresh of the final state.
 - **A native `create_view()` sizes the host window from its own layout bounds.**
   In `ViewBridge::open`, when the editor is native (not a scripted UI) and the
   view reports non-zero `bounds()`, those bounds override the processor's

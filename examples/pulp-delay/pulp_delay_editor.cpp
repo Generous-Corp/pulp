@@ -305,7 +305,8 @@ PulpDelayEditor::PulpDelayEditor(state::StateStore& store)
                 update_timing_presentation();
             }
         },
-        state::ListenerThread::Main));
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile));
     update_timing_presentation();
 }
 

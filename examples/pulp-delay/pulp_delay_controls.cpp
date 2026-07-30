@@ -343,7 +343,8 @@ DelayChoice::DelayChoice(state::StateStore& store,
             if (sync_access_value())
                 request_repaint();
         },
-        state::ListenerThread::Main);
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
 }
 
 float DelayChoice::normalized_value() const noexcept {

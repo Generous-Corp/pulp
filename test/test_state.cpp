@@ -2569,6 +2569,87 @@ TEST_CASE("RT-queued changes are skipped when the token was reset before pump",
     REQUIRE(fire_count == 0);
 }
 
+TEST_CASE("restore reconciliation scales across a large parameter and listener bank",
+          "[state][listener][restore][scaling]") {
+    constexpr std::size_t kBankSize = 256;
+    StateStore store;
+    for (std::size_t i = 0; i < kBankSize; ++i) {
+        store.add_parameter(make_param_info(
+            static_cast<ParamID>(i + 1), "Bank", "", {0.0f, 1.0f, 0.0f}));
+    }
+
+    std::size_t callback_count = 0;
+    std::vector<ListenerToken> tokens;
+    tokens.reserve(kBankSize);
+    for (std::size_t i = 0; i < kBankSize; ++i) {
+        tokens.push_back(store.add_listener(
+            [&callback_count](ParamID, float) { ++callback_count; },
+            ListenerThread::Main,
+            ListenerRestoreBehavior::Reconcile));
+    }
+
+    const auto preset = store.serialize();
+    for (std::size_t i = 0; i < kBankSize; ++i)
+        store.set_value(static_cast<ParamID>(i + 1), 1.0f);
+    callback_count = 0;
+    REQUIRE(store.deserialize(preset));
+
+    const auto expected = kBankSize * kBankSize;
+    REQUIRE(store.reconcile_restore_listeners() == expected);
+    REQUIRE(callback_count == expected);
+}
+
+TEST_CASE("restore reconciliation skips a listener removed before its turn",
+          "[state][listener][restore][concurrency]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    const auto preset = store.serialize();
+    store.set_value(1, 1.0f);
+
+    std::mutex gate_mutex;
+    std::condition_variable gate_cv;
+    bool first_entered = false;
+    bool release_first = false;
+    auto first = store.add_listener(
+        [&](ParamID, float) {
+            std::unique_lock lock(gate_mutex);
+            first_entered = true;
+            gate_cv.notify_one();
+            gate_cv.wait(lock, [&] { return release_first; });
+        },
+        ListenerThread::Main,
+        ListenerRestoreBehavior::Reconcile);
+
+    std::atomic<int> removed_calls{0};
+    auto removed = store.add_listener(
+        [&](ParamID, float) {
+            removed_calls.fetch_add(1, std::memory_order_relaxed);
+        },
+        ListenerThread::Main,
+        ListenerRestoreBehavior::Reconcile);
+
+    REQUIRE(store.deserialize(preset));
+
+    std::size_t invoked = 0;
+    std::thread reconcile_thread([&] {
+        invoked = store.reconcile_restore_listeners();
+    });
+    {
+        std::unique_lock lock(gate_mutex);
+        gate_cv.wait(lock, [&] { return first_entered; });
+    }
+    removed.reset();
+    {
+        std::lock_guard lock(gate_mutex);
+        release_first = true;
+    }
+    gate_cv.notify_one();
+    reconcile_thread.join();
+
+    REQUIRE(invoked == 1);
+    REQUIRE(removed_calls.load(std::memory_order_relaxed) == 0);
+}
+
 // ─── snapshot() block-local helper (Slice 5) ────────────────────────────────
 
 TEST_CASE("StateStore::snapshot returns values in the requested order",

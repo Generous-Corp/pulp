@@ -148,6 +148,17 @@ public:
     std::vector<view::ParameterBinding> bindings_;
 };
 
+class MultiBoundProcessor final : public StubProcessor {
+public:
+    std::unique_ptr<view::View> create_view() override {
+        auto controls = std::make_unique<BoundControlsView>(state());
+        views.push_back(controls.get());
+        return controls;
+    }
+
+    std::vector<BoundControlsView*> views;
+};
+
 class ScriptedCustomViewProcessor : public StubProcessor {
 public:
     view::ScriptedUiSession* active_scripted_ui() override {
@@ -741,10 +752,12 @@ TEST_CASE("ViewBridge idle pump reconciles bound widgets after state restore",
         [&removed_listener](state::ParamID, float) {
             removed_listener.reset();
         },
-        state::ListenerThread::Main);
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
     removed_listener = store.add_listener(
         [&removed_callbacks](state::ParamID, float) { ++removed_callbacks; },
-        state::ListenerThread::Main);
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
 
     auto pump = format::make_editor_idle_pump(bridge);
     pump();
@@ -756,6 +769,67 @@ TEST_CASE("ViewBridge idle pump reconciles bound widgets after state restore",
     const auto repaint_count = host.repaint_count;
     pump();
     REQUIRE(host.repaint_count == repaint_count);
+}
+
+TEST_CASE("shared StateStore reconciles one restore once across ViewBridges",
+          "[view_bridge][state-restore][multi-view]") {
+    MultiBoundProcessor processor;
+    state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+
+    format::ViewBridge first(processor, store);
+    format::ViewBridge second(processor, store);
+    REQUIRE(first.open());
+    REQUIRE(second.open());
+    REQUIRE(processor.views.size() == 2);
+
+    CountingWindowHost first_host;
+    CountingWindowHost second_host;
+    first.view()->set_window_host(&first_host);
+    second.view()->set_window_host(&second_host);
+
+    store.set_value(1, -18.0f);
+    const auto preset = store.serialize();
+    store.set_value(1, 6.0f);
+
+    int restore_callbacks = 0;
+    const auto restore_probe = store.add_listener(
+        [&restore_callbacks](state::ParamID, float) {
+            ++restore_callbacks;
+        },
+        state::ListenerThread::Main,
+        state::ListenerRestoreBehavior::Reconcile);
+    int ordinary_callbacks = 0;
+    const auto ordinary_probe = store.add_listener(
+        [&ordinary_callbacks](state::ParamID, float) {
+            ++ordinary_callbacks;
+        },
+        state::ListenerThread::Main);
+
+    first_host.repaint_count = 0;
+    second_host.repaint_count = 0;
+    REQUIRE(store.deserialize(preset));
+    auto first_pump = format::make_editor_idle_pump(first);
+    auto second_pump = format::make_editor_idle_pump(second);
+    first_pump();
+
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    for (const auto* controls : processor.views) {
+        REQUIRE(controls->knob_->value()
+                == Catch::Approx(store.get_normalized(1)));
+        REQUIRE(controls->fader_->value()
+                == Catch::Approx(store.get_normalized(1)));
+    }
+    REQUIRE(first_host.repaint_count > 0);
+    REQUIRE(second_host.repaint_count > 0);
+
+    const auto second_repaints_before_own_pump = second_host.repaint_count;
+    second_pump();
+    REQUIRE(restore_callbacks == 1);
+    REQUIRE(ordinary_callbacks == 0);
+    REQUIRE(second_host.repaint_count > second_repaints_before_own_pump);
 }
 
 TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",

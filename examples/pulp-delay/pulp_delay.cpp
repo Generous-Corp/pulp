@@ -74,8 +74,8 @@ void PulpDelayProcessor::process(audio::BufferView<float>& output,
     const auto routing = routing_from_param(state().get_value(kRouting));
     const auto times =
         DelayTimeModel::derive(delay_time_inputs_from_store(state(), context.tempo_bpm));
-    engines_.request_character(character);
     engines_.apply(engine_config(times, routing));
+    engines_.request_character(character);
 
     const float mix = std::clamp(state().get_value(kMix) * 0.01f, 0.0f, 1.0f);
     if (mix != mix_smoother_.target())
