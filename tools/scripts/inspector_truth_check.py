@@ -68,10 +68,14 @@ FORBIDDEN_CLAIMS = {
     "experimental/pulp-rs/src/cmd/motion.rs": (
         "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
         ".arg(\"--port\")\n            .arg(port.to_string())",
+        "use std::net::TcpStream;",
+        "fn inspector_reachable(",
     ),
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
         ".arg(\"--port\")\n            .arg(port.to_string())",
+        "use std::net::TcpStream;",
+        "fn inspector_reachable(",
     ),
     ".claude/commands/trace.md": (
         "(default 9147)",

@@ -122,7 +122,16 @@ public:
     std::map<std::thread::id, std::size_t> callback_threads;
     std::atomic<std::uint64_t> next_client_id{1};
     std::size_t max_clients = 16;
-    InspectorServer* owner = nullptr;
+    std::atomic<int> port{0};
+    InspectorSession* session = nullptr;
+    InspectorDiscoveryPublisher* discovery = nullptr;
+    std::vector<std::uint8_t> token;
+    std::chrono::milliseconds authentication_timeout =
+        std::chrono::seconds(3);
+    std::mutex lifecycle_mutex;
+    std::recursive_mutex transition_mutex;
+    std::atomic<bool> stop_requested{false};
+    std::atomic<bool> transition_waiting_for_callbacks{false};
     std::function<void()> heartbeat;
     std::chrono::steady_clock::time_point next_heartbeat{};
 
@@ -179,14 +188,14 @@ public:
             auto client =
                 std::shared_ptr<events::InterprocessConnection>(std::move(conn));
             auto* raw = client.get();
-            if (!owner || !owner->session_) {
+            if (!session) {
                 raw->disconnect();
                 return;
             }
             const auto challenge = make_inspector_auth_challenge(
-                owner->session_->info().session_id,
-                owner->session_->info().instance_id,
-                owner->session_->info().protocol_version);
+                session->info().session_id,
+                session->info().instance_id,
+                session->info().protocol_version);
             if (!challenge) {
                 raw->disconnect();
                 return;
@@ -210,11 +219,11 @@ public:
                     raw,
                     AuthenticationState{
                         std::make_unique<InspectorAuthVerifier>(
-                            owner->token_, *challenge),
+                            token, *challenge),
                         client_id,
                         false,
                         std::chrono::steady_clock::now() +
-                            owner->authentication_timeout_});
+                            authentication_timeout});
             }
             const std::weak_ptr<events::InterprocessConnection> weak = client;
             const std::weak_ptr<Impl> weak_self = shared_from_this();
@@ -252,9 +261,8 @@ public:
                             }),
                         self->owned_clients.end());
                 }
-                if (!authenticated_client.empty() && self->owner &&
-                    self->owner->session_)
-                    self->owner->session_->disconnect(authenticated_client);
+                if (!authenticated_client.empty() && self->session)
+                    self->session->disconnect(authenticated_client);
                 self->cleanup_cv.notify_one();
             });
             raw->set_on_text_message([weak_self, weak, raw](std::string_view msg) {
@@ -265,7 +273,7 @@ public:
                 CallbackGuard callback(self);
                 if (!callback)
                     return;
-                self->on_message(std::string(msg), raw);
+                self->on_message_received(std::string(msg), raw);
             });
                 auto params = choc::value::createObject("");
                 params.addMember(
@@ -350,99 +358,129 @@ public:
         }
     }
 
-    std::function<void(const std::string&, events::InterprocessConnection*)> on_message;
+    bool start_authenticated(InspectorServerConfig config);
+    void stop();
+    void stop_locked();
+    void broadcast(const InspectorMessage& event);
+    int client_count();
+    void on_message_received(const std::string& data,
+                             events::InterprocessConnection* sender);
 };
 
 InspectorServer::InspectorServer() : impl_(std::make_shared<Impl>()) {
-    impl_->owner = this;
     impl_->initialize();
-    impl_->on_message = [this](const std::string& data, events::InterprocessConnection* sender) {
-        on_message_received(data, sender);
-    };
 }
 
 InspectorServer::~InspectorServer() {
-    stop();
-    impl_->stop_cleanup();
-    impl_->owner = nullptr;
-    impl_->on_message = {};
+    auto impl = std::move(impl_);
+    impl->stop();
+    impl->stop_cleanup();
 }
 
 bool InspectorServer::start_authenticated(InspectorServerConfig config) {
-    std::lock_guard transition_lock(transition_mutex_);
-    stop_requested_.store(false, std::memory_order_release);
+    return impl_->start_authenticated(std::move(config));
+}
+
+void InspectorServer::stop() {
+    impl_->stop();
+}
+
+void InspectorServer::broadcast(const InspectorMessage& event) {
+    impl_->broadcast(event);
+}
+
+int InspectorServer::client_count() const {
+    return impl_->client_count();
+}
+
+int InspectorServer::port() const {
+    return impl_->port.load(std::memory_order_acquire);
+}
+
+bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
+    std::lock_guard transition_lock(transition_mutex);
+    stop_requested.store(false, std::memory_order_release);
     stop_locked();
-    if (stop_requested_.load(std::memory_order_acquire))
+    if (stop_requested.load(std::memory_order_acquire))
         return false;
     if (!config.session || !config.discovery ||
         config.token.size() != inspector_token_size ||
+        config.session->info().protocol_version != "1" ||
         config.record.session_id != config.session->info().session_id ||
         config.record.instance_id != config.session->info().instance_id ||
         config.record.plugin_id != config.session->info().plugin_id) {
         return false;
     }
-    session_ = config.session;
-    discovery_ = config.discovery;
-    token_ = std::move(config.token);
-    authentication_timeout_ =
+    session = config.session;
+    discovery = config.discovery;
+    token = std::move(config.token);
+    authentication_timeout =
         std::max(config.authentication_timeout, std::chrono::milliseconds(1));
-    impl_->server.set_max_message_bytes(
+    server.set_max_message_bytes(
         std::clamp<std::size_t>(config.max_message_bytes, 1,
                                 16u * 1024u * 1024u));
-    impl_->server.set_write_timeout(std::chrono::seconds(3));
+    server.set_write_timeout(std::chrono::seconds(3));
     {
-        std::lock_guard lock(impl_->clients_mutex);
-        impl_->max_clients =
+        std::lock_guard lock(clients_mutex);
+        max_clients =
             std::clamp<std::size_t>(config.max_clients, 1, 64);
-        impl_->stopping_callbacks = false;
+        stopping_callbacks = false;
     }
-    if (!impl_->server.start("127.0.0.1:0",
-                             events::IpcTransport::Socket)) {
+    if (!server.start("127.0.0.1:0", events::IpcTransport::Socket)) {
         stop_locked();
         return false;
     }
-    if (stop_requested_.load(std::memory_order_acquire)) {
+    if (stop_requested.load(std::memory_order_acquire)) {
         stop_locked();
         return false;
     }
-    port_ = impl_->server.bound_port();
-    if (port_ == 0) {
+    port.store(server.bound_port(), std::memory_order_release);
+    if (port.load(std::memory_order_acquire) == 0) {
         stop_locked();
         return false;
     }
-    config.record.endpoint = "127.0.0.1:" + std::to_string(port_);
-    config.record.protocol_version = session_->info().protocol_version;
-    config.record.profile = session_->policy().profile();
-    if (!discovery_->publish(config.record, token_)) {
+    config.record.endpoint =
+        "127.0.0.1:" +
+        std::to_string(port.load(std::memory_order_acquire));
+    config.record.protocol_version = session->info().protocol_version;
+    config.record.profile = session->policy().profile();
+    if (!discovery->publish(config.record, token)) {
         stop_locked();
         return false;
     }
-    if (stop_requested_.load(std::memory_order_acquire)) {
+    if (stop_requested.load(std::memory_order_acquire)) {
         stop_locked();
         return false;
     }
     {
-        std::lock_guard lock(impl_->clients_mutex);
-        impl_->next_heartbeat =
+        std::lock_guard lock(clients_mutex);
+        next_heartbeat =
             std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        impl_->heartbeat = [this] {
-            std::lock_guard lifecycle_lock(lifecycle_mutex_);
-            if (discovery_)
-                (void)discovery_->refresh();
+        const std::weak_ptr<Impl> weak_self = shared_from_this();
+        heartbeat = [weak_self] {
+            const auto self = weak_self.lock();
+            if (!self)
+                return;
+            std::lock_guard lifecycle_lock(self->lifecycle_mutex);
+            if (self->discovery)
+                (void)self->discovery->refresh();
         };
     }
     return true;
 }
 
-void InspectorServer::stop() {
-    stop_requested_.store(true, std::memory_order_release);
-    std::unique_lock transition_lock(transition_mutex_, std::defer_lock);
+void InspectorServer::Impl::stop() {
+    // Keep the shared teardown state alive if this call is the last owner and
+    // must defer to a transition that is waiting for the current callback.
+    const auto keep_alive = shared_from_this();
+    stop_requested.store(true, std::memory_order_release);
+    std::unique_lock transition_lock(transition_mutex, std::defer_lock);
     if (!transition_lock.try_lock()) {
         bool called_from_callback = false;
         {
-            std::lock_guard lock(impl_->clients_mutex);
+            std::lock_guard lock(clients_mutex);
             called_from_callback =
-                impl_->callback_threads.contains(std::this_thread::get_id());
+                callback_threads.contains(std::this_thread::get_id());
         }
         if (called_from_callback) {
             // A transition tearing down the current generation must wait for
@@ -450,7 +488,7 @@ void InspectorServer::stop() {
             // only in that interval. Otherwise keep trying until the
             // transition completes, then perform the requested stop.
             while (!transition_lock.try_lock()) {
-                if (transition_waiting_for_callbacks_.load(
+                if (transition_waiting_for_callbacks.load(
                         std::memory_order_acquire))
                     return;
                 std::this_thread::yield();
@@ -462,30 +500,29 @@ void InspectorServer::stop() {
     stop_locked();
 }
 
-void InspectorServer::stop_locked() {
-    transition_waiting_for_callbacks_.store(true,
-                                            std::memory_order_release);
+void InspectorServer::Impl::stop_locked() {
+    transition_waiting_for_callbacks.store(true, std::memory_order_release);
     {
-        std::lock_guard lock(impl_->clients_mutex);
-        impl_->heartbeat = {};
-        impl_->stopping_callbacks = true;
+        std::lock_guard lock(clients_mutex);
+        heartbeat = {};
+        stopping_callbacks = true;
     }
-    impl_->server.stop();
+    server.stop();
     std::vector<std::shared_ptr<events::InterprocessConnection>> clients;
-    std::vector<std::shared_ptr<Impl::OutboundClient>> outbound_clients;
+    std::vector<std::shared_ptr<Impl::OutboundClient>> outbound_to_stop;
     std::vector<std::string> authenticated_clients;
     {
-        std::lock_guard lock(impl_->clients_mutex);
-        clients = std::move(impl_->owned_clients);
-        for (auto& [client, outbound] : impl_->outbound_clients) {
+        std::lock_guard lock(clients_mutex);
+        clients = std::move(owned_clients);
+        for (auto& [client, outbound] : this->outbound_clients) {
             (void)client;
-            outbound_clients.push_back(std::move(outbound));
+            outbound_to_stop.push_back(std::move(outbound));
         }
-        impl_->outbound_clients.clear();
-        for (auto& outbound : impl_->retired_outbound_clients)
-            outbound_clients.push_back(std::move(outbound));
-        impl_->retired_outbound_clients.clear();
-        for (const auto& [client, state] : impl_->authentication) {
+        this->outbound_clients.clear();
+        for (auto& outbound : retired_outbound_clients)
+            outbound_to_stop.push_back(std::move(outbound));
+        retired_outbound_clients.clear();
+        for (const auto& [client, state] : authentication) {
             (void)client;
             if (state.authenticated)
                 authenticated_clients.push_back(state.client_id);
@@ -495,65 +532,64 @@ void InspectorServer::stop_locked() {
         if (client)
             client->disconnect();
     }
-    for (const auto& outbound : outbound_clients) {
+    for (const auto& outbound : outbound_to_stop) {
         if (outbound)
             outbound->shutdown();
     }
     {
-        std::unique_lock lock(impl_->clients_mutex);
-        const auto current = impl_->callback_threads.find(
+        std::unique_lock lock(clients_mutex);
+        const auto current = callback_threads.find(
             std::this_thread::get_id());
         const auto current_callbacks =
-            current == impl_->callback_threads.end() ? 0 : current->second;
-        impl_->cleanup_cv.wait(lock, [this, current_callbacks] {
-            return impl_->active_callbacks <= current_callbacks;
+            current == callback_threads.end() ? 0 : current->second;
+        cleanup_cv.wait(lock, [this, current_callbacks] {
+            return active_callbacks <= current_callbacks;
         });
-        impl_->authentication.clear();
+        authentication.clear();
     }
-    transition_waiting_for_callbacks_.store(false,
-                                            std::memory_order_release);
+    transition_waiting_for_callbacks.store(false, std::memory_order_release);
     clients.clear();
     {
-        std::lock_guard lifecycle_lock(lifecycle_mutex_);
-        if (session_) {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (session) {
             for (const auto& client_id : authenticated_clients)
-                session_->disconnect(client_id);
+                session->disconnect(client_id);
         }
-        if (discovery_)
-            discovery_->remove();
-        discovery_ = nullptr;
-        session_ = nullptr;
-        std::fill(token_.begin(), token_.end(), std::uint8_t{0});
-        token_.clear();
+        if (discovery)
+            discovery->remove();
+        discovery = nullptr;
+        session = nullptr;
+        std::fill(token.begin(), token.end(), std::uint8_t{0});
+        token.clear();
     }
-    port_ = 0;
+    port.store(0, std::memory_order_release);
 }
 
-void InspectorServer::broadcast(const InspectorMessage& event) {
+void InspectorServer::Impl::broadcast(const InspectorMessage& event) {
     const auto* descriptor = find_inspector_method(event.method);
     if (event.id != 0 || !descriptor ||
         descriptor->kind != InspectorMethodKind::Event) {
         return;
     }
     {
-        std::lock_guard lifecycle_lock(lifecycle_mutex_);
-        if (!session_ ||
-            !session_->policy().is_available(descriptor->capability) ||
-            !session_->policy().is_granted(descriptor->capability)) {
+        std::lock_guard lifecycle_lock(lifecycle_mutex);
+        if (!session ||
+            !session->policy().is_available(descriptor->capability) ||
+            !session->policy().is_granted(descriptor->capability)) {
             return;
         }
     }
 
     auto json = encode_message(event);
     {
-        std::lock_guard lock(impl_->clients_mutex);
-        for (const auto& client : impl_->owned_clients) {
-            const auto auth = impl_->authentication.find(client.get());
-            if (auth != impl_->authentication.end() &&
+        std::lock_guard lock(clients_mutex);
+        for (const auto& client : owned_clients) {
+            const auto auth = authentication.find(client.get());
+            if (auth != authentication.end() &&
                 auth->second.authenticated) {
                 if (const auto outbound =
-                        impl_->outbound_clients.find(client.get());
-                    outbound != impl_->outbound_clients.end()) {
+                        outbound_clients.find(client.get());
+                    outbound != outbound_clients.end()) {
                     outbound->second->enqueue(json);
                 }
             }
@@ -561,19 +597,20 @@ void InspectorServer::broadcast(const InspectorMessage& event) {
     }
 }
 
-int InspectorServer::client_count() const {
-    std::lock_guard lock(impl_->clients_mutex);
+int InspectorServer::Impl::client_count() {
+    std::lock_guard lock(clients_mutex);
     return static_cast<int>(std::count_if(
-        impl_->owned_clients.begin(), impl_->owned_clients.end(),
+        owned_clients.begin(), owned_clients.end(),
         [&](const auto& client) {
-            const auto auth = impl_->authentication.find(client.get());
-            return auth != impl_->authentication.end() &&
+            const auto auth = authentication.find(client.get());
+            return auth != authentication.end() &&
                    auth->second.authenticated;
         }));
 }
 
-void InspectorServer::on_message_received(const std::string& data,
-                                           events::InterprocessConnection* sender) {
+void InspectorServer::Impl::on_message_received(
+    const std::string& data,
+    events::InterprocessConnection* sender) {
     InspectorMessage request;
     if (!decode_message(data, request)) {
         // Invalid JSON — send error
@@ -583,13 +620,13 @@ void InspectorServer::on_message_received(const std::string& data,
         return;
     }
 
-    if (session_) {
+    if (session) {
         std::string client_id;
         bool authenticated = false;
         {
-            std::lock_guard lock(impl_->clients_mutex);
-            const auto found = impl_->authentication.find(sender);
-            if (found == impl_->authentication.end()) {
+            std::lock_guard lock(clients_mutex);
+            const auto found = authentication.find(sender);
+            if (found == authentication.end()) {
                 sender->disconnect();
                 return;
             }
@@ -616,9 +653,9 @@ void InspectorServer::on_message_received(const std::string& data,
             }
             bool accepted = false;
             {
-                std::lock_guard lock(impl_->clients_mutex);
-                const auto found = impl_->authentication.find(sender);
-                if (found != impl_->authentication.end() &&
+                std::lock_guard lock(clients_mutex);
+                const auto found = authentication.find(sender);
+                if (found != authentication.end() &&
                     found->second.verifier &&
                     std::chrono::steady_clock::now() <
                         found->second.deadline) {
@@ -642,7 +679,7 @@ void InspectorServer::on_message_received(const std::string& data,
             return;
         }
 
-        const auto response = session_->handle(client_id, request);
+        const auto response = session->handle(client_id, request);
         if (response.id != 0 || !response.method.empty())
             sender->send_message(encode_message(response));
         return;
