@@ -59,6 +59,29 @@ inline constexpr double kModRateMinHz = 0.05;
 inline constexpr double kModRateMaxHz = 10.0;
 inline constexpr double kModMaxDepth = 0.05;
 
+/// User-facing in-loop tone stage. This is the player's tone control, distinct
+/// from the character-owned loop_highpass/loop_lowpass that model each
+/// realization's own bandwidth. It sits in the recirculation path, so the
+/// filters compound once per repeat and the tail darkens (or thins)
+/// progressively rather than being shaped once on the way out.
+///
+/// The stage is BYPASSED, and bit-exact, while low cut sits at its minimum and
+/// high cut at its maximum — an untouched delay is unchanged.
+inline constexpr double kLoopToneHpMinHz = 20.0;
+inline constexpr double kLoopToneHpMaxHz = 2000.0;
+inline constexpr double kLoopToneLpMinHz = 200.0;
+inline constexpr double kLoopToneLpMaxHz = 20000.0;
+/// Keep the TPT prewarp strictly below Nyquist. At or above Nyquist tan() is
+/// periodic rather than a meaningful analog-frequency mapping.
+inline constexpr double kLoopToneNyquistFraction = 0.45;
+/// Resonance range for both loop-tone filters. 0.5 is gently damped, 0.707 is
+/// Butterworth (flat), and 2.0 is a clear but controlled peak. The ceiling is
+/// deliberately low: these filters sit in a feedback loop that already has its
+/// own gain. CharacterDelay reduces the unsaturated feedback ceiling by the
+/// active filters' worst-case resonant peaks so this range remains stable.
+inline constexpr double kLoopToneResMin = 0.5;
+inline constexpr double kLoopToneResMax = 2.0;
+
 /// Right-channel depth scaler for every shared-LFO modulation. One oscillator
 /// with slightly unequal depths reads as natural width without the slow phase
 /// drift two free-running oscillators produce. [design parameter, 0.9–0.99]
@@ -240,6 +263,67 @@ inline constexpr std::array<double, 2> kDiffusionModRatesHz = {0.40, 0.53};
 /// Diffusion loop filters. [LP is a design parameter]
 inline constexpr double kDiffusionLoopHpHz = 20.0;
 inline constexpr double kDiffusionLoopLpHz = 9000.0;
+
+// ── Diffusion tank ────────────────────────────────────────────────────────
+// The input diffuser above smears a transient, but on its own it cannot make a
+// reverb: it has no recirculation of its own, so between the delay's repeats
+// there is silence and the character reads as a smeared slap rather than a
+// cloud. The tank is Dattorro's figure-of-eight (Effect Design Part 1, Fig. 2)
+// — two branches, each an allpass, a delay, a damping lowpass, a second
+// allpass and a second delay, cross-coupled through a decay coefficient — so
+// energy circulates on its OWN short time constants and fills the gaps.
+//
+// It blooms with character_amount and is exactly ZERO at amount 0, which keeps
+// the pure-diffuser configuration a magnitude-flat allpass (the null-test
+// baseline the character is specified against).
+inline constexpr std::array<double, 3> kDiffusionTankAxis = {0.0, 0.5, 1.0};
+
+/// Branch delays in ms, mutually prime-ish so their comb nulls never align.
+/// [design parameters; Dattorro's tank ratios at a nominal room size]
+inline constexpr std::array<double, 2> kDiffusionTankDelayAMs = {30.51, 44.79};
+inline constexpr std::array<double, 2> kDiffusionTankDelayBMs = {37.13, 53.27};
+/// The two decay-diffuser allpasses per branch. [design parameters]
+inline constexpr std::array<double, 2> kDiffusionTankApAMs = {22.58, 60.48};
+inline constexpr std::array<double, 2> kDiffusionTankApBMs = {30.24, 89.24};
+inline constexpr double kDiffusionTankApGain1 = 0.70;
+inline constexpr double kDiffusionTankApGain2 = 0.50;
+
+/// Tank size scaler and recirculation decay by character amount. The decay
+/// ceiling is deliberately below unity because the output-only tank still owns
+/// an internal figure-of-eight recirculation; unity there would make the cloud
+/// an oscillator rather than a reverb.
+inline constexpr std::array<double, 3> kDiffusionTankSizeScale = {0.6, 1.0, 1.6};
+inline constexpr std::array<double, 3> kDiffusionTankDecay = {0.0, 0.62, 0.80};
+
+/// How much of the character's output is the tank rather than the bare
+/// diffuser. At 0 the tank is silent AND unmixed, so the character is the
+/// published allpass diffuser and nothing else.
+inline constexpr std::array<double, 3> kDiffusionTankMix = {0.0, 0.55, 0.85};
+
+/// In-tank damping. A reverb without it is a bright metallic ring; rolling the
+/// recirculation off is what makes successive passes sound like air.
+inline constexpr std::array<double, 3> kDiffusionTankDampHz = {12000.0, 7000.0, 4200.0};
+
+/// Tank modulation — this is what makes the cloud granular rather than static.
+/// Deeper and faster than the input diffuser's anti-metallic wobble: each
+/// branch's first allpass is swept, which scatters the recirculating energy in
+/// time and turns a smooth tail into a shimmer of grains. Depth in samples.
+inline constexpr std::array<double, 3> kDiffusionTankModDepth = {0.0, 14.0, 42.0};
+inline constexpr std::array<double, 2> kDiffusionTankModRatesHz = {0.83, 1.27};
+/// Extra scattered taps read at their own modulated offsets, as a fraction of
+/// the branch delay. Density without another allpass in the loop.
+inline constexpr std::array<double, 2> kDiffusionTankTapFraction = {0.37, 0.71};
+
+/// In-tank low cut. The damping filter is a LOWPASS, so without this the low
+/// end recirculates undamped and the tank's worst resonant mode sits below
+/// 100 Hz, where a flat energy estimate never sees it — measured as a tail
+/// that GREW a thousandfold after the input stopped. Every recirculation must
+/// lose a little low end, exactly as it loses a little top. [design parameter]
+inline constexpr double kDiffusionTankLowGuardHz = 90.0;
+/// Live character automation moves tank taps toward their new positions over a
+/// short continuous glide instead of changing fractional reads at control-rate
+/// boundaries.
+inline constexpr double kDiffusionTankDelaySlewMs = 5.0;
 
 // ── Reverse ───────────────────────────────────────────────────────────────
 /// Raised-cosine splice fade at each end of a reversed segment, in samples.
