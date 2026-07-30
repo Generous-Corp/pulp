@@ -125,6 +125,43 @@ TEST_CASE("discovery rejects records and credentials above their fixed bounds",
     CHECK_FALSE(reader.read_credential(*publisher.record()).has_value());
 }
 
+TEST_CASE("discovery accepts only complete nonzero loopback ports",
+          "[inspect][discovery][endpoint]") {
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    for (const auto endpoint : {
+             "127.0.0.1:0",
+             "127.0.0.1:not-a-port",
+             "127.0.0.1:65536",
+             "127.0.0.1:123:456",
+             "127.0.0.2:32123",
+         }) {
+        auto record = fixture_record("bad-endpoint");
+        record.endpoint = endpoint;
+        CHECK_FALSE(publisher.publish(record, *token, 5s));
+    }
+
+    REQUIRE(publisher.publish(
+        fixture_record("decoded-endpoint"), *token, 5s));
+    std::ifstream input(publisher.record()->record_path,
+                        std::ios::binary);
+    std::string json((std::istreambuf_iterator<char>(input)),
+                     std::istreambuf_iterator<char>());
+    const auto endpoint = json.find("127.0.0.1:32123");
+    REQUIRE(endpoint != std::string::npos);
+    json.replace(endpoint, std::string("127.0.0.1:32123").size(),
+                 "127.0.0.1:0");
+    {
+        std::ofstream output(publisher.record()->record_path,
+                             std::ios::binary | std::ios::trunc);
+        output << json;
+    }
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+}
+
 TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
           "[inspect][discovery][identity]") {
     TemporaryDirectory temporary;

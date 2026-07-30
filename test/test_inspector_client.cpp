@@ -224,6 +224,7 @@ TEST_CASE("client reconnect discards queued events from the prior session",
     bool release_first = false;
     std::vector<int> delivered;
     std::optional<pulp::inspect::InspectorMessage> stale_follow_up;
+    bool stale_reconnect_succeeded = true;
     InspectorClient client;
     client.set_event_handler([&](const auto& event) {
         const auto params = choc::json::parse(event.params_json);
@@ -239,8 +240,12 @@ TEST_CASE("client reconnect discards queued events from the prior session",
             lock.unlock();
             auto response =
                 client.request("Session.getCapabilities");
+            const bool reconnected =
+                client.connect(records.front(), fixture.reader);
+            client.disconnect();
             lock.lock();
             stale_follow_up = std::move(response);
+            stale_reconnect_succeeded = reconnected;
         }
         cv.notify_all();
     });
@@ -276,7 +281,11 @@ TEST_CASE("client reconnect discards queued events from the prior session",
         REQUIRE(stale_follow_up->is_error);
         CHECK(stale_follow_up->error_code ==
               "stale_event_callback");
+        CHECK_FALSE(stale_reconnect_succeeded);
     }
+    CHECK(client.is_connected());
+    CHECK_FALSE(
+        client.request("Session.getCapabilities").is_error);
 }
 
 TEST_CASE("response timeout fences may-have-applied requests",

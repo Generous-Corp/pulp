@@ -226,6 +226,8 @@ InspectorClient::~InspectorClient() {
 bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
                               const InspectorDiscoveryReader& discovery,
                               std::chrono::milliseconds timeout) {
+    if (impl_->request_from_stale_callback())
+        return false;
     disconnect();
     const auto token = discovery.read_credential(record);
     if (!token)
@@ -311,6 +313,8 @@ bool InspectorClient::connect(const InspectorDiscoveryRecord& record,
 }
 
 void InspectorClient::disconnect() {
+    if (impl_->request_from_stale_callback())
+        return;
     std::uint64_t generation = 0;
     {
         std::lock_guard lock(impl_->mutex);

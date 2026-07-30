@@ -93,6 +93,19 @@ bool safe_component(std::string_view value) {
            });
 }
 
+bool valid_loopback_endpoint(std::string_view endpoint) {
+    constexpr std::string_view prefix = "127.0.0.1:";
+    if (!endpoint.starts_with(prefix))
+        return false;
+    endpoint.remove_prefix(prefix.size());
+    std::uint32_t port = 0;
+    const auto [end, error] = std::from_chars(
+        endpoint.data(), endpoint.data() + endpoint.size(), port);
+    return error == std::errc{} &&
+           end == endpoint.data() + endpoint.size() &&
+           port >= 1 && port <= 65535;
+}
+
 std::string discovery_file_stem(std::string_view session_id,
                                 std::string_view instance_id) {
     return std::to_string(session_id.size()) + "-" +
@@ -541,7 +554,7 @@ std::optional<InspectorDiscoveryRecord> decode_record(
             !safe_component(record.instance_id) ||
             path.filename() != file_stem + ".json" ||
             credential_name != file_stem + ".token" ||
-            record.endpoint.rfind("127.0.0.1:", 0) != 0 ||
+            !valid_loopback_endpoint(record.endpoint) ||
             record.protocol_version != "1" ||
             record.expires_at_unix_ms <= unix_ms_now() ||
             process_start_identity(record.process_id) !=
@@ -770,7 +783,9 @@ bool InspectorDiscoveryPublisher::publish(
     std::chrono::milliseconds ttl) {
     remove();
     if (!safe_component(record.session_id) ||
-        !safe_component(record.instance_id) || credential.size() != 32 ||
+        !safe_component(record.instance_id) ||
+        !valid_loopback_endpoint(record.endpoint) ||
+        credential.size() != 32 ||
         ttl <= std::chrono::milliseconds(0) ||
         !ensure_private_directory(runtime_directory_)) {
         return false;
