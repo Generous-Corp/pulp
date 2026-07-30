@@ -17,6 +17,7 @@
 
 #include "forge/build_monitor.hpp"
 #include "forge/mention_overlay.hpp"
+#include "forge/patch_explanation.hpp"
 #include "forge/rack_preview.hpp"
 
 #include <pulp/view/buttons.hpp>
@@ -107,6 +108,7 @@ public:
                    std::vector<Connection> connections);
 
     RackPreview* rack_preview() { return rack_preview_; }
+    PatchExplanation* explanation() { return explanation_; }
 
     BuildOutcome build_outcome() const { return monitor_.outcome(); }
     const BuildMonitor& monitor() const { return monitor_; }
@@ -176,6 +178,7 @@ private:
     BuildMonitor monitor_;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;
+    PatchExplanation* explanation_ = nullptr;
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
     void refresh_depth_tabs();

@@ -278,6 +278,13 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
 }
 
 std::unique_ptr<View> ForgeModularShell::stage_accessory() {
+    auto column = std::make_unique<View>();
+    column->flex().direction = FlexDirection::column;
+    column->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    column->flex().flex_grow = 1;
+    column->flex().min_height = 0;
+    column->flex().gap = 10;
+
     auto preview = std::make_unique<RackPreview>();
     rack_preview_ = preview.get();
     // Fills the stage: a rack shown in a postage stamp cannot be read, and
@@ -285,13 +292,30 @@ std::unique_ptr<View> ForgeModularShell::stage_accessory() {
     preview->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
     preview->flex().flex_grow = 1;
     preview->flex().min_height = 0;
-    return preview;
+    column->add_child(std::move(preview));
+
+    auto explanation = std::make_unique<PatchExplanation>();
+    explanation_ = explanation.get();
+    explanation->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    explanation->flex().flex_grow = 0;
+    explanation->flex().flex_shrink = 0;
+    // The pairing that makes this worth drawing: point at a sentence, the
+    // cable it names lights and the rest recede.
+    explanation->on_hover = [this](std::optional<std::size_t> index) {
+        if (rack_preview_) rack_preview_->set_highlight(index);
+    };
+    column->add_child(std::move(explanation));
+    return column;
 }
 
 void ForgeModularShell::show_rack(std::vector<RackModule> modules,
                                   std::vector<Connection> connections) {
     if (!rack_preview_) return;
     const bool have_rack = !modules.empty();
+    if (explanation_) {
+        explanation_->set_connections(connections, modules);
+        explanation_->set_depth(static_cast<ExplainDepth>(depth_));
+    }
     rack_preview_->set_rack(std::move(modules), std::move(connections));
     // An empty rack keeps the skeleton up rather than showing a blank stage,
     // which would read as a finished build that produced nothing.
@@ -302,6 +326,9 @@ void ForgeModularShell::set_depth(Depth d) {
     if (d == depth_) return;
     depth_ = d;
     refresh_depth_tabs();
+    // The tab is not a preference stored for later: the explanation on screen
+    // rewrites itself now, or the control looks broken.
+    if (explanation_) explanation_->set_depth(static_cast<ExplainDepth>(d));
 }
 
 void ForgeModularShell::refresh_depth_tabs() {

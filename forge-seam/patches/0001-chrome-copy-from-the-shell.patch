@@ -1,8 +1,8 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..a3a6787 100644
+index 0863f43..f255dba 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
-@@ -640,6 +640,27 @@ public:
+@@ -640,6 +640,28 @@ public:
          return generation_turn_state_.has_active();
      }
      int chat_line_count() const { return chat_line_count_; }
@@ -15,6 +15,7 @@ index 0863f43..a3a6787 100644
 +        if (skeleton_) skeleton_->set_visible(!shown);
 +    }
 +    pulp::view::View* stage_accessory() const { return stage_accessory_; }
++    pulp::view::View* build_accessory() const { return build_accessory_; }
 +
 +    /// Put one line of narration in the Build transcript.
 +    ///
@@ -30,7 +31,7 @@ index 0863f43..a3a6787 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -722,6 +743,14 @@ public:
+@@ -722,6 +744,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -45,7 +46,7 @@ index 0863f43..a3a6787 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1162,8 @@ private:
+@@ -1133,6 +1163,8 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
@@ -54,7 +55,7 @@ index 0863f43..a3a6787 100644
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1202,7 @@ private:
+@@ -1171,6 +1203,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;

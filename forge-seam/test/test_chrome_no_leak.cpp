@@ -1052,19 +1052,22 @@ TEST_CASE("a wired patch replaces the skeleton on the Build stage", "[rack][seam
     REQUIRE(chrome != nullptr);
     chrome->enter_build();
 
-    // The preview is mounted but yields the stage to the skeleton until there
-    // is something to show.
+    // Assert what is actually on screen -- the mounted accessory -- not the
+    // preview's own flag. A child reports itself visible while its parent is
+    // hidden, so checking the child would pass on a rack nobody can see.
     auto* preview = shell.rack_preview();
+    auto* mounted = chrome->stage_accessory();
     REQUIRE(preview != nullptr);
-    CHECK_FALSE(preview->visible());
+    REQUIRE(mounted != nullptr);
+    CHECK_FALSE(mounted->visible());
 
     // An empty rack must NOT take the stage: a blank stage reads as a finished
     // build that produced nothing.
     shell.show_rack({}, {});
-    CHECK_FALSE(preview->visible());
+    CHECK_FALSE(mounted->visible());
 
     shell.show_rack(sample_rack(), sample_patch());
-    CHECK(preview->visible());
+    CHECK(mounted->visible());
     CHECK(preview->modules().size() == 3);
     CHECK(preview->connections().size() == 3);
 
@@ -1074,4 +1077,145 @@ TEST_CASE("a wired patch replaces the skeleton on the Build stage", "[rack][seam
         *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
         shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
     CHECK(std::filesystem::file_size(shot) > 20000);
+}
+
+TEST_CASE("depth rewrites the explanation, and hover lights the cable",
+          "[rack][depth][hover][seam]") {
+    // The pairing that justifies drawing a rack at all, driven end to end
+    // through the shell: press a depth tab, the words on screen change; point
+    // at a sentence, the cable it names lights and the rest recede.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.chrome()->enter_build();
+    shell.show_rack(sample_rack(), sample_patch());
+
+    auto* ex = shell.explanation();
+    auto* preview = shell.rack_preview();
+    REQUIRE(ex != nullptr);
+    REQUIRE(preview != nullptr);
+    REQUIRE(ex->line_count() == 3);
+
+    // Every depth still says what is plugged into what -- depth adds, it never
+    // takes the wiring away.
+    // Drive the tabs the chrome actually mounted. Building a second set would
+    // repoint the shell at buttons nobody can see, so the on-screen control
+    // would stop tracking the depth it is setting.
+    auto* tabs = shell.chrome()->build_accessory();
+    REQUIRE(tabs != nullptr);
+    auto press = [&](int i) {
+        dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i))->on_click();
+    };
+    auto tab_is_selected = [&](int i) {
+        return dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i))->style() ==
+               pulp::view::TextButton::Style::secondary;
+    };
+
+    press(0);   // Terse
+    const auto terse = ex->line_text(0);
+    press(1);   // Standard
+    const auto standard = ex->line_text(0);
+    press(2);   // Learning
+    const auto learning = ex->line_text(0);
+    // The control on screen must agree with the depth the words are at.
+    CHECK(tab_is_selected(2));
+    CHECK_FALSE(tab_is_selected(1));
+
+    for (const auto& t : {terse, standard, learning}) {
+        INFO(t);
+        CHECK(t.find("VCO-1 OUT") != std::string::npos);
+        CHECK(t.find("VCF IN") != std::string::npos);
+    }
+    // Each depth genuinely says more than the one below it.
+    CHECK(standard.size() > terse.size());
+    CHECK(learning.size() > standard.size());
+    CHECK(standard.find("everything else shapes it") != std::string::npos);
+    CHECK(terse.find("everything else shapes it") == std::string::npos);
+
+    // Hovering a line lights its cable and dims the others.
+    ex->hover_line(2);
+    CHECK(preview->highlight().has_value());
+    CHECK(*preview->highlight() == 2);
+    CHECK(preview->cable_alpha(2) == Approx(1.0f));
+    CHECK(preview->cable_alpha(0) < 1.0f);
+
+    // Letting go restores the rack rather than leaving it dimmed.
+    ex->hover_line(std::nullopt);
+    CHECK_FALSE(preview->highlight().has_value());
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK(preview->cable_alpha(i) == Approx(1.0f));
+
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-patch-explained.png";
+    press(2);
+    ex->hover_line(2);
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
+    CHECK(std::filesystem::file_size(shot) > 20000);
+}
+
+TEST_CASE("explanation lines do not overlap", "[rack][render]") {
+    forge_modular::PatchExplanation ex;
+    ex.set_connections(sample_patch(), sample_rack());
+    ex.set_depth(forge_modular::ExplainDepth::learning);
+    ex.set_bounds({0, 0, 820, 300});
+    const auto shot = std::filesystem::temp_directory_path() / "explanation-only.png";
+    REQUIRE(pulp::view::render_to_file(ex, 820, 300, shot.string(), 1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    CHECK(std::filesystem::file_size(shot) > 3000);
+
+    // The regression this closes: wrapped lines drew on top of each other, so
+    // the explanation was unreadable in every render before this. Assert the
+    // geometry, because the render only shows it to a human who looks.
+    REQUIRE(ex.child_count() == 3);
+    float previous_bottom = -1.0f;
+    for (int r = 0; r < ex.child_count(); ++r) {
+        auto* row = ex.child_at(r);
+        REQUIRE(row != nullptr);
+        const auto rb = row->bounds();
+        INFO("row " << r << " top " << rb.y << " height " << rb.height);
+        CHECK(rb.y >= previous_bottom);          // rows never overlap
+        previous_bottom = rb.y + rb.height;
+
+        // Consecutive lines must advance by close to a full line. The bug was
+        // an advance of about nine points against a 12.5pt font -- half a line
+        // -- so each wrapped line sat on top of the one above it. A point of
+        // rounding between the height and the advance is invisible; half a
+        // line is not.
+        float previous_top = -1000.0f;
+        for (int c = 0; c < row->child_count(); ++c) {
+            auto* lbl = dynamic_cast<pulp::view::Label*>(row->child_at(c));
+            if (!lbl) continue;                  // the role dot
+            const auto lb = lbl->bounds();
+            INFO("  line at " << lb.y << " height " << lb.height);
+            CHECK(lb.height >= 17.0f);           // a full line, not a squeezed one
+            if (previous_top > -999.0f) CHECK(lb.y - previous_top >= 16.0f);
+            previous_top = lb.y;
+        }
+    }
+
+    // A deeper setting genuinely produces more lines to read.
+    const int standard_lines = [&] {
+        forge_modular::PatchExplanation s;
+        s.set_connections(sample_patch(), sample_rack());
+        s.set_depth(forge_modular::ExplainDepth::standard);
+        s.set_bounds({0, 0, 820, 300});
+        int n = 0;
+        for (int r = 0; r < s.child_count(); ++r) n += s.child_at(r)->child_count();
+        return n;
+    }();
+    int learning_lines = 0;
+    for (int r = 0; r < ex.child_count(); ++r)
+        learning_lines += ex.child_at(r)->child_count();
+    CHECK(learning_lines > standard_lines);
 }
