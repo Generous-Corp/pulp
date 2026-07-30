@@ -515,6 +515,21 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("RELEASE_VERSION: ${{ inputs.version }}", step_block)
         self.assertNotIn("release_version='${{ inputs.version }}'", run_block)
         self.assertNotIn("${repo}", run_block)
+        self.assertIn(
+            'curl -fsSL "$matrix_url" -o "$matrix_file"',
+            run_block,
+        )
+        self.assertIn(
+            'release_era="$(python3 - "$RELEASE_VERSION" "$matrix_file"',
+            run_block,
+        )
+        self.assertIn('if [[ "$release_era" == "marker-era" ]]', run_block)
+        self.assertNotIn(
+            'if curl -fsSL "$matrix_url" | python3',
+            run_block,
+            "Matrix download or parsing failures must abort instead of selecting "
+            "the legacy overlay path.",
+        )
         refusal = run_block.index("refusing current-main source overlays")
         first_overlay = run_block.index("tools/scripts/fetch_skia_for_release.py")
         self.assertLess(
