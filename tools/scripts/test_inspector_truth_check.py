@@ -34,6 +34,12 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "unavailable in normal launches; explicitly wired\n",
             "docs/status/cli-commands.yaml":
                 "owner-private authenticated discovery\n",
+            "experimental/pulp-rs/src/cmd/motion.rs":
+                "authenticated auto-discovery\n",
+            "experimental/pulp-rs/src/cmd/trace.rs":
+                "authenticated auto-discovery\n",
+            ".claude/commands/trace.md":
+                "authenticated ephemeral discovery\n",
             "tools/mcp/pulp_mcp.cpp":
                 '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n',
             "CMakeLists.txt":
@@ -49,6 +55,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "test/cmake/view_widget_bridge_tests.cmake":
                 "pulp-test-inspector-stripped-artifact\n"
                 "check_inspector_stripped_artifact.cmake\n",
+            "inspect/src/discovery.cpp":
+                "if (info.pbi_status == SZOMB)\n",
         }
         for relative, text in files.items():
             path = root / relative
@@ -155,6 +163,25 @@ class InspectorTruthCheckTests(unittest.TestCase):
         self.assertIn("docs/reference/cli.md retains stale claim", errors)
         self.assertIn("docs/status/cli-commands.yaml retains stale claim", errors)
 
+    def test_rejects_legacy_rust_wrapper_port_defaults(self) -> None:
+        root = self.make_root()
+        (root / "experimental/pulp-rs/src/cmd/motion.rs").write_text(
+            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n",
+            encoding="utf-8",
+        )
+        (root / "experimental/pulp-rs/src/cmd/trace.rs").write_text(
+            "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;\n",
+            encoding="utf-8",
+        )
+        (root / ".claude/commands/trace.md").write_text(
+            "authenticated ephemeral discovery (default 9147)\n",
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn("cmd/motion.rs retains stale claim", errors)
+        self.assertIn("cmd/trace.rs retains stale claim", errors)
+        self.assertIn(".claude/commands/trace.md retains stale claim", errors)
+
     def test_rejects_stale_rust_help_claim(self) -> None:
         root = self.make_root()
         (root / "experimental/pulp-rs/src/help.rs").write_text(
@@ -200,6 +227,17 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         self.assertIn(
             "omits inspector build contract",
+            " ".join(inspector_truth_check.check_root(root)),
+        )
+
+    def test_rejects_macos_zombie_liveness_regression(self) -> None:
+        root = self.make_root()
+        (root / "inspect/src/discovery.cpp").write_text(
+            "return process start time without checking status\n",
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "omits inspector security contract",
             " ".join(inspector_truth_check.check_root(root)),
         )
 

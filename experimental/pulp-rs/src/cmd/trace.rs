@@ -44,9 +44,10 @@
 //!
 //! # Reachability gate (off-by-default ergonomics)
 //!
-//! Every verb runs a quick `TcpStream::connect` against
-//! `127.0.0.1:<port>` first (default 9147, override via
-//! `PULP_INSPECTOR_PORT`). If nothing is listening we print a clear
+//! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
+//! filter and gets a quick reachability probe. Without one, the C++ client
+//! performs authenticated ephemeral discovery. If no session is available it
+//! prints a clear
 //! "no inspector running — start with `PULP_TRACE_SERVER=1
 //! ./build/examples/ui-preview/pulp-ui-preview`" message and exit 1.
 //! This catches the most common user mistake (forgetting to launch the
@@ -63,14 +64,7 @@ use crate::cmd::trace_open::{run_open, OpenArgs};
 use crate::cmd::trace_query::run_offline_query;
 use crate::error::{CliError, Result};
 
-/// Default inspector port — matches `inspect/src/inspector_server.cpp`
-/// `kDefaultPort` (and `motion::DEFAULT_INSPECTOR_PORT`). The C++ side
-/// also honours `PULP_INSPECTOR_PORT`; we honor the same env var here
-/// so a non-default host stays reachable.
-pub const DEFAULT_INSPECTOR_PORT: u16 = 9147;
-
-/// Env var that overrides [`DEFAULT_INSPECTOR_PORT`]. Same name the
-/// C++ inspector server reads on startup.
+/// Optional explicit discovery filter understood by the wrapper.
 pub const INSPECTOR_PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 
 /// Output format for `pulp trace query`. JSON is the default because
@@ -153,8 +147,8 @@ pub struct GlobalFlags {
     /// `--json` — emit the raw inspector JSON instead of the
     /// pretty-printed default.
     pub json: bool,
-    /// Optional explicit port. Falls back to
-    /// `$PULP_INSPECTOR_PORT`, then [`DEFAULT_INSPECTOR_PORT`].
+    /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
+    /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
 }
 
@@ -214,9 +208,15 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             let v = args.get(i).ok_or_else(|| {
                 CliError::BadUsage("--port requires a value".to_owned())
             })?;
-            globals.port = Some(v.parse::<u16>().map_err(|_| {
+            let port = v.parse::<u16>().map_err(|_| {
                 CliError::BadUsage(format!("--port: invalid u16 value `{v}`"))
-            })?);
+            })?;
+            if port == 0 {
+                return Err(CliError::BadUsage(
+                    "--port must be between 1 and 65535".to_owned(),
+                ));
+            }
+            globals.port = Some(port);
         } else {
             rest.push(a.clone());
         }
@@ -551,9 +551,9 @@ impl InspectorTalker for SystemInspector {
         method: &str,
         params_json: &str,
     ) -> Result<String> {
-        // Reachability probe — fail fast with a clear message before
-        // the C++ binary's slower discovery+connect cycle would.
-        if !inspector_reachable(port) {
+        // An explicit port is only a discovery filter. With no filter, let
+        // the authenticated C++ client select the exact ephemeral session.
+        if port != 0 && !inspector_reachable(port) {
             return Err(CliError::Other(no_inspector_hint(port)));
         }
         let bin = resolve_inspect_binary().ok_or_else(|| {
@@ -564,10 +564,12 @@ impl InspectorTalker for SystemInspector {
                     .to_owned(),
             )
         })?;
-        let output = Command::new(&bin)
-            .arg("inspect")
-            .arg("--port")
-            .arg(port.to_string())
+        let mut command = Command::new(&bin);
+        command.arg("inspect");
+        if port != 0 {
+            command.arg("--port").arg(port.to_string());
+        }
+        let output = command
             .arg("--command")
             .arg(method)
             .arg("--params")
@@ -643,7 +645,8 @@ fn no_inspector_hint(port: u16) -> String {
     )
 }
 
-/// Resolve the effective port from CLI flags + env.
+/// Resolve the explicit port filter from CLI flags + env. Zero delegates
+/// selection to authenticated discovery.
 #[must_use]
 pub fn resolve_port(flags: &GlobalFlags) -> u16 {
     if let Some(p) = flags.port {
@@ -654,7 +657,7 @@ pub fn resolve_port(flags: &GlobalFlags) -> u16 {
             return p;
         }
     }
-    DEFAULT_INSPECTOR_PORT
+    0
 }
 
 /// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure glue
@@ -916,14 +919,14 @@ pub fn run_doctor<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let reachable = inspector_reachable(port);
-    // Only ask the inspector for its snapshot when we know it is up;
-    // otherwise the talker's own reachability probe would just re-fail.
-    let snapshot = if reachable {
+    let snapshot = if port == 0 {
+        talker.call(port, "Trace.snapshot", "{}").ok()
+    } else if inspector_reachable(port) {
         talker.call(port, "Trace.snapshot", "{}").ok()
     } else {
         None
     };
+    let reachable = snapshot.is_some();
     let tp = resolve_trace_processor();
     let report =
         build_doctor_report(port, reachable, snapshot.as_deref(), &tp, json);
@@ -971,8 +974,13 @@ pub fn build_doctor_report(
 
     if json {
         let tp_path = tp.path.as_deref().and_then(std::path::Path::to_str);
+        let port_json = if port == 0 {
+            "null".to_owned()
+        } else {
+            port.to_string()
+        };
         return format!(
-            "{{\"port\":{port},\
+            "{{\"port\":{port_json},\
              \"inspector_reachable\":{reachable},\
              \"compiled_in\":{},\
              \"active\":{},\
@@ -993,8 +1001,13 @@ pub fn build_doctor_report(
 
     let mut b = String::with_capacity(512);
     b.push_str("pulp trace doctor\n");
+    let inspector_target = if port == 0 {
+        "authenticated discovery".to_owned()
+    } else {
+        format!("port {port}")
+    };
     b.push_str(&format!(
-        "  inspector (port {port}) ... {}\n",
+        "  inspector ({inspector_target}) ... {}\n",
         if reachable { "reachable" } else { "UNREACHABLE" }
     ));
     b.push_str(&format!(
@@ -1121,7 +1134,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  --json                        Print the raw inspector JSON response")?;
     writeln!(
         out,
-        "  --port N                      Override the inspector port (default 9147 / $PULP_INSPECTOR_PORT)\n"
+        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
     )?;
     writeln!(
         out,
@@ -1180,6 +1193,12 @@ mod tests {
     #[test]
     fn parse_port_rejects_garbage() {
         let err = parse(&s(&["--port", "nope", "snapshot"])).unwrap_err();
+        assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_port_rejects_zero() {
+        let err = parse(&s(&["--port", "0", "snapshot"])).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
@@ -1413,6 +1432,13 @@ mod tests {
     }
 
     #[test]
+    fn resolve_port_defaults_to_authenticated_discovery() {
+        if std::env::var_os(INSPECTOR_PORT_ENV).is_none() {
+            assert_eq!(resolve_port(&GlobalFlags::default()), 0);
+        }
+    }
+
+    #[test]
     fn extract_str_reads_flat_string_field() {
         let body = "{\"out_path\":\"/tmp/pulp-1.pftrace\",\"n\":3}";
         assert_eq!(
@@ -1491,6 +1517,7 @@ mod tests {
         dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
         let calls = t.calls.borrow();
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, 0);
         assert_eq!(calls[0].1, "Trace.startSession");
         assert!(calls[0].2.contains("\"categories\":[\"dsp\"]"));
         let out = String::from_utf8(buf).unwrap();
@@ -1678,6 +1705,16 @@ mod tests {
         assert!(v["trace_processor_path"].is_null());
         assert_eq!(v["trace_processor_source"], "none");
         assert_eq!(v["ready_to_query"], false);
+    }
+
+    #[test]
+    fn doctor_report_labels_authenticated_discovery() {
+        let status = tp(TraceProcessorSource::None, None);
+        let human = build_doctor_report(0, false, None, &status, false);
+        assert!(human.contains("inspector (authenticated discovery)"));
+        let json = build_doctor_report(0, false, None, &status, true);
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value["port"].is_null());
     }
 
     #[test]

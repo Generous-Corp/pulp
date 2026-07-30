@@ -57,8 +57,9 @@ pulp trace query --preset dsp-hotspots
 | `snapshot` | `Trace.snapshot` |
 | `explain` | `Trace.explain` |
 
-Every verb honors `--port N` / `$PULP_INSPECTOR_PORT` (default 9147) and
-`--json` for the raw inspector response. If nothing is listening, the CLI
+Every verb uses authenticated ephemeral discovery by default and honors
+`--port N` / `$PULP_INSPECTOR_PORT` as an explicit port filter, plus
+`--json` for the raw inspector response. If no session is discoverable, the CLI
 prints a legacy no-inspector hint; that environment variable does not currently
 activate a server.
 

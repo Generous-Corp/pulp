@@ -65,6 +65,17 @@ FORBIDDEN_CLAIMS = {
         "auto-discovery from a temp-file hint",
         "same temp-file auto-discovery as `pulp inspect`",
     ),
+    "experimental/pulp-rs/src/cmd/motion.rs": (
+        "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
+        ".arg(\"--port\")\n            .arg(port.to_string())",
+    ),
+    "experimental/pulp-rs/src/cmd/trace.rs": (
+        "pub const DEFAULT_INSPECTOR_PORT: u16 = 9147",
+        ".arg(\"--port\")\n            .arg(port.to_string())",
+    ),
+    ".claude/commands/trace.md": (
+        "(default 9147)",
+    ),
 }
 
 REQUIRED_CLAIMS = {
@@ -106,6 +117,12 @@ REQUIRED_BUILD_CONTRACTS = {
     "test/cmake/view_widget_bridge_tests.cmake": (
         "pulp-test-inspector-stripped-artifact",
         "check_inspector_stripped_artifact.cmake",
+    ),
+}
+
+REQUIRED_SECURITY_CONTRACTS = {
+    "inspect/src/discovery.cpp": (
+        "if (info.pbi_status == SZOMB)",
     ),
 }
 
@@ -185,6 +202,14 @@ def check_root(root: pathlib.Path) -> list[str]:
             if contract not in text:
                 errors.append(
                     f"{relative_path} omits inspector build contract: {contract}"
+                )
+
+    for relative_path, contracts in REQUIRED_SECURITY_CONTRACTS.items():
+        text = (root / relative_path).read_text(encoding="utf-8")
+        for contract in contracts:
+            if contract not in text:
+                errors.append(
+                    f"{relative_path} omits inspector security contract: {contract}"
                 )
 
     mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")

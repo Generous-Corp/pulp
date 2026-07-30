@@ -30,6 +30,7 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 #include <libproc.h>
+#include <sys/proc.h>
 #endif
 #endif
 #endif
@@ -305,6 +306,8 @@ std::optional<std::string> process_start_identity(std::int64_t process_id) {
                      &info, sizeof(info)) != sizeof(info)) {
         return std::nullopt;
     }
+    if (info.pbi_status == SZOMB)
+        return std::nullopt;
     return std::to_string(info.pbi_start_tvsec) + ":" +
            std::to_string(info.pbi_start_tvusec);
 #elif defined(__linux__)
