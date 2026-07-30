@@ -181,6 +181,18 @@ For **all four products**:
 
 - `auval` for each AU, `clap-validator` for each CLAP, load-probe each VST3, run
   each standalone.
+- **Load every format in REAPER** and confirm its editor opens, via
+  `tools/testing/daw-smoke/reaper_smoke.py`. REAPER is installed here and the
+  smoke is enabled in `~/.config/pulp/daw-smoke.toml`. It is log-scrape, so
+  headless-safe, and its exit codes keep a SKIP from ever reading as a PASS
+  (0 PASS / 1 FAIL / 2 SKIP / 3 INCONCLUSIVE).
+
+  **One small addition needed:** its three modes -- `reload`,
+  `live-plugin-swap`, `sequence-loop-seek` -- all assume a hot-swap or transport
+  scenario, and Forge Modular needs none of them. It needs "insert the plugin,
+  open its editor, confirm it rendered". `insert_and_float.lua` already does the
+  insert-and-open, so this is a fourth mode over existing tested machinery
+  rather than new infrastructure. Counted as part of Phase 8.
 - Re-validate **after** the final rebuild. Results expire when a binary changes —
   this already bit once, when the installer carried a stale binary after the fix
   was verified.
@@ -201,18 +213,26 @@ products pixel-identical to baseline, Forge Modular generating on m5.
 Build and A/B all four products · drive every control headlessly at real
 coordinates · type into the composer and work the mention overlay · click Build
 and watch the real generator run, refuse and retry · generate a module and a
-patch · launch Rack and confirm from its log · validate every format · sign,
-notarize and verify · install on m5 and generate there · negative-control every
-gate.
+patch · launch Rack and confirm from its log · **load all three formats in REAPER
+and open their editors** · validate every format · sign, notarize and verify ·
+install on m5 and generate there · negative-control every gate.
+
+The standalone shares its shell with the three plugin formats, so driving the
+standalone exercises the same UI code the plugins present. That is a shortcut for
+*most* checks, not all of them: a format adapter can inject state no standalone
+path has — a synthesized bypass parameter once made every in-DAW reload fail
+while every headless check passed — which is exactly why the REAPER pass is
+separate and not inferred from the standalone.
 
 **Cannot, and will say so rather than imply otherwise:**
 
 - **`auval` on m5 over SSH** — AU registration needs a GUI login session, so it
   fails regardless of the plugin. I will run it here and state the gap there.
-- **The plugins inside a DAW** — no DAW automation on this machine. Needs you.
 - **How it feels** — latency, hover, whether the dropdown lands where your hand
-  expects. No screenshot or test answers that. It is the reason m5 is the handoff
-  and not the proof.
+  expects, whether the tabs read as tabs. I can measure a frame time and assert a
+  click lands; I cannot judge whether it feels right. This is now the **only**
+  thing on this list, and it is the reason m5 is the handoff rather than the
+  proof.
 
 ---
 
