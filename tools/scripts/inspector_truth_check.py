@@ -127,6 +127,13 @@ REQUIRED_BUILD_CONTRACTS = {
 REQUIRED_SECURITY_CONTRACTS = {
     "inspect/src/discovery.cpp": (
         "if (info.pbi_status == SZOMB)",
+        "record && read_credential(*record).has_value()",
+    ),
+    "experimental/pulp-rs/src/cmd/motion.rs": (
+        "must be an integer from 1 to 65535",
+    ),
+    "experimental/pulp-rs/src/cmd/trace.rs": (
+        "must be an integer from 1 to 65535",
     ),
 }
 

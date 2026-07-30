@@ -383,5 +383,24 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
 #ifndef _WIN32
     REQUIRE(::chmod(first.record()->credential_path.c_str(), 0644) == 0);
     CHECK_FALSE(reader.read_credential(records.front()).has_value());
+    records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().session_id == "second");
+    REQUIRE(::chmod(first.record()->credential_path.c_str(), 0600) == 0);
 #endif
+
+    {
+        std::ofstream corrupt(first.record()->credential_path,
+                              std::ios::binary | std::ios::trunc);
+        corrupt << "not-a-credential";
+    }
+    records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().session_id == "second");
+    REQUIRE(select_inspector_session(records, "", {}, &error).has_value());
+
+    std::filesystem::remove(first.record()->credential_path);
+    records = reader.list();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().session_id == "second");
 }
