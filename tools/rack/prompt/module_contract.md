@@ -85,6 +85,10 @@ useful in isolation, and it is pervasive in real modules:
 - **A label sits ABOVE its control**, and the emitter places it automatically — you only supply
   `label`. Leave ≥ 9 mm of vertical space above any control that has one.
 - **Widgets must not overlap.** Two controls need ≥ (r1 + r2 + 0.5) mm between centres.
+- **A label must not land on another widget either.** The label sits in the ~9 mm band above
+  its own control, and anything else drawn in that band collides with it — most often a light
+  placed just above a jack. The validator rejects `label 'IN' collides with widget X`. Give a
+  light its own row, or move it beside the control rather than above it.
 - **Name length**: at 3 HP the name must be ≤ 4 characters. At 6 HP ≤ 8. Wider is freer.
 - Typical column x positions: 3 HP → centre only (7.62). 6 HP → 9.0 and 21.5.
   8 HP → 11.8 and 28.8. 12 HP → 4 columns at 9.6, 23.2, 36.8, 50.4.
@@ -99,6 +103,17 @@ useful in isolation, and it is pervasive in real modules:
 | Audio | **±5 V** |
 | CV, unipolar | **0…10 V** |
 | CV, bipolar | **±5 V** |
+
+**A parameter's default must leave the knob somewhere it can move from.** Two rejections come
+up constantly and both are about where a knob STARTS:
+
+- **A bipolar range must default to its centre.** `-1..1` defaults to `0`; `-2..2` defaults to
+  `0`. A bipolar control that starts at `0.5` or `1.0` shows a knob pointing off to one side
+  for what the user reads as the neutral setting.
+- **Nothing defaults to the top or bottom of its range.** A `0..1` parameter defaulting to
+  `1.0` gives a knob with nowhere left to turn; the module appears to have a broken control
+  before it is even patched. Choose a value inside the range that sounds right — for a mix or
+  amount, that is usually the middle.
 | Pitch | **1 V/oct**, `f = f0 · 2^V`; f0 = C4 = 261.6256 Hz (audio), 2 Hz (LFO/clock) |
 | Gate / trigger | **10 V** when active; a trigger is ~1 ms |
 | Trigger detection | Schmitt: rises at **1.0 V**, falls at **0.1 V** |

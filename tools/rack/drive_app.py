@@ -66,6 +66,18 @@ def osa(script: str) -> str:
     return r.stdout.strip()
 
 
+def generating() -> bool:
+    """True when the Rack generator is actually running.
+
+    Matched on the interpreter invocation, not the bare filename: `pgrep -f
+    generate.py` also matches any SHELL whose command line mentions it -- so a
+    command that begins with `pkill -f generate.py` makes the check report the
+    generator as running because it matched the shell doing the killing."""
+    r = subprocess.run(["pgrep", "-f", "python3 generate.py"],
+                       capture_output=True)
+    return r.returncode == 0
+
+
 def running() -> bool:
     return subprocess.run(["pgrep", "-f", NAME],
                           capture_output=True).returncode == 0
@@ -159,8 +171,7 @@ def shot(path: str) -> str:
 def log_state() -> dict:
     """What the generator has said, and what that means."""
     out = {"exists": os.path.exists(LOG), "bytes": 0, "tail": [],
-           "generating": subprocess.run(["pgrep", "-f", "generate.py"],
-                                        capture_output=True).returncode == 0,
+           "generating": generating(),
            "forge_pipeline_ran": False}
     if out["exists"]:
         out["bytes"] = os.path.getsize(LOG)
