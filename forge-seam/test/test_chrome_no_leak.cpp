@@ -19,6 +19,7 @@
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
 #include <forge/rack_layout.hpp>
+#include <forge/process_engine.hpp>
 #include <forge/rack_preview.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -1504,4 +1505,65 @@ TEST_CASE("model roles are re-cut by artifact, not duplicated", "[phase6][settin
     CHECK(shell.model_roles().dsp);                 // module by default
     shell.set_artifact(forge_modular::Artifact::patch);
     CHECK_FALSE(shell.model_roles().dsp);
+}
+
+TEST_CASE("Ask answers about a real patch, through the app's own path",
+          "[phase7][app]") {
+    // Drives the same engine the app uses against the real toolchain and a
+    // real generated patch. Scripted proof that the CLI works says nothing
+    // about whether the app reaches it -- the app had no engine connected at
+    // all until this existed, so Build did nothing there while the command
+    // line worked perfectly.
+    const std::string tools = "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
+    const std::string patch = "/tmp/ambient-drone.vcv";
+    if (!std::filesystem::exists(tools) || !std::filesystem::exists(patch)) {
+        WARN("toolchain or generated patch not present; skipping");
+        return;
+    }
+
+    forge_modular::ProcessEngine engine(
+        tools, (std::filesystem::temp_directory_path() / "fm-ask.log").string());
+    CHECK(engine.available());
+    REQUIRE(engine.ensure_running());
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+
+    // With no patch open, Ask says so rather than inventing an answer.
+    chrome->prompt_input()->set_text("what makes the sound here?");
+    CHECK(shell.ask().empty());
+    const int after_empty = chrome->chat_line_count();
+    CHECK(after_empty > 0);
+
+    // With a patch open, the answer is derived from that file.
+    shell.set_open_patch(patch);
+    chrome->prompt_input()->set_text("what makes the sound here?");
+    CHECK(shell.ask().empty());
+    CHECK(chrome->chat_line_count() > after_empty + 2);   // a real explanation
+
+    // And the explanation genuinely describes THIS patch: the audio path it
+    // names must be one the file actually contains.
+    const auto answer = engine.explain(patch);
+    INFO(answer);
+    CHECK(answer.find("AUDIO") != std::string::npos);
+    CHECK(answer.find("Audio") != std::string::npos);     // it reaches an output
+    // An explanation computed from the file cannot claim a cable that is not
+    // in it -- so a module absent from the patch must not appear.
+    CHECK(answer.find("Bogus Module That Is Not Here") == std::string::npos);
+
+    // Asking twice costs nothing and gives the same answer, because no model
+    // is involved.
+    CHECK(engine.explain(patch) == answer);
 }

@@ -435,11 +435,26 @@ std::string ForgeModularShell::ask() {
     const auto prompt = input ? input->text() : std::string{};
     if (prompt.find_first_not_of(" \t\n") == std::string::npos)
         return "type a question first";
-    // Deliberately does NOT reach the generator: Ask must never rewrite the
-    // artifact, and the difference between the two is carried, not inferred.
+    // Deliberately never generates: Ask must not rewrite the artifact, and the
+    // difference between the two is carried, not inferred.
     c->enter_build();
     c->narrate(prompt.substr(0, 200));
     if (input) input->set_text("");
+
+    // Answer from the patch itself. Derived from the file rather than a model,
+    // so it costs nothing to re-ask and cannot claim a cable the patch does
+    // not contain -- a confident answer about a connection that does not exist
+    // would be worse than no answer.
+    if (engine_ && !open_patch_.empty()) {
+        auto answer = engine_->explain(open_patch_);
+        if (!answer.empty()) {
+            for (const auto& line : PatchExplanation::wrap(answer, 118))
+                c->narrate(line);
+            return {};
+        }
+    }
+    if (open_patch_.empty())
+        c->narrate("Build or open a patch first and I can explain it.");
     return {};
 }
 

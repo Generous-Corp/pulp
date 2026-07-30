@@ -85,6 +85,22 @@ std::vector<std::string> PatchExplanation::wrap(const std::string& text,
     std::vector<std::string> lines;
     if (columns == 0) { lines.push_back(text); return lines; }
 
+    // Existing line breaks are the author's and are kept: an explanation that
+    // groups cables by role loses that grouping if its newlines are reflowed
+    // away into one paragraph.
+    if (text.find('\n') != std::string::npos) {
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            auto nl = text.find('\n', start);
+            if (nl == std::string::npos) nl = text.size();
+            for (auto& piece : wrap(text.substr(start, nl - start), columns))
+                lines.push_back(piece);
+            if (nl == text.size()) break;
+            start = nl + 1;
+        }
+        return lines;
+    }
+
     std::string line;
     std::size_t i = 0;
     while (i < text.size()) {

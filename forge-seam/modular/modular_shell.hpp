@@ -48,6 +48,14 @@ public:
     /// Why the last submit did nothing; empty when it started. A Build that
     /// silently does nothing is the worst available outcome, and it shipped once.
     virtual std::string last_error() const { return {}; }
+
+    /// Answer a question about a patch from the patch itself, or empty when
+    /// this engine cannot. Kept on the engine because it is the side that
+    /// knows where patches live.
+    virtual std::string explain(const std::string& patch_path) const {
+        (void)patch_path;
+        return {};
+    }
 };
 
 class ForgeModularShell final : public forge::ForgeShell {
@@ -87,6 +95,10 @@ public:
     /// an Ask that could rewrite the artifact would destroy work on a misread
     /// intent.
     std::string ask();
+
+    /// The patch the workspace currently holds, if any. Ask answers about it.
+    void set_open_patch(std::string path) { open_patch_ = std::move(path); }
+    const std::string& open_patch() const { return open_patch_; }
 
     /// Open the mention list, as typing `@` does.
     void begin_mention();
@@ -208,6 +220,7 @@ private:
     BuildMonitor monitor_;
     Depth depth_ = Depth::standard;
     RackPreview* rack_preview_ = nullptr;
+    std::string open_patch_;
     PatchExplanation* explanation_ = nullptr;
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
