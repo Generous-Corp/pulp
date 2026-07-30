@@ -111,6 +111,12 @@ if ! qm clone "$GOLDEN" "$VMID" --name "pulp-ci-ephemeral-$VMID" >/dev/null 2>&1
     flock -u 9
     die "clone failed"
 fi
+# Claim it for cleanup BEFORE releasing the lock. The guard exists so a failure
+# before the clone lands cannot destroy whatever now owns that id — but it is
+# read on every exit path, so leaving it unset means nothing is ever destroyed
+# and the pool silently becomes persistent runners that leak VMIDs.
+CLONED=1
+
 # The id is now committed to disk (200.conf exists), so no other slot can pick
 # it. Safe to release before the slow boot/register/run phase.
 flock -u 9
