@@ -142,15 +142,13 @@ TEST_CASE("pulp inspect one-shot prints a server response",
 
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.empty());
-    REQUIRE(result.stdout_output.find("Connecting to 127.0.0.1:" +
+    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" +
                                       fixture.port_string()) !=
             std::string::npos);
-    REQUIRE(result.stdout_output.find("Connected to inspector") !=
+    REQUIRE(result.stderr_output.find("Connected to inspector") !=
             std::string::npos);
-    REQUIRE(compact_json_for_assertion(result.stdout_output)
-                .find(R"({"ok":true,"source":"inspect-test"})") !=
-            std::string::npos);
+    REQUIRE(result.stdout_output == R"({"ok": true, "source": "inspect-test"})"
+                                    "\n");
     REQUIRE(fixture.seen.size() == 1);
     REQUIRE(fixture.seen[0].id >= 2);
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
@@ -171,16 +169,14 @@ TEST_CASE("pulp inspect one-shot can discover the advertised server port",
 
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.empty());
-    REQUIRE(result.stdout_output.find("Found inspector session " +
+    REQUIRE(result.stderr_output.find("Found inspector session " +
                                       fixture.session.info().session_id) !=
             std::string::npos);
-    REQUIRE(result.stdout_output.find("Connecting to 127.0.0.1:" +
+    REQUIRE(result.stderr_output.find("Connecting to 127.0.0.1:" +
                                       fixture.port_string()) !=
             std::string::npos);
-    REQUIRE(compact_json_for_assertion(result.stdout_output)
-                .find(R"({"discovered":true})") !=
-            std::string::npos);
+    REQUIRE(result.stdout_output == R"({"discovered": true})"
+                                    "\n");
     REQUIRE(fixture.seen.size() == 1);
     REQUIRE(fixture.seen[0].method == "DOM.getDocument");
     REQUIRE((fixture.seen[0].params_json.empty() ||
@@ -228,9 +224,8 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
 
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.empty());
-    CHECK(compact_json_for_assertion(result.stdout_output)
-              .find(R"({"instance":"second"})") != std::string::npos);
+    CHECK(result.stdout_output == R"({"instance": "second"})"
+                                  "\n");
     CHECK(first.seen.empty());
     REQUIRE(second_seen.size() == 1);
     second_server.stop();
@@ -254,9 +249,8 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
 
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
-    REQUIRE(result.stderr_output.empty());
-    REQUIRE(compact_json_for_assertion(result.stdout_output)
-                .find(R"({"applied":true})") != std::string::npos);
+    REQUIRE(result.stdout_output == R"({"applied": true})"
+                                    "\n");
     REQUIRE(fixture.seen.size() == 1);
     CHECK(fixture.seen.front().method == "State.setParameter");
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
@@ -284,7 +278,11 @@ TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
 
     REQUIRE_FALSE(written.timed_out);
     REQUIRE(written.exit_code == 0);
-    REQUIRE(written.stderr_output.empty());
+    REQUIRE(written.stderr_output.find("Connecting to 127.0.0.1:" +
+                                       fixture.port_string()) !=
+            std::string::npos);
+    REQUIRE(written.stderr_output.find("Connected to inspector") !=
+            std::string::npos);
     REQUIRE(written.stdout_output.find("Written to " + out.string()) !=
             std::string::npos);
     REQUIRE(fs::exists(out));
@@ -344,4 +342,13 @@ TEST_CASE("pulp inspect validates missing values before connecting",
             std::string::npos);
     REQUIRE(invalid_negative.stdout_output.find("Connecting to") ==
             std::string::npos);
+
+    auto unmatched_port =
+        run_pulp({"inspect", "--port", "1", "--command", "Motion.snapshot"},
+                 10000);
+    REQUIRE_FALSE(unmatched_port.timed_out);
+    REQUIRE(unmatched_port.exit_code == 1);
+    REQUIRE(unmatched_port.stderr_output.find("requested port 1") !=
+            std::string::npos);
+    REQUIRE(unmatched_port.stdout_output.empty());
 }

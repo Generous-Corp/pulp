@@ -172,25 +172,40 @@ int cmd_inspect(const std::vector<std::string>& args) {
     const auto selected = select_inspector_session(
         records, session_id, instance_id, &selection_error);
     if (!selected) {
-        std::cerr << "Error: " << selection_error << "\n";
+        std::cerr << "Error: " << selection_error;
+        if (!host.empty() || port != 0 || !session_id.empty() ||
+            !instance_id.empty()) {
+            std::cerr << " (requested";
+            if (!host.empty()) std::cerr << " host " << host;
+            if (port != 0) std::cerr << " port " << port;
+            if (!session_id.empty()) std::cerr << " session " << session_id;
+            if (!instance_id.empty())
+                std::cerr << " instance " << instance_id;
+            std::cerr << ")";
+        }
+        std::cerr << "\n";
         return 1;
     }
 
-    std::cout << "Found inspector session " << selected->session_id << "\n"
-              << "Connecting to " << selected->endpoint << "...\n";
+    auto& status = command.empty() ? std::cout : std::cerr;
+    status << "Found inspector session " << selected->session_id << "\n"
+           << "Connecting to " << selected->endpoint << "...\n";
     InspectorClient client;
-    client.set_event_handler([](const InspectorMessage& event) {
-        std::cout << ic_cyan() << "← " << event.method << ic_reset() << "\n";
-        if (!event.params_json.empty() && event.params_json != "{}")
-            std::cout << "  " << event.params_json << "\n";
-    });
+    if (command.empty()) {
+        client.set_event_handler([](const InspectorMessage& event) {
+            std::cout << ic_cyan() << "← " << event.method << ic_reset()
+                      << "\n";
+            if (!event.params_json.empty() && event.params_json != "{}")
+                std::cout << "  " << event.params_json << "\n";
+        });
+    }
     if (!client.connect(*selected, discovery)) {
         std::cerr << "Error: authentication or connection failed for session "
                   << selected->session_id << "\n";
         return 1;
     }
-    std::cout << "  " << ic_green() << "✓" << ic_reset()
-              << " Connected to inspector\n";
+    status << "  " << ic_green() << "✓" << ic_reset()
+           << " Connected to inspector\n";
 
     if (!command.empty()) {
         const auto* descriptor = find_inspector_method(command);
