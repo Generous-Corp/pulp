@@ -103,7 +103,39 @@ Phase 2, so the test becomes natural there rather than requiring a throwaway.
 builder sits, and an icon that cannot be wired is worse than one that does not
 exist.
 
-Still to do in Phase 1: the two optional view hooks.
+### Phase 1, step 3 — the home accessory hook
+
+**Done. One hook, not two.**
+
+`ForgeShell::home_accessory()` returns an extra view for between the title and
+the composer, or `nullptr`. Forge Modular's Module|Patch tabs go there.
+`build_home()` is a plain sequence of `add_child` calls, so this is one
+conditional insert at the point the tabs belong.
+
+Proven live and per-product the same way: temporarily giving Forge FX a red
+200x40 accessory failed FX and passed Instrument and MIDI. Removed: 3 of 3 pass,
+chrome suite still 4,711 assertions.
+
+**I declared a `workspace_accessory()` hook and then removed it**, because
+nothing called it. A hook no code path reaches is exactly the inert-path problem
+this project keeps hitting -- it compiles, it looks like progress, and it does
+nothing. The rack preview needs it in Phase 5; it gets added there, with a
+mount point and a live-path proof, rather than sitting unused until then.
+
+## Phase 1 is complete
+
+Three changes, 197 insertions and 39 deletions across 6 files. Effect on the
+three existing products: **none**, asserted byte-identical after each step.
+
+Every step was proven live as well as harmless -- an important distinction,
+since "changes nothing" is also what a dead code path looks like.
+
+Still owed: a permanent test for the described row and the accessory hook. Both
+demonstrations were manual because `ForgeFxShell` is `final` and cannot be
+subclassed for a test double. `ForgeModularShell` is that subclass, so the tests
+become natural in Phase 2 rather than needing a throwaway.
+
+Still to do in Phase 1: nothing.
 
 ## Applying it to a Forge checkout
 
