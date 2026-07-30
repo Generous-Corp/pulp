@@ -553,10 +553,15 @@ TEST_CASE("non-finite parameter writes preserve the last valid state",
                   TapeTier::physical);
         delay.set_sample_rate(kSr);
         delay.set_tape_speed_ips(15.0f);
-        delay.set_time_offset(1.27f);
+        delay.set_right_time_ms(611.0f);
         delay.set_crossfeed(0.41f);
+        delay.set_diffusion_amount(0.29f);
         delay.set_mod(0.31f, 0.46f);
         delay.set_duck(0.37f);
+        delay.set_loop_low_cut_hz(180.0f);
+        delay.set_loop_low_cut_resonance(1.3f);
+        delay.set_loop_high_cut_hz(7200.0f);
+        delay.set_loop_high_cut_resonance(1.1f);
     };
 
     for (double bad : {std::numeric_limits<double>::quiet_NaN(),
@@ -583,10 +588,16 @@ TEST_CASE("non-finite parameter writes preserve the last valid state",
         candidate.set_tape_speed_ips(static_cast<float>(bad));
         candidate.set_time_ms(static_cast<float>(bad));
         candidate.set_time_offset(static_cast<float>(bad));
+        candidate.set_right_time_ms(static_cast<float>(bad));
         candidate.set_feedback(static_cast<float>(bad));
         candidate.set_crossfeed(static_cast<float>(bad));
         candidate.set_character_amount(static_cast<float>(bad));
+        candidate.set_diffusion_amount(static_cast<float>(bad));
         candidate.set_duck(static_cast<float>(bad));
+        candidate.set_loop_low_cut_hz(static_cast<float>(bad));
+        candidate.set_loop_low_cut_resonance(static_cast<float>(bad));
+        candidate.set_loop_high_cut_hz(static_cast<float>(bad));
+        candidate.set_loop_high_cut_resonance(static_cast<float>(bad));
 
         // A bad component must not discard the valid component beside it.
         candidate.set_mod(static_cast<float>(bad), 0.73f);
@@ -666,6 +677,11 @@ TEST_CASE("process allocates nothing in any configuration",
                     delay.set_mod(0.4f, 0.5f);
                     delay.set_duck(0.5f);
                     delay.set_crossfeed(0.3f);
+                    delay.set_diffusion_amount(0.6f);
+                    delay.set_loop_low_cut_hz(120.0f);
+                    delay.set_loop_low_cut_resonance(1.2f);
+                    delay.set_loop_high_cut_hz(6000.0f);
+                    delay.set_loop_high_cut_resonance(1.1f);
                     delay.reset();
 
                     auto warmup = sine_both(kBlock * 8, 500.0, 0.4f);
