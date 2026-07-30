@@ -531,6 +531,11 @@ pub trait InspectorTalker {
     /// command exited non-zero).
     fn call(&self, port: u16, method: &str, params_json: &str)
         -> Result<String>;
+
+    /// Probe an authenticated session independently of any Trace capability.
+    fn is_reachable(&self, port: u16) -> bool {
+        self.call(port, "Session.getCapabilities", "{}").is_ok()
+    }
 }
 
 /// Production talker — shells out to `pulp-cpp
@@ -900,8 +905,9 @@ pub fn resolve_trace_processor() -> TraceProcessorStatus {
 }
 
 /// Run `pulp trace doctor`: aggregate client-side readiness probes
-/// (an authenticated `Trace.snapshot`, `trace_processor` availability) with the
-/// inspector's own `Trace.snapshot` facts, then print a report.
+/// (authenticated session reachability, `Trace.snapshot`,
+/// `trace_processor` availability) with the inspector's own trace facts, then
+/// print a report.
 ///
 /// # Errors
 ///
@@ -914,11 +920,24 @@ pub fn run_doctor<T: InspectorTalker>(
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let snapshot = talker.call(port, "Trace.snapshot", "{}").ok();
-    let reachable = snapshot.is_some();
+    let reachable = talker.is_reachable(port);
+    let (snapshot, snapshot_error) = if reachable {
+        match talker.call(port, "Trace.snapshot", "{}") {
+            Ok(snapshot) => (Some(snapshot), None),
+            Err(error) => (None, Some(error.to_string())),
+        }
+    } else {
+        (None, None)
+    };
     let tp = resolve_trace_processor();
-    let report =
-        build_doctor_report(port, reachable, snapshot.as_deref(), &tp, json);
+    let report = build_doctor_report(
+        port,
+        reachable,
+        snapshot.as_deref(),
+        snapshot_error.as_deref(),
+        &tp,
+        json,
+    );
     write!(out, "{report}").map_err(io_err)
 }
 
@@ -942,14 +961,15 @@ fn json_str_opt(v: Option<&str>) -> String {
 ///
 /// `compiled_in` / `active` / `last_trace_path` come from the inspector's
 /// `Trace.snapshot`; they are `None` (JSON `null` / "unknown") when the
-/// inspector is unreachable. `ready_to_capture` needs a reachable inspector
-/// with tracing compiled in; `ready_to_query` needs a `trace_processor`
-/// plus a captured trace to run over.
+/// inspector is unreachable or the snapshot capability is unavailable.
+/// `ready_to_capture` needs a reachable inspector with tracing compiled in;
+/// `ready_to_query` needs a `trace_processor` plus a captured trace.
 #[must_use]
 pub fn build_doctor_report(
     port: u16,
     reachable: bool,
     snapshot_json: Option<&str>,
+    snapshot_error: Option<&str>,
     tp: &TraceProcessorStatus,
     json: bool,
 ) -> String {
@@ -974,6 +994,7 @@ pub fn build_doctor_report(
              \"compiled_in\":{},\
              \"active\":{},\
              \"last_trace_path\":{},\
+             \"snapshot_error\":{},\
              \"trace_processor_available\":{},\
              \"trace_processor_path\":{},\
              \"trace_processor_source\":\"{}\",\
@@ -982,6 +1003,7 @@ pub fn build_doctor_report(
             json_bool_opt(compiled_in),
             json_bool_opt(active),
             json_str_opt(last_trace_path.as_deref()),
+            json_str_opt(snapshot_error),
             tp.available(),
             json_str_opt(tp_path),
             tp.source_str(),
@@ -1004,9 +1026,15 @@ pub fn build_doctor_report(
         match compiled_in {
             Some(true) => "yes",
             Some(false) => "NO (rebuild with -DPULP_TRACING=ON)",
+            None if reachable => "unknown (Trace.snapshot unavailable)",
             None => "unknown (inspector unreachable)",
         }
     ));
+    if let Some(error) = snapshot_error {
+        b.push_str(&format!(
+            "  trace snapshot .......... unavailable ({error})\n"
+        ));
+    }
     if let Some(a) = active {
         b.push_str(&format!(
             "  session active .......... {}\n",
@@ -1642,7 +1670,8 @@ mod tests {
         let snap = "{\"compiled_in\":true,\"active\":false,\
                     \"last_trace_path\":\"/tmp/x.pftrace\"}";
         let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human = build_doctor_report(9147, true, Some(snap), &status, false);
+        let human =
+            build_doctor_report(9147, true, Some(snap), None, &status, false);
         assert!(human.contains("inspector (port 9147) ... reachable"), "{human}");
         assert!(human.contains("tracing compiled in ..... yes"), "{human}");
         assert!(human.contains("last trace .............. /tmp/x.pftrace"), "{human}");
@@ -1653,7 +1682,8 @@ mod tests {
     #[test]
     fn doctor_report_unreachable_marks_unknowns_and_prints_hint() {
         let status = tp(TraceProcessorSource::None, None);
-        let human = build_doctor_report(9200, false, None, &status, false);
+        let human =
+            build_doctor_report(9200, false, None, None, &status, false);
         assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
         assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
         assert!(human.contains("ready to capture a trace . no"), "{human}");
@@ -1662,10 +1692,43 @@ mod tests {
     }
 
     #[test]
+    fn doctor_report_distinguishes_snapshot_denial_from_unreachable() {
+        let status = tp(TraceProcessorSource::None, None);
+        let human = build_doctor_report(
+            9200,
+            true,
+            None,
+            Some("capability_denied"),
+            &status,
+            false,
+        );
+        assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
+        assert!(
+            human.contains("trace snapshot .......... unavailable (capability_denied)"),
+            "{human}"
+        );
+        assert!(!human.contains("no inspector available"), "{human}");
+
+        let json = build_doctor_report(
+            9200,
+            true,
+            None,
+            Some("capability_denied"),
+            &status,
+            true,
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["inspector_reachable"], true);
+        assert_eq!(value["snapshot_error"], "capability_denied");
+    }
+
+    #[test]
     fn doctor_report_not_compiled_in_blocks_capture() {
         let snap = "{\"compiled_in\":false,\"active\":false}";
         let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human = build_doctor_report(9147, true, Some(snap), &status, false);
+        let human =
+            build_doctor_report(9147, true, Some(snap), None, &status, false);
         assert!(human.contains("tracing compiled in ..... NO"), "{human}");
         assert!(human.contains("ready to capture a trace . no"), "{human}");
         // No trace yet, so offline query is not ready even with the binary.
@@ -1677,7 +1740,8 @@ mod tests {
         let snap = "{\"compiled_in\":true,\"active\":true,\
                     \"last_trace_path\":\"/tmp/y.pftrace\"}";
         let status = tp(TraceProcessorSource::Env, Some("/opt/tp"));
-        let json = build_doctor_report(9147, true, Some(snap), &status, true);
+        let json =
+            build_doctor_report(9147, true, Some(snap), None, &status, true);
         // Parses as one flat JSON object with the readiness contract.
         let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
         assert_eq!(v["port"], 9147);
@@ -1695,7 +1759,8 @@ mod tests {
     #[test]
     fn doctor_report_json_nulls_when_unreachable() {
         let status = tp(TraceProcessorSource::None, None);
-        let json = build_doctor_report(9147, false, None, &status, true);
+        let json =
+            build_doctor_report(9147, false, None, None, &status, true);
         let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
         assert!(v["compiled_in"].is_null());
         assert!(v["last_trace_path"].is_null());
@@ -1707,9 +1772,11 @@ mod tests {
     #[test]
     fn doctor_report_labels_authenticated_discovery() {
         let status = tp(TraceProcessorSource::None, None);
-        let human = build_doctor_report(0, false, None, &status, false);
+        let human =
+            build_doctor_report(0, false, None, None, &status, false);
         assert!(human.contains("inspector (authenticated discovery)"));
-        let json = build_doctor_report(0, false, None, &status, true);
+        let json =
+            build_doctor_report(0, false, None, None, &status, true);
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(value["port"].is_null());
     }
@@ -1776,8 +1843,43 @@ mod tests {
         assert!(out.contains("reachable"), "{out}");
         assert_eq!(
             &*t.calls.borrow(),
-            &[(1, "Trace.snapshot".to_owned(), "{}".to_owned())]
+            &[
+                (1, "Session.getCapabilities".to_owned(), "{}".to_owned()),
+                (1, "Trace.snapshot".to_owned(), "{}".to_owned()),
+            ]
         );
+    }
+
+    #[test]
+    fn dispatch_doctor_keeps_reachability_when_snapshot_is_denied() {
+        struct SnapshotDeniedTalker;
+        impl InspectorTalker for SnapshotDeniedTalker {
+            fn call(
+                &self,
+                _port: u16,
+                method: &str,
+                _params: &str,
+            ) -> Result<String> {
+                if method == "Session.getCapabilities" {
+                    Ok("{}".to_owned())
+                } else {
+                    Err(CliError::Other("capability_denied".to_owned()))
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        run_doctor(
+            9200,
+            false,
+            &SnapshotDeniedTalker,
+            &mut output,
+        )
+        .unwrap();
+        let human = String::from_utf8(output).unwrap();
+        assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
+        assert!(human.contains("capability_denied"), "{human}");
+        assert!(!human.contains("no inspector available"), "{human}");
     }
 
     #[test]

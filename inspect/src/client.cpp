@@ -276,6 +276,10 @@ void InspectorClient::disconnect() {
         impl_->in_flight.clear();
         impl_->challenge.reset();
     }
+    {
+        std::lock_guard lock(impl_->event_state->mutex);
+        impl_->event_state->events.clear();
+    }
     impl_->cv.notify_all();
 }
 
