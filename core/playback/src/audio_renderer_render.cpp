@@ -61,7 +61,9 @@ float source_sample(
             (*host_source_frames_per_output_frame > 1.0 ||
              clip.source_frames_per_timeline_frame > 1.0))
             return host_rate_converter->read(channel, source_position,
-                                             *host_source_frames_per_output_frame);
+                                             *host_source_frames_per_output_frame == 0.0
+                                                 ? 1.0
+                                                 : *host_source_frames_per_output_frame);
         if (sample_rate_converter) {
             return sample_rate_converter->read(segment, source_position);
         }
@@ -134,6 +136,125 @@ struct TrackMixerRun {
     }
 };
 
+long double musical_phase_source_position(const AudioClipRendererProgram& clip,
+                                          long double document_tick) noexcept {
+    const auto tick_start = static_cast<long double>(clip.musical_tick_start.value);
+    const auto tick_span = static_cast<long double>(clip.musical_tick_end.value) - tick_start;
+    const auto phase = std::clamp((document_tick - tick_start) / tick_span, 0.0L, 1.0L);
+    return static_cast<long double>(clip.source_frame_offset) +
+           phase * (static_cast<long double>(clip.source_frame_count) -
+                    static_cast<long double>(clip.source_frame_offset));
+}
+
+struct SourceReadPoint {
+    long double position = 0.0L;
+    double filter_step = 0.0;
+};
+
+SourceReadPoint source_read_point(const AudioClipRendererProgram& clip,
+                                  long double document_position,
+                                  long double next_document_position,
+                                  long double document_tick,
+                                  long double next_document_tick,
+                                  long double clip_start_position) noexcept {
+    if (clip.source_time_mapping ==
+        AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
+        const auto position = musical_phase_source_position(clip, document_tick);
+        return {position, static_cast<double>(
+                              std::abs(musical_phase_source_position(clip, next_document_tick) -
+                                       position))};
+    }
+    const auto position = static_cast<long double>(clip.source_frame_offset) +
+                          (document_position - clip_start_position) *
+                              static_cast<long double>(clip.source_frames_per_timeline_frame);
+    return {position,
+            static_cast<double>(std::abs(next_document_position - document_position) *
+                                static_cast<long double>(
+                                    clip.source_frames_per_timeline_frame))};
+}
+
+bool supported_source_step(double step) noexcept {
+    return std::isfinite(step) && step >= 0.0 &&
+           step <= audio::PreparedVariableRateConversion::
+                       kMaximumSourceFramesPerOutputFrame;
+}
+
+bool preflight_host_source_steps(const AudioTrackRendererProgram& track,
+                                 const TransportRange& range,
+                                 const timebase::CompiledTempoMap& tempo_map) noexcept {
+    const auto clips = track.clips();
+    const auto range_tick_start =
+        range.has_precise_host_ticks ? static_cast<long double>(range.host_tick_start)
+                                     : static_cast<long double>(range.timeline_tick_start.value);
+    const auto range_tick_end =
+        range.has_precise_host_ticks ? static_cast<long double>(range.host_tick_end)
+                                     : static_cast<long double>(range.timeline_tick_end.value);
+    timebase::TempoTickCursor position_cursor(tempo_map);
+    timebase::TempoTickCursor clip_start_cursor(tempo_map);
+    auto first_clip = clips.begin();
+    auto document_tick = range_tick_start;
+    auto document_position = position_cursor.advance_fractional(document_tick);
+    for (std::uint32_t output_frame = 0; output_frame < range.frame_count; ++output_frame) {
+        const auto next_document_tick =
+            range_tick_start +
+            (range_tick_end - range_tick_start) *
+                (static_cast<long double>(output_frame + 1u) /
+                 static_cast<long double>(range.frame_count));
+        const auto next_document_position =
+            position_cursor.advance_fractional(next_document_tick);
+        while (first_clip != clips.end()) {
+            const auto ended =
+                first_clip->time_domain == AudioClipRendererProgram::TimeDomain::Musical
+                    ? static_cast<long double>(first_clip->musical_tick_end.value) <= document_tick
+                    : static_cast<long double>(first_clip->timeline_end()) <= document_position;
+            if (!ended)
+                break;
+            ++first_clip;
+        }
+        auto clip = first_clip;
+        for (; clip != clips.end(); ++clip) {
+            if (clip->time_domain != AudioClipRendererProgram::TimeDomain::Musical)
+                continue;
+            const auto clip_tick_start = static_cast<long double>(clip->musical_tick_start.value);
+            const auto clip_tick_end = static_cast<long double>(clip->musical_tick_end.value);
+            if (document_tick < clip_tick_start)
+                break;
+            if (!(document_tick < clip_tick_end))
+                continue;
+            const auto clip_start_position =
+                clip_start_cursor.advance_fractional(clip_tick_start);
+            const auto relative = document_position - clip_start_position;
+            const auto musical_phase_mapping =
+                clip->source_time_mapping ==
+                AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample;
+            if (relative < 0.0L ||
+                (!musical_phase_mapping &&
+                 relative >= static_cast<long double>(clip->renderable_timeline_frames)))
+                continue;
+            const auto read_point =
+                source_read_point(*clip, document_position, next_document_position, document_tick,
+                                  next_document_tick, clip_start_position);
+            if (!supported_source_step(read_point.filter_step))
+                return false;
+        }
+        document_tick = next_document_tick;
+        document_position = next_document_position;
+    }
+    return true;
+}
+
+bool preflight_source_steps(const AudioTrackRendererProgram& track,
+                            const TransportSnapshot& transport,
+                            const timebase::CompiledTempoMap& tempo_map) noexcept {
+    for (std::uint8_t index = 0; index < transport.range_count; ++index) {
+        const auto& range = transport.ranges[index];
+        if (range.host_beat_mapping &&
+            !preflight_host_source_steps(track, range, tempo_map))
+            return false;
+    }
+    return true;
+}
+
 void render_track(const AudioTrackRendererProgram& track, const TransportRange& range,
                   const timebase::CompiledTempoMap& tempo_map, TrackMixerRun& mixer,
                   audio::BufferView<float> output, bool absolute_only = false,
@@ -160,28 +281,40 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
         const auto output_start = static_cast<std::size_t>(range.sample_offset) +
                                   static_cast<std::size_t>(overlap_start - range_start);
         const auto count = static_cast<std::size_t>(overlap_end - overlap_start);
-        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
-            auto destination = output.channel(channel);
-            // Each channel replays the same span, so the forward cursors start
-            // over rather than stepping backwards.
-            if (!mixer.transparent)
-                mixer.restart(tempo_map);
-            for (std::size_t frame = 0; frame < count; ++frame) {
-                const auto relative = relative_start + frame;
-                const auto source_position =
-                    static_cast<long double>(clip->source_frame_offset) +
-                    static_cast<long double>(relative) *
-                        static_cast<long double>(clip->source_frames_per_timeline_frame);
-                const auto source_offset = std::min(static_cast<std::uint64_t>(source_position),
-                                                    clip->source_frame_count - 1u);
-                const auto source_frame = clip->source_start + source_offset;
-                const auto source_last = clip->source_start + clip->source_frame_count - 1u;
-                const auto next_frame = std::min(source_frame + 1u, source_last);
-                const auto fraction =
-                    source_offset + 1u < clip->source_frame_count
-                        ? static_cast<float>(source_position -
-                                             static_cast<long double>(source_offset))
-                        : 0.0f;
+        const auto musical_phase_mapping =
+            clip->source_time_mapping ==
+            AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample;
+        if (!mixer.transparent)
+            mixer.restart(tempo_map);
+        timebase::TempoCursor phase_cursor(tempo_map);
+        for (std::size_t frame = 0; frame < count; ++frame) {
+            const auto relative = relative_start + frame;
+            SourceReadPoint read_point;
+            long double source_position =
+                static_cast<long double>(clip->source_frame_offset) +
+                static_cast<long double>(relative) *
+                    static_cast<long double>(clip->source_frames_per_timeline_frame);
+            if (musical_phase_mapping) {
+                const auto document_position = static_cast<long double>(
+                    overlap_start + static_cast<std::int64_t>(frame));
+                const auto document_tick = phase_cursor.advance_fractional(document_position);
+                const auto next_document_tick =
+                    phase_cursor.advance_fractional(document_position + 1.0L);
+                read_point = source_read_point(
+                    *clip, document_position, document_position + 1.0L, document_tick,
+                    next_document_tick, static_cast<long double>(clip->timeline_start));
+                source_position = read_point.position;
+            }
+            const auto source_offset = std::min(static_cast<std::uint64_t>(source_position),
+                                                clip->source_frame_count - 1u);
+            const auto source_frame = clip->source_start + source_offset;
+            const auto source_last = clip->source_start + clip->source_frame_count - 1u;
+            const auto next_frame = std::min(source_frame + 1u, source_last);
+            const auto fraction = source_offset + 1u < clip->source_frame_count
+                                      ? static_cast<float>(
+                                            source_position - static_cast<long double>(source_offset))
+                                      : 0.0f;
+            for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
                 float mixer_factor = 1.0f;
                 if (!mixer.transparent) {
                     if (host_mixer_mapping) {
@@ -207,9 +340,12 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
                                          channel, output.num_channels());
                     }
                 }
-                destination[output_start + frame] +=
+                output.channel(channel)[output_start + frame] +=
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
-                                  fraction, static_cast<double>(source_position)) *
+                                  fraction, static_cast<double>(source_position),
+                                  musical_phase_mapping
+                                      ? std::optional<double>{read_point.filter_step}
+                                      : std::nullopt) *
                     envelope(*clip, relative) * mixer_factor;
             }
         }
@@ -260,17 +396,23 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                 continue;
             const auto clip_start_position = tempo_map.fractional_ticks_to_samples(clip_tick_start);
             const auto relative = document_position - clip_start_position;
+            const auto musical_phase_mapping =
+                clip->source_time_mapping ==
+                AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample;
             if (relative < 0.0L ||
-                relative >= static_cast<long double>(clip->renderable_timeline_frames))
+                (!musical_phase_mapping &&
+                 relative >= static_cast<long double>(clip->renderable_timeline_frames)))
                 continue;
-            const auto source_position =
-                static_cast<long double>(clip->source_frame_offset) +
-                relative * static_cast<long double>(clip->source_frames_per_timeline_frame);
             const auto next_document_position =
                 host_mapped_document_sample_at_output_offset(range, tempo_map, output_frame + 1u);
-            const auto source_frames_per_output_frame = static_cast<double>(
-                std::abs(next_document_position - document_position) *
-                static_cast<long double>(clip->source_frames_per_timeline_frame));
+            const auto next_document_tick =
+                range_tick_start +
+                (range_tick_end - range_tick_start) * (static_cast<long double>(output_frame + 1u) /
+                                                       static_cast<long double>(range.frame_count));
+            const auto read_point =
+                source_read_point(*clip, document_position, next_document_position, document_tick,
+                                  next_document_tick, clip_start_position);
+            const auto source_position = read_point.position;
             const auto source_offset =
                 std::min(static_cast<std::uint64_t>(std::floor(source_position)),
                          clip->source_frame_count - 1u);
@@ -291,7 +433,7 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                 output.channel(channel)[destination_frame] +=
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
                                   fraction, static_cast<double>(source_position),
-                                  source_frames_per_output_frame) *
+                                  read_point.filter_step) *
                     envelope(*clip, relative) * mixer_factor;
             }
         }
@@ -389,15 +531,15 @@ AudioRenderStatus ArrangementAudioRenderer::process(const PlaybackProgram& progr
     if (output.num_channels() > limits.max_channels ||
         output.num_samples() > limits.max_block_frames)
         return AudioRenderStatus::CapacityExceeded;
-    output.clear();
-    if (!valid_transport(transport, output.num_samples(), program.tempo_map(), limits))
+    if (!valid_transport(transport, output.num_samples(), program.tempo_map(), limits)) {
+        output.clear();
         return AudioRenderStatus::InvalidTransport;
-    if (!transport.is_playing)
-        return AudioRenderStatus::Silent;
+    }
 
-    bool rendered = false;
-    if (program.tracks().size() > limits.max_tracks)
+    if (program.tracks().size() > limits.max_tracks) {
+        output.clear();
         return AudioRenderStatus::CapacityExceeded;
+    }
 
     std::uint64_t total_clips = 0;
     for (const auto& track : program.tracks()) {
@@ -405,11 +547,27 @@ AudioRenderStatus ArrangementAudioRenderer::process(const PlaybackProgram& progr
             continue;
         const auto clip_count = static_cast<std::uint64_t>(track->audio_program()->clips().size());
         if (const auto invalid = invalid_audio_program(*track->audio_program(), track->id(),
-                                                       limits.max_clips - total_clips))
+                                                       limits.max_clips - total_clips)) {
+            output.clear();
             return *invalid;
+        }
         total_clips += clip_count;
     }
 
+    if (!transport.is_playing) {
+        output.clear();
+        return AudioRenderStatus::Silent;
+    }
+    for (const auto& track : program.tracks()) {
+        const auto provider = track->provider();
+        if (provider.selected == ProviderKind::Arrangement &&
+            provider.available(ProviderKind::Arrangement) && track->audio_program() &&
+            !preflight_source_steps(*track->audio_program(), transport, program.tempo_map()))
+            return AudioRenderStatus::InvalidTransport;
+    }
+    output.clear();
+
+    bool rendered = false;
     for (const auto& track : program.tracks()) {
         const auto provider = track->provider();
         if (provider.selected != ProviderKind::Arrangement ||
@@ -463,6 +621,9 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
         output.clear();
         return AudioRenderStatus::InvalidTransport;
     }
+    if (transport.is_playing && arrangement_selected && audio_program != nullptr &&
+        !preflight_source_steps(*audio_program, transport, program.tempo_map()))
+        return AudioRenderStatus::InvalidTransport;
     output.clear();
 
     AudioRenderStatus status = AudioRenderStatus::Silent;

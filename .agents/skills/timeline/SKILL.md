@@ -85,8 +85,11 @@ artifact is needed. Never modify canonical project JSON text directly.
   musical `MediaRef`; absolute clips and every non-media content alternative
   fail with `InvalidTimeConform`. Clip schema v2 persists the required lowercase
   spelling; v1 loads as `None`, and v2→v1 refuses either non-default value.
-  Playback does not consume the intent yet, so do not claim an audible behavior
-  change from the model/persistence stage.
+  Playback consumes `Resample` as pitch-coupled varispeed by mapping source
+  phase across the authored musical tick interval, including tempo ramps and
+  precise host beat mapping. `None` retains native-rate playback. `Stretch`
+  remains intent-only and currently uses the same native-rate playback path as
+  `None`; do not claim tempo-preserving stretch is implemented.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another

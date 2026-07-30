@@ -161,10 +161,8 @@ SamplePosition CompiledTempoMap::ticks_to_samples(TickPosition tick) const noexc
 }
 
 long double CompiledTempoMap::fractional_ticks_to_samples(long double tick) const noexcept {
-    constexpr auto minimum =
-        static_cast<long double>(std::numeric_limits<std::int64_t>::min());
-    constexpr auto maximum =
-        static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
     if (!std::isfinite(tick))
         return tick < 0.0L ? minimum : maximum;
     if (tick <= minimum)
@@ -175,7 +173,14 @@ long double CompiledTempoMap::fractional_ticks_to_samples(long double tick) cons
             ticks_to_samples({std::numeric_limits<std::int64_t>::max()}).value);
 
     const TickPosition containing_tick{static_cast<std::int64_t>(std::floor(tick))};
-    const auto& segment = segments_[segment_for_tick(containing_tick)];
+    return fractional_ticks_to_samples_in_segment(tick, segment_for_tick(containing_tick));
+}
+
+long double CompiledTempoMap::fractional_ticks_to_samples_in_segment(
+    long double tick, std::size_t segment_index) const noexcept {
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    const auto& segment = segments_[segment_index];
     const auto delta_ticks = tick - static_cast<long double>(segment.start_tick.value);
     const auto scale =
         sample_rate_.as_long_double() * 60.0L /
@@ -199,6 +204,31 @@ long double CompiledTempoMap::fractional_ticks_to_samples(long double tick) cons
     }
     return std::clamp(static_cast<long double>(segment.start_sample.value) + offset,
                       minimum, maximum);
+}
+
+long double CompiledTempoMap::fractional_samples_to_ticks(long double sample) const noexcept {
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (!std::isfinite(sample))
+        return sample < 0.0L ? minimum : maximum;
+    if (sample <= minimum)
+        return minimum;
+    if (sample >= maximum)
+        return maximum;
+
+    const SamplePosition containing_sample{static_cast<std::int64_t>(std::floor(sample))};
+    return fractional_samples_to_ticks_in_segment(sample, segment_for_sample(containing_sample));
+}
+
+long double CompiledTempoMap::fractional_samples_to_ticks_in_segment(
+    long double sample, std::size_t segment_index) const noexcept {
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    const auto& segment = segments_[segment_index];
+    const auto delta_samples = sample - static_cast<long double>(segment.start_sample.value);
+    const auto tick = static_cast<long double>(segment.start_tick.value) +
+                      ticks_from_segment_start(segment, delta_samples);
+    return std::clamp(tick, minimum, maximum);
 }
 
 SamplePosition
@@ -229,6 +259,26 @@ double CompiledTempoMap::tempo_at_tick(TickPosition tick) const noexcept {
     return static_cast<double>(static_cast<long double>(segment.start_bpm) +
                                fraction * (static_cast<long double>(segment.end_bpm) -
                                            static_cast<long double>(segment.start_bpm)));
+}
+
+double CompiledTempoMap::maximum_tempo_between(TickPosition start,
+                                               TickPosition end) const noexcept {
+    if (end < start)
+        std::swap(start, end);
+    auto maximum = tempo_at_tick(start);
+    auto segment_index = segment_for_tick(start);
+    while (segment_index < segments_.size()) {
+        const auto& segment = segments_[segment_index];
+        if (segment.start_tick > end)
+            break;
+        const auto clipped_start = std::max(start, segment.start_tick);
+        const auto clipped_end = std::min(end, segment.end_tick);
+        maximum = std::max(maximum, tempo_at_tick(clipped_start));
+        maximum = std::max(maximum, tempo_at_tick(clipped_end));
+        if (segment.end_tick >= end || ++segment_index == segments_.size())
+            break;
+    }
+    return maximum;
 }
 
 TickPosition CompiledTempoMap::samples_to_ticks(SamplePosition sample) const noexcept {
@@ -341,6 +391,30 @@ SampleToTickResult TempoCursor::advance(SamplePosition sample) noexcept {
     return map_->resolve_sample_in_segment(sample, segment_index_);
 }
 
+long double TempoCursor::advance_fractional(long double sample) noexcept {
+    if (map_ == nullptr)
+        return 0.0L;
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (!std::isfinite(sample))
+        return sample < 0.0L ? minimum : maximum;
+    if (sample <= minimum)
+        return minimum;
+    if (sample >= maximum)
+        return maximum;
+    const SamplePosition containing_sample{static_cast<std::int64_t>(std::floor(sample))};
+    if (!positioned_ || containing_sample < sample_) {
+        segment_index_ = map_->segment_for_sample(containing_sample);
+    } else {
+        while (segment_index_ + 1 < map_->segments_.size() &&
+               containing_sample >= map_->segments_[segment_index_ + 1].start_sample)
+            ++segment_index_;
+    }
+    sample_ = containing_sample;
+    positioned_ = true;
+    return map_->fractional_samples_to_ticks_in_segment(sample, segment_index_);
+}
+
 double TempoCursor::tempo_at_tick(TickPosition tick) noexcept {
     if (map_ == nullptr)
         return 120.0;
@@ -359,6 +433,30 @@ double TempoCursor::tempo_at_tick(TickPosition tick) noexcept {
     return static_cast<double>(static_cast<long double>(segment.start_bpm) +
                                fraction * (static_cast<long double>(segment.end_bpm) -
                                            static_cast<long double>(segment.start_bpm)));
+}
+
+long double TempoTickCursor::advance_fractional(long double tick) noexcept {
+    if (map_ == nullptr)
+        return 0.0L;
+    constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (!std::isfinite(tick))
+        return tick < 0.0L ? minimum : maximum;
+    if (tick <= minimum)
+        return map_->fractional_ticks_to_samples(minimum);
+    if (tick >= maximum)
+        return map_->fractional_ticks_to_samples(maximum);
+    if (!positioned_ || tick < tick_) {
+        const TickPosition containing_tick{static_cast<std::int64_t>(std::floor(tick))};
+        segment_index_ = map_->segment_for_tick(containing_tick);
+    } else {
+        while (segment_index_ + 1 < map_->segments_.size() &&
+               tick >= static_cast<long double>(map_->segments_[segment_index_ + 1].start_tick.value))
+            ++segment_index_;
+    }
+    tick_ = tick;
+    positioned_ = true;
+    return map_->fractional_ticks_to_samples_in_segment(tick, segment_index_);
 }
 
 } // namespace pulp::timebase

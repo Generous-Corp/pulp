@@ -72,6 +72,7 @@ class DecodedAudioAssetPool {
 struct AudioClipRendererProgram {
     enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
     enum class TimeDomain : std::uint8_t { Musical, Absolute };
+    enum class SourceTimeMapping : std::uint8_t { NativeRate, MusicalPhaseResample };
 
     timeline::ItemId id;
     timeline::ItemId asset_id;
@@ -92,6 +93,7 @@ struct AudioClipRendererProgram {
     TimeDomain time_domain = TimeDomain::Absolute;
     timebase::TickPosition musical_tick_start{};
     timebase::TickPosition musical_tick_end{};
+    SourceTimeMapping source_time_mapping = SourceTimeMapping::NativeRate;
 
     std::int64_t timeline_end() const noexcept;
     bool uses_sample_rate_conversion() const noexcept;
