@@ -1594,9 +1594,20 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
     const auto loaded = forge_modular::load_patch(patch);
     INFO(loaded.error);
     REQUIRE(loaded.ok());
-    // What the generator reported: 8 modules, 10 cables.
-    CHECK(loaded.modules.size() == 8);
-    CHECK(loaded.connections.size() == 10);
+    // Counted from the file itself rather than hardcoded. A fixed number
+    // asserts which patch happened to be generated last, not that the loader
+    // read the one in front of it.
+    const auto raw = read_all(patch);
+    const std::string text(raw.begin(), raw.end());
+    auto occurrences = [&](const char* needle) {
+        std::size_t n = 0, at = 0;
+        while ((at = text.find(needle, at)) != std::string::npos) { ++n; at += 1; }
+        return n;
+    };
+    CHECK(loaded.modules.size() == occurrences("\"plugin\""));
+    CHECK(loaded.connections.size() == occurrences("\"outputModuleId\""));
+    CHECK(loaded.modules.size() >= 3);        // a real patch, not a stub
+    CHECK(loaded.connections.size() >= 3);
 
     // Roles come from the colour the file carries, which is the colour Rack
     // shows -- not re-derived here, where a guess could disagree with what the
@@ -1629,7 +1640,7 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
     CHECK(chrome->stage_accessory() != nullptr);
     CHECK(chrome->stage_accessory()->visible());
     REQUIRE(shell.explanation() != nullptr);
-    CHECK(shell.explanation()->line_count() == 10);
+    CHECK(shell.explanation()->line_count() == loaded.connections.size());
     REQUIRE(chrome->build_accessory() != nullptr);
     CHECK(chrome->build_accessory()->child_count() == 3);
 
@@ -1646,7 +1657,7 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
 
     // An unreadable file must not leave an empty rack on screen.
     CHECK_FALSE(shell.open_patch_file("/tmp/definitely-not-a-patch.vcv").empty());
-    CHECK(shell.explanation()->line_count() == 10);   // the good patch survives
+    CHECK(shell.explanation()->line_count() == loaded.connections.size());   // the good patch survives
 
     const auto shot = std::filesystem::temp_directory_path() /
                       "modular-real-patch.png";
