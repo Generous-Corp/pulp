@@ -5,6 +5,15 @@ from the first commit on `main` to 14 downloadable assets on the Releases page
 (including the Intel `darwin-x64` pair, cross-compiled on Apple Silicon — see
 the assets section).
 
+Starting at the SDK provenance floor in
+`tools/scripts/release_product_matrix.json`, every SDK archive carries an
+`official-release` marker binding its version tag to the exact clean source
+commit and archive platform, and proving inspector/audio-probe features were
+disabled. The release finalizer verifies that marker against the resolved tag
+SHA before publication. Marker-era manual runs cannot substitute `source_ref`
+or overlay current `main`; repair the source and create a new tag instead.
+Historical pre-marker backfills retain their compatibility path.
+
 If you're hunting a specific layer:
 
 - **Tag creation logic** → `auto-release.yml`, plus [versioning.md](versioning.md) for the version-bump gates.
@@ -65,8 +74,9 @@ PR merge to main
 │                                                          │
 │ For each platform: configure → build → strip → fix       │
 │ rpaths → package `pulp-${PLATFORM}.tar.gz` → repackage   │
-│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → verify the    │
-│ exact product/format matrix → attest →                   │
+│ the SDK as `pulp-sdk-${PLATFORM}.tar.gz` → stamp and     │
+│ verify positive SDK provenance → verify the exact        │
+│ product/format matrix → attest →                         │
 │ upload as an Actions artifact. The `smoke-cli` matrix    │
 │ then extracts each tarball on a fresh runner and runs    │
 │ `pulp help`, `pulp-cpp help`, `pulp-mcp --version`, and  │

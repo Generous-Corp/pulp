@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -40,6 +41,7 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
+    sdk_provenance_floor: str
     platforms: tuple[str, ...]
     pulp_library_stems: frozenset[str]
     platform_library_stems: dict[str, frozenset[str]]
@@ -52,6 +54,12 @@ class ProductMatrix:
             doc = json.loads(path.read_text(encoding="utf-8"))
             matrix = cls(
                 contract_floor=str(doc["contract_floor"]),
+                # Historical product matrices predate positive SDK provenance.
+                # An absent key therefore means "no release covered by this
+                # historical matrix requires the marker", not malformed data.
+                sdk_provenance_floor=str(
+                    doc.get("sdk_provenance_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
                 pulp_library_stems=frozenset(doc["pulp_library_stems"]),
                 platform_library_stems={
@@ -66,6 +74,7 @@ class ProductMatrix:
         if not matrix.platforms or not matrix.pulp_library_stems:
             raise ContentError(f"invalid release product matrix {path}: empty contract")
         version_tuple(matrix.contract_floor)
+        version_tuple(matrix.sdk_provenance_floor)
         return matrix
 
 
@@ -213,7 +222,11 @@ def expected_pulp_libraries(platform: str, matrix: ProductMatrix) -> frozenset[s
     return frozenset(expected)
 
 
-def required_sdk_members(platform: str, matrix: ProductMatrix = DEFAULT_MATRIX) -> frozenset[str]:
+def required_sdk_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
     required = set(matrix.common_sdk_members)
     required.update(sdk_binary_members(platform))
     required.update(
@@ -236,6 +249,11 @@ def required_sdk_members(platform: str, matrix: ProductMatrix = DEFAULT_MATRIX) 
     )
     if platform.startswith("darwin-"):
         required.update(matrix.darwin_sdk_members)
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
+    ):
+        required.add("pulp-sdk/sdk-provenance.json")
     return frozenset(required)
 
 
@@ -282,11 +300,15 @@ def verify_cli_archive(path: Path, platform: str) -> None:
 
 
 def verify_sdk_archive(
-    path: Path, platform: str, version: str, matrix: ProductMatrix = DEFAULT_MATRIX
+    path: Path,
+    platform: str,
+    version: str,
+    source_sha: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
 ) -> None:
     with Archive(path) as archive:
         names = set(archive.members)
-        required = required_sdk_members(platform, matrix)
+        required = required_sdk_members(platform, matrix, version)
         missing = sorted(required - names)
         if missing:
             raise ContentError(f"{path.name}: missing SDK product(s): {missing}")
@@ -309,6 +331,53 @@ def verify_sdk_archive(
             raise ContentError(
                 f"{path.name}: version.txt is {archived_version!r}, expected {version!r}"
             )
+        if version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor):
+            provenance_member = "pulp-sdk/sdk-provenance.json"
+            if (
+                archive.preserves_modes
+                and archive.members[provenance_member].mode & 0o004 == 0
+            ):
+                raise ContentError(
+                    f"{path.name}: {provenance_member} is not world-readable"
+                )
+            try:
+                provenance = json.loads(
+                    archive.read(provenance_member).decode("utf-8")
+                )
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ContentError(
+                    f"{path.name}: sdk-provenance.json is invalid: {exc}"
+                ) from exc
+            expected = {
+                "schema": "pulp.sdk-provenance.v1",
+                "kind": "release",
+                "profile": "official-release",
+                "distribution_eligible": True,
+                "sdk_version": version,
+                "source_git_ref": f"v{version}",
+                "source_git_sha": source_sha,
+                "source_git_dirty": False,
+                "platform": platform,
+                "build_type": "Release",
+                "features": {"audio_probes": False, "inspector": False},
+            }
+            mismatches = {
+                key: (provenance.get(key), value)
+                for key, value in expected.items()
+                if provenance.get(key) != value
+            }
+            marker_source_sha = provenance.get("source_git_sha")
+            if not isinstance(marker_source_sha, str) or not re.fullmatch(
+                r"[0-9a-f]{40}", marker_source_sha
+            ):
+                mismatches["source_git_sha"] = (
+                    marker_source_sha,
+                    "40 lowercase hex characters",
+                )
+            if mismatches:
+                raise ContentError(
+                    f"{path.name}: unsafe SDK provenance contract: {mismatches}"
+                )
         if not platform.startswith("windows-"):
             require_executable(archive, sdk_binary_members(platform))
 
@@ -361,6 +430,7 @@ def verify_platform(
     asset_dir: Path,
     platform: str,
     version: str,
+    source_sha: str,
     *,
     native_signatures: bool,
     matrix: ProductMatrix = DEFAULT_MATRIX,
@@ -373,7 +443,7 @@ def verify_platform(
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
     verify_cli_archive(cli, platform)
-    verify_sdk_archive(sdk, platform, version, matrix)
+    verify_sdk_archive(sdk, platform, version, source_sha, matrix)
     if native_signatures:
         verify_native_macos_signatures(asset_dir, platform)
 
@@ -385,6 +455,9 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--platform", choices=PLATFORMS)
     group.add_argument("--all-platforms", action="store_true")
     parser.add_argument("--version", required=True, help="Release version without the leading v")
+    parser.add_argument(
+        "--source-sha", required=True, help="Exact 40-character release-tag commit"
+    )
     parser.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX_PATH)
     parser.add_argument("--native-signatures", action="store_true")
     return parser
@@ -407,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.asset_dir,
                 platform,
                 args.version,
+                args.source_sha,
                 native_signatures=args.native_signatures,
                 matrix=matrix,
             )

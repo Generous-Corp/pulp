@@ -1211,6 +1211,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DPULP_BUILD_TESTS=OFF `
             -DPULP_ENABLE_AUDIO_PROBES=OFF `
+            -DPULP_ENABLE_INSPECTOR=OFF `
             -DPULP_BUILD_WEBVIEW=ON
         shell: pwsh
 
