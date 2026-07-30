@@ -97,9 +97,17 @@ jobs:
         # heals a single timing flake.
         run: |
           set -euo pipefail
-          exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
+          # `process-deadline-selftest` asserts that a deadline is ENFORCED within
+          # a wall-clock window. Rosetta runs x86_64 at roughly a third of native
+          # speed, so the assertion measures the emulator, not the code.
+          exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items|process-deadline-selftest'
+          # Same label set build.yml excludes on PR runs. `performance`, `bench`,
+          # and `quality-lab` assert CPU budgets against wall-clock; under
+          # emulation they report the translation overhead as a regression. This
+          # lane's signal is "x86_64 compiles and its logic is correct", never
+          # "x86_64 is fast" — that is the nightly's native-Intel job.
           ctest --test-dir "${BUILD_DIR}" --output-on-failure \
             --repeat until-pass:2 \
-            -C Release -LE "validation|slow" \
-            -j"$(sysctl -n hw.ncpu)" --timeout 120 \
+            -C Release -LE "validation|slow|performance|bench|quality-lab" \
+            -j"$(sysctl -n hw.ncpu)" --timeout 300 \
             --exclude-regex "$exclude"
