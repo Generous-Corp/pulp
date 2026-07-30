@@ -826,6 +826,42 @@ TEST_CASE("session restart serializes publication with heartbeat refresh",
     }
 }
 
+TEST_CASE("discovery lifetime remains longer than a configured heartbeat",
+          "[inspect][client][heartbeat][discovery]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-long-heartbeat", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    InspectorServer server;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.heartbeat_interval = std::chrono::seconds(40);
+    const auto started_at = std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    REQUIRE(server.start_authenticated(std::move(config)));
+
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    // A 40-second heartbeat would outlive the publisher's historical
+    // 30-second default. The server derives a three-interval TTL instead.
+    CHECK(records.front().expires_at_unix_ms - started_at >= 119'000);
+}
+
 TEST_CASE("server stop waits for an active request callback",
           "[inspect][client][teardown][concurrency]") {
     TemporaryDirectory temporary;

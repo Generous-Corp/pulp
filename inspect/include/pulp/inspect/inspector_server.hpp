@@ -26,6 +26,7 @@ struct InspectorServerConfig {
         std::chrono::seconds(3);
     std::chrono::milliseconds frame_read_timeout =
         std::chrono::seconds(3);
+    // Discovery TTL is derived as at least three times this interval.
     std::chrono::milliseconds heartbeat_interval =
         std::chrono::seconds(10);
     std::size_t max_message_bytes = 1024u * 1024u;
