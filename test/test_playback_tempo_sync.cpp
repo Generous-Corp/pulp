@@ -322,6 +322,42 @@ TEST_CASE("master transport consumes a backend-independent tempo sync mapping",
     REQUIRE(source.capture_count == captures_before);
 }
 
+TEST_CASE("tempo sync preserves coherent playback epochs", "[playback][tempo-sync][epoch]") {
+    const auto map = constant_map();
+    FakeTempoSyncSource source;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(source)) == TransportError::None);
+
+    TransportSnapshot snapshot;
+    REQUIRE(transport.begin_block(128, source.time(1'000), snapshot) == TransportError::None);
+    const auto started_epoch = snapshot.playback_epoch;
+    REQUIRE(snapshot.ranges[0].playback_epoch == started_epoch);
+
+    REQUIRE(transport.begin_block(128, source.time(2'000), snapshot) == TransportError::None);
+    REQUIRE(snapshot.playback_epoch == started_epoch);
+
+    REQUIRE(transport.set_playing(false) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(3'000), snapshot) == TransportError::None);
+    REQUIRE(snapshot.playback_epoch == started_epoch);
+
+    REQUIRE(transport.set_playing(true) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(4'000), snapshot) == TransportError::None);
+    REQUIRE(snapshot.playback_epoch == started_epoch + 1);
+
+    const auto restarted_epoch = snapshot.playback_epoch;
+    REQUIRE(transport.seek({8 * kTicksPerQuarter}) == TransportError::None);
+    REQUIRE(transport.begin_block(128, source.time(5'000), snapshot) == TransportError::None);
+    REQUIRE(snapshot.playback_epoch == restarted_epoch + 1);
+
+    const auto seek_epoch = snapshot.playback_epoch;
+    source.next_beat += 0.25;
+    REQUIRE(transport.begin_block(128, source.time(6'000), snapshot) == TransportError::None);
+    REQUIRE(snapshot.reset_requested);
+    REQUIRE(snapshot.playback_epoch == seek_epoch + 1);
+    REQUIRE(snapshot.ranges[0].playback_epoch == snapshot.playback_epoch);
+    REQUIRE(valid_transport_ranges(snapshot));
+}
+
 TEST_CASE("master transport sends only explicit tempo sync commands", "[playback][tempo-sync]") {
     const auto map = constant_map();
     FakeTempoSyncSource source;
@@ -404,6 +440,8 @@ TEST_CASE("tempo sync projection preserves the two-range loop contract", "[playb
     REQUIRE(snapshot.ranges[0].timeline_tick_end == TickPosition{4 * kTicksPerQuarter});
     REQUIRE(snapshot.ranges[1].timeline_tick_start == TickPosition{0});
     REQUIRE(snapshot.ranges[1].discontinuity);
+    REQUIRE(snapshot.ranges[0].playback_epoch == snapshot.playback_epoch);
+    REQUIRE(snapshot.ranges[1].playback_epoch == snapshot.playback_epoch);
     REQUIRE(snapshot.ranges[0].frame_count + snapshot.ranges[1].frame_count == 4'800);
 }
 
