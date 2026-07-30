@@ -195,7 +195,8 @@ def write_archive(
             info.size = len(data)
             default_mode = (
                 0o755
-                if "/bin/" in name or name in {"pulp", "pulp-cpp", "pulp-mcp"}
+                if "/bin/" in name
+                or name in {"pulp", "pulp-cpp", "pulp-mcp", "pulp-import-design"}
                 else 0o644
             )
             info.mode = mode_overrides.get(name, default_mode)
@@ -203,7 +204,7 @@ def write_archive(
 
 
 def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
-    cli = set(rac.cli_members(platform))
+    cli = set(rac.cli_members(platform, VERSION))
     sdk = set(rac.required_sdk_members(platform, rac.DEFAULT_MATRIX, VERSION))
     write_archive(
         root / rac.cli_asset_name(platform),
@@ -222,6 +223,35 @@ def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
 
 
 class ReleaseArtifactContentsTests(unittest.TestCase):
+    def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
+        runtime_manifest = (
+            ROOT
+            / "tools"
+            / "import-design"
+            / "browser_capture"
+            / "runtime_manifest.txt"
+        )
+        runtime_members = {
+            f"browser_capture/{line.strip()}"
+            for line in runtime_manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        unix_members = rac.cli_members("darwin-arm64", VERSION)
+        windows_members = rac.cli_members("windows-x64", VERSION)
+        self.assertTrue(runtime_members)
+        self.assertLessEqual(runtime_members, unix_members)
+        self.assertLessEqual(runtime_members, windows_members)
+        self.assertIn("pulp-import-design", unix_members)
+        self.assertIn("pulp-import-design.exe", windows_members)
+
+    def test_cli_contract_preserves_pre_import_design_releases(self) -> None:
+        members = rac.cli_members("linux-x64", "0.763.0")
+        self.assertEqual(
+            members,
+            frozenset({"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.so"}),
+        )
+
     def test_interface_target_parser_accepts_cmake_case_and_whitespace(self) -> None:
         self.assertEqual(
             interface_library_targets_from_text(
@@ -370,7 +400,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                 rac.subprocess, "run", return_value=failed
             ):
                 with self.assertRaisesRegex(rac.ContentError, "invalid signature"):
-                    rac.verify_native_macos_signatures(root, "darwin-arm64")
+                    rac.verify_native_macos_signatures(
+                        root, "darwin-arm64", VERSION
+                    )
 
     def test_negative_control_wrong_version_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:

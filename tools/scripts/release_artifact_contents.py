@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
+IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
 
 
 class ContentError(RuntimeError):
@@ -186,11 +187,40 @@ def sdk_asset_name(platform: str) -> str:
     return f"pulp-sdk-{platform}.tar.gz"
 
 
-def cli_members(platform: str) -> frozenset[str]:
-    if platform.startswith("windows-"):
-        return frozenset({"pulp.exe", "pulp-cpp.exe", "pulp-mcp.exe", "wgpu_native.dll"})
+def cli_binary_members(platform: str, version: str) -> frozenset[str]:
+    is_windows = platform.startswith("windows-")
+    suffix = ".exe" if is_windows else ""
+    members = {
+        f"pulp{suffix}",
+        f"pulp-cpp{suffix}",
+        f"pulp-mcp{suffix}",
+    }
+    if version_tuple(version) >= version_tuple(IMPORT_DESIGN_CLI_FLOOR):
+        members.add(f"pulp-import-design{suffix}")
+    return frozenset(members)
+
+
+def cli_members(platform: str, version: str) -> frozenset[str]:
+    is_windows = platform.startswith("windows-")
+    members = set(cli_binary_members(platform, version))
+    if version_tuple(version) >= version_tuple(IMPORT_DESIGN_CLI_FLOOR):
+        runtime_manifest = (
+            Path(__file__).resolve().parents[1]
+            / "import-design"
+            / "browser_capture"
+            / "runtime_manifest.txt"
+        )
+        members.update(
+            f"browser_capture/{line.strip()}"
+            for line in runtime_manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    if is_windows:
+        members.add("wgpu_native.dll")
+        return frozenset(members)
     runtime = "libwgpu_native.dylib" if platform.startswith("darwin-") else "libwgpu_native.so"
-    return frozenset({"pulp", "pulp-cpp", "pulp-mcp", runtime})
+    members.add(runtime)
+    return frozenset(members)
 
 
 def sdk_binary_members(platform: str) -> frozenset[str]:
@@ -284,9 +314,9 @@ def require_executable(archive: Archive, names: frozenset[str]) -> None:
         raise ContentError(f"{archive.path.name}: non-executable shipped binary(s): {bad}")
 
 
-def verify_cli_archive(path: Path, platform: str) -> None:
+def verify_cli_archive(path: Path, platform: str, version: str) -> None:
     with Archive(path) as archive:
-        expected = cli_members(platform)
+        expected = cli_members(platform, version)
         actual = set(archive.members)
         missing = sorted(expected - actual)
         unexpected = sorted(actual - expected)
@@ -296,7 +326,7 @@ def verify_cli_archive(path: Path, platform: str) -> None:
                 f"unexpected={unexpected}"
             )
         if not platform.startswith("windows-"):
-            require_executable(archive, expected - {next(n for n in expected if n.startswith("libwgpu_"))})
+            require_executable(archive, cli_binary_members(platform, version))
 
 
 def verify_sdk_archive(
@@ -393,14 +423,16 @@ def verify_sdk_archive(
                 raise ContentError(f"{path.name}: stale Apple-only SDK products: {apple_only[:10]}")
 
 
-def verify_native_macos_signatures(asset_dir: Path, platform: str) -> None:
+def verify_native_macos_signatures(
+    asset_dir: Path, platform: str, version: str
+) -> None:
     if not platform.startswith("darwin-"):
         return
     if sys.platform != "darwin":
         raise ContentError("--native-signatures for Darwin archives requires a macOS runner")
 
     targets = {
-        cli_asset_name(platform): cli_members(platform),
+        cli_asset_name(platform): cli_binary_members(platform, version),
         sdk_asset_name(platform): sdk_binary_members(platform)
         | frozenset({"pulp-sdk/lib/libwgpu_native.dylib"}),
     }
@@ -442,10 +474,10 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform)
+    verify_cli_archive(cli, platform, version)
     verify_sdk_archive(sdk, platform, version, source_sha, matrix)
     if native_signatures:
-        verify_native_macos_signatures(asset_dir, platform)
+        verify_native_macos_signatures(asset_dir, platform, version)
 
 
 def build_parser() -> argparse.ArgumentParser:
