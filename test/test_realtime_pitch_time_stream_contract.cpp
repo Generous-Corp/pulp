@@ -255,39 +255,47 @@ TEST_CASE("RealtimePitchTimeProcessor rejects target-byte capacity atomically",
 
 TEST_CASE("RealtimePitchTimeProcessor partial EOF read preserves the real prefix",
           "[signal][pitch-time][streaming]") {
-    RealtimePitchTimeProcessor exact;
-    RealtimePitchTimeProcessor partial;
-    REQUIRE(exact.prepare(kSampleRate, stream_config(256)) == PitchTimePrepareStatus::prepared);
-    REQUIRE(partial.prepare(kSampleRate, stream_config(256)) == PitchTimePrepareStatus::prepared);
+    RealtimePitchTimeProcessor processor;
+    REQUIRE(processor.prepare(kSampleRate, stream_config(256))
+            == PitchTimePrepareStatus::prepared);
 
     const auto input = sine(367.0, 0.5, 513);
-    for (std::size_t offset = 0; offset < input.size();) {
-        const int count = static_cast<int>(std::min<std::size_t>(256, input.size() - offset));
-        const float* chunk[] = {input.data() + offset};
-        REQUIRE(exact.feed(chunk, count) == PitchTimeStreamFeedStatus::accepted);
-        REQUIRE(partial.feed(chunk, count) == PitchTimeStreamFeedStatus::accepted);
-        offset += static_cast<std::size_t>(count);
-    }
+    const auto feed_input = [&input](RealtimePitchTimeProcessor& target) {
+        for (std::size_t offset = 0; offset < input.size();) {
+            const int count =
+                static_cast<int>(std::min<std::size_t>(256, input.size() - offset));
+            const float* chunk[] = {input.data() + offset};
+            REQUIRE(target.feed(chunk, count) == PitchTimeStreamFeedStatus::accepted);
+            offset += static_cast<std::size_t>(count);
+        }
+    };
 
-    advance_to_final_buffer(exact);
-    advance_to_final_buffer(partial);
-    const int available = exact.available_stretched();
+    feed_input(processor);
+    advance_to_final_buffer(processor);
+    const int available = processor.available_stretched();
     REQUIRE(available > 0);
-    REQUIRE(partial.available_stretched() == available);
 
     std::vector<float> expected(static_cast<std::size_t>(available));
     float* expected_output[] = {expected.data()};
-    REQUIRE(exact.read_stretched(expected_output, available) == available);
+    REQUIRE(processor.read_stretched(expected_output, available) == available);
+
+    // Compare two read shapes from the same prepared DSP instance. Reset is
+    // bit-exact; separate float/vDSP composite instances are not guaranteed to
+    // be, and that unrelated property must not weaken this strict read contract.
+    processor.reset();
+    feed_input(processor);
+    advance_to_final_buffer(processor);
+    REQUIRE(processor.available_stretched() == available);
 
     constexpr int excess = 7;
     std::vector<float> actual(static_cast<std::size_t>(available + excess), 123.0f);
     float* actual_output[] = {actual.data()};
-    REQUIRE(partial.read_stretched(actual_output, available + excess) == available);
+    REQUIRE(processor.read_stretched(actual_output, available + excess) == available);
     REQUIRE(std::equal(expected.begin(), expected.end(), actual.begin()));
     REQUIRE(std::all_of(actual.begin() + available, actual.end(),
                         [](float value) { return value == 0.0f; }));
-    REQUIRE(partial.available_stretched() == 0);
-    REQUIRE(partial.finalize() == PitchTimeStreamFinalizeStatus::complete);
+    REQUIRE(processor.available_stretched() == 0);
+    REQUIRE(processor.finalize() == PitchTimeStreamFinalizeStatus::complete);
 }
 
 TEST_CASE("RealtimePitchTimeProcessor finalize backpressure preserves buffered state",

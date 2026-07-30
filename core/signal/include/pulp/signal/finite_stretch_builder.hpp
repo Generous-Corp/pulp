@@ -75,6 +75,10 @@ inline FiniteStretchCounterGeometryStatus checked_finite_stretch_counter_geometr
                                      static_cast<std::uint64_t>(maximum_hop_value),
                                      signed_max, maximum_output))
         return FiniteStretchCounterGeometryStatus::output_counter_overflow;
+    // Every emitted hop is positive, so the accumulator's negative correction
+    // debt can never have a larger magnitude than this same bounded output
+    // position. One proof therefore admits both the synthesis counter and its
+    // exact signed correction debt.
     return FiniteStretchCounterGeometryStatus::representable;
 }
 

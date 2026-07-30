@@ -723,11 +723,9 @@ private:
 
         // Integer synthesis hop from the fractional accumulator, so the
         // average hop tracks stretch * analysis_hop exactly.
-        int hop = synth_hop_accumulator_.advance(
-            static_cast<double>(stretch) * static_cast<double>(analysis_hop_));
-        hop = std::clamp(hop, 1, static_cast<int>(std::ceil(
-                                     static_cast<double>(stretch) * analysis_hop_))
-                                 + 1);
+        const int hop = synth_hop_accumulator_.advance(
+            static_cast<double>(stretch) * static_cast<double>(analysis_hop_),
+            1, max_synthesis_hop_);
         // Record this frame's stretched start position for the reader's
         // input-time -> stretched-position map.
         frame_starts_[static_cast<size_t>(frames_done_ & kFrameMapMask)] = synth_accum_int_;
