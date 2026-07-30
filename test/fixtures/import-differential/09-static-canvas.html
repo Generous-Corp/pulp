@@ -1,0 +1,6 @@
+<!doctype html>
+<html><head><style>
+body{margin:0;background:#030712;color:white;font-family:Arial,sans-serif}.wrap{padding:20px}canvas{border:1px solid #374151;border-radius:6px}
+</style></head><body><div class="wrap"><h3>Waveform</h3><canvas id="scope" width="360" height="120"></canvas></div><script>
+const c=document.getElementById("scope"),x=c.getContext("2d");x.fillStyle="#111827";x.fillRect(0,0,c.width,c.height);x.strokeStyle="#22d3ee";x.lineWidth=3;x.beginPath();for(let i=0;i<360;i++){const y=60+Math.sin(i/18)*34;i?x.lineTo(i,y):x.moveTo(i,y)}x.stroke();
+</script></body></html>

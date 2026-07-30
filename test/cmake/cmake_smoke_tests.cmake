@@ -380,6 +380,18 @@ if(Python3_Interpreter_FOUND)
         LABELS "import;fidelity;slow"
         TIMEOUT 120)
 
+    # Pure comparison-protocol tests for the Chromium-oracle differential lab.
+    # Corpus execution is intentionally not a unit test: it launches the
+    # importer and a browser, while this test keeps schemas, matching, scoring,
+    # promotion policy, and visual artifacts deterministic and fast.
+    add_test(NAME importer-differential-lab
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_importer_differential_lab.py)
+    set_tests_properties(importer-differential-lab PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "import;fidelity"
+        TIMEOUT 30)
+
     # Golden re-import regression tool (tools/import-validation/golden_regression.py)
     # — self-test for its structural edge map. Guards the uint8-wraparound fix
     # (a 255->0 dark-on-light edge must not vanish). Exits 77 (skips) when numpy

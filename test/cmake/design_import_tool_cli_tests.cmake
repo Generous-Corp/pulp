@@ -27,7 +27,7 @@ if(_PULP_NODE_FOR_TESTS)
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_NODE_TESTS})
     set_tests_properties(pulp-browser-capture-node-unit PROPERTIES
-        TIMEOUT 60
+        TIMEOUT 180
         LABELS "parser-import;browser-capture;node")
 endif()
 

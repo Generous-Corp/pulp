@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/importer-differential-corpus-v1.schema.json",
+  "title": "Pulp importer differential corpus v1",
+  "type": "object",
+  "required": ["schema", "version", "fixture_count", "completed_fixture_count", "failed_fixture_count", "classifications", "shares", "mean_scores", "mean_timings_ms", "false_promotions", "ranked_gaps"],
+  "properties": {
+    "schema": {"const": "pulp-importer-differential-corpus-v1"},
+    "version": {"const": 1},
+    "fixture_count": {"type": "integer", "minimum": 0},
+    "completed_fixture_count": {"type": "integer", "minimum": 0},
+    "failed_fixture_count": {"type": "integer", "minimum": 0},
+    "classifications": {"type": "object"},
+    "shares": {"type": "object"},
+    "mean_scores": {"type": "object"},
+    "mean_timings_ms": {"type": "object"},
+    "false_promotions": {"type": "integer", "minimum": 0},
+    "ranked_gaps": {"type": "array"},
+    "failures": {"type": "array"}
+  }
+}
