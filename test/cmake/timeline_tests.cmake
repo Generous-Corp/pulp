@@ -43,7 +43,7 @@ pulp_add_test_suite(pulp-test-playback-production
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
-    SOURCES test_playback_transport.cpp
+    SOURCES test_playback_transport.cpp test_playback_transport_epoch.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
