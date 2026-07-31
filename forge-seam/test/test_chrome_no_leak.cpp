@@ -2257,6 +2257,80 @@ TEST_CASE("a build can be asked for without driving the screen",
     unsetenv("FORGE_MODULAR_TEST_PROMPT");
 }
 
+TEST_CASE("polling while the log is being written does not corrupt the heap",
+          "[crash][race]") {
+    // REAPER died with a heap abort the moment a build finished:
+    //
+    //   malloc_zone_error -> PatchExplanation::set_connections
+    //     <- ForgeModularShell::show_rack <- open_patch_file <- on_poll
+    //
+    // with ProcessEngine::run still streaming the generator's output on
+    // another thread. malloc_zone_error means the heap was ALREADY corrupt --
+    // set_connections is the next allocation, the victim rather than the
+    // cause. So this drives the same shape: polls that tail a log while that
+    // log is being appended to underneath, and opens a real generated patch
+    // over and over.
+    //
+    // Run it under Guard Malloc to mean anything:
+    //   DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib ./forge-test-... "[race]"
+    HermeticProjects isolated;
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path patches =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/patches";
+    std::error_code ec;
+    if (!std::filesystem::exists(patches, ec))
+        SKIP("no generated patches on this machine");
+    std::vector<std::string> real;
+    for (const auto& e : std::filesystem::directory_iterator(patches, ec))
+        if (e.path().extension() == ".vcv") real.push_back(e.path().string());
+    if (real.size() < 2) SKIP("not enough generated patches to churn");
+
+    const auto log = std::filesystem::temp_directory_path() /
+                     "forge-race-last-run.log";
+    std::filesystem::remove(log);
+    { std::ofstream f(log); f << "starting\n"; }
+
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.watch_build_log(log.string());
+
+    // A writer that appends the way the generator does, including the
+    // TRUNCATE a new build performs -- which is the case that makes a tailer
+    // read from an offset past the end.
+    std::atomic<bool> stop{false};
+    std::thread writer([&] {
+        for (int i = 0; !stop && i < 400; ++i) {
+            if (i % 97 == 96) {
+                std::ofstream f(log, std::ios::trunc);
+                f << "  starting over\n";
+            } else {
+                std::ofstream f(log, std::ios::app);
+                f << "  line " << i << " with some text on it\n";
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+    });
+
+    for (int i = 0; i < 400; ++i) {
+        shell.chrome()->poll();
+        // The step that crashed: a real patch, parsed and pushed into the
+        // views, while all of the above is going on.
+        shell.open_patch_file(real[i % real.size()]);
+    }
+    stop = true;
+    writer.join();
+    std::filesystem::remove(log);
+
+    // Surviving IS the assertion; the rest says it did real work.
+    CHECK(shell.explanation() != nullptr);
+    CHECK(shell.rack_preview() != nullptr);
+}
+
 TEST_CASE("no control on Home paints like a control and does nothing",
           "[phase6][controls]") {
     // A control that highlights and does nothing is indistinguishable from a
