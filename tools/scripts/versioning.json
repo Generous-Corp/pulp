@@ -29,6 +29,7 @@
         "tools/cli/**/*.hpp",
     "tools/cli/**/*.h",
     "tools/audio/host-probe/**",
+        "tools/import-design/CMakeLists.txt",
     "tools/import-design/**/*.cpp",
         "tools/import-design/**/*.hpp",
         "tools/import-design/**/*.h"
