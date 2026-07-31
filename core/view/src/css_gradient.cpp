@@ -113,12 +113,66 @@ canvas::Color parse_css_color(const std::string& str) {
 
 namespace {
 
-// Paren-aware comma split (so rgba(...) stays intact) + trailing position peel
-// (Npx / N%). Fills colors/positions in parallel.
+// A stop position resolved to the gradient's own 0..1 parameter, or nullopt
+// when the token is not a position at all.
+//
+// `angular` selects the units the gradient measures its stops in. A conic
+// measures them as <angle-percentage>, and CSS conics are almost always
+// authored in degrees — dropping the unit and keeping the number put `180deg`
+// at 180.0, which is 18000% and clamps to the end of the ramp, so a two-colour
+// sweep rendered as one flat colour. Linear and radial gradients measure
+// lengths instead, where an angle is meaningless and is left alone.
+std::optional<float> parse_stop_position(const std::string& tail, bool angular) {
+    const auto unit_at = [&](std::string_view unit) {
+        return tail.size() > unit.size() &&
+               tail.compare(tail.size() - unit.size(), unit.size(), unit) == 0;
+    };
+    std::string number = tail;
+    float scale = 1.0f;  // bare number: already the 0..1 parameter
+    if (!tail.empty() && tail.back() == '%') {
+        number = tail.substr(0, tail.size() - 1);
+        scale = 1.0f / 100.0f;
+    } else if (unit_at("px")) {
+        // A pixel offset needs the box to resolve against, which this parser
+        // does not have. Kept as the historical raw-number reading rather than
+        // silently becoming something else.
+        number = tail.substr(0, tail.size() - 2);
+    } else if (angular && unit_at("grad")) {
+        number = tail.substr(0, tail.size() - 4);
+        scale = 1.0f / 400.0f;
+    } else if (angular && unit_at("turn")) {
+        number = tail.substr(0, tail.size() - 4);
+    } else if (angular && unit_at("deg")) {
+        number = tail.substr(0, tail.size() - 3);
+        scale = 1.0f / 360.0f;
+    } else if (angular && unit_at("rad")) {
+        number = tail.substr(0, tail.size() - 3);
+        scale = 1.0f / 6.28318531f;
+    }
+    if (number.empty() ||
+        !(std::isdigit(static_cast<unsigned char>(number[0])) ||
+          number[0] == '.' || number[0] == '-'))
+        return std::nullopt;
+    // The number must be the WHOLE token. Without this, `calc(100% - 7px)`
+    // reaches here as `7px)`, parses as 7, and lands the stop at 700%.
+    try {
+        std::size_t consumed = 0;
+        const float value = std::stof(number, &consumed);
+        if (consumed != number.size()) return std::nullopt;
+        return value * scale;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+// Paren-aware comma split (so rgba(...) stays intact) + trailing position peel.
+// Fills colors/positions in parallel. `angular` selects the stop-position units
+// (see parse_stop_position).
 void parse_stops(const std::string& colorStr,
                  const CssColorParser& parseColor,
                  std::vector<canvas::Color>& colors,
-                 std::vector<float>& positions) {
+                 std::vector<float>& positions,
+                 bool angular = false) {
     std::vector<std::string> tokens;
     std::string cur; int paren = 0;
     for (char c : colorStr) {
@@ -134,29 +188,46 @@ void parse_stops(const std::string& colorStr,
     while (!cur.empty() && cur.front() == ' ') cur.erase(0, 1);
     while (!cur.empty() && cur.back() == ' ') cur.pop_back();
     if (!cur.empty()) tokens.push_back(cur);
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        std::string tok = tokens[i];
-        std::optional<float> explicitPos;
-        auto sp = tok.find_last_of(' ');
-        if (sp != std::string::npos) {
-            std::string tail = tok.substr(sp + 1);
-            bool isPct = false;
-            if (!tail.empty() && tail.back() == '%') { isPct = true; tail.pop_back(); }
-            else if (tail.size() >= 2 && tail.substr(tail.size() - 2) == "px")
-                tail = tail.substr(0, tail.size() - 2);
-            if (!tail.empty() && (std::isdigit(static_cast<unsigned char>(tail[0])) ||
-                                  tail[0] == '.' || tail[0] == '-')) {
-                try {
-                    float vv = std::stof(tail);
-                    explicitPos = isPct ? vv / 100.0f : vv;
-                    tok = tok.substr(0, sp);
-                    while (!tok.empty() && tok.back() == ' ') tok.pop_back();
-                } catch (...) {}
-            }
+    // Peel positions off the RIGHT, up to two of them. One stop may carry two —
+    // `#fff 0deg 2deg` is the shorthand for a hard band running from the first
+    // to the second — and peeling only one left the other glued to the colour,
+    // which took the colour down with it and made the whole stop unreadable.
+    const auto peel = [&](std::string& tok) -> std::optional<float> {
+        const auto sp = tok.find_last_of(' ');
+        if (sp == std::string::npos) return std::nullopt;
+        const auto value = parse_stop_position(tok.substr(sp + 1), angular);
+        if (!value) return std::nullopt;
+        tok = tok.substr(0, sp);
+        while (!tok.empty() && tok.back() == ' ') tok.pop_back();
+        return value;
+    };
+
+    // A stop with no position of its own is spread evenly, which needs the
+    // final stop COUNT — and a two-position stop contributes two. Resolve the
+    // tokens first, then fill the gaps.
+    struct Stop {
+        canvas::Color color;
+        std::optional<float> position;
+    };
+    std::vector<Stop> stops;
+    stops.reserve(tokens.size());
+    for (auto& token : tokens) {
+        std::string tok = token;
+        const auto second = peel(tok);
+        const auto first = second ? peel(tok) : std::nullopt;
+        const auto color = parseColor(tok);
+        if (first) {
+            stops.push_back({color, first});
+            stops.push_back({color, second});
+        } else {
+            stops.push_back({color, second});
         }
-        colors.push_back(parseColor(tok));
-        positions.push_back(explicitPos.value_or(
-            tokens.size() > 1 ? static_cast<float>(i) / (tokens.size() - 1) : 0));
+    }
+
+    for (size_t i = 0; i < stops.size(); ++i) {
+        colors.push_back(stops[i].color);
+        positions.push_back(stops[i].position.value_or(
+            stops.size() > 1 ? static_cast<float>(i) / (stops.size() - 1) : 0));
     }
 }
 
@@ -291,7 +362,9 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         }
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        parse_stops(inner.substr(color_start), color_of, colors, positions);
+        // Conic stops are angles, not lengths.
+        parse_stops(inner.substr(color_start), color_of, colors, positions,
+                    /*angular=*/true);
         if (!colors.empty()) {
             v.set_background_gradient_conic(cx, cy, from_rad - 1.57079633f, colors, positions);
             return true;

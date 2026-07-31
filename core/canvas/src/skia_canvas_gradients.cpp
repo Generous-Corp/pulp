@@ -39,6 +39,16 @@ namespace pulp::canvas {
 
 // ── Gradients ────────────────────────────────────────────────────────────────
 
+// Turn a sweep shader by `start_angle` radians about its own centre. Applied as
+// a local matrix so the gradient's own angle window stays a full turn; see
+// set_fill_gradient_conic for why the rotation cannot live in that window.
+static sk_sp<SkShader> rotate_sweep(sk_sp<SkShader> shader, float cx, float cy,
+                                    float start_angle) {
+    if (shader == nullptr || start_angle == 0.0f) return shader;
+    const float degrees = start_angle * 180.0f / 3.14159265f;
+    return shader->makeWithLocalMatrix(SkMatrix::RotateDeg(degrees, {cx, cy}));
+}
+
 static void colors_to_skia4f(const Color* colors, const float* positions, int count,
                              std::vector<SkColor4f>& sk_colors,
                              std::vector<float>& sk_pos) {
@@ -70,14 +80,21 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// A sweep's start angle is ROTATION, not a window into the turn. Skia clamps
+// angles outside [start, end] rather than wrapping them, so handing it
+// `start .. start + 360` left every angle before `start` outside the window and
+// painted flat in the end stop's colour — a wedge the size of the rotation, and
+// the CSS default `from 0deg` carries a -90° correction, so the common case lost
+// a quarter of the circle. The window stays a full turn and the SHADER is
+// rotated instead, which no angle can fall outside of.
 void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
                                           const Color* colors, const float* positions, int count) {
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    float start_deg = start_angle * 180.0f / 3.14159265f;
-    gradient_shader_ = skia_gradient::make_sweep({cx, cy}, start_deg, start_deg + 360.0f,
+    gradient_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f,
                                                  sk_colors.data(), sk_pos.data(), count);
+    gradient_shader_ = rotate_sweep(std::move(gradient_shader_), cx, cy, start_angle);
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
@@ -147,9 +164,11 @@ void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle
     std::vector<SkColor4f> sk_colors;
     std::vector<float> sk_pos;
     colors_to_skia4f(colors, positions, count, sk_colors, sk_pos);
-    float start_deg = start_angle * 180.0f / 3.14159265f;
-    stroke_shader_ = skia_gradient::make_sweep({cx, cy}, start_deg, start_deg + 360.0f,
+    // Same full-turn window + rotation as the fill side; a stroked sweep loses
+    // the identical wedge otherwise.
+    stroke_shader_ = skia_gradient::make_sweep({cx, cy}, 0.0f, 360.0f,
                                                sk_colors.data(), sk_pos.data(), count);
+    stroke_shader_ = rotate_sweep(std::move(stroke_shader_), cx, cy, start_angle);
 }
 
 void SkiaCanvas::clear_stroke_gradient() {
