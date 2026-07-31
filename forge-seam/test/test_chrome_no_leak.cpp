@@ -4885,3 +4885,40 @@ TEST_CASE("the materializing placeholder is shaped like the artifact",
         CHECK_FALSE(rack);
     }
 }
+
+TEST_CASE("the heading names the artifact, and never eats a real title",
+          "[rack][skeleton]") {
+    // The default heading names the artifact, and it was chosen once at
+    // construction. Starting on Module and switching to Patch left "Untitled
+    // module" beside a PATCH pill for the whole build -- the same disagreement
+    // as a patch materializing into a module panel, in words instead of shapes.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* c = shell.chrome();
+    REQUIRE(c != nullptr);
+
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(c->project_title() == "Untitled module");
+
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK(c->project_title() == "Untitled patch");
+
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(c->project_title() == "Untitled module");
+
+    // The assertion that carries the weight. Re-deriving on every switch is
+    // the easy fix and the wrong one: a project the user has named is theirs,
+    // and changing tabs must not take the name away.
+    c->set_project_title_from_prompt("an ambient generative drone");
+    const auto named = c->project_title();
+    CHECK(named != "Untitled module");
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK(c->project_title() == named);
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(c->project_title() == named);
+}

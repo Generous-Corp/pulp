@@ -350,9 +350,14 @@ void ForgeModularShell::style_tabs() {
     // patch materializing as one module panel and then snapping to a rack of
     // ten shows the wrong thing for the whole build, with the header saying
     // PATCH beside it.
-    if (auto* c = chrome())
+    if (auto* c = chrome()) {
         c->set_skeleton_shape(patch ? forge::ForgeChrome::SkeletonShape::rack
                                     : forge::ForgeChrome::SkeletonShape::module);
+        // The heading names the artifact too, and it was chosen before this
+        // switch: starting on Module and moving to Patch left "Untitled
+        // module" beside a PATCH pill for the whole build.
+        c->refresh_default_project_title();
+    }
     TextButton* const buttons[] = {tab_module_, tab_patch_};
     const bool active[] = {!patch, patch};
     for (std::size_t i = 0; i < 2; ++i) {
