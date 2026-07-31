@@ -341,6 +341,20 @@ struct SetTrackMixer {
     TrackMixer replacement;
 };
 
+/// Inserts a track and its complete owned identity subtree at an authored position.
+struct InsertTrack {
+    ItemId sequence_id;
+    Track track;
+    // Empty appends. See InsertScene::before_scene_id.
+    std::optional<ItemId> before_track_id = std::nullopt;
+};
+
+/// Removes a track and its complete owned identity subtree by identity.
+struct RemoveTrack {
+    ItemId sequence_id;
+    ItemId track_id;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
@@ -349,7 +363,8 @@ using Command =
                  SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
                  SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
-                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer>;
+                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer,
+                 InsertTrack, RemoveTrack>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

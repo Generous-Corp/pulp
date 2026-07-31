@@ -195,6 +195,23 @@ artifact is needed. Never modify canonical project JSON text directly.
   validate deletions by scanning every scene.
   `InsertScene` / `RemoveScene` and `InsertSlot` / `RemoveSlot` reduce through
   `transaction_scene_internal` with exact inverse and tombstone ownership.
+- **A track owns eight identity kinds across four levels, and an incomplete
+  owned set cannot fail at remove time.** `InsertTrack` / `RemoveTrack` reduce
+  through `transaction_track_internal`. `plan_identity_deactivate` validates
+  nothing — it emits one `Deactivate` per identity handed to it — so a missed
+  kind leaks an identity that stays `active` with its owner gone, and only
+  surfaces later as an unrelated `IdentityNotAvailable`, or as undo failing
+  because tombstone restore requires each id to exist and be inactive. The two
+  that get missed are the lane-parented pair, `AutomationPoint` and `Take`.
+  Never hand-write the list: `visit_track_owned_identities()` in
+  `owned_identity_traversal.hpp` is the single enumeration, and
+  `visit_sequence_owned_identities()` calls it, so the two cannot diverge.
+  `has_same_owner` compares only kind and parent while `target_error` compares
+  all four coordinates, so right ids with a wrong coordinate cache survive both
+  undo and redo and reject the next command two edits later — assert the
+  complete `ItemLocation` of every level, not just `active`.
+  `RemoveTrack`'s inverse is `InsertTrack{sequence_id, removed, following}`;
+  `following` is what restores authored position exactly instead of appending.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -1024,6 +1041,16 @@ runtime tests. That shared CMake inventory does not make profile JSON, capture
 evidence, or sampler rendering part of the timeline document schema; keep those
 contracts in `pulp::audio` unless a future version explicitly adds a document
 reference type.
+
+`test/cmake/timeline_tests.cmake` also owns the playback RT-safety suite
+registrations, which carry a two-backend shape: a `$<BOOL:${UNIX}>` split
+between `native_components/rt_intercept_test_support.cpp` and
+`harness/rt_allocation_probe.cpp`, plus `pulp::native-components`,
+`${CMAKE_DL_LIBS}`, and a `PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1` define.
+Do not simplify that to a plain source list. Dropping the trap source while
+keeping the define fails at link on `RtNoAllocScope`'s out-of-line constructor,
+which is the intended behavior — the `playback` skill explains why that guard
+exists and what still needs a hand-run control.
 
 ### Writing a render-continuity assertion
 

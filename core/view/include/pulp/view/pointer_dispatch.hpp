@@ -75,6 +75,26 @@ bool transfer_input_focus(View& root, View* target);
 /// the process-global compatibility shim.
 View* focused_input_under_root(View& root);
 
+/// Device identity of the pointer a delivery verb is dispatching, stamped onto
+/// every MouseEvent the verb builds (including the ancestor-bubble copies).
+///
+/// Kept as a struct for the same reason WheelHost / MouseDownHost / MouseUpHost
+/// are: press and release carried no device fields at all, so a touch could be
+/// described on a drag tick but never on the press a widget latches on, and
+/// adding `pointer_id` — plus stylus tilt later — would otherwise cost one more
+/// positional overload per verb. The drag verb keeps its older
+/// `PointerType` + `float` scalar overloads because they are already exported;
+/// this struct is the form that also carries `pointer_id`.
+struct PointerAttributes {
+    PointerType type = PointerType::mouse;
+    float pressure = 0.5f;  ///< 0.0-1.0; 0.5 is the mouse default.
+    /// 0 = primary pointer, >0 = an additional simultaneous touch. The gesture
+    /// arbiter keys its per-pointer sessions on this, and PinchRecognizer /
+    /// RotateRecognizer key their touch maps on it, so two touches that share an
+    /// id collapse into one and no multi-touch gesture can ever form.
+    int pointer_id = 0;
+};
+
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
 ///
 /// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
@@ -107,6 +127,12 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         PointerType pointer_type, float pressure,
                         MouseButton button);
+
+/// Attribute-carrying overload — the only drag form that also carries
+/// `pointer_id`. Both scalar signatures above remain exported.
+void deliver_mouse_drag(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count,
+                        MouseButton button, const PointerAttributes& pointer);
 
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.
@@ -192,6 +218,15 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count, bool bubble,
                         MouseButton button, const MouseDownHost& host);
 
+/// Attribute-carrying overload. The press is where a widget latches the device
+/// it is being driven by — a Knob deciding a touch needs a coarser slop than a
+/// mouse, a paint surface reading `pressure`. Every overload above delivers a
+/// default mouse pointer, so a caller that never opts in is unchanged.
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button, const MouseDownHost& host,
+                        const PointerAttributes& pointer);
+
 /// Host hooks the portable mouse-up router calls back into. Like WheelHost,
 /// kept as a struct so the click-firing seam can gain hooks without re-touching
 /// every call site.
@@ -243,6 +278,15 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
 void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host, MouseButton button);
+
+/// Attribute-carrying overload. A release that reported `mouse` after a `touch`
+/// press leaves a widget unable to match the two halves of one gesture, so the
+/// device travels with the release too. Both overloads above deliver a default
+/// mouse pointer.
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host, MouseButton button,
+                      const PointerAttributes& pointer);
 
 /// Close the press bracket when a recognizer CLAIMS the pointer mid-gesture,
 /// after a press was already delivered to `target`.
