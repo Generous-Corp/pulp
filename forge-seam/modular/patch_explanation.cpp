@@ -77,10 +77,11 @@ std::string PatchExplanation::line_text(std::size_t index) const {
 
     if (depth_ == ExplainDepth::terse) return text;
     if (!c.why.empty()) text += " \xE2\x80\x94 " + c.why;
-    if (depth_ == ExplainDepth::learning) {
-        const auto* primer = role_primer(c.role);
-        if (primer && *primer) text += " " + std::string(primer);
-    }
+    // The role primer is NOT repeated here. It belongs to the role, not to
+    // each cable that has it, and a patch with six modulation cables used to
+    // print the same sentence six times -- which reads as padding and made
+    // "learning has more lines than standard" true without teaching anything.
+    // It is written once, under the heading, in rebuild().
     return text;
 }
 
@@ -180,6 +181,23 @@ void PatchExplanation::rebuild() {
         count->set_text_color(color::text_faint);
         header->add_child(std::move(count));
         add_child(std::move(header));
+
+        // At the deepest setting the group says what its role IS, once. This
+        // is the concept the reader is here to learn; the cables under it are
+        // instances of it.
+        if (depth_ == ExplainDepth::learning) {
+            if (const auto* primer = role_primer(group.role); primer && *primer) {
+                for (const auto& piece : wrap(primer, kColumns)) {
+                    auto note = std::make_unique<Label>(piece);
+                    note->set_font_family(forge::design::type::display);
+                    note->set_font_size(12.0f);
+                    note->set_text_color(color::text_faint);
+                    note->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+                    note->flex().flex_shrink = 0;
+                    add_child(std::move(note));
+                }
+            }
+        }
 
         for (const std::size_t i : members) {
         // Built exactly like a Forge chat bubble: a column with a bounded

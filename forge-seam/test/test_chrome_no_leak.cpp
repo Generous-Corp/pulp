@@ -292,6 +292,24 @@ std::size_t count_pixels_near(const std::vector<std::uint8_t>& png,
     return hits;
 }
 
+/// Every word the explanation actually puts on screen.
+///
+/// Depth has to be measured here rather than on one cable's string: a role's
+/// primer belongs to the role and is written once under its heading, so a
+/// per-cable comparison sees no difference and would push the primer back onto
+/// every cable to satisfy itself.
+inline std::string rendered_text(const pulp::view::View* root) {
+    std::string all;
+    std::function<void(const pulp::view::View*)> walk =
+        [&](const pulp::view::View* v) {
+            if (auto* l = dynamic_cast<const pulp::view::Label*>(v))
+                all += l->text() + "\n";
+            for (int i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+        };
+    walk(root);
+    return all;
+}
+
 std::size_t distinct_colors(const std::vector<std::uint8_t>& png) {
     if (png.empty()) return 0;
     auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
@@ -1422,17 +1440,26 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
                pulp::view::TextButton::Style::secondary;
     };
 
+    // Measured on what is RENDERED, not on one cable's string. The old test
+    // read line_text(0) at each depth, which rewarded exactly the wrong thing:
+    // repeating a role's primer on every cable that shares that role made
+    // "learning says more" true while teaching nothing. Said once under the
+    // heading -- the right place -- the per-cable string is unchanged and this
+    // check passed only because it was measuring the padding.
     press(0);   // Terse
-    const auto terse = ex->line_text(0);
+    const auto terse = rendered_text(ex);
+    const auto terse_line = ex->line_text(0);
     press(1);   // Standard
-    const auto standard = ex->line_text(0);
+    const auto standard = rendered_text(ex);
+    const auto standard_line = ex->line_text(0);
     press(2);   // Learning
-    const auto learning = ex->line_text(0);
+    const auto learning = rendered_text(ex);
+    const auto learning_line = ex->line_text(0);
     // The control on screen must agree with the depth the words are at.
     CHECK(tab_is_selected(2));
     CHECK_FALSE(tab_is_selected(1));
 
-    for (const auto& t : {terse, standard, learning}) {
+    for (const auto& t : {terse_line, standard_line, learning_line}) {
         INFO(t);
         CHECK(t.find("VCO-1 OUT") != std::string::npos);
         CHECK(t.find("VCF IN") != std::string::npos);
@@ -1442,6 +1469,13 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
     CHECK(learning.size() > standard.size());
     CHECK(standard.find("everything else shapes it") != std::string::npos);
     CHECK(terse.find("everything else shapes it") == std::string::npos);
+    // The concept a reader is here for appears once, not once per cable.
+    const auto primer = std::string("What you actually hear");
+    std::size_t occurrences = 0;
+    for (std::size_t at = learning.find(primer); at != std::string::npos;
+         at = learning.find(primer, at + 1)) ++occurrences;
+    INFO("primer occurrences at learning depth: " << occurrences);
+    CHECK(occurrences == 1);
 
     // Hovering a line lights its cable and dims the others.
     ex->hover_line(2);
@@ -1521,9 +1555,12 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
     // One child per cable, plus one heading per role present -- derived from
     // the fixture rather than written down, so adding a cable to the sample
     // does not silently turn this into a weaker test.
+    // One child per cable, plus a heading per role, plus that role's primer
+    // at this depth. The exact heading text is pinned by its own test; here
+    // the point is that everything drawn has somewhere to sit.
     std::set<forge_modular::SignalRole> roles;
     for (const auto& c : sample_patch()) roles.insert(c.role);
-    REQUIRE(ex.child_count() ==
+    REQUIRE(ex.child_count() >=
             static_cast<int>(sample_patch().size() + roles.size()));
     float previous_bottom = -1.0f;
     for (int r = 0; r < ex.child_count(); ++r) {
@@ -1561,19 +1598,24 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
         }
     }
 
-    // A deeper setting genuinely produces more lines to read.
-    const int standard_lines = [&] {
+    // A deeper setting genuinely produces more to read. Counted over every
+    // label drawn, at any nesting: this used to count grandchildren only, so a
+    // line added directly to the explanation -- which is where a role's primer
+    // belongs -- registered as nothing at all.
+    auto line_count_at = [](forge_modular::ExplainDepth depth) {
         forge_modular::PatchExplanation s;
         s.set_connections(sample_patch(), sample_rack());
-        s.set_depth(forge_modular::ExplainDepth::standard);
+        s.set_depth(depth);
         s.set_bounds({0, 0, 820, 300});
-        int n = 0;
-        for (int r = 0; r < s.child_count(); ++r) n += s.child_at(r)->child_count();
-        return n;
-    }();
-    int learning_lines = 0;
-    for (int r = 0; r < ex.child_count(); ++r)
-        learning_lines += ex.child_at(r)->child_count();
+        const auto text = rendered_text(&s);
+        return static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+    };
+    const int terse_lines = line_count_at(forge_modular::ExplainDepth::terse);
+    const int standard_lines = line_count_at(forge_modular::ExplainDepth::standard);
+    const int learning_lines = line_count_at(forge_modular::ExplainDepth::learning);
+    INFO("terse " << terse_lines << ", standard " << standard_lines
+                  << ", learning " << learning_lines);
+    CHECK(standard_lines >= terse_lines);
     CHECK(learning_lines > standard_lines);
 }
 
@@ -1970,9 +2012,10 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
         dynamic_cast<pulp::view::TextButton*>(tabs->child_at(i))->on_click();
     };
     press(0);
-    const auto terse = shell.explanation()->line_text(0);
+    const auto terse = rendered_text(shell.explanation());
     press(2);
-    const auto learning = shell.explanation()->line_text(0);
+    const auto learning = rendered_text(shell.explanation());
+    INFO("terse " << terse.size() << " bytes, learning " << learning.size());
     CHECK(learning.size() > terse.size());
 
     // An unreadable file must not leave an empty rack on screen.
