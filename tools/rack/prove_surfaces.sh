@@ -21,6 +21,28 @@ TOOLS="${FORGE_MODULAR_TOOLS:-$HOME/Library/Application Support/Forge Modular/to
 ONLY="${1:-all}"
 pass=0; fail=0; skip=0
 
+# macOS ships no `timeout` -- it is GNU coreutils, and a machine that has never
+# had this installed will not have it. Without a shim every capped command here
+# dies with "command not found", which reads as the surface failing rather than
+# the harness missing a tool.
+if command -v timeout >/dev/null 2>&1; then
+    cap() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+    cap() { gtimeout "$@"; }
+else
+    cap() {
+        local secs="$1"; shift
+        "$@" &
+        local job=$!
+        ( sleep "$secs"; kill -TERM "$job" 2>/dev/null ) 2>/dev/null &
+        local killer=$!
+        wait "$job" 2>/dev/null
+        local rc=$?
+        kill "$killer" 2>/dev/null
+        return "$rc"
+    }
+fi
+
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
 none() { printf '  SKIP  %s\n' "$*"; skip=$((skip + 1)); }
@@ -39,7 +61,7 @@ sys.exit(0 if P.inventory() else 1)
         none "the module inventory is empty — VCV Rack is not installed here, so
         there is nothing to build a patch out of"
     else
-        out="$(cd "$TOOLS" && timeout 1500 python3 patch.py build \
+        out="$(cd "$TOOLS" && cap 1500 python3 patch.py build \
               "a classic subtractive voice with a filter envelope" 2>&1)"
         path="$(printf '%s' "$out" | sed -n 's/.*cables → \(.*\)$/\1/p' | tail -1)"
         if [ -n "$path" ] && [ -f "$path" ]; then
@@ -67,7 +89,7 @@ if [ "$ONLY" = "all" ] || [ "$ONLY" = "app" ]; then
         printf '  launching the app; it will take an audio device for up to 25 minutes\n'
         open -a "/Applications/Forge Modular.app"
         sleep 6
-        out="$(cd "$HERE" && timeout 1500 python3 drive_app.py patch \
+        out="$(cd "$HERE" && cap 1500 python3 drive_app.py patch \
               "a classic subtractive voice with a filter envelope" 2>&1)"
         printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
         if printf '%s' "$out" | grep -q "^PASS"; then
