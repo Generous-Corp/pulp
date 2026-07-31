@@ -335,6 +335,24 @@ def lint(patch: dict, inv: dict) -> list[str]:
     if len(set(ids)) != len(ids):
         errs.append("duplicate module ids — Rack keys cables by id")
 
+    # An input takes ONE cable. Rack silently keeps the last and drops the
+    # rest, so a patch can lint clean, make sound, and still not do what it
+    # was asked for: a Krell patch whose sample-and-hold and low-pass gate both
+    # landed on the same MULT input lost the loop that makes it self-play, and
+    # produced a single note. Nothing failed -- one cable just was not there.
+    by_input = {}
+    label = {m.get("id"): m.get("model", "?") for m in mods}
+    for c in patch.get("cables", []):
+        key = (c.get("inputModuleId"), c.get("inputId"))
+        by_input.setdefault(key, []).append(c.get("outputModuleId"))
+    for (mid, port), sources in by_input.items():
+        if len(sources) > 1:
+            names = ", ".join(str(label.get(s, s)) for s in sources)
+            errs.append(
+                f"{label.get(mid, mid)} input {port} has {len(sources)} cables "
+                f"({names}) — an input takes one; Rack keeps the last and "
+                f"silently drops the others")
+
     for m in mods:
         plug = inv.get(m.get("plugin"))
         if plug is None:
