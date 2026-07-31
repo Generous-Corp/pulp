@@ -38,8 +38,11 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp
-        harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::playback pulp::audio pulp::timeline)
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::native-components
+        ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -123,9 +126,11 @@ pulp_add_test_suite(pulp-test-playback-audio-renderer
         test_playback_realtime_stretch_state_bank.cpp
         test_playback_track_freeze.cpp
         test_playback_track_mixer.cpp
-        harness/rt_allocation_probe.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
-        pulp::runtime)
+        pulp::runtime pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-automation-cursor
     SOURCES test_playback_automation_cursor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

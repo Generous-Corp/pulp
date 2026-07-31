@@ -1042,6 +1042,16 @@ evidence, or sampler rendering part of the timeline document schema; keep those
 contracts in `pulp::audio` unless a future version explicitly adds a document
 reference type.
 
+`test/cmake/timeline_tests.cmake` also owns the playback RT-safety suite
+registrations, which carry a two-backend shape: a `$<BOOL:${UNIX}>` split
+between `native_components/rt_intercept_test_support.cpp` and
+`harness/rt_allocation_probe.cpp`, plus `pulp::native-components`,
+`${CMAKE_DL_LIBS}`, and a `PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1` define.
+Do not simplify that to a plain source list. Dropping the trap source while
+keeping the define fails at link on `RtNoAllocScope`'s out-of-line constructor,
+which is the intended behavior — the `playback` skill explains why that guard
+exists and what still needs a hand-run control.
+
 ### Writing a render-continuity assertion
 
 A "gap-free during playback" test must distinguish two things that both look
