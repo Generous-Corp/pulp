@@ -117,6 +117,19 @@ class VersionFileIoTests(unittest.TestCase):
             "marketplace.json top-level version and plugins[0].version drifted; "
             "Claude Code installs from plugins[0].version.")
 
+    def test_combined_installer_recipe_is_an_sdk_release_surface(self) -> None:
+        # SDK consumers such as Forge execute this recipe from a detached Pulp
+        # source checkout at the SDK provenance SHA. A recipe fix therefore
+        # needs an SDK version/tag even though the script is not installed in
+        # the binary SDK prefix yet.
+        repo = pathlib.Path(vbc.__file__).resolve().parents[2]
+        cfg = json.loads((repo / "tools/scripts/versioning.json").read_text())
+
+        self.assertIn(
+            "tools/scripts/build_combined_installer.sh",
+            cfg["surfaces"]["sdk"]["trigger_paths"],
+        )
+
     def test_json_decode_and_unknown_version_kinds_are_tolerated(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = pathlib.Path(td)
@@ -281,7 +294,10 @@ class GitAndHeuristicTests(unittest.TestCase):
             self.assertEqual(
                 vbc.git_range_trailers("base", "head"),
                 {
-                    "version-bump": ['sdk=patch reason="x"'],
+                    "version-bump": [
+                        'sdk=patch reason="x"',
+                        'sdk=minor reason="x"',
+                    ],
                     "skill-update": ['skip skill=ci reason="x"'],
                 },
             )
@@ -1019,6 +1035,7 @@ class MainTests(unittest.TestCase):
             with mock.patch.object(vbc, "git_diff_names", return_value=["src/api.hpp"]), \
                  mock.patch.object(vbc, "assess_surfaces", return_value=[verdict]), \
                  mock.patch.object(vbc, "apply_bumps", return_value=["sdk.json"]), \
+                 mock.patch.object(vbc, "_range_fix_feat_subjects", return_value=[]), \
                  mock.patch.object(vbc, "render_report", return_value=("after", 0)), \
                  contextlib.redirect_stdout(stdout):
                 self.assertEqual(vbc.main(["--repo-root", str(repo), "--config", str(config), "--mode", "apply"]), 0)
