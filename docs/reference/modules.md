@@ -1194,6 +1194,17 @@ Plugin/host adapters include
 public `ProcessContext`. That header is the only lossy tick-to-double boundary;
 `core/playback` does not depend on format, host, or view code.
 
+The optional backend-neutral `TempoSyncSource` lets `MasterTransport` consume a
+session tempo/beat mapping at the output boundary without putting device state
+in the timeline document. Its host-time overload accepts an opaque timestamp
+tagged by the producing source, preserves precise fractional ticks, and fails
+closed when the token belongs to another clock domain or the source is
+unavailable. The desktop adapter's realtime-safe `output_host_time()` reads
+Link's platform clock and adds device/output latency before producing that
+token. A developer can compile the desktop `pulp::ableton-link` adapter from
+source with `PULP_ENABLE_ABLETON_LINK=ON` and an out-of-tree
+`PULP_ABLETON_LINK_SDK_DIR`; that SDK-backed target is never installed or exported.
+
 The module also compiles immutable `PlaybackProgram` snapshots off the audio
 thread. A request carries one immutable Project snapshot, its external document
 revision, a precompiled tempo map, and an explicit dirty-track set. Clean

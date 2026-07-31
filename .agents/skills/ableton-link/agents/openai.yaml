@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ableton Link"
+  short_description: "Configure Pulp desktop Ableton Link support"
+  default_prompt: "Help me configure or work on Pulp desktop Ableton Link tempo sync."

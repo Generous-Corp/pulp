@@ -184,8 +184,39 @@ if(NOT _installed_config_alias_text MATCHES "pulp-osc")
         "Ensure pulp-osc is in PULP_SDK_TARGETS in PulpInstallRules.cmake.")
 endif()
 
+# The optional Ableton Link adapter is source-build-only. Its declaration must
+# not be swept into the installed playback headers, and neither its target nor
+# the developer's SDK path may leak into the exported CMake package.
+if(EXISTS "${_prefix}/include/pulp/playback/ableton_link.hpp")
+    message(FATAL_ERROR
+        "Source-build-only ableton_link.hpp leaked into the installed SDK at "
+        "${_prefix}/include/pulp/playback/ableton_link.hpp.")
+endif()
+set(_pulp_export_text "")
+foreach(_tf IN LISTS _pulp_targets)
+    file(READ "${_tf}" _tf_text)
+    string(APPEND _pulp_export_text "\n${_tf_text}")
+endforeach()
+string(APPEND _pulp_export_text "\n${_installed_config_alias_text}")
+if(_pulp_export_text MATCHES "ableton[-_]link|Ableton::Link")
+    message(FATAL_ERROR
+        "The source-build-only Ableton Link adapter leaked into the installed "
+        "Pulp CMake target/config closure under ${_pulp_cmake_dir}.")
+endif()
+file(STRINGS "${PULP_BUILD_DIR}/CMakeCache.txt" _link_sdk_cache_line
+    REGEX "^PULP_ABLETON_LINK_SDK_DIR(:[^=]*)?=")
+foreach(_line IN LISTS _link_sdk_cache_line)
+    string(REGEX REPLACE "^[^=]*=" "" _link_sdk_path "${_line}")
+    string(FIND "${_pulp_export_text}" "${_link_sdk_path}" _link_sdk_path_index)
+    if(NOT _link_sdk_path STREQUAL "" AND NOT _link_sdk_path_index EQUAL -1)
+        message(FATAL_ERROR
+            "Developer-supplied Ableton Link SDK path leaked into the installed "
+            "Pulp CMake package: ${_link_sdk_path}")
+    endif()
+endforeach()
+
 message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
     "${_installed_encoder} (${_installed_size} bytes), PulpMinOs.cmake + "
     "min_os.json bundled and wired into PulpConfig.cmake, pulp::osc header + "
-    "target exported. All present.")
+    "target exported; Ableton Link header, target, and SDK path absent. All present.")

@@ -4118,6 +4118,10 @@
         "disposition": "excluded"
       },
       {
+        "name": "ableton-link",
+        "disposition": "excluded"
+      },
+      {
         "name": "android",
         "disposition": "candidate-shared-later"
       },
