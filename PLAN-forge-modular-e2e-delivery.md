@@ -167,6 +167,61 @@ investigation down the wrong path twice.
 
 ---
 
+## Step 4c — Ground patches in real idioms, and assert them
+
+The honest state: the model is inventing plausible module graphs, not
+reproducing known-good patches. It has an inventory and a prompt and nothing
+anchoring it to how these instruments are actually patched, so "drone" gets
+oscillators into a filter into a delay -- a shape it has read about, not a good
+drone. Listening to one confirms it: a tone, not a piece.
+
+Rack ships no patch library to learn from (only `template.vcv`), so the anchor
+has to be built. Two things make that legitimate and useful at once.
+
+**Patch idioms are techniques, not expression.** A Krell patch IS "a random
+voltage sampled to set an envelope's decay, with end-of-cycle retriggering the
+envelope." That is a method, documented across manufacturer manuals and decades
+of practice, and describing it in our own words is fair. Copying a book's text
+or ingesting a community patch library is not, and is not proposed.
+
+**A named idiom is simultaneously a prompt exemplar and a test.** The same
+topology that teaches the model what a Krell patch is also asserts whether it
+built one:
+
+```
+krell:
+  requires  random -> sample&hold -> envelope TIME
+            envelope END-OF-CYCLE -> envelope TRIGGER   (the self-play loop)
+  expects   self_playing, evolving
+  fails if  no cycle from an envelope output back to its own trigger
+```
+
+Roughly a dozen carry most of the territory: krell, west-coast LPG voice,
+subtractive drone, generative rhythm from a shift register, ping-filter
+percussion, chaos/Rungler modulation, clock-divided polyrhythm, bouncing-ball
+decay, sample-and-hold burble, feedback patch, kick from a decaying pitch
+envelope, evolving pad from detuned oscillators plus slow LFOs.
+
+**Why this beats a better prompt.** A prompt asks nicely. A required topology is
+checkable: the krell patch that played one note had the loop wired correctly and
+still failed on behaviour, while the bouncing ball had no trigger source at all
+and would have been rejected before a single sample was rendered.
+
+**How they combine with 4b.** The idiom names the structure, 4b measures the
+behaviour. Structure without behaviour is the krell case; behaviour without
+structure would pass a drone off as a rhythm. Both, or neither is worth much.
+
+**Done means:** a prompt naming or implying an idiom is checked against its
+required topology BEFORE the audio gate runs, the failure names the missing
+connection rather than saying "no sound", and the idiom's expectations feed 4b's
+behavioural assertions automatically.
+
+**Explicitly not in scope:** deciding whether a patch is *good*. Taste is not
+measurable. What is measurable is whether a patch is the KIND of thing it claims
+to be, and whether it behaves the way that kind behaves.
+
+---
+
 ## Step 5 — Re-validate, sign, notarize the shipping build
 
 Results expire when a binary changes, and every step above changes binaries.
