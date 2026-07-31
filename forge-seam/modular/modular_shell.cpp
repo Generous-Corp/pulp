@@ -421,7 +421,12 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
                 std::string text = input->text();
                 const auto at = text.rfind('@');
                 if (at != std::string::npos) text.erase(at);
-                input->set_text(text + slug + " ");
+                // The '@' STAYS. The field is plain text -- it cannot bold or
+                // highlight a range -- so the marker is the only thing that
+                // distinguishes a module you picked from a word you typed.
+                // It is also what makes the mention deletable as one unit,
+                // because it is the only delimiter there is.
+                input->set_text(text + "@" + slug + " ");
             }
         }
     };
@@ -1221,6 +1226,52 @@ void ForgeModularShell::on_poll() {
             rack_pill_->request_repaint();
         }
     }
+}
+
+bool ForgeModularShell::handle_prompt_key(const pulp::view::KeyEvent& event) {
+    // Backspace removes a whole mention, not one letter of it.
+    //
+    // A picked module is "@VCO" -- a single thing the user chose, not five
+    // characters they typed -- and rubbing it out a letter at a time leaves
+    // "@VC", which is a half-name the generator would take literally. The
+    // field is plain text, so this is what "delete the whole thing and mention
+    // it again" looks like.
+    if (!event.is_down || event.key != pulp::view::KeyCode::backspace)
+        return false;
+    if (mentions_.is_open()) return false;   // typing narrows; leave it alone
+    auto* c = chrome();
+    auto* input = c ? c->prompt_input() : nullptr;
+    if (!input) return false;
+
+    std::string text = input->text();
+    // Only at the very end, because that is the only place the caret position
+    // is known here. Editing mid-prompt behaves normally rather than
+    // surprisingly.
+    while (!text.empty() && text.back() == ' ') text.pop_back();
+    const auto at = text.rfind('@');
+    if (at == std::string::npos) return false;
+    // The marker must start the token: "a@b" is not a mention.
+    if (at > 0 && text[at - 1] != ' ') return false;
+    if (text.find(' ', at) != std::string::npos) return false;   // not the last
+
+    text.erase(at);
+    input->set_text(text);
+    return true;
+}
+
+std::unique_ptr<pulp::view::View> ForgeModularShell::create_view() {
+    auto root = forge::ForgeShell::create_view();
+    if (root) {
+        // Arrows and Enter belong to the LIST while it is open. The hook has
+        // to be on the ROOT to run before normal dispatch; on the overlay's
+        // own view it never fired at all, and the text field kept the arrows
+        // for its caret.
+        root->on_global_key = [this](const pulp::view::KeyEvent& e) {
+            if (mentions_.handle_key_event(e)) return true;
+            return handle_prompt_key(e);
+        };
+    }
+    return root;
 }
 
 void ForgeModularShell::on_view_closed(pulp::view::View& view) {

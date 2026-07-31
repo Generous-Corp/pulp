@@ -81,15 +81,6 @@ std::unique_ptr<View> MentionOverlay::build() {
     root->set_border(line, 1, forge::design::radius::medium);
     root->set_visible(false);
 
-    // Arrows and Enter belong to the LIST while it is open. The text field
-    // owns them otherwise -- it needs arrows to move the caret -- so this runs
-    // ahead of normal dispatch and consumes only what an open list is for.
-    // Set here rather than by the shell because the overlay owns this view and
-    // rebuilds it per editor; a hook installed elsewhere would outlive it.
-    root->on_global_key = [this](const pulp::view::KeyEvent& e) {
-        return handle_key_event(e);
-    };
-
     auto list = std::make_unique<View>();
     list_ = list.get();
     list->flex().direction = FlexDirection::column;

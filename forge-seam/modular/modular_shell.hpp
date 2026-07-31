@@ -264,6 +264,14 @@ public:
     /// these views outright rather than merely containing them: the chat
     /// accessory is held in `retired_chat_`, so it dies inside `~ForgeChrome`
     /// -- during this call -- and not with the tree afterwards.
+    /// The editor's root, with the mention list's key hook attached.
+    ///
+    /// `on_global_key` fires only when set on the ROOT view -- setting it on
+    /// the overlay's own root (a child) did nothing, which is why Up and Down
+    /// still went to the text field's caret instead of the open list.
+    std::unique_ptr<pulp::view::View> create_view() override;
+    /// Backspace over a finished mention removes the whole token.
+    bool handle_prompt_key(const pulp::view::KeyEvent& event);
     void on_view_closed(pulp::view::View& view) override;
 
     bool busy() const override;

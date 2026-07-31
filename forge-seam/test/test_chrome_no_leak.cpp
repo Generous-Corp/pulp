@@ -5207,3 +5207,60 @@ TEST_CASE("hovering the mention list does not free the rows being walked",
     CHECK(m.selected_index() >= 0);
     CHECK(m.selected_index() < 20);
 }
+
+TEST_CASE("a picked mention is marked, and deletes as one thing",
+          "[rack][mention]") {
+    // Two things at once, both reported. The inserted module was a bare word
+    // -- indistinguishable from anything else typed -- and backspace ate it a
+    // letter at a time, leaving "@VC", a half-name the generator would take
+    // literally.
+    //
+    // The field is PLAIN TEXT: it cannot bold or highlight a range. So the
+    // marker is the only thing that can say "you chose this", and it is also
+    // the only delimiter that makes the token deletable as a unit.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* input = shell.chrome()->prompt_input();
+    REQUIRE(input != nullptr);
+
+    shell.mentions().set_source([](const std::string&) {
+        forge_modular::MentionCandidate c;
+        c.brand = "VCV"; c.name = "VCO"; c.slug = "VCO";
+        c.state = forge_modular::MentionCandidate::Availability::ready;
+        return std::vector<forge_modular::MentionCandidate>{c};
+    });
+
+    input->set_text("wire a ");
+    shell.begin_mention();
+    shell.mentions().choose(0);
+    // Marked, so a chosen module does not read as a typed word.
+    CHECK(input->text() == "wire a @VCO ");
+
+    pulp::view::KeyEvent bs;
+    bs.key = pulp::view::KeyCode::backspace;
+
+    // One press takes the whole mention, not one letter of it. The space
+    // before it stays, so the next word can just be typed.
+    CHECK(shell.handle_prompt_key(bs));
+    CHECK(input->text() == "wire a ");
+
+    // And ordinary text is left entirely alone -- the field still behaves like
+    // a field everywhere else, so a second press is the editor's business.
+    CHECK_FALSE(shell.handle_prompt_key(bs));
+    CHECK(input->text() == "wire a ");
+
+    // An '@' that is not the start of a token is not a mention.
+    input->set_text("mail me at a@b");
+    CHECK_FALSE(shell.handle_prompt_key(bs));
+    CHECK(input->text() == "mail me at a@b");
+
+    // Nor is one with text after it -- only the trailing token is a mention.
+    input->set_text("@VCO into the filter");
+    CHECK_FALSE(shell.handle_prompt_key(bs));
+    CHECK(input->text() == "@VCO into the filter");
+}
