@@ -167,58 +167,123 @@ investigation down the wrong path twice.
 
 ---
 
-## Step 4c — Ground patches in real idioms, and assert them
+## Step 4c — A patch vocabulary, built the way the DSP vocabulary is
 
-The honest state: the model is inventing plausible module graphs, not
+The honest state: the model invents plausible module graphs rather than
 reproducing known-good patches. It has an inventory and a prompt and nothing
 anchoring it to how these instruments are actually patched, so "drone" gets
 oscillators into a filter into a delay -- a shape it has read about, not a good
-drone. Listening to one confirms it: a tone, not a piece.
+drone. Listening confirms it: a tone, not a piece.
 
-Rack ships no patch library to learn from (only `template.vcv`), so the anchor
-has to be built. Two things make that legitimate and useful at once.
+A module never had this problem, because `dsp_vocabulary.py` extracts what a
+module may be BUILT FROM and injects it into the module contract. Patches have
+no equivalent. That is the whole gap, and the fix has the same shape.
 
-**Patch idioms are techniques, not expression.** A Krell patch IS "a random
-voltage sampled to set an envelope's decay, with end-of-cycle retriggering the
-envelope." That is a method, documented across manufacturer manuals and decades
-of practice, and describing it in our own words is fair. Copying a book's text
-or ingesting a community patch library is not, and is not proposed.
-
-**A named idiom is simultaneously a prompt exemplar and a test.** The same
-topology that teaches the model what a Krell patch is also asserts whether it
-built one:
+### The subsystem
 
 ```
-krell:
-  requires  random -> sample&hold -> envelope TIME
-            envelope END-OF-CYCLE -> envelope TRIGGER   (the self-play loop)
-  expects   self_playing, evolving
-  fails if  no cycle from an envelope output back to its own trigger
+tools/rack/patch_idioms/*.json     the library -- one file per idiom family
+tools/rack/patch_vocabulary.py     renders it into the patch contract
+                                   (mirrors dsp_vocabulary.py exactly)
+tools/rack/idiom_check.py          asserts a patch against its claimed idiom
 ```
 
-Roughly a dozen carry most of the territory: krell, west-coast LPG voice,
-subtractive drone, generative rhythm from a shift register, ping-filter
-percussion, chaos/Rungler modulation, clock-divided polyrhythm, bouncing-ball
-decay, sample-and-hold burble, feedback patch, kick from a decaying pitch
-envelope, evolving pad from detuned oscillators plus slow LFOs.
+`patch_vocabulary.py` replaces `<!--PATCH_VOCABULARY-->` in the contract the way
+`dsp_vocabulary.py` replaces `<!--DSP_VOCABULARY-->`. Same mechanism, same
+install path, and the same install-time check that it is non-empty -- because an
+empty vocabulary is exactly how the DSP side failed silently and cost three
+model calls per run to discover.
 
-**Why this beats a better prompt.** A prompt asks nicely. A required topology is
-checkable: the krell patch that played one note had the loop wired correctly and
-still failed on behaviour, while the bouncing ball had no trigger source at all
-and would have been rejected before a single sample was rendered.
+### What an idiom carries
 
-**How they combine with 4b.** The idiom names the structure, 4b measures the
-behaviour. Structure without behaviour is the krell case; behaviour without
-structure would pass a drone off as a rhythm. Both, or neither is worth much.
+```json
+{
+  "slug": "krell",
+  "family": "generative",
+  "is": "a voice that plays itself, each note choosing the next one's length",
+  "topology": [
+    {"from": "random", "to": "sample_hold.in"},
+    {"from": "sample_hold.out", "to": "envelope.time"},
+    {"from": "envelope.end_of_cycle", "to": "envelope.trigger"}
+  ],
+  "behaviour": ["self_playing", "evolving"],
+  "sounds_right_when": "note lengths vary audibly and it never stops",
+  "common_mistakes": ["envelope OUT fed back instead of END-OF-CYCLE",
+                      "random source static, so every note is the same length"]
+}
+```
 
-**Done means:** a prompt naming or implying an idiom is checked against its
-required topology BEFORE the audio gate runs, the failure names the missing
-connection rather than saying "no sound", and the idiom's expectations feed 4b's
-behavioural assertions automatically.
+Four jobs from one record: it teaches the model (prompt exemplar), it checks the
+result (topology), it feeds the behavioural gate (Step 4b flags), and it explains
+a rejection in terms a person recognises ("the loop is wired from the envelope's
+output, not its end-of-cycle").
+
+### Where the content comes from
+
+From the body of knowledge these instruments actually have, not invented:
+Allen Strange's *Electronic Music: Systems, Techniques and Controls* for the
+classical voltage-control repertoire; Bjørn & Meyer's *Patch & Tweak* for modern
+Eurorack practice; the manufacturer manuals that document their own idioms best
+(Make Noise Maths and its function-generator patches, Mutable's design notes,
+Buchla's LPG-centred west-coast approach); Rob Hordijk's Rungler and the chaos
+lineage; Todd Barton's Krell work.
+
+**Techniques, not text.** A Krell patch IS "a random voltage sampled to set an
+envelope's decay, with end-of-cycle retriggering it" -- that is a method, and
+describing it in our own words is fair. Copying a book's prose or ingesting a
+community patch library is neither necessary nor proposed.
+
+### Scale
+
+Not a handful. Roughly sixty idioms across families, because coverage is what
+turns this from a demo into a system:
+
+- **voice** -- subtractive, west-coast complex + LPG, FM two-operator, additive
+  drone, karplus-strong pluck, formant/vowel, wavefolded lead
+- **generative** -- krell, Turing-machine shift register, chaos/Rungler,
+  Euclidean, drunk walk, cellular, probability gates
+- **rhythm** -- ping-filter percussion, kick from a decaying pitch envelope,
+  hi-hat from filtered noise, bouncing-ball decay, clock-divided polyrhythm,
+  swing, ratcheting
+- **modulation** -- slow LFO drift, envelope-follower, sample-and-hold burble,
+  cross-modulation, audio-rate FM as timbre
+- **texture** -- granular cloud, feedback patch, delay-as-instrument, reverb
+  freeze, drone with beating detune
+- **utility** -- attenuverted offsets, mixing to unity, quantised pitch, clock
+  division/multiplication, gate-to-trigger
+
+Each family has a shared shape, so the library is more than sixty rows of prose:
+a family carries what its members have in common, and a member states its own
+required loop.
+
+### How this pairs with Step 4b
+
+The idiom names the STRUCTURE, 4b measures the BEHAVIOUR. Structure without
+behaviour is the krell that wired the loop correctly and played one note.
+Behaviour without structure would let a drone pass as a rhythm because something
+moved. Both, or neither is worth much.
+
+Checked in that order, too: topology first, because it is instant and its
+failures are specific ("no cycle from an envelope back to its own trigger"),
+then audio, because rendering costs seconds. The bouncing ball had no trigger
+source at all and would have been rejected before a single sample was rendered.
+
+### Done means
+
+- A prompt naming or implying an idiom is checked against its topology BEFORE
+  the audio gate, and a rejection names the missing connection.
+- The idiom's `behaviour` flags drive 4b's assertions with no second authoring
+  step.
+- `patch_vocabulary.py` is installed and verified non-empty alongside
+  `dsp_vocabulary.py`, so this cannot fail the silent way that one did.
+- A spread of at least a dozen prompts across families each produce a patch that
+  passes its idiom check -- proven by running them, not by reading the library.
 
 **Explicitly not in scope:** deciding whether a patch is *good*. Taste is not
 measurable. What is measurable is whether a patch is the KIND of thing it claims
-to be, and whether it behaves the way that kind behaves.
+to be, and whether it behaves the way that kind behaves. That is a floor, not a
+ceiling -- but the floor is currently absent, which is why a generic tone can
+pass as an evolving drone.
 
 ---
 
