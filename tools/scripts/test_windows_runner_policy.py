@@ -332,10 +332,33 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertIn("macos", keys)
         self.assertIn("linux", keys)
 
-    def test_merge_group_matrix_keeps_windows(self) -> None:
-        self.assertIn("windows", self._matrix_keys("merge_group"))
+    def test_merge_group_matrix_drops_windows_but_keeps_macos_and_linux(self) -> None:
+        """Windows must not sit in the path every merge takes.
+
+        A merge-group leg runs per queued entry, so Windows there is the single
+        largest consumer of hosted minutes while gating nothing — `windows` is
+        advisory, and only `macos` plus the version/skill and Vellum checks are
+        required. Coverage moves to the nightly cross-platform suite, which
+        still catches a Windows break; it just files it as work instead of
+        stalling every merge behind it.
+        """
+        keys = self._matrix_keys("merge_group")
+        self.assertNotIn("windows", keys)
+        # Same negative control as the pull_request case: the saving has to come
+        # from Windows alone. macOS and Linux run on hardware we own, so neither
+        # competes for the hosted pool and dropping either would cost merge-group
+        # signal for nothing.
+        self.assertIn("macos", keys)
+        self.assertIn("linux", keys)
 
     def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
+        """Reduced by default, still reachable on demand.
+
+        Dropping Windows from pull_request and merge_group is a scheduling
+        decision, not a withdrawal of support. A hand-dispatched run must still
+        be able to build it — that is how a Windows fix gets verified without
+        waiting for the nightly.
+        """
         self.assertIn("windows", self._matrix_keys("workflow_dispatch"))
 
     def test_latest_toolchain_gates_skip_pull_request(self) -> None:

@@ -406,6 +406,17 @@ def _check_lane(
 
     # ── drift: the variable must match what the contract says it routes to.
     actual_raw = variables[lane.variable]
+
+    # A sentinel is a bare word by design, not a JSON array — `local-only` is
+    # the documented off switch for macOS overflow, because emptiness cannot
+    # disable a lane whose workflow `||` default would just re-fill it. It has
+    # to be recognized BEFORE the parse: json.loads() rejects it, so the lane's
+    # deliberate off state was being reported as a malformed value that would
+    # "fail at dispatch." A standing error for an intended state is worse than
+    # no check, because it teaches everyone to skim past this report.
+    if actual_raw in contract.sentinels:
+        return findings
+
     try:
         actual = json.loads(actual_raw)
     except json.JSONDecodeError:

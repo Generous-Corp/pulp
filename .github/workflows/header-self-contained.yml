@@ -39,7 +39,7 @@ concurrency:
 jobs:
   self-contained:
     name: Public headers compile standalone (Linux Clang)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_HEADERS_RUNS_ON_JSON || '"ubuntu-24.04"') }}
     steps:
       - uses: actions/checkout@v5
         with:
