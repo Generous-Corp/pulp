@@ -1265,6 +1265,16 @@ Two things such a wrapper must do, because both failures are silent:
 - **Assert every expected artifact exists before invoking the recipe.** A
   Customize pane that quietly lost a format still looks like a successful build.
 
+**Standalone apps must be non-relocatable package components.** `pkgbuild`
+otherwise marks an app bundle relocatable, and Installer may overwrite any
+Launch-Services-known development copy with the same bundle ID instead of
+placing the selected app in `/Applications`. A successful Installer summary and
+receipt do not prove the destination. The recipe analyzes each staged app,
+sets `BundleIsRelocatable=false` for every discovered bundle, and passes the
+result through `--component-plist`. Keep the app-relocation assertion in
+`test_build_combined_installer.py`, and on a real release verify the final paths
+under `/Applications` rather than accepting receipts alone.
+
 The script also accepts bundles from multiple products in one installer. Every
 component package and `pkg-ref` is keyed by the plugin's deterministic
 first-seen index plus format (`plugin-0-au`, `plugin-1-au`, ...), never by format
