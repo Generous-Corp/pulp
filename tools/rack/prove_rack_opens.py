@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -109,6 +110,13 @@ def rack_creates(patch, plugin_dir):
     modules, which is the exact failure this script exists to detect. A probe
     that manufactures the fault it is looking for is worse than no probe.
     """
+    # A beat between launches. Rack aborts in CoreMIDI client creation
+    # sporadically, and the rate goes up sharply when Racks are started back to
+    # back -- a sweep of eighteen produced crash reports that a single run
+    # never does. This does not fix Rack; it stops the checker from being the
+    # thing that provokes it, which is the difference between a tool you can
+    # leave running and one that fills someone's crash-report folder.
+    time.sleep(float(os.environ.get("PROVE_RACK_SETTLE", "1.5")))
     with tempfile.TemporaryDirectory(prefix="rack-open-") as tmp:
         os.symlink(plugin_dir, Path(tmp) / plugin_dir.name)
         r = subprocess.run([str(RACK), "-h", "-u", tmp, str(Path(patch).resolve())],
