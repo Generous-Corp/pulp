@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 63b40c2..f6964d9 100644
+index 63b40c2..00a0b4c 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -332,6 +332,24 @@ if(FORGE_HAS_PULP_HTTP_STREAMING)
@@ -27,7 +27,28 @@ index 63b40c2..f6964d9 100644
  # Absolute paths so the list also resolves from a plugin subdirectory (a
  # subdir's relative source paths would otherwise anchor at that subdir).
  list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-@@ -1573,6 +1591,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -645,6 +663,20 @@ if(FORGE_BUILD_TESTS)
+             forge_core Catch2::Catch2WithMain)
+         catch_discover_tests(forge-test-chrome)
+ 
++        # Forge Modular's chrome/lifetime suite. The file is copied in from the
++        # pulp-modular-rack seam and is untracked here, so the guard is what
++        # keeps a Forge-only checkout configuring -- and registering it here,
++        # rather than leaving it as a step in a README, is what stops a rebuilt
++        # worktree from quietly having no coverage of the shared chrome.
++        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_chrome_no_leak.cpp")
++            add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
++            target_include_directories(forge-test-chrome-no-leak PRIVATE
++                ${CMAKE_CURRENT_SOURCE_DIR}/test)
++            target_link_libraries(forge-test-chrome-no-leak PRIVATE
++                forge_core Catch2::Catch2WithMain)
++            catch_discover_tests(forge-test-chrome-no-leak)
++        endif()
++
+         add_executable(forge-test-audio-asset-coordinator
+             test/test_audio_asset_coordinator.cpp)
+         target_include_directories(forge-test-audio-asset-coordinator PRIVATE
+@@ -1573,6 +1605,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  

@@ -57,6 +57,17 @@ else
     ok "the patch adds the modular sources to the build"
 fi
 
+# And the test target. It was a step in a README -- "register the no-leak test
+# in CMakeLists.txt" -- which a rebuilt worktree simply does not do, leaving no
+# coverage of the shared chrome at all while everything still built. The
+# rebuild that exposed this configured, compiled and linked, and only the
+# missing binary gave it away.
+grep -q "forge-test-chrome-no-leak" "$PATCH" \
+    && ok "the patch registers the chrome test target" \
+    || wrong "the patch never registers forge-test-chrome-no-leak — a worktree
+         rebuilt from it has no chrome coverage, and nothing about the build
+         says so"
+
 if [ ! -f "$BASE_FILE" ]; then
     wrong "no patches/BASE — nothing records which commit the patch applies to,
          so the only way to find it is trial and error"
