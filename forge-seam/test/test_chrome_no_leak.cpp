@@ -1149,7 +1149,9 @@ TEST_CASE("the explanation-depth tabs are patch-only and switch", "[depth][seam]
     shell.set_artifact(forge_modular::Artifact::patch);
     auto tabs = shell.build_accessory();
     REQUIRE(tabs != nullptr);
-    REQUIRE(tabs->child_count() == 4);   // three depths + Open in Rack
+    // Three depths, Open in Rack, and the pill saying whether Rack is there
+    // to open it in.
+    REQUIRE(tabs->child_count() == 5);
 
     // Standard is the default: the middle setting, not an extreme.
     CHECK(shell.depth() == Shell::Depth::standard);
@@ -1744,6 +1746,123 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
     }
 }
 
+TEST_CASE("Rack is handed the patch, not left to restore its autosave",
+          "[rack][open]") {
+    // The stray module. `~/Library/Application Support/Rack2/autosave/patch.json`
+    // held one TURBID and no cables for days, and Rack restores that on every
+    // launch -- so a freshly built patch handed over as a DOCUMENT arrived, if
+    // at all, behind the previous session. It read as our patch failing to
+    // load. It was Rack showing its last one first.
+    //
+    // Rack takes a patch path as a positional argument and loads THAT instead
+    // of the autosave, and `open --args` is how a launch carries one.
+    const std::string app = "/Applications/VCV Rack 2 Free.app";
+    const std::string patch = "/tmp/some patch.vcv";
+
+    const auto cold = forge_modular::rack_open_command(app, patch, false);
+    INFO(cold);
+    CHECK(cold.find("--args") != std::string::npos);
+    CHECK(cold.find("some patch.vcv") != std::string::npos);
+
+    // Already running is the other case, and --args would be ignored there --
+    // it only reaches an app being launched. Handing a live Rack a second
+    // launch instead would put two of them on one audio device.
+    const auto warm = forge_modular::rack_open_command(app, patch, true);
+    INFO(warm);
+    CHECK(warm.find("--args") == std::string::npos);
+    CHECK(warm.find("some patch.vcv") != std::string::npos);
+
+    // Both ends are user-shaped text: Application Support has a space in it
+    // and a patch is named after the prompt somebody typed. Asserted by
+    // running the command through a real shell with a stub `open` that prints
+    // its arguments -- substring-matching the command text would pass on a
+    // path the shell then splits into three.
+    const auto args_of = [](const std::string& command) {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "forge-rack-open-stub";
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        const auto stub = dir / "open";
+        {
+            std::ofstream f(stub);
+            f << "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n";
+        }
+        std::filesystem::permissions(stub, std::filesystem::perms::owner_all);
+        const auto out = dir / "argv.txt";
+        const std::string sh = "PATH=" + dir.string() + ":$PATH " + command +
+                               " > " + out.string();
+        std::system(sh.c_str());
+        std::vector<std::string> argv;
+        std::ifstream in(out);
+        for (std::string line; std::getline(in, line);) argv.push_back(line);
+        return argv;
+    };
+
+    const auto awkward = args_of(forge_modular::rack_open_command(
+        app, "/tmp/it's a drone.vcv", false));
+    REQUIRE(awkward.size() == 4);
+    CHECK(awkward[0] == "-a");
+    CHECK(awkward[1] == app);           // the space in the app path survived
+    CHECK(awkward[2] == "--args");
+    CHECK(awkward[3] == "/tmp/it's a drone.vcv");   // and the apostrophe
+
+    const auto plain = args_of(forge_modular::rack_open_command(
+        app, "/tmp/some patch.vcv", true));
+    REQUIRE(plain.size() == 3);
+    CHECK(plain[2] == "/tmp/some patch.vcv");
+}
+
+TEST_CASE("whether Rack is there is shown, not left to be discovered",
+          "[rack][open]") {
+    // All three states were known to the app and reached a person only as the
+    // wording of a failure AFTER they pressed the button. Until then "Rack is
+    // not installed" and "the button did nothing" looked the same.
+    forge_modular::RackPresence p;
+    CHECK(p.phrase() == "Rack is not installed");
+    p.plugin_installed = true;
+    CHECK(p.phrase() == "Rack is available as a plugin");
+    p.standalone_installed = true;
+    CHECK(p.phrase() == "Rack is installed");
+    p.standalone_running = true;
+    CHECK(p.phrase() == "Rack is running");
+
+    // Every state says something different. A phrase() that returned one
+    // string would satisfy nothing above but is worth pinning: the pill is
+    // only useful because the four readings are distinguishable.
+    std::set<std::string> said;
+    for (int i = 0; i < 8; ++i) {
+        forge_modular::RackPresence q;
+        q.standalone_running = i & 1;
+        q.standalone_installed = i & 2;
+        q.plugin_installed = i & 4;
+        said.insert(q.phrase());
+    }
+    CHECK(said.size() == 4);
+
+    // And it reaches the screen. The pill is hidden until there is something
+    // to open, then carries the words look_for_rack() found on this machine.
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* tabs = shell.chrome()->build_accessory();
+    REQUIRE(tabs != nullptr);
+    auto* pill = dynamic_cast<pulp::view::Label*>(
+        tabs->child_at(tabs->child_count() - 1));
+    REQUIRE(pill != nullptr);
+    CHECK_FALSE(pill->visible());        // nothing built yet, nothing to open
+
+    shell.refresh_rack_presence();
+    INFO("pill says: " << shell.rack_presence_phrase());
+    CHECK_FALSE(shell.rack_presence_phrase().empty());
+    CHECK(shell.rack_presence_phrase() == pill->text());
+    // It has to say one of the four things, not any string at all.
+    CHECK(said.count(shell.rack_presence_phrase()) == 1);
+}
+
 TEST_CASE("a patch nobody generated still says something", "[rack]") {
     // Imported and shipped patches have no per-cable reasoning and never will:
     // nobody wrote one. The only honest sentence is computed from the wiring,
@@ -2329,7 +2448,7 @@ TEST_CASE("a real generated patch drives the rack, explanation and tabs",
     REQUIRE(shell.explanation() != nullptr);
     CHECK(shell.explanation()->line_count() == loaded.connections.size());
     REQUIRE(chrome->build_accessory() != nullptr);
-    CHECK(chrome->build_accessory()->child_count() == 4);
+    CHECK(chrome->build_accessory()->child_count() == 5);
 
     // The learning tabs change what this real patch says about itself.
     auto* tabs = chrome->build_accessory();

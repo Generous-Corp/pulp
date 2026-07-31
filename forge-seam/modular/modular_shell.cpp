@@ -471,6 +471,25 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
     // Hidden until something exists to open: a button that cannot work yet
     // teaches people to distrust it.
     group->add_child(std::move(open_btn));
+
+    // What Rack's state actually is, beside the button that depends on it.
+    // The app has always known this and only ever said it as the wording of a
+    // failure AFTER the button was pressed -- so "Rack is not installed" and
+    // "the button did nothing" were the same experience up to that point.
+    {
+        auto pill = std::make_unique<pulp::view::Label>("");
+        pill->set_font_family(forge::design::type::mono);
+        pill->set_font_size(10.0f);
+        pill->set_text_color(forge::design::color::text_faint);
+        pill->set_vertical_align(pulp::canvas::TextVerticalAlign::center);
+        pill->flex().preferred_height = 26;
+        pill->flex().flex_grow = 0;
+        pill->flex().flex_shrink = 0;
+        pill->set_hit_testable(false);
+        pill->set_visible(false);
+        rack_pill_ = pill.get();
+        group->add_child(std::move(pill));
+    }
     return group;
 }
 
@@ -780,14 +799,14 @@ std::string ForgeModularShell::artifact_path() const {
     return {};
 }
 
-namespace {
-
-/// Where a Rack artifact can be opened on this machine.
-struct RackPresence {
-    bool standalone_installed = false;
-    bool standalone_running = false;
-    bool plugin_installed = false;     ///< Rack Pro as AU/VST3/CLAP
-};
+std::string RackPresence::phrase() const {
+    // One sentence, in the order a person cares about: can I use it right now,
+    // could I, or do I need to go and get it.
+    if (standalone_running) return "Rack is running";
+    if (standalone_installed) return "Rack is installed";
+    if (plugin_installed) return "Rack is available as a plugin";
+    return "Rack is not installed";
+}
 
 RackPresence look_for_rack() {
     RackPresence r;
@@ -812,7 +831,34 @@ RackPresence look_for_rack() {
     return r;
 }
 
+namespace {
+
+/// A path as one shell word, whatever is in it. Application Support has a
+/// space in it and a patch is named after the prompt, so both ends of every
+/// command here are user-shaped text.
+std::string quoted(const std::string& text) {
+    std::string out = "'";
+    for (const char c : text) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    return out + "'";
+}
+
 }  // namespace
+
+std::string rack_open_command(const std::string& app, const std::string& patch,
+                              bool already_running) {
+    if (already_running) {
+        // A live application takes a document; --args would be ignored, and
+        // launching a second Rack would put two of them on one audio device.
+        return "open -a " + quoted(app) + " " + quoted(patch);
+    }
+    // Rack's own positional argument. Without it Rack starts by restoring its
+    // autosave, and the patch just built arrives -- if at all -- behind
+    // whatever was open last time.
+    return "open -a " + quoted(app) + " --args " + quoted(patch);
+}
 
 std::string ForgeModularShell::open_in_rack() {
     // Re-checked at click time, not just at paint time. A generation can start
@@ -828,15 +874,13 @@ std::string ForgeModularShell::open_in_rack() {
 
     const auto rack = look_for_rack();
 
-    auto launch = [path] {
-        // A running Rack takes the file into the instance already open rather
-        // than starting a second one, which is what `open` does with a live
-        // application -- and two Racks fighting for one audio device is the
-        // silence this button exists to avoid.
-        std::thread([path] {
+    auto launch = [path, &rack] {
+        const bool running = rack.standalone_running;
+        std::thread([path, running] {
             std::string out;
-            ProcessEngine::run("open -a \"/Applications/VCV Rack 2 Free.app\" '" +
-                               path + "' &", out);
+            ProcessEngine::run(
+                rack_open_command("/Applications/VCV Rack 2 Free.app", path,
+                                  running) + " &", out);
         }).detach();
     };
 
@@ -1002,7 +1046,32 @@ void ForgeModularShell::on_poll() {
         if (ready != open_button_->visible()) {
             open_button_->set_visible(ready);
             open_button_->request_repaint();
+            // Probe the moment the button appears, so the pill is right the
+            // first time it is read rather than up to a throttle late.
+            if (ready) rack_probed_ = {};
         }
+        if (ready) refresh_rack_presence();
+        if (rack_pill_ && rack_pill_->visible() != ready) {
+            rack_pill_->set_visible(ready);
+            rack_pill_->request_repaint();
+        }
+    }
+}
+
+void ForgeModularShell::refresh_rack_presence() {
+    // `pgrep` is a process spawn, and the poll runs several times a second for
+    // a state that changes when somebody launches an application.
+    const auto now = std::chrono::steady_clock::now();
+    if (rack_probed_ != std::chrono::steady_clock::time_point{} &&
+        now - rack_probed_ < std::chrono::seconds(2))
+        return;
+    rack_probed_ = now;
+    auto phrase = look_for_rack().phrase();
+    if (phrase == rack_phrase_) return;
+    rack_phrase_ = std::move(phrase);
+    if (rack_pill_) {
+        rack_pill_->set_text(rack_phrase_);
+        rack_pill_->request_repaint();
     }
 }
 

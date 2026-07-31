@@ -68,6 +68,37 @@ public:
 /// and do nothing, exactly the defect that shipped in the app.
 std::unique_ptr<pulp::format::Processor> create_forge_modular();
 
+/// Where a Rack artifact can be opened on this machine.
+///
+/// Public because it is now SHOWN. The app knew all three of these and told
+/// nobody: the state only reached a person as the wording of an error after
+/// they had already pressed a button, so "why is nothing happening" and "Rack
+/// is not installed" looked identical until then.
+struct RackPresence {
+    bool standalone_installed = false;
+    bool standalone_running = false;
+    bool plugin_installed = false;     ///< Rack Pro as AU/VST3/CLAP
+
+    /// The one phrase that names this state, for the pill beside the button.
+    std::string phrase() const;
+};
+
+/// What this machine has, probed now.
+RackPresence look_for_rack();
+
+/// The shell command that opens `patch` in Rack.
+///
+/// Rack takes a patch path as a positional argument and loads THAT instead of
+/// restoring its autosave -- which is the whole point here. A patch handed
+/// over as a document (`open -a Rack file`) left Rack restoring the previous
+/// session, so a stray TURBID with no cables kept appearing in front of a
+/// patch that had loaded perfectly well and was sitting behind it.
+///
+/// `--args` only reaches an app being LAUNCHED, so a Rack already running is
+/// handed the file the other way and told about it.
+std::string rack_open_command(const std::string& app, const std::string& patch,
+                              bool already_running);
+
 class ForgeModularShell final : public forge::ForgeShell {
 public:
     ForgeModularShell();
@@ -136,6 +167,14 @@ public:
 
     /// The path the generator reported, or empty until a build succeeds.
     std::string artifact_path() const;
+
+    /// What the presence pill currently says. Exposed so a test can read the
+    /// words a person is actually shown rather than the flags behind them.
+    const std::string& rack_presence_phrase() const { return rack_phrase_; }
+
+    /// Re-probe for Rack and update the pill. Called from the poll, throttled;
+    /// exposed so a test need not wait for a timer.
+    void refresh_rack_presence();
 
     /// Which of Forge's model roles an artifact actually consumes.
     ///
@@ -276,6 +315,12 @@ private:
     std::vector<pulp::view::Label*> depth_labels_;
     pulp::view::View* depth_group_ = nullptr;
     pulp::view::TextButton* open_button_ = nullptr;
+    pulp::view::Label* rack_pill_ = nullptr;
+    std::string rack_phrase_;
+    /// When the presence was last probed. `pgrep` on every poll would be a
+    /// process spawn several times a second for a state that changes when
+    /// somebody launches an application.
+    std::chrono::steady_clock::time_point rack_probed_{};
     std::vector<pulp::view::Label*> tab_labels_;
     void refresh_depth_tabs();
     std::string last_random_;
