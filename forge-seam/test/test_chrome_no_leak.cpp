@@ -4790,3 +4790,42 @@ TEST_CASE("Open in Rack refuses a patch this Rack cannot create",
 
     std::filesystem::remove_all(dir, ec);
 }
+
+TEST_CASE("closing the editor drops the mention overlay's view pointers",
+          "[crash][lifetime]") {
+    // The overlay belongs to the SHELL, which outlives every editor, while the
+    // views it points at belong to the editor's tree. Between one editor
+    // closing and the next being built there is nothing here to point at, and
+    // a kept pointer names freed memory.
+    //
+    // `forget_views()` existed for this and had no test that could fail
+    // without it: removing it left the whole suite green, including under
+    // Guard Malloc, because nothing touched the overlay after an editor
+    // closed. An untested guard is indistinguishable from a comment.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // Open it, so root_ and list_ genuinely point into this editor's tree. An
+    // overlay that was never opened has nothing to forget.
+    shell.begin_mention();
+    REQUIRE(shell.mentions().is_open());
+
+    shell.on_view_closed(*view);
+    view.reset();
+
+    // Deterministic half: an overlay still claiming to be open is claiming a
+    // window that no longer exists, and the next thing to consult it acts on
+    // that answer.
+    CHECK_FALSE(shell.mentions().is_open());
+
+    // Guard Malloc half: close() calls root_->set_visible(false) whenever
+    // root_ is non-null. With the pointers forgotten this is a no-op; with
+    // them kept it writes into the freed view tree.
+    shell.mentions().close();
+    CHECK_FALSE(shell.mentions().is_open());
+}
