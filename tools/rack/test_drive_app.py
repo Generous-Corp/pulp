@@ -26,7 +26,8 @@ DRIVE = os.path.join(HERE, "drive_app.py")
 PASS, FAIL, RUNNING, INCONCLUSIVE = 0, 1, 2, 3
 
 
-def run_verdict(log_text: str, expect: str, make_artifact: bool = True):
+def run_verdict(log_text: str, expect: str, make_artifact: bool = True,
+                busy: bool = False):
     """Run the real verdict against a synthetic log, in a sandbox."""
     with tempfile.TemporaryDirectory() as tmp:
         artifact = os.path.join(tmp, "demo.vcv")
@@ -39,11 +40,14 @@ def run_verdict(log_text: str, expect: str, make_artifact: bool = True):
         # driver touching the real one.
         src = open(DRIVE).read().replace(
             'LOG = os.path.expanduser(', 'LOG = (lambda _: %r)(' % log, 1)
-        ns = {"__name__": "driver_under_test"}
+        # __file__ too: the driver resolves its helper source relative to
+        # itself, and a namespace without one is not a module the code could
+        # ever really run in.
+        ns = {"__name__": "driver_under_test", "__file__": DRIVE}
         exec(compile(src, DRIVE, "exec"), ns)
         ns["LOG"] = log
         ns["DIAGNOSTICS"] = os.path.join(tmp, "no-such-dir")
-        ns["generating"] = lambda: False
+        ns["generating"] = lambda: busy
 
         import io
         from contextlib import redirect_stdout
@@ -54,7 +58,7 @@ def run_verdict(log_text: str, expect: str, make_artifact: bool = True):
 
 
 CASES = [
-    # (name, log, expect, artifact exists, expected verdict)
+    # (name, log, expect, artifact exists, expected verdict[, generator busy])
     ("a built patch passes",
      "  built 8 modules, 9 cables → <ARTIFACT>\n\nAUDIO\n  VCO SAW → VCF IN\n",
      "patch", True, PASS),
@@ -94,17 +98,74 @@ CASES = [
      "  thinking\n  gave up: could not satisfy the request\n",
      "patch", True, FAIL),
 
+    # The one that made the M5 proof lie. Build HAD landed, the model call was
+    # in flight, and nothing was written yet -- reported as "Build did not
+    # reach it", which is the opposite of what was happening.
+    ("a generation in flight is running, not a dead button",
+     "", "patch", False, RUNNING, True),
     ("silence is inconclusive, not a pass",
      "  thinking\n  writing files\n",
      "patch", True, INCONCLUSIVE),
 ]
 
 
+sys.path.insert(0, HERE)
+import drive_app as D                                    # noqa: E402
+
+
+def check_uidriver() -> int:
+    """The click/type helper builds from source that is actually in the repo.
+
+    It used to be two binaries in /tmp and no source anywhere, so the app proof
+    worked on one machine until it was rebooted, then failed everywhere with
+    "build the click/type helpers first" -- an instruction nobody could follow.
+    This deletes the cached binary first, so it proves the SOURCE builds rather
+    than that a stale copy is lying around.
+    """
+    import subprocess
+    bad = 0
+    if not os.path.exists(D.UIDRIVER_SRC):
+        print(f"  WRONG  no helper source at {D.UIDRIVER_SRC}")
+        return 1
+    try:
+        os.remove(D.UIDRIVER)
+    except FileNotFoundError:
+        pass
+    try:
+        built = D.uidriver()
+    except SystemExit as e:
+        print(f"  WRONG  the helper does not build: {e}")
+        return 1
+    if not os.path.exists(built):
+        print("  WRONG  uidriver() returned a path that is not there")
+        return 1
+    print("  ok     the click/type helper builds from committed source")
+
+    # It has to REFUSE what it cannot do, rather than exit 0 having done
+    # nothing -- a helper that silently succeeds is a click that never
+    # happened and a proof that passes anyway.
+    for args, why in ((["click"], "click with no coordinates"),
+                      (["wat"], "an unknown command"),
+                      ([], "no command at all")):
+        r = subprocess.run([built, *args], capture_output=True, text=True)
+        if r.returncode == 0:
+            print(f"  WRONG  {why} exited 0")
+            bad += 1
+        elif "uidriver:" not in r.stderr:
+            print(f"  WRONG  {why} failed without saying why: {r.stderr!r}")
+            bad += 1
+    if not bad:
+        print("  ok     it refuses a call it cannot carry out, and says so")
+    return bad
+
+
 def main() -> int:
     bad = 0
-    for name, log, expect, exists, want in CASES:
+    for case in CASES:
+        name, log, expect, exists, want = case[:5]
+        busy = case[5] if len(case) > 5 else False
         try:
-            code, out = run_verdict(log, expect, exists)
+            code, out = run_verdict(log, expect, exists, busy)
         except Exception as e:  # noqa: BLE001 - report, don't mask
             print(f"  ERROR  {name}: {e}")
             bad += 1
@@ -118,6 +179,7 @@ def main() -> int:
                   f"got {names.get(code, code)}")
             print("         " + out.strip().replace("\n", "\n         ")[:400])
             bad += 1
+    bad += check_uidriver()
     print(f"\n{len(CASES) - bad}/{len(CASES)} verdicts correct")
     return 1 if bad else 0
 

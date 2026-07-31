@@ -43,7 +43,7 @@ index 63b40c2..b4cd44a 100644
  
      # A replacement bundle with unchanged Info.plist version can remain stale
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..5c212a0 100644
+index 0863f43..6fdee12 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
 @@ -640,6 +640,52 @@ public:
@@ -170,7 +170,21 @@ index 0863f43..5c212a0 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1229,10 @@ private:
+@@ -989,6 +1085,13 @@ private:
+     void reset_chips();
+     void resolve_chips_done();  // set every pipeline chip to its terminal "ok"
+     void clear_chat_rail();     // detach all bubbles/lines (keep the status card)
++    /// The rail that was just detached, kept alive until the next reset.
++    ///
++    /// clear_chat_rail() runs from inside event delivery, and destroying a
++    /// view the delivery is still walking is a use-after-free. Holding the
++    /// old bubbles here costs one conversation's worth of views and removes
++    /// the whole class of crash.
++    std::vector<std::unique_ptr<pulp::view::View>> retired_chat_;
+     void apply_progress(gen::GenStage stage, const std::string& detail);
+     void copy_full_error();
+     void refresh_activity_readout();  // repaint the live token / answer-size line
+@@ -1133,6 +1236,10 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
@@ -181,7 +195,7 @@ index 0863f43..5c212a0 100644
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1271,7 @@ private:
+@@ -1171,6 +1278,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -429,7 +443,7 @@ index c8101e1..ff2b01a 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..13311e7 100644
+index 1c3814e..6fd6c4a 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,81 @@ private:
@@ -868,7 +882,41 @@ index 1c3814e..13311e7 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -8630,6 +8829,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -6771,11 +6970,32 @@ void ForgeChrome::reset_chips() {
+ // status card. Used when the shelf opens a DIFFERENT entry: the rail must show
+ // the newly-opened build's conversation, not the previous one's.
+ void ForgeChrome::clear_chat_rail() {
++    // The previous rail is DETACHED here and destroyed later, never destroyed
++    // on the spot.
++    //
++    // This runs from a Build click, which arrives through deliver_mouse_down,
++    // which is part-way through walking the very tree being emptied. Freeing a
++    // bubble under it left the walk holding freed memory and the app died in
++    // ~Label with a null read -- reproducibly, under Guard Malloc, on the
++    // second build of a session. The first build never showed it because an
++    // empty rail has nothing to free.
++    //
++    // Ownership simply moves: the views stay alive, out of the tree, until the
++    // NEXT reset, by which time no event is being delivered into them. Cheap,
++    // needs no run loop, and so behaves the same in a headless test as in the
++    // app -- which a "defer to the next turn of the loop" fix would not.
++    // NOT cleared here. Freeing the PREVIOUS generation at the start of the
++    // next reset moved the crash from the first build to the second: something
++    // in the chrome still refers to a retired bubble, and this is not the
++    // place to find out what. They are held for the life of the editor
++    // instead -- a few dozen detached labels per session, against a
++    // reproducible segfault on the app's primary button.
+     if (chat_col_) {
+         for (std::size_t i = chat_col_->child_count(); i-- > 0;) {
+             pulp::view::View* c = chat_col_->child_at(i);
+             if (c == status_card_) continue;  // keep the reusable status card
+-            chat_col_->remove_child(c);
++            if (auto owned = chat_col_->remove_child(c))
++                retired_chat_.push_back(std::move(owned));
+         }
+     }
+     transcript_.clear();
+@@ -8630,6 +8850,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -888,7 +936,7 @@ index 1c3814e..13311e7 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9212,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9233,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -903,7 +951,7 @@ index 1c3814e..13311e7 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9226,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9247,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -914,7 +962,7 @@ index 1c3814e..13311e7 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9237,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9258,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(

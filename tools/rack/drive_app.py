@@ -41,8 +41,28 @@ HOME = os.path.expanduser("~/Library/Application Support/Forge Modular")
 LOG = os.path.join(HOME, "last-run.log")
 DIAGNOSTICS = os.path.join(HOME, "projects", "diagnostics")
 
-CLICK = "/tmp/click"
-TYPER = "/tmp/typer"
+HERE = os.path.dirname(os.path.abspath(__file__))
+UIDRIVER_SRC = os.path.join(HERE, "uidriver.swift")
+# NOT /tmp. The click and type helpers lived there as two binaries with no
+# source anywhere, so the app proof ran on one machine until it was rebooted
+# and then failed everywhere with "build the click/type helpers first" -- a
+# step nobody could carry out, because there was nothing to build from.
+UIDRIVER = os.path.join(os.path.expanduser("~/.cache/forge-modular"), "uidriver")
+
+
+def uidriver() -> str:
+    """The click/type helper, compiled if it is missing or out of date."""
+    import subprocess
+    if os.path.exists(UIDRIVER) and \
+            os.path.getmtime(UIDRIVER) > os.path.getmtime(UIDRIVER_SRC):
+        return UIDRIVER
+    os.makedirs(os.path.dirname(UIDRIVER), exist_ok=True)
+    r = subprocess.run(["swiftc", "-O", "-o", UIDRIVER, UIDRIVER_SRC],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("could not build the click/type helper from "
+                 f"{UIDRIVER_SRC}:\n{r.stderr[:600]}")
+    return UIDRIVER
 
 # Where things sit inside the window, as fractions of its size. Fractions
 # rather than pixels because the window is not always the same size, and a
@@ -179,13 +199,13 @@ def ensure_home() -> None:
 
 def click(target: str) -> None:
     px, py = point(target)
-    subprocess.run([CLICK, str(px), str(py)], check=True)
+    subprocess.run([uidriver(), "click", str(px), str(py)], check=True)
     print(f"  clicked {target} at ({px}, {py})")
     time.sleep(0.6)
 
 
 def type_text(text: str) -> None:
-    subprocess.run([TYPER, text], check=True)
+    subprocess.run([uidriver(), "type", text], check=True)
     print(f"  typed {text!r}")
     time.sleep(0.6)
 
@@ -236,6 +256,15 @@ def verdict(expect: str = "") -> int:
                   f"{m.group(2)} cables, and the file exists")
             return 0
     if not st["exists"] or st["bytes"] == 0:
+        # A generation that has STARTED and not yet written is not a Build that
+        # failed to land. This test used to come first, so a run that was
+        # working perfectly reported "Build did not reach it" -- the exact
+        # opposite of what was happening, and the reason the M5 proof read as
+        # a dead button while the app was busy building the patch it went on
+        # to finish.
+        if st["generating"]:
+            print("RUNNING: Build started a generation; it has not written yet")
+            return 2
         print("FAIL: the generator never wrote anything — Build did not reach it")
         return 1
     text = "\n".join(st["tail"])
@@ -263,9 +292,11 @@ def main(argv: list[str]) -> int:
         return 2
     cmd = argv[1]
 
-    for tool in (CLICK, TYPER):
-        if cmd not in ("status", "quit", "launch") and not os.path.exists(tool):
-            sys.exit(f"missing {tool} — build the click/type helpers first")
+    # Built on demand from committed source, rather than demanded of whoever
+    # is running this. "Build the helpers first" was an instruction with no
+    # referent: there was no source in the repo to build.
+    if cmd not in ("status", "quit", "launch"):
+        uidriver()
 
     if cmd == "launch":
         if running():
@@ -373,6 +404,20 @@ def main(argv: list[str]) -> int:
                      "was typed and the button was clicked, so the click "
                      "landed somewhere that is not Build — see "
                      "/tmp/drive-build-nofire.png")
+        # Then WAIT for it to finish. The verdict used to be taken twenty
+        # seconds after the click, while the model call was still in flight, so
+        # a build that went on to succeed was reported as a Build that never
+        # happened. A generation is minutes; the cap is generous and the
+        # progress is printed, so a run that is genuinely stuck is still
+        # visible rather than silent.
+        deadline = time.time() + float(os.environ.get("FORGE_DRIVE_WAIT", 1500))
+        while generating() and time.time() < deadline:
+            time.sleep(5)
+            left = int(deadline - time.time())
+            print(f"  generating… {left}s before this gives up", flush=True)
+        if generating():
+            print("  the generator is still running and the wait ran out; "
+                  "it is not being killed — read the verdict as inconclusive")
         shot("/tmp/drive-build.png")
         return verdict("patch" if cmd == "patch" else "module")
 

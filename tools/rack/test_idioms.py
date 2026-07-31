@@ -357,7 +357,22 @@ def check_corpus(idioms) -> int:
             print(f"  WRONG  {name} is missing — the regression cannot run")
             bad += 1
             continue
-        problems = idiom_check.check(json.load(open(path)), inv, idioms[slug])
+        patch = json.load(open(path))
+        # A patch naming modules this machine does not have is not a verdict on
+        # the checker. The M5 runs a plugin build eight modules older than this
+        # checkout, so the krell's low-pass gate simply is not there -- and the
+        # idiom then reports, perfectly correctly, that nothing opens the
+        # amplifier. Reported as what it is, or the next person debugs a
+        # checker that is working.
+        missing = sorted({m.get("model") for m in patch.get("modules", [])
+                          if m.get("model") not in
+                          inv.get(m.get("plugin"), {}).get("modules", {})})
+        if missing:
+            print(f"  --     {name}: skipped, this machine has no "
+                  f"{', '.join(missing)} — its plugin build is older than "
+                  f"these patches")
+            continue
+        problems = idiom_check.check(patch, inv, idioms[slug])
         held = not problems
         if held != should_hold:
             print(f"  WRONG  {name}: expected {'holds' if should_hold else 'fails'}, "

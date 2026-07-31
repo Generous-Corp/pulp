@@ -2059,6 +2059,128 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
     CHECK(learning_lines > standard_lines);
 }
 
+TEST_CASE("pressing Build through a real click does not tear itself down",
+          "[phase6][controls][crash]") {
+    // Forge Modular segfaulted on the M5 the moment Build was clicked:
+    //
+    //   Label::~Label -> View::~View -> ForgeChrome::clear_chat_rail
+    //     -> begin_new_session -> start_build_with -> start_build
+    //     -> composer_row()::$_3 -> deliver_mouse_down
+    //
+    // Starting a build resets the session, and resetting the session destroys
+    // the Home subtree -- including the button whose click handler is still on
+    // the stack, inside the very event delivery that is walking it. This
+    // codebase already knows the shape: PatchExplanation::on_resized says in
+    // as many words that replacing children from inside a pass that is walking
+    // them segfaults, and defers to the next turn of the loop.
+    //
+    // Every existing test called on_click() DIRECTLY, which never enters
+    // deliver_mouse_down and so never destroys anything under it. That is why
+    // a suite of 600 assertions was green while the app crashed on its
+    // primary button.
+    // A generator that says yes. Without one, start_build_with returns "the
+    // generator is not connected" before it ever resets the session -- which
+    // is the second reason the suite never saw this: the crash lives past a
+    // guard no test could get through.
+    struct WillingEngine : forge_modular::EngineClient {
+        bool submitted = false;
+        bool available() const override { return true; }
+        bool ensure_running() override { return true; }
+        void submit(const std::string&, bool) override { submitted = true; }
+    } engine;
+
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    // Rendered once so the tree goes through the real layout pass; without
+    // it every child is still at 0x0 and a click lands nowhere.
+    const auto shot = std::filesystem::temp_directory_path() /
+                      "modular-build-click.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth,
+        forge::ForgeChrome::kDesignHeight, shot.string(), 1.0f,
+        pulp::view::ScreenshotBackend::skia));
+
+    auto* input = shell.chrome()->prompt_input();
+    REQUIRE(input != nullptr);
+    input->set_text("a classic subtractive voice with a filter envelope");
+
+    // The Build button, found in the live tree rather than rebuilt here.
+    pulp::view::View* build = nullptr;
+    std::function<void(pulp::view::View*)> walk = [&](pulp::view::View* v) {
+        if (!v || build) return;
+        if (auto* b = dynamic_cast<pulp::view::TextButton*>(v)) {
+            if (b->access_label().find("Build") != std::string::npos) {
+                build = b;
+                return;
+            }
+        }
+        for (std::size_t i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+    };
+    walk(view.get());
+    REQUIRE(build != nullptr);
+
+    // Through the window server's path, not the handler's front door. This is
+    // the whole point: the crash is in what happens to the view tree WHILE the
+    // event is being delivered into it.
+    const auto b = build->bounds();
+    float rx = b.x + b.width / 2.0f, ry = b.y + b.height / 2.0f;
+    for (auto* up = build->parent(); up; up = up->parent()) {
+        rx += up->bounds().x;
+        ry += up->bounds().y;
+    }
+    INFO("clicking Build at " << rx << "," << ry);
+    view->simulate_click({rx, ry});
+
+    // The defect, asserted deterministically rather than left to a
+    // sanitiser: is the control that was clicked STILL IN THE TREE? A
+    // use-after-free only faults when the memory happens to be reused, so a
+    // plain run can pass over it all day -- but walking down from the live
+    // root and failing to find the button is unambiguous, and it is exactly
+    // what the crash report describes.
+    pulp::view::View* found = nullptr;
+    std::function<void(pulp::view::View*)> still_there = [&](pulp::view::View* v) {
+        if (!v || found) return;
+        if (v == build) { found = v; return; }
+        for (std::size_t i = 0; i < v->child_count(); ++i) still_there(v->child_at(i));
+    };
+    still_there(view.get());
+    CHECK(found != nullptr);
+
+    // Surviving is most of the assertion. The rest says the press was not
+    // simply swallowed to achieve that.
+    CHECK(shell.chrome()->mode() == forge::ForgeChrome::Mode::Build);
+    CHECK(engine.submitted);
+
+    // And AGAIN, with a conversation behind it. The M5 crash was on the
+    // SECOND build of a session -- the app launched at 22:55, built a patch,
+    // and died at 22:59 when Build was pressed again. begin_new_session()
+    // only resets the rail from Home, and on the first build that rail is
+    // empty, so there is nothing to destroy and nothing goes wrong. The
+    // second one tears down a rail full of the first build's bubbles while
+    // the click that asked for it is still being delivered.
+    shell.chrome()->narrate("Built. Open it in Rack to play it.");
+    shell.chrome()->narrate("Eight modules, nine cables.");
+    shell.chrome()->enter_home();
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth,
+        forge::ForgeChrome::kDesignHeight, shot.string(), 1.0f,
+        pulp::view::ScreenshotBackend::skia));
+    if (auto* again = shell.chrome()->prompt_input())
+        again->set_text("a west coast voice through a low pass gate");
+    view->simulate_click({rx, ry});
+    CHECK(shell.chrome()->mode() == forge::ForgeChrome::Mode::Build);
+}
+
 TEST_CASE("no control on Home paints like a control and does nothing",
           "[phase6][controls]") {
     // A control that highlights and does nothing is indistinguishable from a
