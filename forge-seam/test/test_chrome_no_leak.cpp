@@ -2231,11 +2231,28 @@ TEST_CASE("a build can be asked for without driving the screen",
     REQUIRE(engine.prompts.size() == 1);
     CHECK(engine.prompts[0] == "a west coast voice through a low pass gate");
 
+    // The request says WHICH artifact. Without it the shell builds whichever
+    // it was last on, so a request for a patch built a module and the run
+    // failed for asking the wrong question rather than for anything broken.
+    shell.set_artifact(forge_modular::Artifact::module);
+    { std::ofstream f(trigger); f << "patch: two detuned oscillators\n"; }
+    shell.chrome()->poll();
+    REQUIRE(engine.prompts.size() == 2);
+    CHECK(engine.prompts[1] == "two detuned oscillators");
+    CHECK(shell.artifact() == forge_modular::Artifact::patch);
+
+    { std::ofstream f(trigger); f << "module: a 6 HP sample and hold\n"; }
+    shell.chrome()->poll();
+    REQUIRE(engine.prompts.size() == 3);
+    CHECK(engine.prompts[2] == "a 6 HP sample and hold");
+    CHECK(shell.artifact() == forge_modular::Artifact::module);
+
     // Consumed, so a build that takes minutes is not started again every tick.
     CHECK_FALSE(std::filesystem::exists(trigger));
+    const auto asked = engine.prompts.size();
     shell.chrome()->poll();
     shell.chrome()->poll();
-    CHECK(engine.prompts.size() == 1);
+    CHECK(engine.prompts.size() == asked);
 
     unsetenv("FORGE_MODULAR_TEST_PROMPT");
 }

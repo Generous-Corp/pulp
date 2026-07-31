@@ -978,6 +978,19 @@ void ForgeModularShell::on_poll() {
             // Removed BEFORE submitting, so a build that takes minutes cannot
             // be started again on the next tick.
             std::filesystem::remove(trigger, ec);
+            // "patch: …" or "module: …" chooses WHICH artifact, because the
+            // shell defaults to whichever it was last on -- a request for a
+            // patch built a module, and the run failed for asking the wrong
+            // question rather than for anything being broken.
+            if (prompt.rfind("patch:", 0) == 0) {
+                set_artifact(Artifact::patch);
+                prompt = prompt.substr(6);
+            } else if (prompt.rfind("module:", 0) == 0) {
+                set_artifact(Artifact::module);
+                prompt = prompt.substr(7);
+            }
+            while (!prompt.empty() && prompt.front() == ' ')
+                prompt.erase(prompt.begin());
             if (!prompt.empty()) {
                 pulp::runtime::log_info(
                     "Forge Modular: build requested through the test seam");

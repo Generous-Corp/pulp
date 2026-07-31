@@ -623,7 +623,7 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         if not_shown is not None:
             return not_shown
         time.sleep(4)                     # let the editor settle and poll
-        trigger.write_text(prompt + "\n")
+        trigger.write_text("patch: " + prompt + "\n")
         log(f"asked the hosted plugin to build: {prompt!r}")
 
         started = False
