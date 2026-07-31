@@ -151,6 +151,12 @@ responsibilities. See
 representative supported document; malformed or out-of-subset input returns a
 typed `DawProjectImportError` rather than a partial project.
 
+That raw-member contract belongs to the low-level installed SDK. The higher-level
+`pulp seq` and Timeline MCP interchange operations own bounded package I/O:
+they import a standard `.dawproject` ZIP, require a safe root `project.xml`,
+resolve only safe package-relative media, and export a standard `.dawproject`
+ZIP containing the XML, manifest, and referenced media.
+
 ## Optional Standard MIDI File interop
 
 Standard MIDI File (SMF) import and export live in their own target for the same

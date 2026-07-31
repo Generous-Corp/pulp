@@ -810,9 +810,10 @@ pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
 pulp seq export <project.json> --format <smf|dawproject> --plan
-pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
+pulp seq export <project.json> --format smf --out <new-directory> \
+pulp seq export <project.json> --format dawproject --out <new-file.dawproject> \
   [--accept-loss <concept-id>]...
-pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \
+pulp seq import <file.mid|file.dawproject> --format <smf|dawproject> \
   --out <new-directory>
 pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
 ```
@@ -833,11 +834,11 @@ Publishing requires `--out`. MCP uses the equivalent outputless
 `plan_only: true` input and rejects `output` or `accept_losses` in that mode.
 Refusal and successful export
 results carry the same manifest object. SMF exports contain `project.mid`;
-DAWproject exports are currently
-unpacked `project.xml` plus sibling media, not packaged `.dawproject` files.
-DAWproject import likewise requires the input filename `project.xml`, confines
-sibling media resolution to its directory, and publishes canonical
-`project.json` plus sealed sibling artifacts.
+DAWproject export publishes one standard `.dawproject` ZIP containing a root
+`project.xml`, the manifest, and referenced media entries. DAWproject import
+requires a `.dawproject` ZIP, rejects unsafe or unsupported archive entries,
+confines media resolution to safe package-relative entries, and publishes
+canonical `project.json` plus sealed sibling artifacts into a new directory.
 
 The live MCP server embeds `timeline_mcp_tools.json` at configure time and
 dispatches exactly ten operations. Seven operations retain stateless

@@ -15,9 +15,10 @@ pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
 pulp seq export <project.json> --format <smf|dawproject> --plan
-pulp seq export <project.json> --format <smf|dawproject> --out <new-directory> \
+pulp seq export <project.json> --format smf --out <new-directory> \
+pulp seq export <project.json> --format dawproject --out <new-file.dawproject> \
   [--accept-loss <concept-id>]...
-pulp seq import <file.mid|unpacked/project.xml> --format <smf|dawproject> \
+pulp seq import <file.mid|file.dawproject> --format <smf|dawproject> \
   --out <new-directory>
 ```
 
@@ -33,8 +34,9 @@ a loss never removes it from the successful result's manifest.
 Treat refusal as useful output: report `required_consent` exactly so it can be
 reviewed and supplied on a later call. Do not invent concept IDs. Import and
 export destinations must be new paths; do not delete or replace an existing
-destination to make the command succeed. DAWproject currently uses an unpacked
-`project.xml` directory rather than packing or unpacking a `.dawproject` ZIP.
+destination to make the command succeed. DAWproject import consumes and export
+produces a standard `.dawproject` ZIP with a bounded root `project.xml`; the
+canonical imported project is published into the new output directory.
 
 After `apply` or `import`, validate the emitted project. Use `explain` when the
 user needs the lowered playback plan, and render separately only when an audio
