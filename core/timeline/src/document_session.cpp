@@ -161,6 +161,7 @@ struct DocumentSession::Impl {
             break;
         case GesturePhase::Update:
         case GesturePhase::End:
+        case GesturePhase::Cancel:
             if (!open_gesture || !transaction.undo_group ||
                 open_gesture->writer != transaction.id.writer ||
                 open_gesture->group != *transaction.undo_group)
@@ -198,7 +199,8 @@ struct DocumentSession::Impl {
             candidate.writer = transaction.id.writer;
             candidate.group = transaction.undo_group;
             candidate.closed = transaction.gesture_phase == GesturePhase::Single ||
-                               transaction.gesture_phase == GesturePhase::End;
+                               transaction.gesture_phase == GesturePhase::End ||
+                               transaction.gesture_phase == GesturePhase::Cancel;
             for (const auto& envelope : transaction.commands)
                 candidate.forward.push_back(envelope.command);
             candidate.inverse = reduced->inverses;
@@ -297,7 +299,8 @@ struct DocumentSession::Impl {
             undo_bytes = saturated_add(undo_bytes, undo_added_bytes);
             if (transaction.gesture_phase == GesturePhase::Begin)
                 open_gesture = OpenGesture{transaction.id.writer, *transaction.undo_group};
-            else if (transaction.gesture_phase == GesturePhase::End)
+            else if (transaction.gesture_phase == GesturePhase::End ||
+                     transaction.gesture_phase == GesturePhase::Cancel)
                 open_gesture.reset();
             if (clear_redo) {
                 redo.clear();

@@ -12,6 +12,7 @@ function(pulp_resolve_timeline_sources root output)
         command.cpp
         compile_context.cpp
         document_session.cpp
+        edit_intent.cpp
         identity_directory.cpp
         id_remap.cpp
         journal.cpp

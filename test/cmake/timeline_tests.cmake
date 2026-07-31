@@ -40,6 +40,11 @@ pulp_add_test_suite(pulp-test-playback-production
         test_playback_buffered_content_source.cpp
         harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio pulp::timeline)
+# Links the view layer as well: the mouse/touch parity fixture drives the
+# device-dependent hit metrics through the pointer-neutral intent seam.
+pulp_add_test_suite(pulp-test-timeline-edit-intents
+    SOURCES test_timeline_edit_intents.cpp
+    LIBRARIES pulp::timeline pulp::view)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport

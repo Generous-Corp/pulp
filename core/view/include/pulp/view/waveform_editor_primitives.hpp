@@ -4,6 +4,7 @@
 /// Reusable waveform editor geometry, snapping, hit-testing, and transaction helpers.
 
 #include <pulp/view/geometry.hpp>
+#include <pulp/view/hit_metrics.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -176,6 +177,16 @@ struct WaveformHitResult {
                                                           float x,
                                                           float tolerance_px);
 
+/// Device-aware overload: the same hit test sized for the pointer driving it.
+///
+/// Projects `metrics` onto the tolerance the raw overload already takes, so a
+/// touch pointer widens the handle targets without a second geometry path.
+[[nodiscard]] WaveformHitResult hit_test_waveform_handles(const WaveformViewport& viewport,
+                                                          const WaveformHandleModel& model,
+                                                          float x,
+                                                          const HitMetrics& metrics,
+                                                          float pixels_per_point = 1.0f);
+
 enum class WaveformSnapSource {
     none,
     bounds,
@@ -305,6 +316,8 @@ public:
     [[nodiscard]] WaveformEditorSurfaceSnapshot snapshot() const;
     [[nodiscard]] WaveformRenderPlan render_plan(int max_spans = 0) const;
     [[nodiscard]] WaveformHitResult hit_test(float x, float tolerance_px) const;
+    [[nodiscard]] WaveformHitResult hit_test(float x, const HitMetrics& metrics,
+                                             float pixels_per_point = 1.0f) const;
 
     [[nodiscard]] bool begin_selection_edit(int64_t anchor_sample);
     [[nodiscard]] bool begin_handle_edit(WaveformHandleKind kind, int id = -1);
