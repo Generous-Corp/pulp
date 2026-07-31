@@ -84,6 +84,7 @@ TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
+WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
@@ -378,6 +379,20 @@ if [ -f "$DESIGNATED_INIT_LINT" ]; then
     echo "" >&2
     echo "▸ designated-initializer lint (MSVC C7560)" >&2
     if ! "$PYTHON" "$DESIGNATED_INIT_LINT" --mode=changed --base "$BASE" >&2; then
+        fail=1
+    fi
+fi
+
+# ── 9b. win32 include lint (MSVC C2589 min/max macro leak) ─────────────────
+# A public header that includes <windows.h> raw leaks the min/max macros into
+# every consumer. <windows.h> has an include guard, so the FIRST header to
+# reach it decides NOMINMAX for the whole TU — a raw include breaks a consumer
+# only when it wins that race, which no macOS gate can observe. Whole-tree
+# (the installed header surface is small) and sub-second.
+if [ -f "$WIN32_INCLUDE_LINT" ]; then
+    echo "" >&2
+    echo "▸ win32 include lint (MSVC C2589 min/max leak)" >&2
+    if ! "$PYTHON" "$WIN32_INCLUDE_LINT" --root "$ROOT" >&2; then
         fail=1
     fi
 fi
