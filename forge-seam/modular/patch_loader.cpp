@@ -1,4 +1,5 @@
 #include "forge/patch_loader.hpp"
+#include <map>
 
 #include <choc/text/choc_JSON.h>
 
@@ -80,6 +81,32 @@ LoadedPatch load_patch(const std::string& path) {
     }
 
     if (!root.hasObjectMember("cables")) return out;
+
+    // The reason each cable exists travels beside the patch, because Rack owns
+    // the .vcv format and will not carry our prose. Absent for a patch a person
+    // wired themselves, and for anything built before the sidecar existed --
+    // the explanation degrades to the wiring, which is still true, just terser.
+    std::map<std::string, std::string> why;
+    if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") {
+        std::ifstream wf(path.substr(0, path.size() - 4) + ".why.json");
+        if (wf) {
+            std::stringstream ws;
+            ws << wf.rdbuf();
+            try {
+                const auto wroot = choc::json::parse(ws.str());
+                if (wroot.isObject()) {
+                    for (uint32_t i = 0; i < wroot.size(); ++i) {
+                        const auto m = wroot.getObjectMemberAt(i);
+                        why[m.name] = m.value.getWithDefault<std::string>("");
+                    }
+                }
+            } catch (...) {
+                // A malformed sidecar must not cost the patch. The wiring is
+                // the artifact; the prose is the commentary on it.
+            }
+        }
+    }
+
     const auto cables = root["cables"];
     for (uint32_t i = 0; i < cables.size(); ++i) {
         const auto c = cables[i];
@@ -100,6 +127,11 @@ LoadedPatch load_patch(const std::string& path) {
         conn.role = role_from_color(
             c.hasObjectMember("color") ? c["color"].getWithDefault<std::string>("")
                                        : "");
+        const auto key = std::to_string(from_id) + ":" +
+                         std::to_string(c["outputId"].getWithDefault<int64_t>(0)) + ">" +
+                         std::to_string(to_id) + ":" +
+                         std::to_string(c["inputId"].getWithDefault<int64_t>(0));
+        if (const auto it = why.find(key); it != why.end()) conn.why = it->second;
         out.connections.push_back(conn);
 
         // Register the ports the cables actually use, so the explanation can

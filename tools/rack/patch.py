@@ -1164,6 +1164,13 @@ def main(argv):
                 out = os.path.join(pdir, f"{slug}-{n}.vcv")
                 n += 1
         json.dump(patch, open(out, "w"), indent=1)
+        # The reason each cable exists, beside the patch that has the cables.
+        # Rack owns the .vcv format and will not carry our prose, so it travels
+        # as a sidecar. Without this the app can only ever show a netlist: it
+        # reads the patch back from disk, and everything not written here is
+        # gone the moment this process exits.
+        if why:
+            json.dump(why, open(out[:-4] + ".why.json", "w"), indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
         print(explain(patch, inv, why))

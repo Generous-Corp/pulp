@@ -14,6 +14,7 @@
 //     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 // and commit the changed PNGs with the reason in the message.
 
+#include "forge/patch_loader.hpp"
 #include "forge/rack_preview.hpp"
 #include <ImageIO/ImageIO.h>
 #include <catch2/catch_test_macros.hpp>
@@ -45,6 +46,7 @@ using Catch::Approx;
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
@@ -402,6 +404,82 @@ TEST_CASE("a real generated panel renders and not just a synthetic one", "[seam]
     // "drew a rectangle", which asserting non-empty output cannot.
     INFO("panel slug: " << slug);
     CHECK(distinct_colors(png) > 40);
+}
+
+TEST_CASE("a loaded patch explains itself beyond the wiring", "[seam]") {
+    // The defect this pins: the generator printed its reasoning to stdout and
+    // wrote only the netlist, and the loader never looked for prose. Every
+    // patch the app showed therefore had an empty `why` on every cable -- and
+    // because Standard depth adds exactly that string, Standard rendered
+    // byte-identical to Terse for every real patch. The three-depth promise
+    // held only in tests, which built their connections by hand.
+    //
+    // So this test refuses to build a Connection: it writes a patch and its
+    // sidecar to disk and reads them back the way the app does.
+    const auto dir = std::filesystem::temp_directory_path() / "forge-modular-why-test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto vcv = dir / "demo.vcv";
+    {
+        std::ofstream f(vcv);
+        f << R"({"modules":[{"id":1,"plugin":"Fundamental","model":"VCO"},)"
+          << R"({"id":2,"plugin":"Fundamental","model":"VCF"}],)"
+          << R"("cables":[{"outputModuleId":1,"outputId":0,)"
+          << R"("inputModuleId":2,"inputId":0,"color":"#00ff00"}]})";
+    }
+    {
+        std::ofstream f(dir / "demo.why.json");
+        f << R"({"1:0>2:0":"the saw is the raw material the filter shapes"})";
+    }
+
+    const auto loaded = forge_modular::load_patch(vcv.string());
+    REQUIRE(loaded.connections.size() == 1);
+    CHECK(loaded.connections[0].why ==
+          "the saw is the raw material the filter shapes");
+
+    // The negative control: the same patch with no sidecar must come back with
+    // nothing to say, or the assertion above proves only that a string exists
+    // somewhere.
+    std::filesystem::remove(dir / "demo.why.json");
+    const auto bare = forge_modular::load_patch(vcv.string());
+    REQUIRE(bare.connections.size() == 1);
+    CHECK(bare.connections[0].why.empty());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a really generated patch arrives with its reasons attached", "[seam]") {
+    // The synthetic round-trip above proves the mechanism. This proves the two
+    // halves agree in the field: the generator's key format and the loader's
+    // must match exactly, and they are written in different languages in
+    // different repositories -- the project's most expensive recurring bug.
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path dir =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/patches";
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec)) SKIP("no patches installed here");
+
+    std::string found;
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+        const auto n = e.path().string();
+        if (n.size() > 9 && n.substr(n.size() - 9) == ".why.json") {
+            found = n.substr(0, n.size() - 9) + ".vcv";
+            break;
+        }
+    }
+    if (found.empty()) SKIP("no patch with a sidecar installed here");
+
+    const auto loaded = forge_modular::load_patch(found);
+    REQUIRE_FALSE(loaded.connections.empty());
+    const auto explained = std::count_if(
+        loaded.connections.begin(), loaded.connections.end(),
+        [](const forge_modular::Connection& c) { return !c.why.empty(); });
+    INFO("patch: " << found << " -- " << explained << " of "
+                   << loaded.connections.size() << " cables carry a reason");
+    // Not every cable: the contract tells the model to omit the obvious. But a
+    // patch where NONE carries a reason is the defect this test exists for.
+    CHECK(explained > 0);
 }
 
 TEST_CASE("Forge Modular reports an unwired install rather than claiming success",
