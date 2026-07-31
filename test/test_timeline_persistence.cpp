@@ -289,7 +289,7 @@ TEST_CASE("Timeline time-conform refuses unsupported anchors and content without
     REQUIRE_FALSE(rejected_empty);
     REQUIRE(rejected_empty.error().code == ModelErrorCode::InvalidTimeConform);
 
-    const auto notes = take(NoteContent::create({{{5}, {0}, {10}, 0xffff, 60, 0}}));
+    const auto notes = take(MidiContent::create({{{5}, {0}, {10}, 0xffff, 60, 0}}));
     const auto rejected_notes =
         Clip::create({4}, {0}, {100}, notes, {}, TimeConform::Stretch);
     REQUIRE_FALSE(rejected_notes);
@@ -460,7 +460,7 @@ TEST_CASE("Timeline snapshots round trip media notes and absolute time") {
     const auto* musical = decoded.value().find_sequence({8});
     REQUIRE(musical != nullptr);
     REQUIRE(std::holds_alternative<MediaRef>(musical->tracks()[0].clips()[0].content()));
-    const auto& note_content = std::get<NoteContent>(musical->tracks()[0].clips()[1].content());
+    const auto& note_content = std::get<MidiContent>(musical->tracks()[0].clips()[1].content());
     REQUIRE(note_content.notes().size() == 2);
     REQUIRE(note_content.notes()[0].id == ItemId{6});
     const auto* absolute = decoded.value().find_sequence({11});

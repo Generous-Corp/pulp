@@ -328,8 +328,95 @@ decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValu
                  static_cast<std::uint16_t>(decoded_offset.value()),
                  static_cast<std::uint16_t>(decoded_ratchet.value()), decoded_condition});
         }
-        auto created = NoteContent::create(std::move(events), std::move(decoded_modifiers),
-                                           decoded_seed.value());
+        auto lanes = required(*data.value(), "lanes", path + "/data");
+        if (!lanes)
+            return fail<ClipContent>(PersistenceErrorCode::MissingField, path + "/data");
+        if (lanes.value()->kind != JsonValue::Kind::Array)
+            return fail<ClipContent>(PersistenceErrorCode::UnexpectedType, path + "/data/lanes");
+        if (counts.midi_lanes > limits.max_midi_lanes ||
+            lanes.value()->array.size() > limits.max_midi_lanes - counts.midi_lanes)
+            return fail<ClipContent>(PersistenceErrorCode::LimitExceeded, path + "/data/lanes",
+                                     lanes.value()->begin,
+                                     counts.midi_lanes + lanes.value()->array.size(),
+                                     limits.max_midi_lanes);
+        counts.midi_lanes += lanes.value()->array.size();
+        std::vector<MidiExpressionLane> decoded_lanes;
+        decoded_lanes.reserve(lanes.value()->array.size());
+        for (std::size_t lane_index = 0; lane_index < lanes.value()->array.size(); ++lane_index) {
+            const auto lane_path = path + "/data/lanes/" + std::to_string(lane_index);
+            const auto& lane = lanes.value()->array[lane_index];
+            auto bank = required(lane, "bank", lane_path);
+            auto lane_channel = required(lane, "channel", lane_path);
+            auto group = required(lane, "group", lane_path);
+            auto lane_id = required(lane, "id", lane_path);
+            auto lane_index_field = required(lane, "index", lane_path);
+            auto points = required(lane, "points", lane_path);
+            auto status = required(lane, "status", lane_path);
+            if (!bank || !lane_channel || !group || !lane_id || !lane_index_field || !points ||
+                !status)
+                return fail<ClipContent>(PersistenceErrorCode::MissingField, lane_path);
+            if (points.value()->kind != JsonValue::Kind::Array)
+                return fail<ClipContent>(PersistenceErrorCode::UnexpectedType,
+                                         lane_path + "/points");
+            auto decoded_lane_id = parse_canonical_u64_string(*lane_id.value(), lane_path + "/id");
+            auto decoded_bank = parse_u32_number(*bank.value(), lane_path + "/bank");
+            auto decoded_lane_channel =
+                parse_u32_number(*lane_channel.value(), lane_path + "/channel");
+            auto decoded_group = parse_u32_number(*group.value(), lane_path + "/group");
+            auto decoded_index = parse_u32_number(*lane_index_field.value(), lane_path + "/index");
+            auto decoded_status = parse_u32_number(*status.value(), lane_path + "/status");
+            if (!decoded_lane_id || !decoded_bank || !decoded_lane_channel || !decoded_group ||
+                !decoded_index || !decoded_status ||
+                decoded_bank.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_lane_channel.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_group.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_index.value() > std::numeric_limits<std::uint8_t>::max() ||
+                decoded_status.value() > std::numeric_limits<std::uint8_t>::max())
+                return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, lane_path);
+            if (counts.midi_lane_points > limits.max_midi_lane_points ||
+                points.value()->array.size() >
+                    limits.max_midi_lane_points - counts.midi_lane_points)
+                return fail<ClipContent>(
+                    PersistenceErrorCode::LimitExceeded, lane_path + "/points",
+                    points.value()->begin, counts.midi_lane_points + points.value()->array.size(),
+                    limits.max_midi_lane_points);
+            counts.midi_lane_points += points.value()->array.size();
+            std::vector<MidiLanePoint> decoded_points;
+            decoded_points.reserve(points.value()->array.size());
+            for (std::size_t point_index = 0; point_index < points.value()->array.size();
+                 ++point_index) {
+                const auto point_path = lane_path + "/points/" + std::to_string(point_index);
+                const auto& point = points.value()->array[point_index];
+                auto point_id = required(point, "id", point_path);
+                auto position = required(point, "position_ticks", point_path);
+                auto point_value = required(point, "value", point_path);
+                if (!point_id || !position || !point_value)
+                    return fail<ClipContent>(PersistenceErrorCode::MissingField, point_path);
+                auto decoded_point_id =
+                    parse_canonical_u64_string(*point_id.value(), point_path + "/id");
+                auto decoded_position =
+                    parse_canonical_i64_string(*position.value(), point_path + "/position_ticks");
+                auto decoded_value = parse_u32_number(*point_value.value(), point_path + "/value");
+                if (!decoded_point_id || !decoded_position || !decoded_value)
+                    return fail<ClipContent>(PersistenceErrorCode::InvalidNumber, point_path);
+                decoded_points.push_back({ItemId{decoded_point_id.value()},
+                                          {decoded_position.value()},
+                                          decoded_value.value()});
+            }
+            decoded_lanes.push_back(
+                MidiExpressionLane{ItemId{decoded_lane_id.value()},
+                                   MidiLaneAddress{static_cast<std::uint8_t>(decoded_group.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_lane_channel.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_status.value()),
+                                                   static_cast<std::uint8_t>(decoded_bank.value()),
+                                                   static_cast<std::uint8_t>(
+                                                       decoded_index.value())},
+                                   std::move(decoded_points)});
+        }
+        auto created = MidiContent::create(std::move(events), std::move(decoded_modifiers),
+                                           decoded_seed.value(), std::move(decoded_lanes));
         if (!created)
             return model_fail<ClipContent>(created.error(), std::move(path));
         return runtime::Result<ClipContent, PersistenceError>(

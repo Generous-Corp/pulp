@@ -49,7 +49,7 @@ std::shared_ptr<const Project> stretch_latency_alignment_project(std::uint64_t s
     note.duration = {kTicksPerQuarter};
     note.velocity = 0xffff;
     note.pitch = 60;
-    auto notes = take(NoteContent::create({note}));
+    auto notes = take(MidiContent::create({note}));
     auto note_clip = take(Clip::create({102}, {0}, {2 * kTicksPerQuarter}, std::move(notes)));
     auto impulse_track =
         take(Track::create({10}, "latency alignment impulse", {std::move(impulse)}));
@@ -112,7 +112,7 @@ std::shared_ptr<const Project> tempo_change_alignment_project(TimeConform confor
     note.duration = {kTicksPerQuarter / 16};
     note.velocity = 0xffff;
     note.pitch = 64;
-    auto notes = take(NoteContent::create({note}));
+    auto notes = take(MidiContent::create({note}));
     auto note_clip =
         take(Clip::create({201}, {0}, {kTempoChangeClipTicks}, std::move(notes)));
     auto audio_track = take(Track::create({20}, "tempo-conformed audio", {std::move(audio_clip)}));

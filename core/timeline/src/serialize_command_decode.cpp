@@ -108,7 +108,7 @@ decode_command_notes(const JsonValue& value, DecodeContext& context, std::string
                          static_cast<std::uint8_t>(decoded_channel.value())});
     }
     count += notes.size();
-    auto validated = NoteContent::create(std::move(notes));
+    auto validated = MidiContent::create(std::move(notes));
     if (!validated)
         return model_fail<std::vector<NoteEvent>>(validated.error(), std::move(path));
     return runtime::Ok(std::vector<NoteEvent>(validated->notes().begin(),

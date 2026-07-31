@@ -233,6 +233,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_asset_loop_info.cpp
         test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
+        test_timeline_midi_content.cpp
         test_timeline_note_modifier_persistence.cpp
         test_timeline_marker_persistence.cpp
         test_timeline_session_persistence.cpp

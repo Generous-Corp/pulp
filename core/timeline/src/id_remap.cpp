@@ -84,7 +84,7 @@ std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexce
         ClipContentCases{
             [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
             [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
-            [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const MidiContent&) { return std::optional<ModelErrorCode>{}; },
             [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
             [](const OpaqueContent&) {
                 return std::optional<ModelErrorCode>{ModelErrorCode::OpaqueContentCannotRemap};
@@ -157,7 +157,7 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                        else
                            media.asset_id = fixed.value();
                    },
-                   [&](NoteContent& old_notes) {
+                   [&](MidiContent& old_notes) {
                        std::vector<NoteEvent> notes(old_notes.notes().begin(),
                                                     old_notes.notes().end());
                        for (auto& note : notes)
@@ -169,8 +169,20 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                                                            old_notes.modifiers().end());
                        for (auto& modifier : modifiers)
                            modifier.note_id = *table.find(modifier.note_id);
-                       auto rebuilt = NoteContent::create(std::move(notes), std::move(modifiers),
-                                                          old_notes.modifier_seed());
+                       // Lanes and their points own identities of their own, so
+                       // both are rewritten; a lane's address is a wire
+                       // coordinate rather than a document identity and is
+                       // carried across unchanged.
+                       std::vector<MidiExpressionLane> lanes(old_notes.lanes().begin(),
+                                                             old_notes.lanes().end());
+                       for (auto& lane : lanes) {
+                           lane.id = *table.find(lane.id);
+                           for (auto& point : lane.points)
+                               point.id = *table.find(point.id);
+                       }
+                       auto rebuilt = MidiContent::create(std::move(notes), std::move(modifiers),
+                                                          old_notes.modifier_seed(),
+                                                          std::move(lanes));
                        if (!rebuilt)
                            content_error = rebuilt.error();
                        else
@@ -205,12 +217,24 @@ void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator&
     if (error)
         return;
     error = allocate_owned(table, allocator, clip.id());
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
-        for (const auto& note : notes->notes()) {
+    const auto* notes = std::get_if<MidiContent>(&clip.content());
+    if (!notes)
+        return;
+    for (const auto& note : notes->notes()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, note.id);
+    }
+    for (const auto& lane : notes->lanes()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, lane.id);
+        for (const auto& point : lane.points) {
             if (error)
                 return;
-            error = allocate_owned(table, allocator, note.id);
+            error = allocate_owned(table, allocator, point.id);
         }
+    }
 }
 
 void allocate_automation_owned(const AutomationLane& lane, IdRemapTable& table,

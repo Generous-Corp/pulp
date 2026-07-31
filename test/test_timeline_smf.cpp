@@ -128,7 +128,7 @@ std::vector<AbsoluteNote> absolute_notes(const Project& project) {
     REQUIRE(sequence != nullptr);
     for (const auto& track : sequence->tracks()) {
         for (const auto& clip : track.clips()) {
-            const auto* notes = std::get_if<NoteContent>(&clip.content());
+            const auto* notes = std::get_if<MidiContent>(&clip.content());
             if (notes == nullptr)
                 continue;
             for (const auto& note : notes->notes()) {
@@ -166,7 +166,7 @@ Project make_project(const std::vector<AbsoluteNote>& notes,
         event.channel = note.channel;
         events.push_back(event);
     }
-    auto content = NoteContent::create(std::move(events));
+    auto content = MidiContent::create(std::move(events));
     REQUIRE(content);
     auto clip = Clip::create(ItemId{next_id++}, timebase::TickPosition{first},
                              timebase::TickDuration{last - first}, std::move(content.value()));
@@ -695,7 +695,7 @@ TEST_CASE("SMF export rejects values with no MIDI representation",
         CHECK(exported.error().code == SmfErrorCode::InvalidValue);
     }
     SECTION("absolute-anchored clip") {
-        auto content = NoteContent::create({NoteEvent{ItemId{1}, timebase::TickPosition{0},
+        auto content = MidiContent::create({NoteEvent{ItemId{1}, timebase::TickPosition{0},
                                                       timebase::TickDuration{kQuarter},
                                                       0xffffu, 60, 0}});
         REQUIRE(content);
@@ -731,7 +731,7 @@ TEST_CASE("SMF export rejects values with no MIDI representation",
                 modifiers.push_back(modifier);
             }
             auto content =
-                NoteContent::create({note}, std::move(modifiers), seed_only ? 42 : 0);
+                MidiContent::create({note}, std::move(modifiers), seed_only ? 42 : 0);
             REQUIRE(content);
             auto clip = Clip::create(ItemId{2}, timebase::TickPosition{0},
                                      timebase::TickDuration{kQuarter},

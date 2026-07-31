@@ -14,9 +14,9 @@
 
 namespace {
 
-NoteContent note_content(std::uint64_t note_id, std::int64_t start = 120,
+MidiContent note_content(std::uint64_t note_id, std::int64_t start = 120,
                          std::int64_t duration = 240) {
-    return take(NoteContent::create({NoteEvent{{note_id}, {start}, {duration}, 40'000, 64, 0}}));
+    return take(MidiContent::create({NoteEvent{{note_id}, {start}, {duration}, 40'000, 64, 0}}));
 }
 
 Track track(std::uint64_t id, std::vector<Clip> clips, std::vector<DevicePlacement> devices = {}) {

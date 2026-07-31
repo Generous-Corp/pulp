@@ -39,8 +39,8 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
                 return left.asset_id == right.asset_id && left.source_start == right.source_start &&
                        left.frame_count == right.frame_count;
             },
-            [&](const NoteContent& left) {
-                const auto& other = std::get<NoteContent>(rhs);
+            [&](const MidiContent& left) {
+                const auto& other = std::get<MidiContent>(rhs);
                 const auto right = other.notes();
                 // The modifiers and the seed are part of how the clip plays, so
                 // a change to either is an edit the journal must keep.
@@ -88,7 +88,7 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
         ClipContentCases{
             [](const EmptyContent&) { return sizeof(Clip); },
             [](const MediaRef&) { return sizeof(Clip); },
-            [](const NoteContent& notes) {
+            [](const MidiContent& notes) {
                 return saturated_add(
                     saturated_add(sizeof(Clip),
                                   saturated_multiply(notes.notes().size(), sizeof(NoteEvent))),

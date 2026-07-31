@@ -622,8 +622,8 @@ TEST_CASE("Timeline future built-in notes content remains opaque and quota-termi
     // knows at a version it does not. Raise this whenever the notes content
     // schema is bumped, or the case silently stops testing the opaque path.
     const std::string raw =
-        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":3})";
-    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 3}, raw));
+        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":4})";
+    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 4}, raw));
     const auto registry = builtins();
     auto snapshot = take(serialize_project(project_with(std::move(opaque)), registry));
     DecodeLimits limits;

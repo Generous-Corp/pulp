@@ -78,7 +78,7 @@ ClipContent generator_content(const SchemaRegistry& registry, std::string_view t
 std::shared_ptr<const Project> make_project(const SchemaRegistry& registry, ChordScaleLane lane,
                                             GrooveTemplate groove) {
     auto notes = [](std::uint64_t clip_id, std::uint64_t note_id) {
-        auto content = take(NoteContent::create({NoteEvent{{note_id}, {0}, {240}, 0xffff, 60, 0}}));
+        auto content = take(MidiContent::create({NoteEvent{{note_id}, {0}, {240}, 0xffff, 60, 0}}));
         return take(Clip::create({clip_id}, {0}, {480}, std::move(content)));
     };
 

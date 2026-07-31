@@ -20,10 +20,23 @@ void visit_clip_owned_identities(const Clip& clip, ItemId track, Visitor&& visit
         ClipContentCases{
             [](const EmptyContent&) {},
             [](const MediaRef&) {},
-            [&](const NoteContent& notes) {
+            [&](const MidiContent& notes) {
                 for (const auto& note : notes.notes())
                     visitor(ModelOwnedIdentity{
                         .id = note.id, .kind = ItemKind::Note, .track = track, .clip = clip.id()});
+                for (const auto& lane : notes.lanes()) {
+                    visitor(ModelOwnedIdentity{.id = lane.id,
+                                               .kind = ItemKind::MidiLane,
+                                               .track = track,
+                                               .clip = clip.id(),
+                                               .lane = lane.id});
+                    for (const auto& point : lane.points)
+                        visitor(ModelOwnedIdentity{.id = point.id,
+                                                   .kind = ItemKind::MidiLanePoint,
+                                                   .track = track,
+                                                   .clip = clip.id(),
+                                                   .lane = lane.id});
+                }
             },
             [](const RegisteredContent&) {},
             [](const OpaqueContent&) {},

@@ -891,13 +891,18 @@ bound both domains.
 before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
 overloads distinguish owned IDs from external media-asset references and accept
 an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
-before allocator state changes. `NoteContent` is a flat POD array sorted by
+before allocator state changes. `MidiContent` is a flat POD array sorted by
 `(start, ItemId)`, alongside a sparse companion array of per-note playback
 modifiers sorted by note ID and an authored seed. A modifier carries a
 probability, a loop-pass condition, and a ratchet count; notes that play
 unconditionally and once carry no entry. Evaluation is a pure function of the
 seed, the note identity, and the loop-pass index, so an identical document and
-transport trace always reproduces the same sounding decisions.
+transport trace always reproduces the same sounding decisions. The same content
+carries the clip's controller and expression lanes, one lane per addressed
+stream, ordered by address with each lane's points ordered by
+`(position, ItemId)`; a lane address is the MIDI wire's own group, channel,
+status nibble, controller bank, and controller index, and a point value is the
+32-bit channel-voice data width. Clips authoring no controllers carry no lanes.
 Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 

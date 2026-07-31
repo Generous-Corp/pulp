@@ -92,7 +92,7 @@ artifact is needed. Never modify canonical project JSON text directly.
   the authored frame count, then plays it 1:1. A missing, over-capacity, or
   length-mismatched Stretch artifact fails compilation; it never degrades to
   native-rate playback.
-- `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
+- `MidiContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another
   sequence. Its source window begins at `source_start`; project construction
@@ -373,6 +373,12 @@ artifact is needed. Never modify canonical project JSON text directly.
   breakage appears only when the two branches meet on main — neither PR's CI can
   see it alone. Check `corpus.index` covers the tree before merging a
   fixture-adding branch.
+- A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
+  also emitted by `collect_summary()` in `test/fixture_runner_main.cpp`, which
+  lists the counts one by one and is not generated. Add the count and skip that
+  list and every manifest regenerates clean while the new entity goes uncounted
+  in every fixture — the corpus reports green on a document whose new structure
+  it never looked at.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency
@@ -429,6 +435,35 @@ noise there. And note that `-fno-exceptions` makes a bare `std::get` on a
 mismatched alternative call `std::terminate` rather than throw, so a fallthrough
 `std::get` is a process abort, not a caught error — that is why the encoder is a
 visit and not a chain ending in `std::get<OpaqueContent>`.
+
+### MIDI content stores the wire's numbers, and cannot reach `core/midi` to name them
+
+`MidiContent` carries notes, their deterministic modifiers, and the clip's
+controller/expression lanes. It is tempting — and specs sometimes ask — to type
+a lane's controller family against `core/midi`'s UMP/MPE/RPN declarations so the
+document model and the wire cannot disagree. **`core/timeline` cannot include
+`pulp/midi/*` at all.** `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py` gives `timeline` the
+floor `{timeline, timebase, platform, runtime}`; `midi` belongs to `playback`'s
+floor, one layer up. The check scans every include under `core/timeline/` and
+fails the build gate, so this is discovered late if it is discovered by
+compiling.
+
+The resolution is not a parallel enum either — it is to store the wire's own
+numeric domain and name nothing. `MidiLaneAddress` is five raw bytes (UMP group,
+channel, status nibble, controller bank, controller index) and a lane point's
+value is the full 32-bit channel-voice width that 7-bit and 14-bit MIDI 1.0
+values scale into. `NoteEvent` set this precedent already with bare `pitch` /
+`channel` / `velocity` integers. Only bounds the wire itself imposes are
+validated here (group, channel, and status are 4-bit fields); *which* addresses
+carry meaning is a playback question and does not belong in the document model.
+
+The per-stream layout is also load-bearing rather than incidental. Lanes are
+sorted by `(address, id)` and each lane's points by `(position, id)`, because
+the question asked on every seek is "what did this one stream last say at or
+before `t`" — two binary searches against that layout, versus a scan over every
+event of every stream if lanes were flattened into one interleaved list.
+Flattening them is the change that quietly makes seeking O(n).
 
 ## Editing contracts
 

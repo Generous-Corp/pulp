@@ -197,7 +197,7 @@ TEST_CASE("Timeline reduction support preserves full ownership and atomic identi
     REQUIRE_FALSE(parent_rejected);
     REQUIRE(parent_rejected.error().code == ConflictCode::ParentMismatch);
 
-    auto notes = NoteContent::create({{{8}, {0}, {kTicksPerQuarter / 4}, 1000, 60, 0}});
+    auto notes = MidiContent::create({{{8}, {0}, {kTicksPerQuarter / 4}, 1000, 60, 0}});
     REQUIRE(notes);
     auto colliding = Clip::create({8}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
                                   std::move(notes).value());
