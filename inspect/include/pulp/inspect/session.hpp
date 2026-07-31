@@ -101,7 +101,8 @@ struct InspectorSessionInfo {
 
 /// Capability-enforcing dispatch facade. Transport supplies an authenticated
 /// per-connection client identity; the session owns policy and the controller
-/// lease, then delegates authorized domain requests to the attached handler.
+/// lease, then serializes authorized domain requests before delegating to the
+/// attached handler. Session control remains available while a handler runs.
 class InspectorSession {
 public:
     using RequestHandler =
@@ -131,6 +132,7 @@ private:
     RequestHandler handler_;
     InspectorControllerLease lease_;
     mutable std::mutex mutex_;
+    std::recursive_mutex dispatch_mutex_;
 };
 
 } // namespace pulp::inspect

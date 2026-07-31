@@ -105,6 +105,7 @@ public:
     std::mutex lifecycle_mutex;
     std::recursive_mutex transition_mutex;
     std::atomic<bool> stop_requested{false};
+    std::atomic<bool> deferred_stop_requested{false};
     std::atomic<bool> transition_waiting_for_callbacks{false};
     std::size_t max_message_bytes = 1024u * 1024u;
 
@@ -287,9 +288,14 @@ public:
         while (true) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
                 return stopping_cleanup ||
+                       deferred_stop_requested.load(
+                           std::memory_order_acquire) ||
                        !retired_outbound_clients.empty();
             });
             const bool should_stop = stopping_cleanup;
+            const bool run_deferred_stop =
+                deferred_stop_requested.exchange(
+                    false, std::memory_order_acq_rel);
             auto retired = std::move(retired_outbound_clients);
             const auto now = std::chrono::steady_clock::now();
             std::vector<std::shared_ptr<events::InterprocessConnection>> expired;
@@ -311,6 +317,8 @@ public:
                 if (client)
                     client->disconnect();
             }
+            if (run_deferred_stop)
+                stop();
             if (!should_stop)
                 publication.refresh_if_due(now);
             if (should_stop)
@@ -336,6 +344,28 @@ InspectorServer::InspectorServer() : impl_(std::make_shared<Impl>()) {
 
 InspectorServer::~InspectorServer() {
     auto impl = std::move(impl_);
+    {
+        std::lock_guard lock(impl->clients_mutex);
+        const auto current =
+            impl->callback_threads.find(std::this_thread::get_id());
+        const auto current_callbacks =
+            current == impl->callback_threads.end() ? 0 : current->second;
+        const bool callback_has_peer =
+            current_callbacks != 0 &&
+            impl->active_callbacks > current_callbacks;
+        if (callback_has_peer) {
+            // Joining teardown from the callback being torn down would
+            // deadlock when a peer callback is queued behind serialized domain
+            // dispatch. Transfer the final strong reference to a finalizer
+            // thread; it waits for both callbacks to unwind, then performs the
+            // normal synchronous stop and cleanup.
+            std::thread([impl = std::move(impl)]() {
+                impl->stop();
+                impl->stop_cleanup();
+            }).detach();
+            return;
+        }
+    }
     impl->stop();
     impl->stop_cleanup();
 }
@@ -437,31 +467,40 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
 
 void InspectorServer::Impl::stop() {
     // Keep the shared teardown state alive if this call is the last owner and
-    // must defer to a transition that is waiting for the current callback.
+    // must defer until the current callback has unwound.
     const auto keep_alive = shared_from_this();
     stop_requested.store(true, std::memory_order_release);
+    bool called_from_callback = false;
+    {
+        std::lock_guard lock(clients_mutex);
+        const auto current =
+            callback_threads.find(std::this_thread::get_id());
+        const auto current_callbacks =
+            current == callback_threads.end() ? 0 : current->second;
+        called_from_callback = current_callbacks != 0;
+        const bool callback_has_peer =
+            called_from_callback &&
+            active_callbacks > current_callbacks;
+        if (callback_has_peer) {
+            // Teardown waits for every other callback. A callback must not hold
+            // a domain-dispatch lock while entering that wait, because another
+            // callback may be queued behind it. Let the cleanup worker perform
+            // the stop after this callback releases its guard.
+            deferred_stop_requested.store(true, std::memory_order_release);
+            cleanup_cv.notify_one();
+            return;
+        }
+    }
     std::unique_lock transition_lock(transition_mutex, std::defer_lock);
-    if (!transition_lock.try_lock()) {
-        bool called_from_callback = false;
-        {
-            std::lock_guard lock(clients_mutex);
-            called_from_callback =
-                callback_threads.contains(std::this_thread::get_id());
+    if (called_from_callback) {
+        while (!transition_lock.try_lock()) {
+            if (transition_waiting_for_callbacks.load(
+                    std::memory_order_acquire))
+                return;
+            std::this_thread::yield();
         }
-        if (called_from_callback) {
-            // A transition tearing down the current generation must wait for
-            // this callback, so blocking on its mutex would deadlock. Defer
-            // only in that interval. Otherwise keep trying until the
-            // transition completes, then perform the requested stop.
-            while (!transition_lock.try_lock()) {
-                if (transition_waiting_for_callbacks.load(
-                        std::memory_order_acquire))
-                    return;
-                std::this_thread::yield();
-            }
-        } else {
-            transition_lock.lock();
-        }
+    } else {
+        transition_lock.lock();
     }
     stop_locked();
 }
