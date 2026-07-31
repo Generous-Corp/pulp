@@ -145,10 +145,6 @@ pulp_add_test_suite(pulp-test-plugin-frame-clip LIBRARIES pulp::view pulp::canva
 # across a failed frame, and the bounded surface-recreate policy. Compiles to a
 # sentinel without Skia.
 pulp_add_test_suite(pulp-test-plugin-frame-renderer LIBRARIES pulp::view pulp::canvas)
-if(PULP_HAS_SKIA)
-    target_link_libraries(pulp-test-plugin-frame-clip PRIVATE pulp::render)
-    target_link_libraries(pulp-test-plugin-frame-renderer PRIVATE pulp::render)
-endif()
 
 # paint_all compositing-layer contract (WI-27). After the FU-4 decomposition,
 # pins the push_effect_layers / pop_effect_layers save-depth invariant across
