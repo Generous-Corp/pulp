@@ -369,7 +369,8 @@ jobs:
         run: |
           python3 tools/scripts/resolve_advisory_macos_runner.py \
             --configured-json "$CONFIGURED_JSON" \
-            --require-self-hosted
+            --require-self-hosted \
+            --event-name "${{ github.event_name }}"
 
   gpu-audio-macos:
     name: GPU audio proof (macOS, real WebGPU)

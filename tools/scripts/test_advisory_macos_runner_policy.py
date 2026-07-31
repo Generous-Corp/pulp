@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import re
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 
@@ -82,6 +84,48 @@ class AdvisoryMacosRunnerPolicyTests(unittest.TestCase):
                 self.assertTrue(enabled)
                 self.assertEqual(selector.casefold(), configured.casefold())
 
+    def test_pull_request_ignores_private_selector(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            enabled, selector = MODULE.resolve_selector(
+                '["self-hosted","macOS","ARM64","pulp-advisory-examples"]',
+                '"macos-15"',
+                event_name="pull_request",
+            )
+        self.assertTrue(enabled)
+        self.assertEqual(selector, '"macos-15"')
+        self.assertIn("workflow_dispatch-only", stderr.getvalue())
+
+    def test_pull_request_disables_private_only_lane_without_fallback(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = MODULE.resolve_selector(
+                '["self-hosted","macOS","ARM64","pulp-advisory-gpu"]',
+                "",
+                require_self_hosted=True,
+                event_name="pull_request",
+            )
+        self.assertEqual(result, (False, '"macos-15"'))
+        self.assertIn("workflow_dispatch-only", stderr.getvalue())
+
+    def test_required_self_hosted_lane_cannot_fall_back_to_hosted(self) -> None:
+        with self.assertRaisesRegex(ValueError, "self-hosted"):
+            MODULE.resolve_selector(
+                '["self-hosted","macOS","ARM64","pulp-advisory-gpu"]',
+                '"macos-15"',
+                require_self_hosted=True,
+                event_name="pull_request",
+            )
+
+    def test_workflow_dispatch_accepts_private_selector(self) -> None:
+        enabled, selector = MODULE.resolve_selector(
+            '["self-hosted","macOS","ARM64","pulp-advisory-examples"]',
+            '"macos-15"',
+            event_name="workflow_dispatch",
+        )
+        self.assertTrue(enabled)
+        self.assertIn("pulp-advisory-examples", selector)
+
     def test_unknown_hosted_looking_selector_fails_closed(self) -> None:
         for configured in (
             '"macos-999"',
@@ -115,6 +159,7 @@ class AdvisoryMacosRunnerPolicyTests(unittest.TestCase):
             with self.subTest(workflow=filename):
                 self.assertIn(required, text)
                 self.assertIn("resolve_advisory_macos_runner.py", text)
+                self.assertIn('--event-name "${{ github.event_name }}"', text)
                 for variable in forbidden:
                     self.assertNotIn(variable, text)
                 self.assertIsNone(
