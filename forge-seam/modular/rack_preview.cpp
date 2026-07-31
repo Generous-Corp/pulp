@@ -193,22 +193,82 @@ void draw_dock_collar(Canvas& canvas, const JackPoint& p, Color body, float scal
 
 const std::string& RackPreview::panel_svg(const std::string& slug) const {
     static const std::string kNone;
-    if (panel_dir_.empty() || slug.empty()) return kNone;
+    if (slug.empty()) return kNone;
     const auto it = panel_cache_.find(slug);
     if (it != panel_cache_.end()) return it->second;
-
-    // Dark first: the app's stage is dark, and the light panel on it reads as
-    // a mistake rather than a variant.
     std::string text;
-    for (const char* suffix : {"-dark.svg", ".svg"}) {
-        std::ifstream f(panel_dir_ + "/" + slug + suffix, std::ios::binary);
+    if (!panel_dir_.empty()) text = read_panel(panel_dir_, slug);
+    return panel_cache_.emplace(slug, std::move(text)).first->second;
+}
+
+std::string RackPreview::read_panel(const std::string& dir,
+                                    const std::string& slug) {
+    // LIGHT first, because that is what Rack shows.
+    //
+    // This preferred `-dark.svg`, on the reasoning that a light panel on a
+    // dark stage reads as a mistake. It reads as a mistake for a better
+    // reason: the same rack is white in Rack and black here, so the preview
+    // and the thing it previews disagree about what the user is about to see.
+    // Fidelity beats fitting in -- the picture's whole job is to be the rack
+    // you get.
+    for (const char* suffix : {".svg", "-dark.svg"}) {
+        std::ifstream f(dir + "/" + slug + suffix, std::ios::binary);
         if (!f) continue;
         std::stringstream ss;
         ss << f.rdbuf();
-        text = ss.str();
-        break;
+        return ss.str();
     }
-    return panel_cache_.emplace(slug, std::move(text)).first->second;
+    return {};
+}
+
+const std::string& RackPreview::vendor_svg(const std::string& plugin,
+                                           const std::string& model) const {
+    // Somebody else's module, drawn from THEIR artwork.
+    //
+    // Only our own panels were ever looked up, so every module we did not make
+    // came out as a blank slab -- most visibly Core's audio interface, which
+    // is in every patch that makes a sound and was the emptiest thing on the
+    // stage. Its cables then docked at the panel edge rather than at jacks,
+    // because a face with no artwork has no jack positions, which is the odd
+    // wiring that goes with it.
+    //
+    // Rack keeps Core's artwork inside its own bundle and every other
+    // plugin's beside the plugin, so both are readable without shipping
+    // copies of anyone's work.
+    static const std::string kNone;
+    const auto key = plugin + "/" + model;
+    const auto it = vendor_cache_.find(key);
+    if (it != vendor_cache_.end()) return it->second;
+
+    std::vector<std::pair<std::string, std::string>> tries;
+    if (plugin == "Core") {
+        // Core's files are named for what the module IS rather than for its
+        // slug: AudioInterface2 is Audio2.svg, AudioInterface16 is Audio8.svg
+        // in the free build. Slug first, then the shortened name.
+        std::string shortened = model;
+        const std::string prefix = "AudioInterface";
+        if (model.rfind(prefix, 0) == 0)
+            shortened = "Audio" + model.substr(prefix.size());
+        for (const char* app : {"/Applications/VCV Rack 2 Free.app",
+                                "/Applications/VCV Rack 2 Pro.app"}) {
+            const std::string dir = std::string(app) + "/Contents/Resources/res/Core";
+            tries.emplace_back(dir, model);
+            if (shortened != model) tries.emplace_back(dir, shortened);
+        }
+    } else {
+        const char* home = std::getenv("HOME");
+        const std::string base = std::string(home ? home : ".") +
+                                 "/Library/Application Support/Rack2";
+        for (const char* arch : {"plugins-mac-arm64", "plugins-mac-x64", "plugins"})
+            tries.emplace_back(base + "/" + arch + "/" + plugin + "/res", model);
+    }
+
+    std::string text;
+    for (const auto& [dir, name] : tries) {
+        text = read_panel(dir, name);
+        if (!text.empty()) break;
+    }
+    return vendor_cache_.emplace(key, std::move(text)).first->second;
 }
 
 const RackModule* RackPreview::find(const std::string& id) const {
@@ -314,9 +374,15 @@ void RackPreview::paint(Canvas& canvas) {
         // a vendor's module. It looks plausible, has the wrong controls and
         // the wrong width, and is a confident lie about what is in the rack.
         static const std::string kOurs = "ForgeModular";
-        const auto& svg = (mod_for_panel && mod_for_panel->brand == kOurs)
-                              ? panel_svg(mod_for_panel->name)
-                              : std::string{};
+        // Ours from our own res/, anyone else's from theirs. Matching on the
+        // slug alone would draw OUR panel on a vendor module -- Fundamental
+        // also ships VCO, VCF, VCA and LFO -- which looks plausible, has the
+        // wrong controls and the wrong width, and is a confident lie about
+        // what is in the rack.
+        const std::string& svg =
+            !mod_for_panel                        ? panel_svg(std::string{})
+            : mod_for_panel->brand == kOurs       ? panel_svg(mod_for_panel->name)
+            : vendor_svg(mod_for_panel->brand, mod_for_panel->name);
         bool artwork = false;
         if (!svg.empty()) {
             // Clipped to its own slot. Each panel's artwork paints a

@@ -4962,3 +4962,34 @@ TEST_CASE("the depth tabs are actually on screen for a patch", "[rack][depth]") 
     shell.set_artifact(forge_modular::Artifact::patch);
     CHECK(visible_tabs() == 3);
 }
+
+TEST_CASE("a module we did not make is drawn from its own artwork",
+          "[rack][artwork]") {
+    // Only our own panels were ever looked up, so every module from another
+    // plugin came out as a blank slab -- most visibly Core's audio interface,
+    // which is in every patch that makes a sound. Its cables then docked at
+    // the panel edge instead of at jacks, because a face with no artwork has
+    // no jack positions; the odd wiring and the empty panel were one bug.
+    forge_modular::RackPreview preview;
+    preview.set_panel_directory(
+        "/Volumes/Workshop/Code/pulp-modular-rack/examples/forge-modular/res");
+
+    if (!std::filesystem::exists("/Applications/VCV Rack 2 Free.app")) {
+        WARN("Rack is not installed — vendor artwork cannot be checked here. "
+             "This is a skip, not a pass.");
+        return;
+    }
+
+    // Core's files are named for what the module is, not for its slug:
+    // AudioInterface2 lives in Audio2.svg. Looking up the slug alone finds
+    // nothing, which is exactly how it stayed blank.
+    CHECK(preview.has_artwork_for("Core", "AudioInterface2"));
+
+    // Ours still resolve, from our own res/ rather than a vendor's.
+    CHECK(preview.has_artwork_for("ForgeModular", "VCO"));
+
+    // And a plugin nobody has resolves to nothing rather than to somebody
+    // else's panel -- drawing the wrong module's face is worse than drawing
+    // none, because it looks right.
+    CHECK_FALSE(preview.has_artwork_for("NoSuchPluginAnywhere", "GHOST"));
+}

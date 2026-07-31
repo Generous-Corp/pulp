@@ -41,6 +41,16 @@ public:
     /// its name on it and none of the knobs it had just been given.
     void set_panel_directory(std::string dir) { panel_dir_ = std::move(dir); }
 
+    /// Is there artwork for this module, ours or the vendor's? Exposed so a
+    /// test can ask whether a panel will be DRAWN rather than infer it from
+    /// pixels -- a blank slab and a dark panel look alike in a comparison.
+    bool has_artwork_for(const std::string& plugin,
+                         const std::string& model) const {
+        static const std::string kOurs = "ForgeModular";
+        return !(plugin == kOurs ? panel_svg(model) : vendor_svg(plugin, model))
+                    .empty();
+    }
+
     const std::vector<RackModule>& modules() const { return modules_; }
     const std::vector<Connection>& connections() const { return connections_; }
 
@@ -103,6 +113,15 @@ private:
     const std::string& panel_svg(const std::string& slug) const;
 
     std::string panel_dir_;
+    /// Artwork for modules we did not make, keyed "plugin/model". Kept apart
+    /// from `panel_cache_` because slugs collide across plugins.
+    mutable std::map<std::string, std::string> vendor_cache_;
+
+    /// Read `<dir>/<slug>.svg`, preferring the light face Rack shows.
+    static std::string read_panel(const std::string& dir, const std::string& slug);
+    /// Artwork for somebody else's module, from wherever Rack keeps it.
+    const std::string& vendor_svg(const std::string& plugin,
+                                  const std::string& model) const;
     mutable std::map<std::string, std::string> panel_cache_;
 };
 
