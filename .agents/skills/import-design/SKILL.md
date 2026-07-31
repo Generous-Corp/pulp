@@ -3284,6 +3284,26 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated
   plugins do not embed or require either one.
+- **Never read pixels with virtual time paused.** `Emulation.setVirtualTimePolicy
+  {policy:"pause"}` suppresses the compositor's BeginFrame source, and Chromium's
+  screenshot path waits for a fresh presented frame. From Chrome 151 the *first*
+  `Page.captureScreenshot` after a pause still resolves — `captureBeyondViewport`
+  resizes the capture surface and forces one commit — and every call after it
+  hangs forever. That is why `settle.mjs` pauses virtual time for the DOM,
+  semantics, token, and health reads and then calls `resumeDynamicTime` before
+  the screenshot loop. Determinism does not rest on the pause: tracked
+  timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
+  and transition are disabled, and `captureStableScreenshot` requires a
+  byte-identical trailing run as the observable proof of stillness.
+- **A capture that hangs is a single unresolved CDP call, not a slow loop.**
+  Every settle loop is bounded to seconds, so a multi-minute stall can only be
+  one awaited call. Diagnose by timestamping `cdp.call` start/resolve to stderr
+  and diffing the last line printed between two Chrome versions on one machine —
+  do not theorize from the code. The capture runtime now reports the phase, the
+  last completed browser call, and the calls still in flight when its deadline
+  expires, and writes the resolved browser build to stderr as a
+  `[browser-capture]` line before any page work, so a failed capture already
+  names both the Chrome and the stalled call.
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.

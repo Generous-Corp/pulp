@@ -704,7 +704,17 @@ TEST_CASE("capture deadline leaves time for runtime-owned cleanup",
         capture::capture_document(fixture_browser(), request);
 
     REQUIRE_FALSE(result.ok());
+    // The runtime reports its browser build before the diagnostic line, so the
+    // code has to be recovered from the line that carries it, not from the
+    // start of stderr.
     CHECK(result.diagnostic.code == "browser-capture-timeout");
+    // A stalled capture must name the stage it died in rather than reporting a
+    // bare timeout.
+    CHECK(result.diagnostic.message.find("stalled=Page.captureScreenshot")
+          != std::string::npos);
+    CHECK(result.diagnostic.message.find(
+              "last-completed=DOMSnapshot.captureSnapshot")
+          != std::string::npos);
     CHECK_FALSE(result.process.timed_out);
     CHECK(result.process.exit_code == 124);
     const auto output = fs::canonical(request.output_directory);

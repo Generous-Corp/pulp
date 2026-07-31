@@ -126,17 +126,28 @@ std::string sanitize_subprocess_output(std::string value) {
 }
 
 std::optional<std::string> capture_error_code(std::string_view stderr_text) {
-    const auto colon = stderr_text.find(':');
-    if (colon == std::string_view::npos || colon == 0 || colon > 80)
-        return std::nullopt;
-    const auto candidate = stderr_text.substr(0, colon);
-    if (!std::all_of(candidate.begin(), candidate.end(), [](unsigned char c) {
-            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
-                || c == '-';
-        })) {
-        return std::nullopt;
+    // The capture runtime writes its diagnostic as a leading `code: message`
+    // token, but it also reports the resolved browser build before doing any
+    // work, and Node itself can emit runtime warnings. Scan for the first line
+    // that carries a code rather than assuming the code opens the stream.
+    while (!stderr_text.empty()) {
+        const auto newline = stderr_text.find('\n');
+        const auto line = stderr_text.substr(0, newline);
+        const auto colon = line.find(':');
+        if (colon != std::string_view::npos && colon != 0 && colon <= 80) {
+            const auto candidate = line.substr(0, colon);
+            if (std::all_of(
+                    candidate.begin(), candidate.end(), [](unsigned char c) {
+                        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                            || c == '-';
+                    })) {
+                return std::string(candidate);
+            }
+        }
+        if (newline == std::string_view::npos) break;
+        stderr_text.remove_prefix(newline + 1);
     }
-    return std::string(candidate);
+    return std::nullopt;
 }
 
 std::optional<fs::path> resolve_node(

@@ -88,6 +88,14 @@ launches, and every fetched response is content-hashed in the capture envelope.
 Failures are nonzero and write `capture-error.json` when an output directory is
 available. The helper never selects a lower-fidelity importer.
 
+The resolved browser build is written to stderr as a `[browser-capture]` line
+before any page work, so a capture that never produces an envelope still says
+which Chromium ran. Chromium's screenshot and virtual-time behaviour differs
+between releases, and a failure report that does not name the browser cannot be
+triaged. A capture that reaches its deadline reports the phase it died in, the
+last browser call that completed, and the calls still in flight; the same
+detail is written to `capture-error.json`.
+
 Arbitrary JavaScript evaluation is intentionally not a CLI escape hatch: it
 would weaken the source/evidence boundary and make captures difficult to
 reproduce or audit.
