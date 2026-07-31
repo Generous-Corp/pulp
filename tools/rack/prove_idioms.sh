@@ -38,9 +38,34 @@ PROMPTS=(
   "texture|two detuned oscillators beating against each other|named"
 )
 
+# macOS ships no `timeout` -- it is GNU coreutils, so a machine that has never
+# had it installed dies with "command not found" on every build, which reads as
+# twelve failing prompts rather than a missing tool. Same shim as
+# prove_surfaces.sh, for the same reason.
+if command -v timeout >/dev/null 2>&1; then
+    cap() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+    cap() { gtimeout "$@"; }
+else
+    cap() {
+        local secs="$1"; shift
+        "$@" &
+        local job=$!
+        ( sleep "$secs"; kill -TERM "$job" 2>/dev/null ) 2>/dev/null &
+        local killer=$!
+        wait "$job" 2>/dev/null
+        local rc=$?
+        kill "$killer" 2>/dev/null
+        return "$rc"
+    }
+fi
+
 only="${1:-}"
+LOGS="${PROVE_LOGS:-${OUT%.txt}-logs}"
+mkdir -p "$LOGS"
 : > "$OUT"
 pass=0; fail=0; n=0
+silent_total=0; lint_total=0; idiom_total=0
 
 for entry in "${PROMPTS[@]}"; do
     n=$((n + 1))
@@ -59,14 +84,31 @@ print(resolve('''$prompt''') or '')
     fi
 
     printf '%2d. %-9s %-52s -> %s (%s)\n' "$n" "$family" "${prompt:0:52}" "$slug" "$how" | tee -a "$OUT"
-    log="$(cd "$TOOLS" && timeout 1500 python3 patch.py build "$prompt" 2>&1)"
+    log="$(cd "$TOOLS" && cap 1500 python3 patch.py build "$prompt" 2>&1)"
 
     # The generator prints the verdict; the artifact is checked again here
     # rather than trusted, because "built" and "holds" are separate claims and
     # this project has had them disagree.
+    # The whole log, kept. Only the last two lines used to survive, which is
+    # how the previous run's summary came to say four prompts died at the audio
+    # gate when its own transcript showed two -- the reason printed is the
+    # LAST attempt's, and the earlier attempts had already scrolled away.
+    printf '%s\n' "$log" > "$LOGS/$(printf '%02d' "$n").log"
+
     path="$(printf '%s' "$log" | sed -n 's/.*cables → \(.*\)$/\1/p' | tail -1)"
     if [ -z "$path" ] || [ ! -f "$path" ]; then
+        # Which gate stopped it, counted from the transcript rather than
+        # described from memory. A silent patch and a wrongly wired one are
+        # different bugs with different fixes.
+        audio=$(printf '%s' "$log" | grep -c "makes no sound")
+        wiring=$(printf '%s' "$log" | grep -c "^  rejected (attempt")
+        wrong=$(printf '%s' "$log" | grep -c "not a .* patch yet")
         printf '    FAILED to build: %s\n' "$(printf '%s' "$log" | tail -2 | head -1)" | tee -a "$OUT"
+        printf '        attempts stopped by: %s silent, %s rejected by the lint, %s wrong idiom\n' \
+               "$audio" "$wiring" "$wrong" | tee -a "$OUT"
+        silent_total=$((silent_total + audio))
+        lint_total=$((lint_total + wiring))
+        idiom_total=$((idiom_total + wrong))
         fail=$((fail + 1))
         continue
     fi
@@ -81,4 +123,7 @@ print(resolve('''$prompt''') or '')
 done
 
 printf '\n%d held, %d did not\n' "$pass" "$fail" | tee -a "$OUT"
+printf 'across every attempt of the runs that failed: %d silent, %d rejected by the lint, %d wrong idiom\n' \
+       "$silent_total" "$lint_total" "$idiom_total" | tee -a "$OUT"
+printf 'full transcripts: %s\n' "$LOGS" | tee -a "$OUT"
 [ "$fail" -eq 0 ]

@@ -148,6 +148,7 @@ def inventory() -> dict:
                     _record(inv, d, entry.split("-")[0])
     _add_port_names(inv)
     _add_portmap(inv)
+    _infer_port_roles(inv)
     return inv
 
 
@@ -257,6 +258,137 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
                     ]
 
 
+# What a port carries, worked out from what it is called. Ordered: the first
+# group whose word appears in the name wins, so "Channel 1 exponential CV" is
+# read as CV rather than as the mixer channel its first word suggests.
+#
+# CV comes first deliberately. Almost every modulation jack is named after the
+# thing it modulates -- "Frequency", "Time", "Attack" -- so a later pass would
+# have to un-claim them one at a time.
+_ROLE_WORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("Cv", ("CV", "MODULATION", "FM", "PROBABILITY", "SPREAD", "RATE",
+            "AMOUNT", "AMT", "DEPTH", "LEVEL", "LVL", "EXPONENTIAL", "LINEAR",
+            "VELOCITY", "AFTERTOUCH", "WHEEL", "SHIFT", "ATTACK", "DECAY",
+            "SUSTAIN", "RELEASE", "TIME", "FREQUENCY", "RESONANCE", "DRIVE",
+            "TONE", "FEEDBACK", "SHAPE", "STEPS", "ENVELOPE", "ENV",
+            "SMOOTH", "STEPPED", "CUTOFF")),
+    ("Pitch", ("V/OCT", "1V/OCT", "1V/OCTAVE", "V/OCTAVE", "PITCH")),
+    ("Clock", ("CLOCK", "CLK", "TEMPO")),
+    ("Gate", ("GATE",)),
+    ("Trigger", ("TRIG", "TRIGGER", "RESET", "RETRIGGER", "SYNC", "RUN",
+                 "EOC", "EOR", "EOF", "START", "STOP", "CONTINUE", "STEP")),
+    ("Audio", ("AUDIO", "IN", "OUT", "INPUT", "OUTPUT", "L", "R", "MIX",
+               "WET", "DRY", "SINE", "SIN", "TRIANGLE", "TRI", "SAWTOOTH",
+               "SAW", "SQUARE", "SQR", "PULSE", "PLS", "NOISE", "LOWPASS",
+               "HIGHPASS", "BANDPASS", "NOTCH", "LP", "HP", "BP", "SIGNAL",
+               "EXTERNAL", "SUM", "MAIN", "MASTER")),
+]
+
+# A numbered jack -- "Channel 3", "Ch 2", "Row 5", "In 1" -- says nothing about
+# what it carries. On something that handles audio it is a signal; on a MIDI
+# interface the identically named jack is a control voltage, so the module's
+# own tags decide.
+_NUMBERED = ("CHANNEL", "CH", "ROW", "BUS")
+
+
+def _normalise_port(name: str) -> list[str]:
+    """A port name as comparable words: upper case, punctuation gone.
+
+    `To "device output 1"` becomes ['TO', 'DEVICE', 'OUTPUT', '1'], so the
+    match is on whole words. Substring matching would read "STEPS" (how many
+    steps a sequence has, a CV) as "STEP" (one step firing, a trigger), and
+    "OUTPUT" as "OUT".
+    """
+    out, word = [], []
+    for ch in name.upper():
+        if ch.isalnum() or ch == "/":
+            word.append(ch)
+        elif word:
+            out.append("".join(word))
+            word = []
+    if word:
+        out.append("".join(word))
+    return out
+
+
+# The waveform names an oscillator's outputs carry, split by what the shape is
+# good for. On a VCO these are audio. On an LFO the identical jack is a
+# modulation source -- and the square one is also how most people clock a
+# divider or gate an envelope.
+_WAVE_SMOOTH = ("SINE", "SIN", "TRIANGLE", "TRI", "SAWTOOTH", "SAW", "RAMP")
+_WAVE_EDGED = ("SQUARE", "SQR", "PULSE", "PLS")
+
+LFO_TAGS = {"LFO", "Low-frequency oscillator", "Clock generator"}
+OSC_TAGS = {"VCO", "Oscillator"}
+
+
+def infer_port_role(name: str | None, tags: list | None,
+                    kind: str = "in") -> str | list | None:
+    """The role a port called `name` on a module tagged `tags` plays.
+
+    A list when the jack is honestly more than one thing. An LFO's square
+    output is a modulation source, a clock and a gate, depending only on where
+    it is patched -- naming one of those and rejecting the others would trade
+    a systematic false rejection for a different systematic false rejection.
+    The idiom's own module role does the narrowing: `clock.clock_out` already
+    requires the source to be a clock before this is consulted at all.
+
+    None when the port has no name -- an unnamed port is unknown, and saying
+    "Cv" about it would be inventing cartography rather than deriving it.
+    """
+    if not name:
+        return None
+    words = set(_normalise_port(name))
+    if not words:
+        return None
+
+    # A waveform jack, on something running below hearing rather than in it.
+    if (kind == "out" and has_tag(tags, LFO_TAGS)
+            and not has_tag(tags, OSC_TAGS)):
+        if words & set(_WAVE_EDGED):
+            return ["Cv", "Clock", "Gate", "Trigger"]
+        if words & set(_WAVE_SMOOTH):
+            return ["Cv"]
+
+    for role, markers in _ROLE_WORDS:
+        if words & set(markers):
+            return role
+    if words & set(_NUMBERED):
+        return "Audio" if has_tag(tags, AUDIO_TAGS) else "Cv"
+    return "Cv"
+
+
+def _infer_port_roles(inv: dict) -> None:
+    """Fill in port roles for every module nobody cartographed.
+
+    Only 15 of Fundamental's 39 modules -- and none of Core's -- carry a role,
+    because roles come from our own manifests and from the CARTOG module, and
+    neither describes a vendor's ports. Everything downstream reads a role:
+    the idiom check, the cable colours, the grouping in the explanation. With
+    no role and no matching label, a requirement can never be satisfied, so a
+    textbook patch built from the modules EVERYONE has was rejected for a
+    reason that had nothing to do with the patch -- `two detuned oscillators`
+    was told its oscillators were not summed while they plainly were.
+
+    Derived here and nowhere else, so the checker, the colours and the
+    explanation cannot disagree about what a cable is. A cartographed role
+    always wins: this only fills silence.
+    """
+    for plug in inv.values():
+        for mod in plug.get("modules", {}).values():
+            tags = mod.get("tags") or []
+            for names_key, roles_key in (("inputs", "roles_in"),
+                                         ("outputs", "roles_out")):
+                names = mod.get(names_key)
+                if not names or mod.get(roles_key):
+                    continue
+                kind = "in" if names_key == "inputs" else "out"
+                roles = [infer_port_role(n, tags, kind) for n in names]
+                if any(roles):
+                    mod[roles_key] = roles
+                    mod[roles_key + "_inferred"] = True
+
+
 def port_name(inv, plugin, model, kind, idx):
     """A port's name if we know it, else its index. Never a guess."""
     mod = inv.get(plugin, {}).get("modules", {}).get(model, {})
@@ -267,6 +399,21 @@ def port_name(inv, plugin, model, kind, idx):
 
 
 def port_role(inv, plugin, model, kind, idx):
+    """What one port carries, as a single name.
+
+    A jack that is honestly several things -- an LFO's square output -- is
+    stored as a list, and the FIRST entry is its primary reading: what it is
+    when nothing else is known. Colour and grouping need one answer; the
+    idiom check reads the whole list through `roles_at`.
+    """
+    role = roles_at(inv, plugin, model, kind, idx)
+    if isinstance(role, list):
+        return role[0] if role else None
+    return role
+
+
+def roles_at(inv, plugin, model, kind, idx):
+    """Everything one port may be: a name, a list of names, or None."""
     mod = inv.get(plugin, {}).get("modules", {}).get(model, {})
     roles = mod.get("roles_out" if kind == "out" else "roles_in")
     if roles and 0 <= idx < len(roles):
@@ -279,15 +426,31 @@ def port_role(inv, plugin, model, kind, idx):
 # Which heading a cable falls under. Role comes from our manifests when we have
 # it; otherwise the module's own tags are a decent proxy, since a module tagged
 # "Oscillator" feeding something is almost always carrying audio.
-AUDIO_TAGS = {"Oscillator", "Waveshaper", "Filter", "Reverb", "Delay", "Drum",
-              "Distortion", "Chorus", "Phaser", "Flanger", "Synth voice",
-              "Granular", "Sampler", "Noise", "Ring modulator", "Mixer",
-              "Voltage-controlled amplifier", "Low-pass gate", "Equalizer",
-              "Compressor", "Limiter", "Vocoder", "Physical modeling"}
+# Both spellings of the same tag. Rack accepts "VCO" as an alias for
+# "Oscillator" and plugin authors use whichever they like -- Fundamental writes
+# the short form throughout, so a set holding only the long one classified
+# every module the average user actually has as "not audio".
+AUDIO_TAGS = {"Oscillator", "VCO", "Waveshaper", "Filter", "VCF", "Reverb",
+              "Delay", "Drum", "Distortion", "Chorus", "Phaser", "Flanger",
+              "Synth voice", "Granular", "Sampler", "Noise", "Ring modulator",
+              "Mixer", "Voltage-controlled amplifier", "VCA", "Amplifier",
+              "Low-pass gate", "Equalizer", "Compressor", "Limiter", "Vocoder",
+              "Physical modeling"}
 MOD_TAGS = {"Low-frequency oscillator", "Envelope generator", "Random",
             "Sample and hold", "Slew limiter", "Function generator",
             "Envelope follower", "Attenuator"}
 CLOCK_TAGS = {"Clock generator", "Clock modulator", "Sequencer", "Arpeggiator"}
+
+
+def has_tag(tags, wanted) -> bool:
+    """Does this module carry any of `wanted`, however its author capitalised?
+
+    Rack's canonical tag is "Envelope generator"; Fundamental writes "Envelope
+    Generator". An exact comparison silently classified the modules everyone
+    actually has as carrying none of the tags they carry.
+    """
+    return bool({t.casefold() for t in (tags or [])}
+                & {w.casefold() for w in wanted})
 
 
 # The colour Rack draws for each structural group, and the ONLY place a cable
@@ -334,13 +497,13 @@ def _group_of(inv, mod_ref, out_idx, in_role):
         return "AUDIO"
     if in_role == "Cv":
         return "MODULATION"
-    tags = set(inv.get(mod_ref[0], {}).get("modules", {})
+    tags = (inv.get(mod_ref[0], {}).get("modules", {})
                .get(mod_ref[1], {}).get("tags", []))
-    if tags & CLOCK_TAGS:
+    if has_tag(tags, CLOCK_TAGS):
         return "PITCH & GATE"
-    if tags & MOD_TAGS:
+    if has_tag(tags, MOD_TAGS):
         return "MODULATION"
-    if tags & AUDIO_TAGS:
+    if has_tag(tags, AUDIO_TAGS):
         return "AUDIO"
     return "MODULATION"
 

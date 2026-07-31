@@ -67,6 +67,222 @@ CORPUS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# the modules everyone actually has
+#
+# Every check above this line runs against a fixture rack of our own making, or
+# against patches built from our own modules -- which carry a cartographed role
+# on every jack. Fundamental and Core do not, and they are what a bare Rack
+# install contains. So the idioms were proven able to fail on modules nobody
+# has, and were never once asked about the modules everybody has.
+#
+# What that hid: a case-sensitive tag comparison decided Fundamental's ADSR was
+# not an envelope, and an unrolled port carried no role at all, so a textbook
+# patch was rejected while being told its envelope was missing and its
+# oscillators were not summed. Three of a dozen real prompts died there.
+
+VENDOR = os.path.join(HERE, "patch_idioms", "regressions", "vendor_ports.json")
+
+# What each jack CARRIES, written from what the jack is rather than from what
+# the code returns. A derivation table checked against itself proves nothing.
+PORT_ROLES = [
+    ("Fundamental", "VCO", "out", 2, "Audio"),      # Sawtooth
+    ("Fundamental", "VCO", "in", 0, "Pitch"),       # 1V/octave pitch
+    ("Fundamental", "VCO", "in", 1, "Cv"),          # Frequency modulation
+    ("Fundamental", "VCF", "in", 3, "Audio"),       # Audio
+    ("Fundamental", "VCF", "in", 0, "Cv"),          # Frequency
+    ("Fundamental", "VCF", "out", 0, "Audio"),      # Lowpass filter
+    ("Fundamental", "ADSR", "in", 4, "Gate"),       # Gate
+    ("Fundamental", "ADSR", "out", 0, "Cv"),        # Envelope
+    ("Fundamental", "Mixer", "in", 0, "Audio"),     # Channel 1, on a mixer
+    ("Fundamental", "Mixer", "out", 0, "Audio"),    # Mix
+    ("Fundamental", "VCA", "in", 0, "Cv"),          # Channel 1 exponential CV
+    ("Fundamental", "VCA", "in", 2, "Audio"),       # Channel 1, on a VCA
+    ("Fundamental", "SEQ3", "out", 4, "Trigger"),   # Step 1
+    ("Fundamental", "SEQ3", "in", 3, "Cv"),         # Steps -- how many, not one
+    ("Fundamental", "SEQ3", "in", 1, "Clock"),      # Clock
+    ("Fundamental", "Random", "in", 4, "Cv"),       # Trigger probability
+    ("Fundamental", "Random", "in", 2, "Trigger"),  # Trigger
+    ("Core", "AudioInterface2", "in", 0, "Audio"),  # To "device output 1"
+    # The same waveform name means different things on different modules.
+    ("Fundamental", "LFO", "out", 0, "Cv"),         # Sine, below hearing
+    ("Fundamental", "LFO", "out", 3, "Cv"),         # Square, primarily a CV
+]
+
+# A jack that is honestly more than one thing, and the kinds it must satisfy.
+DUAL_ROLE = [
+    ("Fundamental", "LFO", "out", 3, ("cv_out", "clock_out", "gate_out")),
+]
+
+# Textbook patches, built from a bare Rack install and nothing else. Each one
+# is the patch a person would draw on a napkin for that idiom. The cut names
+# EVERY cable that satisfies one requirement -- remove them and the rejection
+# must name it. Cutting one of two identical cables proves nothing: the first
+# version of this test cut one of a drone's two summing cables and the idiom
+# still held, correctly, because the other oscillator was still summed.
+def _p(mods, cables):
+    return {"modules": [{"id": i + 1, "plugin": p, "model": m}
+                        for i, (p, m) in enumerate(mods)],
+            "cables": [{"outputModuleId": a, "outputId": b,
+                        "inputModuleId": c, "inputId": d}
+                       for a, b, c, d in cables]}
+
+
+AUDIO2 = ("Core", "AudioInterface2")
+
+TEXTBOOK = [
+    ("subtractive-voice",
+     _p([("Fundamental", "VCO"), ("Fundamental", "VCF"), ("Fundamental", "ADSR"),
+         ("Fundamental", "VCA"), ("Fundamental", "LFO"), AUDIO2],
+        [(1, 2, 2, 3), (5, 3, 3, 4), (3, 0, 2, 0), (2, 0, 4, 2),
+         (3, 0, 4, 0), (4, 0, 6, 0)]),
+     (4,), "envelope has to open the amplifier"),
+
+    ("drone-cluster",
+     _p([("Fundamental", "VCO"), ("Fundamental", "VCO"),
+         ("Fundamental", "Mixer"), AUDIO2],
+        [(1, 2, 3, 0), (2, 2, 3, 1), (3, 0, 4, 0)]),
+     (0, 1), "oscillators have to be summed"),
+
+    ("vibrato",
+     _p([("Fundamental", "LFO"), ("Fundamental", "VCO"), AUDIO2],
+        [(1, 0, 2, 1), (2, 2, 3, 0)]),
+     (0,), "modulator has to reach the oscillator"),
+
+    ("kick-drum",
+     _p([("Fundamental", "LFO"), ("Fundamental", "ADSR"), ("Fundamental", "VCO"),
+         ("Fundamental", "VCA"), AUDIO2],
+        [(1, 3, 2, 4), (2, 0, 3, 1), (2, 0, 4, 0), (3, 0, 4, 2), (4, 0, 5, 0)]),
+     (0,), "something has to trigger it"),
+
+    ("turing-machine",
+     _p([("Fundamental", "LFO"), ("Fundamental", "Random"),
+         ("Fundamental", "VCO"), AUDIO2],
+        [(1, 3, 2, 2), (2, 0, 3, 0), (3, 2, 4, 0)]),
+     (0,), "register has to be clocked"),
+
+    ("noise-texture",
+     _p([("Fundamental", "Noise"), ("Fundamental", "VCF"),
+         ("Fundamental", "LFO"), AUDIO2],
+        [(1, 1, 2, 3), (3, 0, 2, 0), (2, 0, 4, 0)]),
+     (1,), "filter has to move"),
+
+    ("wandering-drone",
+     _p([("Fundamental", "VCO"), ("Fundamental", "VCF"), ("Fundamental", "LFO"),
+         ("Fundamental", "LFO"), AUDIO2],
+        [(1, 2, 2, 3), (3, 0, 2, 0), (4, 0, 1, 1), (2, 0, 5, 0)]),
+     (1,), "modulator has to move the filter"),
+]
+
+
+def vendor_inventory() -> dict:
+    """A rack holding only what a bare Rack install has, from the recording."""
+    import json
+    sys.path.insert(0, HERE)
+    import patch as patch_mod
+    doc = json.load(open(VENDOR))
+    inv = {p: {"name": p, "brand": "", "version": "",
+               "modules": {k: dict(v) for k, v in pv["modules"].items()}}
+           for p, pv in doc["plugins"].items()}
+    patch_mod._infer_port_roles(inv)
+    return inv
+
+
+def check_vendor_freshness() -> int:
+    """The recording still describes the plugins, when there are plugins here.
+
+    A fixture that has drifted from the thing it stands for is worse than no
+    fixture: it keeps passing while the product breaks.
+    """
+    import json
+    sys.path.insert(0, HERE)
+    import patch as patch_mod
+    live = patch_mod.inventory()
+    if not any(p in live for p in ("Fundamental", "Core")):
+        print("  --     no Rack install here, so the recording cannot be "
+              "checked against one (it is still what the tests above used)")
+        return 0
+    doc = json.load(open(VENDOR))
+    drift = []
+    for pslug, pv in doc["plugins"].items():
+        have = live.get(pslug, {}).get("modules", {})
+        if not have:
+            continue
+        for mslug, rec in pv["modules"].items():
+            real = have.get(mslug)
+            if real is None:
+                drift.append(f"{pslug}/{mslug} is no longer installed")
+                continue
+            if sorted(real.get("tags") or []) != sorted(rec.get("tags") or []):
+                drift.append(f"{pslug}/{mslug} tags changed")
+            for key in ("inputs", "outputs"):
+                if rec.get(key) and real.get(key) and real[key] != rec[key]:
+                    drift.append(f"{pslug}/{mslug} {key} changed")
+    if drift:
+        for d in drift[:6]:
+            print(f"  WRONG  the recording is stale: {d}")
+        print("         re-record with: python3 test_idioms.py --capture-vendor")
+        return 1
+    print(f"  ok     the recording still matches the plugins installed here")
+    return 0
+
+
+def check_vendor(idioms) -> int:
+    import copy
+    inv = vendor_inventory()
+    roles = idiom_check.load_roles()
+    bad = 0
+
+    for plug, model, kind, idx, want in PORT_ROLES:
+        got = idiom_check._port_info(inv, {"plugin": plug, "model": model},
+                                     kind, idx)[0]
+        primary = got[0] if isinstance(got, list) else got
+        if primary != want:
+            print(f"  WRONG  {plug}/{model} {kind}{idx} reads as {got!r}, "
+                  f"not {want!r}")
+            bad += 1
+    if not bad:
+        print(f"  ok     {len(PORT_ROLES)} vendor jacks are read as what they are")
+
+    for plug, model, kind, idx, kinds in DUAL_ROLE:
+        got = idiom_check._port_info(inv, {"plugin": plug, "model": model},
+                                     kind, idx)
+        missed = [k for k in kinds
+                  if not idiom_check._port_matches(k, got[0], got[1], roles)]
+        if missed:
+            print(f"  WRONG  {plug}/{model} {kind}{idx} is {got[0]!r}, which "
+                  f"cannot serve as {missed}")
+            bad += 1
+        else:
+            print(f"  ok     {plug}/{model} {kind}{idx} serves as "
+                  f"{', '.join(kinds)}")
+
+    for slug, patch, cuts, expect in TEXTBOOK:
+        problems = idiom_check.check(patch, inv, idioms[slug], roles)
+        if problems:
+            print(f"  WRONG  the textbook {slug}, built from a bare Rack "
+                  f"install, is rejected: {problems}")
+            bad += 1
+            continue
+        # Break it on purpose. A requirement nobody has watched reject
+        # anything is indistinguishable from one that cannot.
+        broken = copy.deepcopy(patch)
+        broken["cables"] = [c for i, c in enumerate(broken["cables"])
+                            if i not in cuts]
+        got = idiom_check.check(broken, inv, idioms[slug], roles)
+        if not got:
+            print(f"  WRONG  {slug} still holds with cable(s) {cuts} cut — the "
+                  f"requirement cannot fail on real modules")
+            bad += 1
+        elif not any(expect in g for g in got):
+            print(f"  WRONG  {slug} rejected the cut, but not for "
+                  f"{expect!r}: {got}")
+            bad += 1
+        else:
+            print(f"  ok     {slug:<20} holds, and names the cut cable")
+    return bad
+
+
 def check_corpus(idioms) -> int:
     import json
     sys.path.insert(0, HERE)
@@ -96,7 +312,37 @@ def check_corpus(idioms) -> int:
     return bad
 
 
+def capture_vendor() -> int:
+    """Re-record the vendor metadata from the Rack install on this machine."""
+    import json
+    sys.path.insert(0, HERE)
+    import patch as patch_mod
+    live = patch_mod.inventory()
+    missing = [p for p in ("Fundamental", "Core") if p not in live]
+    if missing:
+        print(f"cannot record: {', '.join(missing)} is not installed here")
+        return 2
+    doc = json.load(open(VENDOR))
+    doc["captured_from"] = {p: live[p].get("version", "")
+                            for p in doc["plugins"]}
+    for pslug, pv in doc["plugins"].items():
+        mods = {}
+        for mslug, e in sorted(live[pslug]["modules"].items()):
+            rec = {"name": e.get("name"), "tags": e.get("tags") or []}
+            for key in ("inputs", "outputs"):
+                if e.get(key):
+                    rec[key] = e[key]
+            mods[mslug] = rec
+        pv["modules"] = mods
+    json.dump(doc, open(VENDOR, "w"), indent=1)
+    print(f"recorded {sum(len(p['modules']) for p in doc['plugins'].values())} "
+          f"modules to {VENDOR}")
+    return 0
+
+
 def main() -> int:
+    if "--capture-vendor" in sys.argv:
+        return capture_vendor()
     bad = 0
 
     print("idioms can fail:")
@@ -128,6 +374,10 @@ def main() -> int:
         bad += 1
     else:
         print(f"  ok     {named} named, {implied} implied")
+
+    print("\nthe modules everyone actually has:")
+    bad += check_vendor(idioms)
+    bad += check_vendor_freshness()
 
     print("\nreal patches are told apart:")
     bad += check_corpus(idioms)

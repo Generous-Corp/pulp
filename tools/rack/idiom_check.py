@@ -97,13 +97,18 @@ def _module_matches(role: str, mod_entry: dict, roles: dict) -> bool:
     spec = roles["roles"].get(role)
     if spec is None:
         raise KeyError(f"idiom refers to unknown role {role!r}")
-    wanted = set(spec.get("tags") or [])
+    wanted = {t.casefold() for t in (spec.get("tags") or [])}
     if not wanted:
         return True                      # "any"
-    return bool(wanted & set(mod_entry.get("tags") or []))
+    # Case-folded, because a tag is whatever the plugin's author typed.
+    # Rack's canonical spelling is "Envelope generator" and Fundamental writes
+    # "Envelope Generator", so an exact comparison decided that the ADSR every
+    # user has is not an envelope -- and every idiom needing one rejected a
+    # correct patch while naming the envelope as the missing part.
+    return bool(wanted & {t.casefold() for t in (mod_entry.get("tags") or [])})
 
 
-def _port_matches(kind: str, role: str | None, label: str | None,
+def _port_matches(kind: str, role, label: str | None,
                   roles: dict) -> bool:
     spec = roles["ports"].get(kind)
     if spec is None:
@@ -112,7 +117,11 @@ def _port_matches(kind: str, role: str | None, label: str | None,
     ok_labels = {s.upper() for s in (spec.get("labels") or [])}
     if not ok_roles and not ok_labels:
         return True                      # "any_in" / "any_out"
-    if role and role in ok_roles:
+    # A role may be several things at once: an LFO's square output is a
+    # modulation source AND a clock AND a gate, and which one it is depends
+    # only on where it is patched.
+    mine = set(role) if isinstance(role, list) else ({role} if role else set())
+    if mine & ok_roles:
         return True
     # The label fallback matters: a module nobody has cartographed has no port
     # roles at all, and skipping those patches would exempt the modules most
