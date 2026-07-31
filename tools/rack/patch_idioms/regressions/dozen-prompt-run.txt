@@ -1,0 +1,39 @@
+# A dozen prompts, run end to end against the library.
+#
+# Kept as evidence rather than a claim. Six held; six did not, and the failures
+# are worth more than the passes: four ran out of attempts at the AUDIO gate
+# (the patch was the right shape and made no sound) and two were rejected by
+# the idiom check itself, which named the missing connection.
+#
+# The number that moved most is not the pass rate: every one of the twelve now
+# RESOLVES to an idiom, where two previously matched nothing at all. A patch
+# nobody can ask for is a patch the library cannot help with.
+#
+# Re-run with: tools/rack/prove_idioms.sh
+#
+ 1. generative a krell patch where each note chooses the next one's -> krell (named)
+    FAILED to build:     PATCH GATE FAILED: 1 failure(s), 2 warning(s)
+ 2. generative an evolving ambient drone that never settles         -> wandering-drone (named)
+    HOLDS  an-evolving-ambient-drone-that-never-set.vcv
+ 3. generative a melody that repeats then slowly mutates            -> turing-machine (implied)
+    FAILED to build:     - the register has to be clocked, or the sequence never advances
+ 4. rhythm    a bouncing ball rhythm that slows down as it settles -> bouncing-ball (named)
+    FAILED to build:     DUALAD input 0 has 2 cables (LFO, MULT) — an input takes one; Rack keeps the last and silently drops the others
+ 5. rhythm    a kick drum with a fast pitch sweep                  -> kick-drum (named)
+    FAILED to build:     - something has to trigger it
+ 6. rhythm    four different speeds coming from one clock          -> generative-clock-divider (implied)
+    HOLDS  four-different-speeds-coming-from-one-cl.vcv
+ 7. voice     a classic subtractive voice with a filter envelope   -> subtractive-voice (named)
+    HOLDS  a-classic-subtractive-voice-with-a-filte-2.vcv
+ 8. voice     a west coast voice through a low pass gate           -> west-coast-voice (named)
+    HOLDS  a-west-coast-voice-through-a-low-pass-ga-2.vcv
+ 9. voice     a bass sound that stays in the key of C              -> quantized-voice (implied)
+    FAILED to build:     PATCH GATE FAILED: 1 failure(s), 2 warning(s)
+10. modulation slow vibrato on a sustained note                     -> vibrato (named)
+    HOLDS  slow-vibrato-on-a-sustained-note-2.vcv
+11. texture   wind and rain that keeps shifting                    -> noise-texture (implied)
+    HOLDS  wind-and-rain-that-keeps-shifting-2.vcv
+12. texture   two detuned oscillators beating against each other   -> drone-cluster (named)
+    FAILED to build:     - the oscillators have to be summed for their differences to beat
+
+6 held, 6 did not
