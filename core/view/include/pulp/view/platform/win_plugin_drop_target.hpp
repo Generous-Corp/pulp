@@ -32,6 +32,18 @@
 #include <functional>
 #include <string>
 
+// Everything below is Windows-only BY CONSTRUCTION — it implements a Microsoft
+// COM interface over the Win32 SDK, so unlike its WAH-6 siblings
+// (win_plugin_input_router.hpp, win_pointer_input.hpp, win_surface_lifecycle.hpp,
+// which are deliberately free of <windows.h>) it cannot be made portable.
+//
+// The guard is what lets it satisfy the self-contained-header gate, which
+// compiles every changed public header alone under Linux Clang, where <ole2.h>
+// does not exist. Off Windows this header contributes nothing, which is
+// accurate: its only consumer, platform/win/plugin_view_host_win.cpp, is added
+// to the build solely in the Windows branch of core/view/CMakeLists.txt.
+#ifdef _WIN32
+
 // win32_sane.hpp, never raw <windows.h>: it pre-sets WIN32_LEAN_AND_MEAN and
 // NOMINMAX so the min/max macros cannot collide with std::min/std::max or with
 // Skia's headers (issue #384). A header that pulls windows.h directly drags
@@ -241,3 +253,5 @@ private:
 };
 
 }  // namespace pulp::view::win_drop
+
+#endif  // _WIN32
