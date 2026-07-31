@@ -66,6 +66,11 @@ pulp trace doctor            # human report; add --json for {ready_to_capture, r
 `ready_to_capture:false` usually means no eligible inspector session was found
 or tracing was compiled out. Normal launches create no endpoint; capture
 requires an explicitly wired custom fixture published through authenticated discovery.
+When more than one live session exists—or when a capture spans separate CLI
+invocations—pass the same paired `--session ID --instance ID` selector to
+`doctor`, `start`, `stop`, and live queries. The pair pins the exact
+authenticated process instance instead of allowing a replacement session to
+inherit the operation.
 `ready_to_query:false` means no `trace_processor` (on
 `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
 captured trace yet. For zero-install, run

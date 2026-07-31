@@ -57,9 +57,12 @@ pulp trace query --preset dsp-hotspots
 | `snapshot` | `Trace.snapshot` |
 | `explain` | `Trace.explain` |
 
-Every verb uses authenticated ephemeral discovery by default and honors
+Every live verb uses authenticated ephemeral discovery by default and honors
+`--session ID --instance ID` as a paired exact-session selector,
 `--port N` / `$PULP_INSPECTOR_PORT` as an explicit port filter, plus
-`--json` for the raw inspector response. If no session is discoverable, the CLI
+`--json` for the raw inspector response. Use the same exact selector for
+`start`, `stop`, and later live queries so a replacement process cannot inherit
+the operation. If no session is discoverable, the CLI
 prints a legacy no-inspector hint; that environment variable does not currently
 activate a server.
 

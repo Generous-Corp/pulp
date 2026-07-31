@@ -15,7 +15,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 'PULP_INSPECT_CAPABILITY(StateRead, "state.read", Observe, 1, 1, 1)\n',
             "docs/reference/development-inspector-capabilities.md":
                 "| `state.read` | yes | yes | available |\n"
-                "owner-private ephemeral record/token files; "
+                "owner-private ephemeral record/token files; extended ACLs; "
                 "Capability dispatch is fail-closed\n",
             "tools/cli/cmd_inspect.cpp": "custom fixture only\n",
             "tools/cli/pulp_cli.cpp":
@@ -54,7 +54,12 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "experimental/pulp-rs/src/cmd/trace.rs":
                 "authenticated auto-discovery\n"
                 "pulp trace start --out is unavailable\n"
-                "if !(1..=512).contains(&ring_mb)\n",
+                "if !(1..=512).contains(&ring_mb)\n"
+                'a == "--session" || a == "--instance"\n'
+                "--session and --instance must be supplied together\n"
+                "talker.call_selected(\n"
+                'no_args("stop", &rest[1..])\n'
+                "explicit_selection.as_ref()\n",
             "experimental/pulp-rs/src/cmd/inspector.rs":
                 "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":
@@ -97,7 +102,11 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "info.kp_proc.p_stat == SZOMB\n"
                 "without a supported start-time identity fail closed\n"
                 "record && read_credential(*record).has_value()\n"
-                "std::numeric_limits<std::int64_t>::max() - now\n",
+                "std::numeric_limits<std::int64_t>::max() - now\n"
+                "acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED)\n"
+                "clear_extended_acl(descriptor)\n"
+                "owner_private_descriptor(fd, false)\n"
+                "open_owner_private(path, false)\n",
             "inspect/src/inspector_publication.hpp":
                 "heartbeat_interval > std::chrono::milliseconds::max() / 3\n"
                 "std::chrono::steady_clock::duration::max()\n"

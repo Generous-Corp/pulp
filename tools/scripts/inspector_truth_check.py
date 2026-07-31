@@ -130,6 +130,7 @@ REQUIRED_CLAIMS = {
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
+        "extended ACLs",
         "Capability dispatch is fail-closed",
     ),
     "docs/reference/scripted-ui-inspector.md": (
@@ -187,6 +188,10 @@ REQUIRED_SECURITY_CONTRACTS = {
         "without a supported start-time identity fail closed",
         "record && read_credential(*record).has_value()",
         "std::numeric_limits<std::int64_t>::max() - now",
+        "acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED)",
+        "clear_extended_acl(descriptor)",
+        "owner_private_descriptor(fd, false)",
+        "open_owner_private(path, false)",
     ),
     "inspect/src/inspector_publication.hpp": (
         "heartbeat_interval > std::chrono::milliseconds::max() / 3",
@@ -202,6 +207,11 @@ REQUIRED_SECURITY_CONTRACTS = {
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pulp trace start --out is unavailable",
         "if !(1..=512).contains(&ring_mb)",
+        'a == "--session" || a == "--instance"',
+        "--session and --instance must be supplied together",
+        "talker.call_selected(",
+        'no_args("stop", &rest[1..])',
+        "explicit_selection.as_ref()",
     ),
     "experimental/pulp-rs/src/cmd/motion.rs": (
         'a == "--session" || a == "--instance"',
