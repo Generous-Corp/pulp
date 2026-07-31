@@ -393,7 +393,9 @@ artifact is needed. Never modify canonical project JSON text directly.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency
-  edge worth knowing before adding one.
+  edge worth knowing before adding one. That call is also why the runner binary
+  is owned by `core/interchange/CMakeLists.txt` rather than by the test tree —
+  see the placement convention below.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
@@ -718,6 +720,21 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 **repo-wide gate script** lives under `tools/scripts/` with the other checks
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
+
+**A tool that claims to be portable belongs under `core/`, not under `test/`,
+even when its inputs live in `test/`.** `pulp-fixture-runner` is the worked
+example: its source is `core/interchange/tools/fixture_runner_main.cpp` while its
+corpus stays at `test/fixtures/timeline/`, and `test/cmake/timeline_tests.cmake`
+holds only the two ctest registrations. Two things break if such a tool lives in
+`test/`. First, `add_subdirectory(test)` is gated on
+`PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS`, so the binary cannot be
+configured at all on the mobile lanes it exists to serve. Second — and this is
+the one that stays silent — `timeline_engine_dependency_floor_check.py` walks
+`core/<module>/` and nothing else, so a `#include <pulp/view/…>` added to a
+runner under `test/` passes every gate while the file's own comment still claims
+a portable floor. Relocating into an owning module puts the file inside the
+existing scan with no new `MODULE_FLOORS` row. Pick the module at the *top* of
+what the tool links (interchange, not timeline, since it calls `census()`).
 
 `schema_drift_check.py` is generic — it takes `--artifact` and `--emit-cmd` and
 byte-compares. A new generated artifact anywhere in the repo reuses it as-is

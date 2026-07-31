@@ -326,13 +326,19 @@ pulp_add_test_suite(pulp-test-timeline-daw-project
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
     LIBRARIES pulp::playback pulp::timeline pulp::timebase)
 
-# Portable conformance runner over the timeline fixture corpus. Deliberately
-# free of Catch2 and of any desktop dependency: the same binary is meant to run
-# here under ctest, on the Android emulator lane via `adb push`, and compiled to
-# WASM, so it links only the portable floor (timeline + interchange) and takes
-# its corpus path on argv rather than through a compile-time host path.
-add_executable(pulp-fixture-runner fixture_runner_main.cpp)
-target_link_libraries(pulp-fixture-runner PRIVATE pulp::timeline pulp::interchange)
+# The portable conformance runner over this corpus is built by
+# core/interchange, which is configured on every platform — including the mobile
+# lanes where this test directory is not added at all. Only the ctest wiring and
+# the corpus itself live here; the corpus stays under test/ because it is the
+# fixture data the rest of this suite already loads.
+if(NOT TARGET pulp-fixture-runner)
+    # Dropping these two registrations silently would remove the corpus gate
+    # while every lane stayed green, which is the exact blindness the gate
+    # exists to prevent. Fail the configure instead.
+    message(FATAL_ERROR
+        "pulp-fixture-runner is missing: core/interchange must be configured "
+        "before test/ for the timeline fixture corpus gate to be registered.")
+endif()
 add_test(NAME timeline-fixture-corpus
     COMMAND pulp-fixture-runner --corpus "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
