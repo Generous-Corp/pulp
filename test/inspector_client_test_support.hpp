@@ -25,6 +25,10 @@
 #include <type_traits>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 #endif
 
@@ -215,5 +219,33 @@ struct AuthenticatedFixture {
         server.stop();
     }
 };
+
+#ifndef _WIN32
+[[maybe_unused]] std::optional<std::string> first_non_loopback_ipv4() {
+    struct ifaddrs* interfaces = nullptr;
+    if (getifaddrs(&interfaces) != 0 || interfaces == nullptr)
+        return std::nullopt;
+    std::optional<std::string> found;
+    for (auto* current = interfaces; current != nullptr;
+         current = current->ifa_next) {
+        if (current->ifa_addr == nullptr ||
+            current->ifa_addr->sa_family != AF_INET ||
+            (current->ifa_flags & IFF_LOOPBACK) != 0 ||
+            (current->ifa_flags & IFF_UP) == 0) {
+            continue;
+        }
+        char buffer[INET_ADDRSTRLEN] = {};
+        const auto* address = reinterpret_cast<const sockaddr_in*>(
+            current->ifa_addr);
+        if (inet_ntop(AF_INET, &address->sin_addr, buffer,
+                      sizeof(buffer)) != nullptr) {
+            found = std::string(buffer);
+            break;
+        }
+    }
+    freeifaddrs(interfaces);
+    return found;
+}
+#endif
 
 } // namespace
