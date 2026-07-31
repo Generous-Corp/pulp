@@ -85,15 +85,13 @@ jobs:
         # Coverage workflow, not from this independent path-filtered
         # workflow when a native Coverage run was superseded before it
         # could upload its OS legs.
-        if: always() && github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v5
+        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true
+        uses: ./.github/actions/upload-codecov-report
         with:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
-          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
+          receipt-name: codecov-upload-pulp-react-${{ github.sha }}
 
   import-ir:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO

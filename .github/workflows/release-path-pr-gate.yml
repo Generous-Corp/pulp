@@ -104,20 +104,11 @@ jobs:
           # persistent Studio release runners.
           lfs: false
 
-      # Mirror release-cli.yml's Linux deps step verbatim. If this list
-      # ever drifts from release-cli.yml, the gate is lying — keep them
-      # in sync (or pull both from a shared composite action).
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols \
-            libfontconfig1-dev
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native-webview
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
