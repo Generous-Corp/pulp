@@ -45,6 +45,14 @@ std::string tools_dir() {
     return "/Volumes/Workshop/Code/pulp-modular-rack/tools/rack";
 }
 
+/// Where the emitter writes each module's panel artwork. Derived from
+/// `tools_dir()` rather than spelled out again, so a developer pointing at a
+/// checkout gets that checkout's panels and not the installed copy's.
+std::string panels_dir() {
+    return (std::filesystem::path(tools_dir()).parent_path().parent_path() /
+            "examples" / "forge-modular" / "res").string();
+}
+
 std::string build_log_path() {
     const char* home = std::getenv("HOME");
     return std::string(home ? home : ".") +
@@ -439,34 +447,31 @@ std::unique_ptr<View> ForgeModularShell::build_accessory() {
 }
 
 std::unique_ptr<View> ForgeModularShell::stage_accessory() {
-    auto column = std::make_unique<View>();
-    column->flex().direction = FlexDirection::column;
-    column->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-    column->flex().flex_grow = 1;
-    column->flex().min_height = 0;
-    column->flex().gap = 10;
-
+    // The stage is the RACK, and nothing else. The explanation used to sit
+    // under it in the same pane, which shrank the rack to a stamp and buried
+    // the text below it -- the prototype reads the two side by side, because
+    // a cable's reason is read WHILE looking at the cable.
     auto preview = std::make_unique<RackPreview>();
     rack_preview_ = preview.get();
-    // Fills the stage: a rack shown in a postage stamp cannot be read, and
-    // reading it is the point.
+    preview->set_panel_directory(panels_dir());
     preview->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
     preview->flex().flex_grow = 1;
     preview->flex().min_height = 0;
-    column->add_child(std::move(preview));
+    return preview;
+}
 
+std::unique_ptr<View> ForgeModularShell::chat_accessory() {
     auto explanation = std::make_unique<PatchExplanation>();
     explanation_ = explanation.get();
     explanation->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
-    explanation->flex().flex_grow = 0;
     explanation->flex().flex_shrink = 0;
     // The pairing that makes this worth drawing: point at a sentence, the
-    // cable it names lights and the rest recede.
+    // cable it names lights and the rest recede. It survives the move to the
+    // rail unchanged -- the two views were never coupled by their layout.
     explanation->on_hover = [this](std::optional<std::size_t> index) {
         if (rack_preview_) rack_preview_->set_highlight(index);
     };
-    column->add_child(std::move(explanation));
-    return column;
+    return explanation;
 }
 
 void ForgeModularShell::show_rack(std::vector<RackModule> modules,
@@ -480,7 +485,10 @@ void ForgeModularShell::show_rack(std::vector<RackModule> modules,
     rack_preview_->set_rack(std::move(modules), std::move(connections));
     // An empty rack keeps the skeleton up rather than showing a blank stage,
     // which would read as a finished build that produced nothing.
-    if (auto* c = chrome()) c->show_stage_accessory(have_rack);
+    if (auto* c = chrome()) {
+        c->show_stage_accessory(have_rack);
+        c->show_chat_accessory(have_rack);
+    }
 }
 
 void ForgeModularShell::set_depth(Depth d) {

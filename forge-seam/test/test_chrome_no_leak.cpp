@@ -14,6 +14,8 @@
 //     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 // and commit the changed PNGs with the reason in the message.
 
+#include "forge/rack_preview.hpp"
+#include <ImageIO/ImageIO.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <forge/chrome.hpp>
@@ -250,6 +252,156 @@ TEST_CASE("Forge Modular's home accessory reaches the chrome", "[seam]") {
     forge_modular::ForgeModularShell shell;
     auto accessory = shell.home_accessory();
     REQUIRE(accessory != nullptr);
+}
+
+namespace {
+
+/// Count pixels close to a colour. CoreGraphics rather than a new dependency --
+/// the harness already decodes this way.
+std::size_t count_pixels_near(const std::vector<std::uint8_t>& png,
+                              std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    if (png.empty()) return 0;
+    auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    auto* src = CGImageSourceCreateWithData(data, nullptr);
+    std::size_t hits = 0;
+    if (src && CGImageSourceGetCount(src) > 0) {
+        auto* img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        if (img) {
+            const std::size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+            std::vector<std::uint8_t> rgba(w * h * 4, 0);
+            auto* cs = CGColorSpaceCreateDeviceRGB();
+            auto* ctx = CGBitmapContextCreate(rgba.data(), w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast);
+            if (ctx) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+                for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+                    if (std::abs(int(rgba[i]) - int(r)) < 24 &&
+                        std::abs(int(rgba[i + 1]) - int(g)) < 24 &&
+                        std::abs(int(rgba[i + 2]) - int(b)) < 24) ++hits;
+                }
+                CGContextRelease(ctx);
+            }
+            CGColorSpaceRelease(cs);
+            CGImageRelease(img);
+        }
+    }
+    if (src) CFRelease(src);
+    CFRelease(data);
+    return hits;
+}
+
+std::size_t distinct_colors(const std::vector<std::uint8_t>& png) {
+    if (png.empty()) return 0;
+    auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    auto* src = CGImageSourceCreateWithData(data, nullptr);
+    std::set<std::uint32_t> seen;
+    if (src && CGImageSourceGetCount(src) > 0) {
+        auto* img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        if (img) {
+            const std::size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+            std::vector<std::uint8_t> rgba(w * h * 4, 0);
+            auto* cs = CGColorSpaceCreateDeviceRGB();
+            auto* ctx = CGBitmapContextCreate(rgba.data(), w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast);
+            if (ctx) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+                for (std::size_t i = 0; i + 3 < rgba.size(); i += 4)
+                    seen.insert((std::uint32_t(rgba[i] >> 3) << 10) |
+                                (std::uint32_t(rgba[i + 1] >> 3) << 5) |
+                                std::uint32_t(rgba[i + 2] >> 3));
+                CGContextRelease(ctx);
+            }
+            CGColorSpaceRelease(cs);
+            CGImageRelease(img);
+        }
+    }
+    if (src) CFRelease(src);
+    CFRelease(data);
+    return seen.size();
+}
+
+std::vector<std::uint8_t> render_preview(const std::string& panel_dir) {
+    forge_modular::RackModule mod;
+    mod.id = "m1";
+    mod.name = "TESTPANEL";
+    mod.hp = 10;
+    forge_modular::RackPreview preview;
+    preview.set_rack({mod}, {});
+    if (!panel_dir.empty()) preview.set_panel_directory(panel_dir);
+    return pulp::view::render_to_png(preview, 420, 320, 1.0f,
+                                     pulp::view::ScreenshotBackend::skia);
+}
+
+}  // namespace
+
+TEST_CASE("a module's own panel artwork is what the stage draws", "[seam]") {
+    // The defect this pins: a finished module showed an empty rectangle with
+    // its name on it, while the emitter had already written its panel -- knobs,
+    // labels and all -- to a directory the preview never read.
+    //
+    // The artwork here is a flat magenta field, a colour the chrome uses
+    // nowhere, so its presence on the stage can only have come from the file.
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "forge-modular-panel-test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    {
+        std::ofstream svg(dir / "TESTPANEL-dark.svg");
+        svg << R"(<svg xmlns="http://www.w3.org/2000/svg" width="50" height="380" )"
+            << R"(viewBox="0 0 50 380"><rect width="50" height="380" fill="#ff00ff"/></svg>)";
+    }
+
+    const auto painted = count_pixels_near(render_preview(dir.string()), 255, 0, 255);
+    // The negative control is the point of this test. Without it, a preview
+    // that drew nothing at all would pass the first assertion by accident.
+    const auto unpainted = count_pixels_near(render_preview(""), 255, 0, 255);
+
+    INFO("magenta with artwork: " << painted << ", without: " << unpainted);
+    CHECK(unpainted == 0);
+    CHECK(painted > 200);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a real generated panel renders and not just a synthetic one", "[seam]") {
+    // The synthetic test above proves the wiring. This proves the wiring
+    // survives the artwork we actually ship: 23 KB of paths, gradients and
+    // text per panel, which Skia's SVG module has to accept in full.
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path res =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/res";
+    std::error_code ec;
+    if (!std::filesystem::exists(res, ec)) {
+        SKIP("no generated panels installed on this machine");
+    }
+    std::string slug;
+    for (const auto& e : std::filesystem::directory_iterator(res, ec)) {
+        const auto n = e.path().filename().string();
+        if (n.size() > 9 && n.substr(n.size() - 9) == "-dark.svg") {
+            slug = n.substr(0, n.size() - 9);
+            break;
+        }
+    }
+    if (slug.empty()) SKIP("no dark panel artwork found");
+
+    forge_modular::RackModule mod;
+    mod.id = "m1";
+    mod.name = slug;
+    mod.hp = 10;
+    forge_modular::RackPreview preview;
+    preview.set_rack({mod}, {});
+    preview.set_panel_directory(res.string());
+    const auto png = pulp::view::render_to_png(preview, 420, 320, 1.0f,
+                                               pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+
+    // A panel that failed to parse falls back to the flat placeholder, so the
+    // tell is variety: real artwork has knob rings, silkscreen and jacks in
+    // many distinct tones. Counting them separates "drew the panel" from
+    // "drew a rectangle", which asserting non-empty output cannot.
+    INFO("panel slug: " << slug);
+    CHECK(distinct_colors(png) > 40);
 }
 
 TEST_CASE("Forge Modular reports an unwired install rather than claiming success",

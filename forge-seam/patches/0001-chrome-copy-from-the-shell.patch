@@ -42,10 +42,10 @@ index 63b40c2..272dd01 100644
  
      # A replacement bundle with unchanged Info.plist version can remain stale
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..b9f8998 100644
+index 0863f43..5c212a0 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
-@@ -640,6 +640,47 @@ public:
+@@ -640,6 +640,52 @@ public:
          return generation_turn_state_.has_active();
      }
      int chat_line_count() const { return chat_line_count_; }
@@ -58,6 +58,11 @@ index 0863f43..b9f8998 100644
 +        if (skeleton_) skeleton_->set_visible(!shown);
 +    }
 +    pulp::view::View* stage_accessory() const { return stage_accessory_; }
++    pulp::view::View* chat_accessory() const { return chat_accessory_; }
++    void show_chat_accessory(bool shown) {
++        if (chat_accessory_) chat_accessory_->set_visible(shown);
++        if (root_) { root_->invalidate_layout(); root_->request_repaint(); }
++    }
 +    pulp::view::View* build_accessory() const { return build_accessory_; }
 +
 +    /// Begin a fresh session: empty transcript, no carried-over artifact.
@@ -93,7 +98,7 @@ index 0863f43..b9f8998 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -696,6 +737,38 @@ public:
+@@ -696,6 +742,38 @@ public:
      float chamber_progress() const;
      std::string chamber_header_text() const;
      int active_chip() const { return active_chip_; }
@@ -132,7 +137,7 @@ index 0863f43..b9f8998 100644
      int macro_knob_count() const { return macro_knob_count_; }
      bool materialized() const { return materialized_; }
      bool has_project() const { return has_project_; }
-@@ -712,6 +785,16 @@ public:
+@@ -712,6 +790,16 @@ public:
      std::string first_tile_badge_text() const;
      bool delete_affordance_visible() const;
      const std::string& project_title() const { return project_title_; }
@@ -149,7 +154,7 @@ index 0863f43..b9f8998 100644
      // The FIRST shelf tile — the live build's (tests: drive its hover reveal
      // without coordinates).
      pulp::view::View* shelf_tile() { return shelf_tile_; }
-@@ -722,6 +805,14 @@ public:
+@@ -722,6 +810,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -164,17 +169,18 @@ index 0863f43..b9f8998 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1224,9 @@ private:
+@@ -1133,6 +1229,10 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
 +    pulp::view::View* build_accessory_ = nullptr;
 +    pulp::view::View* stage_accessory_ = nullptr;
 +    pulp::view::View* composer_actions_ = nullptr;
++    pulp::view::View* chat_accessory_ = nullptr;
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1265,7 @@ private:
+@@ -1171,6 +1271,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -275,7 +281,7 @@ index 27f98d0..cdecceb 100644
      std::vector<MacroDesc> macro_descriptors() const override;
      bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
-index c8101e1..433eb33 100644
+index c8101e1..ff2b01a 100644
 --- a/include/forge/shell.hpp
 +++ b/include/forge/shell.hpp
 @@ -59,6 +59,55 @@ class ProjectStore;
@@ -334,7 +340,7 @@ index c8101e1..433eb33 100644
  const char* shell_kind_name(ShellKind kind);        // "effect" / "instrument" / "midi_effect"
  ShellKind shell_kind_from_name(const std::string& name, ShellKind fallback);
  
-@@ -343,6 +392,78 @@ public:
+@@ -343,6 +392,86 @@ public:
      // ── Kind-specific hooks each concrete shell fills in ─────────────────────
  
      // Whether a build is installed and processing.
@@ -380,6 +386,14 @@ index c8101e1..433eb33 100644
 +    /// unchanged.
 +    virtual std::unique_ptr<pulp::view::View> stage_accessory() { return nullptr; }
 +
++    /// A product-specific panel in the chat column, below the transcript.
++    ///
++    /// Some things belong beside the conversation rather than on the stage: a
++    /// patch's per-cable explanation is read WHILE looking at the rack, so
++    /// stacking the two in one pane shrinks the rack and buries the text.
++    /// Forge's own products return nothing and their rail is unchanged.
++    virtual std::unique_ptr<pulp::view::View> chat_accessory() { return nullptr; }
++
 +    /// Called on the chrome's poll tick (~120ms), on the main thread.
 +    ///
 +    /// A product that drives work outside Forge's own generation loop has no
@@ -414,7 +428,7 @@ index c8101e1..433eb33 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..551866b 100644
+index 1c3814e..13311e7 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,81 @@ private:
@@ -662,7 +676,19 @@ index 1c3814e..551866b 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3401,7 +3489,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3069,6 +3157,11 @@ void ForgeChrome::build_chat_rail(View& parent) {
+ 
+     auto col = make_box(FlexDirection::column);
+     chat_col_ = col.get();
++    if (auto accessory = shell_.chat_accessory()) {
++        chat_accessory_ = accessory.get();
++        accessory->set_visible(false);   // nothing to explain until there is
++        col->add_child(std::move(accessory));
++    }
+     col->flex().dim_width = {100, DimensionUnit::percent};
+     col->flex().padding_left = kChatColumnInset;
+     col->flex().padding_right = kChatColumnInset;
+@@ -3401,7 +3494,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -671,7 +697,7 @@ index 1c3814e..551866b 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -3611,6 +3699,13 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3611,6 +3704,13 @@ void ForgeChrome::build_stage(View& parent) {
      scripted->set_visible(false);
      stage->add_child(std::move(scripted));
  
@@ -685,7 +711,7 @@ index 1c3814e..551866b 100644
      viewport->add_child(std::move(stage));
      viewport->set_content_size(
          {static_cast<float>(kDesignWidth), static_cast<float>(kDesignHeight)});
-@@ -4268,7 +4363,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4368,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -694,7 +720,7 @@ index 1c3814e..551866b 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -4327,6 +4422,91 @@ void ForgeChrome::enter_home() {
+@@ -4327,6 +4427,91 @@ void ForgeChrome::enter_home() {
      apply_modes();
  }
  
@@ -786,7 +812,7 @@ index 1c3814e..551866b 100644
  void ForgeChrome::enter_build() {
      // The shell's generated source is worker-owned until the exact terminal
      // event has been reduced. Build can become the visible destination now,
-@@ -5726,7 +5906,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5911,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -795,7 +821,7 @@ index 1c3814e..551866b 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +6039,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +6044,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -804,7 +830,7 @@ index 1c3814e..551866b 100644
      enter_home();
  }
  
-@@ -5920,6 +6100,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -5920,6 +6105,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
      // reduced, so it owns the mutation transaction for that whole interval.
      if (marketplace_open_worker_.joinable()) return false;
      const std::string text = trim_copy(prompt);
@@ -821,7 +847,7 @@ index 1c3814e..551866b 100644
      std::optional<RecoverableTurn> pending_replay;
      bool replaying_pending_submission = false;
      const RecoverableTurn* pending_submission =
-@@ -6189,6 +6379,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -6189,6 +6384,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
  }
  
  void ForgeChrome::poll() {
@@ -832,7 +858,7 @@ index 1c3814e..551866b 100644
      // Publication callbacks may arrive on arbitrary provider threads. They
      // write only to a shared mailbox; the host's UI-thread tick owns every
      // ForgeChrome and widget mutation.
-@@ -6379,7 +6573,7 @@ void ForgeChrome::schedule_poll() {
+@@ -6379,7 +6578,7 @@ void ForgeChrome::schedule_poll() {
              if (!alive->load(std::memory_order_acquire)) return;
              poll_armed_ = false;
              poll();
@@ -841,7 +867,7 @@ index 1c3814e..551866b 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -8630,6 +8824,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8829,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -861,7 +887,7 @@ index 1c3814e..551866b 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9207,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9212,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -876,7 +902,7 @@ index 1c3814e..551866b 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9221,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9226,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -887,7 +913,7 @@ index 1c3814e..551866b 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9232,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9237,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(

@@ -176,6 +176,7 @@ public:
 
     std::unique_ptr<pulp::view::View> build_accessory() override;
     std::unique_ptr<pulp::view::View> stage_accessory() override;
+    std::unique_ptr<pulp::view::View> chat_accessory() override;
 
     void on_poll() override;
     bool busy() const override;

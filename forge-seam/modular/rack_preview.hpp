@@ -15,6 +15,7 @@
 
 #include <pulp/view/view.hpp>
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,6 +26,14 @@ class RackPreview : public pulp::view::View {
 public:
     void set_rack(std::vector<RackModule> modules,
                   std::vector<Connection> connections);
+
+    /// Where the generated panel SVGs live, so a panel is drawn as the module
+    /// actually looks rather than as a labelled rectangle.
+    ///
+    /// The emitter already writes one per module -- the preview simply was not
+    /// reading them, which is why a finished module showed an empty box with
+    /// its name on it and none of the knobs it had just been given.
+    void set_panel_directory(std::string dir) { panel_dir_ = std::move(dir); }
 
     const std::vector<RackModule>& modules() const { return modules_; }
     const std::vector<Connection>& connections() const { return connections_; }
@@ -62,6 +71,14 @@ private:
     float progress_ = 1.0f;
 
     const RackModule* find(const std::string& id) const;
+
+    /// The panel SVG for a module, loaded once and kept. Empty when there is
+    /// none, in which case the plain face is drawn instead -- an honest
+    /// placeholder beats a borrowed panel that misidentifies the module.
+    const std::string& panel_svg(const std::string& slug) const;
+
+    std::string panel_dir_;
+    mutable std::map<std::string, std::string> panel_cache_;
 };
 
 }  // namespace forge_modular

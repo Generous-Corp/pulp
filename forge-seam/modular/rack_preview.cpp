@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 namespace forge_modular {
 
@@ -42,6 +44,26 @@ void stroke_curve(Canvas& canvas, const CableCurve& c, Color stroke, float width
 }
 
 }  // namespace
+
+const std::string& RackPreview::panel_svg(const std::string& slug) const {
+    static const std::string kNone;
+    if (panel_dir_.empty() || slug.empty()) return kNone;
+    const auto it = panel_cache_.find(slug);
+    if (it != panel_cache_.end()) return it->second;
+
+    // Dark first: the app's stage is dark, and the light panel on it reads as
+    // a mistake rather than a variant.
+    std::string text;
+    for (const char* suffix : {"-dark.svg", ".svg"}) {
+        std::ifstream f(panel_dir_ + "/" + slug + suffix, std::ios::binary);
+        if (!f) continue;
+        std::stringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+        break;
+    }
+    return panel_cache_.emplace(slug, std::move(text)).first->second;
+}
 
 const RackModule* RackPreview::find(const std::string& id) const {
     for (const auto& m : modules_)
@@ -97,6 +119,15 @@ void RackPreview::paint(Canvas& canvas) {
     for (const auto& panel : L.panels) {
         // A module whose artwork is missing gets a plain face rather than a
         // borrowed one: showing another module's panel would misidentify it.
+        const auto* mod_for_panel = find(panel.id);
+        const auto& svg = mod_for_panel ? panel_svg(mod_for_panel->name)
+                                        : std::string{};
+        if (!svg.empty() &&
+            canvas.draw_svg(svg, panel.x, panel.y, panel.width, panel.height)) {
+            // The real face, knobs and all. Nothing else to draw for it.
+            continue;
+        }
+
         canvas.set_fill_color(panel.has_artwork ? color::surface_panel
                                                 : color::surface_sunken);
         canvas.fill_rounded_rect(panel.x, panel.y, panel.width, panel.height,
