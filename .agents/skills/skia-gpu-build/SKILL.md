@@ -85,6 +85,25 @@ without opening a window.
 
 ## Gotchas (each cost real time)
 
+- **Graphite drops any raster `SkImage` it is handed — it never uploads one on
+  its own.** When Graphite meets a non-GPU-backed image while building a paint
+  key it asks `Recorder::clientImageProvider()->findOrCreate()`, and Skia's
+  default provider returns nothing; the draw is discarded, the draw call still
+  reports success, and the only trace is
+  `[skia] WARNING - Couldn't convert SkImage to a Graphite-backed
+  representation`. That is why `SkiaSurface` installs
+  `GraphiteImageProvider` (`core/render/src/graphite_image_provider.hpp`) on
+  every Recorder it creates. `SkiaCanvas::ensure_gpu_image` pre-uploads at
+  Pulp's own draw entry points, but it can only reach images Pulp constructs —
+  a Skia module that decodes internally (`SkSVGDOM` turning
+  `<image href="data:...">` into a raster image) bypasses it entirely. **If you
+  add a code path that hands Graphite an image, do not add another manual
+  pre-upload — the provider already covers it.** Raster is the control here: an
+  asset that composites on the raster backend and vanishes on the GPU one is
+  this class of bug, not a bad asset. Covered by
+  `test/test_headless_surface.cpp` (`[headless-surface][image]` /
+  `[headless-surface][svg]`), which asserts the asset's own pixels, since
+  asserting the draw call returned true is exactly what missed it.
 - **Skia raster FALLS BACK to CoreGraphics when libs are absent.** In a CPU-only
   build, `render_to_png(..., ScreenshotBackend::skia)` produces **byte-identical
   output to CoreGraphics** (silent fallback). So a "Skia re-render" proves
