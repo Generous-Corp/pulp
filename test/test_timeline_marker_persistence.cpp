@@ -114,10 +114,13 @@ TEST_CASE("Timeline v4 marker fixture upgrades without requiring scenes") {
     REQUIRE(original.find(R"("type_name":"pulp.timeline.sequence","version":4)") !=
             std::string::npos);
     REQUIRE(original.find(R"("scenes")") == std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":5)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":6)") !=
             std::string::npos);
     REQUIRE(resaved.find(R"("groove":{"name":"","step":"0","steps":[])") != std::string::npos);
     REQUIRE(resaved.find(R"("scenes":[])") != std::string::npos);
+    // The fixture recorded no authored order, so re-saving states the identity
+    // order of its track list rather than leaving the field empty.
+    REQUIRE(resaved.find(R"("scenes":[],"track_order":["3"],"tracks":[)") != std::string::npos);
 }
 
 TEST_CASE("Timeline sequence upgrades to markers and regions and downgrades back") {
@@ -149,12 +152,13 @@ TEST_CASE("Timeline sequence downgrade refuses to discard authored annotations")
     DecodeLimits limits;
     const auto populated =
         sequence_envelope(take(serialize_project(annotated_project(), registry)).json);
-    // The chain walks 5 -> 4 (the empty scene list drops cleanly), then 4 -> 3
-    // (the straight groove drops cleanly), then 3 -> 2 (the empty chord lane
-    // drops cleanly), and finally refuses at 2 -> 1, where the authored
+    // The chain walks 6 -> 5 (the authored order is the identity order, so it
+    // drops cleanly), then 5 -> 4 (the empty scene list drops cleanly), then
+    // 4 -> 3 (the straight groove drops cleanly), then 3 -> 2 (the empty chord
+    // lane drops cleanly), and finally refuses at 2 -> 1, where the authored
     // annotations would be lost.
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 1, populated, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6, 1, populated, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -169,7 +173,7 @@ TEST_CASE("Timeline version-one sequences decode with no markers or regions") {
     // Re-saving lifts the sequence to the current schema version.
     const auto resaved = take(serialize_project(decoded, registry)).json;
     REQUIRE(resaved.find(R"("markers":[],"musical_duration")") != std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":5)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":6)") !=
             std::string::npos);
 }
 
@@ -202,10 +206,10 @@ TEST_CASE("Timeline snapshots reject malformed marker and region payloads") {
 
     // A version-one sequence carrying markers is a contradiction, not a hint.
     auto mismatched = snapshot;
-    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":5)");
+    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":6)");
     REQUIRE(version != std::string::npos);
     mismatched.replace(
-        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":5)").size(),
+        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":6)").size(),
         R"("type_name":"pulp.timeline.sequence","version":1)");
     auto rejected_version = deserialize_project(mismatched, registry);
     REQUIRE_FALSE(rejected_version);

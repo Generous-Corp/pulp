@@ -801,6 +801,12 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                     !write_scene(context, scene))
                     return false;
             }
+            if (!context.writer.append("],\"track_order\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.track_order().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.u64(sequence.track_order()[index].value, true))
+                    return false;
             if (!context.writer.append("],\"tracks\":["))
                 return false;
             for (std::size_t index = 0; index < sequence.tracks().size(); ++index)

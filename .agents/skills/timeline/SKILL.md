@@ -296,6 +296,31 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Unknown or future extension content is retained as exact validated envelope
   bytes. Saving may splice those bytes unchanged and reports
   `has_opaque_objects`; ID remapping must fail closed for any opaque subtree.
+- **Adding a field to a persisted entity touches more than encode and decode, and
+  the sites people miss lose data silently.** Beyond `serialize_encode.cpp` /
+  `serialize_project_decode.cpp` you must also update the schema policy header
+  (`current_version` plus an `<field>_introduced_version` predicate),
+  `schema_registry.cpp` (declare the field, register BOTH migrations),
+  `structural_registry_validation.cpp`, and `schema_json_preflight.cpp`. Then two
+  more that no gate points at: **`id_remap.cpp`**, or every copy/paste/import
+  quietly resets the field to its default, and **`snapshot_equivalence.cpp`**, or
+  the journal-replay checkpoint guard treats documents differing only in that
+  field as identical — and it is also the round-trip oracle, so a round-trip test
+  asserted through `equivalent()` passes even when the field was never persisted.
+  Grow the oracle in the same change, and prove a round-trip test fails with the
+  encode disabled before trusting it.
+- **Field order in the canonical JSON is alphabetical, so a new field renumbers
+  its neighbours.** `track_order` sorts before `tracks` (`_` < `s`), which moved
+  `tracks` from member index 9 to 10 in the preflight walk. A wrong index
+  **compiles and silently reads the neighbouring member**. Re-derive every index
+  after inserting a field rather than appending to the end of the list.
+- A migration that adds an optional collection should write it **empty** rather
+  than materializing a default, when the model already normalizes empty to the
+  default: `Sequence::create` turns an empty `track_order` into identity order, so
+  the v5→v6 upgrade writes `[]` and every upgraded document loads correctly
+  without bloating. The **downgrade** is the asymmetric half — it must fail closed
+  with `MigrationFailed` when the value is not equivalent to the default, exactly
+  as the v5→v4 scenes downgrade refuses a non-empty scene list.
 - Versioned persistence fixtures live under `test/fixtures/timeline/vN/` and
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,

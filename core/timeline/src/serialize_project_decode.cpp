@@ -875,6 +875,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     auto absolute = required(*data, "absolute_duration", path + "/data");
     const auto* chord_lane = data->find("chord_scale_lane");
     const auto* scenes = data->find("scenes");
+    const auto* track_order = data->find("track_order");
     const auto requires_chord_lane =
         sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
     const auto* groove = data->find("groove");
@@ -886,7 +887,10 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)) ||
         (sequence_schema_policy.requires_scenes(structural.value().version) !=
          (scenes != nullptr)) ||
-        (scenes && scenes->kind != JsonValue::Kind::Array))
+        (scenes && scenes->kind != JsonValue::Kind::Array) ||
+        (sequence_schema_policy.requires_track_order(structural.value().version) !=
+         (track_order != nullptr)) ||
+        (track_order && track_order->kind != JsonValue::Kind::Array))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
     std::vector<SequenceMarker> decoded_markers;
     std::vector<SequenceRegion> decoded_regions;
@@ -966,6 +970,22 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
             decoded_scenes.push_back(std::move(decoded).value());
         }
     }
+    // Whether the order names every track exactly once is the model's rule, so
+    // the ids are decoded here and Sequence::create is left to judge them: a
+    // second copy of that rule here could disagree with the one the editing
+    // paths enforce.
+    std::vector<ItemId> decoded_track_order;
+    if (track_order) {
+        decoded_track_order.reserve(track_order->array.size());
+        for (std::size_t index = 0; index < track_order->array.size(); ++index) {
+            auto decoded = parse_canonical_u64_string(
+                track_order->array[index], path + "/data/track_order/" + std::to_string(index));
+            if (!decoded)
+                return fail<Sequence>(decoded.error().code, decoded.error().path,
+                                      decoded.error().byte_offset);
+            decoded_track_order.push_back(ItemId{decoded.value()});
+        }
+    }
     auto created = Sequence::create(SequenceInput{
         .id = {decoded_id.value()},
         .name = std::move(name).value(),
@@ -977,6 +997,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         .chord_scale_lane = std::move(decoded_lane).value(),
         .groove = std::move(decoded_groove).value(),
         .scenes = std::move(decoded_scenes),
+        .track_order = std::move(decoded_track_order),
     });
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));

@@ -396,7 +396,7 @@ export interface PulpTimelineScene {
   slots: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 5. */
+/** `pulp.timeline.sequence` — domain Document, schema version 6. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
@@ -407,6 +407,7 @@ export interface PulpTimelineSequence {
   name: string;
   regions: readonly unknown[];
   scenes: readonly unknown[];
+  track_order: readonly unknown[];
   tracks: readonly unknown[];
 }
 
