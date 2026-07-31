@@ -313,6 +313,27 @@ pulp_add_test_suite(pulp-test-timeline-daw-project
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
     LIBRARIES pulp::playback pulp::timeline pulp::timebase)
 
+# Portable conformance runner over the timeline fixture corpus. Deliberately
+# free of Catch2 and of any desktop dependency: the same binary is meant to run
+# here under ctest, on the Android emulator lane via `adb push`, and compiled to
+# WASM, so it links only the portable floor (timeline + interchange) and takes
+# its corpus path on argv rather than through a compile-time host path.
+add_executable(pulp-fixture-runner fixture_runner_main.cpp)
+target_link_libraries(pulp-fixture-runner PRIVATE pulp::timeline pulp::interchange)
+add_test(NAME timeline-fixture-corpus
+    COMMAND pulp-fixture-runner --corpus "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+
+# The corpus run above proves the runner passes on a good corpus. It cannot
+# prove the runner FAILS on a bad one, and a conformance gate that cannot go red
+# is indistinguishable from no gate. This suite shells out to the binary against
+# deliberately broken temporary corpora and asserts each exit code and message.
+pulp_add_test_suite(pulp-test-fixture-runner-cli
+    SOURCES test_fixture_runner_cli.cpp
+    LIBRARIES pulp::platform)
+add_dependencies(pulp-test-fixture-runner-cli pulp-fixture-runner)
+target_compile_definitions(pulp-test-fixture-runner-cli PRIVATE
+    PULP_FIXTURE_RUNNER_BINARY="$<TARGET_FILE:pulp-fixture-runner>")
+
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not
     # include or link back upward. The selftest proves every forbidden layer is

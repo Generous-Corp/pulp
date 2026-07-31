@@ -319,6 +319,29 @@ artifact is needed. Never modify canonical project JSON text directly.
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,
   escapes, and member order cover the exact-byte re-save contract.
+- **Not every `.json` under `test/fixtures/timeline/` is a project.** The corpus
+  holds three shapes and nothing in the files distinguishes them: complete
+  `pulp.timeline.project` envelopes; single-entity **fragments** such as
+  `v4/sequence-before-scenes.json`, a bare `pulp.timeline.sequence` at v4 used to
+  drive `registry.migrate()` directly; and raw **payloads** such as
+  `v1/unknown-content-envelope.json`, which is never parsed as timeline JSON at
+  all — it is embedded as `OpaqueContent` to prove unknown bytes survive a round
+  trip. Decoding a fragment or a payload as a project fails `InvalidSchema`, and
+  that is correct refusal, not a broken fixture. `test/fixtures/timeline/corpus.index`
+  declares each entry's kind so the distinction is stated rather than guessed;
+  a new fixture must be listed there with its kind.
+- `pulp-fixture-runner` validates every `document` entry against a sibling
+  `<path>.expect` manifest: schema envelope version, identity, structural counts
+  from `peek_project_summary()`, and the interchange concept census. Regenerate
+  manifests with `pulp-fixture-runner --corpus test/fixtures/timeline --update`;
+  generation is deterministic, so a regeneration that dirties the tree means a
+  document actually changed. The manifest is checked in **both** directions — an
+  entry declared but not observed fails too, because a document that *lost* an
+  entity would otherwise pass with every observed value still matching.
+- The census the runner records is `pulp::interchange::census()`, which lives in
+  `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
+  interchange dependency; that is on the portable floor, but it is a dependency
+  edge worth knowing before adding one.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
