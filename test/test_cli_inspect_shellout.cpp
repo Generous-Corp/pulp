@@ -311,6 +311,18 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
     CHECK(fixture.seen.front().method == "State.setParameter");
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
           R"({"id":"gain","value":0.75})");
+
+    result = run_pulp(
+        {"inspect",
+         "--port", fixture.port_string(),
+         "--command", "State.setParameter",
+         "--params", R"({"id":"gain","value":0.5})"},
+        10000);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(fixture.seen.size() == 2);
+    CHECK(compact_json_for_assertion(fixture.seen.back().params_json) ==
+          R"({"id":"gain","value":0.5})");
 }
 
 TEST_CASE("pulp inspect one-shot writes output files and propagates errors",

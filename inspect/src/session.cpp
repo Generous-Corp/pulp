@@ -285,27 +285,79 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
-    // Domain handlers share thread-affine UI state and mutable inspector
-    // components across all authenticated clients. Serialize their execution
-    // independently of the lease mutex; recursive entry remains available to
-    // adapters that synchronously route a nested request through this session.
-    std::lock_guard dispatch_lock(dispatch_mutex_);
+    if (!begin_dispatch()) {
+        finish_controller_operation();
+        return make_error(request.id,
+                          "Inspector dispatch was cancelled during teardown",
+                          "dispatch_cancelled");
+    }
     try {
         auto response = handler(request);
+        end_dispatch();
         finish_controller_operation();
         return response;
     } catch (const std::exception& error) {
+        end_dispatch();
         finish_controller_operation();
         return make_error(request.id,
                           std::string("Inspector dispatch failed: ") +
                               error.what(),
                           "dispatch_failed");
     } catch (...) {
+        end_dispatch();
         finish_controller_operation();
         return make_error(request.id,
                           "Inspector dispatch failed",
                           "dispatch_failed");
     }
+}
+
+bool InspectorSession::begin_dispatch() {
+    const auto caller = std::this_thread::get_id();
+    std::unique_lock lock(dispatch_mutex_);
+    if (dispatch_active_ && dispatch_owner_ == caller) {
+        ++dispatch_recursion_;
+        return true;
+    }
+    dispatch_cv_.wait(lock, [this] {
+        return !dispatch_accepting_ || !dispatch_active_;
+    });
+    if (!dispatch_accepting_)
+        return false;
+    dispatch_active_ = true;
+    dispatch_owner_ = caller;
+    dispatch_recursion_ = 1;
+    return true;
+}
+
+void InspectorSession::end_dispatch() {
+    std::lock_guard lock(dispatch_mutex_);
+    if (!dispatch_active_ ||
+        dispatch_owner_ != std::this_thread::get_id() ||
+        dispatch_recursion_ == 0) {
+        return;
+    }
+    if (--dispatch_recursion_ != 0)
+        return;
+    dispatch_active_ = false;
+    dispatch_owner_ = {};
+    dispatch_cv_.notify_all();
+}
+
+void InspectorSession::suspend_dispatches() {
+    {
+        std::lock_guard lock(dispatch_mutex_);
+        dispatch_accepting_ = false;
+    }
+    dispatch_cv_.notify_all();
+}
+
+void InspectorSession::resume_dispatches() {
+    {
+        std::lock_guard lock(dispatch_mutex_);
+        dispatch_accepting_ = true;
+    }
+    dispatch_cv_.notify_all();
 }
 
 void InspectorSession::disconnect(std::string_view client_id) {

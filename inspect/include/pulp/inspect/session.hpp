@@ -4,12 +4,14 @@
 #include <pulp/inspect/protocol.hpp>
 
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <optional>
 #include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace pulp::inspect {
@@ -119,6 +121,11 @@ public:
     InspectorMessage handle(std::string_view client_id,
                             const InspectorMessage& request);
     void disconnect(std::string_view client_id);
+    /// Cancel queued domain handlers and reject new ones during server teardown.
+    /// The handler already executing on the dispatch owner may finish.
+    void suspend_dispatches();
+    /// Reopen domain-handler admission for a new authenticated server generation.
+    void resume_dispatches();
 
     const InspectorSessionInfo& info() const { return info_; }
     const InspectorAccessPolicy& policy() const { return policy_; }
@@ -126,13 +133,20 @@ public:
 private:
     InspectorMessage handle_session_method(std::string_view client_id,
                                            const InspectorMessage& request);
+    bool begin_dispatch();
+    void end_dispatch();
 
     InspectorSessionInfo info_;
     InspectorAccessPolicy policy_;
     RequestHandler handler_;
     InspectorControllerLease lease_;
     mutable std::mutex mutex_;
-    std::recursive_mutex dispatch_mutex_;
+    std::mutex dispatch_mutex_;
+    std::condition_variable dispatch_cv_;
+    bool dispatch_accepting_ = true;
+    bool dispatch_active_ = false;
+    std::thread::id dispatch_owner_;
+    std::size_t dispatch_recursion_ = 0;
 };
 
 } // namespace pulp::inspect

@@ -247,6 +247,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
             command != methods::kSessionAcquireController &&
             command != methods::kSessionRenewController &&
             command != methods::kSessionReleaseController;
+        bool controller_acquired = false;
         if (needs_controller) {
             const auto lease =
                 client.request(std::string(methods::kSessionAcquireController));
@@ -254,8 +255,17 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 print_error(lease);
                 return 1;
             }
+            controller_acquired = true;
         }
         const auto response = client.request(command, params);
+        if (controller_acquired) {
+            // Release explicitly before this one-shot connection exits. EOF is
+            // still the fallback if the transport is already broken, but a
+            // following CLI/MCP mutation must not race asynchronous EOF
+            // processing for controller ownership.
+            (void)client.request(
+                std::string(methods::kSessionReleaseController));
+        }
         if (response.is_error) {
             print_error(response);
             return 1;
