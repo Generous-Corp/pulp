@@ -221,11 +221,15 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         )
 
     def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
-        self.assertEqual(
-            self.text.count("tools/scripts/sdk_provenance.py stamp"),
-            2,
-            "Unix and Windows SDK archive paths must both stamp provenance.",
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
         )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_block)
+        self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_block)
         self.assertIn("--prefix sdk-staging", self.text)
         self.assertIn("--build-dir build-sdk", self.text)
 
@@ -269,13 +273,13 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         unix_block = self.text[unix_start:windows_start]
         windows_block = self.text[windows_start:floor_start]
         self.assertIn(
-            "release_artifact_contents.py --help",
+            'PULP_RELEASE_CONTENT_VERIFIER" --help',
             unix_block,
         )
         self.assertIn("grep -q -- '--source-sha'", unix_block)
         self.assertIn('"${source_sha_args[@]}"', unix_block)
         self.assertIn(
-            "release_artifact_contents.py --help",
+            "PULP_RELEASE_CONTENT_VERIFIER --help",
             windows_block,
         )
         self.assertIn("$verifierHelp.Contains('--source-sha')", windows_block)
@@ -640,17 +644,50 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "Overlaying current backfill compatibility engine",
             run_block,
         )
+        self.assertIn(
+            'curl -fsSL "$url" -o "$compat_dir/${path##*/}"',
+            run_block,
+        )
+        self.assertIn(
+            'cp tools/scripts/release_product_matrix.json',
+            run_block,
+        )
+
+    def test_manual_dispatch_compatibility_helpers_do_not_dirty_tracked_source(
+        self,
+    ) -> None:
+        ensure_block = self._find_step_run(
+            "Ensure release-content verifier helpers exist"
+        )
+        unix_stamp = self._find_step_run("Build SDK tarball (Unix)")
+        windows_stamp = self._find_step_run("Build SDK tarball (Windows)")
+        unix_verify = self._find_step_run(
+            "Verify release archive product matrix (Unix)"
+        )
+        windows_verify = self._find_step_run(
+            "Verify release archive product matrix (Windows)"
+        )
+        self.assertIn("compat_dir=.release-backfill-helpers", ensure_block)
+        self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
+        self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
+        self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_stamp)
+        self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_stamp)
+        self.assertIn('"$PULP_RELEASE_CONTENT_VERIFIER"', unix_verify)
+        self.assertIn("$env:PULP_RELEASE_CONTENT_VERIFIER", windows_verify)
 
     def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
         unix_block = self._find_step_run("Build SDK tarball (Unix)")
         windows_block = self._find_step_run("Build SDK tarball (Windows)")
         self.assertIn('if [ -z "$SOURCE_REF" ]; then', unix_block)
-        self.assertNotIn("-f tools/scripts/sdk_provenance.py", unix_block)
+        self.assertNotIn("-f \"$PULP_SDK_PROVENANCE_HELPER\"", unix_block)
         self.assertIn(
             "if ([string]::IsNullOrEmpty($env:SOURCE_REF))",
             windows_block,
         )
-        self.assertNotIn("Test-Path tools/scripts/sdk_provenance.py", windows_block)
+        self.assertNotIn(
+            "Test-Path $env:PULP_SDK_PROVENANCE_HELPER",
+            windows_block,
+        )
 
 
 class SingleOwnerReleasePublication(unittest.TestCase):
