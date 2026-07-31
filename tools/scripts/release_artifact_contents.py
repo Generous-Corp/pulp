@@ -24,6 +24,25 @@ from pathlib import Path, PurePosixPath
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
+LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
+IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
+PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS = LEGACY_CLI_BINARY_STEMS | {
+    "pulp-import-design"
+}
+PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
+    {
+        "browser_capture/browser_process.mjs",
+        "browser_capture/capture.mjs",
+        "browser_capture/health.mjs",
+        "browser_capture/lifecycle.mjs",
+        "browser_capture/network_dependencies.mjs",
+        "browser_capture/renderers.mjs",
+        "browser_capture/security.mjs",
+        "browser_capture/semantics.mjs",
+        "browser_capture/settle.mjs",
+        "browser_capture/tokens.mjs",
+    }
+)
 
 
 class ContentError(RuntimeError):
@@ -41,6 +60,9 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 class ProductMatrix:
     contract_floor: str
     platforms: tuple[str, ...]
+    cli_contract_declared: bool
+    cli_binary_stems: frozenset[str]
+    common_cli_members: frozenset[str]
     pulp_library_stems: frozenset[str]
     platform_library_stems: dict[str, frozenset[str]]
     common_sdk_members: frozenset[str]
@@ -50,9 +72,25 @@ class ProductMatrix:
     def load(cls, path: Path) -> ProductMatrix:
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
+            cli_contract_declared = (
+                "cli_binary_stems" in doc and "common_cli_members" in doc
+            )
+            if ("cli_binary_stems" in doc) != ("common_cli_members" in doc):
+                raise ContentError(
+                    f"invalid release product matrix {path}: "
+                    "CLI contract fields must be declared together"
+                )
             matrix = cls(
                 contract_floor=str(doc["contract_floor"]),
                 platforms=tuple(doc["platforms"]),
+                cli_contract_declared=cli_contract_declared,
+                # Matrices versioned before the import-design CLI payload did
+                # not declare CLI members. Their release version selects the
+                # exact historical contract during a backfill.
+                cli_binary_stems=frozenset(
+                    doc.get("cli_binary_stems", LEGACY_CLI_BINARY_STEMS)
+                ),
+                common_cli_members=frozenset(doc.get("common_cli_members", ())),
                 pulp_library_stems=frozenset(doc["pulp_library_stems"]),
                 platform_library_stems={
                     key: frozenset(value)
@@ -63,7 +101,11 @@ class ProductMatrix:
             )
         except (KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
             raise ContentError(f"invalid release product matrix {path}: {exc}") from exc
-        if not matrix.platforms or not matrix.pulp_library_stems:
+        if (
+            not matrix.platforms
+            or not matrix.cli_binary_stems
+            or not matrix.pulp_library_stems
+        ):
             raise ContentError(f"invalid release product matrix {path}: empty contract")
         version_tuple(matrix.contract_floor)
         return matrix
@@ -177,11 +219,62 @@ def sdk_asset_name(platform: str) -> str:
     return f"pulp-sdk-{platform}.tar.gz"
 
 
-def cli_members(platform: str) -> frozenset[str]:
+def cli_binary_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    suffix = ".exe" if platform.startswith("windows-") else ""
+    stems, _resources = effective_cli_contract(matrix, version)
+    return frozenset(f"{stem}{suffix}" for stem in stems)
+
+
+def effective_cli_contract(
+    matrix: ProductMatrix, version: str | None
+) -> tuple[frozenset[str], frozenset[str]]:
+    # The declarative matrix follows current main, while backfills validate the
+    # payload that the requested tag could actually package.
+    if version is not None:
+        requested = version_tuple(version)
+        import_design_floor = version_tuple(IMPORT_DESIGN_CLI_FLOOR)
+        if requested < import_design_floor:
+            return LEGACY_CLI_BINARY_STEMS, frozenset()
+        if requested == import_design_floor:
+            return (
+                frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
+                PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            )
+    if matrix.cli_contract_declared:
+        return matrix.cli_binary_stems, matrix.common_cli_members
+    if version is not None:
+        return (
+            frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
+            PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+        )
+    return LEGACY_CLI_BINARY_STEMS, frozenset()
+
+
+def cli_runtime_member(platform: str) -> str:
     if platform.startswith("windows-"):
-        return frozenset({"pulp.exe", "pulp-cpp.exe", "pulp-mcp.exe", "wgpu_native.dll"})
-    runtime = "libwgpu_native.dylib" if platform.startswith("darwin-") else "libwgpu_native.so"
-    return frozenset({"pulp", "pulp-cpp", "pulp-mcp", runtime})
+        return "wgpu_native.dll"
+    return (
+        "libwgpu_native.dylib"
+        if platform.startswith("darwin-")
+        else "libwgpu_native.so"
+    )
+
+
+def cli_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    _binaries, resources = effective_cli_contract(matrix, version)
+    return (
+        cli_binary_members(platform, matrix, version)
+        | resources
+        | frozenset({cli_runtime_member(platform)})
+    )
 
 
 def sdk_binary_members(platform: str) -> frozenset[str]:
@@ -266,9 +359,14 @@ def require_executable(archive: Archive, names: frozenset[str]) -> None:
         raise ContentError(f"{archive.path.name}: non-executable shipped binary(s): {bad}")
 
 
-def verify_cli_archive(path: Path, platform: str) -> None:
+def verify_cli_archive(
+    path: Path,
+    platform: str,
+    version: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+) -> None:
     with Archive(path) as archive:
-        expected = cli_members(platform)
+        expected = cli_members(platform, matrix, version)
         actual = set(archive.members)
         missing = sorted(expected - actual)
         unexpected = sorted(actual - expected)
@@ -278,7 +376,9 @@ def verify_cli_archive(path: Path, platform: str) -> None:
                 f"unexpected={unexpected}"
             )
         if not platform.startswith("windows-"):
-            require_executable(archive, expected - {next(n for n in expected if n.startswith("libwgpu_"))})
+            require_executable(
+                archive, cli_binary_members(platform, matrix, version)
+            )
 
 
 def verify_sdk_archive(
@@ -324,14 +424,20 @@ def verify_sdk_archive(
                 raise ContentError(f"{path.name}: stale Apple-only SDK products: {apple_only[:10]}")
 
 
-def verify_native_macos_signatures(asset_dir: Path, platform: str) -> None:
+def verify_native_macos_signatures(
+    asset_dir: Path,
+    platform: str,
+    version: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+) -> None:
     if not platform.startswith("darwin-"):
         return
     if sys.platform != "darwin":
         raise ContentError("--native-signatures for Darwin archives requires a macOS runner")
 
     targets = {
-        cli_asset_name(platform): cli_members(platform),
+        cli_asset_name(platform): cli_binary_members(platform, matrix, version)
+        | frozenset({cli_runtime_member(platform)}),
         sdk_asset_name(platform): sdk_binary_members(platform)
         | frozenset({"pulp-sdk/lib/libwgpu_native.dylib"}),
     }
@@ -372,10 +478,10 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform)
+    verify_cli_archive(cli, platform, version, matrix)
     verify_sdk_archive(sdk, platform, version, matrix)
     if native_signatures:
-        verify_native_macos_signatures(asset_dir, platform)
+        verify_native_macos_signatures(asset_dir, platform, version, matrix)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -65,7 +66,7 @@ constexpr double kTestAmplitude = 0.5;  // −6 dBFS, the spec's measurement lev
 /// Coherent DFT magnitude at `hz`. Exact — no window, no correction — as long
 /// as `hz` is a whole multiple of `kBinHz`, which every call site checks.
 double magnitude_at(const std::vector<double>& x, double hz) {
-    const double w = 2.0 * M_PI * hz / kSr;
+    const double w = 2.0 * std::numbers::pi * hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -127,7 +128,7 @@ std::vector<double> render(Shifter& shifter, Signal&& signal, int length = kAnal
 
 auto sine(double hz, double amplitude = kTestAmplitude) {
     return [hz, amplitude](int n) {
-        return amplitude * std::sin(2.0 * M_PI * hz * static_cast<double>(n) / kSr);
+        return amplitude * std::sin(2.0 * std::numbers::pi * hz * static_cast<double>(n) / kSr);
     };
 }
 
@@ -160,7 +161,7 @@ double theta_from_rejection_db(double db) {
 /// `j / length`, which is an exact whole number of periods in the window.
 double network_theta(int j, int length = 65536, int skip = 40000) {
     Network net;
-    const double w = 2.0 * M_PI * static_cast<double>(j) / static_cast<double>(length);
+    const double w = 2.0 * std::numbers::pi * static_cast<double>(j) / static_cast<double>(length);
     double ire = 0.0, iim = 0.0, qre = 0.0, qim = 0.0;
     for (int n = 0; n < skip + length; ++n) {
         const auto out = net.process(std::sin(w * static_cast<double>(n)));
@@ -175,9 +176,11 @@ double network_theta(int j, int length = 65536, int skip = 40000) {
     // This accumulation's sign convention is the mirror of the textbook
     // e^{-jwn} transform, so the quarter cycle the quadrature branch LAGS by
     // reads as +pi/2 here. Only the deviation matters, and it is signless.
-    double error = (std::atan2(qim, qre) - std::atan2(iim, ire)) - 0.5 * M_PI;
-    while (error > M_PI) error -= 2.0 * M_PI;
-    while (error < -M_PI) error += 2.0 * M_PI;
+    double error = (std::atan2(qim, qre) - std::atan2(iim, ire)) - 0.5 * std::numbers::pi;
+    while (error > std::numbers::pi)
+        error -= 2.0 * std::numbers::pi;
+    while (error < -std::numbers::pi)
+        error += 2.0 * std::numbers::pi;
     return std::abs(error);
 }
 
@@ -300,7 +303,7 @@ TEST_CASE("T2 shifting destroys the harmonic ratio a pitch shift would keep",
 
     auto shifter = make_shifter(kShift);
     const auto out = render(shifter, [](int n) {
-        const double t = 2.0 * M_PI * static_cast<double>(n) / kSr;
+        const double t = 2.0 * std::numbers::pi * static_cast<double>(n) / kSr;
         return 0.5 * kTestAmplitude * (std::sin(kFundamental * t) + std::sin(kOctave * t));
     });
 
@@ -418,7 +421,9 @@ TEST_CASE("T5 a render is bit-identical after reset", "[signal][frequency-shifte
     // Series law 2. There is no generator in this module to seed — the only
     // randomness anywhere near it is this test's own input signal, which is
     // itself seeded.
-    auto automation = [](int n) { return 400.0 * std::sin(2.0 * M_PI * 0.37 * n / kSr) - 60.0; };
+    auto automation = [](int n) {
+        return 400.0 * std::sin(2.0 * std::numbers::pi * 0.37 * n / kSr) - 60.0;
+    };
 
     // The rewind is part of what is under test, so `run` performs it: setting
     // the automation's value at n = 0 BEFORE the reset is what makes the
@@ -472,8 +477,8 @@ TEST_CASE("T6 the feedback loop stays bounded at the feedback ceiling",
     double worst = 0.0;
     bool all_finite = true;
     for (int n = 0; n < burst + tail; ++n) {
-        const double x = n < burst ? kTestAmplitude * std::sin(2.0 * M_PI * 1000.0 * n / kSr)
-                                   : 0.0;
+        const double x =
+            n < burst ? kTestAmplitude * std::sin(2.0 * std::numbers::pi * 1000.0 * n / kSr) : 0.0;
         const double y = shifter.process(x);
         all_finite = all_finite && std::isfinite(y);
         worst = std::max(worst, std::abs(y));
@@ -529,7 +534,7 @@ TEST_CASE("T8 the retained-sideband gain stays inside its budget",
     REQUIRE(worst <= Shifter::kGshiftBudget);
 
     // The predicted DC-blocker supremum, from the shipped corner and rate.
-    const double pole = std::exp(-2.0 * M_PI * Shifter::kDcCornerHz / kSr);
+    const double pole = std::exp(-2.0 * std::numbers::pi * Shifter::kDcCornerHz / kSr);
     const double dc_supremum = 2.0 / (1.0 + pole);
     REQUIRE(worst <= dc_supremum * 1.001);
     REQUIRE(dc_supremum <= Shifter::kGshiftBudget);
@@ -537,7 +542,7 @@ TEST_CASE("T8 the retained-sideband gain stays inside its budget",
 
 TEST_CASE("T8 the loop impulse peak stays under the analytic envelope",
           "[signal][frequency-shifter][ssb]") {
-    const double pole = std::exp(-2.0 * M_PI * Shifter::kDcCornerHz / kSr);
+    const double pole = std::exp(-2.0 * std::numbers::pi * Shifter::kDcCornerHz / kSr);
     const double g_shift = 2.0 / (1.0 + pole);  // the measured bound from above
 
     for (double g : {0.5, 0.7, Shifter::kMaxFeedback}) {
@@ -619,8 +624,7 @@ TEST_CASE("T10 a fast shift sweep produces no step discontinuity",
     // never exceeds kTone + kTopShift, so its sample-to-sample step is at most
     // A*2*pi*f/fs. The 10 % allowance covers the residual image riding along
     // and the DC blocker's sub-0.1 % boost.
-    const double bound =
-        1.1 * kTestAmplitude * 2.0 * M_PI * (kTone + kTopShift) / kSr;
+    const double bound = 1.1 * kTestAmplitude * 2.0 * std::numbers::pi * (kTone + kTopShift) / kSr;
     double worst = 0.0;
     for (std::size_t n = 1; n < out.size(); ++n)
         worst = std::max(worst, std::abs(out[n] - out[n - 1]));
@@ -686,7 +690,7 @@ TEST_CASE("stereo processing keeps the two channels independent",
 
     double right_energy = 0.0;
     for (int n = 0; n < 48000; ++n) {
-        double l = std::sin(2.0 * M_PI * 1000.0 * n / kSr), r = 0.0;
+        double l = std::sin(2.0 * std::numbers::pi * 1000.0 * n / kSr), r = 0.0;
         shifter.process_stereo(l, r);
         right_energy += std::abs(r);
     }
@@ -811,11 +815,11 @@ TEST_CASE("the sample rate only moves the band edge, not the shift accuracy",
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(length));
     for (int n = 0; n < static_cast<int>(kHighRate) + length; ++n) {
-        const double y = shifter.process(
-            kTestAmplitude * std::sin(2.0 * M_PI * kTone * n / kHighRate));
+        const double y = shifter.process(kTestAmplitude *
+                                         std::sin(2.0 * std::numbers::pi * kTone * n / kHighRate));
         if (n >= static_cast<int>(kHighRate)) out.push_back(y);
     }
-    const double w = 2.0 * M_PI * (kTone + kShift) / kHighRate;
+    const double w = 2.0 * std::numbers::pi * (kTone + kShift) / kHighRate;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < out.size(); ++n) {
         re += out[n] * std::cos(w * static_cast<double>(n));

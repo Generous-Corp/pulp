@@ -15,6 +15,15 @@ namespace {
 using paint_detail::text;
 using paint_detail::with_alpha;
 
+void set_authored_bounds(view::View& target, view::Rect bounds) {
+    target.set_bounds(bounds);
+    target.set_position(view::View::Position::absolute);
+    target.set_left(bounds.x);
+    target.set_top(bounds.y);
+    target.flex().preferred_width = bounds.width;
+    target.flex().preferred_height = bounds.height;
+}
+
 class HeaderView final : public view::View {
   public:
     explicit HeaderView(const CharacterPalette& palette) : palette_(&palette) {}
@@ -377,7 +386,7 @@ PulpDelayEditor::Panel& PulpDelayEditor::add_panel(
     view::Rect bounds, int index, std::string title) {
     auto panel = std::make_unique<Panel>(palette_, index, std::move(title));
     auto* result = panel.get();
-    panel->set_bounds(bounds);
+    set_authored_bounds(*panel, bounds);
     add_child(std::move(panel));
     return *result;
 }
@@ -397,7 +406,7 @@ DelayKnob& PulpDelayEditor::add_knob(
     auto control =
         std::make_unique<DelayKnob>(*store_, palette_, id, std::move(caption));
     auto* result = control.get();
-    control->set_bounds(bounds);
+    set_authored_bounds(*control, bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
     register_control(*result, *result);
     parent.add_child(std::move(control));
@@ -410,7 +419,7 @@ DelayFader& PulpDelayEditor::add_fader(
     auto control =
         std::make_unique<DelayFader>(*store_, palette_, id, std::move(caption));
     auto* result = control.get();
-    control->set_bounds(bounds);
+    set_authored_bounds(*control, bounds);
     bindings_.push_back(view::bind_parameter(*result, *store_, id));
     register_control(*result, *result);
     parent.add_child(std::move(control));
@@ -422,7 +431,7 @@ DelayTapField& PulpDelayEditor::add_tap_field(
     auto control = std::make_unique<DelayTapField>(
         *store_, palette_, kTime, kFeedback, kSync, kDivision);
     auto* result = control.get();
-    control->set_bounds(bounds);
+    set_authored_bounds(*control, bounds);
     bindings_.push_back(view::bind_parameter(
         static_cast<view::Fader&>(*result), *store_, kTime));
     register_control(*result, *result);
@@ -436,7 +445,7 @@ DelayChoice& PulpDelayEditor::add_choice(
     auto control = std::make_unique<DelayChoice>(
         *store_, palette_, id, std::move(caption), std::move(labels));
     auto* result = control.get();
-    control->set_bounds(bounds);
+    set_authored_bounds(*control, bounds);
     register_control(*result, *result);
     parent.add_child(std::move(control));
     return *result;
@@ -450,7 +459,7 @@ DelayActionCard& PulpDelayEditor::add_action(
         palette_, id, std::move(caption), std::move(subtitle),
         std::move(glyph), compact, warning);
     auto* result = control.get();
-    control->set_bounds(bounds);
+    set_authored_bounds(*control, bounds);
     bindings_.push_back(view::bind_parameter(
         static_cast<view::ToggleButton&>(*result), *store_, id));
     register_control(*result, *result);
@@ -460,7 +469,7 @@ DelayActionCard& PulpDelayEditor::add_action(
 
 void PulpDelayEditor::build() {
     auto header = std::make_unique<HeaderView>(palette_);
-    header->set_bounds({0, 0, metric::editor_width, 65.0f});
+    set_authored_bounds(*header, {0, 0, metric::editor_width, 65.0f});
     add_child(std::move(header));
 
     auto& circulation = add_panel({19, 79, 700, 322}, 1, "CIRCULATION");
@@ -480,7 +489,7 @@ void PulpDelayEditor::build() {
     auto effective_right =
         std::make_unique<EffectiveRightTimeView>(*store_, palette_);
     effective_right_time_ = effective_right.get();
-    effective_right->set_bounds({12, 99, 166, 31});
+    set_authored_bounds(*effective_right, {12, 99, 166, 31});
     stereo.add_child(std::move(effective_right));
     add_choice(stereo, {187, 99, 178, 31}, kOffsetMode, "OFFSET MODE",
                {"RATIO", "MS"});
@@ -505,13 +514,13 @@ void PulpDelayEditor::build() {
     auto crossfeed_override =
         std::make_unique<CrossfeedOverrideView>(*store_, palette_);
     crossfeed_override_ = crossfeed_override.get();
-    crossfeed_override->set_bounds({16, 178, 160, 50});
+    set_authored_bounds(*crossfeed_override, {16, 178, 160, 50});
     energy.add_child(std::move(crossfeed_override));
     add_fader(energy, {190, 178, 160, 50}, kDuck, "DUCK");
 
     auto& tone = add_panel({735, 339, 366, 296}, 5, "TONE + MOVEMENT");
     auto response = std::make_unique<ToneResponseView>(*store_, palette_);
-    response->set_bounds({12, 38, 342, 53});
+    set_authored_bounds(*response, {12, 38, 342, 53});
     tone.add_child(std::move(response));
     add_fader(tone, {16, 101, 158, 38}, kLowCut, "LOW CUT");
     add_fader(tone, {192, 101, 158, 38}, kHighCut, "HIGH CUT");
@@ -526,7 +535,7 @@ void PulpDelayEditor::build() {
                "REVERSE", "TURN THE ECHO AROUND", "<-", false, true);
 
     auto control_state = std::make_unique<ControlStateView>(*store_, palette_);
-    control_state->set_bounds({817, 649, 284, 72});
+    set_authored_bounds(*control_state, {817, 649, 284, 72});
     add_child(std::move(control_state));
 }
 

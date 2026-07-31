@@ -74,13 +74,16 @@ def main() -> int:
     expected_names = [
         "pulp_timeline_project_open",
         "pulp_timeline_command_apply",
+        "pulp_timeline_diff",
+        "pulp_timeline_undo",
+        "pulp_timeline_redo",
         "pulp_timeline_validate",
         "pulp_timeline_explain",
         "pulp_timeline_render",
         "pulp_timeline_export",
         "pulp_timeline_import",
     ]
-    check("surface has exactly the seven operations", [tool["name"] for tool in document["tools"]] == expected_names)
+    check("surface has exactly the ten operations", [tool["name"] for tool in document["tools"]] == expected_names)
     check(
         "every operation carries a closed object input schema",
         all(
@@ -139,6 +142,21 @@ def main() -> int:
     check(
         "command batches exclude empty transactions",
         command_apply["inputSchema"]["properties"]["commands"]["minItems"] == 1,
+    )
+    check(
+        "command apply requires exactly one project source",
+        command_apply["inputSchema"]["oneOf"]
+        == [
+            {"required": ["project"], "not": {"required": ["session_id"]}},
+            {"required": ["session_id"], "not": {"required": ["project"]}},
+        ],
+    )
+    check(
+        "iteration operations require an open session",
+        all(
+            _tool(document, name)["inputSchema"]["required"] == ["session_id"]
+            for name in ["pulp_timeline_diff", "pulp_timeline_undo", "pulp_timeline_redo"]
+        ),
     )
 
     no_commands = json.loads(

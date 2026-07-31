@@ -1,5 +1,7 @@
 #include "test_signal_diode_bridge_compressor_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("A1 the divider realises its requested gain reduction exactly",
           "[diode-bridge][gain-law]") {
     // At −40 dBFS the shaper's curvature is utterly negligible — with the
@@ -23,7 +25,8 @@ TEST_CASE("A1 the divider realises its requested gain reduction exactly",
         const double amplitude = units::db_to_linear(-40.0);
         double peak = 0.0;
         for (int n = 0; n < 9600; ++n) {
-            const double y = bridge.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr), x);
+            const double y =
+                bridge.process(amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr), x);
             if (n > 4800) peak = std::max(peak, std::abs(y));
         }
         const double expected_db = units::linear_to_db(Bridge::gain_for_control_drive(x));
@@ -47,7 +50,7 @@ TEST_CASE("A1 the ADAA offset is the two-tap average, not a gain error",
     // exactly on the crest. The measured deviation is therefore `cos²(ω/2)`
     // — asserted, so that a future change to the ADAA path cannot pass this
     // suite by quietly turning into a gain stage.
-    const double w = 2.0 * M_PI * kToneHz / kSr;
+    const double w = 2.0 * std::numbers::pi * kToneHz / kSr;
     const double predicted_db = units::linear_to_db(std::cos(0.5 * w) * std::cos(0.5 * w));
 
     Bridge bridge;
@@ -241,8 +244,8 @@ TEST_CASE("A3 the bridge's third harmonic matches the closed form",
         std::vector<double> out;
         out.reserve(kTonePeriod * 500);
         for (int n = 0; n < 4800 + kTonePeriod * 500; ++n) {
-            const double y =
-                bridge.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr), control_drive);
+            const double y = bridge.process(
+                amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr), control_drive);
             if (n >= 4800) out.push_back(y);
         }
         return harmonic_magnitude(out, kToneHz, 3) / harmonic_magnitude(out, kToneHz, 1);
@@ -284,8 +287,8 @@ TEST_CASE("A3 curvature grows with control drive — the colour comes from the g
         std::vector<double> out;
         out.reserve(kTonePeriod * 500);
         for (int n = 0; n < 4800 + kTonePeriod * 500; ++n) {
-            const double y =
-                bridge.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr), control_drive);
+            const double y = bridge.process(
+                amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr), control_drive);
             if (n >= 4800) out.push_back(y);
         }
         return harmonic_magnitude(out, kToneHz, 3) / harmonic_magnitude(out, kToneHz, 1);
@@ -308,7 +311,8 @@ TEST_CASE("A3 curvature grows with control drive — the colour comes from the g
     bridge.reset();
     std::vector<double> out;
     for (int n = 0; n < 4800 + kTonePeriod * 500; ++n) {
-        const double y = bridge.process(0.9 * std::sin(2.0 * M_PI * kToneHz * n / kSr), 3.0);
+        const double y =
+            bridge.process(0.9 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr), 3.0);
         if (n >= 4800) out.push_back(y);
     }
     const double h1 = harmonic_magnitude(out, kToneHz, 1);
@@ -328,7 +332,8 @@ TEST_CASE("A3 the node's colour deepens as it compresses", "[diode-bridge][colou
         std::vector<double> out;
         out.reserve(kTonePeriod * 500);
         for (int n = 0; n < static_cast<int>(kSr) + kTonePeriod * 500; ++n) {
-            const double y = c.process(amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+            const double y =
+                c.process(amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
             if (n >= static_cast<int>(kSr)) out.push_back(y);
         }
         return harmonic_magnitude(out, kToneHz, 3) / harmonic_magnitude(out, kToneHz, 1);
@@ -366,8 +371,8 @@ TEST_CASE("A4 ADAA suppresses the folded harmonic", "[diode-bridge][adaa][aliasi
         std::vector<double> out;
         out.reserve(kWindow);
         for (int n = 0; n < kWindow + kWindow; ++n) {
-            const double y =
-                bridge.process(std::sin(2.0 * M_PI * kProbeBin * n / double(kWindow)), 0.0);
+            const double y = bridge.process(
+                std::sin(2.0 * std::numbers::pi * kProbeBin * n / double(kWindow)), 0.0);
             if (n >= kWindow) out.push_back(y);
         }
         return out;
@@ -382,7 +387,7 @@ TEST_CASE("A4 ADAA suppresses the folded harmonic", "[diode-bridge][adaa][aliasi
         for (int bin = 1; bin < kWindow / 2; ++bin) {
             double re = 0.0, im = 0.0;
             for (int n = 0; n < kWindow; ++n) {
-                const double w = 2.0 * M_PI * bin * n / double(kWindow);
+                const double w = 2.0 * std::numbers::pi * bin * n / double(kWindow);
                 re += x[static_cast<std::size_t>(n)] * std::cos(w);
                 im += x[static_cast<std::size_t>(n)] * std::sin(w);
             }
@@ -512,7 +517,7 @@ TEST_CASE("A7 the worst-case gain bound is the one the registry cites",
             const int start = skip_transient ? static_cast<int>(kSr * 0.1) : 0;
             double in_peak = 0.0, out_peak = 0.0;
             for (int n = 0; n < total; ++n) {
-                const double x = amplitude * std::sin(2.0 * M_PI * kToneHz * n / kSr);
+                const double x = amplitude * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr);
                 const double y = c.process(x);
                 if (n < start) continue;
                 in_peak = std::max(in_peak, std::abs(x));
@@ -539,7 +544,7 @@ TEST_CASE("A7 the worst-case gain bound is the one the registry cites",
     bracket.reset();
     double bracket_in = 0.0, bracket_out = 0.0;
     for (int n = 0; n < static_cast<int>(kSr * 0.1); ++n) {
-        const double x = 1e-3 * std::sin(2.0 * M_PI * kToneHz * n / kSr);
+        const double x = 1e-3 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr);
         bracket_in = std::max(bracket_in, std::abs(x));
         bracket_out = std::max(bracket_out, std::abs(bracket.process(x)));
     }
@@ -589,7 +594,7 @@ TEST_CASE("A7 the dry path cannot push the mix past the bound",
         double in_peak = 0.0, out_peak = 0.0;
         const int total = static_cast<int>(kSr * 0.5);
         for (int n = 0; n < total; ++n) {
-            const double x = 0.01 * std::sin(2.0 * M_PI * kToneHz * n / kSr);
+            const double x = 0.01 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr);
             const double y = c.process(x);
             if (n < static_cast<int>(kSr * 0.1)) continue;
             in_peak = std::max(in_peak, std::abs(x));
@@ -728,7 +733,7 @@ TEST_CASE("A8 makeup gain stays outside the feedback loop", "[diode-bridge][ball
         c.set_makeup_db(makeup_db);
         c.reset();
         for (int n = 0; n < static_cast<int>(kSr * 3.0); ++n)
-            c.process(0.5 * std::sin(2.0 * M_PI * kToneHz * n / kSr));
+            c.process(0.5 * std::sin(2.0 * std::numbers::pi * kToneHz * n / kSr));
         return c.gain_reduction_db();
     };
 

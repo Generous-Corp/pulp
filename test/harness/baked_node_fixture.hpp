@@ -30,6 +30,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <vector>
 
 namespace pulp::test {
@@ -191,7 +192,8 @@ inline std::vector<float> sine_block(int frames, double tone_hz, double sample_r
     std::vector<float> v(static_cast<std::size_t>(frames), 0.0f);
     for (int k = 0; k < frames; ++k)
         v[static_cast<std::size_t>(k)] =
-            amplitude * static_cast<float>(std::sin(2.0 * M_PI * tone_hz * k / sample_rate));
+            amplitude *
+            static_cast<float>(std::sin(2.0 * std::numbers::pi * tone_hz * k / sample_rate));
     return v;
 }
 
@@ -199,7 +201,7 @@ inline std::vector<float> sine_block(int frames, double tone_hz, double sample_r
 /// window holds a whole number of periods.
 inline double harmonic_magnitude(const std::vector<float>& x, int harmonic, double tone_hz,
                                  double sample_rate) {
-    const double w = 2.0 * M_PI * harmonic * tone_hz / sample_rate;
+    const double w = 2.0 * std::numbers::pi * harmonic * tone_hz / sample_rate;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));

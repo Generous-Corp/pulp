@@ -8,6 +8,27 @@
     "windows-arm64",
     "windows-x64"
   ],
+  "cli_binary_stems": [
+    "pulp",
+    "pulp-cpp",
+    "pulp-import-design",
+    "pulp-mcp"
+  ],
+  "common_cli_members": [
+    "browser_capture/browser_process.mjs",
+    "browser_capture/capture.mjs",
+    "browser_capture/health.mjs",
+    "browser_capture/interaction_executor.mjs",
+    "browser_capture/interaction_plan.mjs",
+    "browser_capture/interaction_plan_protocol.json",
+    "browser_capture/lifecycle.mjs",
+    "browser_capture/network_dependencies.mjs",
+    "browser_capture/renderers.mjs",
+    "browser_capture/security.mjs",
+    "browser_capture/semantics.mjs",
+    "browser_capture/settle.mjs",
+    "browser_capture/tokens.mjs"
+  ],
   "pulp_library_stems": [
     "pulp-audio",
     "pulp-canvas",

@@ -623,6 +623,9 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_content_reveal")JSON");
     require_tool_name(tools, "pulp_timeline_project_open");
     require_tool_name(tools, "pulp_timeline_command_apply");
+    require_tool_name(tools, "pulp_timeline_diff");
+    require_tool_name(tools, "pulp_timeline_undo");
+    require_tool_name(tools, "pulp_timeline_redo");
     require_tool_name(tools, "pulp_timeline_validate");
     require_tool_name(tools, "pulp_timeline_explain");
     require_tool_name(tools, "pulp_timeline_render");
@@ -648,28 +651,64 @@ TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][too
                               std::istreambuf_iterator<char>()};
     const auto project_args = "{\"project\":" + json_string(project) + "}";
 
-    require_contains(handle_request(tool_call("410", std::string(pulp_mcp::kTimelineMcpToolNames[0]),
-                                              project_args)),
-                     R"JSON("project":)JSON");
     require_contains(
-        handle_request(tool_call("411", std::string(pulp_mcp::kTimelineMcpToolNames[1]),
+        handle_request(tool_call("410", std::string(kTimelineProjectOpenToolName), project_args)),
+        R"JSON("project":)JSON");
+    require_contains(
+        handle_request(tool_call("411", std::string(kTimelineCommandApplyToolName),
                                  "{\"commands\":[],\"project\":" + json_string(project) + "}")),
         "commands must be a non-empty array");
-    require_contains(handle_request(tool_call("412", std::string(pulp_mcp::kTimelineMcpToolNames[2]),
-                                              project_args)),
-                     R"JSON("diagnostics":[])JSON");
-    require_contains(handle_request(tool_call("413", std::string(pulp_mcp::kTimelineMcpToolNames[3]),
-                                              project_args)),
-                     R"JSON("tracks":[])JSON");
-    require_contains(handle_request(tool_call("414", std::string(pulp_mcp::kTimelineMcpToolNames[4]),
-                                              project_args)),
-                     "project and output are required");
-    require_contains(handle_request(tool_call("415", std::string(pulp_mcp::kTimelineMcpToolNames[5]),
-                                              project_args)),
-                     "project and format are required");
-    require_contains(handle_request(tool_call("416", std::string(pulp_mcp::kTimelineMcpToolNames[6]),
-                                              "{}")),
+    require_contains(handle_request(tool_call("412", std::string(kTimelineDiffToolName), "{}")),
+                     "session_id is required");
+    require_contains(handle_request(tool_call("413", std::string(kTimelineUndoToolName), "{}")),
+                     "session_id is required");
+    require_contains(handle_request(tool_call("414", std::string(kTimelineRedoToolName), "{}")),
+                     "session_id is required");
+    require_contains(
+        handle_request(tool_call("415", std::string(kTimelineValidateToolName), project_args)),
+        R"JSON("diagnostics":[])JSON");
+    require_contains(
+        handle_request(tool_call("416", std::string(kTimelineExplainToolName), project_args)),
+        R"JSON("tracks":[])JSON");
+    require_contains(
+        handle_request(tool_call("417", std::string(kTimelineRenderToolName), project_args)),
+        "project and output are required");
+    require_contains(
+        handle_request(tool_call("418", std::string(kTimelineExportToolName), project_args)),
+        "project and format are required");
+    require_contains(handle_request(tool_call("419", std::string(kTimelineImportToolName), "{}")),
                      "input, format, and output are required");
+}
+
+TEST_CASE("generated timeline bindings preserve protocol apply undo redo lifecycle",
+          "[mcp][tools][timeline][iteration]") {
+    std::ifstream fixture(repo_root_path() / "test/fixtures/timeline/v4/sequence-markers.json");
+    REQUIRE(fixture);
+    const std::string project{std::istreambuf_iterator<char>(fixture),
+                              std::istreambuf_iterator<char>()};
+    const auto opened = handle_request(tool_call("420", std::string(kTimelineProjectOpenToolName),
+                                                 "{\"project\":" + json_string(project) + "}"));
+    const auto session_id = extract_string(opened, "session_id");
+    REQUIRE_FALSE(session_id.empty());
+    const auto session_argument = "\"session_id\":" + json_string(session_id);
+    const std::string commands =
+        R"JSON([{"data":{"marker":{"data":{"id":"8","name":"protocol-marker","position":"0"},"type_name":"pulp.timeline.marker","version":1},"sequence_id":"2"},"type_name":"pulp.timeline.command.insert_marker","version":1}])JSON";
+
+    const auto applied =
+        handle_request(tool_call("421", std::string(kTimelineCommandApplyToolName),
+                                 "{\"commands\":" + commands + "," + session_argument + "}"));
+    require_contains(applied, "protocol-marker");
+    require_contains(applied, R"JSON("can_undo":true)JSON");
+
+    const auto undone = handle_request(
+        tool_call("422", std::string(kTimelineUndoToolName), "{" + session_argument + "}"));
+    REQUIRE(undone.find("protocol-marker") == std::string::npos);
+    require_contains(undone, R"JSON("can_redo":true)JSON");
+
+    const auto redone = handle_request(
+        tool_call("423", std::string(kTimelineRedoToolName), "{" + session_argument + "}"));
+    require_contains(redone, "protocol-marker");
+    require_contains(redone, R"JSON("can_undo":true)JSON");
 }
 
 // pulp #1997 — gap 1: every advertised MCP tool is named in tools/list.
@@ -753,11 +792,14 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_status",
         "pulp_test",
         "pulp_timeline_command_apply",
+        "pulp_timeline_diff",
         "pulp_timeline_explain",
         "pulp_timeline_export",
         "pulp_timeline_import",
         "pulp_timeline_project_open",
+        "pulp_timeline_redo",
         "pulp_timeline_render",
+        "pulp_timeline_undo",
         "pulp_timeline_validate",
         "pulp_validate",
     };
@@ -796,7 +838,11 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_kit_publish_check", "Error: path is required"},
         std::pair{"pulp_kit_init", "Error: kind and id are required"},
         std::pair{"pulp_timeline_project_open", "Error: project is required"},
-        std::pair{"pulp_timeline_command_apply", "Error: project is required"},
+        std::pair{"pulp_timeline_command_apply",
+                  "Error: exactly one of project or session_id is required"},
+        std::pair{"pulp_timeline_diff", "Error: session_id is required"},
+        std::pair{"pulp_timeline_undo", "Error: session_id is required"},
+        std::pair{"pulp_timeline_redo", "Error: session_id is required"},
         std::pair{"pulp_timeline_validate", "Error: project is required"},
         std::pair{"pulp_timeline_explain", "Error: project is required"},
         std::pair{"pulp_timeline_render", "Error: project and output are required"},

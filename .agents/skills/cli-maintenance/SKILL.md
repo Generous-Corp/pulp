@@ -2566,6 +2566,16 @@ Fix: split into adjacent raw-string literals — `)JSON" R"JSON(` — which the
 compiler concatenates (output byte-identical). Keep each chunk well under 16 KB;
 when you add MCP tools, watch the literal size.
 
+Generated timeline iteration tools are stateful within one `pulp-mcp` process:
+`pulp_timeline_project_open` returns a bounded session identifier consumed by
+apply/diff/undo/redo. Seven timeline operations retain stateless
+`pulp::tool-timeline` entry points; diff/undo/redo are MCP-local
+`DocumentSession` operations with no `pulp seq` session subtools. Keep their
+generated names, explicit typed handler bindings, MCP-only parity rows,
+membership tests, and required-argument tests aligned; do not
+reimplement undo from a serialized project because the real undo groups live in
+`DocumentSession`.
+
 ## `pulp validate --json` carries machine-readable evidence
 
 The `--json` / `--report` output of `pulp validate` is a consumer contract, not

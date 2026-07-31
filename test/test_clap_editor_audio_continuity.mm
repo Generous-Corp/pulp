@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <numbers>
 #include <thread>
 #include <vector>
 
@@ -82,12 +83,13 @@ clap_process_status CLAP_ABI tone_process(const clap_plugin_t* p, const clap_pro
     auto* t = static_cast<TonePlugin*>(p->plugin_data);
     if (!proc || proc->audio_outputs_count == 0) return CLAP_PROCESS_CONTINUE;
 
-    const double step = 2.0 * M_PI * 440.0 / kSampleRate;
+    const double step = 2.0 * std::numbers::pi * 440.0 / kSampleRate;
     auto& out = proc->audio_outputs[0];
     for (uint32_t f = 0; f < proc->frames_count; ++f) {
         const auto s = static_cast<float>(std::sin(t->phase) * 0.5);
         t->phase += step;
-        if (t->phase > 2.0 * M_PI) t->phase -= 2.0 * M_PI;
+        if (t->phase > 2.0 * std::numbers::pi)
+            t->phase -= 2.0 * std::numbers::pi;
         for (uint32_t c = 0; c < out.channel_count; ++c) {
             if (out.data32 && out.data32[c]) out.data32[c][f] = s;
         }

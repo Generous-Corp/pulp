@@ -23,6 +23,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -73,7 +74,7 @@ Comp static_curve_probe(double t, double r, double w) {
 /// Settled gain reduction, in dB, for a steady sine at `peak_db`.
 double settled_reduction_db(Comp& c, double peak_db, double seconds = 1.0) {
     const double peak = units::db_to_linear(peak_db);
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     const auto n = static_cast<int>(kSr * seconds);
     for (int i = 0; i < n; ++i) c.process(peak * std::sin(w * i));
     return c.gain_reduction_db();
@@ -87,7 +88,7 @@ int rise_time_10_90(Comp& c, double input_peak, double target_db, int max_sample
     const double low = start + 0.1 * span;
     const double high = start + 0.9 * span;
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     int at_low = -1;
     for (int i = 0; i < max_samples; ++i) {
         c.process(input_peak * std::sin(w * i));
@@ -228,7 +229,7 @@ TEST_CASE("3 the detector attacks toward more reduction, not less",
     c.set_auto_makeup(false);
     c.reset();
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     const auto ten_ms = static_cast<int>(units::ms_to_samples(10.0, kSr));
     for (int i = 0; i < ten_ms; ++i) c.process(std::sin(w * i));
     const double after_10ms = c.gain_reduction_db();
@@ -280,7 +281,7 @@ TEST_CASE("4 RMS integrates a burst that peak detection takes literally",
         Xorshift32 rng{4242u};
         const double noise_amp = units::db_to_linear(kNoiseDb);
         double baseline = 0.0, deepest = 0.0;
-        const double bw = 2.0 * M_PI * 1000.0 / kSr;
+        const double bw = 2.0 * std::numbers::pi * 1000.0 / kSr;
         for (int i = 0; i < burst_at + window; ++i) {
             double x = noise_amp * rng.next_bipolar<double>();
             if (i >= burst_at && i < burst_at + cycle) x += std::sin(bw * (i - burst_at));
@@ -331,7 +332,7 @@ TEST_CASE("5 sustained compression releases more slowly than a lone transient",
         c.set_auto_makeup(false);
         c.reset();
 
-        const double w = 2.0 * M_PI * 1000.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
         const auto n = static_cast<int>(kSr * over_threshold_seconds);
         for (int i = 0; i < n; ++i) c.process(std::sin(w * i));
 
@@ -371,7 +372,7 @@ TEST_CASE("5 disabling program-dependent release reduces to one constant",
     off.set_auto_makeup(false);
     off.reset();
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     for (int i = 0; i < static_cast<int>(kSr * 2); ++i) off.process(std::sin(w * i));
     const double start = off.gain_reduction_db();
     int n = 0;
@@ -435,7 +436,7 @@ TEST_CASE("7 a fully linked pair reduces both channels identically",
     c.set_auto_makeup(false);
     c.reset();
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     for (int i = 0; i < static_cast<int>(kSr * 0.2); ++i) {
         double l = std::sin(w * i), r = 0.0;
         c.process_stereo(l, r);
@@ -456,7 +457,7 @@ TEST_CASE("7 an unlinked pair leaves the silent channel alone",
     c.set_auto_makeup(false);
     c.reset();
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     for (int i = 0; i < static_cast<int>(kSr * 0.2); ++i) {
         double l = std::sin(w * i), r = 0.0;
         c.process_stereo(l, r);
@@ -478,7 +479,7 @@ TEST_CASE("8 output never exceeds the makeup-gain bound", "[feedforward-compress
     c.reset();
 
     const double bound = units::db_to_linear(Comp::kMakeupDbMax);
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     double observed = 0.0;
     for (int i = 0; i < static_cast<int>(kSr); ++i)
         observed = std::max(observed, std::abs(c.process(std::sin(w * i))));
@@ -527,7 +528,7 @@ TEST_CASE("9 reset returns the detector to a silence-equivalent state",
     Comp swept;
     swept.prepare(kSr, 10.0);
     swept.set_lookahead_ms(5.0);
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     for (int i = 0; i < static_cast<int>(kSr); ++i) swept.process(std::sin(w * i));
     swept.reset();
 
@@ -555,7 +556,7 @@ TEST_CASE("11 auto-makeup restores unity at the reference point",
     c.set_auto_makeup(true);
     c.reset();
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     double observed = 0.0;
     const auto n = static_cast<int>(kSr * 2);
     for (int i = 0; i < n; ++i) {
@@ -588,7 +589,7 @@ TEST_CASE("the float and double instantiations agree", "[feedforward-compressor]
 
     REQUIRE(f.latency_samples() == d.latency_samples());
 
-    const double w = 2.0 * M_PI * 1000.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
     for (int i = 0; i < static_cast<int>(kSr * 0.5); ++i) {
         const double x = 0.7 * std::sin(w * i);
         const double yf = f.process(static_cast<float>(x));
