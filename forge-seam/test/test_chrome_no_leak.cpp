@@ -1644,6 +1644,32 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
     CHECK(std::filesystem::file_size(shot) > 20000);
 }
 
+TEST_CASE("a patch nobody generated still says something", "[rack]") {
+    // Imported and shipped patches have no per-cable reasoning and never will:
+    // nobody wrote one. The only honest sentence is computed from the wiring,
+    // and without it those patches are a bare netlist -- which is what every
+    // shipped example was.
+    auto bare = sample_patch();
+    for (auto& c : bare) c.why.clear();
+
+    forge_modular::PatchExplanation ex;
+    ex.set_bounds({0, 0, 820, 400});
+    ex.set_connections(bare, sample_rack());
+    const auto text = flatten(rendered_text(&ex));
+    INFO(text);
+    CHECK(text.find("3 cables") != std::string::npos);
+    CHECK(text.find("audio path") != std::string::npos);
+
+    // And NOT shown when the patch explains itself: a computed summary above
+    // the model's own reasoning would be the app talking over it.
+    forge_modular::PatchExplanation withprose;
+    withprose.set_bounds({0, 0, 820, 400});
+    withprose.set_connections(sample_patch(), sample_rack());
+    const auto explained = flatten(rendered_text(&withprose));
+    INFO(explained);
+    CHECK(explained.find("audio path") == std::string::npos);
+}
+
 TEST_CASE("the explanation is grouped by what each cable carries", "[rack]") {
     // A flat list of a dozen cables is a netlist. Grouped, the same dozen say
     // how the patch is organised before a line of it is read -- which is the

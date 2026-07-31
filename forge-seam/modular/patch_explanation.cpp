@@ -241,6 +241,51 @@ void PatchExplanation::rebuild() {
     const auto columns = columns_for(bounds().width);
     wrapped_at_ = bounds().width;
 
+    // A patch nobody generated -- imported, or one of the shipped examples --
+    // has no per-cable reasoning and never will. It still deserves a sentence,
+    // and the only honest one is computed from the wiring itself: how big it
+    // is, and how far the sound travels to get out. Shown only when there is
+    // no prose, so a generated patch is not told what it already says better.
+    bool any_prose = false;
+    for (const auto& c : connections_)
+        if (!c.why.empty()) { any_prose = true; break; }
+
+    if (!any_prose && !connections_.empty()) {
+        std::size_t audio = 0;
+        for (const auto& c : connections_)
+            if (c.role == SignalRole::audio) ++audio;
+        std::string intro = std::to_string(modules_.size()) +
+            (modules_.size() == 1 ? " module, " : " modules, ") +
+            std::to_string(connections_.size()) +
+            (connections_.size() == 1 ? " cable." : " cables.");
+        if (audio > 0) {
+            intro += " The audio path is " + std::to_string(audio) +
+                     (audio == 1 ? " cable long" : " cables long") +
+                     "; everything else exists to make " +
+                     (audio == 1 ? "it move." : "those move.");
+        } else {
+            // Worth saying plainly: a patch with no audio role reaching an
+            // output is silent, and that is the first thing to check.
+            intro += " Nothing here is carrying audio.";
+        }
+
+        auto note = std::make_unique<View>();
+        note->flex().direction = FlexDirection::column;
+        note->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        note->flex().flex_shrink = 0;
+        note->flex().padding_bottom = 6;
+        for (const auto& piece : wrap(intro, columns)) {
+            auto line = std::make_unique<Label>(piece);
+            line->set_font_family(forge::design::type::display);
+            line->set_font_size(12.5f);
+            line->set_text_color(color::text_muted);
+            line->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+            line->flex().flex_shrink = 0;
+            note->add_child(std::move(line));
+        }
+        add_child(std::move(note));
+    }
+
     // Grouped by what each cable carries, in signal order: what you hear, then
     // what decides the notes, then what keeps time, then what moves. A flat
     // list of a dozen cables is a netlist; grouped, the same dozen say how the
