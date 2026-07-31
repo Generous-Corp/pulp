@@ -184,6 +184,14 @@ cap=2 runner; it belongs in a dedicated cap=1 nightly/perf lane. The full lane m
 what runs where, the label taxonomy, and how to route a new test — is
 [docs/guides/test-lanes.md](test-lanes.md).
 
+The `example-validation` workflow classifies changed paths with
+`tools/scripts/example_validation_paths.py`. That file is the canonical policy
+for deciding when example builds must run: changes to examples, shared build or
+dependency inputs, format lifecycle tests, and AU validator wiring all trigger
+the lane. The classifier fails closed on errors, and its focused regression
+test is part of workflow lint. Keep the path policy centralized rather than
+duplicating shell globs in the workflow and Shipyard configuration.
+
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned

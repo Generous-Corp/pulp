@@ -54,6 +54,8 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+    add_test(NAME example-validation-paths COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_example_validation_paths.py")
     # A fork's code must never be routed onto the self-hosted Macs, which hold
     # the signing keychain. Runs the resolver build.yml actually embeds.
     add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}

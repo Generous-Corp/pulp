@@ -10,7 +10,7 @@ single source of truth for that model.
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR | **yes** (blocking) | yes (compile only) | all tests **except** `validation` and `slow` labels; `--repeat until-pass:2` |
-| **Example-validation** (`example-validation`) | PRs touching `examples/**` | yes on example PRs (see status below) | yes | **only** `validation`-labeled example format-validators |
+| **Example-validation** (`example-validation`) | PRs touching examples or consumed build inputs | yes when triggered (see status below) | yes | **only** `validation`-labeled example format-validators |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including `validation` + `slow`; results eyeballed, build failures file an issue |
 | **cross-platform-check** | per PR (Linux/Windows) | advisory | no | core tests, excludes `validation` + `slow` |
 
@@ -52,8 +52,9 @@ of the time on the required gate and cost unrelated PRs hours (see
 2. **Validation is still enforced — on the PR that changes the example.** The
    `example-validation` lane
    ([`.github/workflows/examples-validation.yml`](../../.github/workflows/examples-validation.yml))
-   runs the `validation`-labeled tests and **blocks** whenever a PR touches
-   `examples/**`. It is deliberately **not** a nightly-only deferral: a broken
+   runs the `validation`-labeled tests and **blocks** whenever a PR touches an
+   example or a build input it consumes (public headers, CMake, dependencies,
+   or bootstrap tooling). It is deliberately **not** a nightly-only deferral: a broken
    example validator fails the PR that introduced it. The nightly is only a
    backstop.
 
@@ -61,7 +62,7 @@ of the time on the required gate and cost unrelated PRs hours (see
 
 The lane ships **not yet in `required_status_checks`**. It always runs and
 reports a stable `example-validation` status (it internally skips the heavy work
-on non-`examples/**` PRs), so it is **required-safe** — it can be added to branch
+when no example-affecting input changed), so it is **required-safe** — it can be added to branch
 protection without the "Expected — waiting for status" dead-lock GitHub imposes
 on a `paths:`-filtered required check. Promote it to required after one green
 real-runner run on an `examples/**` PR. Until then it is visible-but-advisory.

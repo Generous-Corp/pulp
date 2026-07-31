@@ -4,9 +4,9 @@
 # `clap-dlopen-*`, all tagged `LABELS "validation"`) are excluded from the
 # per-PR required `macos` gate (see .shipyard/config.toml + docs/guides/
 # test-lanes.md): they are slow and flaky under load and must not gate unrelated
-# core PRs. But they must still be ENFORCED when an example itself changes —
-# not deferred to the informational nightly. This lane does exactly that:
-# it runs them (and BLOCKS) only on PRs that touch `examples/**`.
+# core PRs. But they must still run when an example, consumed public header,
+# CMake input, or shared dependency/bootstrap surface changes, not only on the
+# informational nightly.
 #
 # Required-safe shape: the workflow ALWAYS runs (no top-level `paths:` filter),
 # a cheap `changes` job decides whether examples were touched, and a final
@@ -53,20 +53,21 @@ jobs:
             echo "examples=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Trigger on examples/** AND on the core headers the examples
-          # brace-initialize (ParamInfo/ParamRange in core/state, the
-          # descriptor/bus/context structs in core/format). A field REORDER in
-          # one of those headers breaks every example's designated initializer
-          # without touching examples/** — GCC then fails the release build while
-          # a core-only PR sailed through. Watch the include dirs so that class
-          # of change compiles the examples here, at PR time.
-          if git diff --name-only "$base"...HEAD \
-               | grep -qE '^(examples/|core/state/include/|core/format/)'; then
+          changed_paths="$(git diff --name-only "$base"...HEAD)"
+          set +e
+          printf '%s\n' "$changed_paths" \
+            | python3 tools/scripts/example_validation_paths.py
+          classifier_status=$?
+          set -e
+          if [ "$classifier_status" -eq 0 ]; then
             echo "examples=true" >> "$GITHUB_OUTPUT"
-            echo "examples/**, core/format/**, or a brace-initialized state header changed — will run example validators."
-          else
+            echo "example source, watched headers, CMake, or shared dependency infrastructure changed — will run example validators."
+          elif [ "$classifier_status" -eq 10 ]; then
             echo "examples=false" >> "$GITHUB_OUTPUT"
-            echo "no examples/**, core/format/**, or core/state/include change — skipping example validators."
+            echo "no example-affecting change — skipping example validators."
+          else
+            echo "example path classifier failed with status $classifier_status" >&2
+            exit "$classifier_status"
           fi
 
   resolve-advisory-macos:
@@ -153,10 +154,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          changes_result="${{ needs.changes.result }}"
           changed="${{ needs.changes.outputs.examples }}"
           result="${{ needs.validate.result }}"
+          if [ "$changes_result" != "success" ]; then
+            echo "Example change detection did not pass (result=$changes_result). FAIL."
+            exit 1
+          fi
           if [ "$changed" != "true" ]; then
-            echo "No examples/** or brace-initialized core-header changes — example validation not required. PASS."
+            echo "No example-affecting source or build/dependency change — example validation not required. PASS."
             exit 0
           fi
           if [ "$result" = "success" ]; then

@@ -112,7 +112,8 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
   gate on the **`example-validation`** lane
   (`.github/workflows/examples-validation.yml`), which blocks PRs touching
-  `examples/**` and internally skips otherwise (required-safe: always reports).
+  examples or consumed build inputs (public headers, CMake, dependencies, and
+  bootstrap tooling) and internally skips otherwise (required-safe: always reports).
 - **The required `macos` gate does NOT compile the examples.** `build.yml` (and
   `cross-platform-check.yml`, the windows gates) configure with
   `PULP_BUILD_EXAMPLES=OFF`. **Only `release-cli.yml` compiles the examples** — at
@@ -138,9 +139,10 @@ Guard (`build(examples)` PR): `examples/CMakeLists.txt` promotes
 `-Wreorder-init-list` to an error under Clang (GCC already errors by default), so
 the reorder now fails wherever examples compile — `release-cli` AND the
 `example-validation` lane — on every compiler. `examples-validation.yml` also
-triggers on `core/state/include/**` + `core/format/include/**`, because a field
-reorder in a header the examples brace-initialize breaks their inits without
-touching `examples/**`. Proven by the `cmake-examples-reorder-init-guard` ctest.
+triggers on public headers, CMake modules, external dependencies, and bootstrap
+tooling consumed by the examples, because any of those can break the example
+tree without touching `examples/**`. Proven by the
+`cmake-examples-reorder-init-guard` ctest and the path-classifier tests.
 If you add a NEW example struct pattern that a compiler tolerates but the release
 compiler rejects, extend that guard rather than discovering it at release time.
 

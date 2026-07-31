@@ -44,6 +44,8 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/scripts/example_validation_paths.py'
+      - 'tools/scripts/test_example_validation_paths.py'
   push:
     branches: [main]
     paths:
@@ -72,6 +74,8 @@ on:
       - 'tools/ci/linux_build_deps.json'
       - 'tools/ci/linux_build_deps_workflows.json'
       - 'tools/ci/test_install_linux_build_deps.py'
+      - 'tools/scripts/example_validation_paths.py'
+      - 'tools/scripts/test_example_validation_paths.py'
 
 permissions:
   contents: read
@@ -148,6 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/ci/test_install_linux_build_deps.py
+          python3 tools/scripts/test_example_validation_paths.py
           python3 tools/scripts/test_codecov_upload_contract.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
