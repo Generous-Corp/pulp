@@ -471,12 +471,14 @@ jobs:
 
       # A normal post-contract tag carries these files itself. An old tag or an
       # explicit old source_ref may not. Manual dispatches always use the current
-      # verifier and provenance stamper as compatibility helpers while retaining
-      # the selected source's product matrix. Keep those current helpers outside
-      # tracked source paths: provenance stamping must see the selected tag's
-      # tracked tree as clean. Otherwise fetch helpers only when absent. The
-      # matrix floor makes a pre-contract source an explicit skip rather than an
-      # accidental pass.
+      # verifier, provenance stamper, and CLI packager as compatibility helpers
+      # while retaining the selected source's product matrix. Keep those current
+      # helpers outside tracked source paths: provenance stamping must see the
+      # selected tag's tracked tree as clean. The current packager is also
+      # required because historical copies can omit release repairs such as
+      # signing a staged macOS wgpu runtime. Otherwise fetch helpers only when
+      # absent. The matrix floor makes a pre-contract source an explicit skip
+      # rather than an accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
@@ -486,13 +488,15 @@ jobs:
           rm -rf "$compat_dir"
           mkdir -p "$compat_dir"
           for path in \
+              tools/scripts/package_cli.py \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
               tools/scripts/sdk_provenance.py \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
-                && { [ "$path" = tools/scripts/release_artifact_contents.py ] \
+                && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/scripts/release_artifact_contents.py ] \
                   || [ "$path" = tools/scripts/sdk_provenance.py ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
@@ -512,10 +516,14 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=$compat_dir/package_cli.py" \
+              >> "$GITHUB_ENV"
           else
             echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
           fi
 
@@ -788,7 +796,7 @@ jobs:
               --import-design-runtime-dir build/tools/import-design/browser_capture-v1
             )
           fi
-          python3 tools/scripts/package_cli.py \
+          python3 "$PULP_RELEASE_PACKAGER" \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
@@ -811,7 +819,7 @@ jobs:
               'build/tools/import-design/Release/browser_capture-v1'
             )
           }
-          python tools/scripts/package_cli.py `
+          python $env:PULP_RELEASE_PACKAGER `
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `
