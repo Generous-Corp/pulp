@@ -566,3 +566,22 @@ when the build would have linked.
 The table holds every engine-adjacent module, not just playback, and the selftest
 is generic over it. Adding a module there is how a new `core/` target gets the
 same enforcement; it does not widen anyone else's floor.
+
+### An editor view never links playback
+
+`core/timeline_editor` carries a floor that deliberately excludes `playback`, and
+the selftest asserts that pair by name in both the include and the link
+direction. An editor learns where the playhead is through
+`timeline_editor::SequencerUiHost`, whose implementation lives with whoever owns
+audio — so a plugin that draws a piano roll over its own engine consumes the
+editor without acquiring a transport.
+
+That interface hands out `UiPlayhead` **by value**, and the reason is specific to
+this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
+compiled program. That is correct for a block renderer, which consumes the
+snapshot inside the callback that produced it, and unsafe for a view, which keeps
+its copy across frames while the engine may adopt a different program underneath.
+Never widen the UI-facing seam by passing a `TransportSnapshot` — project the
+fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_generation`
+is what lets a view tell a stale reading from a live one without holding anything
+a program swap can invalidate.

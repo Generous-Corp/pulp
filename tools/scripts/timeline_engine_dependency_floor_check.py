@@ -30,6 +30,21 @@ MODULE_FLOORS = {
         "platform",
         "runtime",
     },
+    # The editor rung reaches the document model and the timebase and stops
+    # there. Playback is absent on purpose: an editor view learns where the
+    # playhead is through the SequencerUiHost interface declared here, which the
+    # product shell implements, so a plugin that draws a piano roll over its own
+    # engine consumes the editor without acquiring a transport. Both spellings
+    # of the module's own name are allowed because the CMake target is
+    # pulp::timeline-editor while the directory is timeline_editor.
+    "timeline_editor": {
+        "timeline_editor",
+        "timeline-editor",
+        "timeline",
+        "timebase",
+        "platform",
+        "runtime",
+    },
 }
 INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]pulp/([^/]+)/", re.MULTILINE)
 LINK_RE = re.compile(r"\bpulp(?:::|-)([a-zA-Z0-9_-]+)\b")
@@ -246,6 +261,38 @@ def run_selftest() -> int:
                 + " ".join(f"pulp::{name}" for name in sorted(allowed))
                 + ")\n"
             )
+
+        # The editor rung's defining rule is that it cannot reach playback, and
+        # playback — unlike the render module the loop above uses — is itself a
+        # declared engine module. Assert it by name in both directions so the
+        # rule cannot be weakened by widening some other row.
+        editor_source, editor_cmake = fixtures["timeline_editor"]
+        editor_source.write_text("#include <pulp/playback/transport.hpp>\n")
+        if not any(
+            "timeline_editor outside-floor pulp/playback include" in error
+            for error in verify(root)
+        ):
+            print("selftest missed timeline_editor playback include")
+            return 1
+        editor_source.write_text("#include <pulp/timeline_editor/allowed.hpp>\n")
+
+        editor_cmake.write_text(
+            "target_link_libraries(pulp-timeline-editor INTERFACE "
+            "pulp::timeline pulp::timebase pulp::playback)\n"
+        )
+        if not any(
+            "timeline_editor outside-floor pulp::playback link" in error
+            for error in verify(root)
+        ):
+            print("selftest missed timeline_editor playback link")
+            return 1
+        editor_cmake.write_text(
+            "target_link_libraries(pulp-timeline-editor INTERFACE "
+            "pulp::timeline pulp::timebase)\n"
+        )
+        if verify(root):
+            print("selftest rejected the restored timeline_editor fixture")
+            return 1
 
         shutil.rmtree(root / "core" / "timeline")
         if not any("missing required engine module" in error for error in verify(root)):
