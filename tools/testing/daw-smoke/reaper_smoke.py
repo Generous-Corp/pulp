@@ -644,7 +644,18 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         built = ""
         while time.time() < deadline:
             time.sleep(5)
-            if not plugin_log.exists() or plugin_log.stat().st_size <= before:
+            if not plugin_log.exists():
+                continue
+            size = plugin_log.stat().st_size
+            if size < before:
+                # TRUNCATED. The app clears this log when a build starts, so
+                # the file is SMALLER than where this run began reading -- and
+                # an offset guard that only skips forward then skips forever.
+                # The build had already succeeded; the gate simply never
+                # looked. Everything in the file is now this run's by
+                # definition, so start from the beginning.
+                before = 0
+            elif size == before:
                 continue
             with open(plugin_log, errors="replace") as f:
                 f.seek(before)
