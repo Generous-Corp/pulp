@@ -54,6 +54,19 @@ target_link_libraries(pulp-import-design PRIVATE
     pulp::state
     pulp::platform)
 
+# Match the SDK install layout so the installed helper can resolve shared
+# dependencies such as libwgpu_native from the sibling lib directory.
+if(APPLE)
+    set_target_properties(pulp-import-design PROPERTIES
+        INSTALL_RPATH "@executable_path/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE
+        MACOSX_RPATH TRUE)
+elseif(UNIX)
+    set_target_properties(pulp-import-design PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
+
 file(STRINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/runtime_manifest.txt"
     _pulp_browser_capture_runtime_names)

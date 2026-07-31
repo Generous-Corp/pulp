@@ -937,6 +937,10 @@ jobs:
           if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
             python3 tools/scripts/resign_macos_release_tree.py sdk-staging
           fi
+          # Exercise the installed SDK helper, not the build-tree binary or the
+          # separately repackaged CLI copy. This catches missing install RPATHs
+          # before an archive with an unloadable helper can be published.
+          sdk-staging/bin/pulp-import-design --help >/dev/null
           python3 - <<'PY'
           import os
           from pathlib import Path
@@ -998,6 +1002,10 @@ jobs:
           }
           if (!(Test-Path sdk-staging/lib/pulp-view-core.lib)) {
             throw "sdk-staging/lib/pulp-view-core.lib missing"
+          }
+          & .\sdk-staging\bin\pulp-import-design.exe --help *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Installed SDK pulp-import-design runtime smoke failed'
           }
           python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
           Rename-Item sdk-staging pulp-sdk

@@ -246,6 +246,32 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         self.assertIn("$releaseTag = $env:RELEASE_TAG", windows_block)
         self.assertNotIn("$releaseTag = '${{", windows_block)
 
+    def test_sdk_archive_build_smokes_the_installed_import_design_helper(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        unix_smoke = "sdk-staging/bin/pulp-import-design --help"
+        windows_smoke = r".\sdk-staging\bin\pulp-import-design.exe --help"
+        self.assertIn(unix_smoke, unix_block)
+        self.assertIn(windows_smoke, windows_block)
+        self.assertLess(
+            unix_block.index("resign_macos_release_tree.py sdk-staging"),
+            unix_block.index(unix_smoke),
+            "macOS must re-sign the install-RPATH-rewritten helper before launch",
+        )
+        self.assertLess(
+            unix_block.index(unix_smoke),
+            unix_block.index("mv sdk-staging pulp-sdk"),
+        )
+        self.assertLess(
+            windows_block.index(windows_smoke),
+            windows_block.index("Rename-Item sdk-staging pulp-sdk"),
+        )
+
     def test_historical_source_substitution_skips_exact_tag_stamping(self) -> None:
         unix_start = self.text.index("- name: Build SDK tarball (Unix)")
         windows_start = self.text.index("- name: Build SDK tarball (Windows)")

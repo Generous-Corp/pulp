@@ -5122,3 +5122,15 @@ Before concluding anything from an import run, confirm the binary matches the
 worktree you edited: check `git log --oneline -1` in the checkout you built
 from, and rebuild if the change you are validating is not in it. Testing an old
 worktree and reporting the result as current has burned real debugging hours.
+
+## Installed importer helpers need the SDK-relative runtime search path
+
+The build-tree `pulp-import-design` can find linked shared dependencies through
+its build RPATH while the installed SDK helper cannot. Keep its install RPATH at
+`@executable_path/../lib` on macOS and `$ORIGIN/../lib` on other Unix platforms,
+with `BUILD_WITH_INSTALL_RPATH FALSE` so development binaries retain their build
+RPATH. The release gate must execute
+`sdk-staging/bin/pulp-import-design --help` after installation (and after macOS
+re-signing), not merely inspect archive members. v0.764.0 passed structural
+archive verification while the installed helper had no `LC_RPATH` and failed to
+load `@rpath/libwgpu_native.dylib`.
