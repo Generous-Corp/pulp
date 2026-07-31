@@ -327,6 +327,53 @@ TEST_CASE("InspectorSession serializes domain handlers across clients",
     CHECK(entered == 2);
 }
 
+TEST_CASE("InspectorSession cancels queued dispatch during teardown",
+          "[inspect][session][dispatch][concurrency][teardown]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool release = false;
+    InspectorSession session(
+        {"session-cancel-queued", "instance-1", "fixture"},
+        policy(InspectorProfile::Develop),
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            entered = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(request.id, R"({"completed":true})");
+        });
+
+    pulp::inspect::InspectorMessage active_response;
+    pulp::inspect::InspectorMessage queued_response;
+    std::thread active([&] {
+        active_response =
+            session.handle("alpha", make_request(1, "State.getParameters"));
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return entered; }));
+    }
+    std::thread queued([&] {
+        queued_response =
+            session.handle("beta", make_request(2, "State.getParameters"));
+    });
+
+    std::this_thread::sleep_for(20ms);
+    session.suspend_dispatches();
+    queued.join();
+    CHECK(queued_response.is_error);
+    CHECK(queued_response.error_code == "dispatch_cancelled");
+
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    cv.notify_all();
+    active.join();
+    CHECK_FALSE(active_response.is_error);
+}
+
 TEST_CASE("controller lease handoff waits for an admitted mutation",
           "[inspect][session][lease][concurrency]") {
     auto now = std::chrono::steady_clock::time_point{};
