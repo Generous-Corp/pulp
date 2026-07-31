@@ -35,6 +35,13 @@ pulp_add_test_suite(pulp-test-smf-interchange
 pulp_add_test_suite(pulp-test-timeline-production-mode
     SOURCES test_timeline_production_mode.cpp
     LIBRARIES pulp::timeline)
+# SequencerUiHost is the editor rung's only coupling toward playback, so the
+# link list is part of what this suite proves: it names the editor interface and
+# the document model, and never pulp::playback. A member of the interface that
+# grew into an engine type would fail to build here.
+pulp_add_test_suite(pulp-test-sequencer-ui-host
+    SOURCES test_sequencer_ui_host.cpp
+    LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp

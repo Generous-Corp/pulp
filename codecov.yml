@@ -293,6 +293,10 @@ flags:
     paths:
       - core/timeline/
     carryforward: true
+  timeline_editor:
+    paths:
+      - core/timeline_editor/
+    carryforward: true
   view:
     paths:
       - core/view/
@@ -508,6 +512,9 @@ component_management:
     - component_id: timeline
       name: timeline
       paths: ["core/timeline/**"]
+    - component_id: timeline_editor
+      name: timeline_editor
+      paths: ["core/timeline_editor/**"]
     - component_id: view
       name: view
       paths:

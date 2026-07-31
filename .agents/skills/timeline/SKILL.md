@@ -732,6 +732,35 @@ link-scan coverage plus selftest proof without touching the selftest. Adding an
 entry is not the same as widening `timeline`'s own floor — a module that sits
 *above* timeline gets its own row and must not appear in timeline's set.
 
+Three things bite when adding a row:
+
+- **`verify()` reports `missing required engine module` when a row names a
+  directory that does not exist.** A row and its target therefore land in the
+  same change, always — you cannot declare a floor ahead of the code it
+  constrains. That is the intended discipline, not an obstacle to work around:
+  it is what stops a floor from being written around a violation that already
+  shipped.
+- **Allow both spellings of the module's own name.** The row key is the
+  directory (`timeline_editor`), but `LINK_RE` reads a CMake alias verbatim, so
+  `pulp::timeline-editor` yields the token `timeline-editor`. A row carrying
+  only the underscore spelling reads a helper target's self-link as an
+  outside-floor violation.
+- **The generic selftest loop proves detection using `pulp/render`, which is in
+  no floor at all.** When a row's defining rule is that it cannot reach a module
+  that *is* in the table — `timeline_editor` and playback — assert that pair by
+  name too, or the rule survives someone widening the other row.
+
+A new `core/<module>` directory also drifts `codecov.yml`, whose flags and
+components mirror `core/*`. Add the flag and the component alongside the target;
+`tools/scripts/gates.sh` catches the omission before CI does.
+
+**A new rung takes a new row — never widen an existing one.** `timeline_editor`
+carries no `view` and no `canvas`, which is correct for the editor kernel and
+will look like a gap the first time a view lands beside it. It is not. Widening
+that row to admit `view` makes every consumer of the kernel pay for `core/view`,
+which is the exact coupling the rung split exists to prevent. A view target gets
+its own directory and its own row, sitting above this one.
+
 ### Derived surfaces are projections of the manifest, not the registry
 
 Every downstream agent surface is a **pure function of the committed
