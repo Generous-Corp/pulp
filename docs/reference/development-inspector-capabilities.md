@@ -59,6 +59,7 @@ mode bits or extended ACLs, path escapes, and ambiguous selection. Newly
 created Darwin discovery objects
 discard inherited ACLs before any credential material is written; readers
 validate the opened object and fail closed on any remaining extended ACL.
+Rejected server starts wipe their owned credential before releasing storage.
 Capability dispatch is fail-closed before a domain handler runs. The old
 unauthenticated direct-handler server exists only as a non-installed test
 fixture for transport regression coverage.

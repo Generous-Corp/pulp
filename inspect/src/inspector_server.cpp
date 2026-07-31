@@ -23,6 +23,28 @@ namespace {
 constexpr std::size_t kMaxJsonNestingDepth = 64;
 constexpr std::size_t kMinimumMessageBytes = 1024;
 
+class SensitiveTokenWiper {
+public:
+    explicit SensitiveTokenWiper(std::vector<std::uint8_t>& token)
+        : token_(&token) {}
+
+    ~SensitiveTokenWiper() noexcept {
+        if (token_ && !token_->empty())
+            pulp::runtime::secure_zero_memory(
+                token_->data(), token_->size());
+    }
+
+    SensitiveTokenWiper(const SensitiveTokenWiper&) = delete;
+    SensitiveTokenWiper& operator=(const SensitiveTokenWiper&) = delete;
+
+    void disarm() noexcept {
+        token_ = nullptr;
+    }
+
+private:
+    std::vector<std::uint8_t>* token_;
+};
+
 bool json_nesting_is_bounded(std::string_view text) {
     std::size_t depth = 0;
     bool in_string = false;
@@ -339,6 +361,7 @@ int InspectorServer::port() const {
 }
 
 bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
+    SensitiveTokenWiper config_token_wiper(config.token);
     std::lock_guard transition_lock(transition_mutex);
     stop_requested.store(false, std::memory_order_release);
     stop_locked();
@@ -359,6 +382,7 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         session = config.session;
         token = std::move(config.token);
+        config_token_wiper.disarm();
         session_generation.fetch_add(1, std::memory_order_acq_rel);
     }
     authentication_timeout =

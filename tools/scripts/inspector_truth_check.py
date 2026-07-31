@@ -258,6 +258,10 @@ REQUIRED_SECURITY_CONTRACTS = {
         "const auto authentication_timeout = remaining()",
         "impl_->wait_for_response(1, remaining())",
     ),
+    "inspect/src/inspector_server.cpp": (
+        "SensitiveTokenWiper config_token_wiper(config.token)",
+        "config_token_wiper.disarm()",
+    ),
     "core/events/include/pulp/events/interprocess_connection.hpp": (
         "std::shared_ptr<Impl> impl_",
     ),

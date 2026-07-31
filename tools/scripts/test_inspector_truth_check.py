@@ -150,6 +150,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "const auto challenge_timeout = remaining()\n"
                 "const auto authentication_timeout = remaining()\n"
                 "impl_->wait_for_response(1, remaining())\n",
+            "inspect/src/inspector_server.cpp":
+                "SensitiveTokenWiper config_token_wiper(config.token)\n"
+                "config_token_wiper.disarm()\n",
             "core/events/include/pulp/events/interprocess_connection.hpp":
                 "std::shared_ptr<Impl> impl_\n",
             "core/events/src/interprocess_connection.cpp":
