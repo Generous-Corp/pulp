@@ -607,6 +607,26 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         # perfectly well forward. The window server is asked instead, about
         # the actual points that will be clicked.
         _dismiss_own_screenshot_ui()
+
+        # Something floating over the editor is not a reason to give up, and
+        # it is certainly not a reason to close somebody's app. The window
+        # this harness opened can simply be moved out from under it. Tried at
+        # a few positions, and each one VERIFIED with the window server before
+        # anything is clicked.
+        if not _editor_is_really_in_front(str(uidriver), x, y, w, h):
+            for nx, ny in ((0, 25), (0, 25 + 40), (60, 25)):
+                _osa(f'tell application "System Events" to tell process '
+                     f'"REAPER" to set position of window 1 whose name '
+                     f'contains "{args.plugin_name}" to {{{nx}, {ny}}}')
+                time.sleep(1.0)
+                moved = _floating_editor_bounds(args.plugin_name)
+                if moved is None:
+                    continue
+                x, y, w, h = moved
+                if _editor_is_really_in_front(str(uidriver), x, y, w, h):
+                    log(f"moved the editor clear, to {x},{y}")
+                    break
+
         if not _editor_is_really_in_front(str(uidriver), x, y, w, h):
             log("REAPER says it is frontmost, but the editor is not what is on "
                 "screen where the clicks would land — something else is over "
