@@ -30,6 +30,10 @@ quantizer's beat/frame arithmetic.
   `absolute_error_samples`, and `exact`; the nearest tick is returned.
 - Arbitrary tick -> sample -> tick cannot be identity because many ticks share an
   integer sample. Test monotonicity and canonical-sample preservation instead.
+- Render-time phase mapping may use `fractional_ticks_to_samples()` and its
+  analytic inverse `fractional_samples_to_ticks()`. Both retain the compiled
+  integer segment anchors but avoid rounding their input/output domains; keep
+  ramp round-trip coverage at fractional interior positions.
 - `TempoCursor` is the allocation-free playback path. Monotonic sample advances
   consume segment transitions once (amortized O(1)); seeks and loop wraps reset
   it explicitly. Differential tests must match cold-map canonical results.

@@ -186,7 +186,12 @@ pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
-pulp_add_test_suite(pulp-test-spectral-primitives SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp test_sinc_pitch.cpp LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-spectral-primitives
+    SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
+            test_realtime_pitch_time_stream_contract.cpp test_finite_stretch_builder.cpp
+            test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp
+            test_sinc_pitch.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)

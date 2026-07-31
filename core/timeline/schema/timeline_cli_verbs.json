@@ -255,6 +255,13 @@
           "value_type": "uint"
         },
         {
+          "kind": "String",
+          "name": "time-conform",
+          "required": true,
+          "schema_field": "time_conform",
+          "value_type": "string"
+        },
+        {
           "kind": "Object",
           "name": "time-range",
           "required": true,
@@ -264,7 +271,7 @@
       ],
       "name": "timeline:clip",
       "schema_type": "pulp.timeline.clip",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Command",

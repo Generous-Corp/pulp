@@ -403,7 +403,15 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
+        step_start = self.text.index("- name: Strip binaries (Unix)")
+        step_end = self.text.index("- name: Install Linux rpath helper")
+        step_block = self.text[step_start:step_end]
         run_block = self._find_step_run("Strip binaries (Unix)")
+        self.assertIn(
+            "shell: bash",
+            step_block,
+            "The Ubuntu container defaults to sh, which cannot parse Bash arrays.",
+        )
         self.assertIn(
             "release_bins=(build/pulp build/tools/cli/pulp-cpp "
             "build/tools/mcp/pulp-mcp)",

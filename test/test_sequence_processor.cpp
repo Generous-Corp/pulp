@@ -1,5 +1,7 @@
 #include "support/timeline_graph_binding_test_support.hpp"
 
+#include "../core/sequence/src/midi_latency_queue.hpp"
+
 #include <pulp/format/playback_context_projection.hpp>
 #include <pulp/sequence/sequence_processor.hpp>
 
@@ -10,6 +12,28 @@
 #include <limits>
 
 namespace {
+
+class UmpOutputAttachment {
+  public:
+    UmpOutputAttachment(midi::MidiBuffer& output, std::size_t capacity) : output_(output) {
+        ump_.reserve(capacity);
+        ump_.set_realtime_capacity_limit(true);
+        output_.attach_ump(&ump_);
+    }
+    ~UmpOutputAttachment() {
+        output_.attach_ump(nullptr);
+    }
+    UmpOutputAttachment(const UmpOutputAttachment&) = delete;
+    UmpOutputAttachment& operator=(const UmpOutputAttachment&) = delete;
+
+    const midi::UmpBuffer& ump() const noexcept {
+        return ump_;
+    }
+
+  private:
+    midi::MidiBuffer& output_;
+    midi::UmpBuffer ump_;
+};
 
 format::ProcessContext host_context(const TransportSnapshot& snapshot) {
     auto context = format::project_process_context(snapshot, snapshot.ranges[0]);
@@ -118,7 +142,113 @@ std::shared_ptr<const Project> dense_multitrack_note_project(std::size_t notes_p
         take(Project::create(ProjectInput{{1}, "dense", next_id, {2}, {}, {std::move(sequence)}})));
 }
 
+std::shared_ptr<const Project> single_note_project(std::uint8_t pitch) {
+    NoteEvent event;
+    event.id = {101};
+    event.start = {};
+    event.duration = {kTicksPerQuarter};
+    event.velocity = 0xffff;
+    event.pitch = pitch;
+    auto content = take(NoteContent::create({event}));
+    auto clip = take(Clip::create({100}, {0}, {2 * kTicksPerQuarter}, std::move(content)));
+    auto track = take(Track::create({10}, "adopted note", {std::move(clip)}));
+    auto sequence =
+        take(Sequence::create({2}, "root", TickDuration{2 * kTicksPerQuarter}, {std::move(track)}));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "adoption", 1'000, {2}, {}, {std::move(sequence)}})));
+}
+
+
 } // namespace
+
+TEST_CASE("sequence MIDI latency queue delays paired MIDI and UMP without leakage",
+          "[sequence][midi-latency]") {
+    sequence::detail::MidiLatencyQueue queue;
+    REQUIRE(queue.prepare(4, 5, 64));
+
+    midi::MidiBuffer source;
+    source.reserve(4);
+    source.set_realtime_capacity_limit(true);
+    auto note = midi::MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 2;
+    REQUIRE(source.add(note));
+    midi::UmpBuffer source_ump;
+    source_ump.reserve(4);
+    source_ump.set_realtime_capacity_limit(true);
+    REQUIRE(source_ump.add(midi::UmpPacket::note_on_2(0, 0, 60, 0xffff), 2));
+    source.attach_ump(&source_ump);
+
+    midi::MidiBuffer destination;
+    destination.reserve(4);
+    destination.set_realtime_capacity_limit(true);
+    midi::UmpBuffer destination_ump;
+    destination_ump.reserve(4);
+    destination_ump.set_realtime_capacity_limit(true);
+    destination.attach_ump(&destination_ump);
+    REQUIRE(queue.process(source, destination, 4));
+    REQUIRE(destination.empty());
+    REQUIRE(destination_ump.empty());
+
+    source.clear();
+    source_ump.clear();
+    REQUIRE(queue.process(source, destination, 4));
+    REQUIRE(destination.size() == 1);
+    REQUIRE(destination.begin()->sample_offset == 3);
+    REQUIRE(destination_ump.size() == 1);
+    REQUIRE(destination_ump[0].sample_offset == 3);
+
+    // Clear discards both representations together. A queued UMP packet also
+    // fails closed before mutation when the destination lacks its sidecar.
+    destination.clear();
+    destination_ump.clear();
+    REQUIRE(source.add(note));
+    REQUIRE(source_ump.add(midi::UmpPacket::note_on_2(0, 0, 60, 0xffff), 2));
+    REQUIRE(queue.process(source, destination, 4));
+    queue.clear_pending();
+    source.clear();
+    source_ump.clear();
+    REQUIRE(queue.process(source, destination, 8));
+    REQUIRE(destination.empty());
+    REQUIRE(destination_ump.empty());
+
+    sequence::detail::MidiLatencyQueue missing_sidecar;
+    REQUIRE(missing_sidecar.prepare(4, 5, 64));
+    REQUIRE(source.add(note));
+    REQUIRE(source_ump.add(midi::UmpPacket::note_on_2(0, 0, 60, 0xffff), 2));
+    midi::MidiBuffer midi_only;
+    midi_only.reserve(4);
+    midi_only.set_realtime_capacity_limit(true);
+    REQUIRE_FALSE(missing_sidecar.process(source, midi_only, 4));
+    REQUIRE(midi_only.empty());
+
+    sequence::detail::MidiLatencyQueue full_ump_destination;
+    REQUIRE(full_ump_destination.prepare(4, 5, 64));
+    midi::MidiBuffer paired_destination;
+    paired_destination.reserve(4);
+    paired_destination.set_realtime_capacity_limit(true);
+    midi::UmpBuffer no_ump_capacity;
+    no_ump_capacity.set_realtime_capacity_limit(true);
+    for (std::size_t index = 0; index < no_ump_capacity.capacity(); ++index)
+        REQUIRE(no_ump_capacity.add(midi::UmpPacket::note_on_2(0, 0, 1, 1), 0));
+    paired_destination.attach_ump(&no_ump_capacity);
+    REQUIRE(full_ump_destination.process(source, paired_destination, 4));
+    source.clear();
+    source_ump.clear();
+    source.attach_ump(nullptr);
+    REQUIRE_FALSE(full_ump_destination.process(source, paired_destination, 4));
+    REQUIRE(paired_destination.empty());
+    REQUIRE(no_ump_capacity.size() == no_ump_capacity.capacity());
+
+    midi::UmpBuffer retry_ump;
+    retry_ump.reserve(4);
+    retry_ump.set_realtime_capacity_limit(true);
+    paired_destination.attach_ump(&retry_ump);
+    REQUIRE(full_ump_destination.process(source, paired_destination, 4));
+    REQUIRE(paired_destination.size() == 1);
+    REQUIRE(paired_destination.begin()->sample_offset == 3);
+    REQUIRE(retry_ump.size() == 1);
+    REQUIRE(retry_ump[0].sample_offset == 3);
+}
 
 TEST_CASE("embedded sequence processor schedules program-beat notes on the host beat clock") {
     const auto map = tempo_map();
@@ -155,6 +285,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         midi::MidiBuffer output;
         output.reserve(16);
         output.set_realtime_capacity_limit(true);
+        UmpOutputAttachment output_ump(output, 16);
         format::ProcessContext context;
         context.is_playing = true;
         context.tempo_bpm = 60.0;
@@ -175,6 +306,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         midi::MidiBuffer output;
         output.reserve(16);
         output.set_realtime_capacity_limit(true);
+        UmpOutputAttachment output_ump(output, 16);
         format::ProcessContext before;
         before.is_playing = true;
         before.tempo_bpm = 60.0;
@@ -204,6 +336,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         midi::MidiBuffer output;
         output.reserve(16);
         output.set_realtime_capacity_limit(true);
+        UmpOutputAttachment output_ump(output, 16);
         format::ProcessContext context;
         context.is_playing = true;
         context.is_looping = true;
@@ -228,6 +361,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         midi::MidiBuffer output;
         output.reserve(16);
         output.set_realtime_capacity_limit(true);
+        UmpOutputAttachment output_ump(output, 16);
         format::ProcessContext fallback;
         fallback.is_playing = true;
         fallback.position_samples = 41'968;
@@ -287,6 +421,7 @@ TEST_CASE("host-mapped note scheduling preserves tick order within one compiled 
     midi::MidiBuffer output;
     output.reserve(16);
     output.set_realtime_capacity_limit(true);
+    UmpOutputAttachment output_ump(output, 16);
     format::ProcessContext context;
     context.sample_rate = 48'000.0;
     context.num_samples = 48'000;
@@ -347,6 +482,7 @@ TEST_CASE("embedded sequence processor sizes routed MIDI for dense multiple trac
     midi::MidiBuffer output;
     output.reserve(2 * notes_per_track);
     output.set_realtime_capacity_limit(true);
+    UmpOutputAttachment output_ump(output, 2 * notes_per_track);
     format::ProcessContext context;
     context.sample_rate = 48'000.0;
     context.num_samples = 32;
@@ -401,6 +537,7 @@ TEST_CASE("embedded sequence processor matches offline and desktop event streams
     midi::MidiBuffer embedded_midi;
     embedded_midi.reserve(256);
     embedded_midi.set_realtime_capacity_limit(true);
+    UmpOutputAttachment embedded_ump(embedded_midi, 256);
 
     auto seeked = snapshot(*program, 32, 0);
     seeked.block_index = 2;
@@ -469,6 +606,7 @@ TEST_CASE("embedded sequence processor never publishes a partial MIDI block") {
     midi::MidiBuffer midi_out;
     midi_out.reserve(1);
     midi_out.set_realtime_capacity_limit(true);
+    UmpOutputAttachment midi_ump(midi_out, 1);
     const auto transport = snapshot(*program, 32, 0);
     auto context = host_context(transport);
 
@@ -482,6 +620,59 @@ TEST_CASE("embedded sequence processor never publishes a partial MIDI block") {
     REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::RenderFailed);
     REQUIRE(midi_out.empty());
 }
+
+TEST_CASE("embedded sequence processor atomically adopts prepared same-topology generations") {
+    const auto map = tempo_map();
+    const auto assets = take(DecodedAudioAssetPool::create({}));
+    ProgramHarness programs;
+    programs.publish(single_note_project(60), map, assets, 1);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 32,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer silence(1, 32);
+    Buffer audio_output(1, 32);
+    auto audio_view = audio_output.view();
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi_out.reserve(16);
+    midi_out.set_realtime_capacity_limit(true);
+    UmpOutputAttachment midi_ump(midi_out, 16);
+
+    programs.publish(single_note_project(61), map, assets, 2);
+    REQUIRE(embedded.adopt_latest_program());
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 0;
+    context.transport_jump = true;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(midi_out.size() == 1);
+    REQUIRE(midi_out[0].is_note_on());
+    REQUIRE(midi_out[0].note() == 61);
+
+    // A later store publication is inert until its exact prepared runtime pair
+    // is adopted; the callback keeps rendering its pinned generation instead
+    // of permanently rejecting every subsequent block.
+    programs.publish(single_note_project(62), map, assets, 3);
+    context.transport_jump = true;
+    embedded.process(audio_view, silence.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(std::count_if(midi_out.begin(), midi_out.end(), [](const auto& event) {
+                return event.is_note_on() && event.note() == 61;
+            }) == 1);
+}
+
 
 TEST_CASE("embedded sequence processor treats zero-frame callbacks as recoverable no-ops") {
     const auto map = tempo_map();
@@ -509,6 +700,8 @@ TEST_CASE("embedded sequence processor treats zero-frame callbacks as recoverabl
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
     midi_out.reserve(256);
+    midi_out.set_realtime_capacity_limit(true);
+    UmpOutputAttachment midi_ump(midi_out, 256);
     REQUIRE(midi_out.add(midi::MidiEvent::note_on(0, 60, 100)));
     auto zero_context = host_context(snapshot(*program, 32, 0));
     zero_context.num_samples = 0;

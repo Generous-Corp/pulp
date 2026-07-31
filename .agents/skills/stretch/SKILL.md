@@ -20,6 +20,84 @@ stretch public config remains control-plane double regardless of sample type;
 only the sample buffers and internal DSP storage widen for the f64 aliases.
 Keep quality comparisons explicit about which sample type is under test.
 
+## Finite streaming contract
+
+For clip-ready streaming, prepare `RealtimePitchTimeProcessor` in
+`PitchTimeMode::time_stretch` and check its `PitchTimePrepareStatus`.
+Non-positive sample rates, channel counts outside the prepared ceiling, and
+non-positive `max_block` capacities are rejected before processor state changes.
+Time-stretch sizing also requires a finite `max_time_ratio >= 1`; pitch sizing
+requires a finite, non-negative semitone bound whose derived ratio is finite.
+Preparation rejects any otherwise-valid bound whose synthesis hop, power-of-two
+ring, or typed backing-buffer byte size is not representable in the target
+address space; never rely on a later float-to-int conversion or allocation
+failure to police capacity.
+Optional FFT overrides must satisfy the spectral engine's 256–16384 power-of-two
+window and `analysis_hop <= fft_size/2` invariants or preparation rejects them
+without changing prior state.
+`feed()` is all-or-nothing: on
+`backpressure`, drain `available_stretched()` with `read_stretched()` and retry
+the identical input block. Never advance a decoder on a rejected feed.
+
+At source EOF, call `finalize()` repeatedly, alternating with output reads,
+until it returns `complete`. Finalization seals input, advances at most one
+prepared block per call, preserves the overlap-add tail, and publishes the
+frame-map-derived duration (exactly `round(input_frames * ratio)` for a constant
+ratio). A later feed returns `input_closed`; reset starts a new stream.
+
+`input_priming_samples()` is how much source must be queued before the first
+final output becomes readable. It is not leading silence:
+`output_alignment_samples()` is zero. `output_free_space()` is an advisory
+scheduling value; the typed feed/finalize result remains authoritative. These
+methods allocate nothing after `prepare()`. Timeline `TimeConform::Stretch` uses
+this finite path only during program compilation. The compiler first
+materializes the exact source slice at the compiled timeline sample rate,
+updates ratios only at analysis boundaries from the authored tempo map, and
+accepts only an exact target-frame result. It then publishes immutable audio
+that the renderer reads 1:1. This offline path uses the scalar double finite
+builder and a bounded final conversion to float so separate compiles remain
+bit-identical within one build/platform. Compiler work-block size is
+deliberately absent
+from cache identity and must not change output. This is offline compilation,
+not the separate live/realtime stretch lifecycle.
+
+Higher engine layers use the public audio-domain boundaries
+`FiniteTimeStretchJob` and `RealtimeTimeStretchProcessor`; they must not expose
+`pulp::signal` types through playback headers. The realtime facade is prepared
+on the control thread, reports its complete retained-state charge and fixed
+causal delay, and is allocation-free after successful preparation. Timeline
+live playback uses it only through a prepared `RealtimeStretchProgramRuntime`,
+with one compensated latency shared by Stretch, parallel non-Stretch audio,
+MIDI 1, and UMP output. Keep both audio implementation translation units in the
+native no-exception mirror and the WAM/WebCLAP portable dependency inventories.
+
+For reproducible offline artifacts, prefer `FiniteStretchBuilder64` from
+`finite_stretch_builder.hpp` over open-coding the stream loop. Keep the render
+double-precision through completion, then seal to float once. This uses the
+portable scalar FFT path; platform float FFTs are numerically equivalent but
+do not promise bit-identical output across fresh instances. The typed capacity
+checks charge `sizeof(double)` for every 64-bit caller-owned plane.
+`FiniteStretchBuilder` remains available for float/RT-oriented uses. Its
+caller-owned planar buffers must remain stable for the builder lifetime. One
+`step()` does at most one bounded feed, drain, or finalize unit; rejected feeds
+are retained and retried byte-for-byte after a drain. Success means the requested target frame
+count was produced exactly; short and long natural renders are typed failures.
+Output planes must be distinct and non-overlapping with every input plane,
+because incremental writes otherwise corrupt unread source frames. Shared
+read-only input planes are valid.
+Long streams keep absolute synthesis position in a checked signed integer and
+only the bounded fractional-hop residual in floating point. Do not restore an
+ever-growing double accumulator: sub-sample hop fractions disappear around
+large absolute positions even before integer spacing exceeds one.
+
+The non-obvious ramp rule is that ratios belong to analysis-frame boundaries,
+not decoder or host blocks. The builder's `ratio_at_input_frame` callback is
+invoked at those boundaries even when `max_block` changes, and bounded
+finalization preserves the same rule through EOF padding while holding the
+endpoint ratio. Keep the callback `noexcept` and allocation-free. Do not replace
+this with block-start ratio updates: that makes the rendered ramp depend on the
+chosen work quantum.
+
 ## Build + run
 
 ```bash

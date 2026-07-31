@@ -35,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/anticipation_lane.cpp
     src/timeline_automation_delivery.cpp
     src/timeline_graph_binding.cpp
+    src/timeline_graph_stretch_policy.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)

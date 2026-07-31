@@ -20,6 +20,8 @@
 /// depends on the synthesis phase tracking the analysis phase exactly
 /// over arbitrarily long streams.
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -35,6 +37,18 @@ template <typename SampleType = float>
 class MultichannelPhaseCoordinatorT {
 public:
     MultichannelPhaseCoordinatorT() = default;
+
+    static bool checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        const auto bins = static_cast<std::uint64_t>(fft_size / 2 + 1);
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<double>(bins) || !charge.add<double>(bins)
+            || !charge.add<SampleType>(bins) || !charge.add<double>(bins)
+            || !charge.add<int>(bins))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
 
     void prepare(int fft_size, int channels) {
         assert(fft_size >= 256 && (fft_size & (fft_size - 1)) == 0);

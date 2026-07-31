@@ -1,4 +1,5 @@
 #include "timeline_nesting_test_support.hpp"
+#include "../core/playback/src/sequence_content_lowerer.hpp"
 
 TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty children") {
     const auto nested = nested_note_project(false, 2);
@@ -526,6 +527,81 @@ TEST_CASE("Nested audio trimming preserves fractional sample-rate conversion off
     REQUIRE(ArrangementAudioRenderer::process(*direct_program, snapshot(*direct_program, 256, 25),
                                               direct_output.view()) == AudioRenderStatus::Rendered);
     REQUIRE(nested_output.storage == direct_output.storage);
+}
+
+TEST_CASE("Nested conforming audio refuses partial source windows") {
+    std::vector<float> source(24'000, 1.0f);
+    const auto data = audio_data({source});
+    const auto assets = pool({{{50}, data}});
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+
+    const std::array windows{
+        std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
+        std::pair{0LL, 3 * kTicksPerQuarter / 4},                  // right trim only
+        std::pair{kTicksPerQuarter / 4, kTicksPerQuarter / 2},    // both sides
+    };
+    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
+        for (const auto [source_start, duration] : windows) {
+            auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, source.size(), {},
+                                                   conform);
+            auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                               {track(11, {child_media})}));
+            auto root = take(Sequence::create(
+                {2}, "root", std::nullopt,
+                {track(3, {nested_clip(4, 10, 0, duration, source_start)})}));
+            auto project = shared(take(Project::create(
+                ProjectInput{{1}, "partial nested conform", 100, {2},
+                             {{50, "source", source.size(), {48'000, 1}, hash}}, {root, child}})));
+
+            PlaybackProgramStore store;
+            InlineExecutor executor;
+            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+            ProgramCompileRequest request;
+            request.project = std::move(project);
+            request.sequence_id = {2};
+            request.tempo_map = map_120();
+            request.document_revision = 1;
+            request.dirty.all = true;
+            request.audio_assets = assets;
+            REQUIRE(compiler.submit(std::move(request)));
+            REQUIRE(compiler.status().has_error);
+            REQUIRE(compiler.status().last_error.code ==
+                    CompileErrorCode::NestedSequenceUnsupported);
+            REQUIRE(compiler.status().last_error.item == ItemId{12});
+            REQUIRE_FALSE(store.has_value());
+        }
+    }
+}
+
+TEST_CASE("Complete nested media preserves authored time conform intent") {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
+        auto child_media =
+            musical_media_clip(12, 0, kTicksPerQuarter, 50, 24'000, {}, conform);
+        auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                           {track(11, {child_media})}));
+        auto root = take(Sequence::create(
+            {2}, "root", std::nullopt,
+            {track(3, {nested_clip(4, 10, 0, kTicksPerQuarter, 0)})}));
+        auto project = take(Project::create(
+            ProjectInput{{1}, "complete nested conform", 100, {2},
+                         {{50, "source", 24'000, {48'000, 1}, hash}}, {root, child}}));
+        const auto tempo = map_120();
+        SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+        std::vector<LoweredClip> lowered;
+        const auto begun = lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered);
+        REQUIRE_FALSE(begun.error);
+        for (;;) {
+            const auto step = lowerer.step();
+            REQUIRE_FALSE(step.error);
+            if (step.complete)
+                break;
+        }
+        REQUIRE(lowered.size() == 2);
+        REQUIRE(lowered[0].clip.id() == ItemId{4});
+        REQUIRE(lowered[0].clip.time_conform() == TimeConform::None);
+        REQUIRE(lowered[1].clip.time_conform() == conform);
+    }
 }
 
 namespace {

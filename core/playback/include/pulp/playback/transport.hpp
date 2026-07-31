@@ -27,7 +27,13 @@ enum class TransportError {
     TempoSyncHostTimeRequired,
     TempoSyncUnavailable,
     InvalidTempoSyncState,
+    PlaybackEpochExhausted,
 };
+
+namespace detail {
+/// Advances an epoch without ever wrapping to an aliased identity.
+TransportError advance_playback_epoch(std::uint64_t& epoch) noexcept;
+}
 
 using MeterSignature = timebase::MeterSignature;
 
@@ -54,6 +60,10 @@ struct TransportRange {
     double host_tick_start = 0.0;
     double host_tick_end = 0.0;
     bool has_precise_host_ticks = false;
+    /// Identity of the continuous playback interval containing this range.
+    /// A block may contain two epochs only when its second range applies a
+    /// newly latched scrub anchor. Ordinary loop wraps retain the epoch.
+    std::uint64_t playback_epoch = 0;
     /// Zero-based loop pass within the transport's current playback epoch.
     /// Transport producers own this state so newly attached renderers and
     /// renderers that skip a callback observe the same pass.
@@ -66,6 +76,9 @@ struct TransportSnapshot {
     const timebase::CompiledTempoMap* tempo_map = nullptr;
     timebase::RationalRate sample_rate{};
     std::uint64_t block_index = 0;
+    /// Epoch of ranges[0]. Later ranges carry their own epoch so a scrub-anchor
+    /// discontinuity may be represented precisely when it splits a block.
+    std::uint64_t playback_epoch = 0;
     std::uint32_t frame_count = 0;
     MeterSignature meter{};
     LoopRegion loop{};
@@ -228,9 +241,13 @@ class MasterTransport {
     std::uint64_t applied_tempo_sync_seek_generation_ = 0;
     std::uint64_t applied_tempo_sync_tempo_generation_ = 0;
     std::uint64_t block_index_ = 0;
+    std::uint64_t playback_epoch_ = 0;
+    bool playback_epoch_exhausted_ = false;
     std::uint64_t loop_pass_index_ = 0;
     std::uint32_t scrub_window_remaining_ = 0;
     bool previous_scrubbing_ = false;
+    bool has_applied_scrub_position_ = false;
+    timebase::TickPosition applied_scrub_position_{};
     bool previous_playing_ = false;
     MeterSignature previous_meter_{};
     LoopRegion previous_loop_{};

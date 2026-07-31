@@ -432,7 +432,13 @@
       "paths": [
         "core/signal/include/pulp/signal/offline_stretch.hpp",
         "core/signal/include/pulp/signal/stretch_preset.hpp",
+        "core/signal/include/pulp/signal/finite_stretch_builder.hpp",
+        "core/signal/include/pulp/signal/realtime_pitch_time_geometry.hpp",
         "core/signal/include/pulp/signal/realtime_pitch_time_processor.hpp",
+        "core/audio/include/pulp/audio/finite_time_stretch.hpp",
+        "core/audio/include/pulp/audio/realtime_time_stretch.hpp",
+        "core/audio/src/finite_time_stretch.cpp",
+        "core/audio/src/realtime_time_stretch.cpp",
         "examples/offline-stretch/**"
       ]
     },

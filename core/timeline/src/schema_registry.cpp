@@ -2,6 +2,8 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "clip_schema_migrations.hpp"
+#include "clip_schema_policy.hpp"
 #include "note_content_schema_migrations.hpp"
 #include "project_schema_migrations.hpp"
 #include "project_schema_policy.hpp"
@@ -415,13 +417,18 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"placement_start", SchemaValueKind::I64String},
                                {"sample_rate", SchemaValueKind::Object},
                                {"source_start", SchemaValueKind::I64String}}));
-    schemas.push_back(builtin("pulp.timeline.clip", SchemaDomain::Document,
-                              {{"content", SchemaValueKind::Object},
-                               {"fade_in_duration", SchemaValueKind::U64String, false},
-                               {"fade_out_duration", SchemaValueKind::U64String, false},
-                               {"gain_linear_bits", SchemaValueKind::U64String, false},
-                               {"id", SchemaValueKind::U64String},
-                               {"time_range", SchemaValueKind::Object}}));
+    auto clip = builtin(std::string(detail::clip_schema_policy.type_name), SchemaDomain::Document,
+                        {{"content", SchemaValueKind::Object},
+                         {"fade_in_duration", SchemaValueKind::U64String, false},
+                         {"fade_out_duration", SchemaValueKind::U64String, false},
+                         {"gain_linear_bits", SchemaValueKind::U64String, false},
+                         {"id", SchemaValueKind::U64String},
+                         {"time_conform", SchemaValueKind::String},
+                         {"time_range", SchemaValueKind::Object}},
+                        detail::clip_schema_policy.current_version);
+    clip.upgrades.push_back({1, 2, {}, detail::migrate_clip_v1_to_v2});
+    clip.downgrades.push_back({2, 1, {}, detail::migrate_clip_v2_to_v1});
+    schemas.push_back(std::move(clip));
     schemas.push_back(builtin("pulp.timeline.content.empty", SchemaDomain::Content, {}));
     schemas.push_back(builtin("pulp.timeline.content.media", SchemaDomain::Content,
                               {{"asset_id", SchemaValueKind::U64String},

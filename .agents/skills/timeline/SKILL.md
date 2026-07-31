@@ -79,6 +79,19 @@ artifact is needed. Never modify canonical project JSON text directly.
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
   Track until a context-owned tempo/rate projection can compare them safely.
+- `TimeConform` is clip-level document intent: `None` is the default and keeps
+  legacy behavior, `Resample` requests pitch-coupled varispeed, and `Stretch`
+  requests tempo-preserving stretch. Non-default intent is valid only on a
+  musical `MediaRef`; absolute clips and every non-media content alternative
+  fail with `InvalidTimeConform`. Clip schema v2 persists the required lowercase
+  spelling; v1 loads as `None`, and v2→v1 refuses either non-default value.
+  Playback consumes `Resample` as pitch-coupled varispeed by mapping source
+  phase across the authored musical tick interval, including tempo ramps and
+  precise host beat mapping. `None` retains native-rate playback. `Stretch`
+  compiles a timeline-rate immutable artifact off the audio thread with exactly
+  the authored frame count, then plays it 1:1. A missing, over-capacity, or
+  length-mismatched Stretch artifact fails compilation; it never degrades to
+  native-rate playback.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another
@@ -90,7 +103,10 @@ artifact is needed. Never modify canonical project JSON text directly.
   programs. Stage 1 accepts child note/audio clips and rejects child devices,
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
   reference gain/fades. Source windows that intersect child audio fades also
-  fail closed because Stage 1 cannot represent an envelope offset. Expansion
+  fail closed because Stage 1 cannot represent an envelope offset. A complete
+  nested media clip preserves its `TimeConform` intent, but a source window
+  that trims a conforming clip fails with `NestedSequenceUnsupported` until
+  playback has a conform-aware source-range mapping. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent
@@ -270,6 +286,9 @@ artifact is needed. Never modify canonical project JSON text directly.
   Track schema v6 adds optional `freeze`; v5→v6 is version-only because absence
   means unfrozen, while v6→v5 succeeds only when `freeze` is absent. Never
   silently discard a selected artifact during downgrade.
+- Clip schema v2 adds required `time_conform`. Its v1 upgrade inserts `none`;
+  its v2 downgrade succeeds only for `none`, and a v1 envelope that illegally
+  carries the field is rejected rather than normalized.
 - Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
   only when that field is absent, and a v1 envelope that illegally contains
   the field is rejected rather than silently normalized.

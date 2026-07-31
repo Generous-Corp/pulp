@@ -26,6 +26,8 @@
 /// Magnitude-domain, real-time-safe: a fixed history ring and per-frame
 /// median over odd windows; no allocation after prepare().
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -71,6 +73,26 @@ using StnMasks64 = StnMasksT<double>;
 template <typename SampleType = float>
 class StnDecomposerT {
 public:
+    static bool checked_retained_bytes(const StnConfig& config,
+                                       std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        const auto bins = static_cast<std::uint64_t>(config.num_bins);
+        std::uint64_t history = 0;
+        if (!checked_capacity_product(static_cast<std::uint64_t>(config.time_median), bins,
+                                      UINT64_MAX, history))
+            return false;
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<SampleType>(history)
+            || !charge.add<SampleType>(bins) || !charge.add<SampleType>(bins)
+            || !charge.add<SampleType>(bins) || !charge.add<SampleType>(bins)
+            || !charge.add<SampleType>(bins)
+            || !charge.add<SampleType>(static_cast<std::uint64_t>(config.time_median))
+            || !charge.add<SampleType>(static_cast<std::uint64_t>(config.freq_median)))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
+
     /// RT contract: prepare() allocates history, scratch, and mask storage and
     /// is not audio-thread safe. After prepare(), process(), center_magnitude(),
     /// latency_frames(), reset(), and accessors are allocation-free for the

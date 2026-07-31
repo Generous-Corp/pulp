@@ -77,13 +77,14 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.clip": Object.freeze({
     schemaType: "pulp.timeline.clip",
     domain: "Document",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
       Object.freeze({ name: "content", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "fade_in_duration", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "fade_out_duration", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "gain_linear_bits", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "time_conform", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "time_range", kind: "Object", jsType: "object", required: true }),
     ]),
   }),

@@ -907,6 +907,58 @@ class FreezeGitIntegrationTests(unittest.TestCase):
         head = self._commit("rename out of slice")
         self.assertEqual(self._run(head), 1)
 
+    def _diverged_branch_with_event_only_on_base(self) -> str:
+        """A branch forked before the base branch gained a change event.
+
+        Reproduces the shape every real PR has: the base branch moves while the
+        branch is open, and the commit it moved by adds an append-only change
+        event the branch never saw.
+        """
+        self._git("checkout", "-q", "-b", "mainline", self.base)
+        self._write(
+            ".github/vellum-change-events/20260723-base-side.json",
+            change_event("20260723-base-side"),
+        )
+        self._git("update-ref", "refs/remotes/origin/main", self._commit("base-side event"))
+        self._git("checkout", "-q", "-b", "topic", self.base)
+        self._write("core/view/src/design_ir_json.cpp", "after\n")
+        self._write(
+            ".github/vellum-change-events/20260722-design-fix.json", change_event()
+        )
+        return self._commit("classified change")
+
+    def test_base_branch_tip_reports_base_side_event_as_a_deletion(self):
+        # The intuitive `--base origin/main` invocation: a two-dot diff against
+        # the moved tip reads the base-side event as a deletion the branch made.
+        head = self._diverged_branch_with_event_only_on_base()
+        self.assertEqual(
+            freeze.main([
+                "--repo", str(self.repo),
+                "--base", "origin/main",
+                "--head", head,
+                "--output", str(self.repo / "outbox.json"),
+            ]),
+            1,
+        )
+
+    def test_fork_point_default_matches_the_gate(self):
+        # Same branch, no --base: diffing from the fork point sees only what the
+        # branch changed, which is what CI compares.
+        head = self._diverged_branch_with_event_only_on_base()
+        self.assertEqual(
+            freeze.main([
+                "--repo", str(self.repo),
+                "--head", head,
+                "--output", str(self.repo / "outbox.json"),
+            ]),
+            0,
+        )
+        outbox = json.loads((self.repo / "outbox.json").read_text())
+        self.assertEqual(
+            [ref["path"] for ref in outbox["event_refs"]],
+            [".github/vellum-change-events/20260722-design-fix.json"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,13 @@ enum class HostTransportProjectionError : std::uint8_t {
     LoopTooShortForBlock,
     InvalidHostBeatClock,
     BeatPositionOutOfRange,
+    PlaybackEpochExhausted,
 };
+
+namespace detail {
+/// Advances a host-projected playback epoch without wrapping its identity.
+HostTransportProjectionError advance_host_playback_epoch(std::uint64_t& epoch) noexcept;
+}
 
 /// Re-anchors the engine transport to the host's integer sample position on
 /// every callback. A loop crossing is represented by the same two-range
@@ -41,6 +47,8 @@ class HostTransportProjector {
     playback::MeterSignature previous_meter_{};
     playback::LoopRegion previous_loop_{};
     std::uint64_t block_index_ = 0;
+    std::uint64_t playback_epoch_ = 0;
+    bool playback_epoch_exhausted_ = false;
     std::uint64_t loop_pass_index_ = 0;
     double previous_host_loop_start_beats_ = 0.0;
     double previous_host_loop_end_beats_ = 0.0;

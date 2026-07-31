@@ -85,6 +85,8 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_TIMELINE_SOURCES}
     ${_PULP_WAM_PLAYBACK_SOURCES}
     ${_PULP_WAM_WAV_SOURCES}
+    ${_PULP_WAM_ROOT}/core/audio/src/finite_time_stretch.cpp
+    ${_PULP_WAM_ROOT}/core/audio/src/realtime_time_stretch.cpp
     ${_PULP_WAM_ROOT}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp

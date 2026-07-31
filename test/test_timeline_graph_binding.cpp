@@ -1,4 +1,31 @@
+#include "../core/host/src/timeline_graph_binding_internal.hpp"
 #include "support/timeline_graph_binding_test_support.hpp"
+
+TEST_CASE("timeline graph parallel audio status cannot downgrade a hard failure") {
+    using pulp::host::TimelineGraphProcessCode;
+    pulp::host::detail::TimelineGraphSharedBlockState shared;
+    constexpr std::array hard_failures{
+        TimelineGraphProcessCode::MissingProgram,
+        TimelineGraphProcessCode::AudioRenderFailed,
+        TimelineGraphProcessCode::RealtimeStretchStateRequired,
+        TimelineGraphProcessCode::RealtimeStretchStalePublication,
+        TimelineGraphProcessCode::RealtimeStretchImpossibleRatio,
+        TimelineGraphProcessCode::RealtimeStretchBackpressure,
+        TimelineGraphProcessCode::RealtimeStretchUnderflow,
+        TimelineGraphProcessCode::RealtimeStretchUnsupportedScrubbing,
+    };
+    for (const auto hard_failure : hard_failures) {
+        for (std::uint32_t iteration = 0; iteration < 1'000; ++iteration) {
+            shared.audio_code.store(TimelineGraphProcessCode::Ok, std::memory_order_relaxed);
+            std::thread gap(
+                [&] { shared.report_audio_code(TimelineGraphProcessCode::RealtimeStretchGap); });
+            std::thread hard([&] { shared.report_audio_code(hard_failure); });
+            gap.join();
+            hard.join();
+            REQUIRE(shared.audio_code.load(std::memory_order_relaxed) == hard_failure);
+        }
+    }
+}
 
 TEST_CASE("timeline graph binding matches direct audio across varied blocks") {
     const auto map = tempo_map();
@@ -120,8 +147,7 @@ TEST_CASE("timeline graph binding uses one exact split transport snapshot") {
 TEST_CASE("timeline graph binding projects split transport as one callback context") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(audio_project(1.0f, 128), map,
-                     asset_pool(std::vector<float>(128, 1.0f)), 1);
+    programs.publish(audio_project(1.0f, 128), map, asset_pool(std::vector<float>(128, 1.0f)), 1);
     auto pinned = programs.store.read();
     SignalGraph graph;
     format::ProcessContext observed;
@@ -217,12 +243,10 @@ TEST_CASE("timeline graph binding injects separately rendered notes") {
     const auto output_node = graph.add_output_node(1);
     auto counter = std::make_unique<MidiCountingSlot>();
     auto* counter_ptr = counter.get();
-    const auto midi_destination = graph.add_plugin_node(
-        std::move(counter), 1, 1, "note recorder");
+    const auto midi_destination = graph.add_plugin_node(std::move(counter), 1, 1, "note recorder");
     REQUIRE(graph.prepare(48'000.0, 128));
     TimelineGraphPlaybackBinding binding(graph, programs.store);
-    const std::array routes{
-        TimelineTrackGraphRoute{{10}, output_node, 0, midi_destination}};
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, midi_destination}};
     REQUIRE(binding.prepare(*pinned, routes, config(1), 48'000.0, 128));
 
     Buffer input(1, 64);
@@ -281,39 +305,32 @@ TEST_CASE("timeline graph mixer controls hosted instrument output after the devi
             .post_mixer_audio_destination = output_node,
         }};
         const auto admission = binding.prepare(*pinned, routes, config(1), 48'000.0, 64);
-        INFO("admission code " << static_cast<int>(admission.code) << " actual "
-                               << admission.actual << " node " << admission.node);
+        INFO("admission code " << static_cast<int>(admission.code) << " actual " << admission.actual
+                               << " node " << admission.node);
         REQUIRE(admission);
-        REQUIRE(std::none_of(
-            graph.connections().begin(), graph.connections().end(),
-            [&](const Connection& connection) {
-                return connection.source_node == instrument_node &&
-                       connection.source_port == 0 &&
-                       connection.dest_node == output_node &&
-                       connection.dest_port == 0 && !connection.midi &&
-                       !connection.feedback && !connection.automation &&
-                       !connection.audio_rate_modulation &&
-                       !connection.sidechain;
-            }));
+        REQUIRE(std::none_of(graph.connections().begin(), graph.connections().end(),
+                             [&](const Connection& connection) {
+                                 return connection.source_node == instrument_node &&
+                                        connection.source_port == 0 &&
+                                        connection.dest_node == output_node &&
+                                        connection.dest_port == 0 && !connection.midi &&
+                                        !connection.feedback && !connection.automation &&
+                                        !connection.audio_rate_modulation && !connection.sidechain;
+                             }));
         Buffer input(1, 64);
         Buffer output(1, 64);
         auto output_view = output.view();
-        REQUIRE(binding.process(output_view, input.const_view(),
-                                snapshot(*pinned, 64)));
+        REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 64)));
         REQUIRE(instrument_ptr->event_count == 2);
         REQUIRE(std::all_of(output.storage[0].begin(), output.storage[0].end(),
                             [](float sample) { return sample == 0.5f; }));
     }
     REQUIRE(std::any_of(
-        graph.connections().begin(), graph.connections().end(),
-        [&](const Connection& connection) {
-            return connection.source_node == instrument_node &&
-                   connection.source_port == 0 &&
-                   connection.dest_node == output_node &&
-                   connection.dest_port == 0 && !connection.midi &&
-                   !connection.feedback && !connection.automation &&
-                   !connection.audio_rate_modulation &&
-                   !connection.sidechain;
+        graph.connections().begin(), graph.connections().end(), [&](const Connection& connection) {
+            return connection.source_node == instrument_node && connection.source_port == 0 &&
+                   connection.dest_node == output_node && connection.dest_port == 0 &&
+                   !connection.midi && !connection.feedback && !connection.automation &&
+                   !connection.audio_rate_modulation && !connection.sidechain;
         }));
 }
 
@@ -518,10 +535,10 @@ TEST_CASE("timeline graph binding compares fractional rates in its double API do
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
 
     REQUIRE(binding.prepare(*pinned, routes, config(1), projected_rate, 64));
-    REQUIRE(binding.prepare(*pinned, routes, config(1),
-                            std::nextafter(projected_rate,
-                                           std::numeric_limits<double>::infinity()),
-                            64)
+    REQUIRE(binding
+                .prepare(*pinned, routes, config(1),
+                         std::nextafter(projected_rate, std::numeric_limits<double>::infinity()),
+                         64)
                 .code == TimelineGraphAdmissionCode::SampleRateMismatch);
     Buffer input(1, 32);
     Buffer output(1, 32);
@@ -568,8 +585,7 @@ TEST_CASE("SignalGraph routed status rejects a build-invalid live snapshot") {
 TEST_CASE("timeline graph binding pins its exact routed snapshot") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(audio_project(1.0f, 128), map,
-                     asset_pool(std::vector<float>(128, 1.0f)), 1);
+    programs.publish(audio_project(1.0f, 128), map, asset_pool(std::vector<float>(128, 1.0f)), 1);
     auto pinned = programs.store.read();
     SignalGraph graph;
     const auto output_node = graph.add_output_node(1);

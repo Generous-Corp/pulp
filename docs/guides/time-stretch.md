@@ -16,6 +16,7 @@ to dial it in for your own material.
 |--------|-----|--------|
 | `pulp::signal::OfflineStretch` | Whole-buffer (offline) render: exact output length, best quality. The path PulpTempoSampler uses. | `pulp/signal/offline_stretch.hpp` |
 | `pulp::signal::RealtimePitchTimeProcessor` | Streaming/realtime, hop-quantized. Laroche-Dolson phase propagation with identity phase locking. | `pulp/signal/realtime_pitch_time_processor.hpp` |
+| `pulp::signal::FiniteStretchBuilderT` | Resumable finite-stream driver with exact target-length success/failure and frame-boundary ratio scheduling. Use its `64` alias for reproducible offline artifacts. | `pulp/signal/finite_stretch_builder.hpp` |
 
 ### Minimal offline render
 
@@ -34,6 +35,93 @@ o.pitch_semitones = 0.0;
 const long out_frames = offline_stretch_output_frames(in_frames, o.time_ratio);
 eng.process(in_ptrs, in_frames, out_ptrs, out_frames, o);
 ```
+
+### Finite realtime stretch streams
+
+`RealtimePitchTimeProcessor` in `time_stretch` mode owns a bounded pull stream.
+Check the `PitchTimePrepareStatus` returned by `prepare()`; invalid sample rates,
+channel counts, and non-positive `max_block` capacities are rejected before the
+processor is used. A time-stretch capacity must also have a finite
+`max_time_ratio >= 1`; pitch bounds must be finite, non-negative, and produce a
+finite derived ratio. Derived synthesis-hop, ring, and typed backing-buffer byte
+sizes must fit the target address space or preparation returns
+`unrepresentable_capacity` without
+changing the previously prepared processor. Optional FFT geometry must satisfy
+the spectral engine's 256–16384 power-of-two window and `hop <= fft/2` contract;
+invalid overrides return `invalid_spectral_geometry` atomically.
+`feed()` accepts a complete input block or returns typed backpressure without
+consuming it. Use `output_free_space()` only as scheduling information; the
+`feed()` result is authoritative because one analysis boundary can publish a
+whole synthesis hop.
+
+Call `finalize()` to seal EOF. It advances at most one prepared input block per
+call and may return backpressure until queued output is read. Continue
+`read_stretched()` / `finalize()` until `complete`; feeding after the first
+finalize returns `input_closed`. The final frame count comes from the engine's
+hop map and is exactly `round(input_frames * ratio)` for a constant ratio, with
+the end overlap-add tail preserved inside that duration.
+
+The producer must supply `input_priming_samples()` before output can become
+readable. This is scheduling latency, not a silence prefix:
+`output_alignment_samples()` is zero, so output frame zero corresponds to input
+frame zero. All streaming calls are allocation-free after `prepare()` and are
+bounded by `RealtimePitchTimeConfig::max_block` and the prepared output ring.
+`TimeConform::Stretch` uses the finite stream during Timeline program
+compilation. The compiler materializes the source
+slice at timeline rate, drives ratios at analysis boundaries, and accepts only
+the exact authored target count. Offline compilation uses scalar double DSP and
+a bounded deterministic conversion into the immutable float artifact, which is
+then read 1:1 on the document clock. When a plugin host supplies a different
+precise beat mapping, the prepared timeline adapter streams that artifact
+through a separate realtime stretcher so duration follows the host without the
+pitch shift that variable-rate resampling would introduce. The adapter admits
+all live states against one program-wide count/byte budget and publishes the
+prepared generation with its program; the callback performs no allocation.
+It uses `maximum_stream_output_lag_samples()` as one conservative, fixed causal
+latency for the complete admitted ratio range. Track-local conventional audio
+and mixer automation are delayed by the same amount, while the graph reports
+that latency for compensation of parallel non-Stretch tracks.
+
+Live identity is the exact program publication, generation, tempo-map object,
+track, clip, playback epoch, and loop pass. An identity change or discontinuity
+reports an explicit gap observation while a charged per-clip FIFO preserves the
+old segment through its fixed-latency cut and a bounded finalization hands off
+to the reset stream. Missing/stale state, impossible ratios, backpressure, and
+underflow fail closed with distinct typed status; there is no `None` or
+`Resample` fallback. Host-mapped Stretch scrubbing is currently unsupported and
+reports that fact explicitly. A block contains at most the two transport ranges
+admitted by `TransportSnapshot`, which bounds loop tail/head and adjacent-boundary
+work.
+
+For control-thread preprocessing that must yield between bounded units, use
+`FiniteStretchBuilder64` for reproducible offline artifacts. It keeps the
+spectral path in double precision (the portable scalar FFT path) across the
+entire render; convert to the destination float format once, after successful
+completion. `FiniteStretchBuilder` remains the float/RT-oriented variant, but
+cross-instance float output from platform FFT backends is only numerically
+equivalent and is not a bitwise artifact contract. The caller owns stable
+planar input and output buffers; `prepare()` validates each channel span and
+all processor allocation geometry before the processor allocates. Output
+planes must be distinct and may not overlap any unread input plane; shared
+read-only input planes are allowed.
+Capacity admission is typed: the 64-bit builder charges `sizeof(double)` for
+each caller-owned plane before allocating processor storage.
+Admission also reserves signed-counter EOF/output headroom. Synthesis carries a
+bounded fractional-hop residual separately from the signed absolute position,
+so long streams do not lose fractional hops as the absolute frame count grows.
+Each `step()` performs at most one bounded feed,
+drain, or finalize operation. Backpressure preserves the pending input span,
+drains once, and retries that identical span.
+
+Set `target_frames` to the required clip length. Completion is reported only
+when exactly that many frames were written; natural output that is shorter or
+longer produces `FiniteStretchFailure::output_too_short` or
+`output_too_long`. A `ratio_at_input_frame` callback can define a varying
+trajectory. It is evaluated at exact analysis-frame boundaries, independent of
+the builder's `max_block`; EOF padding holds the callback's endpoint ratio.
+The callback is part of the allocation-free step path and must be `noexcept`
+and allocation-free. Timeline's control-thread program compiler owns the builder;
+the playback audio callback never does.
 
 ## Character modes — an "engine per job"
 

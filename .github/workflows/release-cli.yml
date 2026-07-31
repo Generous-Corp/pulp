@@ -724,6 +724,8 @@ jobs:
       # `tools/cli/`. The release tarball must include both.
       - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
+        # Container jobs default to POSIX sh, but this step uses Bash arrays.
+        shell: bash
         # Linux: GNU strip works directly. macOS (Apple Silicon): binaries are
         # ad-hoc code-signed at link time, and `strip` invalidates that
         # signature — on the self-hosted Macs that surfaces as a hard `strip`

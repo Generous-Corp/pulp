@@ -12,6 +12,12 @@ Pulp versions three surfaces independently:
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
+  This pin governs what a *fresh* checkout installs, so an
+  already-provisioned machine keeps running whatever it has and any drift
+  between the two is invisible from the repo. When reasoning about it,
+  check what the hosts actually run (`shipyard --version` on each) rather
+  than assuming this file describes them.
+
 The first two are **enforced**: PRs that change code in a surface's
 trigger paths without bumping its version are rejected before merge.
 The third is covered by the existing `tools/deps/audit.py` path and is
