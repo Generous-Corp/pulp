@@ -42,4 +42,5 @@ extern rack::plugin::Model* modelSLEWRF;
 extern rack::plugin::Model* modelSTEPS;
 extern rack::plugin::Model* modelSTRANGE;
 extern rack::plugin::Model* modelTANGLE;
+extern rack::plugin::Model* modelTURBID;
 // END generated model declarations

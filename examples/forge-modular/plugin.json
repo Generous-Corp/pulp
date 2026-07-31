@@ -117,6 +117,15 @@
       ]
     },
     {
+      "slug": "DIV",
+      "name": "DIV",
+      "description": "Clock divider with CV-controlled division, reset, and trigger or gate output",
+      "tags": [
+        "Clock modulator",
+        "Utility"
+      ]
+    },
+    {
       "slug": "DIVIDELY",
       "name": "DIV4",
       "description": "Four independent clock dividers from one clock, with a shared reset.",
@@ -158,6 +167,16 @@
       ]
     },
     {
+      "slug": "FOLDR",
+      "name": "FOLD",
+      "description": "Triangle wavefolder with drive, symmetry offset and CV over the fold amount",
+      "tags": [
+        "Waveshaper",
+        "Distortion",
+        "Effect"
+      ]
+    },
+    {
       "slug": "FOURPOLE",
       "name": "4POLE",
       "description": "Four-pole resonant low-pass filter with measured analog voicings, 1V/oct cutoff tracking, attenuverted FM and input drive.",
@@ -173,6 +192,17 @@
       "tags": [
         "Drum",
         "Synth voice"
+      ]
+    },
+    {
+      "slug": "LPGATE",
+      "name": "LPGATE",
+      "description": "Vactrol lowpass gate with resonance, strike input and voltage-controlled decay",
+      "tags": [
+        "Low-pass gate",
+        "Filter",
+        "Voltage-controlled amplifier",
+        "Polyphonic"
       ]
     },
     {
@@ -215,11 +245,31 @@
       ]
     },
     {
+      "slug": "SLEWRF",
+      "name": "SLEW",
+      "description": "Slew limiter with independent rise and fall times, CV over each, three slope laws, and an end-of-rise gate.",
+      "tags": [
+        "Slew limiter",
+        "Function generator",
+        "Utility"
+      ]
+    },
+    {
       "slug": "STEPS",
       "name": "STEPS",
       "description": "8-step CV sequencer with per-step level, clock, reset, gate and end-of-cycle",
       "tags": [
         "Sequencer"
+      ]
+    },
+    {
+      "slug": "STRANGE",
+      "name": "STRANGE",
+      "description": "Twin chaotic CV from a logistic map, with rate, character, glide and a link that fades the two decorrelated outputs together.",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Dual"
       ]
     },
     {
@@ -230,6 +280,16 @@
         "Random",
         "Low-frequency oscillator",
         "Noise"
+      ]
+    },
+    {
+      "slug": "TURBID",
+      "name": "TURBID",
+      "description": "Chaotic modulation source with two decorrelated CV outputs and a step trigger",
+      "tags": [
+        "Random",
+        "Low-frequency oscillator",
+        "Dual"
       ]
     }
   ]

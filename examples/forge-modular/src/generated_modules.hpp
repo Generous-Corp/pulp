@@ -498,6 +498,47 @@ inline void place_CARTOG(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeMediumLight<GreenLight>>(mm2px(Vec(10.160f, 60.000f)), m, CARTOGLayout::DONE_LIGHT));
 }
 
+// ── DIV (4HP) ─────────────────────────────────────────
+struct DIVLayout {
+    static constexpr int kHp = 4;
+    enum ParamId { DIV_PARAM, MODE_PARAM, PARAMS_LEN };
+    enum InputId { CLK_INPUT, RST_INPUT, CV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { ACT_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_DIV(rack::engine::Module* m) {
+    m->config(DIVLayout::PARAMS_LEN, DIVLayout::INPUTS_LEN, DIVLayout::OUTPUTS_LEN, DIVLayout::LIGHTS_LEN);
+    m->configParam(DIVLayout::DIV_PARAM, 1.0f, 16.0f, 2.0f, "Division", "", 0.0f, 1.0f);
+    m->configSwitch(DIVLayout::MODE_PARAM, 0.0f, 1.0f, 0.0f, "Output mode", {"Trig", "Gate"});
+    m->configInput(DIVLayout::CLK_INPUT, "Clock");
+    m->configInput(DIVLayout::RST_INPUT, "Reset");
+    m->configInput(DIVLayout::CV_INPUT, "Division CV (normalled to 0.0V)");
+    m->configOutput(DIVLayout::OUT_OUTPUT, "Divided clock");
+    m->configLight(DIVLayout::ACT_LIGHT, "Beat");
+}
+
+/// CV_INPUT with its declared normal applied.
+inline float read_DIV_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[DIVLayout::CV_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+inline void place_DIV(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(12.700f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(10.160f, 28.000f)), m, DIVLayout::DIV_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeToggle>(mm2px(Vec(10.160f, 60.000f)), m, DIVLayout::MODE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.160f, 76.000f)), m, DIVLayout::CLK_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.160f, 92.000f)), m, DIVLayout::RST_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.160f, 45.000f)), m, DIVLayout::CV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(10.160f, 117.000f)), m, DIVLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(10.160f, 104.000f)), m, DIVLayout::ACT_LIGHT));
+}
+
 // ── DIVIDELY (4HP) ────────────────────────────────────
 struct DIVIDELYLayout {
     static constexpr int kHp = 4;
@@ -729,6 +770,47 @@ inline void place_FOLD(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(20.320f, 104.000f)), m, FOLDLayout::FOLD_LIGHT));
 }
 
+// ── FOLDR (6HP) ───────────────────────────────────────
+struct FOLDRLayout {
+    static constexpr int kHp = 6;
+    enum ParamId { DRIVE_PARAM, SYM_PARAM, CVAMT_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, CV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { FOLD_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_FOLDR(rack::engine::Module* m) {
+    m->config(FOLDRLayout::PARAMS_LEN, FOLDRLayout::INPUTS_LEN, FOLDRLayout::OUTPUTS_LEN, FOLDRLayout::LIGHTS_LEN);
+    m->configParam(FOLDRLayout::DRIVE_PARAM, 1.0f, 10.0f, 2.0f, "Drive", "x", 0.0f, 1.0f);
+    m->configParam(FOLDRLayout::SYM_PARAM, -1.0f, 1.0f, 0.0f, "Symmetry", "", 0.0f, 1.0f);
+    m->configParam(FOLDRLayout::CVAMT_PARAM, -1.0f, 1.0f, 0.0f, "Fold CV amount", "", 0.0f, 1.0f);
+    m->configInput(FOLDRLayout::IN_INPUT, "Audio in");
+    m->configInput(FOLDRLayout::CV_INPUT, "Fold CV (normalled to 0.0V)");
+    m->configOutput(FOLDRLayout::OUT_OUTPUT, "Folded out");
+    m->configLight(FOLDRLayout::FOLD_LIGHT, "Fold depth");
+}
+
+/// CV_INPUT with its declared normal applied.
+inline float read_FOLDR_CV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[FOLDRLayout::CV_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+inline void place_FOLDR(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(22.860f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 30.000f)), m, FOLDRLayout::DRIVE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(15.240f, 50.000f)), m, FOLDRLayout::SYM_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(15.240f, 68.000f)), m, FOLDRLayout::CVAMT_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(9.000f, 97.000f)), m, FOLDRLayout::IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(21.500f, 97.000f)), m, FOLDRLayout::CV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(15.240f, 114.000f)), m, FOLDRLayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(15.240f, 82.000f)), m, FOLDRLayout::FOLD_LIGHT));
+}
+
 // ── FOURPOLE (8HP) ────────────────────────────────────
 struct FOURPOLELayout {
     static constexpr int kHp = 8;
@@ -822,6 +904,66 @@ inline void place_KICK(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(8.500f, 101.000f)), m, KICKLayout::ACCENT_INPUT));
     w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(22.000f, 101.000f)), m, KICKLayout::OUT_OUTPUT));
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<RedLight>>(mm2px(Vec(15.240f, 113.000f)), m, KICKLayout::HIT_LIGHT));
+}
+
+// ── LPGATE (8HP) ──────────────────────────────────────
+struct LPGATELayout {
+    static constexpr int kHp = 8;
+    enum ParamId { LEVEL_PARAM, DECAY_PARAM, RES_PARAM, COLOR_PARAM, DCVAMT_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, GATE_INPUT, STRIKE_INPUT, DCV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, OUTPUTS_LEN };
+    enum LightId { GATE_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_LPGATE(rack::engine::Module* m) {
+    m->config(LPGATELayout::PARAMS_LEN, LPGATELayout::INPUTS_LEN, LPGATELayout::OUTPUTS_LEN, LPGATELayout::LIGHTS_LEN);
+    m->configParam(LPGATELayout::LEVEL_PARAM, 0.0f, 1.0f, 0.0f, "Level", "%", 0.0f, 100.0f);
+    m->configParam(LPGATELayout::DECAY_PARAM, -1.0f, 1.0f, 0.0f, "Decay", " ms", 10.0f, 200.0f);
+    m->configParam(LPGATELayout::RES_PARAM, 0.0f, 1.0f, 0.15f, "Resonance", "%", 0.0f, 100.0f);
+    m->configParam(LPGATELayout::COLOR_PARAM, 0.0f, 1.0f, 0.5f, "Colour (VCA to filter)", "%", 0.0f, 100.0f);
+    m->configParam(LPGATELayout::DCVAMT_PARAM, -1.0f, 1.0f, 0.0f, "Decay CV amount", "", 0.0f, 1.0f);
+    m->configInput(LPGATELayout::IN_INPUT, "Audio in");
+    m->configInput(LPGATELayout::GATE_INPUT, "Gate / CV (normalled to 0.0V)");
+    m->configInput(LPGATELayout::STRIKE_INPUT, "Strike");
+    m->configInput(LPGATELayout::DCV_INPUT, "Decay CV (normalled to 0.0V)");
+    m->configOutput(LPGATELayout::OUT_OUTPUT, "Gated out");
+    m->configLight(LPGATELayout::GATE_LIGHT, "Gate opening");
+}
+
+/// Channel count for LPGATE, from the manifest's declared source.
+inline int channels_LPGATE(const rack::engine::Module* m) {
+    return std::max(1, const_cast<rack::engine::Module*>(m)
+        ->inputs[LPGATELayout::IN_INPUT].getChannels());
+}
+
+/// GATE_INPUT with its declared normal applied.
+inline float read_LPGATE_GATE_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[LPGATELayout::GATE_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+/// DCV_INPUT with its declared normal applied.
+inline float read_LPGATE_DCV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[LPGATELayout::DCV_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+inline void place_LPGATE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 30.000f)), m, LPGATELayout::LEVEL_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.800f, 30.000f)), m, LPGATELayout::DECAY_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 52.000f)), m, LPGATELayout::RES_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.800f, 52.000f)), m, LPGATELayout::COLOR_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeTrimpot>(mm2px(Vec(28.800f, 70.000f)), m, LPGATELayout::DCVAMT_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 88.000f)), m, LPGATELayout::IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 88.000f)), m, LPGATELayout::GATE_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 103.000f)), m, LPGATELayout::STRIKE_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 103.000f)), m, LPGATELayout::DCV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(20.320f, 118.000f)), m, LPGATELayout::OUT_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<YellowLight>>(mm2px(Vec(11.800f, 70.000f)), m, LPGATELayout::GATE_LIGHT));
 }
 
 // ── MORPHLFO (6HP) ────────────────────────────────────
@@ -1022,6 +1164,58 @@ inline void place_SIXMIX(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(30.480f, 110.000f)), m, SIXMIXLayout::LVL_LIGHT));
 }
 
+// ── SLEWRF (8HP) ──────────────────────────────────────
+struct SLEWRFLayout {
+    static constexpr int kHp = 8;
+    enum ParamId { RISE_PARAM, FALL_PARAM, SHAPE_PARAM, PARAMS_LEN };
+    enum InputId { IN_INPUT, RCV_INPUT, FCV_INPUT, INPUTS_LEN };
+    enum OutputId { OUT_OUTPUT, EOR_OUTPUT, OUTPUTS_LEN };
+    enum LightId { EOR_LIGHT = 0, LIGHTS_LEN = 1 };
+};
+
+inline void config_SLEWRF(rack::engine::Module* m) {
+    m->config(SLEWRFLayout::PARAMS_LEN, SLEWRFLayout::INPUTS_LEN, SLEWRFLayout::OUTPUTS_LEN, SLEWRFLayout::LIGHTS_LEN);
+    m->configParam(SLEWRFLayout::RISE_PARAM, -1.0f, 13.0f, 5.0f, "Rise time", " ms", 2.0f, 1.0f);
+    m->configParam(SLEWRFLayout::FALL_PARAM, -1.0f, 13.0f, 5.0f, "Fall time", " ms", 2.0f, 1.0f);
+    m->configSwitch(SLEWRFLayout::SHAPE_PARAM, 0.0f, 2.0f, 0.0f, "Slope law", {"Linear", "Expo", "Const"});
+    m->configInput(SLEWRFLayout::IN_INPUT, "Signal in");
+    m->configInput(SLEWRFLayout::RCV_INPUT, "Rise time CV (1 V doubles the time) (normalled to 0.0V)");
+    m->configInput(SLEWRFLayout::FCV_INPUT, "Fall time CV (normalled from RCV) (normalled from RCV_INPUT)");
+    m->configOutput(SLEWRFLayout::OUT_OUTPUT, "Slewed out");
+    m->configOutput(SLEWRFLayout::EOR_OUTPUT, "End of rise gate");
+    m->configLight(SLEWRFLayout::EOR_LIGHT, "End of rise");
+}
+
+/// RCV_INPUT with its declared normal applied.
+inline float read_SLEWRF_RCV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[SLEWRFLayout::RCV_INPUT].getNormalPolyVoltage(0.0f, c);
+}
+
+/// FCV_INPUT with its declared normal applied.
+inline float read_SLEWRF_FCV_INPUT(rack::engine::Module* m, int c) {
+    return m->inputs[SLEWRFLayout::FCV_INPUT].isConnected()
+        ? m->inputs[SLEWRFLayout::FCV_INPUT].getPolyVoltage(c)
+        : m->inputs[SLEWRFLayout::RCV_INPUT].getPolyVoltage(c);
+}
+
+inline void place_SLEWRF(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(33.020f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(11.800f, 32.000f)), m, SLEWRFLayout::RISE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(28.800f, 32.000f)), m, SLEWRFLayout::FALL_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeSwitchThree>(mm2px(Vec(20.320f, 74.000f)), m, SLEWRFLayout::SHAPE_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(8.500f, 96.000f)), m, SLEWRFLayout::IN_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(11.800f, 54.000f)), m, SLEWRFLayout::RCV_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(28.800f, 54.000f)), m, SLEWRFLayout::FCV_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(20.000f, 96.000f)), m, SLEWRFLayout::OUT_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(31.500f, 96.000f)), m, SLEWRFLayout::EOR_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(20.000f, 112.000f)), m, SLEWRFLayout::EOR_LIGHT));
+}
+
 // ── STEPS (12HP) ───────────────────────────────────────
 struct STEPSLayout {
     static constexpr int kHp = 12;
@@ -1100,6 +1294,56 @@ inline void place_STEPS(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(50.400f, 64.000f)), m, STEPSLayout::STEP8_LIGHT));
 }
 
+// ── STRANGE (10HP) ─────────────────────────────────────
+struct STRANGELayout {
+    static constexpr int kHp = 10;
+    enum ParamId { RATE_PARAM, CHAR_PARAM, GLIDE_PARAM, LINK_PARAM, PARAMS_LEN };
+    enum InputId { RATE_INPUT, CHAR_INPUT, GLIDE_INPUT, LINK_INPUT, INPUTS_LEN };
+    enum OutputId { A_OUTPUT, STEP_OUTPUT, B_OUTPUT, OUTPUTS_LEN };
+    enum LightId { A_LIGHT = 0, STEP_LIGHT = 1, B_LIGHT = 2, LIGHTS_LEN = 3 };
+};
+
+inline void config_STRANGE(rack::engine::Module* m) {
+    m->config(STRANGELayout::PARAMS_LEN, STRANGELayout::INPUTS_LEN, STRANGELayout::OUTPUTS_LEN, STRANGELayout::LIGHTS_LEN);
+    m->configParam(STRANGELayout::RATE_PARAM, -4.0f, 5.0f, 0.0f, "Rate", " Hz", 2.0f, 2.0f);
+    m->configParam(STRANGELayout::CHAR_PARAM, 0.0f, 1.0f, 0.5f, "Character", " %", 0.0f, 100.0f);
+    m->configParam(STRANGELayout::GLIDE_PARAM, 0.0f, 1.0f, 0.4f, "Glide", " %", 0.0f, 100.0f);
+    m->configParam(STRANGELayout::LINK_PARAM, 0.0f, 1.0f, 0.25f, "Link", " %", 0.0f, 100.0f);
+    m->configInput(STRANGELayout::RATE_INPUT, "Rate CV (1V/oct)");
+    m->configInput(STRANGELayout::CHAR_INPUT, "Character CV");
+    m->configInput(STRANGELayout::GLIDE_INPUT, "Glide CV");
+    m->configInput(STRANGELayout::LINK_INPUT, "Link CV");
+    m->configOutput(STRANGELayout::A_OUTPUT, "Chaos A");
+    m->configOutput(STRANGELayout::STEP_OUTPUT, "Step");
+    m->configOutput(STRANGELayout::B_OUTPUT, "Chaos B");
+    m->configLight(STRANGELayout::A_LIGHT, "A level");
+    m->configLight(STRANGELayout::STEP_LIGHT, "Step");
+    m->configLight(STRANGELayout::B_LIGHT, "B level");
+}
+
+inline void place_STRANGE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(12.700f, 30.000f)), m, STRANGELayout::RATE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(38.100f, 30.000f)), m, STRANGELayout::CHAR_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(12.700f, 52.000f)), m, STRANGELayout::GLIDE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(38.100f, 52.000f)), m, STRANGELayout::LINK_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(8.000f, 88.000f)), m, STRANGELayout::RATE_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(19.600f, 88.000f)), m, STRANGELayout::CHAR_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(31.200f, 88.000f)), m, STRANGELayout::GLIDE_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(42.800f, 88.000f)), m, STRANGELayout::LINK_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(10.000f, 110.000f)), m, STRANGELayout::A_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(25.400f, 110.000f)), m, STRANGELayout::STEP_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(40.800f, 110.000f)), m, STRANGELayout::B_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(10.000f, 70.000f)), m, STRANGELayout::A_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<YellowLight>>(mm2px(Vec(25.400f, 70.000f)), m, STRANGELayout::STEP_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(40.800f, 70.000f)), m, STRANGELayout::B_LIGHT));
+}
+
 // ── TANGLE (10HP) ──────────────────────────────────────
 struct TANGLELayout {
     static constexpr int kHp = 10;
@@ -1175,6 +1419,54 @@ inline void place_TANGLE(rack::app::ModuleWidget* w, rack::engine::Module* m) {
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(25.400f, 120.500f)), m, TANGLELayout::X_LIGHT));
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(35.800f, 120.500f)), m, TANGLELayout::Y_LIGHT));
     w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(46.200f, 120.500f)), m, TANGLELayout::Z_LIGHT));
+}
+
+// ── TURBID (10HP) ──────────────────────────────────────
+struct TURBIDLayout {
+    static constexpr int kHp = 10;
+    enum ParamId { RATE_PARAM, CHAR_PARAM, SHAPE_PARAM, SPREAD_PARAM, DEPTH_PARAM, PARAMS_LEN };
+    enum InputId { RATE_INPUT, CHAR_INPUT, CLK_INPUT, INPUTS_LEN };
+    enum OutputId { A_OUTPUT, B_OUTPUT, TRIG_OUTPUT, OUTPUTS_LEN };
+    enum LightId { A_LIGHT = 0, B_LIGHT = 1, LIGHTS_LEN = 2 };
+};
+
+inline void config_TURBID(rack::engine::Module* m) {
+    m->config(TURBIDLayout::PARAMS_LEN, TURBIDLayout::INPUTS_LEN, TURBIDLayout::OUTPUTS_LEN, TURBIDLayout::LIGHTS_LEN);
+    m->configParam(TURBIDLayout::RATE_PARAM, -4.0f, 4.0f, 0.0f, "Rate", " Hz", 2.0f, 2.0f);
+    m->configParam(TURBIDLayout::CHAR_PARAM, 0.0f, 1.0f, 0.5f, "Character", " %", 0.0f, 100.0f);
+    m->configParam(TURBIDLayout::SHAPE_PARAM, 0.0f, 1.0f, 0.5f, "Shape", " %", 0.0f, 100.0f);
+    m->configParam(TURBIDLayout::SPREAD_PARAM, 0.0f, 1.0f, 0.5f, "Spread", " %", 0.0f, 100.0f);
+    m->configParam(TURBIDLayout::DEPTH_PARAM, 0.0f, 1.0f, 0.5f, "Depth", " %", 0.0f, 100.0f);
+    m->configInput(TURBIDLayout::RATE_INPUT, "Rate CV");
+    m->configInput(TURBIDLayout::CHAR_INPUT, "Character CV");
+    m->configInput(TURBIDLayout::CLK_INPUT, "External clock");
+    m->configOutput(TURBIDLayout::A_OUTPUT, "Chaos A");
+    m->configOutput(TURBIDLayout::B_OUTPUT, "Chaos B");
+    m->configOutput(TURBIDLayout::TRIG_OUTPUT, "Step trigger");
+    m->configLight(TURBIDLayout::A_LIGHT, "Chaos A level");
+    m->configLight(TURBIDLayout::B_LIGHT, "Chaos B level");
+}
+
+inline void place_TURBID(rack::app::ModuleWidget* w, rack::engine::Module* m) {
+    using namespace rack;
+    using namespace rack::componentlibrary;
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(7.620f, 126.153f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 2.54f))));
+    w->addChild(createWidgetCentered<forge_modular::ForgeScrew>(mm2px(Vec(43.180f, 126.153f))));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(13.000f, 30.000f)), m, TURBIDLayout::RATE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(37.800f, 30.000f)), m, TURBIDLayout::CHAR_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(13.000f, 52.000f)), m, TURBIDLayout::SHAPE_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(37.800f, 52.000f)), m, TURBIDLayout::SPREAD_PARAM));
+    w->addParam(createParamCentered<forge_modular::ForgeKnobMedium>(mm2px(Vec(25.400f, 72.000f)), m, TURBIDLayout::DEPTH_PARAM));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(10.500f, 100.000f)), m, TURBIDLayout::RATE_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(25.400f, 100.000f)), m, TURBIDLayout::CHAR_INPUT));
+    w->addInput(createInputCentered<forge_modular::ForgePort>(mm2px(Vec(40.300f, 100.000f)), m, TURBIDLayout::CLK_INPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(10.500f, 116.000f)), m, TURBIDLayout::A_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(25.400f, 116.000f)), m, TURBIDLayout::B_OUTPUT));
+    w->addOutput(createOutputCentered<forge_modular::ForgePort>(mm2px(Vec(40.300f, 116.000f)), m, TURBIDLayout::TRIG_OUTPUT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<GreenLight>>(mm2px(Vec(17.000f, 86.000f)), m, TURBIDLayout::A_LIGHT));
+    w->addChild(createLightCentered<forge_modular::ForgeSmallLight<BlueLight>>(mm2px(Vec(33.800f, 86.000f)), m, TURBIDLayout::B_LIGHT));
 }
 
 }  // namespace forge_modular

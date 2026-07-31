@@ -42,5 +42,6 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelSTEPS);
     p->addModel(modelSTRANGE);
     p->addModel(modelTANGLE);
+    p->addModel(modelTURBID);
     // END generated model registrations
 }
