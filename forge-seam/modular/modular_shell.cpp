@@ -346,6 +346,13 @@ void ForgeModularShell::style_tabs() {
     // -- Module was selected while Patch wore the pill -- which is the
     // "both tabs highlighted at once" a user reported.
     const bool patch = artifact_ == Artifact::patch;
+    // The placeholder has to promise the artifact actually being built. A
+    // patch materializing as one module panel and then snapping to a rack of
+    // ten shows the wrong thing for the whole build, with the header saying
+    // PATCH beside it.
+    if (auto* c = chrome())
+        c->set_skeleton_shape(patch ? forge::ForgeChrome::SkeletonShape::rack
+                                    : forge::ForgeChrome::SkeletonShape::module);
     TextButton* const buttons[] = {tab_module_, tab_patch_};
     const bool active[] = {!patch, patch};
     for (std::size_t i = 0; i < 2; ++i) {

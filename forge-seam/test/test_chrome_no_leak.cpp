@@ -4829,3 +4829,59 @@ TEST_CASE("closing the editor drops the mention overlay's view pointers",
     shell.mentions().close();
     CHECK_FALSE(shell.mentions().is_open());
 }
+
+TEST_CASE("the materializing placeholder is shaped like the artifact",
+          "[rack][skeleton]") {
+    // A placeholder is a promise about the result. One shape served both, so
+    // a PATCH build drew a single module panel -- four knobs and a fader --
+    // for the whole build, with the header saying PATCH beside it, and then
+    // snapped to a rack of ten modules when it landed.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* c = shell.chrome();
+    REQUIRE(c != nullptr);
+
+    // Both shapes exist, and exactly one is ever showing. A build cannot draw
+    // a module panel and a rack at once, and must not draw neither.
+    auto showing = [&] {
+        return std::make_pair(c->skeleton_shape_visible(
+                                  forge::ForgeChrome::SkeletonShape::module),
+                              c->skeleton_shape_visible(
+                                  forge::ForgeChrome::SkeletonShape::rack));
+    };
+
+    shell.set_artifact(forge_modular::Artifact::module);
+    {
+        auto [mod, rack] = showing();
+        CHECK(mod);
+        CHECK_FALSE(rack);
+    }
+
+    shell.set_artifact(forge_modular::Artifact::patch);
+    {
+        auto [mod, rack] = showing();
+        CHECK(rack);
+        CHECK_FALSE(mod);      // the assertion that carries the weight
+
+        // And it actually draws panels. A visible but EMPTY container passes
+        // every visibility check above while putting nothing on the stage --
+        // which looks like a build that produced nothing, the exact reading
+        // the skeleton exists to avoid.
+        CHECK(c->skeleton_rack_panel_count() >= 3);
+    }
+
+    // And back, so this is a switch rather than a one-way door: a user who
+    // tries Patch and returns to Module would otherwise be promised a rack
+    // for the rest of the session.
+    shell.set_artifact(forge_modular::Artifact::module);
+    {
+        auto [mod, rack] = showing();
+        CHECK(mod);
+        CHECK_FALSE(rack);
+    }
+}
