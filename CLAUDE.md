@@ -598,18 +598,51 @@ If an exploration doesn't work out, delete the worktree. No trace in main. No em
 
 Use git worktrees aggressively for parallel development:
 
+Full Pulp worktrees and their build directories are not temporary-file-sized:
+**never put them under `/tmp` or `/private/tmp`**. Use
+`PULP_WORKTREES_ROOT` when the host declares it; otherwise use a sibling of the
+primary checkout as shown below. This is a per-machine storage decision:
+
+- M3 (`Daniels-Mac-Studio`) must declare
+  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`. Stop rather than
+  falling back if that volume or declaration is unavailable. M3 keeps code,
+  builds, and Tart VMs on Workshop so its internal boot disk cannot fill.
+- M1 and M5 intentionally use their internal disk, so a sibling of the primary
+  checkout remains their default.
+
+Before creating parallel lanes, report the resolved root and current free
+space. Do not move an active worktree; let its build finish, capture its git
+state/results, then remove that worktree through `git worktree remove`.
+
 ```bash
+# M3: exported persistently by the host; M1/M5: sibling default.
+if [ "$(hostname -s)" = "Daniels-Mac-Studio" ]; then
+  : "${PULP_WORKTREES_ROOT:?M3 requires PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees}"
+  [ "$PULP_WORKTREES_ROOT" = "/Volumes/Workshop/Code/agent-worktrees" ] || {
+    echo "M3 worktree root must be /Volumes/Workshop/Code/agent-worktrees" >&2
+    exit 1
+  }
+  mount | grep -F " on /Volumes/Workshop (" >/dev/null || {
+    echo "Workshop is not mounted; refusing to create an internal-disk fallback" >&2
+    exit 1
+  }
+else
+  PULP_WORKTREES_ROOT="${PULP_WORKTREES_ROOT:-$(dirname "$(git rev-parse --show-toplevel)")}"
+fi
+mkdir -p "$PULP_WORKTREES_ROOT"
+df -h "$PULP_WORKTREES_ROOT"
+
 # Create exploration worktree
-git worktree add ../pulp-explore-render explore/render-engine
+git worktree add "$PULP_WORKTREES_ROOT/pulp-explore-render" explore/render-engine
 
 # Create phase implementation worktree
-git worktree add ../pulp-phase-audio phase/audio-io
+git worktree add "$PULP_WORKTREES_ROOT/pulp-phase-audio" phase/audio-io
 
 # List active worktrees
 git worktree list
 
 # Clean up after landing
-git worktree remove ../pulp-phase-audio
+git worktree remove "$PULP_WORKTREES_ROOT/pulp-phase-audio"
 ```
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
@@ -1372,9 +1405,10 @@ RepoPrompt's `context_builder`, `file_search`, and `get_code_structure` read fil
 git fetch origin main
 git log --oneline origin/main | head -10
 
-# For thorough exploration, create a fresh worktree from origin/main
-git worktree add /tmp/pulp-audit origin/main
-# Then point all searches at /tmp/pulp-audit, NOT the main repo dir
+# For thorough exploration, create a fresh worktree from origin/main. Resolve
+# PULP_WORKTREES_ROOT using the host policy under "Parallel Work via Worktrees".
+git worktree add "$PULP_WORKTREES_ROOT/pulp-audit" origin/main
+# Then point all searches at that fresh worktree, NOT the main repo dir
 ```
 
 **Never trust "file not found" from RepoPrompt without checking which branch you're on.** Multiple worktrees (feature branches, depth-pass branches, etc.) can cause RepoPrompt to explore the wrong code.
