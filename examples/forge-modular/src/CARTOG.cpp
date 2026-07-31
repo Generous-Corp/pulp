@@ -2,7 +2,10 @@
 
 #include <pulp/format/rack/module_descriptor.hpp>
 
+#include "portmap_merge.hpp"
+
 #include <cstdio>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -99,6 +102,43 @@ struct CARTOGWidget : rack::app::ModuleWidget {
             out += "      \"size\": [" + std::to_string(mw->box.size.x) + ", " +
                    std::to_string(mw->box.size.y) + "],\n";
 
+            // Knobs, faders and switches, the same walk as the jacks.
+            //
+            // Recorded because a control's position exists ONLY here, exactly
+            // like a jack's: a plugin.json says nothing about it and the panel
+            // artwork usually does not draw it. Without this, a preview can
+            // place a vendor module's cables correctly and still show a bare
+            // faceplate with labels floating over nothing.
+            //
+            // The widget's own box size comes too. It is the size Rack DRAWS,
+            // which beats inferring a diameter from a control's declared kind
+            // -- vendors use sizes we have no table for, and a knob drawn at
+            // the wrong size is a picture that looks right and is wrong.
+            out += "      \"params\": [";
+            {
+                bool first = true;
+                for (rack::app::ParamWidget* pw : mw->getParams()) {
+                    if (!pw) continue;
+                    if (!first) out += ",";
+                    first = false;
+                    std::string name;
+                    if (rack::engine::ParamQuantity* q = pw->getParamQuantity())
+                        name = q->getLabel();
+                    // Centre, not corner: a knob turns about its middle and
+                    // box.pos is the widget's top-left.
+                    const float cx = pw->box.pos.x + pw->box.size.x * 0.5f;
+                    const float cy = pw->box.pos.y + pw->box.size.y * 0.5f;
+                    out += "\n        {\"index\": " + std::to_string(pw->paramId) +
+                           ", \"name\": \"" + esc(name) + "\"" +
+                           ", \"x\": " + std::to_string(cx) +
+                           ", \"y\": " + std::to_string(cy) +
+                           ", \"w\": " + std::to_string(pw->box.size.x) +
+                           ", \"h\": " + std::to_string(pw->box.size.y) + "}";
+                }
+                out += first ? "]" : "\n      ]";
+                out += ",\n";
+            }
+
             for (int pass = 0; pass < 2; ++pass) {
                 const bool inputs = (pass == 0);
                 out += inputs ? "      \"inputs\": [" : "      \"outputs\": [";
@@ -129,6 +169,17 @@ struct CARTOGWidget : rack::app::ModuleWidget {
         out += "\n  ]\n}\n";
 
         const std::string path = rack::asset::user("forge-portmap.json");
+        // Read what is already mapped and fold this scan into it, so a
+        // batch adds to the library rather than replacing it.
+        std::string existing;
+        if (FILE* rf = std::fopen(path.c_str(), "rb")) {
+            char buf[8192];
+            std::size_t n;
+            while ((n = std::fread(buf, 1, sizeof(buf), rf)) > 0)
+                existing.append(buf, n);
+            std::fclose(rf);
+        }
+        out = forge_portmap::merge(existing, out);
         if (FILE* f = std::fopen(path.c_str(), "w")) {
             std::fwrite(out.data(), 1, out.size(), f);
             std::fclose(f);
