@@ -444,6 +444,24 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "checked-out tag can predate the release-pipeline fixes.",
         )
 
+    def test_linux_dependency_action_is_available_before_use(self) -> None:
+        ensure_name = "Ensure shared Linux dependency action exists"
+        install_name = "Install Linux dependencies"
+        self.assertLess(
+            self.text.index(f"- name: {ensure_name}"),
+            self.text.index(f"- name: {install_name}"),
+        )
+        run_block = self._find_step_run(ensure_name)
+        self.assertIn(
+            ".github/actions/install-linux-build-deps/action.yml", run_block
+        )
+        self.assertIn("tools/ci/install_linux_build_deps.py", run_block)
+        self.assertIn("tools/ci/linux_build_deps.json", run_block)
+        self.assertNotIn("tools/ci/linux_build_deps_workflows.json", run_block)
+        self.assertIn("workflow_sha='${{ github.workflow_sha }}'", run_block)
+        self.assertIn("${repo}/${workflow_sha}/${path}", run_block)
+        self.assertNotIn("${repo}/main/${path}", run_block)
+
     def test_backfill_overlay_keeps_cli_cmake_source_list_from_tag(self) -> None:
         run_block = self._find_step_run(
             "Overlay latest release-pipeline files (workflow_dispatch backfill)"

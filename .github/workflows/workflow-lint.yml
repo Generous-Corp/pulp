@@ -31,12 +31,17 @@ on:
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
+      - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/release_product_matrix.json'
       - 'CMakeLists.txt'
       - '**/CMakeLists.txt'
       - 'tools/cmake/**'
       - 'tools/scripts/resign_macos_release_tree.py'
       - 'tools/scripts/test_resign_macos_release_tree.py'
+      - 'tools/ci/install_linux_build_deps.py'
+      - 'tools/ci/linux_build_deps.json'
+      - 'tools/ci/linux_build_deps_workflows.json'
+      - 'tools/ci/test_install_linux_build_deps.py'
   push:
     branches: [main]
     paths:
@@ -52,12 +57,17 @@ on:
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
+      - 'tools/scripts/test_codecov_upload_contract.py'
       - 'tools/scripts/release_product_matrix.json'
       - 'CMakeLists.txt'
       - '**/CMakeLists.txt'
       - 'tools/cmake/**'
       - 'tools/scripts/resign_macos_release_tree.py'
       - 'tools/scripts/test_resign_macos_release_tree.py'
+      - 'tools/ci/install_linux_build_deps.py'
+      - 'tools/ci/linux_build_deps.json'
+      - 'tools/ci/linux_build_deps_workflows.json'
+      - 'tools/ci/test_install_linux_build_deps.py'
 
 permissions:
   contents: read
@@ -128,6 +138,13 @@ jobs:
           python3 -m pip install --quiet 'pyyaml>=6'
           python3 tools/scripts/test_scheduled_workflow_fork_guard_check.py
           python3 tools/scripts/scheduled_workflow_fork_guard_check.py
+
+      - name: Linux dependency and Codecov upload contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/ci/test_install_linux_build_deps.py
+          python3 tools/scripts/test_codecov_upload_contract.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:

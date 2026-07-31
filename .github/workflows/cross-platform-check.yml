@@ -62,32 +62,9 @@ jobs:
           lfs: false
 
       - name: Install Linux dependencies
-        run: |
-          # Dependency set mirrors build.yml's "Install Linux
-          # dependencies" step (libfontconfig1-dev included — chrome/m144
-          # Skia exposes fontconfig symbols the Linux link step needs).
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libdbus-1-dev \
-            libdrm-dev \
-            libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libxrandr-dev \
-            libxrender-dev \
-            libxss-dev \
-            libxtst-dev \
-            libwayland-dev \
-            wayland-protocols \
-            ccache
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -144,32 +121,9 @@ jobs:
           lfs: false
 
       - name: Install Linux dependencies
-        run: |
-          # Dependency set mirrors build.yml's "Install Linux
-          # dependencies" step (libfontconfig1-dev included — chrome/m144
-          # Skia exposes fontconfig symbols the Linux link step needs).
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libdbus-1-dev \
-            libdrm-dev \
-            libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libxrandr-dev \
-            libxrender-dev \
-            libxss-dev \
-            libxtst-dev \
-            libwayland-dev \
-            wayland-protocols \
-            ccache
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only

@@ -52,14 +52,7 @@ jobs:
           lfs: false
 
       - name: Install Linux dev headers
-        # setup.sh --ci hard-fails without ALSA/X11/dbus dev headers even for a
-        # GPU=OFF configure. This is the leaner header set the header-self-
-        # contained lane uses for its GPU=OFF build.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libgl1-mesa-dev libx11-dev \
-            libxext-dev libxrandr-dev libxkbcommon-dev libfontconfig1-dev
+        uses: ./.github/actions/install-linux-build-deps
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only

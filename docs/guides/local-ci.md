@@ -2673,6 +2673,17 @@ pulp ci-local run --targets mac
 
 Worth knowing before you trust a green PR, because the answer is not symmetric.
 
+Native Linux workflows install their shared system prerequisites through
+`.github/actions/install-linux-build-deps`, backed by the portable
+`tools/ci/install_linux_build_deps.py` resolver and
+`tools/ci/linux_build_deps.json`. Profiles describe capabilities (`native` and
+`native-webview`); compiler versions, analysis tools, caches, and other
+lane-specific packages stay explicit at each call site. The workflow policy
+file enumerates adopters and reviewed exclusions, and workflow-lint rejects a
+new direct apt workflow that has no owner. Update the manifest once when a
+native dependency changes instead of copying the package into individual
+build, coverage, sanitizer, release, or portability lanes.
+
 Every Linux lane in PR CI compiles with **Clang** — "Public headers compile
 standalone (Linux Clang)", "IWYU (Linux, Clang)", "RealtimeSanitizer (Linux
 x86_64, Clang 18)". macOS is Clang by definition. Windows is MSVC.

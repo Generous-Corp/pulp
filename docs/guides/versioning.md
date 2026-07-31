@@ -349,7 +349,11 @@ macOS/linux run broke `main`). A genuine build failure — no budget hit, no
 report — still fails loudly. The suite runs ctest in parallel with a per-test
 `--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
 `coverage-staleness-check` watchdog is the alarm if coverage genuinely stops
-flowing.
+flowing. Report verification and Codecov transport are separate contracts:
+missing or structurally empty reports fail the producing leg, while the shared
+upload action records transport failure without making Codecov availability a
+merge prerequisite. `coverage-upload-watchdog.yml` counts a main run as fresh
+only when the action emitted both Linux and macOS upload receipts.
 
 ---
 
