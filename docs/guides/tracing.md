@@ -232,7 +232,7 @@ promise.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the plugin editor (or launch the standalone app) ...
-pulp trace stop                                        # → /tmp/pulp-<ts>.pftrace
+pulp trace stop --session SESSION --instance INSTANCE  # copy pair from start
 pulp trace explain "why is my plugin slow to open?"
 ```
 
@@ -264,7 +264,7 @@ pulp trace slowest-frames                              # L0 preset: frames over 
 pulp trace start --categories render,layout,canvas,text,js,gpu
 pulp motion record --view Knob --out knob.jsonl        # motion trace_id joins in
 # ... sweep the knob ...
-pulp trace stop
+pulp trace stop --session SESSION --instance INSTANCE
 pulp trace query --preset layout-vs-paint              # or: explain "why did those frames blow the budget?"
 ```
 
@@ -282,7 +282,7 @@ one-row-per-stage cost split.
 # reproduces exactly.
 pulp trace start --categories dsp,dsp.node
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
-pulp trace stop
+pulp trace stop --session SESSION --instance INSTANCE
 pulp trace explain "why is my plugin using so much CPU?"
 ```
 

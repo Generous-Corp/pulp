@@ -570,18 +570,61 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp motion: no inspector mapping for {sub:?}"
         )));
     };
-    let response = match (
+    let explicit_selection = match (
         flags.session_id.as_deref(),
         flags.instance_id.as_deref(),
     ) {
-        (Some(session_id), Some(instance_id)) => talker.call_selected(
+        (Some(session_id), Some(instance_id)) => {
+            Some(crate::cmd::inspector::SessionSelection {
+                session_id: session_id.to_owned(),
+                instance_id: instance_id.to_owned(),
+            })
+        }
+        _ => None,
+    };
+    let requires_exact_selection = matches!(
+        sub,
+        Sub::Stop { .. } |
+            Sub::Scrub { .. } |
+            Sub::Play |
+            Sub::Pause |
+            Sub::Cost { .. }
+    );
+    if requires_exact_selection && explicit_selection.is_none() {
+        return Err(CliError::BadUsage(
+            "pulp motion mutation requires --session and --instance; reuse the \
+             exact pair printed by `pulp motion record`"
+                .to_owned(),
+        ));
+    }
+    let discovered_selection;
+    let selection = if matches!(sub, Sub::Record(_)) &&
+        explicit_selection.is_none()
+    {
+        let capabilities =
+            talker.call(port, "Session.getCapabilities", "{}")?;
+        discovered_selection =
+            crate::cmd::inspector::parse_session_selection(&capabilities)
+                .ok_or_else(|| {
+                    CliError::Other(
+                        "pulp motion: Session.getCapabilities did not return a \
+                         safe sessionId and instanceId"
+                            .to_owned(),
+                    )
+                })?;
+        Some(&discovered_selection)
+    } else {
+        explicit_selection.as_ref()
+    };
+    let response = match selection {
+        Some(selection) => talker.call_selected(
             port,
-            session_id,
-            instance_id,
+            &selection.session_id,
+            &selection.instance_id,
             method,
             &params,
         )?,
-        _ => talker.call(port, method, &params)?,
+        None => talker.call(port, method, &params)?,
     };
 
     // For `record`, surface the --out path as a sidecar hint so the
@@ -629,9 +672,17 @@ pub fn dispatch<T: InspectorTalker>(
     }
 
     if flags.json {
-        writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
+        let rendered = if matches!(sub, Sub::Record(_)) {
+            crate::cmd::inspector::attach_session_selection(
+                &response,
+                selection,
+            )
+        } else {
+            response.trim_end().to_owned()
+        };
+        writeln!(out, "{rendered}").map_err(io_err)?;
     } else {
-        write_pretty(out, sub, &response, flags).map_err(io_err)?;
+        write_pretty(out, sub, &response, selection).map_err(io_err)?;
     }
     Ok(())
 }
@@ -643,7 +694,7 @@ fn write_pretty(
     out: &mut impl Write,
     sub: &Sub,
     response: &str,
-    flags: &GlobalFlags,
+    selection: Option<&crate::cmd::inspector::SessionSelection>,
 ) -> std::io::Result<()> {
     let trimmed = response.trim();
     match sub {
@@ -656,8 +707,8 @@ fn write_pretty(
                     out,
                     "  stop with: pulp motion stop --trace-id {id}{}",
                     crate::cmd::inspector::selection_cli_suffix(
-                        flags.session_id.as_deref(),
-                        flags.instance_id.as_deref(),
+                        selection.map(|value| value.session_id.as_str()),
+                        selection.map(|value| value.instance_id.as_str()),
                     )
                 )?;
             } else {
@@ -751,11 +802,15 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  --session ID --instance ID   Select one exact authenticated session identity\n"
+        "  --session ID --instance ID   Select one exact authenticated session identity\n\
+         Required for stop, scrub, play, pause, and cost mutations.\n"
     )?;
     writeln!(out, "Example: # after a custom host constructs InspectorServer")?;
     writeln!(out, "         pulp motion record --view Card --out card-fade.jsonl")?;
-    writeln!(out, "         pulp motion stop --trace-id 1")?;
+    writeln!(
+        out,
+        "         pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE"
+    )?;
     Ok(())
 }
 
@@ -1189,7 +1244,10 @@ mod tests {
 
     #[test]
     fn dispatch_record_extracts_trace_id_in_pretty_mode() {
-        let t = RecordingTalker::new(vec!["{\"trace_id\":3}"]);
+        let t = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"trace_id\":3}",
+        ]);
         let mut buf: Vec<u8> = Vec::new();
         let sub = Sub::Record(RecordArgs {
             view_name: "Card".to_owned(),
@@ -1200,7 +1258,16 @@ mod tests {
         dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("trace_id=3"), "{out}");
-        assert!(out.contains("pulp motion stop --trace-id 3"), "{out}");
+        assert!(out.contains(
+            "pulp motion stop --trace-id 3 --session session-a \
+             --instance instance-b"
+        ), "{out}");
+        assert_eq!(t.calls.borrow()[0].1, "Session.getCapabilities");
+        assert_eq!(t.calls.borrow()[1].1, "Motion.startTrace");
+        assert_eq!(
+            t.selections.borrow()[1],
+            Some(("session-a".to_owned(), "instance-b".to_owned()))
+        );
     }
 
     #[test]
@@ -1232,6 +1299,36 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_record_json_surfaces_resolved_exact_selection() {
+        let talker = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"trace_id\":3}",
+        ]);
+        let flags = GlobalFlags {
+            json: true,
+            ..GlobalFlags::default()
+        };
+        let mut output = Vec::new();
+        dispatch(
+            &Sub::Record(RecordArgs {
+                view_name: "Card".to_owned(),
+                fps: None,
+                out: None,
+                metrics: vec![],
+            }),
+            &flags,
+            &talker,
+            &mut output,
+        )
+        .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["sessionId"], "session-a");
+        assert_eq!(value["instanceId"], "instance-b");
+        assert_eq!(value["trace_id"], 3);
+    }
+
+    #[test]
     fn dispatch_json_flag_prints_raw_response() {
         let t = RecordingTalker::new(vec!["{\"trace_ids\":[1,2,3]}"]);
         let mut buf: Vec<u8> = Vec::new();
@@ -1247,7 +1344,10 @@ mod tests {
 
     #[test]
     fn dispatch_record_with_out_prints_sidecar_hint() {
-        let t = RecordingTalker::new(vec!["{\"trace_id\":9}"]);
+        let t = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"trace_id\":9}",
+        ]);
         let mut buf: Vec<u8> = Vec::new();
         let sub = Sub::Record(RecordArgs {
             view_name: "Card".to_owned(),
@@ -1259,6 +1359,30 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("make_fixture_sink"), "{out}");
         assert!(out.contains("/tmp/card.jsonl"), "{out}");
+    }
+
+    #[test]
+    fn dispatch_stateful_followups_require_exact_selection_before_calling_inspector() {
+        let talker = RecordingTalker::new(vec![]);
+        for sub in [
+            Sub::Stop { trace_id: Some(3) },
+            Sub::Scrub { frame: 3 },
+            Sub::Play,
+            Sub::Pause,
+            Sub::Cost { enable: true },
+            Sub::Cost { enable: false },
+        ] {
+            let mut output = Vec::new();
+            let error = dispatch(
+                &sub,
+                &GlobalFlags::default(),
+                &talker,
+                &mut output,
+            )
+            .unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
+        }
+        assert!(talker.calls.borrow().is_empty());
     }
 
     #[test]

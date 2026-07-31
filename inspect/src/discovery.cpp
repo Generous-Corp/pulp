@@ -11,7 +11,6 @@
 // symbols and cannot acquire or mutate discovery ownership.
 
 #include <pulp/runtime/crypto.hpp>
-#include <pulp/runtime/system.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -829,23 +828,6 @@ struct InspectorDiscoveryPublisher::OwnershipLease {
 #endif
 
 #ifndef PULP_INSPECT_PUBLISHER_ONLY
-std::filesystem::path default_inspector_runtime_directory() {
-    if (const auto configured =
-            pulp::runtime::get_env("PULP_INSPECTOR_RUNTIME_DIR")) {
-        return *configured;
-    }
-#ifdef _WIN32
-    const auto base = pulp::runtime::get_env("LOCALAPPDATA")
-                          .value_or(std::filesystem::temp_directory_path().string());
-    return std::filesystem::path(base) / "Pulp" / "Inspector";
-#else
-    const auto base = pulp::runtime::get_env("TMPDIR")
-                          .value_or(std::filesystem::temp_directory_path().string());
-    return std::filesystem::path(base) /
-           ("pulp-inspector-" + std::to_string(::geteuid()));
-#endif
-}
-
 InspectorDiscoveryReader::InspectorDiscoveryReader(
     std::filesystem::path runtime_directory)
     : runtime_directory_(std::move(runtime_directory)) {}

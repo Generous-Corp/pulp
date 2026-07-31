@@ -946,6 +946,64 @@ TEST_CASE("MCP inspector families execute the shared pulp-cpp delegate",
 #endif
 }
 
+TEST_CASE("MCP capture workflows pin start and require the same stop identity",
+          "[mcp][tools][inspect][selection]") {
+#if defined(_WIN32)
+    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\n";
+    const auto cli = make_fake_inspector_cli(project.path);
+    std::ofstream script(cli, std::ios::trunc);
+    script
+        << "#!/bin/sh\n"
+        << "case \" $* \" in\n"
+        << "  *' Session.getCapabilities '*) "
+           "printf '{\"sessionId\":\"session-a\","
+           "\"instanceId\":\"instance-b\"}' ;;\n"
+        << "  *) printf 'fake-inspector'; "
+           "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done ;;\n"
+        << "esac\n";
+    script.close();
+    ScopedCurrentPath cwd(project.path);
+
+    const auto trace_start = handle_request(tool_call(
+        "62", "pulp_trace_start", R"JSON({"categories":["dsp"]})JSON"));
+    require_contains(
+        trace_start,
+        "fake-inspector [inspect] [--session] [session-a] [--instance] "
+        "[instance-b] [--command] [Trace.startSession]");
+    require_contains(
+        trace_start,
+        R"JSON(Exact selection: {\"session_id\":\"session-a\",\"instance_id\":\"instance-b\"})JSON");
+
+    const auto motion_stop = handle_request(tool_call(
+        "63", "pulp_motion_stop_trace",
+        R"JSON({"trace_id":7,"session_id":"session-a","instance_id":"instance-b"})JSON"));
+    require_contains(
+        motion_stop,
+        "fake-inspector [inspect] [--session] [session-a] [--instance] "
+        "[instance-b] [--command] [Motion.stopTrace]");
+
+    const auto motion_play = handle_request(tool_call(
+        "64", "pulp_motion_play",
+        R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
+    require_contains(
+        motion_play,
+        "fake-inspector [inspect] [--session] [session-a] [--instance] "
+        "[instance-b] [--command] [Motion.play]");
+
+    const auto unpinned_stop = handle_request(tool_call(
+        "65", "pulp_trace_stop"));
+    require_contains(unpinned_stop, R"JSON("isError":true)JSON");
+    require_contains(
+        unpinned_stop,
+        "session_id and instance_id must be the exact safe identities");
+#endif
+}
+
 TEST_CASE("MCP inspector families preserve subprocess failure status",
           "[mcp][tools][inspect][delegate][failure]") {
 #if defined(_WIN32)
@@ -2442,6 +2500,8 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
         REQUIRE(src.find(tool) != std::string::npos);
         REQUIRE(src.find(method) != std::string::npos);
     }
+    require_contains(src, "resolve_inspector_selection(root)");
+    require_contains(src, "{\"--session\", session_id, \"--instance\", instance_id}");
 }
 
 // Per-tool SDK feature detection (min_sdk_version).
@@ -2782,6 +2842,30 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
         INFO("required_window=" << required_window << " needle=" << needle);
         REQUIRE(required_window.find(needle) != std::string::npos);
     }
+    const auto motion_stop = tools.find(R"JSON("name":"pulp_motion_stop_trace")JSON");
+    REQUIRE(motion_stop != std::string::npos);
+    const auto motion_stop_schema = tools.substr(motion_stop, 1200);
+    require_contains(motion_stop_schema,
+                     R"JSON("required":["trace_id","session_id","instance_id"])JSON");
+    for (const char* tool : {
+             "pulp_motion_play",
+             "pulp_motion_pause",
+             "pulp_motion_enable_cost",
+             "pulp_motion_disable_cost",
+         }) {
+        INFO("exact-session motion tool: " << tool);
+        const auto position =
+            tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
+        REQUIRE(position != std::string::npos);
+        require_contains(
+            tools.substr(position, 900),
+            R"JSON("required":["session_id","instance_id"])JSON");
+    }
+    const auto scrub = tools.find(R"JSON("name":"pulp_motion_scrub_to")JSON");
+    REQUIRE(scrub != std::string::npos);
+    require_contains(
+        tools.substr(scrub, 1000),
+        R"JSON("required":["frame","session_id","instance_id"])JSON");
 
     // Param-less tools still need a description + an inputSchema object.
     const auto param_less_tools = {
@@ -2803,10 +2887,7 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
-    const auto no_param_tools = {
-        "pulp_trace_stop",
-        "pulp_trace_snapshot",
-    };
+    const auto no_param_tools = {"pulp_trace_snapshot"};
     int id = 90;
     for (const char* tool : no_param_tools) {
         INFO("trace tool (no params): " << tool);
@@ -2823,6 +2904,12 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     require_contains(start, "Error: not in a Pulp project");
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
+    auto stop = handle_request(tool_call(
+        std::to_string(id++), "pulp_trace_stop",
+        R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
+    require_contains(stop, "Error: not in a Pulp project");
+    REQUIRE(stop.find("Unknown tool") == std::string::npos);
+
     const auto tools = handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})");
     const auto trace_start = tools.find(R"("name":"pulp_trace_start")");
     REQUIRE(trace_start != std::string::npos);
@@ -2833,6 +2920,12 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
     require_contains(trace_schema, R"("minimum":1)");
     require_contains(trace_schema, R"("maximum":512)");
     REQUIRE(trace_schema.find(R"("out_path")") == std::string::npos);
+    const auto trace_stop_schema =
+        tools.substr(trace_stop, tools.find(R"("name":"pulp_trace_snapshot")",
+                                           trace_stop) - trace_stop);
+    require_contains(
+        trace_stop_schema,
+        R"JSON("required":["session_id","instance_id"])JSON");
 
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
                                           R"JSON({"sql":"select 1","format":"json"})JSON"));

@@ -30,15 +30,15 @@ inspector path is reserved but not wired into normal Pulp launches;
 #     method, prints the trace_id, honors --port + $PULP_INSPECTOR_PORT).
 pulp motion record --view Card --out card-fade.jsonl
 # → trace started — trace_id=1
-pulp motion stop --trace-id 1
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
 
 # The transport is length-prefixed; raw line-delimited `nc` is not a client.
 
 # 4. Other handy verbs:
 pulp motion snapshot          # view tracing_enabled / active_traces / cost
 pulp motion list-traces       # enumerate inspector-owned trace IDs
-pulp motion scrub 30
-pulp motion cost enable       # opt in to per-frame cost samples
+pulp motion scrub 30 --session SESSION --instance INSTANCE
+pulp motion cost enable --session SESSION --instance INSTANCE
 ```
 
 ## Useful env knobs in `pulp-ui-preview`
