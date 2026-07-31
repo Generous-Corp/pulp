@@ -412,6 +412,44 @@ TEST_CASE("a module's own panel artwork is what the stage draws", "[seam]") {
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("a module with no panel says so instead of looking empty", "[seam]") {
+    // The distinction this draws: "we have no picture of this module" and
+    // "this module is empty" used to be the same grey rectangle. A reader who
+    // cannot tell them apart will read a working rack as broken, or -- worse
+    // -- a broken one as working.
+    //
+    // Hatching is the tell, so the test counts ink rather than trusting a
+    // flag: a face that is merely a different shade of grey would pass any
+    // check written on the enum.
+    const auto count_ink = [](const std::vector<std::uint8_t>& png) {
+        return distinct_colors(png);
+    };
+
+    auto render = [&](const std::string& brand, const std::string& panel_dir) {
+        forge_modular::RackModule mod;
+        mod.id = "m1";
+        mod.name = "NOSUCHPANEL";
+        mod.brand = brand;
+        mod.hp = 10;
+        forge_modular::RackPreview preview;
+        preview.set_rack({mod}, {});
+        if (!panel_dir.empty()) preview.set_panel_directory(panel_dir);
+        return pulp::view::render_to_png(preview, 420, 320, 1.0f,
+                                         pulp::view::ScreenshotBackend::skia);
+    };
+
+    // Ours, with no artwork on disk: a fault, and it has to look like one.
+    const auto ours = count_ink(render("ForgeModular", ""));
+    // A vendor's module we never had a picture of: not a fault, drawn plainly.
+    const auto theirs = count_ink(render("Fundamental", ""));
+
+    INFO("tones on our unpainted module: " << ours
+         << ", on a vendor's: " << theirs);
+    // The hatched face carries strictly more ink than the plain one. Equal
+    // counts would mean both render identically, which is the defect.
+    CHECK(ours > theirs);
+}
+
 TEST_CASE("a real generated panel renders and not just a synthetic one", "[seam]") {
     // The synthetic test above proves the wiring. This proves the wiring
     // survives the artwork we actually ship: 23 KB of paths, gradients and

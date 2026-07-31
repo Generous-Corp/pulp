@@ -144,10 +144,34 @@ void RackPreview::paint(Canvas& canvas) {
             if (drawn) continue;
         }
 
-        canvas.set_fill_color(panel.has_artwork ? color::surface_panel
-                                                : color::surface_sunken);
+        // No artwork for this one. Drawn as a HATCHED face at its true width
+        // rather than a plain rectangle, because a plain rectangle is exactly
+        // what a broken panel looks like -- and a reader who cannot tell "we
+        // have no picture of this module" from "this module is empty" will
+        // read a working rack as a failure, or worse, the reverse.
+        // Hatched only when artwork was EXPECTED and is not there: one of ours
+        // whose panel failed to emit or failed to parse. A third-party module
+        // we never had a picture of is drawn plainly, because that is not a
+        // fault and hatching every one of them would bury the case that is.
+        const auto* mod_here = find(panel.id);
+        const bool ours = mod_here && mod_here->brand == kOurs;
+        const bool undrawn = ours || !panel.has_artwork;
+        canvas.set_fill_color(undrawn ? color::surface_sunken
+                                      : color::surface_panel);
         canvas.fill_rounded_rect(panel.x, panel.y, panel.width, panel.height,
                                  4.0f * L.scale);
+        if (undrawn) {
+            canvas.save();
+            canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+            canvas.set_stroke_color(color::line);
+            canvas.set_line_width(1.0f);
+            const float step = 9.0f * L.scale;
+            for (float x = panel.x - panel.height; x < panel.x + panel.width;
+                 x += step)
+                canvas.stroke_line(x, panel.y + panel.height,
+                                   x + panel.height, panel.y);
+            canvas.restore();
+        }
         canvas.set_stroke_color(color::line);
         canvas.set_line_width(1.0f);
         canvas.stroke_rounded_rect(panel.x, panel.y, panel.width, panel.height,
@@ -164,7 +188,8 @@ void RackPreview::paint(Canvas& canvas) {
                          panel.y + 22.0f * L.scale);
         canvas.set_font(forge::design::type::mono, 8.5f * L.scale);
         canvas.set_fill_color(color::text_faint);
-        canvas.fill_text(mod->brand, panel.x + panel.width / 2.0f,
+        canvas.fill_text(undrawn ? "NO PANEL" : mod->brand,
+                         panel.x + panel.width / 2.0f,
                          panel.y + panel.height - 12.0f * L.scale);
     }
 
