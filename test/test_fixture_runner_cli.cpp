@@ -112,6 +112,32 @@ TEST_CASE("fixture runner verifies a generated corpus", "[cli][fixture-runner]")
     REQUIRE(verified.exit_code == 0);
 }
 
+TEST_CASE("fixture runner verifies a document whose name carries surrounding whitespace",
+          "[cli][fixture-runner]") {
+    if (!runner_available()) {
+        SUCCEED("pulp-fixture-runner not built");
+        return;
+    }
+    // A gate that raises a false failure on a legal document is as useless as one
+    // that cannot fail at all. An authored name is arbitrary user text, and the
+    // manifest is a whitespace-delimited text format, so recording the name made
+    // a generated manifest fail against the very document it came from. The name
+    // is no longer recorded; this pins that, since the failure is invisible until
+    // a fixture happens to carry such a name.
+    TempCorpus corpus;
+    std::string spacey = kMinimalProject;
+    const auto position = spacey.find(R"("name":"cli-fixture")");
+    REQUIRE(position != std::string::npos);
+    spacey.replace(position, std::string(R"("name":"cli-fixture")").size(),
+                   R"("name":" padded name ")");
+    corpus.write("v1/minimal.json", spacey);
+
+    REQUIRE(update(corpus).exit_code == 0);
+    const auto result = check(corpus);
+    INFO("stdout=" << result.stdout_output << " stderr=" << result.stderr_output);
+    REQUIRE(result.exit_code == 0);
+}
+
 TEST_CASE("fixture runner rejects a corpus with no manifest", "[cli][fixture-runner]") {
     if (!runner_available()) {
         SUCCEED("pulp-fixture-runner not built");

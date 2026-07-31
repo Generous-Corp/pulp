@@ -116,7 +116,14 @@ void collect_summary(std::vector<std::pair<std::string, std::string>>& out,
                      const pulp::timeline::ProjectSnapshotSummary& summary) {
     out.emplace_back("schema_version", to_text(summary.schema_version));
     out.emplace_back("project_id", to_text(summary.project_id.value));
-    out.emplace_back("name", summary.name);
+    // The authored project name is deliberately NOT recorded. Every value here
+    // round-trips through a whitespace-delimited text line, and an authored name
+    // is arbitrary user text: a trailing space is silently trimmed on read, and a
+    // newline would corrupt the file outright. Either way the manifest generated
+    // from a document would then fail to verify against that same document — a
+    // gate raising a false failure on a legal input, which is as useless as one
+    // that cannot fail at all. Identity is already carried by project_id, and a
+    // renamed fixture is not a conformance regression.
     out.emplace_back("next_item_id", to_text(summary.next_item_id));
     out.emplace_back("root_sequence_id", to_text(summary.root_sequence_id.value));
     const auto& counts = summary.counts;
