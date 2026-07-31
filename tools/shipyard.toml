@@ -56,7 +56,13 @@
 # saturated gates (Shipyard #345), and self-hosted empty-log diagnostics that
 # point at the uploaded ctest artifact (Shipyard #344).
 #
-# v0.68.0 (current pin) — durable-queue dead-worker recovery (Shipyard #351): a killed
+# v0.80.2 (current pin) — the `version` field moved through v0.70.0 and v0.78.0
+#   to v0.80.2, but this rationale block was left labelled v0.68.0, so the file
+#   documented a pin it no longer installed. Relabelled 2026-07-31. v0.80.2 also
+#   carries `shipyard metrics`, which the docs and the ci skill still told readers
+#   to fetch a newer Shipyard by hand to get.
+#
+# v0.68.0 (earlier pin) — durable-queue dead-worker recovery (Shipyard #351): a killed
 #   `shipyard ship`/`pr` worker left its job stuck `running` in the queue,
 #   which blocked every later same-PR ship with `SamePrShipRunning` —
 #   unrecoverable without hand-editing `queue.json` (the startup reaper only

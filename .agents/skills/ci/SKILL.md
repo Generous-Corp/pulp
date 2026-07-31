@@ -20,10 +20,8 @@ mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
 store and tartci is an optional VM runtime emitter.
 
 This metrics surface requires a Shipyard build that includes the
-`shipyard metrics` subcommand. Pulp's current pinned source-checkout Shipyard in
-`tools/shipyard.toml` is `v0.68.0`, which does not include it yet. If a checkout
-only has the pinned binary, use a newer Shipyard binary or source checkout for
-the optional metrics workflow, or skip metrics and inspect live jobs directly.
+`shipyard metrics` subcommand. Pulp's pin in `tools/shipyard.toml` is `v0.80.2`,
+which provides it, so the pinned binary is sufficient.
 
 Use these commands as the normal agent loop:
 
