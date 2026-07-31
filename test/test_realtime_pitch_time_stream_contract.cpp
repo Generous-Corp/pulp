@@ -223,6 +223,202 @@ bool stream_lag_stays_within_prepared_bound(int max_block, float admitted_ratio,
     return observed_backpressure;
 }
 
+struct VariableLagRun {
+    bool observed_backpressure = false;
+    std::int64_t produced = 0;
+};
+
+VariableLagRun run_variable_lag_trajectory(RealtimePitchTimeConfig config,
+                                           std::uint32_t seed,
+                                           bool continuous_drain) {
+    RealtimePitchTimePreparedGeometry<float> geometry;
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                config, 1.0, std::numeric_limits<std::uint64_t>::max(), geometry)
+            == PitchTimePrepareStatus::prepared);
+    RealtimePitchTimeProcessor processor;
+    REQUIRE(processor.prepare(kSampleRate, config) == PitchTimePrepareStatus::prepared);
+    REQUIRE(processor.maximum_stream_output_lag_samples()
+            == geometry.maximum_stream_output_lag_samples);
+
+    std::vector<float> input(static_cast<std::size_t>(config.max_block), 0.0f);
+    std::vector<float> output(static_cast<std::size_t>(config.max_block), 0.0f);
+    const float* input_ptrs[] = {input.data()};
+    float* output_ptrs[] = {output.data()};
+    const auto minimum_ratio = 1.0f / config.max_time_ratio;
+    float active_ratio = 1.0f;
+    long double ideal_frontier = 0.0L;
+    std::vector<long double> ideal_frame_starts;
+    std::int64_t accepted = 0;
+    std::int64_t drained = 0;
+    bool observed_backpressure = false;
+
+    const auto assert_bound = [&] {
+        const auto produced = drained + processor.available_stretched();
+        const auto lag = static_cast<std::int64_t>(
+            std::ceil(std::max(0.0L, ideal_frontier - produced)));
+        INFO("quality=" << static_cast<int>(config.quality)
+                        << " fft=" << geometry.fft_size
+                        << " hop=" << geometry.analysis_hop
+                        << " block=" << config.max_block
+                        << " accepted=" << accepted
+                        << " produced=" << produced
+                        << " ideal=" << static_cast<double>(ideal_frontier)
+                        << " ratio=" << active_ratio);
+        REQUIRE(lag <= geometry.maximum_stream_output_lag_samples);
+    };
+    const auto drain = [&](int maximum) {
+        const int take = std::min(processor.available_stretched(), maximum);
+        if (take > 0) {
+            REQUIRE(processor.read_stretched(output_ptrs, take) == take);
+            drained += take;
+        }
+        assert_bound();
+    };
+    const auto set_ratio = [&](float ratio) {
+        active_ratio = ratio;
+        processor.set_time_ratio(ratio);
+        assert_bound();
+    };
+    const auto advance_oracle = [&](int count, int until_boundary) {
+        int remaining = count;
+        int until = until_boundary;
+        while (remaining >= until) {
+            ideal_frame_starts.push_back(ideal_frontier);
+            ideal_frontier += static_cast<long double>(active_ratio)
+                            * static_cast<long double>(geometry.analysis_hop);
+            remaining -= until;
+            until = geometry.analysis_hop;
+        }
+    };
+    const auto feed = [&](int count) {
+        REQUIRE(count > 0);
+        REQUIRE(count <= config.max_block);
+        for (;;) {
+            const int until = processor.samples_until_next_analysis_frame();
+            REQUIRE(until > 0);
+            const auto status = processor.feed(input_ptrs, count);
+            if (status == PitchTimeStreamFeedStatus::accepted) {
+                advance_oracle(count, until);
+                accepted += count;
+                assert_bound();
+                if (continuous_drain)
+                    while (processor.available_stretched() > 0)
+                        drain(config.max_block);
+                return;
+            }
+            REQUIRE(status == PitchTimeStreamFeedStatus::backpressure);
+            observed_backpressure = true;
+            drain(config.max_block);
+        }
+    };
+
+    // Deterministic boundary controls: immediately before a boundary, at the
+    // boundary after it has been analyzed, and one sample after that boundary.
+    set_ratio(config.max_time_ratio);
+    while (processor.samples_until_next_analysis_frame() > config.max_block)
+        feed(config.max_block);
+    const int before_boundary = processor.samples_until_next_analysis_frame();
+    if (before_boundary > 1)
+        feed(before_boundary - 1);
+    set_ratio(minimum_ratio);
+    feed(1);
+    set_ratio(config.max_time_ratio);
+    feed(1);
+    set_ratio(1.0f);
+
+    const int prepared_lag = processor.maximum_stream_output_lag_samples();
+    processor.reset();
+    REQUIRE(processor.maximum_stream_output_lag_samples() == prepared_lag);
+    REQUIRE(processor.available_stretched() == 0);
+    accepted = 0;
+    drained = 0;
+    ideal_frontier = 0.0L;
+    ideal_frame_starts.clear();
+    assert_bound();
+
+    // Deterministic xorshift trajectory. Chunk choices straddle both the
+    // current analysis boundary and the nominal hop boundary.
+    const auto next_random = [&seed] {
+        seed ^= seed << 13u;
+        seed ^= seed >> 17u;
+        seed ^= seed << 5u;
+        return seed;
+    };
+    const auto target_input = accepted
+                            + static_cast<std::int64_t>(geometry.fft_size)
+                            + 24 * static_cast<std::int64_t>(geometry.analysis_hop);
+    while (accepted < target_input) {
+        const auto bits = next_random();
+        const float unit = static_cast<float>(bits & 0xffffu) / 65535.0f;
+        set_ratio(minimum_ratio
+                  + unit * (config.max_time_ratio - minimum_ratio));
+        const int until = processor.samples_until_next_analysis_frame();
+        const std::array<int, 9> candidates{
+            1,
+            std::max(1, until - 1),
+            until,
+            until + 1,
+            std::max(1, geometry.analysis_hop - 1),
+            geometry.analysis_hop,
+            geometry.analysis_hop + 1,
+            std::max(1, config.max_block - 1),
+            config.max_block,
+        };
+        const int count = std::min(
+            candidates[(bits >> 16u) % candidates.size()], config.max_block);
+        feed(static_cast<int>(std::min<std::int64_t>(
+            count, target_input - accepted)));
+    }
+
+    // A no-drain maximum-ratio phase deterministically reaches backpressure
+    // regardless of the randomized trajectory above.
+    if (!continuous_drain) {
+        set_ratio(config.max_time_ratio);
+        for (int guard = 0; guard < 100'000 && !observed_backpressure; ++guard)
+            feed(config.max_block);
+        REQUIRE(observed_backpressure);
+    }
+
+    // Final output is interpolated at the real-input cursor between the same
+    // analysis-frame boundaries used by the stream, but with an independent
+    // long-double cumulative ratio oracle rather than processor counters.
+    const auto final_frame = static_cast<std::size_t>(
+        accepted / geometry.analysis_hop);
+    while (ideal_frame_starts.size() <= final_frame + 1u) {
+        ideal_frame_starts.push_back(ideal_frontier);
+        ideal_frontier += static_cast<long double>(active_ratio)
+                        * static_cast<long double>(geometry.analysis_hop);
+    }
+    const auto final_offset = accepted % geometry.analysis_hop;
+    const auto final_ideal =
+        ideal_frame_starts[final_frame]
+        + (ideal_frame_starts[final_frame + 1u] - ideal_frame_starts[final_frame])
+              * static_cast<long double>(final_offset)
+              / static_cast<long double>(geometry.analysis_hop);
+    ideal_frontier = final_ideal;
+    assert_bound();
+
+    for (int guard = 0; guard < 100'000; ++guard) {
+        const auto status = processor.finalize(config.max_block);
+        assert_bound();
+        if (processor.available_stretched() > 0)
+            drain(config.max_block);
+        if (status == PitchTimeStreamFinalizeStatus::complete) {
+            REQUIRE(processor.available_stretched() == 0);
+            assert_bound();
+            REQUIRE(std::abs(
+                        drained
+                        - static_cast<std::int64_t>(std::llround(final_ideal)))
+                    <= 1);
+            return {observed_backpressure, drained};
+        }
+        REQUIRE((status == PitchTimeStreamFinalizeStatus::draining
+                 || status == PitchTimeStreamFinalizeStatus::backpressure));
+    }
+    FAIL("variable-ratio finalization did not converge");
+    return {};
+}
+
 } // namespace
 
 TEST_CASE("RealtimePitchTime geometry exposes a checked causal stream lag bound",
@@ -283,6 +479,131 @@ TEST_CASE("RealtimePitchTime causal stream lag stays within prepared bound",
     REQUIRE(observed_backpressure);
 }
 
+TEST_CASE("RealtimePitchTime variable-ratio trajectories stay within the cumulative lag bound",
+          "[signal][pitch-time][streaming][lag-bound]") {
+    std::array<RealtimePitchTimeConfig, 3> configs;
+    configs[0] = stream_config(257);
+    configs[0].quality = PitchTimeQuality::low_latency;
+    configs[0].max_time_ratio = 4.0f;
+    configs[1] = stream_config(513);
+    configs[1].quality = PitchTimeQuality::quality;
+    configs[1].max_time_ratio = 4.0f;
+    configs[2] = stream_config(129);
+    configs[2].quality = PitchTimeQuality::low_latency;
+    configs[2].fft_size = 2048;
+    configs[2].analysis_hop = 128;
+    configs[2].max_time_ratio = 3.0f;
+
+    for (std::size_t index = 0; index < configs.size(); ++index) {
+        const auto continuous = run_variable_lag_trajectory(
+            configs[index], 0x9e3779b9u + static_cast<std::uint32_t>(index), true);
+        const auto pressured = run_variable_lag_trajectory(
+            configs[index], 0x7f4a7c15u + static_cast<std::uint32_t>(index), false);
+        REQUIRE_FALSE(continuous.observed_backpressure);
+        REQUIRE(pressured.observed_backpressure);
+        REQUIRE(continuous.produced > 0);
+        REQUIRE(pressured.produced > 0);
+    }
+}
+
+TEST_CASE("RealtimePitchTime advertised lag is a causal fixed PDC offset",
+          "[signal][pitch-time][streaming][lag-bound]") {
+    auto config = stream_config(257);
+    config.max_time_ratio = 4.0f;
+    RealtimePitchTimeProcessor processor;
+    REQUIRE(processor.prepare(kSampleRate, config) == PitchTimePrepareStatus::prepared);
+    processor.set_time_ratio(1.0f);
+
+    constexpr int input_frames = 8193;
+    const int marked_impulse = processor.input_priming_samples() + 3 * 256 + 17;
+    std::vector<float> input(input_frames, 0.0f);
+    input[0] = 0.25f;
+    input[static_cast<std::size_t>(marked_impulse)] = 1.0f;
+    std::vector<float> scratch(static_cast<std::size_t>(config.max_block), 0.0f);
+    std::vector<float> rendered;
+    rendered.reserve(input.size());
+    float* output_ptrs[] = {scratch.data()};
+
+    const auto drain = [&] {
+        while (processor.available_stretched() > 0) {
+            const int take = std::min(processor.available_stretched(), config.max_block);
+            REQUIRE(processor.read_stretched(output_ptrs, take) == take);
+            rendered.insert(rendered.end(), scratch.begin(), scratch.begin() + take);
+        }
+    };
+    for (int offset = 0; offset < input_frames;) {
+        const int count = std::min(config.max_block, input_frames - offset);
+        const float* input_ptrs[] = {input.data() + offset};
+        auto status = processor.feed(input_ptrs, count);
+        while (status == PitchTimeStreamFeedStatus::backpressure) {
+            drain();
+            status = processor.feed(input_ptrs, count);
+        }
+        REQUIRE(status == PitchTimeStreamFeedStatus::accepted);
+        offset += count;
+        drain();
+    }
+    for (int guard = 0; guard < 100'000; ++guard) {
+        const auto status = processor.finalize(config.max_block);
+        drain();
+        if (status == PitchTimeStreamFinalizeStatus::complete)
+            break;
+        REQUIRE((status == PitchTimeStreamFinalizeStatus::draining
+                 || status == PitchTimeStreamFinalizeStatus::backpressure));
+        REQUIRE(guard < 99'999);
+    }
+    REQUIRE(rendered.size() == input.size());
+
+    const auto peak = static_cast<std::size_t>(std::distance(
+        rendered.begin(), std::max_element(rendered.begin(), rendered.end(),
+                                           [](float lhs, float rhs) {
+                                               return std::abs(lhs) < std::abs(rhs);
+                                           })));
+    REQUIRE(peak == static_cast<std::size_t>(marked_impulse));
+
+    const auto lag = static_cast<std::size_t>(
+        processor.maximum_stream_output_lag_samples());
+    REQUIRE(lag > 0);
+    constexpr auto invalid_index = std::numeric_limits<std::size_t>::max();
+    std::vector<float> delay_line(lag, 0.0f);
+    std::vector<std::size_t> delayed_indices(lag, invalid_index);
+    std::vector<float> pdc_staged;
+    std::vector<std::size_t> staged_indices;
+    pdc_staged.reserve(lag + rendered.size());
+    staged_indices.reserve(lag + rendered.size());
+    std::size_t write = 0;
+    const auto push_delayed = [&](float sample, std::size_t stream_index) {
+        pdc_staged.push_back(delay_line[write]);
+        staged_indices.push_back(delayed_indices[write]);
+        delay_line[write] = sample;
+        delayed_indices[write] = stream_index;
+        write = (write + 1u) % lag;
+    };
+    for (std::size_t frame = 0; frame < rendered.size(); ++frame)
+        push_delayed(rendered[frame], frame);
+    for (std::size_t frame = 0; frame < lag; ++frame)
+        push_delayed(0.0f, invalid_index);
+    REQUIRE(pdc_staged.size() == lag + rendered.size());
+    REQUIRE(staged_indices.size() == pdc_staged.size());
+    REQUIRE(std::all_of(pdc_staged.begin(), pdc_staged.begin() + lag,
+                        [](float sample) { return sample == 0.0f; }));
+    REQUIRE(std::all_of(staged_indices.begin(), staged_indices.begin() + lag,
+                        [](std::size_t index) {
+                            return index == invalid_index;
+                        }));
+    REQUIRE(staged_indices[lag] == 0);
+    REQUIRE(staged_indices[lag + marked_impulse]
+            == static_cast<std::size_t>(marked_impulse));
+    REQUIRE(pdc_staged[lag + peak] == rendered[peak]);
+    REQUIRE(std::distance(
+                pdc_staged.begin(),
+                std::max_element(pdc_staged.begin(), pdc_staged.end(),
+                                 [](float lhs, float rhs) {
+                                     return std::abs(lhs) < std::abs(rhs);
+                                 }))
+            == static_cast<std::ptrdiff_t>(lag + marked_impulse));
+}
+
 TEST_CASE("RealtimePitchTimeProcessor rejects non-positive prepared block capacity",
           "[signal][pitch-time][streaming]") {
     for (const int invalid : {0, -1}) {
@@ -302,7 +623,10 @@ TEST_CASE("RealtimePitchTimeProcessor rejects invalid prepared ratio bounds atom
     REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
             == PitchTimePrepareStatus::prepared);
     const int prepared_capacity = previously_prepared.output_free_space();
+    const int prepared_lag =
+        previously_prepared.maximum_stream_output_lag_samples();
     REQUIRE(prepared_capacity > 0);
+    REQUIRE(prepared_lag > 0);
 
     for (const float invalid : invalid_time_ratios) {
         auto config = stream_config(256);
@@ -316,6 +640,8 @@ TEST_CASE("RealtimePitchTimeProcessor rejects invalid prepared ratio bounds atom
         REQUIRE(previously_prepared.prepare(kSampleRate, config)
                 == PitchTimePrepareStatus::invalid_max_time_ratio);
         REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+        REQUIRE(previously_prepared.maximum_stream_output_lag_samples()
+                == prepared_lag);
     }
 
     const float sample = 0.25f;
@@ -353,6 +679,8 @@ TEST_CASE("RealtimePitchTimeProcessor rejects unrepresentable prepared geometry 
     REQUIRE(previously_prepared.prepare(kSampleRate, stream_config(256))
             == PitchTimePrepareStatus::prepared);
     const int prepared_capacity = previously_prepared.output_free_space();
+    const int prepared_lag =
+        previously_prepared.maximum_stream_output_lag_samples();
 
     auto require_rejected_without_mutation = [&](RealtimePitchTimeConfig config,
                                                  PitchTimePrepareStatus expected) {
@@ -361,6 +689,8 @@ TEST_CASE("RealtimePitchTimeProcessor rejects unrepresentable prepared geometry 
         REQUIRE(fresh.output_free_space() == 0);
         REQUIRE(previously_prepared.prepare(kSampleRate, config) == expected);
         REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+        REQUIRE(previously_prepared.maximum_stream_output_lag_samples()
+                == prepared_lag);
     };
 
     auto pitch_hop_overflow = stream_config(256);
@@ -392,6 +722,8 @@ TEST_CASE("RealtimePitchTimeProcessor rejects unrepresentable prepared geometry 
     REQUIRE(previously_prepared.prepare(std::numeric_limits<double>::infinity(), infinite_rate)
             == PitchTimePrepareStatus::invalid_sample_rate);
     REQUIRE(previously_prepared.output_free_space() == prepared_capacity);
+    REQUIRE(previously_prepared.maximum_stream_output_lag_samples()
+            == prepared_lag);
 
     const float sample = 0.25f;
     const float* source[] = {&sample};
