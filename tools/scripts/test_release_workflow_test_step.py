@@ -404,6 +404,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
         run_block = self._find_step_run("Strip binaries (Unix)")
+        self.assertIn("shell: bash", run_block)
         self.assertIn(
             "release_bins=(build/pulp build/tools/cli/pulp-cpp "
             "build/tools/mcp/pulp-mcp)",

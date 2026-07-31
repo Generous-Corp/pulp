@@ -755,6 +755,7 @@ jobs:
               strip "$bin"
             fi
           done
+        shell: bash
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
