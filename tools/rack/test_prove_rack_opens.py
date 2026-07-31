@@ -40,10 +40,30 @@ def wrong(msg):
     bad += 1
 
 
-def run(patch):
+def run(patch, rack=None):
+    env = dict(os.environ)
+    if rack:
+        env["PROVE_RACK_BIN"] = rack
     r = subprocess.run([sys.executable, str(PROOF), str(patch)],
-                       capture_output=True, text=True, timeout=600)
+                       capture_output=True, text=True, timeout=600, env=env)
     return r.returncode, r.stdout + r.stderr
+
+
+def stub_bin(tmp):
+    """A stand-in that loads the plugin and creates nothing.
+
+    Used where the patch under test would crash or hang a real Rack. It cannot
+    make the case pass by accident: a run that creates no modules fails the
+    comparison anyway, so only the guard firing FIRST produces the expected
+    message.
+    """
+    p = Path(tmp) / "stub_rack.py"
+    p.write_text("#!/usr/bin/env python3\n"
+                 "import sys\nfrom pathlib import Path\n"
+                 "d = sys.argv[sys.argv.index('-u') + 1]\n"
+                 "Path(d, 'log.txt').write_text('Loaded plugin ForgeModular 2.0.0\\n')\n")
+    p.chmod(0o755)
+    return p
 
 
 def main():
@@ -78,9 +98,39 @@ def main():
         else:
             ok("a model the installed plugin does not have is caught")
 
-        # 2..4. What Rack reports, against a stub standing in for Rack.
+        # 2. Two entries sharing one id. This is not hypothetical: an earlier
+        #    version of THIS test built exactly such a patch and opened it,
+        #    and Rack 2.6.6 aborted on teardown -- SIGABRT in
+        #    Engine::removeModule_NoLock, under ~ATTENWidget, with a crash
+        #    report to show for it. Both widgets end up owning the one module
+        #    and the second destructor removes it twice. So the checker must
+        #    refuse WITHOUT opening it, the same way it refuses an
+        #    uninstalled model: finding out by asking crashes the program
+        #    being asked.
+        d = json.loads(json.dumps(doc))
+        dup = json.loads(json.dumps(d["modules"][0]))
+        dup["pos"] = [20, 0]
+        d["modules"].append(dup)          # same id as the original
+        p = Path(tmp) / "dup.vcv"
+        p.write_text(json.dumps(d))
+        # Through a stub, never the real Rack. If the guard ever regresses,
+        # this case opens the patch -- and opening it ABORTS Rack, which is
+        # what it is testing for. Proving the control by crashing the program
+        # is a cost that does not need paying twice; a real crash report came
+        # out of doing exactly that.
+        rc, out = run(p, rack=str(stub_bin(tmp)))
+        if rc == 0:
+            wrong("a patch with duplicate module ids PASSED")
+        elif "duplicate module ids" not in out:
+            wrong(f"it failed, but not for the right reason:\n{out}")
+        elif "not opened" not in out:
+            wrong("it was caught, but only AFTER opening it — which aborts Rack")
+        else:
+            ok("duplicate module ids are caught without opening Rack")
+
+        # 3..5. What Rack reports, against a stub standing in for Rack.
         #
-        # The other direction -- the patch names a module and Rack does not
+        # The remaining direction -- the patch names a module and Rack does not
         # create it -- cannot be provoked from a patch file: a real Rack either
         # creates the module or blocks on a dialog, and the blocking case is
         # already covered above without starting it. So the comparison itself

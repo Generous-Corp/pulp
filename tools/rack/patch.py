@@ -708,8 +708,14 @@ def lint(patch: dict, inv: dict) -> list[str]:
 
     if not mods:
         errs.append("patch has no modules")
+    # Not merely "cables would be ambiguous". Rack builds a widget per entry
+    # and both widgets end up owning the one module, so on teardown the second
+    # ModuleWidget destructor calls Engine::removeModule for a module already
+    # removed and the assertion in removeModule_NoLock aborts the process.
+    # Observed as a SIGABRT crash report from Rack 2.6.6 (ATTENWidget
+    # destructor) after a hand-made patch duplicated one entry.
     if len(set(ids)) != len(ids):
-        errs.append("duplicate module ids — Rack keys cables by id")
+        errs.append("duplicate module ids — Rack ABORTS on these")
 
     # An input takes ONE cable. Rack silently keeps the last and drops the
     # rest, so a patch can lint clean, make sound, and still not do what it

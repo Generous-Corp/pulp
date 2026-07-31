@@ -106,6 +106,8 @@ def main(argv):
                        if m["plugin"] == "ForgeModular" and m["model"] in names)
         unknown = [m["model"] for m in doc["modules"]
                    if m["plugin"] == "ForgeModular" and m["model"] not in names]
+        ids = [m.get("id") for m in doc["modules"]]
+        duplicate_ids = len(set(ids)) != len(ids)
         # Answered WITHOUT starting Rack, deliberately. Rack blocks on a modal
         # error dialog -- even headless -- when a patch names a module its
         # installed plugin does not have, so asking it would hang this checker
@@ -116,6 +118,18 @@ def main(argv):
             print(f"{patch.name:24} {sum(want.values()):2} modules  MISMATCH")
             print(f"    the installed plugin has no such model: {unknown}")
             print("    not opened: Rack would block on an error dialog")
+            bad.append(patch.name)
+            continue
+
+        # Also answered without starting Rack. Two entries sharing an id give
+        # both widgets the one module, and the second ModuleWidget destructor
+        # calls Engine::removeModule for a module already removed -- the
+        # assertion in removeModule_NoLock aborts Rack on teardown. Opening
+        # such a patch to find out crashes the program we are asking.
+        if duplicate_ids:
+            print(f"{patch.name:24} {sum(want.values()):2} modules  MISMATCH")
+            print("    duplicate module ids — Rack would abort on teardown")
+            print("    not opened")
             bad.append(patch.name)
             continue
 
