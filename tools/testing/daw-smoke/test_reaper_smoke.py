@@ -370,8 +370,11 @@ class EditorBuildMode(unittest.TestCase):
         args = argparse.Namespace(
             mode="editor-build", plugin_name="Forge Modular",
             plugin_path=__file__, format="clap", timeout=30)
+        # Past the opt-in gate, which is checked first and tested separately.
         real = os.path.expanduser
-        with mock.patch.object(rs.os.path, "expanduser",
+        with mock.patch.dict(os.environ,
+                             {"PULP_DAW_SMOKE_DRIVE_MY_SCREEN": "1"}), \
+             mock.patch.object(rs.os.path, "expanduser",
                                side_effect=lambda p: "/tmp/definitely-no-helper"
                                if "uidriver" in p else real(p)):
             rc = rs.run_editor_build_mode(pathlib.Path("/tmp/reaper"), args)
