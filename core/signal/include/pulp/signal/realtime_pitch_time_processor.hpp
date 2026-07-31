@@ -95,6 +95,7 @@ public:
         sample_rate_ = sample_rate;
         fft_size_ = geometry.fft_size;
         analysis_hop_ = geometry.analysis_hop;
+        maximum_stream_output_lag_samples_ = geometry.maximum_stream_output_lag_samples;
         engine_.prepare(geometry.engine_config);
 
         coordinator_.prepare(fft_size_, config.channels);
@@ -292,6 +293,12 @@ public:
     /// zero is aligned to input sample zero.
     int input_priming_samples() const { return fft_size_ + analysis_hop_; }
     int output_alignment_samples() const { return 0; }
+    /// Admission-time causal stream delay bound in output samples for every
+    /// ratio accepted by set_time_ratio(). A fixed-latency driver may stage by
+    /// this amount without deriving DSP geometry itself.
+    int maximum_stream_output_lag_samples() const noexcept {
+        return maximum_stream_output_lag_samples_;
+    }
 
     /// Samples remaining before the next analysis frame completes. This is
     /// exposed for finite-stream drivers that must apply control changes at
@@ -697,6 +704,7 @@ private:
     std::int64_t input_count_ = 0;
     int offset_in_block_ = 0;
     int max_synthesis_hop_ = 0;
+    int maximum_stream_output_lag_samples_ = 0;
     bool input_closed_ = false;
     std::int64_t final_input_count_ = 0;
     std::int64_t final_output_limit_ = -1;

@@ -143,7 +143,145 @@ void advance_to_final_buffer(RealtimePitchTimeProcessor& processor) {
     FAIL("finite stream did not reach its final buffered output");
 }
 
+bool stream_lag_stays_within_prepared_bound(int max_block, float admitted_ratio,
+                                            float active_ratio) {
+    auto config = stream_config(max_block);
+    config.max_time_ratio = admitted_ratio;
+    RealtimePitchTimePreparedGeometry<float> geometry;
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                config, 1.0, std::numeric_limits<std::uint64_t>::max(), geometry)
+            == PitchTimePrepareStatus::prepared);
+
+    RealtimePitchTimeProcessor processor;
+    REQUIRE(processor.prepare(kSampleRate, config) == PitchTimePrepareStatus::prepared);
+    REQUIRE(processor.maximum_stream_output_lag_samples()
+            == geometry.maximum_stream_output_lag_samples);
+    processor.set_time_ratio(active_ratio);
+
+    constexpr std::int64_t input_frames = 12'037;
+    std::vector<float> input(static_cast<std::size_t>(max_block), 0.0f);
+    std::vector<float> output(static_cast<std::size_t>(max_block), 0.0f);
+    const float* input_ptrs[] = {input.data()};
+    float* output_ptrs[] = {output.data()};
+    const std::array<int, 7> requested{1, 17, 3, 251, 29, 7, 113};
+    std::int64_t accepted = 0;
+    std::int64_t drained = 0;
+    std::size_t request_index = 0;
+    bool observed_backpressure = false;
+
+    const auto require_bound = [&] {
+        const auto produced = drained + processor.available_stretched();
+        const auto ideal = static_cast<std::int64_t>(
+            std::ceil(static_cast<long double>(accepted)
+                      * static_cast<long double>(active_ratio)));
+        REQUIRE(std::max<std::int64_t>(0, ideal - produced)
+                <= geometry.maximum_stream_output_lag_samples);
+    };
+
+    while (accepted < input_frames) {
+        const auto wanted = std::min<std::int64_t>(
+            std::min(requested[request_index++ % requested.size()], max_block),
+            input_frames - accepted);
+        const auto status = processor.feed(input_ptrs, static_cast<int>(wanted));
+        if (status == PitchTimeStreamFeedStatus::accepted) {
+            accepted += wanted;
+            require_bound();
+            continue;
+        }
+        REQUIRE(status == PitchTimeStreamFeedStatus::backpressure);
+        observed_backpressure = true;
+        const int take = std::min(processor.available_stretched(), max_block);
+        REQUIRE(take > 0);
+        REQUIRE(processor.read_stretched(output_ptrs, take) == take);
+        drained += take;
+        require_bound();
+    }
+
+    const auto final_output = static_cast<std::int64_t>(
+        std::llround(static_cast<long double>(accepted)
+                     * static_cast<long double>(active_ratio)));
+    for (int guard = 0; guard < 100'000; ++guard) {
+        const int available = processor.available_stretched();
+        if (available > 0) {
+            const int take = std::min(available, max_block);
+            REQUIRE(processor.read_stretched(output_ptrs, take) == take);
+            drained += take;
+        }
+        REQUIRE(std::max<std::int64_t>(
+                    0, final_output - drained - processor.available_stretched())
+                <= geometry.maximum_stream_output_lag_samples);
+        const auto status = processor.finalize(max_block);
+        REQUIRE(status != PitchTimeStreamFinalizeStatus::invalid_mode);
+        REQUIRE(status != PitchTimeStreamFinalizeStatus::invalid_request);
+        if (status == PitchTimeStreamFinalizeStatus::complete) {
+            REQUIRE(processor.available_stretched() == 0);
+            REQUIRE(drained == final_output);
+            return observed_backpressure;
+        }
+    }
+    FAIL("time-stretch finalization did not converge");
+    return observed_backpressure;
+}
+
 } // namespace
+
+TEST_CASE("RealtimePitchTime geometry exposes a checked causal stream lag bound",
+          "[signal][pitch-time][streaming]") {
+    for (const auto quality : {PitchTimeQuality::low_latency, PitchTimeQuality::quality}) {
+        for (const float maximum_ratio : {1.0f, 1.0001f, 2.0f, 4.0f}) {
+            auto config = stream_config(37);
+            config.quality = quality;
+            config.max_time_ratio = maximum_ratio;
+            RealtimePitchTimePreparedGeometry<float> geometry;
+            REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                        config, 1.0, std::numeric_limits<std::uint64_t>::max(), geometry)
+                    == PitchTimePrepareStatus::prepared);
+            const auto expected = static_cast<int>(std::ceil(
+                static_cast<long double>(geometry.fft_size + geometry.analysis_hop)
+                    * static_cast<long double>(maximum_ratio)
+                + static_cast<long double>(geometry.engine_config.max_synthesis_hop)));
+            REQUIRE(geometry.maximum_stream_output_lag_samples == expected);
+            REQUIRE(geometry.maximum_stream_output_lag_samples > 0);
+        }
+    }
+
+    auto realtime = stream_config(37);
+    realtime.mode = PitchTimeMode::realtime_pitch;
+    RealtimePitchTimePreparedGeometry<float> realtime_geometry;
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                realtime, 2.0, std::numeric_limits<std::uint64_t>::max(), realtime_geometry)
+            == PitchTimePrepareStatus::prepared);
+    REQUIRE(realtime_geometry.maximum_stream_output_lag_samples == 0);
+
+    RealtimePitchTimePreparedGeometry<float> sentinel;
+    sentinel.maximum_stream_output_lag_samples = 12345;
+    for (const float invalid : {0.5f, std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::infinity()}) {
+        auto config = stream_config(37);
+        config.max_time_ratio = invalid;
+        REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                    config, 1.0, std::numeric_limits<std::uint64_t>::max(), sentinel)
+                == PitchTimePrepareStatus::invalid_max_time_ratio);
+        REQUIRE(sentinel.maximum_stream_output_lag_samples == 12345);
+    }
+    auto overflow = stream_config(37);
+    overflow.max_time_ratio = std::numeric_limits<float>::max();
+    REQUIRE(checked_realtime_pitch_time_prepared_geometry(
+                overflow, 1.0, std::numeric_limits<std::uint64_t>::max(), sentinel)
+            == PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(sentinel.maximum_stream_output_lag_samples == 12345);
+}
+
+TEST_CASE("RealtimePitchTime causal stream lag stays within prepared bound",
+          "[signal][pitch-time][streaming]") {
+    bool observed_backpressure = false;
+    for (const int max_block : {1, 37, 256}) {
+        for (const float ratio : {0.25f, 0.999f, 1.0f, 1.75f, 4.0f})
+            observed_backpressure |= stream_lag_stays_within_prepared_bound(
+                max_block, 4.0f, ratio);
+    }
+    REQUIRE(observed_backpressure);
+}
 
 TEST_CASE("RealtimePitchTimeProcessor rejects non-positive prepared block capacity",
           "[signal][pitch-time][streaming]") {

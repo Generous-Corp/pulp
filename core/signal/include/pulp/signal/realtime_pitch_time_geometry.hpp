@@ -84,6 +84,11 @@ struct RealtimePitchTimePreparedGeometry {
     int fft_size = 0;
     int analysis_hop = 0;
     int ring_size = 0;
+    /// Conservative output-domain delay required by a causal time-stretch
+    /// stream over the complete admitted ratio range [1 / max_time_ratio,
+    /// max_time_ratio]. This includes analysis priming and one worst-case
+    /// hop-quantized publication interval. Zero outside time_stretch mode.
+    int maximum_stream_output_lag_samples = 0;
     std::uint64_t stretch_ring_elements = 0;
     std::uint64_t drain_elements = 0;
     std::uint64_t finalize_zero_elements = 0;
@@ -98,6 +103,9 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
     std::uint64_t requested_max_bytes,
     RealtimePitchTimePreparedGeometry<SampleType>& prepared) noexcept {
     const auto target_max_bytes = std::min(requested_max_bytes, kTargetAddressMaximumBytes);
+    if (config.mode == PitchTimeMode::time_stretch
+        && (!std::isfinite(config.max_time_ratio) || config.max_time_ratio < 1.0f))
+        return PitchTimePrepareStatus::invalid_max_time_ratio;
     const bool quality = config.quality == PitchTimeQuality::quality;
     int fft_size = quality ? 4096 : 1024;
     int analysis_hop = quality ? 512 : 256;
@@ -124,6 +132,22 @@ PitchTimePrepareStatus checked_realtime_pitch_time_prepared_geometry(
     candidate.engine_config = {fft_size, analysis_hop, config.channels,
                                std::max(config.max_block, analysis_hop),
                                static_cast<int>(synthesis_hop)};
+    if (config.mode == PitchTimeMode::time_stretch) {
+        // A causal driver cannot publish final output until the spectral
+        // analysis window has advanced through its priming span. Once primed,
+        // output is published in synthesis-hop quanta, so reserve one complete
+        // maximum hop beyond that span. Express the result in output samples:
+        // the upper symmetric ratio endpoint is the worst case.
+        const long double lag =
+            static_cast<long double>(fft_size + analysis_hop)
+                * static_cast<long double>(config.max_time_ratio)
+            + static_cast<long double>(candidate.engine_config.max_synthesis_hop);
+        if (!std::isfinite(lag)
+            || lag > static_cast<long double>(std::numeric_limits<int>::max()))
+            return PitchTimePrepareStatus::unrepresentable_capacity;
+        candidate.maximum_stream_output_lag_samples =
+            static_cast<int>(std::ceil(lag));
+    }
     const auto engine_geometry = checked_spectral_frame_engine_geometry<SampleType>(
         candidate.engine_config, target_max_bytes);
     if (!engine_geometry) return PitchTimePrepareStatus::unrepresentable_capacity;
