@@ -465,6 +465,38 @@ before `t`" — two binary searches against that layout, versus a scan over ever
 event of every stream if lanes were flattened into one interleaved list.
 Flattening them is the change that quietly makes seeking O(n).
 
+### A new owned identity has to be added to *two* walks, and neither one checks the other
+
+`id_remap.cpp` enumerates what a clip owns **twice, independently**:
+
+- `allocate_clip_owned()` — a hand-written walk that issues the destination
+  identities. This is the one a clip-level copy depends on.
+- `visit_clip_owned_identities()` (`owned_identity_traversal.hpp`) — the
+  canonical traversal, reached through `append_clip_ids()` / `owned_sequence_ids()`.
+  It feeds preflight's duplicate check, the identity index that `Project::create`
+  and serialization build, and the size check in the carried-id
+  `remap_ids(Sequence, carried_ids, fixups)` overload.
+
+Nothing structurally ties them together, so adding a kind to one and missing the
+other fails in a different place than you would guess, and each failure mode is
+quiet in its own way. Miss the allocation walk and a copy loses the new objects.
+Miss the traversal and the copy looks correct while the new identities never
+reach preflight's duplicate check or the identity index — and a carried-id
+transfer then fails with `InvalidIdentityTransition` naming a size mismatch,
+nowhere near the kind that caused it. A test that copies a clip proves only the
+first walk; replaying one walk's table through the other's size check is what
+covers both.
+
+Two more places a new `ItemKind` must land, neither of which the compiler will
+point at: `restore_identities()` in `model.cpp` recomputes `parent_id` from
+`(sequence, track, clip)` for every kind **except** an explicit
+`AutomationPoint / Take / Slot` list, so any kind whose parent is a *lane* has to
+join that list or every document carrying it fails to deserialize with
+`ModelRejected` at `/data/identities` — an error that names no kind at all. And
+`item_kind_name()` / the decode parser are two hand-maintained tables that must
+gain the same spelling; the encoder's `switch` is exhaustive and will complain,
+but the decoder's `if`-chain silently returns a failure for the unknown name.
+
 ## Editing contracts
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
