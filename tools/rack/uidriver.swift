@@ -66,9 +66,14 @@ func click(x: Double, y: Double) {
 }
 
 func type(_ text: String) {
-    // In chunks, because setUnicodeString takes a bounded buffer and a long
-    // prompt silently loses its tail otherwise.
-    for chunk in Array(text).chunked(into: 16) {
+    // In SMALL chunks, slowly. setUnicodeString takes a bounded buffer, and
+    // posting the pieces back to back drops characters: a prompt typed as
+    // "a classic subtractive voice with a filter envelope" arrived as
+    // "a classic subtractive voice withpe" -- the middle simply gone, and the
+    // run then built something nobody asked for. The receiving app coalesces
+    // events that arrive faster than it drains them, so the fix is to give it
+    // time rather than to send more.
+    for chunk in Array(text).chunked(into: 8) {
         let piece = String(chunk)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
@@ -77,9 +82,9 @@ func type(_ text: String) {
         down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
         up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
         down.post(tap: .cghidEventTap)
-        usleep(8_000)
+        usleep(25_000)
         up.post(tap: .cghidEventTap)
-        usleep(8_000)
+        usleep(25_000)
     }
 }
 
