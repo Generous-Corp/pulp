@@ -79,8 +79,17 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
   `reaper.ini` `vstpath`/`clap_path`), never `~/Library/Audio/Plug-Ins`. AU can't be
   scanned from a custom path, so `--format au` installs to the real Components folder
   and MUST uninstall on exit. Cleanup ALWAYS runs (finally): kill REAPER, rm temp
-  dirs, uninstall AU. Prefer VST3/CLAP — the reload path is format-agnostic (shared
-  editor pump), so they validate the same code the owner runs as AU in Logic.
+  dirs, uninstall AU.
+- **The temp-path scan does not actually work — `--format au` is the only lane that
+  tests anything.** Measured 2026-07-30 on REAPER/macOS arm64: REAPER **ignores** the
+  `vstpath`/`clap_path` keys written into the portable `reaper.ini`. It scanned the
+  real plugin folders instead (124 CLAP + 104 VST3 entries in the portable caches)
+  and never looked at the staged copy, so the bundle under test is absent from the
+  scan cache and the FX is never found. Because a not-found FX is INCONCLUSIVE rather
+  than FAIL, this degrades **silently**: the run reports "flaky launch" forever while
+  testing nothing. Confirm a CLAP/VST3 run really scanned your plugin by grepping the
+  portable `reaper-clap-*.ini` / `reaper-vstplugins_*.ini` for its name before
+  believing any verdict. Until the key names are fixed, use `--format au`.
 - **SKIP is never PASS.** Exit codes: 0 PASS / 1 FAIL / 2 SKIP (REAPER absent) /
   3 INCONCLUSIVE. A gate must treat SKIP/INCONCLUSIVE as not-passed.
 - **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
