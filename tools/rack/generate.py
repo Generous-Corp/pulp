@@ -30,51 +30,21 @@ import tempfile
 
 
 def find_claude() -> str:
-    """Locate the `claude` binary without relying on PATH.
+    """Where `claude` is, asked of the one place that knows.
 
-    An app launched from Finder does not inherit a shell's PATH, so ~/.local/bin
-    is absent and the model call dies instantly with
-    FileNotFoundError: 'claude' -- a build that looks like it gave up. Every
-    generation that worked during development was launched from a terminal,
-    which is exactly the environment a user does not have.
+    There were two answers to this before toolpaths.py, and they drifted --
+    which is how the module builder came to have its own copy that silently
+    returned the bare string "claude" when it found nothing. Launched from a
+    host, where there is no PATH to search, that reached the user as a raw
+    `FileNotFoundError: 'claude'` traceback in the plugin's own window.
+
+    Resolved lazily, at the call, not at import: a module-level lookup runs
+    before the process has an environment worth searching.
     """
-    override = os.environ.get("FORGE_CLAUDE_BIN")
-    if override:
-        return override
-    found = shutil.which("claude")
-    if found:
-        return found
-    # Codex CLI drives the same generator with its own PATH, and a shim may be
-    # the only "claude" on it. Honour an explicit Codex binary before falling
-    # back to fixed locations, so a run launched from either agent resolves
-    # something real rather than dying on FileNotFoundError.
-    for env in ("FORGE_CODEX_BIN", "CODEX_BIN"):
-        candidate = os.environ.get(env)
-        if candidate and os.path.exists(candidate):
-            return candidate
-    for name in ("codex",):
-        found = shutil.which(name)
-        if found:
-            return found
-    home = os.path.expanduser("~")
-    for candidate in (f"{home}/.local/bin/claude",
-                      "/opt/homebrew/bin/claude",
-                      "/usr/local/bin/claude",
-                      f"{home}/.claude/local/claude"):
-        if os.path.exists(candidate):
-            return candidate
-    return "claude"   # let the failure name it, rather than guessing further
+    import toolpaths
+    return toolpaths.find_claude()
 
 
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-PACK = os.path.join(ROOT, "examples", "forge-modular")
-CONTRACT = os.path.join(HERE, "prompt", "module_contract.md")
-EMITTER = os.path.join(HERE, "forge_modular.py")
-
-SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
-CLAUDE = find_claude()
 RACK_APP = "/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack"
 PLUGIN_DIR = os.path.expanduser(
     "~/Library/Application Support/Rack2/plugins-mac-arm64")
@@ -114,7 +84,12 @@ def ask_model(prompt: str, retry_context: str | None = None) -> str:
             "Return the two blocks again, corrected. Do not explain.\n\n"
             "```\n" + retry_context[:6000] + "\n```")
     full = "\n".join(parts)
-    r = subprocess.run([CLAUDE, "-p", full], capture_output=True, text=True, timeout=600)
+    # The enriched environment matters twice over: to find `claude` at all,
+    # and because claude runs its own plugin hooks with `node`, which a host-
+    # launched process has no PATH to find either.
+    import toolpaths
+    r = subprocess.run([find_claude(), "-p", full], capture_output=True,
+                       text=True, timeout=600, env=toolpaths.tool_env())
     if r.returncode != 0:
         raise SystemExit(f"model call failed ({r.returncode}): {r.stderr[:500]}")
     return r.stdout
