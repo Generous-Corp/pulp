@@ -1207,7 +1207,7 @@ commands:
 
   - name: trace
     status: experimental
-    summary: Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing protocol. Requires a running inspector with the tracing server enabled, then starts/stops a session, runs SQL over the captured `.pftrace`, runs L0 preset queries, and asks for a one-shot narrated root cause from a terminal.
+    summary: Experimental source-checkout wrappers for live `Trace.startSession` / `Trace.stopSession` capture plus offline `query --trace` analysis. Live SQL, named presets, and `Trace.explain` are reserved and currently return `capability_unavailable`.
     args:
       - name: --session
         kind: option

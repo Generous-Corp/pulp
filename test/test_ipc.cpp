@@ -1842,6 +1842,113 @@ TEST_CASE("IPC disconnect callback reconnect starts the replacement reader",
     second_server.stop();
 }
 
+TEST_CASE("IPC EOF reconnect teardown waits for the replacement reader",
+          "[events][ipc][socket][lifecycle][reentrant][owner-lifetime]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    auto client = std::make_unique<InterprocessConnection>();
+    std::mutex mutex;
+    std::condition_variable cv;
+    int disconnect_count = 0;
+    bool reconnected = false;
+    bool replacement_callback_entered = false;
+    bool release_replacement_callback = false;
+    bool destructor_started = false;
+    bool destructor_finished = false;
+
+    client->set_on_disconnected([&] {
+        bool reconnect = false;
+        {
+            std::lock_guard lock(mutex);
+            ++disconnect_count;
+            reconnect = disconnect_count == 1;
+        }
+        if (reconnect) {
+            const auto connected = client->connect(
+                "127.0.0.1:" + std::to_string(*second_port),
+                IpcTransport::Socket);
+            {
+                std::lock_guard lock(mutex);
+                reconnected = connected;
+            }
+            cv.notify_all();
+        }
+    });
+    client->set_on_text_message([&](std::string_view message) {
+        if (message != "hold-replacement") return;
+        std::unique_lock lock(mutex);
+        replacement_callback_entered = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release_replacement_callback; });
+    });
+    REQUIRE(client->connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+    {
+        std::unique_lock lock(first_server.mutex);
+        REQUIRE(first_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return first_server.accepted != nullptr; }));
+    }
+    first_server.accepted->disconnect();
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return reconnected;
+        }));
+    }
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return second_server.accepted != nullptr; }));
+    }
+    REQUIRE(second_server.accepted->send_message("hold-replacement"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return replacement_callback_entered;
+        }));
+    }
+
+    std::thread destroyer([&] {
+        {
+            std::lock_guard lock(mutex);
+            destructor_started = true;
+        }
+        cv.notify_all();
+        client.reset();
+        {
+            std::lock_guard lock(mutex);
+            destructor_finished = true;
+        }
+        cv.notify_all();
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return destructor_started;
+        }));
+        CHECK_FALSE(cv.wait_for(
+            lock, std::chrono::milliseconds(100),
+            [&] { return destructor_finished; }));
+        release_replacement_callback = true;
+    }
+    cv.notify_all();
+    destroyer.join();
+    CHECK(destructor_finished);
+
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
 TEST_CASE("IPC disconnect callback may destroy its own connection",
           "[events][ipc][socket][owner-lifetime][lifecycle]") {
     CapturingServer server;

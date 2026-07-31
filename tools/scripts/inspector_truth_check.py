@@ -266,9 +266,9 @@ REQUIRED_SECURITY_CONTRACTS = {
         "std::shared_ptr<Impl> impl_",
     ),
     "core/events/src/interprocess_connection.cpp": (
-        "bool read_running = false",
+        "std::unordered_set<std::thread::id> read_thread_ids",
         "const auto impl = impl_",
-        "return !lifecycle->read_running",
+        "readers_to_wait_for == 0",
         "read_thread.detach()",
         "if (!runtime::AliveToken::is_alive(alive))",
     ),

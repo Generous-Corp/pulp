@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_set>
 
 namespace pulp::events {
 
@@ -23,10 +24,9 @@ struct DisconnectLifecycle {
     std::mutex mutex;
     std::condition_variable cv;
     bool active = false;
-    bool read_running = false;
     bool destruction_requested = false;
     std::thread::id owner;
-    std::thread::id read_thread_id;
+    std::unordered_set<std::thread::id> read_thread_ids;
 };
 
 void encode_u32_le(uint32_t value, uint8_t* out) {
@@ -282,7 +282,8 @@ void InterprocessConnection::disconnect_impl(bool destroying) {
             if (lifecycle->owner == caller) {
                 return;
             }
-            if (lifecycle->read_thread_id == caller) {
+            if (lifecycle->read_thread_ids.find(caller) !=
+                lifecycle->read_thread_ids.end()) {
                 if (!destroying)
                     return;
                 // The active owner may be waiting for this read thread. Signal
@@ -317,12 +318,16 @@ void InterprocessConnection::disconnect_impl(bool destroying) {
     impl->interrupt_blocking_io();
     {
         std::unique_lock lifecycle_lock(lifecycle->mutex);
-        if (lifecycle->read_thread_id != caller) {
-            lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
-                return !lifecycle->read_running ||
-                       lifecycle->destruction_requested;
-            });
-        }
+        lifecycle->cv.wait(lifecycle_lock, [&lifecycle, caller] {
+            const auto caller_is_reader =
+                lifecycle->read_thread_ids.find(caller) !=
+                lifecycle->read_thread_ids.end();
+            const auto readers_to_wait_for =
+                lifecycle->read_thread_ids.size() -
+                static_cast<std::size_t>(caller_is_reader);
+            return readers_to_wait_for == 0 ||
+                   lifecycle->destruction_requested;
+        });
     }
     std::unique_lock write_lock(impl->write_mutex);
     impl->close();
@@ -491,13 +496,11 @@ void InterprocessConnection::start_read_thread(
         read_loop();
         {
             std::lock_guard lifecycle_lock(lifecycle->mutex);
-            lifecycle->read_running = false;
-            lifecycle->read_thread_id = {};
+            lifecycle->read_thread_ids.erase(std::this_thread::get_id());
         }
         lifecycle->cv.notify_all();
     });
-    lifecycle->read_running = true;
-    lifecycle->read_thread_id = read_thread.get_id();
+    lifecycle->read_thread_ids.insert(read_thread.get_id());
     read_thread.detach();
     start_gate->store(true, std::memory_order_release);
 }

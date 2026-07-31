@@ -156,9 +156,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "core/events/include/pulp/events/interprocess_connection.hpp":
                 "std::shared_ptr<Impl> impl_\n",
             "core/events/src/interprocess_connection.cpp":
-                "bool read_running = false\n"
+                "std::unordered_set<std::thread::id> read_thread_ids\n"
                 "const auto impl = impl_\n"
-                "return !lifecycle->read_running\n"
+                "readers_to_wait_for == 0\n"
                 "read_thread.detach()\n"
                 "if (!runtime::AliveToken::is_alive(alive))\n",
             "test/test_ipc.cpp":
