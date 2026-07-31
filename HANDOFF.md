@@ -28,7 +28,8 @@ and what will bite whoever picks it up.
   `FgMd`); Gatekeeper accepts on a machine that did not build them; the
   toolchain proves itself there — 54 idioms, 114 negative controls, 0 wrong.
 - **Step 7, partly.** On the M5: AU, VST3 and CLAP all installed with verifying
-  signatures. Locally: CLI PASS — a patch generated and held its idiom.
+  signatures. Locally: CLI PASS — a patch generated and held its idiom. The
+  M5's CLI does NOT pass; see item 1.
 - **The dozen prompts**: 6 held, 6 did not. All 12 now RESOLVE to an idiom,
   where 2 previously matched nothing. Kept at
   `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt`.
@@ -37,10 +38,25 @@ and what will bite whoever picks it up.
 
 ## What is left
 
-1. **The M5 CLI proof was re-run and its result never read.** The run before it
-   failed on a PATH problem that is now fixed (`toolpaths.py`); the re-run was
-   interrupted. Just run it again:
-   `ssh m5 'cd ~/Library/Application\ Support/Forge\ Modular/tools/rack && bash ./prove_surfaces.sh cli'`
+1. **The M5 CLI still fails, and it is NOT the PATH bug.** That one is fixed:
+   the re-run got past `node: command not found`. It now fails as
+
+       model call failed:
+
+   with **empty stderr** — the `claude` CLI exiting non-zero and saying
+   nothing. Untouched and undiagnosed; do not assume it is the same problem
+   wearing a new hat.
+
+   Worth trying first, in this order: run `claude -p hello` over SSH on the M5
+   by hand and see what it says; check whether it needs an interactive login or
+   a credential this session does not have; compare `claude` version there
+   against the machine where the same command works. Reproduce:
+
+       ssh m5 'cd ~/Library/Application\ Support/Forge\ Modular/tools/rack && bash ./prove_surfaces.sh cli'
+
+   Note the generator swallows the CLI's own stderr into that one line, which
+   is why the message is empty. Fixing the reporting is probably the cheapest
+   route to the cause.
 
 2. **REAPER on the M5, with a person watching.** Load AU, VST3 and CLAP, open
    each editor, generate from inside one. This is the part `prove_surfaces.sh`
