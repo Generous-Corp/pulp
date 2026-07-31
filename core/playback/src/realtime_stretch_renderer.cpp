@@ -342,14 +342,14 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
     const bool force_allocation_failure = impl_ && impl_->fail_prepare_allocation_for_test;
     if (impl_)
         impl_->fail_prepare_allocation_for_test = false;
-    try {
 #if defined(__cpp_exceptions)
+    try {
         if (force_allocation_failure)
             throw std::bad_alloc{};
 #else
-        if (force_allocation_failure)
-            return {RealtimeStretchStateBankError::AllocationFailed, {}, 0, 0, 0,
-                    signal::PitchTimePrepareStatus::prepared};
+    if (force_allocation_failure)
+        return {RealtimeStretchStateBankError::AllocationFailed, {}, 0, 0, 0,
+                signal::PitchTimePrepareStatus::prepared};
 #endif
         auto candidate = std::make_unique<Impl>();
         candidate->generation = program.generation();
@@ -487,10 +487,12 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
         impl_ = std::move(candidate);
         aggregate.reserved_state_bytes = impl_->reserved_bytes;
         return aggregate;
+#if defined(__cpp_exceptions)
     } catch (...) {
         return {RealtimeStretchStateBankError::AllocationFailed, {}, 0, 0, 0,
                 signal::PitchTimePrepareStatus::prepared};
     }
+#endif
 }
 
 RealtimeStretchRenderCode RealtimeStretchProgramRuntime::preflight_track(
