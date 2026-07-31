@@ -378,3 +378,281 @@ TEST_CASE("simulate_drag delivers every drag tick on the modern and JS channels"
     CHECK_THAT(spy->last_drag.x, WithinAbs(40.0f, 1e-3f));
     CHECK_THAT(spy->last_drag.y, WithinAbs(20.0f, 1e-3f));
 }
+
+// ── The simulator can describe a pointer that is not a mouse ────────────────
+//
+// Every synthesized event used to leave `pointer_type` at mouse, `pressure` at
+// 0.5, `modifiers` at 0, `button` at left and `pointer_id` at 0, and the press
+// and release verbs took no device arguments at all — only the drag verb did.
+// So "a touch and a mouse produce the same transaction" was unfalsifiable
+// headlessly (the press, where widgets latch, always said mouse), and
+// multi-touch was unreachable: the arbiter keys sessions on `pointer_id` and
+// the pinch/rotate recognizers key their touch maps on it, but nothing could
+// drive a second id.
+namespace {
+
+// Captures the MouseEvent each phase arrives with, on the modern channel.
+struct DeviceSpy final : View {
+    std::vector<MouseEvent> presses, drags, releases;
+    int legacy_downs = 0, legacy_ups = 0;
+
+    void on_mouse_event(const MouseEvent& e) override {
+        if (e.phase == MousePhase::press) presses.push_back(e);
+        else if (e.phase == MousePhase::drag) drags.push_back(e);
+        else if (e.phase == MousePhase::release) releases.push_back(e);
+    }
+    void on_mouse_down(Point) override { ++legacy_downs; }
+    void on_mouse_up(Point) override { ++legacy_ups; }
+};
+
+DeviceSpy& add_device_spy(View& root) {
+    auto child = std::make_unique<DeviceSpy>();
+    DeviceSpy* spy = child.get();
+    spy->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+    return *spy;
+}
+
+}  // namespace
+
+TEST_CASE("simulate_click reports the given device on the press channel",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    View::SimulatedPointer touch;
+    touch.type = PointerType::touch;
+    touch.pressure = 0.75f;
+    touch.pointer_id = 3;
+    root.simulate_click({60, 60}, touch);
+
+    REQUIRE(spy.presses.size() == 1);
+    CHECK(spy.presses[0].pointer_type == PointerType::touch);
+    CHECK(spy.presses[0].isTouch());
+    CHECK_THAT(spy.presses[0].pressure, WithinAbs(0.75f, 1e-6f));
+    CHECK(spy.presses[0].pointer_id == 3);
+}
+
+TEST_CASE("simulate_click reports the given device on the release channel",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    View::SimulatedPointer pen;
+    pen.type = PointerType::pen;
+    pen.pressure = 0.25f;
+    pen.pointer_id = 2;
+    root.simulate_click({60, 60}, pen);
+
+    REQUIRE(spy.releases.size() == 1);
+    CHECK(spy.releases[0].pointer_type == PointerType::pen);
+    CHECK(spy.releases[0].isPen());
+    CHECK_THAT(spy.releases[0].pressure, WithinAbs(0.25f, 1e-6f));
+    CHECK(spy.releases[0].pointer_id == 2);
+}
+
+TEST_CASE("simulate_drag reports the given device on every phase",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    View::SimulatedPointer touch;
+    touch.type = PointerType::touch;
+    touch.pressure = 0.9f;
+    touch.pointer_id = 5;
+    root.simulate_drag({40, 40}, {120, 40}, /*steps=*/4, touch);
+
+    REQUIRE(spy.presses.size() == 1);
+    REQUIRE(spy.drags.size() == 4);
+    REQUIRE(spy.releases.size() == 1);
+    for (const MouseEvent* e : {&spy.presses[0], &spy.drags[0], &spy.drags[3],
+                                &spy.releases[0]}) {
+        CHECK(e->pointer_type == PointerType::touch);
+        CHECK_THAT(e->pressure, WithinAbs(0.9f, 1e-6f));
+        CHECK(e->pointer_id == 5);
+    }
+}
+
+TEST_CASE("simulate_click carries modifiers and button through delivery",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    View::SimulatedPointer right;
+    right.button = MouseButton::right;
+    right.modifiers = kModShift | kModAlt;
+    root.simulate_click({60, 60}, right);
+
+    REQUIRE(spy.presses.size() == 1);
+    CHECK(spy.presses[0].button == MouseButton::right);
+    CHECK(spy.presses[0].isShiftDown());
+    CHECK(spy.presses[0].isAltDown());
+    REQUIRE(spy.releases.size() == 1);
+    CHECK(spy.releases[0].button == MouseButton::right);
+    CHECK(spy.releases[0].isShiftDown());
+
+    // The legacy channels carry no button identity and stay primary-only, the
+    // same rule deliver_mouse_down/up already applied to the hosts.
+    CHECK(spy.legacy_downs == 0);
+    CHECK(spy.legacy_ups == 0);
+}
+
+TEST_CASE("simulate_click without a device argument is an unmodified left mouse",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    root.simulate_click({60, 60});
+
+    REQUIRE(spy.presses.size() == 1);
+    REQUIRE(spy.releases.size() == 1);
+    for (const MouseEvent* e : {&spy.presses[0], &spy.releases[0]}) {
+        CHECK(e->pointer_type == PointerType::mouse);
+        CHECK_THAT(e->pressure, WithinAbs(0.5f, 1e-6f));
+        CHECK(e->button == MouseButton::left);
+        CHECK(e->modifiers == kModNone);
+        CHECK(e->pointer_id == 0);
+    }
+    CHECK(spy.legacy_downs == 1);
+    CHECK(spy.legacy_ups == 1);
+}
+
+TEST_CASE("simulate_drag without a device argument is an unmodified left mouse",
+          "[view][input][simulate][pointer-type]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    DeviceSpy& spy = add_device_spy(root);
+
+    root.simulate_drag({40, 40}, {120, 40}, /*steps=*/3);
+
+    REQUIRE(spy.drags.size() == 3);
+    for (const MouseEvent& e : spy.drags) {
+        CHECK(e.pointer_type == PointerType::mouse);
+        CHECK_THAT(e.pressure, WithinAbs(0.5f, 1e-6f));
+        CHECK(e.button == MouseButton::left);
+        CHECK(e.pointer_id == 0);
+    }
+}
+
+// ── Multi-touch is now reachable from the simulator ─────────────────────────
+//
+// The load-bearing pair. PinchRecognizer keys `touches_` on `pointer_id`, so it
+// only pairs two fingers when they arrive under DIFFERENT ids. One finger is
+// held down through the raw arbiter entry point; the other is driven entirely by
+// `simulate_drag`. Before the simulator could name a pointer id, the second
+// finger overwrote the first and no pinch could ever form headlessly — which the
+// companion case below pins by driving the identical sequence at the default id.
+namespace {
+
+MouseEvent touch_event(Point p, MousePhase phase, int pointer_id) {
+    MouseEvent e = phase_event(p, phase);
+    e.pointer_type = PointerType::touch;
+    e.pointer_id = pointer_id;
+    return e;
+}
+
+struct PinchFixture {
+    View root;
+    PhaseCounter* surface = nullptr;
+    PinchRecognizer* pinch = nullptr;
+    int began = 0;
+
+    PinchFixture() {
+        root.set_bounds({0, 0, 200, 200});
+        auto child = std::make_unique<PhaseCounter>();
+        surface = child.get();
+        surface->set_bounds({0, 0, 200, 200});
+        root.add_child(std::move(child));
+
+        auto recognizer = std::make_unique<PinchRecognizer>();
+        pinch = recognizer.get();
+        pinch->on_began = [this](GestureRecognizer&) { ++began; };
+        surface->add_gesture_recognizer(std::move(recognizer));
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a simulated drag under a second pointer id pinches against a held touch",
+          "[view][input][simulate][multitouch]") {
+    PinchFixture fx;
+
+    // Finger A goes down at x=40 and stays down.
+    auto first = touch_event({40, 100}, MousePhase::press, /*pointer_id=*/0);
+    REQUIRE(fx.root.dispatch_gesture_pointer_event(first));
+    REQUIRE(fx.began == 0);
+
+    // Finger B is entirely simulated, spreading from x=60 to x=160.
+    View::SimulatedPointer second;
+    second.type = PointerType::touch;
+    second.pointer_id = 1;
+    fx.root.simulate_drag({60, 100}, {160, 100}, /*steps=*/10, second);
+
+    CHECK(fx.began == 1);
+    CHECK(fx.pinch->scale() > 1.0f);
+}
+
+// The control for the case above: identical sequence, identical geometry, only
+// the simulated finger's id left at the default. Both touches land in the same
+// map slot, the recognizer never holds a pair, and no pinch forms — which is
+// exactly the state the simulator was stuck in before it could name an id.
+TEST_CASE("a simulated drag reusing the primary pointer id cannot pinch",
+          "[view][input][simulate][multitouch]") {
+    PinchFixture fx;
+
+    auto first = touch_event({40, 100}, MousePhase::press, /*pointer_id=*/0);
+    REQUIRE(fx.root.dispatch_gesture_pointer_event(first));
+
+    View::SimulatedPointer second;
+    second.type = PointerType::touch;
+    second.pointer_id = 0;
+    fx.root.simulate_drag({60, 100}, {160, 100}, /*steps=*/10, second);
+
+    CHECK(fx.began == 0);
+}
+
+// Recognizer-level proof that the id survives the whole path — arbiter session
+// lookup included — rather than only being observable via a pinch's arithmetic.
+namespace {
+
+struct PointerIdRecorder final : GestureRecognizer {
+    std::vector<int> ids;
+    std::vector<PointerType> types;
+
+protected:
+    void on_pointer_event(const MouseEvent& event, const GestureContext&) override {
+        ids.push_back(event.pointer_id);
+        types.push_back(event.pointer_type);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a simulated drag hands its device to the recognizers on the chain",
+          "[view][input][simulate][multitouch]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* surface = child.get();
+    surface->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto recorder = std::make_unique<PointerIdRecorder>();
+    auto* recorded = recorder.get();
+    surface->add_gesture_recognizer(std::move(recorder));
+
+    View::SimulatedPointer pen;
+    pen.type = PointerType::pen;
+    pen.pointer_id = 9;
+    root.simulate_drag({40, 40}, {120, 40}, /*steps=*/3, pen);
+
+    // press + 3 moves + release.
+    REQUIRE(recorded->ids.size() == 5);
+    for (int id : recorded->ids) CHECK(id == 9);
+    for (PointerType t : recorded->types) CHECK(t == PointerType::pen);
+}

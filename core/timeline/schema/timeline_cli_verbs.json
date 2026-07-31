@@ -579,6 +579,36 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "before-track-id",
+          "required": false,
+          "schema_field": "before_track_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "track",
+          "ref": "pulp.timeline.track",
+          "required": true,
+          "schema_field": "track",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:command:insert-track",
+      "schema_type": "pulp.timeline.command.insert_track",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "clip-id",
           "required": true,
           "schema_field": "clip_id",
@@ -863,6 +893,28 @@
       ],
       "name": "timeline:command:remove-take-lane",
       "schema_type": "pulp.timeline.command.remove_take_lane",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-track",
+      "schema_type": "pulp.timeline.command.remove_track",
       "version": 1
     },
     {

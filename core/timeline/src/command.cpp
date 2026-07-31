@@ -182,6 +182,32 @@ bool equal_absolute_duration(const std::optional<AbsoluteTimelineDuration>& lhs,
                      lhs->sample_rate == rhs->sample_rate));
 }
 
+// Complete authored track state, so a command carrying a whole track compares
+// every field a caller could have edited. A track lifted out of a sequence and
+// a track read back inside one are the same value and use the same comparison.
+bool equal_track(const Track& lhs, const Track& rhs) noexcept {
+    if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
+        lhs.device_chain().size() != rhs.device_chain().size() ||
+        lhs.clips().size() != rhs.clips().size() ||
+        lhs.automation_lanes().size() != rhs.automation_lanes().size() ||
+        lhs.take_lanes().size() != rhs.take_lanes().size() ||
+        lhs.record_armed() != rhs.record_armed() ||
+        lhs.active_take_lane_id() != rhs.active_take_lane_id() || lhs.freeze() != rhs.freeze() ||
+        lhs.mixer() != rhs.mixer() ||
+        !std::equal(lhs.device_chain().begin(), lhs.device_chain().end(),
+                    rhs.device_chain().begin()) ||
+        !std::equal(lhs.take_lanes().begin(), lhs.take_lanes().end(), rhs.take_lanes().begin(),
+                    [](const TakeLane& a, const TakeLane& b) { return equivalent(a, b); }))
+        return false;
+    for (std::size_t clip = 0; clip < lhs.clips().size(); ++clip)
+        if (!equivalent(lhs.clips()[clip], rhs.clips()[clip]))
+            return false;
+    for (std::size_t lane = 0; lane < lhs.automation_lanes().size(); ++lane)
+        if (!equivalent(lhs.automation_lanes()[lane], rhs.automation_lanes()[lane]))
+            return false;
+    return true;
+}
+
 bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() || lhs.duration() != rhs.duration() ||
         !equal_absolute_duration(lhs.absolute_duration(), rhs.absolute_duration()) ||
@@ -195,33 +221,27 @@ bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
         !std::equal(lhs.regions().begin(), lhs.regions().end(), rhs.regions().begin(),
                     equal_region))
         return false;
-    for (std::size_t index = 0; index < lhs.tracks().size(); ++index) {
-        const auto& left = lhs.tracks()[index];
-        const auto& right = rhs.tracks()[index];
-        if (left.id() != right.id() || left.name() != right.name() ||
-            left.device_chain().size() != right.device_chain().size() ||
-            left.clips().size() != right.clips().size() ||
-            left.automation_lanes().size() != right.automation_lanes().size() ||
-            left.take_lanes().size() != right.take_lanes().size() ||
-            left.record_armed() != right.record_armed() ||
-            left.active_take_lane_id() != right.active_take_lane_id() ||
-            left.freeze() != right.freeze() ||
-            !std::equal(left.device_chain().begin(), left.device_chain().end(),
-                        right.device_chain().begin()) ||
-            !std::equal(left.take_lanes().begin(), left.take_lanes().end(),
-                        right.take_lanes().begin(),
-                        [](const TakeLane& a, const TakeLane& b) {
-                            return equivalent(a, b);
-                        }))
+    for (std::size_t index = 0; index < lhs.tracks().size(); ++index)
+        if (!equal_track(lhs.tracks()[index], rhs.tracks()[index]))
             return false;
-        for (std::size_t clip = 0; clip < left.clips().size(); ++clip)
-            if (!equivalent(left.clips()[clip], right.clips()[clip]))
-                return false;
-        for (std::size_t lane = 0; lane < left.automation_lanes().size(); ++lane)
-            if (!equivalent(left.automation_lanes()[lane], right.automation_lanes()[lane]))
-                return false;
-    }
     return true;
+}
+
+// The heap a track owns, including its clip, automation, and take subtrees. A
+// command that carries a whole track is charged the same bytes the same track
+// costs inside a sequence, so the journal and undo limits cannot be defeated by
+// which command moved it.
+std::size_t track_retained_size(const Track& track) noexcept {
+    auto size = saturated_add(sizeof(Track), track.name().size());
+    size = saturated_add(
+        size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
+    for (const auto& clip : track.clips())
+        size = saturated_add(size, clip_retained_size(clip));
+    for (const auto& lane : track.automation_lanes())
+        size = saturated_add(size, automation_lane_retained_size(lane));
+    for (const auto& lane : track.take_lanes())
+        size = saturated_add(size, take_lane_retained_size(lane));
+    return size;
 }
 
 std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
@@ -242,18 +262,8 @@ std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
         size, saturated_multiply(sequence.groove().steps().size(), sizeof(GrooveStep)));
     size = saturated_add(
         size, saturated_multiply(sequence.outgoing_sequence_refs().size(), sizeof(ItemId)));
-    for (const auto& track : sequence.tracks()) {
-        size = saturated_add(size, sizeof(Track));
-        size = saturated_add(size, track.name().size());
-        size = saturated_add(
-            size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
-        for (const auto& clip : track.clips())
-            size = saturated_add(size, clip_retained_size(clip));
-        for (const auto& lane : track.automation_lanes())
-            size = saturated_add(size, automation_lane_retained_size(lane));
-        for (const auto& lane : track.take_lanes())
-            size = saturated_add(size, take_lane_retained_size(lane));
-    }
+    for (const auto& track : sequence.tracks())
+        size = saturated_add(size, track_retained_size(track));
     return size;
 }
 
@@ -444,6 +454,12 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveSlot>) {
                 return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
                        left.slot_id == right.slot_id;
+            } else if constexpr (std::is_same_v<T, InsertTrack>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_track(left.track, right.track) &&
+                       left.before_track_id == right.before_track_id;
+            } else if constexpr (std::is_same_v<T, RemoveTrack>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id;
             } else if constexpr (std::is_same_v<T, InsertSequence>) {
                 return equal_sequence(left.sequence, right.sequence);
             } else if constexpr (std::is_same_v<T, CloneSequence>) {
@@ -501,6 +517,8 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(
                     saturated_add(sizeof(T), value.scene.name.size()),
                     detail::launcher_slot_list_owned_storage(value.scene.slots));
+            if constexpr (std::is_same_v<T, InsertTrack>)
+                return saturated_add(sizeof(T), track_retained_size(value.track));
             if constexpr (std::is_same_v<T, InsertSequence>)
                 return saturated_add(sizeof(T), sequence_retained_size(value.sequence));
             if constexpr (std::is_same_v<T, CloneSequence>)

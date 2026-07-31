@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260731-simulated-pointer-device",
+  "kind": "change",
+  "created_at": "2026-07-31T15:45:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Headless simulation could not express a non-mouse pointer, so no test could falsify the claim that a touch and a mouse produce the same result, and multi-touch was unreachable outright: with pointer id pinned to zero the pinch and rotate recognizers could not be driven at all, though the arbiter has always tracked a session per pointer. The cause was an asymmetry in the delivery verbs. deliver_mouse_drag took a pointer type and pressure; deliver_mouse_down and deliver_mouse_up took neither, so a simulated drag could report touch while the press that widgets latch on always reported mouse. All three now take a PointerAttributes struct carrying type, pressure and pointer id, following the WheelHost and MouseDownHost precedent already in this header rather than growing a tenth positional parameter, and every previous signature remains exported as a wrapper passing the default so no caller changes. The delivery contract is untouched: dispatch stays unconditional, yielding still requires a real claim rather than mere candidacy, a mid-gesture claim still closes the already-delivered press bracket through the handoff path, and the release is still delivered unconditionally. Pulp-only: this widens a test-facing seam that originates here, and no counterpart framework change exists to backport. Note that no platform host passes a device on any channel today, so this makes touch testable without changing host behaviour.",
+  "tests": [
+    "pulp-test-gesture-recognizer",
+    "pulp-test-pointer-delivery",
+    "pulp-test-pointer-gestures",
+    "pulp-test-view"
+  ],
+  "disposition": "pulp-only"
+}

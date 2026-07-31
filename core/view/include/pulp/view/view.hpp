@@ -455,11 +455,33 @@ public:
     /// Resolve a dimension token: check own theme, walk up to parent.
     float resolve_dimension(const std::string& name, float fallback) const;
 
+    /// Device identity of a synthesized pointer gesture. Every default
+    /// reproduces the historical synthetic mouse, so the simulate_* overloads
+    /// that omit it are unchanged. `pointer_id` is what makes multi-touch
+    /// reachable: the gesture arbiter keys its sessions on it and the pinch /
+    /// rotate recognizers key their touch maps on it, so a second finger that
+    /// reuses id 0 overwrites the first instead of pairing with it.
+    struct SimulatedPointer {
+        PointerType type = PointerType::mouse;
+        float pressure = 0.5f;
+        std::uint16_t modifiers = 0;
+        MouseButton button = MouseButton::left;
+        int pointer_id = 0;
+    };
+
     // Dispatch a synthetic click to the deepest view at the given point
     void simulate_click(Point root_pos);
 
+    /// As above, driven by an explicit pointer device. Non-left buttons follow
+    /// the delivery verbs' rule and skip the button-less legacy channels.
+    void simulate_click(Point root_pos, const SimulatedPointer& pointer);
+
     // Dispatch a synthetic drag from start to end
     void simulate_drag(Point start, Point end, int steps = 10);
+
+    /// As above, driven by an explicit pointer device.
+    void simulate_drag(Point start, Point end, int steps,
+                       const SimulatedPointer& pointer);
 
     // Dispatch a synthetic hover to the view at the given point
     void simulate_hover(Point root_pos);

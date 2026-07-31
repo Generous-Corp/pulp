@@ -11,6 +11,7 @@
 #include "transaction_reduction_support.hpp"
 #include "transaction_sequence_internal.hpp"
 #include "transaction_take_internal.hpp"
+#include "transaction_track_internal.hpp"
 #include "transaction_track_state_internal.hpp"
 
 #include <algorithm>
@@ -214,6 +215,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             dirty.push_back(reduced->dirty);
         } else if (detail::is_scene_command(envelope.command)) {
             auto reduced = detail::reduce_scene_command(project, envelope.command, transaction,
+                                                        envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_track_command(envelope.command)) {
+            auto reduced = detail::reduce_track_command(project, envelope.command, transaction,
                                                         envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(

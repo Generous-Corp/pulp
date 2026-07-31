@@ -610,6 +610,30 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             Command(SetTrackFreeze{sequence.value(), track.value(), std::move(expected).value(),
                                    std::move(replacement).value()}));
     }
+    if (type.value() == "pulp.timeline.command.insert_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto before = decode_optional_command_item_id(command, "before_track_id", data_path);
+        auto track = required(command, "track", data_path);
+        if (!sequence)
+            return runtime::Err(sequence.error());
+        if (!before)
+            return runtime::Err(before.error());
+        if (!track)
+            return runtime::Err(track.error());
+        auto decoded =
+            decode_track(document, *track.value(), registry, context, data_path + "/track");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertTrack{sequence.value(), std::move(decoded).value(), before.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveTrack{sequence.value(), track.value()}));
+    }
     if (type.value() == "pulp.timeline.command.insert_sequence") {
         auto sequence = required(command, "sequence", data_path);
         if (!sequence)

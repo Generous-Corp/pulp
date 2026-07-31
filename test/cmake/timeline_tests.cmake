@@ -197,6 +197,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
         test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
         test_timeline_marker_commands.cpp test_timeline_track_mixer.cpp
+        test_timeline_track_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
