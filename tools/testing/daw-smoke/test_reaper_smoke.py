@@ -378,5 +378,29 @@ class EditorBuildMode(unittest.TestCase):
         self.assertEqual(rc, rs.EXIT_INCONCLUSIVE)
 
 
+class FormatIsAsked(unittest.TestCase):
+    """--format has to decide which plugin REAPER inserts.
+
+    TrackFX_AddByName with a bare name lets REAPER pick whichever format it
+    finds first. A crash report from a `--format clap` run named
+    com.generous.forge.modular.au, so the CLAP leg had been proving the AU --
+    and the three format legs were one leg wearing three hats.
+    """
+
+    def test_each_format_asks_for_that_format(self):
+        import argparse
+        seen = {}
+        for fmt, prefix in (("vst3", "VST3:"), ("clap", "CLAP:"), ("au", "AU:")):
+            args = argparse.Namespace(format=fmt, plugin_name="Forge Modular",
+                                      mode="editor-open", plugin_path=__file__,
+                                      timeout=30)
+            env = rs._common_env(args, pathlib.Path("/tmp/status"))
+            seen[fmt] = env["PULP_DAW_SMOKE_FX"]
+            self.assertTrue(env["PULP_DAW_SMOKE_FX"].startswith(prefix),
+                            f"{fmt} asked for {env['PULP_DAW_SMOKE_FX']!r}")
+        self.assertEqual(len(set(seen.values())), 3,
+                         f"the three formats must ask for three things: {seen}")
+
+
 if __name__ == "__main__":
     unittest.main()

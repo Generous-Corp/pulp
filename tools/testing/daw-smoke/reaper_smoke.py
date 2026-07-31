@@ -299,7 +299,14 @@ class ReaperSession:
 
 def _common_env(args: argparse.Namespace, status: Path) -> dict:
     env = dict(os.environ)
-    env["PULP_DAW_SMOKE_FX"] = args.plugin_name
+    # QUALIFIED BY FORMAT. TrackFX_AddByName with a bare name lets REAPER pick
+    # whichever format it finds first, so `--format clap` inserted the
+    # installed AU and the run reported a CLAP pass for an AU -- proven by a
+    # crash report naming com.generous.forge.modular.au during a clap run.
+    # Three legs that all load the same plugin are one leg wearing three hats.
+    env["PULP_DAW_SMOKE_FX"] = {
+        "vst3": "VST3:", "clap": "CLAP:", "au": "AU:",
+    }.get(args.format, "") + args.plugin_name
     env["PULP_DAW_SMOKE_STATUS"] = str(status)
     return env
 
