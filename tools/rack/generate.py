@@ -410,6 +410,72 @@ def main(argv):
     raise SystemExit(f"gave up after {a.retries + 1} attempts; pack restored unchanged")
 
 
+def check_uses_pulp_dsp(slug: str, mod: dict) -> tuple[bool, str]:
+    """Did the generated DSP actually use Pulp's signal library?
+
+    The whole point of generating a Rack module from Pulp is that it is built
+    from Pulp's DSP. The first module ever generated here compiled cleanly and
+    used none of it -- hand-rolled arithmetic wearing the right shape, which
+    the compiler and the behavioural gate both accept.
+
+    Called and never defined, in the original as well: a NameError sitting on
+    the step AFTER the behaviour gate passed, so it fired only on a module
+    that had otherwise succeeded. Nothing reached it, because nothing ran the
+    generator that far.
+    """
+    src_path = os.path.join(PACK, "src", f"{slug}.cpp")
+    try:
+        src = open(src_path).read()
+    except OSError:
+        return False, f"cannot read the generated source at {src_path}"
+    if "pulp/signal" not in src:
+        return (False,
+                "the module includes nothing from pulp/signal, so it is not "
+                "built from Pulp's DSP at all — hand-rolled arithmetic "
+                "compiles just as well and is not what this is for")
+    used = sorted({line.split("pulp/signal/")[1].split(".")[0]
+                   for line in src.splitlines()
+                   if "pulp/signal/" in line})
+    if not used:
+        return False, "pulp/signal is mentioned but nothing is included from it"
+    return True, f"built from Pulp's DSP: {', '.join(used)}"
+
+
+def _assert_no_duplicate_models() -> None:
+    """No two module manifests may claim the same slug.
+
+    Rack keys a model by its slug within a plugin, so two manifests claiming
+    one slug means whichever loads last wins and a module the user built
+    silently disappears. Worth refusing at generation, where the name can
+    still be changed.
+
+    This was CALLED here and never defined -- in the original too, so the
+    module builder had a NameError waiting on the last step of every
+    successful build. Nothing caught it because nothing ran the generator far
+    enough to reach it; a test that imports a function from a file, or runs it
+    with no arguments and gets usage, never gets here.
+    """
+    seen: dict[str, str] = {}
+    mdir = os.path.join(PACK, "modules")
+    for name in sorted(os.listdir(mdir)):
+        if not name.endswith(".json") or name.startswith("_"):
+            continue
+        try:
+            doc = json.load(open(os.path.join(mdir, name)))
+        except Exception:
+            continue
+        for m in doc.get("modules", []):
+            slug = m.get("slug")
+            if not slug:
+                continue
+            if slug in seen and seen[slug] != name:
+                raise SystemExit(
+                    f"two manifests claim the model {slug!r}: {seen[slug]} and "
+                    f"{name}. Rack keeps one and the other module vanishes; "
+                    f"rename one before building.")
+            seen[slug] = name
+
+
 def _wire_entry(slug):
     """No longer registers anything -- forge_modular.py owns it.
 

@@ -76,18 +76,38 @@ def main() -> int:
     for name in ("generate", "patch"):
         src = open(os.path.join(HERE, name + ".py")).read()
         tree = _ast.parse(src)
+        # EVERY name used and never bound, not just the shouty ones. Limiting
+        # this to ALL-CAPS missed `_assert_no_duplicate_models`, which was
+        # called on the last step of every successful module build and never
+        # defined anywhere -- a NameError waiting in the original.
         used = {n.id for n in _ast.walk(tree)
-                if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)
-                and n.id.isupper() and len(n.id) > 2}
-        # Anything the file assigns ANYWHERE is fine, including a constant
-        # local to one function. The question is only whether a name is used
-        # and never bound.
-        bound = {n.id for n in _ast.walk(tree)
-                 if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Store)}
+                if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)}
+        # Anything the file BINDS anywhere is fine: assignments, function
+        # arguments, imports (including inside a function), comprehension
+        # targets, except-clauses, defs and classes. The question is only
+        # whether a name is used and never bound at all.
+        bound: set[str] = set()
+        for n in _ast.walk(tree):
+            if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Store):
+                bound.add(n.id)
+            elif isinstance(n, _ast.arg):
+                bound.add(n.arg)
+            elif isinstance(n, _ast.alias):
+                bound.add((n.asname or n.name).split(".")[0])
+            elif isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                                _ast.ClassDef)):
+                bound.add(n.name)
+            elif isinstance(n, _ast.ExceptHandler) and n.name:
+                bound.add(n.name)
+            elif isinstance(n, (_ast.Global, _ast.Nonlocal)):
+                bound.update(n.names)
         used -= bound
         mod = importlib.import_module(name)
+        import builtins as _b
+        # Names bound by imports, comprehensions, arguments and so on are all
+        # attributes of the module or builtins by the time it is imported.
         missing = sorted(u for u in used
-                         if not hasattr(mod, u) and u not in dir(__builtins__))
+                         if not hasattr(mod, u) and not hasattr(_b, u))
         if missing:
             print(f"  WRONG  {name}.py refers to {missing}, which it does not "
                   f"define — that reaches a user as a NameError traceback")
