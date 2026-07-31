@@ -197,6 +197,16 @@ def _add_portmap(inv: dict) -> None:
         mod["panel"] = entry.get("size")
 
 
+# Panel geometry, shared with the preview: 15 points per HP across, 380 points
+# for a 3U panel down. A Eurorack HP is 5.08mm and 3U is 128.5mm, so the two
+# axes have very slightly different scales -- kept separate rather than
+# averaged, because a jack drawn a millimetre off is a cable that misses it.
+PITCH_PT = 15.0
+PANEL_H_PT = 380.0
+PT_PER_MM_X = PITCH_PT / 5.08
+PT_PER_MM_Y = PANEL_H_PT / 128.5
+
+
 def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
     """Attach real port names for our own modules, from their manifests.
 
@@ -229,6 +239,22 @@ def _add_port_names(inv: dict, our_plugin: str = "ForgeModular") -> None:
                                   for p in m.get("outputs", [])]
                 mod["roles_in"] = [p.get("role", "Cv") for p in m.get("inputs", [])]
                 mod["roles_out"] = [p.get("role", "Cv") for p in m.get("outputs", [])]
+
+                # Panel geometry, in the same shape the cartographer records
+                # for third-party modules, so everything downstream reads one
+                # shape. Ours is in millimetres because that is what a panel
+                # is drawn in; the preview works in points.
+                hp = m.get("hp")
+                if not hp:
+                    continue
+                mod["panel"] = [float(hp) * PITCH_PT, PANEL_H_PT]
+                for key, xy_key in (("inputs", "inputs_xy"),
+                                    ("outputs", "outputs_xy")):
+                    mod[xy_key] = [
+                        (p.get("x_mm", 0.0) * PT_PER_MM_X,
+                         p.get("y_mm", 0.0) * PT_PER_MM_Y)
+                        for p in m.get(key, [])
+                    ]
 
 
 def port_name(inv, plugin, model, kind, idx):
@@ -368,11 +394,31 @@ def sidecar(patch: dict, inv: dict, why: dict | None = None) -> dict:
         if note:
             rec["why"] = note
         cables[key] = rec
-    return {
-        "cables": cables,
-        "modules": {str(m["id"]): label(inv, m, dis)
-                    for m in patch.get("modules", [])},
-    }
+    # Modules carry their width and their jack positions, because a .vcv
+    # carries neither. Without the width every panel is drawn in the same
+    # default slot and the artwork letterboxes inside it; without the jack
+    # positions a cable has nowhere to land and hangs off the panel edge.
+    modules: dict[str, dict] = {}
+    for m in patch.get("modules", []):
+        rec: dict = {"name": label(inv, m, dis)}
+        entry = (inv.get(m["plugin"], {}).get("modules", {})
+                    .get(m["model"], {}))
+        panel = entry.get("panel")
+        if panel and panel[0]:
+            rec["hp"] = round(panel[0] / 15.0)      # kHorizontalPitch
+            ports = {}
+            for kind, xy_key in (("out", "outputs_xy"), ("in", "inputs_xy")):
+                for i, xy in enumerate(entry.get(xy_key) or []):
+                    if not xy:
+                        continue
+                    # x as a fraction of the panel's width, y in panel points:
+                    # the preview scales the two differently.
+                    ports[f"{kind}{i}"] = [round(xy[0] / panel[0], 5),
+                                           round(xy[1], 2)]
+            if ports:
+                rec["ports"] = ports
+        modules[str(m["id"])] = rec
+    return {"cables": cables, "modules": modules}
 
 
 def _disambiguate(patch, inv):

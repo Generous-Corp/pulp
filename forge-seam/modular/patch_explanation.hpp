@@ -35,6 +35,11 @@ public:
                          std::vector<RackModule> modules);
     void set_depth(ExplainDepth depth);
 
+    /// Re-wraps when the pane's width changes. Without this the explanation
+    /// keeps whatever wrap it was built with, which is the wrong one whenever
+    /// it is built before it is measured -- i.e. always.
+    void on_resized() override;
+
     /// The row drawn for one connection, or null if there is none.
     ///
     /// Exposed for tests: the view also holds role HEADINGS, which are a row of
@@ -76,6 +81,8 @@ private:
     std::vector<RackModule> modules_;
     std::vector<pulp::view::View*> rows_;
     ExplainDepth depth_ = ExplainDepth::standard;
+    float wrapped_at_ = -1.0f;
+    bool rewrap_pending_ = false;
     std::optional<std::size_t> hovered_;
 };
 

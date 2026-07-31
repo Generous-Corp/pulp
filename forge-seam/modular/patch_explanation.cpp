@@ -1,5 +1,9 @@
 #include "forge/patch_explanation.hpp"
 
+#include <cmath>
+
+#include <pulp/events/main_thread_dispatcher.hpp>
+
 #include <forge/design_tokens.hpp>
 
 #include <pulp/view/widgets.hpp>
@@ -33,7 +37,22 @@ const char* role_primer(SignalRole role) {
 /// Characters per display line, tuned to the Build stage at the design width.
 /// Approximate by construction -- an exact fit would need the resolved width,
 /// which is not known when the rows are built.
-constexpr std::size_t kColumns = 118;
+/// Roughly how wide one character is at the 12.5pt display face, in points.
+///
+/// Wrapping was a fixed 118 columns, which was right when the explanation sat
+/// on the stage at about 820pt. Moved into the chat column at 430pt it ran
+/// every line off the right edge -- and no test saw it, because they all
+/// asserted the STRINGS, which were correct, rather than whether they fitted.
+constexpr float kCharWidth = 6.95f;
+
+/// Columns that fit a given content width, floored so a very narrow pane still
+/// breaks somewhere rather than emitting one enormous line.
+std::size_t columns_for(float width) {
+    // The row's own padding, which the text does not get to use.
+    const float usable = width - 34.0f;
+    if (usable < 40.0f) return 20;
+    return static_cast<std::size_t>(usable / kCharWidth);
+}
 
 }  // namespace
 
@@ -128,12 +147,38 @@ std::vector<std::string> PatchExplanation::wrap(const std::string& text,
     return lines;
 }
 
+void PatchExplanation::on_resized() {
+    // Only when the wrap would actually change: rebuilding on every layout
+    // pass would discard the hover state constantly.
+    if (std::abs(bounds().width - wrapped_at_) < 1.0f) return;
+
+    // NEVER rebuild here. on_resized() runs inside the layout pass that is
+    // walking these very children, and replacing them under it segfaults.
+    // Deferred to the next turn of the loop, when nothing is traversing.
+    if (rewrap_pending_) return;
+    rewrap_pending_ = true;
+    if (!pulp::events::MainThreadDispatcher::call_async([this] {
+            rewrap_pending_ = false;
+            if (std::abs(bounds().width - wrapped_at_) >= 1.0f) rebuild();
+        })) {
+        // No loop to defer onto -- a headless render. Leave the tree alone:
+        // rebuilding from inside the layout pass is what crashes, and the
+        // content is set after the bounds there anyway, so the wrap is
+        // already right.
+        rewrap_pending_ = false;
+    }
+}
+
 void PatchExplanation::rebuild() {
     while (child_count() > 0) remove_child(child_at(0));
     rows_.clear();
 
     flex().direction = FlexDirection::column;
     flex().gap = 6;
+
+    // Derived from the pane the explanation is actually in, not a constant.
+    const auto columns = columns_for(bounds().width);
+    wrapped_at_ = bounds().width;
 
     // Grouped by what each cable carries, in signal order: what you hear, then
     // what decides the notes, then what keeps time, then what moves. A flat
@@ -187,15 +232,26 @@ void PatchExplanation::rebuild() {
         // instances of it.
         if (depth_ == ExplainDepth::learning) {
             if (const auto* primer = role_primer(group.role); primer && *primer) {
-                for (const auto& piece : wrap(primer, kColumns)) {
+                // In its own block: the explanation's column gap separates
+                // BLOCKS, so adding the primer's lines directly here spaced
+                // them like paragraphs while the cable lines beneath stayed
+                // tight -- the same text set two different ways.
+                auto note_block = std::make_unique<View>();
+                note_block->flex().direction = FlexDirection::column;
+                note_block->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+                note_block->flex().flex_shrink = 0;
+                note_block->flex().padding_left = 24;
+                note_block->flex().padding_bottom = 2;
+                for (const auto& piece : wrap(primer, columns)) {
                     auto note = std::make_unique<Label>(piece);
                     note->set_font_family(forge::design::type::display);
                     note->set_font_size(12.0f);
                     note->set_text_color(color::text_faint);
                     note->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
                     note->flex().flex_shrink = 0;
-                    add_child(std::move(note));
+                    note_block->add_child(std::move(note));
                 }
+                add_child(std::move(note_block));
             }
         }
 
@@ -208,6 +264,7 @@ void PatchExplanation::rebuild() {
         // second line paints over the row beneath it.
         auto row = std::make_unique<View>();
         row->flex().direction = FlexDirection::column;
+        row->flex().gap = 2;             // wrapped lines want a little air
         row->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
         row->flex().flex_shrink = 0;
         row->flex().padding_left = 24;   // room for the role dot
@@ -228,6 +285,9 @@ void PatchExplanation::rebuild() {
         dot->flex().dim_start = {8, pulp::view::DimensionUnit::px};
         dot->flex().preferred_width = 8;
         dot->flex().preferred_height = 8;
+        // Centred on the FIRST line rather than sitting at the row's top edge,
+        // where it read as a bullet on a line of its own above the text.
+        dot->flex().margin_top = 12;
         dot->set_background_color(pulp::canvas::Color::rgba8(
             static_cast<std::uint8_t>((rgb >> 16) & 0xFF),
             static_cast<std::uint8_t>((rgb >> 8) & 0xFF),
@@ -235,7 +295,7 @@ void PatchExplanation::rebuild() {
         dot->set_border_radius(4);
         row->add_child(std::move(dot));
 
-        for (const auto& text : wrap(line_text(i), kColumns)) {
+        for (const auto& text : wrap(line_text(i), columns)) {
             auto label = std::make_unique<Label>(text);
             label->set_font_family(forge::design::type::display);
             label->set_font_size(12.5f);

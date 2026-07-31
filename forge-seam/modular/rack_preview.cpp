@@ -120,12 +120,28 @@ void RackPreview::paint(Canvas& canvas) {
         // A module whose artwork is missing gets a plain face rather than a
         // borrowed one: showing another module's panel would misidentify it.
         const auto* mod_for_panel = find(panel.id);
-        const auto& svg = mod_for_panel ? panel_svg(mod_for_panel->name)
-                                        : std::string{};
-        if (!svg.empty() &&
-            canvas.draw_svg(svg, panel.x, panel.y, panel.width, panel.height)) {
+        // Our artwork, for our modules only. Model slugs are unique within a
+        // plugin but not across the library -- Fundamental also ships VCO,
+        // VCF, VCA and LFO -- so matching on the slug alone draws OUR panel on
+        // a vendor's module. It looks plausible, has the wrong controls and
+        // the wrong width, and is a confident lie about what is in the rack.
+        static const std::string kOurs = "ForgeModular";
+        const auto& svg = (mod_for_panel && mod_for_panel->brand == kOurs)
+                              ? panel_svg(mod_for_panel->name)
+                              : std::string{};
+        if (!svg.empty()) {
+            // Clipped to its own slot. Each panel's artwork paints a
+            // background rect a millimetre PROUD of its viewBox on every side
+            // -- deliberate, so a panel has no hairline seam when Rack butts it
+            // against its neighbour -- and unclipped here that overhang draws
+            // straight over the modules either side.
+            canvas.save();
+            canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+            const bool drawn =
+                canvas.draw_svg(svg, panel.x, panel.y, panel.width, panel.height);
+            canvas.restore();
             // The real face, knobs and all. Nothing else to draw for it.
-            continue;
+            if (drawn) continue;
         }
 
         canvas.set_fill_color(panel.has_artwork ? color::surface_panel

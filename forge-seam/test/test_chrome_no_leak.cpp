@@ -310,6 +310,23 @@ inline std::string rendered_text(const pulp::view::View* root) {
     return all;
 }
 
+/// The same words with every run of whitespace collapsed to one space.
+///
+/// Searching rendered text for a phrase has to allow for the wrap falling in
+/// the middle of it -- otherwise the assertion tracks the pane's width rather
+/// than what the explanation says.
+inline std::string flatten(const std::string& text) {
+    std::string out;
+    bool space = false;
+    for (const char c : text) {
+        if (c == '\n' || c == ' ' || c == '\t') { space = true; continue; }
+        if (space && !out.empty()) out += ' ';
+        space = false;
+        out += c;
+    }
+    return out;
+}
+
 std::size_t distinct_colors(const std::vector<std::uint8_t>& png) {
     if (png.empty()) return 0;
     auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
@@ -340,10 +357,12 @@ std::size_t distinct_colors(const std::vector<std::uint8_t>& png) {
     return seen.size();
 }
 
-std::vector<std::uint8_t> render_preview(const std::string& panel_dir) {
+std::vector<std::uint8_t> render_preview(const std::string& panel_dir,
+                                         const std::string& brand = "ForgeModular") {
     forge_modular::RackModule mod;
     mod.id = "m1";
     mod.name = "TESTPANEL";
+    mod.brand = brand;            // our artwork is only drawn on our modules
     mod.hp = 10;
     forge_modular::RackPreview preview;
     preview.set_rack({mod}, {});
@@ -376,8 +395,18 @@ TEST_CASE("a module's own panel artwork is what the stage draws", "[seam]") {
     // that drew nothing at all would pass the first assertion by accident.
     const auto unpainted = count_pixels_near(render_preview(""), 255, 0, 255);
 
-    INFO("magenta with artwork: " << painted << ", without: " << unpainted);
+    // A module of the same NAME from another plugin must not get our face.
+    // Model slugs are unique within a plugin, not across the library:
+    // Fundamental ships a VCO, a VCF, a VCA and an LFO too, and drawing our
+    // panel on one of theirs is a confident lie about what is in the rack --
+    // wrong controls, wrong width, entirely plausible.
+    const auto other_vendor =
+        count_pixels_near(render_preview(dir.string(), "Fundamental"), 255, 0, 255);
+
+    INFO("magenta ours: " << painted << ", no directory: " << unpainted
+                          << ", another vendor's module: " << other_vendor);
     CHECK(unpainted == 0);
+    CHECK(other_vendor == 0);
     CHECK(painted > 200);
 
     std::filesystem::remove_all(dir);
@@ -408,6 +437,7 @@ TEST_CASE("a real generated panel renders and not just a synthetic one", "[seam]
     forge_modular::RackModule mod;
     mod.id = "m1";
     mod.name = slug;
+    mod.brand = "ForgeModular";
     mod.hp = 10;
     forge_modular::RackPreview preview;
     preview.set_rack({mod}, {});
@@ -458,9 +488,18 @@ TEST_CASE("a loaded patch explains itself beyond the wiring", "[seam]") {
     CHECK(loaded.connections[0].why ==
           "the saw is the raw material the filter shapes");
     // A .vcv stores port INDICES. Without the sidecar the app can only say
-    // "out0 → in1", which is true and teaches nothing.
-    CHECK(loaded.connections[0].from_port == "SAW");
-    CHECK(loaded.connections[0].to_port == "IN");
+    // "out0 → in1", which is true and teaches nothing. Asserted on the line
+    // the reader actually sees rather than on the field behind it: the ID has
+    // to stay on the connection because the jack geometry is keyed on it, so
+    // checking the field would pass while the screen still said "out0".
+    forge_modular::PatchExplanation shown;
+    shown.set_bounds({0, 0, 820, 300});
+    shown.set_connections(loaded.connections, loaded.modules);
+    const auto line = shown.line_text(0);
+    INFO("line: " << line);
+    CHECK(line.find("SAW") != std::string::npos);
+    CHECK(line.find("IN") != std::string::npos);
+    CHECK(line.find("out0") == std::string::npos);
     REQUIRE(loaded.modules.size() == 2);
     CHECK(loaded.modules[0].display == "VCO 1");
     // The slug stays put: the panel artwork is filed under it.
@@ -473,6 +512,8 @@ TEST_CASE("a loaded patch explains itself beyond the wiring", "[seam]") {
     const auto bare = forge_modular::load_patch(vcv.string());
     REQUIRE(bare.connections.size() == 1);
     CHECK(bare.connections[0].why.empty());
+    // With no sidecar there is nothing to name the jacks with, and the index
+    // is what remains -- honest, and the reason the wiring still reads.
     CHECK(bare.connections[0].from_port == "out0");
     CHECK(bare.modules[0].display.empty());
 
@@ -1467,13 +1508,14 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
     // Each depth genuinely says more than the one below it.
     CHECK(standard.size() > terse.size());
     CHECK(learning.size() > standard.size());
-    CHECK(standard.find("everything else shapes it") != std::string::npos);
-    CHECK(terse.find("everything else shapes it") == std::string::npos);
+    CHECK(flatten(standard).find("everything else shapes it") != std::string::npos);
+    CHECK(flatten(terse).find("everything else shapes it") == std::string::npos);
     // The concept a reader is here for appears once, not once per cable.
     const auto primer = std::string("What you actually hear");
+    const auto flat_learning = flatten(learning);
     std::size_t occurrences = 0;
-    for (std::size_t at = learning.find(primer); at != std::string::npos;
-         at = learning.find(primer, at + 1)) ++occurrences;
+    for (std::size_t at = flat_learning.find(primer); at != std::string::npos;
+         at = flat_learning.find(primer, at + 1)) ++occurrences;
     INFO("primer occurrences at learning depth: " << occurrences);
     CHECK(occurrences == 1);
 
@@ -1536,6 +1578,57 @@ TEST_CASE("the explanation is grouped by what each cable carries", "[rack]") {
     // And no heading for a role the patch does not use -- an empty PITCH &
     // GATE heading would claim the patch has something it has not.
     for (const auto& h : headings) CHECK(h.find("PITCH") == std::string::npos);
+}
+
+TEST_CASE("render the explanation and rack for a look", "[.look]") {
+    // Not part of the suite: a picture for a person to judge. The assertions
+    // elsewhere say the geometry is sound; only an eye says it reads well.
+    // Run deliberately:  forge-test-chrome-no-leak "[.look]"
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path dir =
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/patches";
+    std::error_code ec;
+    std::string newest;
+    std::filesystem::file_time_type best{};
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+        const auto n = e.path().string();
+        if (n.size() > 9 && n.substr(n.size() - 9) == ".why.json") {
+            const auto t = std::filesystem::last_write_time(e, ec);
+            if (newest.empty() || t > best) { best = t; newest = n.substr(0, n.size() - 9) + ".vcv"; }
+        }
+    }
+    if (newest.empty()) SKIP("no generated patch with a sidecar here");
+
+    const auto loaded = forge_modular::load_patch(newest);
+    REQUIRE_FALSE(loaded.connections.empty());
+
+    for (const auto depth : {forge_modular::ExplainDepth::terse,
+                             forge_modular::ExplainDepth::standard,
+                             forge_modular::ExplainDepth::learning}) {
+        forge_modular::PatchExplanation ex;
+        ex.set_bounds({0, 0, 430, 900});
+        ex.set_depth(depth);
+        ex.set_connections(loaded.connections, loaded.modules);
+        const char* names[] = {"terse", "standard", "learning"};
+        const auto out = std::filesystem::temp_directory_path() /
+            (std::string("forge-explanation-") +
+             names[static_cast<int>(depth)] + ".png");
+        REQUIRE(pulp::view::render_to_file(ex, 430, 900, out.string(), 2.0f,
+                                           pulp::view::ScreenshotBackend::skia));
+        WARN("wrote " << out.string());
+    }
+
+    forge_modular::RackPreview rack;
+    rack.set_panel_directory(
+        std::string(home ? home : ".") +
+        "/Library/Application Support/Forge Modular/examples/forge-modular/res");
+    rack.set_rack(loaded.modules, loaded.connections);
+    rack.set_bounds({0, 0, 900, 620});
+    const auto rack_png = std::filesystem::temp_directory_path() / "forge-rack.png";
+    REQUIRE(pulp::view::render_to_file(rack, 900, 620, rack_png.string(), 2.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    WARN("wrote " << rack_png.string());
 }
 
 TEST_CASE("explanation lines do not overlap", "[rack][render]") {

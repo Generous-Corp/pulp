@@ -100,7 +100,12 @@ LoadedPatch load_patch(const std::string& path) {
         std::string why, from, to;
     };
     std::map<std::string, CableNote> notes;
-    std::map<std::string, std::string> module_names;
+    struct ModuleNote {
+        std::string name;
+        int hp = 0;
+        std::map<std::string, std::pair<float, float>> ports;
+    };
+    std::map<std::string, ModuleNote> module_notes;
     if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") {
         std::ifstream wf(path.substr(0, path.size() - 4) + ".why.json");
         if (wf) {
@@ -122,8 +127,25 @@ LoadedPatch load_patch(const std::string& path) {
                         const auto ms = wroot["modules"];
                         for (uint32_t i = 0; i < ms.size(); ++i) {
                             const auto m = ms.getObjectMemberAt(i);
-                            module_names[m.name] =
-                                m.value.getWithDefault<std::string>("");
+                            ModuleNote note;
+                            if (m.value.isObject()) {
+                                note.name = m.value["name"].getWithDefault<std::string>("");
+                                note.hp = static_cast<int>(
+                                    m.value["hp"].getWithDefault<int64_t>(0));
+                                if (m.value.hasObjectMember("ports")) {
+                                    const auto ps = m.value["ports"];
+                                    for (uint32_t j = 0; j < ps.size(); ++j) {
+                                        const auto pm = ps.getObjectMemberAt(j);
+                                        if (pm.value.size() < 2) continue;
+                                        note.ports[pm.name] = {
+                                            static_cast<float>(pm.value[0].getWithDefault<double>(0.5)),
+                                            static_cast<float>(pm.value[1].getWithDefault<double>(0.0))};
+                                    }
+                                }
+                            } else {
+                                note.name = m.value.getWithDefault<std::string>("");
+                            }
+                            module_notes[m.name] = std::move(note);
                         }
                     }
                 } else if (wroot.isObject()) {
@@ -142,9 +164,25 @@ LoadedPatch load_patch(const std::string& path) {
     }
 
     for (auto& m : out.modules) {
-        if (const auto it = module_names.find(m.id);
-            it != module_names.end() && !it->second.empty())
-            m.display = it->second;
+        const auto it = module_notes.find(m.id);
+        if (it == module_notes.end()) continue;
+        if (!it->second.name.empty()) m.display = it->second.name;
+        // A .vcv records no width, so every panel used to be drawn in the same
+        // default slot and its artwork letterboxed inside it -- which is why
+        // the modules in a rack did not line up. The generator knows the real
+        // width; it writes it down.
+        if (it->second.hp > 0) m.hp = it->second.hp;
+        for (const auto& [id, xy] : it->second.ports) {
+            Port p;
+            p.id = id;
+            p.name = id;
+            p.x = xy.first;
+            p.y = xy.second;
+            m.ports.push_back(p);
+        }
+        // Jack coordinates are what "placed" means: without them a cable has
+        // nowhere to land and is drawn hanging off the panel edge.
+        if (!it->second.ports.empty()) m.placed = true;
     }
 
     const auto cables = root["cables"];
@@ -171,15 +209,42 @@ LoadedPatch load_patch(const std::string& path) {
                          std::to_string(c["outputId"].getWithDefault<int64_t>(0)) + ">" +
                          std::to_string(to_id) + ":" +
                          std::to_string(c["inputId"].getWithDefault<int64_t>(0));
-        if (const auto it = notes.find(key); it != notes.end()) {
+        // The port IDS stay on the connection, because that is what the jack
+        // geometry is keyed on. The silkscreen NAME belongs to the port, and
+        // is written onto it below -- putting the name here instead broke the
+        // lookup, and every cable landed at the top of the panel rather than
+        // on the jack it belongs to.
+        if (const auto it = notes.find(key); it != notes.end())
             conn.why = it->second.why;
-            // Real silkscreen names in place of the indices the .vcv stores.
-            // Showing "out0 → in1" is honest but teaches nothing; inventing a
-            // plausible name would teach something false. The generator
-            // resolved these against the installed modules, so they are
-            // neither guessed nor made up.
-            if (!it->second.from.empty()) conn.from_port = it->second.from;
-            if (!it->second.to.empty()) conn.to_port = it->second.to;
+        // Name the two jacks this cable uses. "out0 → in1" is honest but
+        // teaches nothing; inventing a plausible name would teach something
+        // false. The generator resolved these against the installed modules,
+        // so they are neither guessed nor made up.
+        if (const auto it = notes.find(key); it != notes.end()) {
+            const auto name_port = [&](const std::string& module_key,
+                                       const std::string& port_id,
+                                       const std::string& shown) {
+                if (shown.empty()) return;
+                for (auto& m : out.modules) {
+                    if (m.id != module_key) continue;
+                    for (auto& p : m.ports) {
+                        if (p.id != port_id) continue;
+                        p.name = shown;
+                        return;
+                    }
+                    // Named but not placed: a module whose jack positions we
+                    // do not have still gets to say what its ports are called.
+                    // The cable then hangs at the default spot, which the
+                    // preview already treats as unplaced.
+                    Port p;
+                    p.id = port_id;
+                    p.name = shown;
+                    m.ports.push_back(p);
+                    return;
+                }
+            };
+            name_port(conn.from_module, conn.from_port, it->second.from);
+            name_port(conn.to_module, conn.to_port, it->second.to);
         }
         out.connections.push_back(conn);
 
