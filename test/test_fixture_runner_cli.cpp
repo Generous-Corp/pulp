@@ -15,6 +15,8 @@
 
 #include "test_cli_shellout_util.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -53,10 +55,17 @@ struct TempCorpus {
     fs::path root;
 
     TempCorpus() {
+        // catch_discover_tests registers every case as its own ctest test, so
+        // these run as concurrent processes under `ctest -j`. A clock-only name
+        // can collide, and a collision means one case's destructor removes
+        // another's corpus mid-run — an unreproducible red. The pid separates
+        // processes; the clock separates cases within one.
         root = fs::temp_directory_path() /
-               ("pulp-fixture-corpus-" +
+               ("pulp-fixture-corpus-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(root / "v1");
+        std::error_code created;
+        fs::create_directories(root / "v1", created);
+        REQUIRE_FALSE(created);
         write("v1/minimal.json", kMinimalProject);
         write("corpus.index", "document v1/minimal.json\n");
     }
