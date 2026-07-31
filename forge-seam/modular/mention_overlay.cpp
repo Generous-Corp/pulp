@@ -146,8 +146,20 @@ void MentionOverlay::choose(std::size_t index) {
     close();
 }
 
+void MentionOverlay::highlight_selected() {
+    for (std::size_t r = 0; r < row_views_.size(); ++r) {
+        auto* v = row_views_[r];
+        if (!v) continue;
+        const bool on = static_cast<int>(r) + first_visible_ == selected_;
+        v->set_background_color(on ? surface_raised
+                                   : pulp::canvas::Color::rgba8(0, 0, 0, 0));
+        v->request_repaint();
+    }
+}
+
 void MentionOverlay::rebuild_rows() {
     if (!list_ || !root_) return;
+    row_views_.clear();
     while (list_->child_count() > 0) list_->remove_child(list_->child_at(0));
 
     const int n = static_cast<int>(candidates_.size());
@@ -183,8 +195,11 @@ void MentionOverlay::rebuild_rows() {
         // used.
         row->on_click = [this, i] { choose(i); };
         row->on_hover_enter = [this, i] {
+            // Colour only. Rebuilding here destroys the row whose handler is
+            // running -- the framework is mid-walk over these children when it
+            // calls this -- and the walk then continues on freed memory.
             selected_ = static_cast<int>(i);
-            rebuild_rows();
+            highlight_selected();
         };
         row->flex().direction = FlexDirection::row;
         row->flex().align_items = FlexAlign::center;
@@ -219,6 +234,7 @@ void MentionOverlay::rebuild_rows() {
                                       : accent);
             row->add_child(std::move(state));
         }
+        row_views_.push_back(row.get());
         list_->add_child(std::move(row));
     }
     if (last < n) affordance("\u25BC", 1);

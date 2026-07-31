@@ -87,6 +87,7 @@ public:
     void forget_views() {
         root_ = nullptr;
         list_ = nullptr;
+        row_views_.clear();
         open_ = false;
     }
 
@@ -112,6 +113,15 @@ public:
 private:
     void refresh(const std::string& query);
     void rebuild_rows();
+    /// Re-colour the existing rows for the current selection.
+    ///
+    /// Separate from rebuild_rows() because hovering must NOT restructure the
+    /// view tree: the hover is dispatched while the framework is walking the
+    /// child list, and destroying those children mid-walk leaves it iterating
+    /// freed memory. That segfaulted on a mouse move.
+    void highlight_selected();
+
+    std::vector<pulp::view::View*> row_views_;
     /// Keep the selected row inside the drawn window.
     void scroll_to_selection();
 

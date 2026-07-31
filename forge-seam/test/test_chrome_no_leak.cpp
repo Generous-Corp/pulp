@@ -5154,3 +5154,56 @@ TEST_CASE("the mention list behaves like a dropdown", "[rack][mention]") {
     CHECK_FALSE(m.handle_key_event(ret));
     CHECK_FALSE(m.handle_key_event(down));
 }
+
+TEST_CASE("hovering the mention list does not free the rows being walked",
+          "[rack][mention][crash]") {
+    // SIGSEGV in View::simulate_hover, on a plain mouse move. The hover is
+    // dispatched WHILE the framework walks the child list, and the handler
+    // called rebuild_rows() -- which destroys those very children. The walk
+    // then continued over freed memory.
+    //
+    // Shipped and crashed twice within a minute of the user moving the mouse.
+    // Nothing caught it because every test drove the model directly and none
+    // moved a pointer over the view.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto& m = shell.mentions();
+
+    m.set_source([](const std::string&) {
+        std::vector<forge_modular::MentionCandidate> out;
+        for (int i = 0; i < 20; ++i) {
+            forge_modular::MentionCandidate c;
+            c.brand = "Test";
+            c.name = "Mod" + std::to_string(i);
+            c.slug = "S" + std::to_string(i);
+            c.state = forge_modular::MentionCandidate::Availability::ready;
+            out.push_back(c);
+        }
+        return out;
+    });
+    m.handle_text("@", 1);
+    REQUIRE(m.is_open());
+    REQUIRE(m.candidates().size() == 20);
+
+    // Sweep a pointer across the whole window, which is what a mouse does and
+    // what nothing here had ever done. Under Guard Malloc this reads freed
+    // memory if a hover handler restructures the tree.
+    for (int pass = 0; pass < 3; ++pass) {
+        for (float y = 0; y < 800; y += 7) {
+            for (float x = 250; x < 700; x += 23)
+                view->simulate_hover({x, y});
+        }
+    }
+
+    // Still coherent afterwards: the list survived being hovered, which is the
+    // whole claim.
+    CHECK(m.is_open());
+    CHECK(m.candidates().size() == 20);
+    CHECK(m.selected_index() >= 0);
+    CHECK(m.selected_index() < 20);
+}
