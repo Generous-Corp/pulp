@@ -223,7 +223,17 @@ def log_state(expect: str = "") -> dict:
     if out["exists"]:
         out["bytes"] = os.path.getsize(LOG)
         with open(LOG, errors="replace") as f:
-            out["tail"] = [ln.rstrip() for ln in f.readlines()[-8:]]
+            lines = [ln.rstrip() for ln in f.readlines()]
+        out["tail"] = lines[-8:]
+        # The verdict reads THIS, not the tail. The generator prints its
+        # success line -- "built 8 modules, 9 cables -> ..." -- and then the
+        # whole explanation underneath it, twenty lines and more. Matching on
+        # the last eight therefore never saw the one line that says a patch
+        # exists, so a build that worked perfectly reported INCONCLUSIVE. That
+        # was diagnosed once as a dead PASS branch and fixed as a pattern; the
+        # pattern was right and the window it searched was eight lines too
+        # short. The tail stays for the human-readable dump.
+        out["log"] = "\n".join(lines[-400:])
     # Forge's own DSP+UI pipeline must never run for a Rack prompt. Its
     # diagnostics directory appearing is the tell, and it is worth reporting
     # every time rather than only when someone thinks to look.
@@ -239,8 +249,8 @@ def verdict(expect: str = "") -> int:
         print("FAIL: Forge's plugin pipeline ran — a Rack prompt reached the "
               "wrong generator")
         return 1
-    if st.get("expect") == "patch" and st["tail"]:
-        text = "\n".join(st["tail"])
+    if st.get("expect") == "patch" and st.get("log"):
+        text = st["log"]
         # The generator's own success line, anchored. The previous test looked
         # for "AUDIO" or ".vcv" anywhere in the tail -- both of which appear in
         # the explanation of a patch that FAILED to write, and neither of which
@@ -267,7 +277,7 @@ def verdict(expect: str = "") -> int:
             return 2
         print("FAIL: the generator never wrote anything — Build did not reach it")
         return 1
-    text = "\n".join(st["tail"])
+    text = st.get("log", "\n".join(st["tail"]))
     if "installed" in text and "open it with" in text:
         m = re.search(r"installed \u2192 (.+)$", text, re.M)
         if m and not os.path.exists(m.group(1).strip()):

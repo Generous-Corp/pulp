@@ -63,6 +63,18 @@ CASES = [
      "  built 8 modules, 9 cables → <ARTIFACT>\n\nAUDIO\n  VCO SAW → VCF IN\n",
      "patch", True, PASS),
 
+    # The success line is the FIRST thing the generator prints, and the whole
+    # explanation follows it. On a real patch that is twenty-odd lines, so a
+    # verdict that searched only the last eight never saw the one line saying
+    # a patch exists -- and every successful build on the M5 reported
+    # INCONCLUSIVE. The explanation here is deliberately longer than that
+    # window; shorten it and this case stops testing anything.
+    ("a success line buried under a long explanation still passes",
+     "  built 8 modules, 9 cables → <ARTIFACT>\n\n" +
+     "".join(f"  cable {i} → somewhere\n      because of a reason\n"
+             for i in range(12)),
+     "patch", True, PASS),
+
     # The bug this file was written for: before the fix this returned
     # INCONCLUSIVE, because `expect` was never set and the branch above was
     # unreachable. Kept as a distinct case from the one above so a regression

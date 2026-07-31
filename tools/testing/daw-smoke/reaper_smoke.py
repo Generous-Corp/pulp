@@ -195,10 +195,21 @@ class ReaperSession:
             comp = Path(os.path.expanduser("~/Library/Audio/Plug-Ins/Components")) / plugin.name
             comp.parent.mkdir(parents=True, exist_ok=True)
             if comp.exists():
-                log(f"refusing to clobber existing {comp} — FAIL")
-                return EXIT_FAIL
-            shutil.copytree(plugin, comp)
-            self.au_installed = comp
+                # Asking about the component that is ALREADY installed is the
+                # normal case, not a collision: an AU is proven where the host
+                # will actually find it. Use it in place and leave
+                # `au_installed` unset, so teardown does not uninstall
+                # something this run did not install. Refusing outright made
+                # the AU leg unrunnable on any machine with the plugin
+                # installed -- which is every machine anyone would test on.
+                if comp.resolve() == plugin.resolve():
+                    log(f"using the component already installed at {comp}")
+                else:
+                    log(f"refusing to clobber existing {comp} — FAIL")
+                    return EXIT_FAIL
+            else:
+                shutil.copytree(plugin, comp)
+                self.au_installed = comp
             subprocess.run(["killall", "-9", "AudioComponentRegistrar"], capture_output=True)
         return None
 
@@ -366,6 +377,146 @@ def run_reload_mode(reaper: Path, args: argparse.Namespace) -> int:
         return EXIT_INCONCLUSIVE
     finally:
         session.cleanup()
+
+
+def _osa(script: str) -> str:
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+def _floating_editor_bounds(plugin_name: str) -> tuple[int, int, int, int] | None:
+    """Where REAPER put the plugin's floating editor, on screen.
+
+    Read from the window server rather than assumed: REAPER places an FX window
+    wherever it likes, and a hardcoded coordinate is a click into the desktop.
+    """
+    for probe in (f'whose name contains "{plugin_name}"',
+                  'whose name contains "FX:"'):
+        pos = _osa(f'tell application "System Events" to tell process "REAPER" '
+                   f'to get position of window 1 {probe}')
+        size = _osa(f'tell application "System Events" to tell process "REAPER" '
+                    f'to get size of window 1 {probe}')
+        if pos and size:
+            try:
+                x, y = (int(v) for v in pos.split(", "))
+                w, h = (int(v) for v in size.split(", "))
+                return x, y, w, h
+            except ValueError:
+                continue
+    return None
+
+
+def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
+    """Generate a patch from INSIDE the host, by pressing the editor's Build.
+
+    editor-open proves the window comes up. It does not prove the product
+    works there: the generator is spawned by the plugin, and a plugin whose
+    editor draws perfectly can still fail to reach it -- the standalone once
+    did exactly that, because an app launched from Finder inherits no PATH.
+    Nothing short of pressing the button inside the host tests that path.
+
+    The verdict is the generator's own success line plus the file it names,
+    scraped from the plugin's log, never the click appearing to land.
+    """
+    plugin = Path(os.path.expanduser(args.plugin_path))
+    bad = _validate_inputs([plugin])
+    if bad is not None:
+        return bad
+
+    uidriver = Path(os.path.expanduser("~/.cache/forge-modular/uidriver"))
+    if not uidriver.exists():
+        log(f"no click helper at {uidriver} — run tools/rack/drive_app.py once "
+            f"to build it, or this cannot press anything — SKIP")
+        return EXIT_INCONCLUSIVE
+
+    plugin_log = Path(os.path.expanduser(
+        "~/Library/Application Support/Forge Modular/last-run.log"))
+    # Where the log ENDS now, so only what this run appends is ever read, and
+    # the PROMPT, so the artifact has to be the one this run asked for.
+    #
+    # Both guards exist because the first version had neither and reported a
+    # confident PASS naming `a-bouncing-ball-rhythm...vcv` for a run that typed
+    # "a classic subtractive voice" -- it matched a success line left behind by
+    # an earlier build. A gate that reports someone else's work as this run's
+    # is worse than no gate.
+    before = plugin_log.stat().st_size if plugin_log.exists() else 0
+    prompt = "a classic subtractive voice with a filter envelope"
+    want = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40]
+
+    _announce(f'"{args.plugin_name}" ({args.format}) editor-build smoke '
+              f'(it will run a generation inside REAPER)', args.timeout)
+    session = ReaperSession(reaper, args)
+    status = Path("/tmp/pulp_daw_smoke_status.txt")
+    try:
+        placed = session.place_plugin()
+        if placed is not None:
+            return placed
+        if status.exists():
+            status.unlink()
+
+        env = _common_env(args, status)
+        not_shown = session.run_until_fx_shown(env, status)
+        if not_shown is not None:
+            return not_shown
+        time.sleep(6)          # let the editor paint before touching it
+
+        box = _floating_editor_bounds(args.plugin_name)
+        if box is None:
+            log("the editor is open but its window could not be located, so "
+                "there is nothing safe to click — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        x, y, w, h = box
+        log(f"editor window at {x},{y} {w}x{h}")
+
+        # The same fractions the standalone driver uses; the editor is the
+        # same view at the same design size whichever shell is around it.
+        def click(fx: float, fy: float) -> None:
+            subprocess.run([str(uidriver), "click",
+                            str(int(x + w * fx)), str(int(y + h * fy))],
+                           check=False)
+            time.sleep(0.8)
+
+        click(0.567, 0.345)                       # the Patch tab
+        click(0.52, 0.48)                         # the prompt field
+        subprocess.run([str(uidriver), "type", prompt], check=False)
+        time.sleep(0.8)
+        click(0.73, 0.53)                         # Build
+
+        # Wait for the generation the way a person would: until the plugin's
+        # log says it finished, or the cap runs out.
+        deadline = time.time() + max(args.timeout, 600)
+        built = ""
+        while time.time() < deadline:
+            time.sleep(5)
+            if not plugin_log.exists() or plugin_log.stat().st_size <= before:
+                continue
+            with open(plugin_log, errors="replace") as f:
+                f.seek(before)
+                text = f.read()          # only what THIS run wrote
+            m = re.search(r"built (\d+) modules?, (\d+) cables? \u2192 (.+)$",
+                          text, re.M)
+            if m:
+                built = m.group(0)
+                path = Path(m.group(3).strip())
+                if not path.exists():
+                    log(f"the log says it built {path}, and it is not there — FAIL")
+                    return EXIT_FAIL
+                if not path.name.startswith(want):
+                    log(f"the log names {path.name}, which is not what this run "
+                        f"asked for ({want}…) — FAIL")
+                    return EXIT_FAIL
+                log(f"a patch was generated from inside REAPER: "
+                    f"{m.group(1)} modules, {m.group(2)} cables, "
+                    f"{path.name} — PASS.")
+                return EXIT_PASS
+            if "gave up" in text or "Traceback" in text:
+                log("the generator ran inside the host and produced nothing — FAIL")
+                return EXIT_FAIL
+        log("the generation did not finish inside the cap; nothing is being "
+            "killed and no verdict is being invented — INCONCLUSIVE")
+        return EXIT_INCONCLUSIVE
+    finally:
+        session.terminate()
 
 
 def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
@@ -711,7 +862,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="REAPER functional smoke for Pulp reload/editor/live-swap changes.")
     ap.add_argument("--mode",
                     choices=["reload", "live-plugin-swap", "sequence-loop-seek",
-                             "editor-open"],
+                             "editor-open", "editor-build"],
                     default="reload",
                     help="reload (default) hot-swaps a watched DSP artifact; "
                          "live-plugin-swap drives a hosted plugin-instance swap; "
@@ -781,7 +932,7 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
         ) if not v]
         if missing:
             ap.error("live-plugin-swap mode requires: " + ", ".join(missing))
-    elif args.mode == "editor-open":
+    elif args.mode in ("editor-open", "editor-build"):
         # Needs nothing beyond the plugin itself: that is the point of it.
         pass
     else:  # sequence-loop-seek
@@ -812,6 +963,8 @@ def main() -> int:
         return run_live_plugin_swap_mode(reaper, args)
     if args.mode == "editor-open":
         return run_editor_open_mode(reaper, args)
+    if args.mode == "editor-build":
+        return run_editor_build_mode(reaper, args)
     return run_sequence_loop_seek_mode(reaper, args)
 
 

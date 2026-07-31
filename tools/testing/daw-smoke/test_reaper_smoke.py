@@ -19,10 +19,13 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 MODULE_PATH = HERE / "reaper_smoke.py"
@@ -280,6 +283,99 @@ class EditorOpenMode(unittest.TestCase):
                               "--plugin-path", "/tmp/definitely-not-here.vst3"])
         rc = rs.run_editor_open_mode(pathlib.Path("/nonexistent/REAPER"), args)
         self.assertNotEqual(rc, rs.EXIT_PASS)
+
+
+class AuAlreadyInstalled(unittest.TestCase):
+    """An AU that is already installed is the case worth proving, not a clash.
+
+    The AU leg copies the component into ~/Library/Audio/Plug-Ins/Components
+    and removes it again afterwards, and it refused outright when something
+    was already there -- a guard against deleting somebody's real plugin on
+    teardown. But the component being there IS the normal state: it is how the
+    host finds it, and it is what a signed, notarized, installed AU looks like.
+    So the AU leg could not run on any machine anyone would actually test on,
+    and reported FAIL for a reason that had nothing to do with the plugin.
+
+    Now the same path is used in place and NOT uninstalled; a different path
+    still refuses.
+    """
+
+    def _prep(self, plugin_path):
+        import argparse
+        args = argparse.Namespace(format="au", plugin_path=str(plugin_path),
+                                  mode="editor-open", plugin_name="X")
+        smoke = rs.ReaperSession.__new__(rs.ReaperSession)
+        smoke.args = args
+        smoke.au_installed = None
+        return smoke
+
+    def test_the_installed_component_is_used_in_place(self):
+        with tempfile.TemporaryDirectory() as home:
+            comps = pathlib.Path(home) / "Library/Audio/Plug-Ins/Components"
+            comps.mkdir(parents=True)
+            comp = comps / "Forge Modular.component"
+            comp.mkdir()
+            smoke = self._prep(comp)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                smoke.portable = pathlib.Path(home) / "portable"
+                smoke.scan_dir = pathlib.Path(home) / "scan"
+                smoke.portable.mkdir(); smoke.scan_dir.mkdir()
+                smoke.args.plugin_path = str(comp)
+                rc = rs.ReaperSession.place_plugin(smoke)
+            self.assertIsNone(rc, "an already-installed AU must not be refused")
+            self.assertIsNone(smoke.au_installed,
+                              "teardown must not uninstall what it did not install")
+            self.assertTrue(comp.exists())
+
+    def test_a_different_component_still_refuses(self):
+        with tempfile.TemporaryDirectory() as home:
+            comps = pathlib.Path(home) / "Library/Audio/Plug-Ins/Components"
+            comps.mkdir(parents=True)
+            (comps / "Forge Modular.component").mkdir()
+            other = pathlib.Path(home) / "build" / "Forge Modular.component"
+            other.mkdir(parents=True)
+            smoke = self._prep(other)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                smoke.portable = pathlib.Path(home) / "portable"
+                smoke.scan_dir = pathlib.Path(home) / "scan"
+                smoke.portable.mkdir(); smoke.scan_dir.mkdir()
+                smoke.args.plugin_path = str(other)
+                rc = rs.ReaperSession.place_plugin(smoke)
+            self.assertEqual(rc, rs.EXIT_FAIL,
+                             "a DIFFERENT build must still not clobber an install")
+
+
+class EditorBuildMode(unittest.TestCase):
+    """Pressing Build INSIDE the host, which editor-open does not do.
+
+    editor-open proves the window comes up. It cannot prove the product works
+    there: the generator is spawned BY the plugin, and a plugin whose editor
+    draws perfectly can still never reach it -- the standalone did exactly
+    that once, because an app launched from Finder inherits no PATH. Only a
+    press inside the host tests that path.
+    """
+
+    def test_mode_is_offered_and_needs_nothing_extra(self):
+        ap = rs.build_parser()
+        args = ap.parse_args(["--mode", "editor-build",
+                              "--plugin-name", "Forge Modular",
+                              "--plugin-path", __file__])
+        self.assertEqual(args.mode, "editor-build")
+        rs.validate_mode_args(ap, args)   # must not raise or exit
+
+    def test_it_refuses_to_click_with_no_helper(self):
+        # Without the click helper there is nothing to press, and pretending
+        # otherwise would report a pass for a button nobody touched.
+        import argparse
+        args = argparse.Namespace(
+            mode="editor-build", plugin_name="Forge Modular",
+            plugin_path=__file__, format="clap", timeout=30)
+        real = os.path.expanduser
+        with mock.patch.object(rs.os.path, "expanduser",
+                               side_effect=lambda p: "/tmp/definitely-no-helper"
+                               if "uidriver" in p else real(p)):
+            rc = rs.run_editor_build_mode(pathlib.Path("/tmp/reaper"), args)
+        self.assertEqual(rc, rs.EXIT_INCONCLUSIVE)
 
 
 if __name__ == "__main__":
