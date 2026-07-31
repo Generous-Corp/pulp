@@ -267,6 +267,41 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                 ss << ind << var << ".style.height = '"
                    << format_px(*node.style.height) << "';\n";
 
+            // And it is a POSITIONED box. This branch returns before the shared
+            // style emitter, so anything it does not write here is dropped —
+            // which silently discarded the design's placement and left every
+            // control to flex flow. Over a faithful capture that is the whole
+            // panel: the backdrop is absolutely positioned art, and controls
+            // meant to sit on top of it stack down one edge instead, all
+            // sharing an x. The result renders, so nothing downstream objects.
+            //
+            // Deliberately the positioning subset and not the full style block.
+            // A control over a capture carries `designed_body: capture` because
+            // its body IS the bitmap underneath; emitting the general
+            // background/border/shadow run here would paint an opaque widget
+            // over the art this exists to reveal.
+            if (node.style.position)
+                ss << ind << var << ".style.position = '"
+                   << js_single_quote_escape(*node.style.position) << "';\n";
+            const auto emit_edge = [&](const char* name,
+                                       const std::optional<float>& value) {
+                if (value)
+                    ss << ind << var << ".style." << name << " = '"
+                       << format_px(*value) << "';\n";
+            };
+            emit_edge("left", node.style.left);
+            emit_edge("top", node.style.top);
+            emit_edge("right", node.style.right);
+            emit_edge("bottom", node.style.bottom);
+            // z-index is deliberately NOT emitted here, and adding it is not the
+            // obvious improvement it looks like. web-compat's auto-overlay
+            // heuristic claims the single global overlay slot for any element
+            // that is `position:absolute` with z-index >= 10
+            // (web-compat-style-decl.js), so emitting a designed stacking order
+            // would make a row of overlay knobs fight over one slot — last one
+            // wins, the rest are released. Placement alone fixes the defect;
+            // the capture lowering sets position/left/top and no z-index.
+
             // Every user-authored string goes through the same escape as the
             // rest of this file. Interpolating the label raw let a crafted
             // design terminate the literal and inject executable bridge JS.
