@@ -85,16 +85,17 @@ pulp motion record --view Card --fps 30 --out card-fade.jsonl
 # → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
 #   in the app or test when you need an on-disk JSONL artifact.
 # → trace started — trace_id=1
-# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
+# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
-`record` resolves authenticated discovery to one exact identity before it
-mutates, then prints that pair in the stop command. `stop` requires the exact
-`--session ID --instance ID` pair so a replacement process cannot inherit the
-operation. `scrub`, `play`, `pause`, and cost toggles also mutate process-owned
-state and require an exact pair. Read-only `snapshot` and `list-traces` accept
+`record` resolves authenticated discovery to one exact publication before it
+mutates, then prints that selector in the stop command. `stop` requires the
+exact `--session ID --instance ID --publication ID` selector so a replacement
+process that reuses the other IDs cannot inherit the operation. `scrub`,
+`play`, `pause`, and cost toggles also mutate process-owned state and require
+an exact publication. Read-only `snapshot` and `list-traces` accept
 auto-discovery or exact selection; `--port` remains a discovery filter, and
-`--json` includes the resolved pair for `record`. The command exits 1 with
+`--json` includes the resolved selector for `record`. The command exits 1 with
 custom-fixture guidance when no eligible session exists. Full list: `record /
 stop / snapshot / list-traces / scrub / play / pause / cost
 {enable|disable}`. Fixture loading is deliberately absent
@@ -121,7 +122,7 @@ animation. The motion server emits events as the values change.
 ### 5. Stop the trace
 
 ```bash
-pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 # → trace stopped (removed=true)
 ```
 
@@ -346,7 +347,8 @@ wire.
 
 After trusted host/test code loads the fixture, an authenticated client with
 the granted trace-control capability may call `pulp motion scrub 120
---session SESSION --instance INSTANCE`, `play` with the same pair,
+--session SESSION --instance INSTANCE --publication PUBLICATION`, `play` with
+the same selector,
 or `pause`. `pulp motion load-fixture` is intentionally unavailable.
 
 Direct C++ usage:
@@ -418,9 +420,9 @@ also reports `cost_enabled` and `cost_samples_emitted`.
 CLI shortcut:
 
 ```bash
-pulp motion cost enable --session SESSION --instance INSTANCE
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
 # ... drive the suspect animation ...
-pulp motion cost disable --session SESSION --instance INSTANCE
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot --json | jq '.cost_samples_emitted'
 ```
 

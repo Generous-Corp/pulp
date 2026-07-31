@@ -27,7 +27,7 @@ Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 # 2. Start a session, reproduce the slow thing, then stop.
 pulp trace start --categories dsp,render
 # ... trigger the suspect interaction / open the editor ...
-pulp trace stop --session SESSION --instance INSTANCE  # copy pair from start
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
 # → /tmp/pulp-<ts>.pftrace
 
 # 3a. Novice one-liner (L1): narrated root cause + fix, no SQL.
@@ -58,7 +58,7 @@ pulp trace query --preset dsp-hotspots
 | `explain` | `Trace.explain` |
 
 Every live verb uses authenticated ephemeral discovery by default and honors
-`--session ID --instance ID` as a paired exact-session selector,
+`--session ID --instance ID --publication ID` as an exact-publication selector,
 `--port N` / `$PULP_INSPECTOR_PORT` as an explicit port filter, plus
 `--json` for the raw inspector response. Use the same exact selector for
 `start`, `stop`, and later live queries so a replacement process cannot inherit

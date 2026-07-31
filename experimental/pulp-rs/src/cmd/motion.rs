@@ -35,7 +35,8 @@
 //!
 //! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! `--session ID --instance ID` selects one exact identity. An explicit
+//! `--session ID --instance ID --publication ID` selects one exact
+//! publication. An explicit
 //! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
 //! C++ client performs authenticated ephemeral discovery and the real protocol
 //! connection is the only connection opened. If no session is available, the
@@ -89,6 +90,8 @@ pub struct GlobalFlags {
     pub session_id: Option<String>,
     /// Exact instance identity forwarded as `pulp inspect --instance`.
     pub instance_id: Option<String>,
+    /// Non-reusable publication generation forwarded as `--publication`.
+    pub publication_id: Option<String>,
 }
 
 /// `pulp motion record` flag set.
@@ -150,7 +153,9 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
                 ));
             }
             globals.port = Some(port);
-        } else if a == "--session" || a == "--instance" {
+        } else if a == "--session" || a == "--instance" ||
+            a == "--publication"
+        {
             i += 1;
             let v = args.get(i).ok_or_else(|| {
                 CliError::BadUsage(format!("{a} requires a value"))
@@ -162,8 +167,10 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             }
             if a == "--session" {
                 globals.session_id = Some(v.clone());
-            } else {
+            } else if a == "--instance" {
                 globals.instance_id = Some(v.clone());
+            } else {
+                globals.publication_id = Some(v.clone());
             }
         } else {
             rest.push(a.clone());
@@ -173,6 +180,13 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     if globals.session_id.is_some() != globals.instance_id.is_some() {
         return Err(CliError::BadUsage(
             "--session and --instance must be supplied together".to_owned(),
+        ));
+    }
+    if globals.publication_id.is_some() &&
+        (globals.session_id.is_none() || globals.instance_id.is_none())
+    {
+        return Err(CliError::BadUsage(
+            "--publication requires --session and --instance".to_owned(),
         ));
     }
 
@@ -487,6 +501,7 @@ pub trait InspectorTalker {
         port: u16,
         _session_id: &str,
         _instance_id: &str,
+        _publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
@@ -515,12 +530,14 @@ impl InspectorTalker for SystemInspector {
         port: u16,
         session_id: &str,
         instance_id: &str,
+        publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
         let selection = crate::cmd::inspector::SessionSelection {
             session_id: session_id.to_owned(),
             instance_id: instance_id.to_owned(),
+            publication_id: publication_id.to_owned(),
         };
         crate::cmd::inspector::call_selected(
             "motion",
@@ -578,6 +595,7 @@ pub fn dispatch<T: InspectorTalker>(
             Some(crate::cmd::inspector::SessionSelection {
                 session_id: session_id.to_owned(),
                 instance_id: instance_id.to_owned(),
+                publication_id: flags.publication_id.clone().unwrap_or_default(),
             })
         }
         _ => None,
@@ -590,25 +608,41 @@ pub fn dispatch<T: InspectorTalker>(
             Sub::Pause |
             Sub::Cost { .. }
     );
-    if requires_exact_selection && explicit_selection.is_none() {
+    if requires_exact_selection &&
+        explicit_selection
+            .as_ref()
+            .map_or(true, |selection| selection.publication_id.is_empty())
+    {
         return Err(CliError::BadUsage(
-            "pulp motion mutation requires --session and --instance; reuse the \
-             exact pair printed by `pulp motion record`"
+            "pulp motion mutation requires --session, --instance, and \
+             --publication; reuse the \
+             exact selector printed by `pulp motion record`"
                 .to_owned(),
         ));
     }
     let discovered_selection;
     let selection = if matches!(sub, Sub::Record(_)) &&
-        explicit_selection.is_none()
+        explicit_selection
+            .as_ref()
+            .map_or(true, |selection| selection.publication_id.is_empty())
     {
-        let capabilities =
-            talker.call(port, "Session.getCapabilities", "{}")?;
+        let capabilities = match explicit_selection.as_ref() {
+            Some(selection) => talker.call_selected(
+                port,
+                &selection.session_id,
+                &selection.instance_id,
+                &selection.publication_id,
+                "Session.getCapabilities",
+                "{}",
+            )?,
+            None => talker.call(port, "Session.getCapabilities", "{}")?,
+        };
         discovered_selection =
             crate::cmd::inspector::parse_session_selection(&capabilities)
                 .ok_or_else(|| {
                     CliError::Other(
                         "pulp motion: Session.getCapabilities did not return a \
-                         safe sessionId and instanceId"
+                         safe sessionId, instanceId, and publicationId"
                             .to_owned(),
                     )
                 })?;
@@ -621,6 +655,7 @@ pub fn dispatch<T: InspectorTalker>(
             port,
             &selection.session_id,
             &selection.instance_id,
+            &selection.publication_id,
             method,
             &params,
         )?,
@@ -709,6 +744,7 @@ fn write_pretty(
                     crate::cmd::inspector::selection_cli_suffix(
                         selection.map(|value| value.session_id.as_str()),
                         selection.map(|value| value.instance_id.as_str()),
+                        selection.map(|value| value.publication_id.as_str()),
                     )
                 )?;
             } else {
@@ -802,14 +838,15 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  --session ID --instance ID   Select one exact authenticated session identity\n\
+        "  --session ID --instance ID --publication ID\n\
+                                        Select one exact authenticated publication\n\
          Required for stop, scrub, play, pause, and cost mutations.\n"
     )?;
     writeln!(out, "Example: # after a custom host constructs InspectorServer")?;
     writeln!(out, "         pulp motion record --view Card --out card-fade.jsonl")?;
     writeln!(
         out,
-        "         pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE"
+        "         pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION"
     )?;
     Ok(())
 }
@@ -868,21 +905,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_exact_session_selection_requires_both_identifiers() {
+    fn parse_exact_publication_selection_accepts_all_identifiers() {
         let (_, flags) = parse(&s(&[
             "play",
             "--session",
             "session-a",
             "--instance",
             "instance-b",
+            "--publication",
+            "publication-c",
         ]))
         .unwrap();
         assert_eq!(flags.session_id.as_deref(), Some("session-a"));
         assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
+        assert_eq!(flags.publication_id.as_deref(), Some("publication-c"));
 
         for args in [
             s(&["play", "--session", "session-a"]),
             s(&["play", "--instance", "instance-b"]),
+            s(&["play", "--publication", "publication-c"]),
             s(&[
                 "play",
                 "--session",
@@ -1140,7 +1181,7 @@ mod tests {
             Vec<(u16, String, String)>, // port, method, params
         >,
         selections:
-            std::cell::RefCell<Vec<Option<(String, String)>>>,
+            std::cell::RefCell<Vec<Option<(String, String, String)>>>,
     }
 
     impl RecordingTalker {
@@ -1185,6 +1226,7 @@ mod tests {
             port: u16,
             session_id: &str,
             instance_id: &str,
+            publication_id: &str,
             method: &str,
             params: &str,
         ) -> Result<String> {
@@ -1196,6 +1238,7 @@ mod tests {
             self.selections.borrow_mut().push(Some((
                 session_id.to_owned(),
                 instance_id.to_owned(),
+                publication_id.to_owned(),
             )));
             Ok(self.respond())
         }
@@ -1207,6 +1250,7 @@ mod tests {
         let flags = GlobalFlags {
             session_id: Some("session-a".to_owned()),
             instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
             ..GlobalFlags::default()
         };
         let mut output = Vec::new();
@@ -1222,6 +1266,7 @@ mod tests {
             &[Some((
                 "session-a".to_owned(),
                 "instance-b".to_owned(),
+                "publication-c".to_owned(),
             ))]
         );
         assert_eq!(talker.calls.borrow()[0].1, "Motion.play");
@@ -1245,7 +1290,8 @@ mod tests {
     #[test]
     fn dispatch_record_extracts_trace_id_in_pretty_mode() {
         let t = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\"}",
             "{\"trace_id\":3}",
         ]);
         let mut buf: Vec<u8> = Vec::new();
@@ -1260,13 +1306,17 @@ mod tests {
         assert!(out.contains("trace_id=3"), "{out}");
         assert!(out.contains(
             "pulp motion stop --trace-id 3 --session session-a \
-             --instance instance-b"
+             --instance instance-b --publication publication-c"
         ), "{out}");
         assert_eq!(t.calls.borrow()[0].1, "Session.getCapabilities");
         assert_eq!(t.calls.borrow()[1].1, "Motion.startTrace");
         assert_eq!(
             t.selections.borrow()[1],
-            Some(("session-a".to_owned(), "instance-b".to_owned()))
+            Some((
+                "session-a".to_owned(),
+                "instance-b".to_owned(),
+                "publication-c".to_owned(),
+            ))
         );
     }
 
@@ -1276,6 +1326,7 @@ mod tests {
         let flags = GlobalFlags {
             session_id: Some("session-a".to_owned()),
             instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
             ..GlobalFlags::default()
         };
         let mut output = Vec::new();
@@ -1294,14 +1345,15 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains(
             "pulp motion stop --trace-id 3 --session session-a \
-             --instance instance-b"
+             --instance instance-b --publication publication-c"
         ), "{output}");
     }
 
     #[test]
     fn dispatch_record_json_surfaces_resolved_exact_selection() {
         let talker = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\"}",
             "{\"trace_id\":3}",
         ]);
         let flags = GlobalFlags {
@@ -1345,7 +1397,8 @@ mod tests {
     #[test]
     fn dispatch_record_with_out_prints_sidecar_hint() {
         let t = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\"}",
             "{\"trace_id\":9}",
         ]);
         let mut buf: Vec<u8> = Vec::new();

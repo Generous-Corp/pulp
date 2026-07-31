@@ -388,10 +388,17 @@ TEST_CASE("inspector authentication binds a one-shot proof to session and protoc
         std::string(64, '1'),
         "session-1",
         "instance-1",
+        "publication-1",
         "1",
     };
     const auto proof = make_inspector_auth_proof(token, challenge);
     REQUIRE(proof.has_value());
+    auto replacement = challenge;
+    replacement.publication_id = "publication-2";
+    const auto replacement_proof =
+        make_inspector_auth_proof(token, replacement);
+    REQUIRE(replacement_proof.has_value());
+    CHECK(*replacement_proof != *proof);
 
     InspectorAuthVerifier verifier(token, challenge);
     const auto server_proof = verifier.authenticate(*proof);

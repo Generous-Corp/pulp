@@ -75,6 +75,8 @@ public:
     std::atomic<int> port{0};
     InspectorSession* session = nullptr;
     detail::InspectorPublication publication;
+    std::mutex publication_id_mutex;
+    std::string publication_id;
     std::vector<std::uint8_t> token;
     std::chrono::milliseconds authentication_timeout =
         std::chrono::seconds(3);
@@ -141,9 +143,15 @@ public:
                 raw->disconnect();
                 return;
             }
+            std::string current_publication_id;
+            {
+                std::lock_guard lock(publication_id_mutex);
+                current_publication_id = publication_id;
+            }
             const auto challenge = make_inspector_auth_challenge(
                 session->info().session_id,
                 session->info().instance_id,
+                std::move(current_publication_id),
                 session->info().protocol_version);
             if (!challenge) {
                 raw->disconnect();
@@ -225,6 +233,9 @@ public:
                 params.addMember(
                     "instanceId",
                     choc::value::createString(challenge->instance_id));
+                params.addMember(
+                    "publicationId",
+                    choc::value::createString(challenge->publication_id));
                 params.addMember(
                     "protocolVersion",
                     choc::value::createString(challenge->protocol_version));
@@ -389,6 +400,10 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         stop_locked();
         return false;
     }
+    {
+        std::lock_guard lock(publication_id_mutex);
+        publication_id = config.discovery->record()->publication_id;
+    }
     if (stop_requested.load(std::memory_order_acquire)) {
         stop_locked();
         return false;
@@ -483,6 +498,10 @@ void InspectorServer::Impl::stop_locked() {
                 session->disconnect(client_id);
         }
         publication.clear();
+        {
+            std::lock_guard lock(publication_id_mutex);
+            publication_id.clear();
+        }
         session = nullptr;
         pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();

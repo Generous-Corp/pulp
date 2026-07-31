@@ -649,6 +649,8 @@ std::string encode_record(const InspectorDiscoveryRecord& record) {
                     choc::value::createString(record.session_id));
     value.addMember("instanceId",
                     choc::value::createString(record.instance_id));
+    value.addMember("publicationId",
+                    choc::value::createString(record.publication_id));
     value.addMember("pluginId", choc::value::createString(record.plugin_id));
     value.addMember("endpoint", choc::value::createString(record.endpoint));
     value.addMember("protocolVersion",
@@ -679,6 +681,8 @@ std::optional<InspectorDiscoveryRecord> decode_record(
         InspectorDiscoveryRecord record;
         record.session_id = std::string(value["sessionId"].getString());
         record.instance_id = std::string(value["instanceId"].getString());
+        record.publication_id =
+            std::string(value["publicationId"].getString());
         record.plugin_id = std::string(value["pluginId"].getString());
         record.endpoint = std::string(value["endpoint"].getString());
         record.protocol_version =
@@ -699,6 +703,7 @@ std::optional<InspectorDiscoveryRecord> decode_record(
             discovery_file_stem(record.session_id, record.instance_id);
         if (!safe_component(record.session_id) ||
             !safe_component(record.instance_id) ||
+            !safe_component(record.publication_id) ||
             path.filename() != file_stem + ".json" ||
             credential_name != file_stem + ".token" ||
             !valid_loopback_endpoint(record.endpoint) ||
@@ -867,6 +872,16 @@ InspectorDiscoveryReader::read_credential(
     const InspectorDiscoveryRecord& record) const {
     if (!validate_private_directory(runtime_directory_))
         return std::nullopt;
+    const auto current =
+        decode_record(runtime_directory_, record.record_path);
+    if (!current ||
+        current->session_id != record.session_id ||
+        current->instance_id != record.instance_id ||
+        current->publication_id != record.publication_id ||
+        current->process_id != record.process_id ||
+        current->process_start_id != record.process_start_id ||
+        current->credential_path != record.credential_path)
+        return std::nullopt;
     const auto path = confined_path(runtime_directory_, record.credential_path);
     if (!path)
         return std::nullopt;
@@ -929,6 +944,10 @@ bool InspectorDiscoveryPublisher::publish(
         return false;
     }
     record.process_id = static_cast<std::int64_t>(getpid());
+    const auto publication_id = pulp::runtime::secure_random_bytes(16);
+    if (!publication_id)
+        return false;
+    record.publication_id = pulp::runtime::hex_encode(*publication_id);
     const auto process_start_id = process_start_identity(record.process_id);
     if (!process_start_id)
         return false;
@@ -943,13 +962,10 @@ bool InspectorDiscoveryPublisher::publish(
     if (encoded_record.size() > kMaxDiscoveryRecordBytes)
         return false;
     ownership_path_ = runtime_directory_ / (file_stem + ".lock");
-    const auto ownership_id = pulp::runtime::secure_random_bytes(16);
-    if (!ownership_id)
-        return false;
     ownership_marker_ =
         std::to_string(record.process_id) + "\n" +
         record.process_start_id + "\n" +
-        pulp::runtime::hex_encode(*ownership_id);
+        record.publication_id;
     ownership_ =
         OwnershipLease::acquire(ownership_path_, ownership_marker_);
     if (!ownership_) {
@@ -1016,12 +1032,16 @@ std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::span<const InspectorDiscoveryRecord> records,
     std::string_view session_id,
     std::string_view instance_id,
+    std::string_view publication_id,
     std::string* error) {
-    if (!session_id.empty() || !instance_id.empty()) {
+    if (!session_id.empty() || !instance_id.empty() ||
+        !publication_id.empty()) {
         std::optional<InspectorDiscoveryRecord> match;
         for (const auto& record : records) {
             if ((!session_id.empty() && record.session_id != session_id) ||
-                (!instance_id.empty() && record.instance_id != instance_id))
+                (!instance_id.empty() && record.instance_id != instance_id) ||
+                (!publication_id.empty() &&
+                 record.publication_id != publication_id))
                 continue;
             if (match) {
                 if (error)

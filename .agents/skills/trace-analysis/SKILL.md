@@ -67,10 +67,10 @@ pulp trace doctor            # human report; add --json for {ready_to_capture, r
 or tracing was compiled out. Normal launches create no endpoint; capture
 requires an explicitly wired custom fixture published through authenticated discovery.
 When more than one live session exists—or when a capture spans separate CLI
-invocations—pass the same paired `--session ID --instance ID` selector to
-`doctor`, `start`, `stop`, and live queries. The pair pins the exact
-authenticated process instance instead of allowing a replacement session to
-inherit the operation.
+invocations—pass the same `--session ID --instance ID --publication ID`
+selector to `doctor`, `start`, `stop`, and live queries. The non-reusable
+publication ID pins the exact authenticated publication instead of allowing a
+replacement process that reuses the other IDs to inherit the operation.
 `ready_to_query:false` means no `trace_processor` (on
 `$PULP_TRACE_PROCESSOR`, the pinned Pulp-fetched build, or `$PATH`) or no
 captured trace yet. For zero-install, run
@@ -81,7 +81,7 @@ trace-processor` fetches the same pinned artifact via the tool registry.)
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
-pulp trace stop --session SESSION --instance INSTANCE     # copy pair from start
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Or accept a `--trace FILE.pftrace` the user hands you. Choose categories from
@@ -216,7 +216,7 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
-pulp trace stop --session SESSION --instance INSTANCE
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp trace explain "why is my plugin slow to open?"
 ```
 

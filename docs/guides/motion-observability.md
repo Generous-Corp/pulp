@@ -59,7 +59,7 @@ regardless of which surface launched the trace.
   # → --out is a fixture-path hint; wire make_fixture_sink("card-fade.jsonl")
   #   in the app or test when you need an on-disk JSONL artifact.
   # → trace started — trace_id=1
-  pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
+  pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
   ```
   See the **CLI subcommands** section below for the full reference.
 - **`pulp-mcp` server** — the MCP server exposes an experimental
@@ -93,10 +93,11 @@ regardless of which surface launched the trace.
     }
   }
   ```
-  The start result includes an exact `session_id` and `instance_id`.
+  The start result includes an exact `session_id`, `instance_id`, and
+  non-reusable `publication_id`.
   Pass both, together with `trace_id`, to `pulp_motion_stop_trace`; the stop
   schema requires the pair and will not rediscover a replacement process.
-  Scrub, play, pause, and cost mutations require the same exact pair.
+  Scrub, play, pause, and cost mutations require the same exact selector.
 - **XcodeBuildMCP** — recommended companion on macOS and the iOS Simulator. Use
   its log-stream + screenshot tools to drive a simulator while the motion
   inspector records, and feed the captured frames into
@@ -138,10 +139,10 @@ endpoint. `PULP_MOTION_SERVER` does not activate it. Use `--port N` or
 | `pulp motion stop [--trace-id N]` | `Motion.stopTrace` | Release the trace returned by `record`. |
 | `pulp motion snapshot` | `Motion.snapshot` | One-shot view of `tracing_enabled`, `firehose`, `active_traces`, `inspector_traces`, `emitted_events`, `cost_enabled`, `cost_samples_emitted`. |
 | `pulp motion list-traces` | `Motion.listTraces` | Enumerate inspector-owned trace IDs. |
-| `pulp motion scrub <FRAME>` | `Motion.scrubTo` | Move the exact session's scrubber playhead to a given frame. |
-| `pulp motion play` | `Motion.play` | Resume exact-session scrubber playback from the playhead. |
-| `pulp motion pause` | `Motion.pause` | Pause exact-session scrubber playback. |
-| `pulp motion cost {enable\|disable}` | `Motion.enableCost` / `Motion.disableCost` | Toggle exact-session cost attribution. Off by default. |
+| `pulp motion scrub <FRAME>` | `Motion.scrubTo` | Move the exact publication's scrubber playhead to a given frame. |
+| `pulp motion play` | `Motion.play` | Resume exact-publication scrubber playback from the playhead. |
+| `pulp motion pause` | `Motion.pause` | Pause exact-publication scrubber playback. |
+| `pulp motion cost {enable\|disable}` | `Motion.enableCost` / `Motion.disableCost` | Toggle exact-publication cost attribution. Off by default. |
 
 All commands accept `--json` to print the raw inspector response
 verbatim (useful for piping into `jq`). The default output is a
@@ -153,16 +154,16 @@ pulp motion record --view Card --fps 60 --out card-fade.jsonl
 # →   note: --out is a fixture-path hint; use make_fixture_sink(path)
 #       in the app or test to create the on-disk JSONL.
 # → trace started — trace_id=1
-# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
+# →   stop with: pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 
 # Replay after the explicitly owned test host loads the fixture in-process.
-pulp motion scrub 30 --session SESSION --instance INSTANCE
-pulp motion play --session SESSION --instance INSTANCE
+pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion play --session SESSION --instance INSTANCE --publication PUBLICATION
 
 # Cost attribution for a short profiling window.
-pulp motion cost enable --session SESSION --instance INSTANCE
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
 # ... drive the suspect animation ...
-pulp motion cost disable --session SESSION --instance INSTANCE
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot --json | jq '.cost_samples_emitted'
 ```
 

@@ -44,7 +44,8 @@
 //!
 //! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! `--session ID --instance ID` selects one exact identity. An explicit
+//! `--session ID --instance ID --publication ID` selects one exact
+//! publication. An explicit
 //! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
 //! C++ client performs authenticated ephemeral discovery and the real protocol
 //! connection is the only connection opened. If no session is available it
@@ -150,6 +151,8 @@ pub struct GlobalFlags {
     pub session_id: Option<String>,
     /// Exact instance identity forwarded as `pulp inspect --instance`.
     pub instance_id: Option<String>,
+    /// Non-reusable publication generation forwarded as `--publication`.
+    pub publication_id: Option<String>,
 }
 
 /// `pulp trace start` flag set.
@@ -214,7 +217,9 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
                 ));
             }
             globals.port = Some(port);
-        } else if a == "--session" || a == "--instance" {
+        } else if a == "--session" || a == "--instance" ||
+            a == "--publication"
+        {
             i += 1;
             let v = args.get(i).ok_or_else(|| {
                 CliError::BadUsage(format!("{a} requires a value"))
@@ -226,8 +231,10 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             }
             if a == "--session" {
                 globals.session_id = Some(v.clone());
-            } else {
+            } else if a == "--instance" {
                 globals.instance_id = Some(v.clone());
+            } else {
+                globals.publication_id = Some(v.clone());
             }
         } else {
             rest.push(a.clone());
@@ -237,6 +244,13 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     if globals.session_id.is_some() != globals.instance_id.is_some() {
         return Err(CliError::BadUsage(
             "--session and --instance must be supplied together".to_owned(),
+        ));
+    }
+    if globals.publication_id.is_some() &&
+        (globals.session_id.is_none() || globals.instance_id.is_none())
+    {
+        return Err(CliError::BadUsage(
+            "--publication requires --session and --instance".to_owned(),
         ));
     }
 
@@ -564,7 +578,7 @@ pub trait InspectorTalker {
     fn call(&self, port: u16, method: &str, params_json: &str)
         -> Result<String>;
 
-    /// Send a request to the exact session selected by an earlier
+    /// Send a request to the exact publication selected by an earlier
     /// authenticated request. Implementations that maintain one persistent
     /// connection may use the default; subprocess adapters override this so
     /// each invocation repeats the original session identity.
@@ -573,6 +587,7 @@ pub trait InspectorTalker {
         port: u16,
         _session_id: &str,
         _instance_id: &str,
+        _publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
@@ -601,12 +616,14 @@ impl InspectorTalker for SystemInspector {
         port: u16,
         session_id: &str,
         instance_id: &str,
+        publication_id: &str,
         method: &str,
         params_json: &str,
     ) -> Result<String> {
         let selection = crate::cmd::inspector::SessionSelection {
             session_id: session_id.to_owned(),
             instance_id: instance_id.to_owned(),
+            publication_id: publication_id.to_owned(),
         };
         crate::cmd::inspector::call_selected(
             "trace",
@@ -688,6 +705,7 @@ pub fn dispatch<T: InspectorTalker>(
             Some(crate::cmd::inspector::SessionSelection {
                 session_id: session_id.to_owned(),
                 instance_id: instance_id.to_owned(),
+                publication_id: flags.publication_id.clone().unwrap_or_default(),
             })
         }
         _ => None,
@@ -709,25 +727,41 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp trace: no inspector mapping for {sub:?}"
         )));
     };
-    if matches!(sub, Sub::Stop) && explicit_selection.is_none() {
+    if matches!(sub, Sub::Stop) &&
+        explicit_selection
+            .as_ref()
+            .map_or(true, |selection| selection.publication_id.is_empty())
+    {
         return Err(CliError::BadUsage(
-            "pulp trace stop requires --session and --instance from the exact \
+            "pulp trace stop requires --session, --instance, and --publication \
+             from the exact \
              stop command printed by `pulp trace start`"
                 .to_owned(),
         ));
     }
     let discovered_selection;
     let selection = if matches!(sub, Sub::Start(_)) &&
-        explicit_selection.is_none()
+        explicit_selection
+            .as_ref()
+            .map_or(true, |selection| selection.publication_id.is_empty())
     {
-        let capabilities =
-            talker.call(port, "Session.getCapabilities", "{}")?;
+        let capabilities = match explicit_selection.as_ref() {
+            Some(selection) => talker.call_selected(
+                port,
+                &selection.session_id,
+                &selection.instance_id,
+                &selection.publication_id,
+                "Session.getCapabilities",
+                "{}",
+            )?,
+            None => talker.call(port, "Session.getCapabilities", "{}")?,
+        };
         discovered_selection =
             crate::cmd::inspector::parse_session_selection(&capabilities)
                 .ok_or_else(|| {
                     CliError::Other(
                         "pulp trace: Session.getCapabilities did not return a \
-                         safe sessionId and instanceId"
+                         safe sessionId, instanceId, and publicationId"
                             .to_owned(),
                     )
                 })?;
@@ -740,6 +774,7 @@ pub fn dispatch<T: InspectorTalker>(
             port,
             &selection.session_id,
             &selection.instance_id,
+            &selection.publication_id,
             method,
             &params,
         )?,
@@ -782,6 +817,7 @@ fn write_pretty(
                     crate::cmd::inspector::selection_cli_suffix(
                         selection.map(|value| value.session_id.as_str()),
                         selection.map(|value| value.instance_id.as_str()),
+                        selection.map(|value| value.publication_id.as_str()),
                     )
                 )?;
             } else {
@@ -978,6 +1014,7 @@ pub(crate) fn run_doctor<T: InspectorTalker>(
             port,
             &selection.session_id,
             &selection.instance_id,
+            &selection.publication_id,
             "Session.getCapabilities",
             "{}",
         ),
@@ -1003,15 +1040,17 @@ pub(crate) fn run_doctor<T: InspectorTalker>(
             port,
             &selection.session_id,
             &selection.instance_id,
+            &selection.publication_id,
             "Trace.snapshot",
             "{}",
         ),
         None if capabilities_response.is_ok() => Err(CliError::Other(
-            "Session.getCapabilities did not return a sessionId and instanceId"
+            "Session.getCapabilities did not return a sessionId, instanceId, \
+             and publicationId"
                 .to_owned(),
         )),
         None => Err(CliError::Other(
-            "an exact session identity is required before Trace.snapshot"
+            "an exact publication identity is required before Trace.snapshot"
                 .to_owned(),
         )),
     };
@@ -1294,7 +1333,8 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  --session ID --instance ID   Select one exact authenticated session identity\n"
+        "  --session ID --instance ID --publication ID\n\
+                                        Select one exact authenticated publication\n"
     )?;
     writeln!(
         out,
@@ -1304,7 +1344,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  pulp trace start --categories dsp,render")?;
     writeln!(
         out,
-        "  pulp trace stop --session SESSION --instance INSTANCE"
+        "  pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION"
     )?;
     writeln!(
         out,
@@ -1367,21 +1407,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_exact_session_selection_requires_a_pair() {
+    fn parse_exact_publication_selection_accepts_all_identifiers() {
         let (_sub, flags) = parse(&s(&[
             "snapshot",
             "--session",
             "session-a",
             "--instance",
             "instance-b",
+            "--publication",
+            "publication-c",
         ]))
         .unwrap();
         assert_eq!(flags.session_id.as_deref(), Some("session-a"));
         assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
+        assert_eq!(flags.publication_id.as_deref(), Some("publication-c"));
 
         for args in [
             s(&["snapshot", "--session", "session-a"]),
             s(&["snapshot", "--instance", "instance-b"]),
+            s(&["snapshot", "--publication", "publication-c"]),
             s(&[
                 "snapshot",
                 "--session",
@@ -1723,6 +1767,7 @@ mod tests {
             port: u16,
             session_id: &str,
             instance_id: &str,
+            publication_id: &str,
             method: &str,
             params: &str,
         ) -> Result<String> {
@@ -1731,6 +1776,7 @@ mod tests {
                 Some(crate::cmd::inspector::SessionSelection {
                     session_id: session_id.to_owned(),
                     instance_id: instance_id.to_owned(),
+                    publication_id: publication_id.to_owned(),
                 }),
                 method,
                 params,
@@ -1741,7 +1787,8 @@ mod tests {
     #[test]
     fn dispatch_start_passes_method_and_params() {
         let t = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\"}",
             "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
         ]);
         let mut buf: Vec<u8> = Vec::new();
@@ -1761,12 +1808,14 @@ mod tests {
             Some(crate::cmd::inspector::SessionSelection {
                 session_id: "session-a".to_owned(),
                 instance_id: "instance-b".to_owned(),
+                publication_id: "publication-c".to_owned(),
             })
         );
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("/tmp/pulp-9.pftrace"), "{out}");
         assert!(out.contains(
-            "pulp trace stop --session session-a --instance instance-b"
+            "pulp trace stop --session session-a --instance instance-b \
+             --publication publication-c"
         ), "{out}");
     }
 
@@ -1778,6 +1827,7 @@ mod tests {
         let flags = GlobalFlags {
             session_id: Some("session-a".to_owned()),
             instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
             ..GlobalFlags::default()
         };
         let mut output = Vec::new();
@@ -1790,14 +1840,16 @@ mod tests {
         .unwrap();
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains(
-            "pulp trace stop --session session-a --instance instance-b"
+            "pulp trace stop --session session-a --instance instance-b \
+             --publication publication-c"
         ), "{output}");
     }
 
     #[test]
     fn dispatch_start_json_surfaces_resolved_exact_selection() {
         let talker = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\"}",
             "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
         ]);
         let flags = GlobalFlags {
@@ -1837,6 +1889,7 @@ mod tests {
             &[Some(crate::cmd::inspector::SessionSelection {
                 session_id: "session-a".to_owned(),
                 instance_id: "instance-b".to_owned(),
+                publication_id: String::new(),
             })]
         );
     }
@@ -1850,6 +1903,7 @@ mod tests {
         let flags = GlobalFlags {
             session_id: Some("session-a".to_owned()),
             instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
             ..GlobalFlags::default()
         };
         dispatch(&Sub::Stop, &flags, &t, &mut buf).unwrap();
@@ -2227,6 +2281,7 @@ mod tests {
     fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
         let t = RecordingTalker::new(vec![
             "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\",\
              \"effective\":[\"session.control\",\"trace.control\"]}",
             "{}",
         ]);
@@ -2254,6 +2309,7 @@ mod tests {
                 Some(crate::cmd::inspector::SessionSelection {
                     session_id: "session-a".to_owned(),
                     instance_id: "instance-b".to_owned(),
+                    publication_id: "publication-c".to_owned(),
                 }),
             ]
         );
@@ -2263,6 +2319,7 @@ mod tests {
     fn dispatch_doctor_keeps_explicit_selection_for_both_probes() {
         let talker = RecordingTalker::new(vec![
             "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"publicationId\":\"publication-c\",\
              \"effective\":[\"session.control\",\"trace.control\"]}",
             "{}",
         ]);
@@ -2279,6 +2336,7 @@ mod tests {
         let expected = Some(crate::cmd::inspector::SessionSelection {
             session_id: "session-a".to_owned(),
             instance_id: "instance-b".to_owned(),
+            publication_id: String::new(),
         });
         assert_eq!(
             &*talker.selections.borrow(),
@@ -2299,7 +2357,8 @@ mod tests {
                 if method == "Session.getCapabilities" {
                     Ok(
                         "{\"sessionId\":\"session-a\",\
-                         \"instanceId\":\"instance-b\"}"
+                         \"instanceId\":\"instance-b\",\
+                         \"publicationId\":\"publication-c\"}"
                             .to_owned(),
                     )
                 } else {
@@ -2340,7 +2399,7 @@ mod tests {
         assert!(value["snapshot_error"]
             .as_str()
             .unwrap()
-            .contains("sessionId and instanceId"));
+            .contains("sessionId, instanceId, and publicationId"));
         assert_eq!(talker.calls.borrow().len(), 1);
     }
 
@@ -2366,6 +2425,7 @@ mod tests {
         let selection = crate::cmd::inspector::SessionSelection {
             session_id: "session-a".to_owned(),
             instance_id: "instance-b".to_owned(),
+            publication_id: String::new(),
         };
         run_doctor(
             9200,

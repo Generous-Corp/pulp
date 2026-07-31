@@ -232,6 +232,61 @@ TEST_CASE("pulp inspect selects an exact instance within a shared session",
     second_server.stop();
 }
 
+TEST_CASE("pulp inspect rejects a stale publication after server restart",
+          "[cli][shellout][inspect][identity][generation]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    InspectServerFixture fixture;
+    fixture.handler = [&](const InspectorMessage& request) {
+        return make_response(request.id, "{}");
+    };
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto stale_publication =
+        fixture.publisher.record()->publication_id;
+
+    fixture.server.stop();
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = fixture.session.info().session_id;
+    record.instance_id = fixture.session.info().instance_id;
+    record.plugin_id = fixture.session.info().plugin_id;
+    REQUIRE(fixture.server.start_authenticated(InspectorServerConfig{
+        &fixture.session, &fixture.publisher, record, *token}));
+    fixture.port = static_cast<std::uint16_t>(fixture.server.port());
+    REQUIRE(fixture.publisher.record().has_value());
+    const auto current_publication =
+        fixture.publisher.record()->publication_id;
+    REQUIRE(current_publication != stale_publication);
+
+    const auto stale = run_pulp(
+        {"inspect",
+         "--session", fixture.session.info().session_id,
+         "--instance", fixture.session.info().instance_id,
+         "--publication", stale_publication,
+         "--command", "Session.getCapabilities"},
+        10000);
+    REQUIRE_FALSE(stale.timed_out);
+    REQUIRE(stale.exit_code == 1);
+    CHECK(stale.stderr_output.find("No live inspector session matches") !=
+          std::string::npos);
+    CHECK(fixture.seen.empty());
+
+    const auto current = run_pulp(
+        {"inspect",
+         "--session", fixture.session.info().session_id,
+         "--instance", fixture.session.info().instance_id,
+         "--publication", current_publication,
+         "--command", "Session.getCapabilities"},
+        10000);
+    REQUIRE_FALSE(current.timed_out);
+    REQUIRE(current.exit_code == 0);
+    CHECK(current.stdout_output.find(
+              "\"publicationId\": \"" + current_publication + "\"") !=
+          std::string::npos);
+    CHECK(fixture.seen.empty());
+}
+
 TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
           "[cli][shellout][inspect][controller]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -322,6 +377,7 @@ TEST_CASE("pulp inspect validates missing values before connecting",
     const std::vector<Case> cases = {
         {{"inspect", "--host"}, "--host requires a value"},
         {{"inspect", "--session"}, "--session requires a value"},
+        {{"inspect", "--publication"}, "--publication requires a value"},
         {{"inspect", "--command"}, "--command requires a value"},
         {{"inspect", "--params"}, "--params requires a value"},
         {{"inspect", "--output"}, "--output requires a value"},
@@ -352,4 +408,12 @@ TEST_CASE("pulp inspect validates missing values before connecting",
     REQUIRE(unmatched_port.stderr_output.find("requested port 1") !=
             std::string::npos);
     REQUIRE(unmatched_port.stdout_output.empty());
+
+    auto unpaired_publication =
+        run_pulp({"inspect", "--publication", "publication-a"}, 10000);
+    REQUIRE_FALSE(unpaired_publication.timed_out);
+    REQUIRE(unpaired_publication.exit_code == 2);
+    REQUIRE(unpaired_publication.stderr_output.find(
+                "--publication requires --session and --instance") !=
+            std::string::npos);
 }

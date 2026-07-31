@@ -11,6 +11,7 @@ pub(crate) const PORT_ENV: &str = "PULP_INSPECTOR_PORT";
 pub(crate) struct SessionSelection {
     pub session_id: String,
     pub instance_id: String,
+    pub publication_id: String,
 }
 
 /// Whether one discovery identity component matches the publisher grammar.
@@ -29,19 +30,22 @@ pub(crate) fn parse_session_selection(
     let value: serde_json::Value = serde_json::from_str(response).ok()?;
     let session_id = value.get("sessionId")?.as_str()?;
     let instance_id = value.get("instanceId")?.as_str()?;
+    let publication_id = value.get("publicationId")?.as_str()?;
     if !valid_session_identity(session_id) ||
-        !valid_session_identity(instance_id)
+        !valid_session_identity(instance_id) ||
+        !valid_session_identity(publication_id)
     {
         return None;
     }
     Some(SessionSelection {
         session_id: session_id.to_owned(),
         instance_id: instance_id.to_owned(),
+        publication_id: publication_id.to_owned(),
     })
 }
 
-/// Add the exact identity to an object response without changing non-object
-/// inspector payloads.
+/// Add the exact publication identity to an object response without changing
+/// non-object inspector payloads.
 pub(crate) fn attach_session_selection(
     response: &str,
     selection: Option<&SessionSelection>,
@@ -63,18 +67,26 @@ pub(crate) fn attach_session_selection(
         "instanceId".to_owned(),
         serde_json::Value::String(selection.instance_id.clone()),
     );
+    object.insert(
+        "publicationId".to_owned(),
+        serde_json::Value::String(selection.publication_id.clone()),
+    );
     serde_json::to_string(&value)
         .unwrap_or_else(|_| response.trim_end().to_owned())
 }
 
-/// Render paired exact-session flags for a copyable follow-up command.
+/// Render an exact-publication selector for a copyable follow-up command.
 pub(crate) fn selection_cli_suffix(
     session_id: Option<&str>,
     instance_id: Option<&str>,
+    publication_id: Option<&str>,
 ) -> String {
-    match (session_id, instance_id) {
-        (Some(session_id), Some(instance_id)) => {
-            format!(" --session {session_id} --instance {instance_id}")
+    match (session_id, instance_id, publication_id) {
+        (Some(session_id), Some(instance_id), Some(publication_id)) => {
+            format!(
+                " --session {session_id} --instance {instance_id} \
+                 --publication {publication_id}"
+            )
         }
         _ => String::new(),
     }
@@ -113,6 +125,11 @@ pub(crate) fn call_selected(
             .arg(&selection.session_id)
             .arg("--instance")
             .arg(&selection.instance_id);
+        if !selection.publication_id.is_empty() {
+            command
+                .arg("--publication")
+                .arg(&selection.publication_id);
+        }
     }
     let output = command
         .arg("--command")
@@ -207,28 +224,48 @@ mod tests {
     }
 
     #[test]
-    fn selection_suffix_is_copyable_only_for_a_complete_pair() {
+    fn selection_suffix_is_copyable_only_for_a_complete_selector() {
         assert_eq!(
-            selection_cli_suffix(Some("session-a"), Some("instance-b")),
-            " --session session-a --instance instance-b"
+            selection_cli_suffix(
+                Some("session-a"),
+                Some("instance-b"),
+                Some("publication-c"),
+            ),
+            " --session session-a --instance instance-b \
+             --publication publication-c"
         );
-        assert!(selection_cli_suffix(Some("session-a"), None).is_empty());
-        assert!(selection_cli_suffix(None, Some("instance-b")).is_empty());
+        assert!(
+            selection_cli_suffix(Some("session-a"), None, None).is_empty()
+        );
+        assert!(
+            selection_cli_suffix(None, Some("instance-b"), None).is_empty()
+        );
+        assert!(selection_cli_suffix(
+            Some("session-a"),
+            Some("instance-b"),
+            None,
+        )
+        .is_empty());
     }
 
     #[test]
     fn capabilities_selection_requires_safe_complete_identity() {
         assert_eq!(
             parse_session_selection(
-                r#"{"sessionId":"session-a","instanceId":"instance-b"}"#
+                r#"{"sessionId":"session-a","instanceId":"instance-b","publicationId":"publication-c"}"#
             ),
             Some(SessionSelection {
                 session_id: "session-a".to_owned(),
                 instance_id: "instance-b".to_owned(),
+                publication_id: "publication-c".to_owned(),
             })
         );
         assert!(parse_session_selection(
-            r#"{"sessionId":"session a","instanceId":"instance-b"}"#
+            r#"{"sessionId":"session a","instanceId":"instance-b","publicationId":"publication-c"}"#
+        )
+        .is_none());
+        assert!(parse_session_selection(
+            r#"{"sessionId":"session-a","instanceId":"instance-b"}"#
         )
         .is_none());
         assert!(
@@ -241,6 +278,7 @@ mod tests {
         let selection = SessionSelection {
             session_id: "session-a".to_owned(),
             instance_id: "instance-b".to_owned(),
+            publication_id: "publication-c".to_owned(),
         };
         let value: serde_json::Value = serde_json::from_str(
             &attach_session_selection(r#"{"trace_id":3}"#, Some(&selection)),
@@ -249,5 +287,6 @@ mod tests {
         assert_eq!(value["trace_id"], 3);
         assert_eq!(value["sessionId"], "session-a");
         assert_eq!(value["instanceId"], "instance-b");
+        assert_eq!(value["publicationId"], "publication-c");
     }
 }

@@ -173,7 +173,8 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
             auto* raw = client.get();
             const auto challenge =
                 pulp::inspect::make_inspector_auth_challenge(
-                    "mutual-session", "mutual-instance", "1");
+                    "mutual-session", "mutual-instance",
+                    publisher.record()->publication_id, "1");
             if (!challenge) {
                 raw->disconnect();
                 return;
@@ -239,6 +240,9 @@ TEST_CASE("mutual authentication rejects reflection and gates early events",
             params.addMember(
                 "instanceId",
                 choc::value::createString(challenge->instance_id));
+            params.addMember(
+                "publicationId",
+                choc::value::createString(challenge->publication_id));
             params.addMember(
                 "protocolVersion",
                 choc::value::createString(challenge->protocol_version));

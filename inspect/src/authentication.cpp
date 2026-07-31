@@ -11,7 +11,8 @@ std::string proof_payload(const InspectorAuthChallenge& challenge) {
     std::string payload;
     payload.reserve(challenge.scheme.size() + challenge.nonce_hex.size() +
                     challenge.session_id.size() + challenge.instance_id.size() +
-                    challenge.protocol_version.size() + 5);
+                    challenge.publication_id.size() +
+                    challenge.protocol_version.size() + 6);
     payload.append(challenge.scheme);
     payload.push_back('\0');
     payload.append(challenge.nonce_hex);
@@ -19,6 +20,8 @@ std::string proof_payload(const InspectorAuthChallenge& challenge) {
     payload.append(challenge.session_id);
     payload.push_back('\0');
     payload.append(challenge.instance_id);
+    payload.push_back('\0');
+    payload.append(challenge.publication_id);
     payload.push_back('\0');
     payload.append(challenge.protocol_version);
     return payload;
@@ -67,6 +70,7 @@ bool valid_auth_inputs(
            nonce && nonce->size() == inspector_nonce_size &&
            !challenge.session_id.empty() &&
            !challenge.instance_id.empty() &&
+           !challenge.publication_id.empty() &&
            !challenge.protocol_version.empty();
 }
 
@@ -79,8 +83,10 @@ std::optional<std::vector<std::uint8_t>> generate_inspector_secret() {
 std::optional<InspectorAuthChallenge> make_inspector_auth_challenge(
     std::string session_id,
     std::string instance_id,
+    std::string publication_id,
     std::string protocol_version) {
-    if (session_id.empty() || instance_id.empty() || protocol_version.empty())
+    if (session_id.empty() || instance_id.empty() ||
+        publication_id.empty() || protocol_version.empty())
         return std::nullopt;
     const auto nonce = pulp::runtime::secure_random_bytes(inspector_nonce_size);
     if (!nonce)
@@ -89,6 +95,7 @@ std::optional<InspectorAuthChallenge> make_inspector_auth_challenge(
     challenge.nonce_hex = pulp::runtime::hex_encode(*nonce);
     challenge.session_id = std::move(session_id);
     challenge.instance_id = std::move(instance_id);
+    challenge.publication_id = std::move(publication_id);
     challenge.protocol_version = std::move(protocol_version);
     return challenge;
 }

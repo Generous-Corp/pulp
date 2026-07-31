@@ -126,7 +126,8 @@ REQUIRED_CLAIMS = {
         "unavailable in normal launches",
         "explicitly wired",
         "remote clients cannot select a filesystem path",
-        "select one exact authenticated session identity; both are required together",
+        "select one exact",
+        "authenticated publication; all three are required",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
@@ -142,7 +143,7 @@ REQUIRED_CLAIMS = {
         "authenticated discovery",
         "nonce/HMAC",
         "intentionally unavailable",
-        "--session ID --instance ID",
+        "--session ID --instance ID --publication ID",
     ),
     ".agents/skills/trace-analysis/SKILL.md": (
         "explicitly wired custom fixture",
@@ -156,6 +157,7 @@ REQUIRED_CLAIMS = {
     "docs/status/cli-commands.yaml": (
         "Exact authenticated session id; must be paired with --instance",
         "Exact authenticated instance id; must be paired with --session",
+        "Non-reusable publication id",
     ),
 }
 
@@ -194,6 +196,8 @@ REQUIRED_SECURITY_CONTRACTS = {
         "clear_extended_acl(descriptor)",
         "owner_private_descriptor(fd, false)",
         "open_owner_private(path, false)",
+        'value.addMember("publicationId"',
+        "current->publication_id != record.publication_id",
     ),
     "inspect/src/inspector_publication.hpp": (
         "heartbeat_interval > std::chrono::milliseconds::max() / 3",
@@ -209,23 +213,23 @@ REQUIRED_SECURITY_CONTRACTS = {
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pulp trace start --out is unavailable",
         "if !(1..=512).contains(&ring_mb)",
-        'a == "--session" || a == "--instance"',
+        'a == "--publication"',
         "--session and --instance must be supplied together",
         "talker.call_selected(",
         'no_args("stop", &rest[1..])',
         "explicit_selection.as_ref()",
         "parse_session_selection(&capabilities)",
-        "pulp trace stop requires --session and --instance",
+        "pulp trace stop requires --session, --instance, and --publication",
         "pulp trace stop{}",
         "selection_cli_suffix(",
         "valid_session_identity(v)",
     ),
     "experimental/pulp-rs/src/cmd/motion.rs": (
-        'a == "--session" || a == "--instance"',
+        'a == "--publication"',
         "--session and --instance must be supplied together",
         "talker.call_selected(",
         "parse_session_selection(&capabilities)",
-        "pulp motion mutation requires --session and --instance",
+        "pulp motion mutation requires --session, --instance, and",
         "pulp motion stop --trace-id {id}{}",
         "selection_cli_suffix(",
         "valid_session_identity(v)",
@@ -237,8 +241,8 @@ REQUIRED_SECURITY_CONTRACTS = {
         '"minimum":1,"maximum":512',
         "The host owns the trace destination.",
         "resolve_inspector_selection(root)",
-        '"required":["session_id","instance_id"]',
-        '"required":["trace_id","session_id","instance_id"]',
+        '"required":["session_id","instance_id","publication_id"]',
+        '"required":["trace_id","session_id","instance_id","publication_id"]',
     ),
     "core/runtime/src/socket.cpp": (
         "FIONBIO",
