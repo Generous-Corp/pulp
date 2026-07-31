@@ -182,13 +182,26 @@ struct AbsoluteTimelineDuration {
     timebase::RationalRate sample_rate;
 };
 
+/// Gain curve traversed across a clip's fade region, in both directions.
+///
+/// `Linear` is equal-gain: two complementary linear fades over uncorrelated
+/// material sum to (1-t)^2 + t^2, which is 0.5 at the midpoint — an audible
+/// 3 dB dip. `EqualPower` is the sine quarter-cycle, whose complementary pair
+/// squares to sin^2 + cos^2 = 1, holding power constant across the transition.
+/// Correlated material (the same take on both sides) inverts the preference,
+/// which is why the shape is authored rather than inferred.
+enum class ClipFadeShape : std::uint8_t { Linear, EqualPower };
+
 /// Clip-level audio controls. Fade lengths use the clip anchor's native
 /// unit: canonical ticks for musical clips and timeline samples for absolute
 /// clips. The playback compiler resolves both to sample-exact frame counts.
+/// The shape governs both fades; it is a reparameterization of the same
+/// normalized progress, so it carries no unit of its own.
 struct ClipPlaybackProperties {
     float gain_linear = 1.0f;
     std::uint64_t fade_in_duration = 0;
     std::uint64_t fade_out_duration = 0;
+    ClipFadeShape fade_shape = ClipFadeShape::Linear;
     constexpr auto operator<=>(const ClipPlaybackProperties&) const = default;
 };
 

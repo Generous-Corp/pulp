@@ -194,7 +194,12 @@
     "clip.fades": {
       "level": "drop",
       "loss_class": "dropped",
-      "loss": "the writer does not emit clip fades, so authored fade-in and fade-out shapes are dropped and the clip exports with hard edges"
+      "loss": "the writer does not emit clip fades, so authored fade-in and fade-out durations are dropped and the clip exports with hard edges"
+    },
+    "clip.fade-shape": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"
     },
     "clip.note-modifier": {
       "level": "drop",

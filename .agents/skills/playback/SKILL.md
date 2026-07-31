@@ -385,6 +385,38 @@ Sorting such a table is real work, so it gets its own budgeted
 `BudgetedStableMergeState` stage rather than a bare `std::sort` inside a compile
 slice.
 
+### Clip fade evaluation lives in one header, and `AudioClipRendererProgram` is built positionally
+
+The clip envelope (gain, fade in, fade out, fade shape) is evaluated in
+`core/playback/src/clip_fade_envelope.hpp` and nowhere else. Before it existed
+the same arithmetic had three homes — a whole-frame and a fractional overload in
+`audio_renderer_render.cpp`, plus a byte-identical fractional copy in
+`realtime_stretch_renderer.cpp` — so a fade behavior added to the normal render
+path silently did not apply under live stretch. The two overloads that survive
+are split on numerics, not on contract: the whole-frame one computes the
+remaining-frame count as exact integer arithmetic, the fractional one clamps a
+`long double` that can land past the last frame. Anything that reads the
+authored shape belongs in `fade_gain`, which both call.
+
+Fade **progress is measured in frames**, in every shape. The compiler converts
+authored fade endpoints from ticks to frames
+(`audio_renderer.cpp`, the musical branch of the clip lowering); the renderer
+then normalizes position against that frame count. So a nonlinear shape needs no
+tempo mapping of its own — it is a reparameterization of a progress value that
+is already in the time domain, and it inherits exactly the tempo behavior the
+linear ramp always had. This is also the acoustically correct answer: a
+constant-power crossfade is a statement about power against *time*, not against
+beats, so measuring progress in ticks would make the same authored fade dip
+differently on either side of a tempo change.
+
+`AudioClipRendererProgram` is brace-initialized **positionally** in four places
+in `audio_renderer.cpp` (the offline-stretch, native/resample, take-comp, and
+frozen-track paths). Inserting a field mid-struct shifts every later initializer.
+It fails closed only when the adjacent types differ — two neighbouring
+`std::uint64_t` fields would swap silently and compile. Grep every
+`AudioClipRendererProgram{` when the struct grows, and prefer adding to the end
+of a run of same-typed fields.
+
 ### Track mixer
 
 - **Track mixer.** `TrackProgram::mixer()` carries the track's own

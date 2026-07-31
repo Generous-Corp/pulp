@@ -421,12 +421,15 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                         {{"content", SchemaValueKind::Object},
                          {"fade_in_duration", SchemaValueKind::U64String, false},
                          {"fade_out_duration", SchemaValueKind::U64String, false},
+                         {"fade_shape", SchemaValueKind::String},
                          {"gain_linear_bits", SchemaValueKind::U64String, false},
                          {"id", SchemaValueKind::U64String},
                          {"time_conform", SchemaValueKind::String},
                          {"time_range", SchemaValueKind::Object}},
                         detail::clip_schema_policy.current_version);
     clip.upgrades.push_back({1, 2, {}, detail::migrate_clip_v1_to_v2});
+    clip.upgrades.push_back({2, 3, {}, detail::migrate_clip_v2_to_v3});
+    clip.downgrades.push_back({3, 2, {}, detail::migrate_clip_v3_to_v2});
     clip.downgrades.push_back({2, 1, {}, detail::migrate_clip_v2_to_v1});
     schemas.push_back(std::move(clip));
     schemas.push_back(builtin("pulp.timeline.content.empty", SchemaDomain::Content, {}));

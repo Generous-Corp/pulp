@@ -762,3 +762,38 @@ TEST_CASE("A nested child track with a transparent mixer still lowers") {
     const auto events = program->find_track({3})->arrangement_note_events();
     REQUIRE_FALSE(events.empty());
 }
+
+TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {
+    auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13),
+                                        {.gain_linear = 1.0f,
+                                         .fade_in_duration = 480,
+                                         .fade_out_duration = 240,
+                                         .fade_shape = ClipFadeShape::EqualPower}));
+    auto child = take(Sequence::create({10}, "child", TickDuration{960}, {track(11, {child_clip})}));
+    // Plays [120, 840) of a 960-tick child, so the flattened clip is trimmed by
+    // 120 ticks on each side.
+    auto root =
+        take(Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 0, 720, 120)})}));
+    auto project =
+        take(Project::create(ProjectInput{{1}, "trimmed fade", 100, {2}, {}, {root, child}}));
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    const auto begun = lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered);
+    REQUIRE_FALSE(begun.error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    // The reference placement itself, then the flattened child it expands to.
+    REQUIRE(lowered.size() == 2);
+    REQUIRE(lowered[0].clip.id() == ItemId{4});
+    const auto playback = lowered[1].clip.playback_properties();
+    REQUIRE(playback.fade_in_duration == 360);
+    REQUIRE(playback.fade_out_duration == 120);
+    // The shape is not a duration and a trim must not reinterpret it: a clip
+    // trimmed to nothing but a fade still fades the way it was authored to.
+    REQUIRE(playback.fade_shape == ClipFadeShape::EqualPower);
+}

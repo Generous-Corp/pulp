@@ -105,6 +105,7 @@ struct AudioClipRendererProgram {
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
+    timeline::ClipFadeShape fade_shape = timeline::ClipFadeShape::Linear;
     SourceKind source_kind = SourceKind::ArrangementClip;
     std::uint32_t source_ordinal = 0;
     TimeDomain time_domain = TimeDomain::Absolute;

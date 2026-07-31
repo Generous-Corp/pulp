@@ -40,6 +40,7 @@ document v1/note-content.json
 document v1/track-opaque.json
 document v2/device-chain.json
 document v3/automation-lane.json
+document v3/clip-fade-shape.json
 document v4/sequence-markers.json
 document v6/sequence-track-order.json
 
