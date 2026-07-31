@@ -24,6 +24,7 @@ struct DisconnectLifecycle {
     std::condition_variable cv;
     bool active = false;
     bool read_running = false;
+    bool destruction_requested = false;
     std::thread::id owner;
     std::thread::id read_thread_id;
 };
@@ -125,7 +126,10 @@ struct InterprocessConnection::Impl {
 
 InterprocessConnection::InterprocessConnection()
     : impl_(std::make_shared<Impl>()) {}
-InterprocessConnection::~InterprocessConnection() { disconnect(); }
+InterprocessConnection::~InterprocessConnection() {
+    alive_.retire();
+    disconnect_impl(true);
+}
 
 void InterprocessConnection::set_on_connected(std::function<void()> callback) {
     std::lock_guard lock(callback_mutex_);
@@ -264,14 +268,32 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
 }
 
 void InterprocessConnection::disconnect() {
+    disconnect_impl(false);
+}
+
+void InterprocessConnection::disconnect_impl(bool destroying) {
     const auto caller = std::this_thread::get_id();
     const auto impl = impl_;
     const auto lifecycle = impl->lifecycle;
+    const auto alive = alive_.capture();
     {
         std::unique_lock lifecycle_lock(lifecycle->mutex);
         while (lifecycle->active) {
-            if (lifecycle->owner == caller ||
-                lifecycle->read_thread_id == caller) {
+            if (lifecycle->owner == caller) {
+                return;
+            }
+            if (lifecycle->read_thread_id == caller) {
+                if (!destroying)
+                    return;
+                // The active owner may be waiting for this read thread. Signal
+                // destruction so it can stop waiting and finish using only the
+                // shared implementation, then keep the object alive until that
+                // owner has relinquished the lifecycle.
+                lifecycle->destruction_requested = true;
+                lifecycle->cv.notify_all();
+                lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
+                    return !lifecycle->active;
+                });
                 return;
             }
             lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
@@ -290,7 +312,6 @@ void InterprocessConnection::disconnect() {
         lifecycle->cv.notify_all();
     };
 
-    const auto alive = alive_.capture();
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
     impl->interrupt_blocking_io();
@@ -298,7 +319,8 @@ void InterprocessConnection::disconnect() {
         std::unique_lock lifecycle_lock(lifecycle->mutex);
         if (lifecycle->read_thread_id != caller) {
             lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
-                return !lifecycle->read_running;
+                return !lifecycle->read_running ||
+                       lifecycle->destruction_requested;
             });
         }
     }

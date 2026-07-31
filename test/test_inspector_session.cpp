@@ -280,6 +280,53 @@ TEST_CASE("InspectorSession invokes domain handlers outside its lease mutex",
     CHECK_FALSE(response.is_error);
 }
 
+TEST_CASE("InspectorSession serializes domain handlers across clients",
+          "[inspect][session][dispatch][concurrency]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    int entered = 0;
+    bool release = false;
+    InspectorSession session(
+        {"session-serialized", "instance-1", "fixture"},
+        policy(InspectorProfile::Develop),
+        [&](const auto& request) {
+            std::unique_lock lock(mutex);
+            ++entered;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release; });
+            return make_response(request.id, R"({"serialized":true})");
+        });
+
+    pulp::inspect::InspectorMessage first_response;
+    pulp::inspect::InspectorMessage second_response;
+    std::thread first([&] {
+        first_response =
+            session.handle("alpha", make_request(1, "State.getParameters"));
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] { return entered == 1; }));
+    }
+    std::thread second([&] {
+        second_response =
+            session.handle("beta", make_request(2, "State.getParameters"));
+    });
+
+    std::this_thread::sleep_for(50ms);
+    {
+        std::lock_guard lock(mutex);
+        CHECK(entered == 1);
+        release = true;
+    }
+    cv.notify_all();
+    first.join();
+    second.join();
+
+    CHECK_FALSE(first_response.is_error);
+    CHECK_FALSE(second_response.is_error);
+    CHECK(entered == 2);
+}
+
 TEST_CASE("controller lease handoff waits for an admitted mutation",
           "[inspect][session][lease][concurrency]") {
     auto now = std::chrono::steady_clock::time_point{};

@@ -285,6 +285,11 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                           "No inspector dispatch handler is attached",
                           "dispatch_unavailable");
     }
+    // Domain handlers share thread-affine UI state and mutable inspector
+    // components across all authenticated clients. Serialize their execution
+    // independently of the lease mutex; recursive entry remains available to
+    // adapters that synchronously route a nested request through this session.
+    std::lock_guard dispatch_lock(dispatch_mutex_);
     try {
         auto response = handler(request);
         finish_controller_operation();

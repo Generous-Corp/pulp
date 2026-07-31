@@ -139,6 +139,7 @@ private:
     mutable std::mutex callback_mutex_;
     runtime::AliveToken alive_;
 
+    void disconnect_impl(bool destroying);
     void release_first_dispatch_gate();
     void start_read_thread(bool allow_active_disconnect_owner = false);
     void read_loop();
