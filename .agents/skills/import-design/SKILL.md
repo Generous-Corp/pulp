@@ -25,6 +25,7 @@ exists:
 | Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
 | Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
+| Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
 
 The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
@@ -205,6 +206,17 @@ reproduces the design; the others below do NOT and waste hours:
   If system discovery is insufficient, run
   `pulp tool install chrome-for-testing`; use
   `pulp tool doctor chrome-for-testing --run` for diagnostics.
+- When improving the offline/native HTML importer, use the development-only
+  Importer Differential Lab rather than changing the authoritative browser
+  route. It runs Chromium and `--offline` separately, renders the candidate
+  DesignIR through Pulp/Skia, and compares structure, geometry, typography,
+  and pixels without modifying canonical output:
+  `python3 tools/import-validation/importer_differential_lab.py
+  analyze-corpus --importer <pulp-import-design> --observer
+  <pulp-design-ir-observe> --manifest
+  test/fixtures/import-differential/manifest.json --output <dir>`.
+  Production native promotion is disabled; `threshold_eligible` is advisory
+  evidence only. See `docs/tools/importer-differential-lab.md`.
 
 **The lane that works (Figma is the source of truth):**
 ```bash

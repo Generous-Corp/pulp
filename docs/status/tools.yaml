@@ -125,6 +125,18 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: importer-differential-lab
+    path: tools/import-validation/importer_differential_lab.py
+    category: visual-compare
+    use_when: Measure whether the offline/native HTML importer is converging on Chromium without changing canonical import output.
+    invocation: python3 tools/import-validation/importer_differential_lab.py analyze-corpus --importer <pulp-import-design> --observer <pulp-design-ir-observe> --manifest test/fixtures/import-differential/manifest.json --output <dir>
+    inputs: Self-contained HTML fixtures or a versioned corpus manifest, plus built importer and DesignIR observer executables.
+    outputs: Separate browser and candidate evidence, layered per-fixture differential reports, visual overlays, corpus rankings, and timing measurements.
+    caveat: Development-only and advisory. Chromium remains authoritative, production native promotion is disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
+    availability: always
+    skill: import-design
+    docs: tools/importer-differential-lab.md
+
   - name: layout-parity
     path: tools/import-design/layout_parity.py
     category: visual-compare

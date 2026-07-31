@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/importer-differential-benchmark-v1.schema.json",
+  "title": "Pulp importer differential benchmark v1",
+  "type": "object",
+  "required": ["schema", "version", "runs", "cold", "warm"],
+  "properties": {
+    "schema": {"const": "pulp-importer-differential-benchmark-v1"},
+    "version": {"const": 1},
+    "runs": {"type": "integer", "minimum": 1},
+    "cold": {"type": "object"},
+    "warm": {
+      "type": "object",
+      "required": ["browser_import_p50_ms", "browser_import_p95_ms", "native_total_p50_ms", "native_total_p95_ms", "p50_ms_saved"]
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "pulp-importer-differential-manifest-v1",
+  "version": 1,
+  "license": "MIT",
+  "ownership": "Pulp synthetic fixtures",
+  "defaults": {
+    "from": "claude",
+    "viewport": {"width": 1280, "height": 800},
+    "split": "lens-calibration"
+  },
+  "fixtures": [
+    {"id":"basic-card","source":"01-basic-card.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"flex-controls","source":"02-flex-controls.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"grid-meter","source":"03-grid-meter.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"css-variables","source":"04-css-variables.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"pseudo-badge","source":"05-pseudo-badge.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["pseudo-element"]},
+    {"id":"absolute-overlay","source":"06-absolute-overlay.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"inline-svg","source":"07-inline-svg.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"form-controls","source":"08-form-controls.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"static-canvas","source":"09-static-canvas.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["canvas"]},
+    {"id":"runtime-state","source":"10-runtime-state.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["javascript-evaluation"]},
+    {"id":"typography","source":"11-typography.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":[]},
+    {"id":"responsive-panel","source":"12-responsive-panel.html","shape":"self-contained-html","from":"claude","split":"lens-calibration","expected_blockers":["responsive-style"]}
+  ]
+}

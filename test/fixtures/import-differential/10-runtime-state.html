@@ -1,0 +1,6 @@
+<!doctype html>
+<html><head><style>
+body{margin:0;background:#171717;color:#fafafa;font-family:Arial,sans-serif}.tabs{padding:24px}.tab{padding:8px 14px;margin-right:8px}.active{background:#a3e635;color:#1a2e05}.panel{margin-top:16px;padding:18px;background:#262626}
+</style></head><body><main class="tabs"><button class="tab active" data-tab="mix">Mix</button><button class="tab" data-tab="route">Route</button><section class="panel" id="panel">Mix controls</section></main><script>
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.getElementById("panel").textContent=b.dataset.tab==="mix"?"Mix controls":"Routing matrix"}));
+</script></body></html>
