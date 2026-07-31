@@ -3295,6 +3295,25 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   timers/intervals/rAFs are cancelled, the schedulers are stubbed, CSS animation
   and transition are disabled, and `captureStableScreenshot` requires a
   byte-identical trailing run as the observable proof of stillness.
+- **Browser discovery has a version FLOOR and no ceiling.**
+  `kMinimumChromiumMajor = 109` (`browser_capture_backend.hpp`) is the only
+  version comparison in the probe — nothing rejects a browser for being too
+  new, so a discovery failure on a current Chrome is never a version-range
+  problem. Selection order is `--browser` → `PULP_DESIGN_BROWSER` → managed
+  (`~/.pulp/tools/chrome-for-testing`, via its `current.json`) → system paths,
+  and the default `auto` mode prefers the pinned browser over a system one.
+  `pulp config set import_design.browser {auto,managed,system}` picks the mode;
+  `managed-browser-unavailable` fires only when `managed` is selected
+  explicitly and nothing is installed.
+- **"Could not read the version" is not "wrong version".** Reading `--version`
+  has been observed to fail once and then succeed moments later on the same
+  browser, and it used to surface as "too old or incompatible" — a message that
+  sends you hunting for a version range that does not exist. The probe now
+  retries the read once, classifies a persistent failure as
+  `browser-version-unreadable` (distinct from `browser-incompatible`), and
+  records the exit code, attempt number, and elapsed time so a recurrence
+  explains itself. CPU load is NOT the cause: `--version` measures ~70-80 ms
+  idle and under saturation against a 15 s budget.
 - **A capture that hangs is a single unresolved CDP call, not a slow loop.**
   Every settle loop is bounded to seconds, so a multi-minute stall can only be
   one awaited call. Diagnose by timestamping `cdp.call` start/resolve to stderr

@@ -407,6 +407,127 @@ TEST_CASE("browser version metadata redacts successful subprocess output",
 }
 #endif
 
+#ifndef _WIN32
+TEST_CASE("a transient version read is retried instead of rejecting a browser",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-retry");
+    // Fail the first version read the way a transient probe failure looks,
+    // then answer normally — the browser itself was never the problem.
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "marker=\"$(dirname \"$0\")/version-attempted\"\n"
+        "if [ -f \"$marker\" ]; then\n"
+        "  echo 'Google Chrome 123.0.0.0'\n"
+        "  exit 0\n"
+        "fi\n"
+        ": > \"$marker\"\n"
+        "exit 1\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    CHECK(result.compatible);
+    CHECK(result.major_version == 123);
+}
+
+TEST_CASE("an unreadable version is never reported as a version verdict",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-unreadable");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'no version here' >&2\n"
+        "exit 3\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure_kind ==
+          capture::BrowserProbeFailure::browser_version_unreadable);
+    // The observed evidence has to survive into the report, or the next
+    // occurrence costs another investigation.
+    CHECK(discovery.probes[0].failure.find("exited 3") != std::string::npos);
+    CHECK(discovery.probes[0].failure.find("attempt 2") != std::string::npos);
+
+    CHECK(discovery.diagnostic.code == "browser-version-unreadable");
+    const auto human = capture::browser_unavailable_human(discovery);
+    CHECK(human.find("too old") == std::string::npos);
+    CHECK(human.find("Retry the import") != std::string::npos);
+}
+
+TEST_CASE("a browser below the supported floor is reported as too old",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-too-old");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'Chromium 90.0.0.0'\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.explicit_path = browser;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto discovery = capture::discover_browser(options);
+
+    REQUIRE_FALSE(discovery.ok());
+    REQUIRE(discovery.probes.size() == 1);
+    CHECK(discovery.probes[0].failure_kind ==
+          capture::BrowserProbeFailure::browser_incompatible);
+    CHECK(discovery.diagnostic.code == "browser-incompatible");
+    CHECK(discovery.probes[0].failure.find("found 90, need 109")
+          != std::string::npos);
+}
+
+TEST_CASE("no upper bound rejects a browser for being newer than expected",
+          "[import-design][browser-capture]") {
+    TempTree tree("version-newer");
+    const auto browser = tree.write(
+        "browser-wrapper",
+        "#!/bin/sh\n"
+        "echo 'Google Chrome 999.0.0.0'\n");
+    fs::permissions(
+        browser,
+        fs::perms::owner_read | fs::perms::owner_write |
+            fs::perms::owner_exec);
+    const auto script = tree.write("capture.mjs", "// fixture");
+
+    capture::BrowserDiscoveryOptions options;
+    options.node_executable = fs::path(PULP_BROWSER_CAPTURE_FIXTURE_PATH);
+    options.capture_script = script;
+    const auto result = capture::probe_browser(
+        {browser, capture::BrowserOrigin::explicit_override}, options);
+
+    INFO(result.failure);
+    CHECK(result.compatible);
+    CHECK(result.major_version == 999);
+}
+#endif
+
 TEST_CASE("missing browser guidance is actionable and explains its narrow use",
           "[import-design][browser-capture]") {
     capture::BrowserDiscoveryResult discovery;
