@@ -47,6 +47,55 @@ RESOLUTIONS = [
 ]
 
 
+
+# Patches that were actually generated, kept because a checker is only worth
+# what it says about real output. Two disappointed a listener and two did not;
+# nothing about the JSON says which, so if the checker cannot separate them it
+# is not doing the job it was built for.
+#
+# The through-a-mult krell earns its place twice over: the first version of the
+# check rejected it for routing its random voltage through a multiple, which is
+# how people actually patch. A checker that rejects correct work for being
+# tidily wired is worse than no checker.
+CORPUS = [
+    ("krell-plays-one-note.vcv", "krell", False,
+     "the envelope's end-of-cycle"),
+    ("krell-through-a-mult.vcv", "krell", True, None),
+    ("bouncing-ball-never-bounces.vcv", "bouncing-ball", False,
+     "end-of-cycle has to retrigger"),
+    ("bouncing-ball-correct.vcv", "bouncing-ball", True, None),
+]
+
+
+def check_corpus(idioms) -> int:
+    import json
+    sys.path.insert(0, HERE)
+    import patch as patch_mod
+    inv = patch_mod.inventory()
+    bad = 0
+    for name, slug, should_hold, expect in CORPUS:
+        path = os.path.join(HERE, "patch_idioms", "regressions", name)
+        if not os.path.exists(path):
+            print(f"  WRONG  {name} is missing — the regression cannot run")
+            bad += 1
+            continue
+        problems = idiom_check.check(json.load(open(path)), inv, idioms[slug])
+        held = not problems
+        if held != should_hold:
+            print(f"  WRONG  {name}: expected {'holds' if should_hold else 'fails'}, "
+                  f"got {'holds' if held else problems}")
+            bad += 1
+            continue
+        # Failing for the wrong reason is its own bug: a check that rejected
+        # everything would score perfectly on the two that should fail.
+        if expect and not any(expect in p for p in problems):
+            print(f"  WRONG  {name}: failed, but not for {expect!r}: {problems}")
+            bad += 1
+            continue
+        print(f"  ok     {name:<34} {'holds' if held else 'rejected, and names why'}")
+    return bad
+
+
 def main() -> int:
     bad = 0
 
@@ -79,6 +128,9 @@ def main() -> int:
         bad += 1
     else:
         print(f"  ok     {named} named, {implied} implied")
+
+    print("\nreal patches are told apart:")
+    bad += check_corpus(idioms)
 
     print("\nthe vocabulary reaches the model:")
     marker_only = "build a patch\n" + patch_vocabulary.MARKER + "\ngo"

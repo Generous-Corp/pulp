@@ -154,6 +154,28 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None) -> lis
         want_same = bool(req.get("same_module"))
 
         froms, tos = candidates(from_role), candidates(to_role)
+
+        # A signal that passes through a multiple, an attenuator or a slew is
+        # still that signal. "The random voltage reaches the envelope's time"
+        # is just as true through a mult -- which is how people actually patch
+        # -- so the sources are widened to anything a source reaches through a
+        # chain of those. Without this the checker rejects correct patches for
+        # being tidily wired, which is the worst thing a checker can do.
+        transparent = {mid for mid, m in by_id.items()
+                       if any(roles["roles"].get(r, {}).get("transparent")
+                              and _module_matches(r, _entry(inv, m), roles)
+                              for r in roles["roles"])}
+        reached = set(froms)
+        changed = True
+        while changed:
+            changed = False
+            for c in patch.get("cables", []):
+                src, dst = c.get("outputModuleId"), c.get("inputModuleId")
+                if src in reached and dst in transparent and dst not in reached:
+                    reached.add(dst)
+                    changed = True
+        froms = reached
+
         found = False
         for c in patch.get("cables", []):
             src_id, dst_id = c.get("outputModuleId"), c.get("inputModuleId")

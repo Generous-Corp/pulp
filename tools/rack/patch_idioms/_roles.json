@@ -16,7 +16,8 @@
     "of `labels` -- the label fallback exists because a module we have not",
     "cartographed has no port roles at all, and refusing to check those patches",
     "would quietly exempt exactly the modules most likely to be miswired.",
-    "`fan_in` marks a role whose modules really do take several cables of the same kind -- a mixer sums, a multiple splits. Everything else takes one cable per jack, which is Rack's own rule and the reason a feedback loop is summed rather than double-patched."
+    "`fan_in` marks a role whose modules really do take several cables of the same kind -- a mixer sums, a multiple splits. Everything else takes one cable per jack, which is Rack's own rule and the reason a feedback loop is summed rather than double-patched.",
+    "`transparent` marks a role a signal passes THROUGH without becoming a different kind of thing: a multiple copies it, an attenuator scales it, a slew smooths it. A requirement is satisfied through a chain of these, because 'the random voltage reaches the envelope's time' is just as true when it goes via a mult -- which is how people actually patch. Without this the checker rejects correct patches for being tidy."
   ],
   "roles": {
     "oscillator": {
@@ -124,20 +125,23 @@
         "Attenuator",
         "Attenuverter"
       ],
-      "is": "something that scales a voltage, often through zero"
+      "is": "something that scales a voltage, often through zero",
+      "transparent": true
     },
     "multiple": {
       "tags": [
         "Multiple"
       ],
       "is": "a splitter, so one signal can reach several places",
-      "fan_in": true
+      "fan_in": true,
+      "transparent": true
     },
     "slew": {
       "tags": [
         "Slew limiter"
       ],
-      "is": "something that slows how fast a voltage may change"
+      "is": "something that slows how fast a voltage may change",
+      "transparent": true
     },
     "waveshaper": {
       "tags": [
@@ -174,7 +178,8 @@
         "Switch",
         "Sequential switch"
       ],
-      "is": "something that routes one of several signals"
+      "is": "something that routes one of several signals",
+      "transparent": true
     },
     "logic": {
       "tags": [
