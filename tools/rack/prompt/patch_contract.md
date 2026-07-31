@@ -53,6 +53,15 @@ One short clause per **non-obvious** cable, keyed `outId:outPort>inId:inPort`.
 - **Omit obvious cables entirely.** `VCA OUT → Audio IN` needs no clause.
 - Keep each under about 15 words. Aim for 3–5 clauses total, not one per cable.
 
+## What kind of patch this is
+
+A patch that merely works is not the patch that was asked for. The section
+below names the structure this request implies, in terms of the connections
+that make it that kind of patch. Build that structure. It is checked, and a
+rejection will name the connection you left out.
+
+<!--PATCH_VOCABULARY-->
+
 ## Rules that decide whether the patch works
 
 1. **Something must reach the audio interface**, or the patch is silent.

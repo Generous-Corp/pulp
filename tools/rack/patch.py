@@ -1073,6 +1073,24 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     claude = find_claude()
     contract = open(CONTRACT).read().replace("<!--INVENTORY-->",
                                              render_inventory(inv, prefer))
+
+    # What KIND of patch this is, decided here from the prompt rather than by
+    # the model. A model that names its own target and is then graded against
+    # that claim learns to name easier targets, so the claim is made outside it.
+    import idiom_check
+    import patch_vocabulary
+    idioms = idiom_check.load_idioms()
+    claimed = idiom_check.resolve(prompt, idioms)
+    contract = contract.replace(
+        patch_vocabulary.MARKER,
+        patch_vocabulary.for_prompt(prompt, idioms) if claimed
+        else patch_vocabulary.render(idioms))
+
+    # Checked where the model receives it, not where it was rendered: the DSP
+    # side once shipped a vocabulary that rendered perfectly and arrived as a
+    # comment marker, and three runs went by before anyone read the prompt.
+    for problem in patch_vocabulary.guard(contract):
+        raise SystemExit(f"the patch contract is not sound: {problem}")
     ctx = None
     for attempt in range(retries + 1):
         parts = [contract, "\n---\n\n## Your task\n\nBuild this patch:\n\n> " + prompt]
@@ -1119,6 +1137,20 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
 
         ok, report = sounds(patch)
         if ok:
+            if claimed:
+                missing = idiom_check.check(patch, inv, idioms[claimed])
+                if missing:
+                    # Named, so the retry can fix the connection rather than
+                    # guessing what "rejected" meant.
+                    print(f"  not a {claimed} patch yet:")
+                    for m in missing:
+                        print(f"    - {m}")
+                    ctx = (f"This has to be a {claimed} patch. "
+                           f"{idioms[claimed].get('is', '')}\n\n"
+                           "It is missing:\n" +
+                           "\n".join(f"  - {m}" for m in missing))
+                    continue
+                print(f"  idiom holds: {claimed}")
             return patch, why
         print(f"  builds, but makes no sound (attempt {attempt + 1}):", flush=True)
         for line in report.splitlines():
