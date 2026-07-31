@@ -651,6 +651,10 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "[ \"$path\" = tools/scripts/sdk_provenance.py ]",
             run_block,
         )
+        self.assertIn(
+            "[ \"$path\" = tools/cmake/PulpSdkProvenance.cmake ]",
+            run_block,
+        )
         self.assertIn("tools/scripts/release_product_matrix.json", run_block)
         self.assertIn(
             "Overlaying current backfill compatibility engine",
@@ -693,6 +697,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
         self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
         self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)
+        self.assertIn("PULP_SDK_PROVENANCE_CMAKE=", ensure_block)
         self.assertIn(
             "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py",
             ensure_block,
@@ -703,6 +708,24 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("$env:PULP_RELEASE_CONTENT_VERIFIER", windows_verify)
         self.assertIn('"$PULP_RELEASE_PACKAGER"', unix_package)
         self.assertIn("$env:PULP_RELEASE_PACKAGER", windows_package)
+        self.assertIn(
+            'install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE"',
+            unix_stamp,
+        )
+        self.assertIn(
+            "Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE",
+            windows_stamp,
+        )
+        self.assertLess(
+            unix_stamp.index('install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE"'),
+            unix_stamp.index('"$PULP_SDK_PROVENANCE_HELPER" stamp'),
+        )
+        self.assertLess(
+            windows_stamp.index(
+                "Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE"
+            ),
+            windows_stamp.index("$env:PULP_SDK_PROVENANCE_HELPER stamp"),
+        )
 
     def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
         unix_block = self._find_step_run("Build SDK tarball (Unix)")
