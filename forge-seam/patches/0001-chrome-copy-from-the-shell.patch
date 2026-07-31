@@ -1,3 +1,22 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 63b40c2..c54f3ba 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1573,6 +1573,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+     # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
+     add_subdirectory(midi)
+ 
++    # Forge Modular, which generates VCV Rack modules and patches. Its sources
++    # live in the pulp-modular-rack seam and are copied in, so the directory is
++    # untracked here and this guard is what keeps a Forge-only checkout
++    # configuring.
++    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modular/CMakeLists.txt")
++        add_subdirectory(modular)
++    endif()
++
+     # A replacement bundle with unchanged Info.plist version can remain stale
+     # in AudioComponentRegistrar even when its executable changed. Assert every
+     # AU advertises this release version, while also freezing the identity tuple
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
 index 0863f43..acb72d3 100644
 --- a/include/forge/chrome.hpp

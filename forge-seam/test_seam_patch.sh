@@ -23,6 +23,17 @@ wrong() { printf '  WRONG  %s\n' "$*"; bad=$((bad + 1)); }
 [ -f "$PATCH" ] && ok "the chrome patch is checked in" \
                 || wrong "no chrome patch — the seam cannot be rebuilt"
 
+# Applying cleanly is not the same as being complete. The patch registered
+# every OTHER product and never `add_subdirectory(modular)`, so a rebuilt
+# worktree configured happily with ForgeFx, ForgeInstrument and ForgeMidi and
+# no Forge Modular at all -- and `git apply --check` was perfectly happy about
+# it. That step lived only in whoever set the worktree up.
+grep -q "add_subdirectory(modular)" "$PATCH" \
+    && ok "the patch registers the modular plugin" \
+    || wrong "the patch never adds modular/ to the build — a worktree rebuilt
+         from it configures without Forge Modular, and applies cleanly while
+         doing so"
+
 if [ ! -f "$BASE_FILE" ]; then
     wrong "no patches/BASE — nothing records which commit the patch applies to,
          so the only way to find it is trial and error"
