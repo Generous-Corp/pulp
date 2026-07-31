@@ -1994,8 +1994,6 @@ TEST_CASE("a finished build can actually open what it says it built",
     pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
     pc.input_channels = 1; pc.output_channels = 2;
     shell.prepare(pc);
-    // Standalone: a hosted build deliberately reports the path instead of
-    // launching another app over a DAW session.
     shell.set_standalone(true);
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
@@ -2216,6 +2214,49 @@ TEST_CASE("every build starts its own clock and its own card",
                           forge::ForgeChrome::PromptOrigin::project);
     CHECK(chrome->chat_line_count() >= before_followup);   // conversation kept
     CHECK(chrome->status_note_text().empty());             // card still reset
+
+    std::filesystem::remove(log);
+}
+
+TEST_CASE("Open in Rack opens Rack from a plugin too", "[phase7][artifact]") {
+    // A button labelled "Open in Rack" that prints a path instead is the same
+    // say-one-thing-do-another this screen has been cured of elsewhere. Rack
+    // Free is all that is needed: Rack Pro is only for running Rack ITSELF
+    // inside a DAW, which is not what this does.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_standalone(false);          // hosted, as in a DAW
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.chrome()->enter_build();
+
+    const std::string real = "/tmp/ambient-drone.vcv";
+    if (!std::filesystem::exists(real)) {
+        WARN("no generated patch present; skipping");
+        return;
+    }
+    const auto log = std::filesystem::temp_directory_path() / "fm-hosted.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+    { std::ofstream f(log);
+      f << "  built 8 modules, 10 cables \xE2\x86\x92 " << real << "\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+
+    // It does NOT refuse with "installed for VCV Rack: <path>" any more.
+    const auto said = shell.open_in_rack();
+    INFO("said: " << said);
+    CHECK(said.find("installed for") == std::string::npos);
+    // It warns instead, because Rack claims an audio device when it starts and
+    // that matters more inside a DAW session than outside one.
+    CHECK(said.find("audio device") != std::string::npos);
 
     std::filesystem::remove(log);
 }

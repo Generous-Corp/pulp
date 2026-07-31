@@ -577,6 +577,14 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     stage_started_ = run_started_;
     reported_outcome_ = BuildOutcome::running;
     reported_stage_ = -2;
+
+    // Forget the previous run's output. The monitor only resets when the log
+    // SHRINKS, and a longer new run never trips that -- so at the first tick
+    // the old "installed" line was still there, the outcome already read done,
+    // and the stage loaded the PREVIOUS artifact: a patch build showing one
+    // module named SLEWRF. Worse, the once-only guard then refused to report
+    // the real result when it arrived.
+    if (watching_) monitor_.watch(monitor_log_path_);
     c->set_status_note({});
     c->set_status_activity({});
     c->set_active_stage(-1);
@@ -678,14 +686,22 @@ std::string ForgeModularShell::open_in_rack() {
         return "a build is running — the patch is being rewritten";
     const auto path = artifact_path();
     if (path.empty()) return "nothing has finished building yet";
-    // Launching another application from inside a DAW steals focus from a
-    // session the user is working in, so hosted builds say where the artifact
-    // is instead of opening it. Standalone opens it directly.
-    if (!is_standalone())
-        return "installed for VCV Rack: " + path;
+    // Hosted builds open it too. The earlier behaviour -- printing the path
+    // and not launching -- was a button labelled "Open in Rack" that did not
+    // open Rack, which is the same say-one-thing-do-another this whole screen
+    // has been cured of. Rack Free (the desktop app) is all that is needed;
+    // Rack Pro is only for running Rack ITSELF inside a DAW, which is not what
+    // this does.
     std::error_code ec;
     if (!std::filesystem::exists(path, ec))
         return "the generator named a file that is not there: " + path;
+
+    // Rack will claim an audio device when it starts, which is worth saying
+    // out loud from inside a DAW session rather than discovering.
+    const std::string note =
+        is_standalone() ? std::string{}
+                        : std::string("opening VCV Rack \u2014 it will take an "
+                                      "audio device");
 
     // No Rack, no launch. Show the folder instead so the artifact is still
     // reachable rather than merely described.
@@ -703,7 +719,7 @@ std::string ForgeModularShell::open_in_rack() {
         std::string out;
         ProcessEngine::run(cmd, out);
     }).detach();
-    return {};
+    return note;
 }
 
 std::string ForgeModularShell::ask() {
@@ -845,6 +861,7 @@ bool ForgeModularShell::busy() const {
 }
 
 void ForgeModularShell::watch_build_log(const std::string& path) {
+    monitor_log_path_ = path;
     monitor_.watch(path);
     watching_ = true;
     run_started_ = std::chrono::steady_clock::now();
