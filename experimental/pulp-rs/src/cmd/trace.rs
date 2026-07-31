@@ -1302,15 +1302,15 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Query verbs:")?;
     writeln!(
         out,
-        "  query \"<sql>\" [--format json|table|csv]   Run SQL (Trace.query; JSON default)"
-    )?;
-    writeln!(
-        out,
         "  query \"<sql>\" --trace FILE.pftrace        Run SQL offline via trace_processor"
     )?;
     writeln!(
         out,
-        "  query --preset <name>         Run a named trace-stdlib preset"
+        "  query \"<sql>\" [--format json|table|csv]   Reserved live command; currently unavailable"
+    )?;
+    writeln!(
+        out,
+        "  query --preset <name>         Reserved live command; currently unavailable"
     )?;
     writeln!(
         out,
@@ -1329,7 +1329,7 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "Investigation:")?;
     writeln!(
         out,
-        "  explain \"<question>\"          One-shot narrated root cause (Trace.explain)"
+        "  explain \"<question>\"          Reserved live command; currently unavailable"
     )?;
     writeln!(out)?;
     writeln!(out, "Readiness:")?;

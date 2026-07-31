@@ -1,11 +1,10 @@
 //! `pulp trace query "<sql>" --trace <file.pftrace>` — run SQL against a
 //! flushed trace **offline**, without a live inspector session.
 //!
-//! The default `pulp trace query "<sql>"` (no `--trace`) forwards to the
-//! running inspector's `Trace.query`, which reads the in-process live
-//! session. Once a session has been flushed to a `.pftrace`, there is no
-//! inspector to ask — so `--trace <file>` shells out to Perfetto's
-//! `trace_processor_shell` and runs the SQL against the saved file.
+//! `--trace <file>` shells out to Perfetto's `trace_processor_shell` and runs
+//! SQL against the saved file. The reserved live `Trace.query` protocol method
+//! currently returns `capability_unavailable`; it does not pretend to execute
+//! a query.
 //!
 //! Resolution reuses [`crate::cmd::trace::resolve_trace_processor`]
 //! (`$PULP_TRACE_PROCESSOR` → `$PATH`); a missing binary is reported with an
