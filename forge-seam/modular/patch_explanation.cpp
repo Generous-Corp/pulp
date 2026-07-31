@@ -147,6 +147,67 @@ std::vector<std::string> PatchExplanation::wrap(const std::string& text,
     return lines;
 }
 
+/// A small mark for each role, drawn in the same geometric language Forge
+/// uses elsewhere -- deliberately NOT added to Forge's own icon enum, which
+/// would put a Rack-shaped name in the core the other three products share.
+///
+/// One shape per role, each saying what the role IS rather than decorating it:
+/// sound radiating, a step, a pulse, a wave.
+class RoleGlyph : public pulp::view::View {
+public:
+    explicit RoleGlyph(SignalRole role) : role_(role) {
+        flex().preferred_width = 11;
+        flex().preferred_height = 11;
+        flex().flex_shrink = 0;
+    }
+
+    void paint(pulp::canvas::Canvas& canvas) override {
+        const auto b = bounds();
+        const float cx = b.width / 2.0f, cy = b.height / 2.0f;
+        const auto rgb = role_color(role_);
+        const auto tint = pulp::canvas::Color::rgba8(
+            static_cast<std::uint8_t>((rgb >> 16) & 0xFF),
+            static_cast<std::uint8_t>((rgb >> 8) & 0xFF),
+            static_cast<std::uint8_t>(rgb & 0xFF));
+        canvas.set_stroke_color(tint);
+        canvas.set_fill_color(tint);
+        canvas.set_line_width(1.3f);
+
+        switch (role_) {
+            case SignalRole::audio:
+                // Sound leaving something: a body and two arcs.
+                canvas.fill_rect(cx - 4.0f, cy - 2.0f, 3.0f, 4.0f);
+                canvas.stroke_arc(cx - 1.0f, cy, 2.6f, -1.0f, 1.0f);
+                canvas.stroke_arc(cx - 1.0f, cy, 4.4f, -1.0f, 1.0f);
+                break;
+            case SignalRole::pitch:
+                // A step: which note, and the change to the next.
+                canvas.stroke_line(cx - 4.5f, cy + 3.0f, cx - 0.5f, cy + 3.0f);
+                canvas.stroke_line(cx - 0.5f, cy + 3.0f, cx - 0.5f, cy - 3.0f);
+                canvas.stroke_line(cx - 0.5f, cy - 3.0f, cx + 4.5f, cy - 3.0f);
+                break;
+            case SignalRole::clock:
+                // A pulse train: on, off, on.
+                canvas.stroke_line(cx - 5.0f, cy + 3.0f, cx - 3.0f, cy + 3.0f);
+                canvas.stroke_line(cx - 3.0f, cy + 3.0f, cx - 3.0f, cy - 3.0f);
+                canvas.stroke_line(cx - 3.0f, cy - 3.0f, cx - 1.0f, cy - 3.0f);
+                canvas.stroke_line(cx - 1.0f, cy - 3.0f, cx - 1.0f, cy + 3.0f);
+                canvas.stroke_line(cx - 1.0f, cy + 3.0f, cx + 1.0f, cy + 3.0f);
+                canvas.stroke_line(cx + 1.0f, cy + 3.0f, cx + 1.0f, cy - 3.0f);
+                canvas.stroke_line(cx + 1.0f, cy - 3.0f, cx + 3.0f, cy - 3.0f);
+                break;
+            case SignalRole::mod:
+                // A slow wave: nothing here makes a noise on its own.
+                canvas.stroke_arc(cx - 2.5f, cy, 2.5f, 3.14159f, 6.28318f);
+                canvas.stroke_arc(cx + 2.5f, cy, 2.5f, 0.0f, 3.14159f);
+                break;
+        }
+    }
+
+private:
+    SignalRole role_;
+};
+
 void PatchExplanation::on_resized() {
     // Only when the wrap would actually change: rebuilding on every layout
     // pass would discard the hover state constantly.
@@ -208,6 +269,11 @@ void PatchExplanation::rebuild() {
         header->flex().flex_shrink = 0;
         header->flex().padding_top = 10;
         header->flex().padding_bottom = 2;
+
+        auto glyph = std::make_unique<RoleGlyph>(group.role);
+        glyph->flex().margin_right = 7;
+        glyph->flex().margin_top = 2;
+        header->add_child(std::move(glyph));
 
         auto title = std::make_unique<Label>(group.title);
         title->set_font_family(forge::design::type::mono);
