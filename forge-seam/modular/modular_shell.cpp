@@ -999,6 +999,11 @@ void ForgeModularShell::on_poll() {
         }
     }
 
+    // A re-wrap the layout asked for and could not schedule. A hosted plugin
+    // has no dispatcher, so without this the explanation stays laid out for
+    // the width it was first built at and its text runs over what is below.
+    if (explanation_) explanation_->apply_pending_rewrap();
+
     // Read what the generator has written FIRST. Evaluating the outcome before
     // pumping meant judging lines that had not been read yet, so every verdict
     // arrived a tick late -- and in a test that polls once, never.

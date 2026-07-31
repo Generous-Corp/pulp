@@ -2474,6 +2474,168 @@ TEST_CASE("a module Rack cannot create is not drawn as if it will be there",
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("a resize re-wraps the explanation even with no loop to defer onto",
+          "[rack][render][overlap]") {
+    // on_resized may not rebuild in place -- that runs inside the layout pass
+    // walking these very children, and replacing them there segfaults -- so it
+    // defers. When there is no dispatcher to defer ONTO, it used to drop the
+    // request entirely, on the reasoning that a headless render sets its
+    // content after its bounds anyway.
+    //
+    // A hosted plugin is exactly that case and is not headless. It has no
+    // dispatcher of its own, so the re-wrap never ran: the rows stayed laid
+    // out for whatever width the view was FIRST built at, and after a resize
+    // the text wrapped to more lines than the layout had allowed and ran over
+    // what was below it.
+    forge_modular::PatchExplanation ex;
+    ex.set_connections(sample_patch(), sample_rack());
+    ex.set_depth(forge_modular::ExplainDepth::learning);
+
+    auto lay_out_at = [&](int w) {
+        // Rendering is what actually runs a layout pass over the children;
+        // set_bounds alone leaves them all at zero height.
+        (void)pulp::view::render_to_png(ex, w, 400, 1.0f,
+                                        pulp::view::ScreenshotBackend::skia);
+    };
+    auto content_height = [&] {
+        float h = 0.0f;
+        for (std::size_t i = 0; i < ex.child_count(); ++i)
+            h += ex.child_at(i)->bounds().height;
+        return h;
+    };
+
+    lay_out_at(900);
+    const float wide = content_height();
+    REQUIRE(wide > 0.0f);
+
+    // Squeeze it. The resize itself may not rebuild -- that runs inside the
+    // layout pass walking these children -- so this render still uses the
+    // wrap computed for 900.
+    lay_out_at(380);
+    const float before_apply = content_height();
+
+    // The poll is where the deferred work is allowed to happen.
+    ex.apply_pending_rewrap();
+    lay_out_at(380);
+    const float after_apply = content_height();
+
+    INFO("content height: 900 -> " << wide << ", 380 before the re-wrap -> "
+         << before_apply << ", after -> " << after_apply);
+    // The defect, exactly: laid out at 900 the content is one height, and
+    // squeezed to 380 it is STILL that height -- the rows kept a layout
+    // computed for a column more than twice as wide, which is what runs text
+    // over whatever sits below it. The measurement is that the pending
+    // re-wrap CHANGED something; which way it goes is the widget's business.
+    CHECK(before_apply == Approx(wide));      // nothing re-wrapped on resize
+    CHECK(after_apply != Approx(before_apply));  // the poll did the work
+}
+
+TEST_CASE("nothing in the rail draws on top of anything else",
+          "[rack][render][overlap]") {
+    // Reported from a screenshot: the left column had the transcript drawn
+    // over the explanation -- "Built. Open it in Rack to play it." sitting on
+    // top of a cable's reasoning, both readable, neither legible.
+    //
+    // The existing overlap test covers PatchExplanation ALONE, which is why it
+    // never saw this: the two views are fine individually and collide when
+    // they share a column. So this walks the LIVE tree and compares every
+    // visible piece of text against every other, in root coordinates.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.chrome()->enter_build();
+    shell.show_rack(sample_rack(), sample_patch());
+    // A transcript, which is the half that landed on top.
+    shell.chrome()->narrate("a classic subtractive voice with a filter envelope");
+    shell.chrome()->narrate("Built. Open it in Rack to play it.");
+    shell.chrome()->narrate("Eight modules, nine cables. The audio path is "
+                            "three cables long.");
+    // And the state the screenshot was actually in: a build in flight, so the
+    // status card is up in the same column as the transcript and the
+    // explanation. Three things sharing one rail is when they collided.
+    shell.chrome()->set_active_stage(1);
+    shell.chrome()->set_active_stage_elapsed("12s");
+    shell.chrome()->set_status_activity("asking the model · 12s elapsed");
+    shell.chrome()->set_status_note("FileNotFoundError: [Errno 2] No such file "
+                                    "or directory: 'claude'");
+    shell.chrome()->narrate("Traceback (most recent call last):", true);
+
+    // At several widths, because the column that collided in the report was a
+    // NARROW one: text wraps to more lines than a layout that measured it
+    // unwrapped allowed for, and only then does it run into what is below.
+    for (auto [kW, kH] : {std::pair<int, int>{forge::ForgeChrome::kDesignWidth,
+                                              forge::ForgeChrome::kDesignHeight},
+                          {1020, 760}, {860, 700}, {700, 640}}) {
+    const auto shot = std::filesystem::temp_directory_path() /
+                      ("rail-overlap-" + std::to_string(kW) + ".png");
+    REQUIRE(pulp::view::render_to_file(*view, kW, kH, shot.string(), 1.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+
+    struct Box { std::string text; float x, y, w, h; };
+    std::vector<Box> texts;
+    // CLIPPED to whatever scrolls it. A label inside a scroll view may sit
+    // far below the viewport and be perfectly invisible; comparing raw bounds
+    // would call that an overlap and send somebody hunting a defect that is
+    // not on screen. Only what is actually painted counts.
+    struct Clip { float x0, y0, x1, y1; };
+    std::function<void(pulp::view::View*, float, float, Clip)> walk =
+        [&](pulp::view::View* v, float ox, float oy, Clip clip) {
+            if (!v || !v->visible()) return;
+            const auto b = v->bounds();
+            const float x = ox + b.x, y = oy + b.y;
+            if (dynamic_cast<pulp::view::ScrollView*>(v)) {
+                clip = {std::max(clip.x0, x), std::max(clip.y0, y),
+                        std::min(clip.x1, x + b.width),
+                        std::min(clip.y1, y + b.height)};
+            }
+            if (auto* l = dynamic_cast<pulp::view::Label*>(v)) {
+                const auto t = l->text();
+                const float vx0 = std::max(x, clip.x0), vy0 = std::max(y, clip.y0);
+                const float vx1 = std::min(x + b.width, clip.x1);
+                const float vy1 = std::min(y + b.height, clip.y1);
+                if (!t.empty() && vx1 - vx0 > 1.0f && vy1 - vy0 > 1.0f)
+                    texts.push_back({t, vx0, vy0, vx1 - vx0, vy1 - vy0});
+            }
+            for (std::size_t i = 0; i < v->child_count(); ++i)
+                walk(v->child_at(i), x, y, clip);
+        };
+    walk(view.get(), 0.0f, 0.0f, {0.0f, 0.0f, float(kW), float(kH)});
+    REQUIRE(texts.size() > 5);
+
+    // Two pieces of text may touch, but they must not sit ON one another.
+    // A generous overlap threshold, so a one-pixel kerning rectangle is not
+    // called a defect while "one paragraph across another" certainly is.
+    std::vector<std::string> collisions;
+    for (std::size_t i = 0; i < texts.size(); ++i)
+        for (std::size_t j = i + 1; j < texts.size(); ++j) {
+            const auto& a = texts[i];
+            const auto& b = texts[j];
+            const float ox = std::min(a.x + a.w, b.x + b.w) - std::max(a.x, b.x);
+            const float oy = std::min(a.y + a.h, b.y + b.h) - std::max(a.y, b.y);
+            if (ox > 4.0f && oy > 4.0f)
+                collisions.push_back("\"" + a.text.substr(0, 34) + "\" over \"" +
+                                     b.text.substr(0, 34) + "\"");
+        }
+    // Gathered into ONE message: a scoped INFO per collision is destroyed at
+    // the end of its loop iteration and never reaches the report, which is a
+    // fine way to fail a test and learn nothing.
+    std::string detail;
+    for (const auto& c : collisions) detail += "\n      " + c;
+    INFO("at " << kW << "x" << kH << ": " << texts.size() << " pieces of text, "
+         << collisions.size() << " collisions:" << detail);
+    CHECK(collisions.empty());
+    }
+}
+
 TEST_CASE("no control on Home paints like a control and does nothing",
           "[phase6][controls]") {
     // A control that highlights and does nothing is indistinguishable from a

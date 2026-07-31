@@ -222,12 +222,27 @@ void PatchExplanation::on_resized() {
             rewrap_pending_ = false;
             if (std::abs(bounds().width - wrapped_at_) >= 1.0f) rebuild();
         })) {
-        // No loop to defer onto -- a headless render. Leave the tree alone:
-        // rebuilding from inside the layout pass is what crashes, and the
-        // content is set after the bounds there anyway, so the wrap is
-        // already right.
-        rewrap_pending_ = false;
+        // No loop to defer onto. The tree still must not be rebuilt from
+        // inside the layout pass -- that is what segfaults -- so the request
+        // is KEPT and the next poll applies it.
+        //
+        // Clearing it here was the bug: a hosted plugin has no dispatcher of
+        // its own, so the re-wrap simply never happened and the rows stayed
+        // laid out for whatever width the view was FIRST built at. Resize the
+        // window and the text wrapped to more lines than the layout had
+        // allowed for, and ran over what was below it.
+        stale_wrap_ = true;
     }
+}
+
+void PatchExplanation::apply_pending_rewrap() {
+    // Called from the shell's poll, which is neither a layout pass nor an
+    // event delivery -- the two places where replacing these children is
+    // unsafe.
+    if (!stale_wrap_) return;
+    stale_wrap_ = false;
+    rewrap_pending_ = false;
+    if (std::abs(bounds().width - wrapped_at_) >= 1.0f) rebuild();
 }
 
 void PatchExplanation::rebuild() {

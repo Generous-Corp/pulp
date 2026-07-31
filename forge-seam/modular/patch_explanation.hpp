@@ -70,6 +70,14 @@ public:
     /// Point at a line, as a hover would. Named so a test drives the same path
     /// the mouse does rather than a private shortcut.
     void hover_line(std::optional<std::size_t> index);
+
+    /// Re-wrap if a resize asked for one and there was no loop to defer onto.
+    ///
+    /// A hosted plugin has no dispatcher of its own, so the deferred re-wrap
+    /// never ran and the rows stayed laid out for the width the view was
+    /// first built at. Driven from the shell's poll, which is neither a
+    /// layout pass nor an event delivery.
+    void apply_pending_rewrap();
     std::optional<std::size_t> hovered() const { return hovered_; }
 
 private:
@@ -83,6 +91,9 @@ private:
     ExplainDepth depth_ = ExplainDepth::standard;
     float wrapped_at_ = -1.0f;
     bool rewrap_pending_ = false;
+    /// A re-wrap was asked for and could not be scheduled. Applied at the
+    /// next poll rather than dropped.
+    bool stale_wrap_ = false;
     std::optional<std::size_t> hovered_;
 };
 
