@@ -178,6 +178,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
             R"({"expected":{"gain_linear_bits":"1065353216","pan_bits":"0"},)"
             R"("replacement":{"gain_linear_bits":"1056964608","pan_bits":"0"},)"
             R"("sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_track",
+                 R"({"before_track_id":"34","sequence_id":"5","track":)" +
+                     std::string(parsed->raw(track)) + "}"),
+        envelope("pulp.timeline.command.remove_track", R"({"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -227,6 +231,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<SetClipSequenceRef>(commands[33]));
     REQUIRE(std::holds_alternative<SetTrackMixer>(commands[34]));
     REQUIRE(std::get<SetTrackMixer>(commands[34]).replacement == TrackMixer{0.5f, 0.0f});
+    REQUIRE(std::holds_alternative<InsertTrack>(commands[35]));
+    REQUIRE(std::get<InsertTrack>(commands[35]).before_track_id == ItemId{34});
+    REQUIRE(std::get<InsertTrack>(commands[35]).track.id() == ItemId{6});
+    REQUIRE(std::holds_alternative<RemoveTrack>(commands[36]));
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

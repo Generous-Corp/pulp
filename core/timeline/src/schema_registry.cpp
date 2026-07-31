@@ -570,6 +570,13 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"scene_id", SchemaValueKind::U64String},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"slot_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_track", SchemaDomain::Command,
+                              {{"before_track_id", SchemaValueKind::U64String, false},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track", SchemaValueKind::Object, true, "pulp.timeline.track"}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.remove_track", SchemaDomain::Command,
+        {{"sequence_id", SchemaValueKind::U64String}, {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_mixer", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Object},
                                {"replacement", SchemaValueKind::Object},
