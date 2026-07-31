@@ -37,3 +37,19 @@ else
         return "$rc"
     }
 fi
+
+# Run it as well as define it.
+#
+# Sourcing is the intended use, but `bash cap.sh 90 some-command` reads as the
+# obvious one -- and it used to define the function, run NOTHING, and exit 0.
+# A harness that measures nothing and reports success is worse than one that
+# fails: a Rack patch-loading probe invoked this way came back clean with an
+# empty log, which looks exactly like Rack opening the patch without complaint.
+# So an executed-with-arguments invocation does the capped run it plainly means.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    if [ "$#" -lt 2 ]; then
+        echo "usage: cap.sh SECONDS command...   (or: . cap.sh, then cap 60 cmd)" >&2
+        exit 2
+    fi
+    cap "$@"
+fi

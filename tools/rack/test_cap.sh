@@ -83,5 +83,43 @@ else
     ok "a command's own exit status survives the cap"
 fi
 
+# 5. Run as a SCRIPT, not sourced. `bash cap.sh 90 some-command` is the
+#    obvious-looking invocation, and it used to define the function, run
+#    nothing, and exit 0. A probe of Rack's patch loading invoked that way came
+#    back silent and successful -- which is what a clean load looks like -- so
+#    the harness reported a pass for a program it had never started.
+out="$(bash "$HERE/cap.sh" 30 /bin/echo hello 2>/dev/null)"
+rc=$?
+if [ "$out" != "hello" ]; then
+    wrong "executed as a script it produced '$out', not 'hello' — it ran nothing"
+elif [ "$rc" -ne 0 ]; then
+    wrong "executed as a script it exited $rc on a command that succeeded"
+else
+    ok "executed as a script it actually runs the command"
+fi
+
+# 6. And it still caps that way, so the executed form is not a pass-through
+#    that happens to forward output while limiting nothing.
+start=$(date +%s)
+bash "$HERE/cap.sh" 2 /bin/sleep 30 >/dev/null 2>&1
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+if [ "$elapsed" -ge 10 ]; then
+    wrong "executed as a script, a 2s cap let a 30s command run ${elapsed}s"
+elif [ "$rc" -eq 0 ]; then
+    wrong "executed as a script, a killed command reported success"
+else
+    ok "executed as a script the cap still stops a long command"
+fi
+
+# 7. Too few arguments is a usage error, not a silent success. This is the
+#    shape the trap took: no command to run, nothing run, exit 0.
+bash "$HERE/cap.sh" 30 >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+    wrong "an invocation with no command to run reported success"
+else
+    ok "an invocation with no command to run is refused"
+fi
+
 printf '\n%s\n' "$([ "$bad" -eq 0 ] && echo 'all good' || echo FAILED)"
 [ "$bad" -eq 0 ]
