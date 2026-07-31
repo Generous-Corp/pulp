@@ -200,6 +200,61 @@ def check_role_colors(inv) -> int:
     return bad
 
 
+# The two patches that separate "silent" from "audible" by ONE cable. They are
+# identical except that the audible one gates its envelope.
+SILENCE = [
+    ("silent-envelope-never-gated.vcv", False, "0.000000"),
+    ("audible-envelope-gated.vcv", True, None),
+]
+
+
+def check_silence_mechanism() -> int:
+    """Why a right-shaped patch makes no sound, pinned to the real DSP.
+
+    The dozen-prompt failures all read `VCA out 0 is silent (mean 0.000000 V)`
+    -- EXACTLY zero. That rules out the obvious explanation: our VCA's level
+    defaults to 0.5, and a level set too low still passes something. Exactly
+    zero is a CV of exactly zero, which means whatever should open the VCA
+    never fired.
+
+    These two patches differ by ONE cable -- an LFO into the envelope's gate --
+    and that cable is the difference between 0.000000 V and 0.45 V. Without
+    both, "silent" and "audible" are two words rather than a measured
+    distinction.
+    """
+    import subprocess
+    gate = P._build_gate()
+    pdir = P._plugin_dir()
+    if not gate or not pdir:
+        print("  --     no Rack SDK here, so the DSP cannot be run")
+        return 0
+    bad = 0
+    for name, should_sound, expect in SILENCE:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "patch_idioms", "regressions", name)
+        if not os.path.exists(path):
+            print(f"  WRONG  {name} is missing — the regression cannot run")
+            bad += 1
+            continue
+        r = subprocess.run([gate, path, pdir], capture_output=True, text=True,
+                           timeout=300,
+                           env=dict(os.environ, DYLD_LIBRARY_PATH=P.SDK))
+        sounded = r.returncode == 0
+        if sounded != should_sound:
+            print(f"  WRONG  {name}: expected "
+                  f"{'sound' if should_sound else 'silence'}, got the other\n"
+                  f"         {r.stdout.strip()[:300]}")
+            bad += 1
+            continue
+        if expect and expect not in r.stdout:
+            print(f"  WRONG  {name}: silent, but not at exactly {expect} — "
+                  f"a level problem and a dead gate are different bugs")
+            bad += 1
+            continue
+        print(f"  ok     {name:<38} {'carries signal' if sounded else 'silent at exactly 0'}")
+    return bad
+
+
 def check_model_failure() -> int:
     """A failed model call has to SAY something.
 
@@ -257,6 +312,7 @@ def main():
     bad += check_disambiguation(inv)
     bad += check_role_colors(inv)
     bad += check_model_failure()
+    bad += check_silence_mechanism()
     print(f"\n{len(CASES) + 4 - bad}/{len(CASES) + 4} correct")
     return 1 if bad else 0
 

@@ -1271,9 +1271,14 @@ def sounds(patch: dict) -> tuple[bool, str]:
         json.dump(patch, f)
         tmp = f.name
     try:
+        # The per-module trace, always. A silent patch is silent for ONE
+        # reason -- some module upstream is putting out nothing -- and the
+        # trace names it. Without it the only thing to tell the model was a
+        # list of usual causes, which is a guess dressed as advice.
         r = subprocess.run([gate, tmp, pdir], capture_output=True, text=True,
                            timeout=300,
-                           env=dict(os.environ, DYLD_LIBRARY_PATH=SDK))
+                           env=dict(os.environ, DYLD_LIBRARY_PATH=SDK,
+                                    PATCH_GATE_TRACE="1"))
         return r.returncode == 0, r.stdout + r.stderr
     except subprocess.TimeoutExpired:
         return False, "the patch did not finish running within 300 s"
@@ -1408,14 +1413,21 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
         for line in report.splitlines():
             if "FAIL" in line or "silent" in line:
                 print(f"    {line.strip()}", flush=True)
+        # The measured output of EVERY module is in the report, so the reason
+        # can be pointed at rather than guessed. A VCA reading exactly 0.000 is
+        # not a level set too low -- a low level still passes something. It is
+        # a CV of exactly zero, which means whatever feeds it never fired.
         ctx = ("The patch was structurally valid but SILENT when run. Every "
                "cable into the audio interface carried nothing.\n\n" + report +
-               "\n\nUsual causes: a sequencer or clock divider with nothing "
-               "clocking it; an envelope whose gate is never driven; a "
-               "self-triggering loop with nothing to start it; a VCA whose CV "
-               "never rises and whose level defaults to zero. Give the patch "
-               "something that runs on its own, and make sure every module in "
-               "the audio path is actually opened by something.")
+               "\n\nRead the per-module activity above and find the FIRST "
+               "module in the chain whose output is 0.000 — that is where the "
+               "signal stops, and everything after it is silent as a "
+               "consequence rather than a cause. An output of exactly 0.000 "
+               "from a VCA or a low-pass gate means its CV never rose, so "
+               "whatever should open it is never triggered; an envelope at "
+               "0.000 was never gated; a sequencer stuck on one value is "
+               "never clocked. Give that module the thing that starts it, "
+               "rather than adding more modules after it.")
     raise SystemExit(f"gave up after {retries + 1} attempts")
 
 
