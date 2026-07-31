@@ -443,7 +443,7 @@ index c8101e1..ff2b01a 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..8c26fe3 100644
+index 1c3814e..69d2c81 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,81 @@ private:
@@ -903,7 +903,7 @@ index 1c3814e..8c26fe3 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -6771,11 +6982,32 @@ void ForgeChrome::reset_chips() {
+@@ -6771,11 +6982,42 @@ void ForgeChrome::reset_chips() {
  // status card. Used when the shelf opens a DIFFERENT entry: the rail must show
  // the newly-opened build's conversation, not the previous one's.
  void ForgeChrome::clear_chat_rail() {
@@ -922,22 +922,32 @@ index 1c3814e..8c26fe3 100644
 +    // needs no run loop, and so behaves the same in a headless test as in the
 +    // app -- which a "defer to the next turn of the loop" fix would not.
 +    // NOT cleared here. Freeing the PREVIOUS generation at the start of the
-+    // next reset moved the crash from the first build to the second: something
-+    // in the chrome still refers to a retired bubble, and this is not the
-+    // place to find out what. They are held for the life of the editor
-+    // instead -- a few dozen detached labels per session, against a
-+    // reproducible segfault on the app's primary button.
++    // next reset moved the crash from the first build to the second, and the
++    // reference that outlived a retired view was the SHELL's: a product's chat
++    // accessory is a child of this column, so retiring it handed the shell's
++    // own `explanation_` / `module_summary_` to this list -- which
++    // `~ForgeChrome` frees while the shell is still live. They are held for the
++    // life of the editor instead -- a few dozen detached labels per session,
++    // against a reproducible segfault on the app's primary button.
      if (chat_col_) {
          for (std::size_t i = chat_col_->child_count(); i-- > 0;) {
              pulp::view::View* c = chat_col_->child_at(i);
              if (c == status_card_) continue;  // keep the reusable status card
 -            chat_col_->remove_child(c);
++            // The product's own accessory is not part of the conversation. It
++            // shows the ARTIFACT -- Forge Modular's patch explanation and
++            // module spec -- so a reset that drops the previous build's chat
++            // must leave it in the rail. Retiring it detached it permanently
++            // (the accessory hook runs once, when the chrome mounts), so from
++            // the first build onward the explanation could never be shown
++            // again, and its owner became this chrome rather than the tree.
++            if (c == chat_accessory_) continue;
 +            if (auto owned = chat_col_->remove_child(c))
 +                retired_chat_.push_back(std::move(owned));
          }
      }
      transcript_.clear();
-@@ -8630,6 +8862,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8872,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -957,7 +967,7 @@ index 1c3814e..8c26fe3 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9245,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9255,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -972,7 +982,7 @@ index 1c3814e..8c26fe3 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9259,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9269,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -983,7 +993,7 @@ index 1c3814e..8c26fe3 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9270,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9280,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
