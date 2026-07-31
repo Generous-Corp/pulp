@@ -25,6 +25,10 @@ pass=0; fail=0; skip=0
 # with no coreutils. One shim, shared, because two copies drift.
 . "$HERE/cap.sh"
 
+# Whether this session can show a window at all -- a locked screen is a
+# logged-in session that cannot.
+. "$HERE/session.sh"
+
 # Which generator this proof is about, and whether it is the one being read.
 . "$HERE/toolchain.sh"
 toolchain_report "$HERE" "$TOOLS"
@@ -67,13 +71,31 @@ fi
 # --- surface two: the app, by clicking ---------------------------------------
 if [ "$ONLY" = "all" ] || [ "$ONLY" = "app" ]; then
     step "2. the standalone app, by pressing Build"
-    if [ ! -d "/Applications/Forge Modular.app" ]; then
+    # Both locations, because the app installs to ~/Applications and only
+    # /Applications was looked at -- so on a machine where the app WAS
+    # installed this step reported "not installed here" and skipped itself.
+    APP=""
+    for candidate in "$HOME/Applications/Forge Modular.app" \
+                     "/Applications/Forge Modular.app"; do
+        [ -d "$candidate" ] && APP="$candidate" && break
+    done
+    if [ -z "$APP" ]; then
         none "the app is not installed here"
     elif ! pgrep -x "loginwindow" >/dev/null 2>&1; then
         none "no GUI session — the window cannot be driven from a terminal alone"
+    elif screen_is_locked; then
+        # A LOCKED screen is a logged-in session, so the loginwindow check above
+        # passes and this used to run anyway. It cannot work: loginwindow owns
+        # every point on the display, the app never becomes frontmost, and the
+        # driver rightly refuses to click. Worse, Skia cannot create a GPU
+        # context behind the lock, so the app logs a flood of dropped draws --
+        # which reads exactly like a rendering regression and is not one. That
+        # misdiagnosis is the reason this branch exists.
+        none "the screen is locked — the app cannot take focus or a GPU surface.
+        Unlock it and re-run; this is a skip, not a failure of the app"
     else
         printf '  launching the app; it will take an audio device for up to 25 minutes\n'
-        open -a "/Applications/Forge Modular.app"
+        open -a "$APP"
         sleep 6
         out="$(cd "$HERE" && cap 1500 python3 drive_app.py patch \
               "a classic subtractive voice with a filter envelope" 2>&1)"
