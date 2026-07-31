@@ -63,6 +63,29 @@ if(NOT EXISTS "${_prefix}/lib/cmake/Pulp/PulpVerifyRuntimeStaging.cmake")
         "directory, so an SDK without it cannot verify its own bundles.")
 endif()
 
+# The SDK's design-import frontend delegates to this installed helper. Launch
+# it from the staged prefix so a missing install rpath fails here instead of
+# later in Forge (or another SDK consumer) with a dynamic-loader error. Windows
+# has no rpath and its SDK DLL layout is a separate packaging contract.
+if(NOT WIN32)
+    set(_import_design_helper "${_prefix}/bin/pulp-import-design")
+    if(NOT EXISTS "${_import_design_helper}")
+        message(FATAL_ERROR
+            "Installed SDK is missing ${_import_design_helper}")
+    endif()
+    execute_process(
+        COMMAND "${_import_design_helper}" --help
+        RESULT_VARIABLE _import_design_result
+        OUTPUT_VARIABLE _import_design_output
+        ERROR_VARIABLE _import_design_error)
+    if(NOT _import_design_result EQUAL 0)
+        message(FATAL_ERROR
+            "Installed pulp-import-design failed to launch (${_import_design_result}). "
+            "Verify that its install rpath resolves shared SDK libraries.\n"
+            "${_import_design_output}\n${_import_design_error}")
+    endif()
+endif()
+
 set(_configure_args
     -S "${PULP_SOURCE_DIR}/tools/validation/sdk-smoke"
     -B "${_consumer_build}"
