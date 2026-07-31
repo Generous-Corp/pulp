@@ -154,7 +154,10 @@ TEST_CASE("discovery publication preserves Unicode runtime paths on Windows",
           "[inspect][discovery][windows][unicode]") {
     TemporaryDirectory temporary;
     const auto runtime =
-        temporary.path / std::filesystem::path(L"runtime-\u03a9-\u65e5\u672c");
+        temporary.path / std::filesystem::path(L"missing-parent-\u03a9") /
+        std::filesystem::path(L"nested-\u65e5\u672c") /
+        std::filesystem::path(L"runtime-\u03a9-\u65e5\u672c");
+    REQUIRE_FALSE(std::filesystem::exists(runtime.parent_path()));
     const auto token = generate_inspector_secret();
     REQUIRE(token.has_value());
 
