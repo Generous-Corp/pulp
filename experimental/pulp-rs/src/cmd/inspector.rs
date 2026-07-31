@@ -13,6 +13,27 @@ pub(crate) struct SessionSelection {
     pub instance_id: String,
 }
 
+/// Whether one discovery identity component matches the publisher grammar.
+pub(crate) fn valid_session_identity(value: &str) -> bool {
+    !value.is_empty() &&
+        value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+        })
+}
+
+/// Render paired exact-session flags for a copyable follow-up command.
+pub(crate) fn selection_cli_suffix(
+    session_id: Option<&str>,
+    instance_id: Option<&str>,
+) -> String {
+    match (session_id, instance_id) {
+        (Some(session_id), Some(instance_id)) => {
+            format!(" --session {session_id} --instance {instance_id}")
+        }
+        _ => String::new(),
+    }
+}
+
 pub(crate) fn call(
     command_name: &str,
     port: u16,
@@ -127,5 +148,25 @@ mod tests {
             let error = resolve_port(None, Some(value)).unwrap_err();
             assert!(matches!(error, CliError::BadUsage(_)), "{error}");
         }
+    }
+
+    #[test]
+    fn session_identity_grammar_matches_discovery_components() {
+        for value in ["session-a", "INSTANCE_2", "3"] {
+            assert!(valid_session_identity(value), "{value}");
+        }
+        for value in ["", "session a", "session/a", "session'a"] {
+            assert!(!valid_session_identity(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn selection_suffix_is_copyable_only_for_a_complete_pair() {
+        assert_eq!(
+            selection_cli_suffix(Some("session-a"), Some("instance-b")),
+            " --session session-a --instance instance-b"
+        );
+        assert!(selection_cli_suffix(Some("session-a"), None).is_empty());
+        assert!(selection_cli_suffix(None, Some("instance-b")).is_empty());
     }
 }
