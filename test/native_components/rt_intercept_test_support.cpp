@@ -13,10 +13,10 @@
 //      acquisition inside a no-alloc scope is trapped.
 //
 // The trap itself allocates nothing, locks nothing, and only writes a fixed
-// message with write(2) before aborting — safe to call from anywhere,
-// including a death-test child. macOS + Linux are the primary enforcement
-// platforms; both honor a strong global operator-new override and a Rust
-// #[global_allocator] in this executable.
+// message naming the violation kind with write(2) before aborting — safe to
+// call from anywhere, including a death-test child. macOS + Linux are the
+// primary enforcement platforms; both honor a strong global operator-new
+// override and a Rust #[global_allocator] in this executable.
 
 #include "rt_test_scope.hpp"
 #include "../harness/rt_allocation_probe.hpp"
@@ -80,15 +80,38 @@ bool in_no_alloc_scope() noexcept {
            pulp::runtime::is_in_no_alloc_scope();
 }
 
-[[noreturn]] void trap_now(std::int32_t kind) noexcept {
-    static const char msg[] =
-        "[pulp-rt-trap] allocation inside no-alloc scope\n";
+// Violation tag passed to the contract trap. 0/1/2 are allocation flavors
+// declared by native_core.h; 3 is the blocking-lock interposition below.
+constexpr std::int32_t kTrapKindLock = 3;
+
+[[noreturn]] void abort_with(const char* message, std::size_t length) noexcept {
     // write(2) is async-signal-safe and never allocates.
-    ssize_t r = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    ssize_t r = ::write(STDERR_FILENO, message, length);
     (void)r;
-    (void)kind;
     // Abort via SIGABRT; the parent death-test asserts the child died here.
     std::abort();
+}
+
+// The message names the violation kind, because a lock reported as an
+// allocation sends the reader hunting for a `new` that does not exist.
+[[noreturn]] void trap_now(std::int32_t kind) noexcept {
+    static const char alloc_msg[] =
+        "[pulp-rt-trap] allocation inside no-alloc scope\n";
+    static const char lock_msg[] =
+        "[pulp-rt-trap] blocking lock inside no-alloc scope\n";
+    if (kind == kTrapKindLock) {
+        abort_with(lock_msg, sizeof(lock_msg) - 1);
+    }
+    abort_with(alloc_msg, sizeof(alloc_msg) - 1);
+}
+
+// A lock interposer that cannot resolve its real symbol has no safe way to
+// forward, so it aborts too — but that is a broken harness, not an RT
+// violation, and must not read as one.
+[[noreturn]] void trap_unresolved_symbol() noexcept {
+    static const char msg[] =
+        "[pulp-rt-trap] could not resolve the real pthread symbol\n";
+    abort_with(msg, sizeof(msg) - 1);
 }
 
 template <typename Fn>
@@ -120,45 +143,45 @@ extern "C" void pulp_rt_trap_if_no_alloc_scope(std::int32_t kind,
 }
 
 extern "C" int pthread_mutex_lock(pthread_mutex_t* mutex) {
-    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    pulp_rt_trap_if_no_alloc_scope(kTrapKindLock, 0);
     using Fn = int (*)(pthread_mutex_t*);
     static std::atomic<Fn> real{nullptr};
     Fn fn = cached_next_symbol(real, "pthread_mutex_lock");
     if (fn == nullptr) {
-        trap_now(3);
+        trap_unresolved_symbol();
     }
     return fn(mutex);
 }
 
 extern "C" int pthread_mutex_trylock(pthread_mutex_t* mutex) {
-    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    pulp_rt_trap_if_no_alloc_scope(kTrapKindLock, 0);
     using Fn = int (*)(pthread_mutex_t*);
     static std::atomic<Fn> real{nullptr};
     Fn fn = cached_next_symbol(real, "pthread_mutex_trylock");
     if (fn == nullptr) {
-        trap_now(3);
+        trap_unresolved_symbol();
     }
     return fn(mutex);
 }
 
 extern "C" int pthread_rwlock_rdlock(pthread_rwlock_t* lock) {
-    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    pulp_rt_trap_if_no_alloc_scope(kTrapKindLock, 0);
     using Fn = int (*)(pthread_rwlock_t*);
     static std::atomic<Fn> real{nullptr};
     Fn fn = cached_next_symbol(real, "pthread_rwlock_rdlock");
     if (fn == nullptr) {
-        trap_now(3);
+        trap_unresolved_symbol();
     }
     return fn(lock);
 }
 
 extern "C" int pthread_rwlock_wrlock(pthread_rwlock_t* lock) {
-    pulp_rt_trap_if_no_alloc_scope(3, 0);
+    pulp_rt_trap_if_no_alloc_scope(kTrapKindLock, 0);
     using Fn = int (*)(pthread_rwlock_t*);
     static std::atomic<Fn> real{nullptr};
     Fn fn = cached_next_symbol(real, "pthread_rwlock_wrlock");
     if (fn == nullptr) {
-        trap_now(3);
+        trap_unresolved_symbol();
     }
     return fn(lock);
 }
