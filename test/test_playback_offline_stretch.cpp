@@ -1,6 +1,7 @@
 #include "playback_audio_renderer_test_support.hpp"
 
 #include <pulp/playback/offline_stretch_artifact.hpp>
+#include <pulp/playback/realtime_stretch_renderer.hpp>
 
 #include <bit>
 #include <deque>
@@ -50,25 +51,35 @@ class QueueExecutor final : public CompileExecutor {
 };
 
 StretchFixture stretch_fixture(std::uint32_t source_rate = 4'800,
-                               std::uint32_t timeline_rate = 4'800) {
-    const auto source_frames = static_cast<std::uint64_t>(source_rate / 2u);
+                               std::uint32_t timeline_rate = 4'800,
+                               std::int64_t duration_ticks = kTicksPerQuarter) {
+    const auto source_frames =
+        static_cast<std::uint64_t>(static_cast<long double>(source_rate) * duration_ticks /
+                                   (2.0L * static_cast<long double>(kTicksPerQuarter)));
     std::vector<float> source(static_cast<std::size_t>(source_frames));
     for (std::size_t frame = 0; frame < source.size(); ++frame)
         source[frame] = 0.35f * std::sin(static_cast<float>(frame) * 0.071f) +
                         0.1f * std::cos(static_cast<float>(frame) * 0.193f);
     auto clip =
-        musical_media_clip(100, 0, kTicksPerQuarter, 3, source_frames, {}, TimeConform::Stretch);
+        musical_media_clip(100, 0, duration_ticks, 3, source_frames, {}, TimeConform::Stretch);
     auto track = take(Track::create({10}, "offline stretch", {clip}));
     auto project =
         project_with_tracks({track}, {{3, "finite.wav", source_frames, {source_rate, 1}}});
     const std::array points{TempoPoint{{0}, 120.0}};
-    return {clip,
-            project,
-            shared_compiled_tempo_map(points, RationalRate{timeline_rate, 1}),
+    return {clip, project, shared_compiled_tempo_map(points, RationalRate{timeline_rate, 1}),
             sealed_decoded(audio_data({std::move(source)}, source_rate))};
 }
 
-StretchFixture stretch_ramp_fixture() {
+AutomationLane stretch_gain_lane() {
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{41}, {0}, 0.2f, AutomationInterpolation::Continuous, 0.0f},
+         AutomationPoint{
+             {42}, {kTicksPerQuarter}, 0.8f, AutomationInterpolation::Continuous, 0.0f}}));
+    return take(AutomationLane::create({40}, TrackMixerTarget{TrackMixerParameter::Gain},
+                                       std::move(curve)));
+}
+
+StretchFixture stretch_ramp_fixture(bool automate_gain = false) {
     constexpr std::uint32_t sample_rate = 4'800;
     constexpr std::uint64_t source_frames = 2'400;
     constexpr std::int64_t duration = kTicksPerQuarter / 2;
@@ -76,7 +87,10 @@ StretchFixture stretch_ramp_fixture() {
     for (std::size_t frame = 0; frame < source.size(); ++frame)
         source[frame] = std::sin(static_cast<float>(frame) * 0.071f);
     auto clip = musical_media_clip(100, 0, duration, 3, source_frames, {}, TimeConform::Stretch);
-    auto track = take(Track::create({10}, "offline ramp stretch", {clip}));
+    TrackInput track_input{.id = {10}, .name = "offline ramp stretch", .clips = {clip}};
+    if (automate_gain)
+        track_input.automation_lanes = {stretch_gain_lane()};
+    auto track = take(Track::create(std::move(track_input)));
     const std::array points{
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
         TempoPoint{{kTicksPerQuarter}, 180.0, TempoCurve::Constant},
@@ -88,14 +102,12 @@ StretchFixture stretch_ramp_fixture() {
     input.name = "offline ramp stretch";
     input.next_item_id = 1'000;
     input.root_sequence_id = {2};
-    input.assets = {{3, "finite-ramp.wav", source_frames, {sample_rate, 1},
-                     fixture_content_hash()}};
+    input.assets = {
+        {3, "finite-ramp.wav", source_frames, {sample_rate, 1}, fixture_content_hash()}};
     input.sequences.push_back(std::move(sequence));
     input.tempo_map = take(TempoMap::create(points));
     auto project = std::make_shared<const Project>(take(Project::create(std::move(input))));
-    return {clip,
-            project,
-            shared_compiled_tempo_map(points, RationalRate{sample_rate, 1}),
+    return {clip, project, shared_compiled_tempo_map(points, RationalRate{sample_rate, 1}),
             sealed_decoded(audio_data({std::move(source)}, sample_rate))};
 }
 
@@ -217,8 +229,7 @@ TEST_CASE("offline Stretch rejects a compiled tempo map from different project p
           "[playback][offline-stretch]") {
     const auto fixture = stretch_fixture();
     const std::array wrong_points{TempoPoint{{0}, 60.0}};
-    const auto wrong_map =
-        shared_compiled_tempo_map(wrong_points, fixture.map->sample_rate());
+    const auto wrong_map = shared_compiled_tempo_map(wrong_points, fixture.map->sample_rate());
     REQUIRE_FALSE(wrong_map->matches(fixture.project->tempo_map().points()));
     REQUIRE(fixture.map->matches(fixture.project->tempo_map().points()));
 
@@ -241,7 +252,7 @@ TEST_CASE("offline Stretch cache enforces aggregate artifact count and byte limi
     REQUIRE(changed_decoded.decoded_content_hash != fixture.decoded.decoded_content_hash);
 
     const auto require_aggregate_rejection = [&](OfflineStretchArtifactCache& cache,
-                                                  OfflineStretchLimits limits) {
+                                                 OfflineStretchLimits limits) {
         OfflineStretchCompileJob job;
         auto status = job.begin(fixture.clip, *fixture.project, *fixture.map, changed_decoded,
                                 limits, {}, 37, &cache);
@@ -378,22 +389,20 @@ TEST_CASE("offline Stretch frame distance is exact across signed boundaries",
     REQUIRE(pulp::playback::detail::offline_stretch_frame_distance(-7, 5, distance));
     REQUIRE(distance == 12);
     REQUIRE(pulp::playback::detail::offline_stretch_frame_distance(
-        std::numeric_limits<std::int64_t>::min(),
-        std::numeric_limits<std::int64_t>::max(), distance));
+        std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max(),
+        distance));
     REQUIRE(distance == std::numeric_limits<std::uint64_t>::max());
     REQUIRE_FALSE(pulp::playback::detail::offline_stretch_frame_distance(5, -7, distance));
     REQUIRE_FALSE(pulp::playback::detail::offline_stretch_frame_distance(5, 5, distance));
 }
 
-TEST_CASE("offline Stretch preserves typed finite-render failures",
-          "[playback][offline-stretch]") {
+TEST_CASE("offline Stretch preserves typed finite-render failures", "[playback][offline-stretch]") {
     REQUIRE(pulp::playback::detail::offline_stretch_error_code(
                 audio::FiniteTimeStretchFailure::InvalidRatio) ==
             OfflineStretchErrorCode::InvalidRatio);
-    REQUIRE(
-        pulp::playback::detail::offline_stretch_error_code(
-            audio::FiniteTimeStretchFailure::OutputTooShort) ==
-        OfflineStretchErrorCode::OutputTooShort);
+    REQUIRE(pulp::playback::detail::offline_stretch_error_code(
+                audio::FiniteTimeStretchFailure::OutputTooShort) ==
+            OfflineStretchErrorCode::OutputTooShort);
     REQUIRE(pulp::playback::detail::offline_stretch_error_code(
                 audio::FiniteTimeStretchFailure::OutputTooLong) ==
             OfflineStretchErrorCode::OutputTooLong);
@@ -442,8 +451,8 @@ TEST_CASE("program compiler publishes and renders offline Stretch one-to-one",
     REQUIRE(compiled.offline_stretch_provenance->project_id == fixture.project->id());
     REQUIRE(compiled.offline_stretch_provenance->document_revision == 7);
     REQUIRE(compiled.offline_stretch_provenance->program_generation == program->generation());
-    REQUIRE(compiled.offline_stretch_provenance->matches(
-        fixture.clip.id(), fixture.project->id(), 7, program->generation()));
+    REQUIRE(compiled.offline_stretch_provenance->matches(fixture.clip.id(), fixture.project->id(),
+                                                         7, program->generation()));
     REQUIRE(compiled.source_frames_per_timeline_frame == 1.0);
     REQUIRE(compiled.source_frame_count == compiled.timeline_frame_count);
 
@@ -451,14 +460,467 @@ TEST_CASE("program compiler publishes and renders offline Stretch one-to-one",
     {
         test::RtAllocationProbe probe;
         REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 128),
-                                                  output.view()) ==
-                AudioRenderStatus::Rendered);
+                                                  output.view()) == AudioRenderStatus::Rendered);
         REQUIRE(probe.allocation_count() == 0);
     }
     for (std::size_t frame = 0; frame < output.storage[0].size(); ++frame)
         REQUIRE(std::bit_cast<std::uint32_t>(output.storage[0][frame]) ==
                 std::bit_cast<std::uint32_t>(
                     compiled.offline_stretch_artifact->audio->channels[0][frame]));
+
+    auto host_mapped = [&](std::int64_t sample_start) {
+        auto state = snapshot(*program, 128, sample_start);
+        auto& range = state.ranges[0];
+        range.timeline_tick_start = program->tempo_map().samples_to_ticks({sample_start});
+        range.timeline_tick_end = program->tempo_map().samples_to_ticks({sample_start + 128});
+        range.host_beat_mapping = true;
+        range.has_precise_host_ticks = true;
+        range.host_tick_start = static_cast<double>(range.timeline_tick_start.value);
+        range.host_tick_end = static_cast<double>(range.timeline_tick_end.value);
+        return state;
+    };
+    Output live_output(1, 128);
+    auto mapped = host_mapped(0);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, live_output.view()) ==
+            AudioRenderStatus::RealtimeStretchStateRequired);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    ArrangementAudioTrackRenderer live_renderer({10});
+    PlaybackProgramBlock block(program.get());
+    REQUIRE(live_renderer.process(block, mapped, live_output.view()) ==
+            AudioRenderStatus::RealtimeStretchStateRequired);
+    RealtimeStretchProgramRuntime unprepared_runtime;
+    REQUIRE(live_renderer.process(block, mapped, live_output.view(), {}, &unprepared_runtime) ==
+            AudioRenderStatus::RealtimeStretchStateRequired);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+    auto wrong_publication = std::make_shared<const PlaybackProgram>(*program);
+    RealtimeStretchProgramRuntime wrong_runtime;
+    REQUIRE(wrong_runtime.prepare(*wrong_publication, 4'800.0, 128, 1,
+                                  wrong_publication->audio_limits()));
+    REQUIRE(live_renderer.process(block, mapped, live_output.view(), {}, &wrong_runtime) ==
+            AudioRenderStatus::RealtimeStretchStalePublication);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    auto old_track = take(Track::create({10}, "same id without Stretch", {}));
+    CompiledFixture old_no_stretch(project_with_tracks({std::move(old_track)}, {}), fixture.map,
+                                   pool({}));
+    const auto old_program = old_no_stretch.store.read();
+    RealtimeStretchProgramRuntime old_no_stretch_runtime;
+    REQUIRE(
+        old_no_stretch_runtime.prepare(*old_program, 4'800.0, 128, 1, old_program->audio_limits()));
+    REQUIRE(live_renderer.process(block, mapped, live_output.view(), {}, &old_no_stretch_runtime) ==
+            AudioRenderStatus::RealtimeStretchStalePublication);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    auto mixed_mapping = mapped;
+    mixed_mapping.range_count = 2;
+    mixed_mapping.ranges[0].frame_count = 64;
+    mixed_mapping.ranges[0].timeline_tick_end = program->tempo_map().samples_to_ticks({64});
+    mixed_mapping.ranges[0].host_tick_end =
+        static_cast<double>(mixed_mapping.ranges[0].timeline_tick_end.value);
+    mixed_mapping.ranges[1] = host_mapped(64).ranges[0];
+    mixed_mapping.ranges[1].sample_offset = 64;
+    mixed_mapping.ranges[1].frame_count = 64;
+    mixed_mapping.ranges[1].timeline_tick_end = program->tempo_map().samples_to_ticks({128});
+    mixed_mapping.ranges[1].host_tick_end =
+        static_cast<double>(mixed_mapping.ranges[1].timeline_tick_end.value);
+    mixed_mapping.ranges[1].host_beat_mapping = false;
+    mixed_mapping.ranges[1].has_precise_host_ticks = false;
+    mixed_mapping.ranges[1].discontinuity = true;
+    RealtimeStretchProgramRuntime mixed_runtime;
+    REQUIRE(mixed_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+    REQUIRE(live_renderer.process(block, mixed_mapping, live_output.view(), {}, &mixed_runtime) ==
+            AudioRenderStatus::RealtimeStretchStateRequired);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    // A host-mapped Stretch clip belongs exclusively to the live runtime.  Compare
+    // the public track renderer with a direct live-runtime oracle so the legacy
+    // artifact path cannot be silently summed into the result a second time.
+    {
+        RealtimeStretchProgramRuntime renderer_runtime;
+        RealtimeStretchProgramRuntime oracle_runtime;
+        REQUIRE(renderer_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        REQUIRE(oracle_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        ArrangementAudioTrackRenderer ownership_renderer({10});
+        bool heard_live_audio = false;
+        const auto comparison_blocks = renderer_runtime.latency_samples() / 128 + 3;
+        for (std::uint32_t index = 0; index < comparison_blocks; ++index) {
+            auto state = host_mapped(static_cast<std::int64_t>(index) * 128);
+            Output actual(1, 128);
+            Output expected(1, 128);
+            expected.view().clear();
+            const auto actual_status =
+                ownership_renderer.process(block, state, actual.view(), {}, &renderer_runtime);
+            const auto expected_status = oracle_runtime.process_track(
+                *program, *track, track->mixer(), state, expected.view());
+            REQUIRE(actual_status == (index == 0 ? AudioRenderStatus::RealtimeStretchGap
+                                                 : AudioRenderStatus::Rendered));
+            REQUIRE(expected_status == (index == 0 ? RealtimeStretchRenderCode::GapIdentityChanged
+                                                   : RealtimeStretchRenderCode::Rendered));
+            for (std::size_t frame = 0; frame < actual.storage[0].size(); ++frame) {
+                INFO("ownership block " << index << " frame " << frame);
+                REQUIRE_THAT(actual.storage[0][frame],
+                             WithinAbs(expected.storage[0][frame], 1.0e-6));
+            }
+            heard_live_audio = heard_live_audio ||
+                               std::any_of(expected.storage[0].begin(), expected.storage[0].end(),
+                                           [](float sample) { return std::abs(sample) > 1.0e-7f; });
+        }
+        REQUIRE(heard_live_audio);
+    }
+
+    // The aggregate byte charge is an exact admission boundary and a rejected
+    // reprepare must leave the previous publication/runtime usable.
+    {
+        RealtimeStretchProgramRuntime measured_runtime;
+        auto measured_limits = program->audio_limits();
+        REQUIRE(measured_runtime.prepare(*program, 4'800.0, 128, 1, measured_limits));
+        const auto exact_bytes = measured_runtime.reserved_runtime_bytes();
+        REQUIRE(exact_bytes > 0);
+
+        auto exact_limits = measured_limits;
+        exact_limits.max_realtime_stretch_state_bytes = exact_bytes;
+        RealtimeStretchProgramRuntime exact_runtime;
+        REQUIRE(exact_runtime.prepare(*program, 4'800.0, 128, 1, exact_limits));
+        REQUIRE(exact_runtime.reserved_runtime_bytes() == exact_bytes);
+        const auto latency_before = exact_runtime.latency_samples();
+
+        auto one_byte_short = exact_limits;
+        --one_byte_short.max_realtime_stretch_state_bytes;
+        const auto rejected = exact_runtime.prepare(*program, 4'800.0, 128, 1, one_byte_short);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.code == RealtimeStretchStateBankError::StateBytesExceeded);
+        REQUIRE(exact_runtime.reserved_runtime_bytes() == exact_bytes);
+        REQUIRE(exact_runtime.latency_samples() == latency_before);
+        Output after_rejection(1, 128);
+        after_rejection.view().clear();
+        REQUIRE(exact_runtime.process_track(*program, *track, track->mixer(), mapped,
+                                            after_rejection.view()) ==
+                RealtimeStretchRenderCode::GapIdentityChanged);
+
+        RealtimeStretchProgramRuntime reference_runtime;
+        REQUIRE(reference_runtime.prepare(*program, 4'800.0, 128, 1, exact_limits));
+        Output reference_warmup(1, 128);
+        REQUIRE(reference_runtime.process_track(*program, *track, track->mixer(), mapped,
+                                                reference_warmup.view()) ==
+                RealtimeStretchRenderCode::GapIdentityChanged);
+        exact_runtime.force_prepare_allocation_failure_for_test();
+        const auto allocation_rejected =
+            exact_runtime.prepare(*program, 4'800.0, 128, 1, exact_limits);
+        REQUIRE_FALSE(allocation_rejected);
+        REQUIRE(allocation_rejected.code == RealtimeStretchStateBankError::AllocationFailed);
+        REQUIRE(exact_runtime.reserved_runtime_bytes() == exact_bytes);
+        REQUIRE(exact_runtime.latency_samples() == latency_before);
+        auto next = host_mapped(128);
+        Output after_allocation_failure(1, 128);
+        Output reference_next(1, 128);
+        REQUIRE(exact_runtime.process_track(*program, *track, track->mixer(), next,
+                                            after_allocation_failure.view()) ==
+                RealtimeStretchRenderCode::Rendered);
+        REQUIRE(reference_runtime.process_track(*program, *track, track->mixer(), next,
+                                                reference_next.view()) ==
+                RealtimeStretchRenderCode::Rendered);
+        REQUIRE(after_allocation_failure.storage == reference_next.storage);
+    }
+
+    // A failure after processor/FIFO/timing mutation resets the entire lane.
+    // Compare its recovery with a fresh runtime so rejected-block residue cannot
+    // leak through the FIFO or dry-delay rings on later callbacks.
+    {
+        RealtimeStretchProgramRuntime failed_runtime;
+        RealtimeStretchProgramRuntime fresh_runtime;
+        REQUIRE(failed_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        REQUIRE(fresh_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        for (std::int64_t position : {0, 128}) {
+            auto state = host_mapped(position);
+            Output warmup(1, 128);
+            warmup.view().clear();
+            REQUIRE(failed_runtime.process_track(*program, *track, track->mixer(), state,
+                                                 warmup.view()) ==
+                    (position == 0 ? RealtimeStretchRenderCode::GapIdentityChanged
+                                   : RealtimeStretchRenderCode::Rendered));
+        }
+        failed_runtime.force_post_mutation_failure_for_test();
+        auto rejected_state = host_mapped(256);
+        Output rejected_output(1, 128);
+        REQUIRE(failed_runtime.process_track(*program, *track, track->mixer(), rejected_state,
+                                             rejected_output.view()) ==
+                RealtimeStretchRenderCode::Underflow);
+        REQUIRE(std::all_of(rejected_output.storage[0].begin(), rejected_output.storage[0].end(),
+                            [](float sample) { return sample == 0.0f; }));
+
+        for (std::uint32_t index = 0; index < 3; ++index) {
+            auto recovery = host_mapped(static_cast<std::int64_t>(index) * 128);
+            Output recovered(1, 128);
+            Output fresh(1, 128);
+            recovered.view().clear();
+            fresh.view().clear();
+            REQUIRE(failed_runtime.process_track(*program, *track, track->mixer(), recovery,
+                                                 recovered.view()) ==
+                    RealtimeStretchRenderCode::StateRequired);
+            REQUIRE(fresh_runtime.process_track(*program, *track, track->mixer(), recovery,
+                                                fresh.view()) ==
+                    (index == 0 ? RealtimeStretchRenderCode::GapIdentityChanged
+                                : RealtimeStretchRenderCode::Rendered));
+            REQUIRE(std::all_of(recovered.storage[0].begin(), recovered.storage[0].end(),
+                                [](float sample) { return sample == 0.0f; }));
+        }
+    }
+
+    {
+        RealtimeStretchProgramRuntime boundary_runtime;
+        RealtimeStretchProgramRuntime untouched_runtime;
+        REQUIRE(boundary_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        REQUIRE(untouched_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        const auto maximum_ratio = program->audio_limits().realtime_stretch_max_time_ratio;
+        auto at_cap = host_mapped(0);
+        at_cap.ranges[0].host_tick_end = static_cast<double>(
+            program->tempo_map().fractional_samples_to_ticks(128.0L / maximum_ratio));
+        REQUIRE(boundary_runtime.preflight_track(*program, *track, at_cap, live_output.view()) ==
+                RealtimeStretchRenderCode::GapIdentityChanged);
+        auto over_cap = at_cap;
+        // Binary-search processor-ratio float representations for the first
+        // request that remains observably over-cap after host-tick and tempo
+        // conversions. The +0.5 value only brackets the search; the asserted
+        // negative control is the adjacent representable boundary.
+        const auto code_for_ratio = [&](float requested_ratio) {
+            over_cap.ranges[0].host_tick_end =
+                static_cast<double>(program->tempo_map().fractional_samples_to_ticks(
+                    128.0L / static_cast<long double>(requested_ratio)));
+            return boundary_runtime.preflight_track(*program, *track, over_cap, live_output.view());
+        };
+        auto passing_bits = std::bit_cast<std::uint32_t>(maximum_ratio);
+        auto failing_bits = std::bit_cast<std::uint32_t>(maximum_ratio + 0.5f);
+        REQUIRE(code_for_ratio(std::bit_cast<float>(failing_bits)) ==
+                RealtimeStretchRenderCode::ImpossibleRatio);
+        while (passing_bits + 1u < failing_bits) {
+            const auto middle = passing_bits + (failing_bits - passing_bits) / 2u;
+            const auto code = code_for_ratio(std::bit_cast<float>(middle));
+            if (code == RealtimeStretchRenderCode::ImpossibleRatio)
+                failing_bits = middle;
+            else {
+                REQUIRE(code == RealtimeStretchRenderCode::GapIdentityChanged);
+                passing_bits = middle;
+            }
+        }
+        REQUIRE(failing_bits == passing_bits + 1u);
+        INFO("minimal projected over-cap ratio " << std::bit_cast<float>(failing_bits));
+        REQUIRE(code_for_ratio(std::bit_cast<float>(failing_bits)) ==
+                RealtimeStretchRenderCode::ImpossibleRatio);
+        REQUIRE(over_cap.ranges[0].host_tick_end < at_cap.ranges[0].host_tick_end);
+        REQUIRE(boundary_runtime.preflight_track(*program, *track, over_cap, live_output.view()) ==
+                RealtimeStretchRenderCode::ImpossibleRatio);
+
+        Output after_boundary(1, 128);
+        Output untouched(1, 128);
+        after_boundary.view().clear();
+        untouched.view().clear();
+        REQUIRE(boundary_runtime.process_track(*program, *track, track->mixer(), mapped,
+                                               after_boundary.view()) ==
+                RealtimeStretchRenderCode::GapIdentityChanged);
+        REQUIRE(untouched_runtime.process_track(*program, *track, track->mixer(), mapped,
+                                                untouched.view()) ==
+                RealtimeStretchRenderCode::GapIdentityChanged);
+        REQUIRE(after_boundary.storage == untouched.storage);
+    }
+
+    // Three live clips exercise the retained vector allocation boundary where
+    // geometric growth would otherwise reserve four ClipLane objects while
+    // reporting only three.
+    {
+        std::vector<Clip> clips;
+        for (std::uint64_t id = 200; id < 203; ++id) {
+            clips.push_back(musical_media_clip(
+                id, static_cast<std::int64_t>(id - 200) * kTicksPerQuarter, kTicksPerQuarter, 3,
+                fixture.decoded.audio->num_frames(), {}, TimeConform::Stretch));
+        }
+        auto multi_track = take(Track::create({10}, "three live Stretch clips", std::move(clips)));
+        CompiledFixture multi(
+            project_with_tracks(
+                {std::move(multi_track)},
+                {{3, "finite.wav", fixture.decoded.audio->num_frames(), {4'410, 1}}}),
+            fixture.map, pool({fixture.decoded}));
+        const auto multi_program = multi.store.read();
+        RealtimeStretchProgramRuntime measured;
+        REQUIRE(measured.prepare(*multi_program, 4'800.0, 128, 1, multi_program->audio_limits()));
+        const auto exact_bytes = measured.reserved_runtime_bytes();
+        REQUIRE(exact_bytes > mixed_runtime.reserved_runtime_bytes());
+        auto exact_limits = multi_program->audio_limits();
+        exact_limits.max_realtime_stretch_state_bytes = exact_bytes;
+        RealtimeStretchProgramRuntime exact;
+        REQUIRE(exact.prepare(*multi_program, 4'800.0, 128, 1, exact_limits));
+        exact_limits.max_realtime_stretch_state_bytes = exact_bytes - 1u;
+        RealtimeStretchProgramRuntime one_under;
+        REQUIRE(one_under.prepare(*multi_program, 4'800.0, 128, 1, exact_limits).code ==
+                RealtimeStretchStateBankError::StateBytesExceeded);
+        // Track validation forbids overlapping clips, so the strongest
+        // representable lane owns three sequential live clip states. A
+        // post-mutation failure must poison/reset all of them and every shared
+        // FIFO/delay ring without later residue.
+        const auto* multi_track_program = multi_program->find_track({10});
+        REQUIRE(multi_track_program);
+        auto multi_state = snapshot(*multi_program, 128, 0);
+        auto& multi_range = multi_state.ranges[0];
+        multi_range.host_beat_mapping = true;
+        multi_range.has_precise_host_ticks = true;
+        multi_range.host_tick_start =
+            static_cast<double>(multi_program->tempo_map().fractional_samples_to_ticks(0.0L));
+        multi_range.host_tick_end =
+            static_cast<double>(multi_program->tempo_map().fractional_samples_to_ticks(128.0L));
+        measured.force_post_mutation_failure_for_test();
+        Output rejected(1, 128);
+        REQUIRE(measured.process_track(*multi_program, *multi_track_program,
+                                       multi_track_program->mixer(), multi_state,
+                                       rejected.view()) == RealtimeStretchRenderCode::Underflow);
+        REQUIRE(std::all_of(rejected.storage[0].begin(), rejected.storage[0].end(),
+                            [](float sample) { return sample == 0.0f; }));
+        for (std::int64_t position : {128, 256}) {
+            multi_state.ranges[0].timeline_sample_start = {position};
+            multi_state.ranges[0].host_tick_start = static_cast<double>(
+                multi_program->tempo_map().fractional_samples_to_ticks(position));
+            multi_state.ranges[0].host_tick_end = static_cast<double>(
+                multi_program->tempo_map().fractional_samples_to_ticks(position + 128));
+            Output poisoned(1, 128);
+            REQUIRE(measured.process_track(
+                        *multi_program, *multi_track_program, multi_track_program->mixer(),
+                        multi_state, poisoned.view()) == RealtimeStretchRenderCode::StateRequired);
+            REQUIRE(std::all_of(poisoned.storage[0].begin(), poisoned.storage[0].end(),
+                                [](float sample) { return sample == 0.0f; }));
+        }
+    }
+
+    RealtimeStretchProgramRuntime live_runtime;
+    REQUIRE(live_runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+    REQUIRE(live_runtime.latency_samples() > 0);
+    {
+        test::RtAllocationProbe probe;
+        REQUIRE(live_renderer.process(block, mapped, live_output.view(), {}, &live_runtime) ==
+                AudioRenderStatus::RealtimeStretchGap);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    auto continuous = host_mapped(128);
+    {
+        test::RtAllocationProbe probe;
+        REQUIRE(live_renderer.process(block, continuous, live_output.view(), {}, &live_runtime) ==
+                AudioRenderStatus::Rendered);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    bool became_audible = false;
+    std::int64_t live_position = 256;
+    const auto blocks_to_latency = live_runtime.latency_samples() / 128 + 3;
+    {
+        test::RtAllocationProbe probe;
+        for (std::uint32_t index = 0; index < blocks_to_latency; ++index) {
+            auto live = host_mapped(live_position);
+            REQUIRE(live_renderer.process(block, live, live_output.view(), {}, &live_runtime) ==
+                    AudioRenderStatus::Rendered);
+            became_audible =
+                became_audible ||
+                std::any_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                            [](float sample) { return sample != 0.0f; });
+            live_position += 128;
+        }
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(became_audible);
+
+    auto impossible = host_mapped(live_position);
+    impossible.ranges[0].host_tick_end = impossible.ranges[0].host_tick_start + 0.001;
+    REQUIRE(live_runtime.preflight_track(*program, *track, impossible, live_output.view()) ==
+            RealtimeStretchRenderCode::ImpossibleRatio);
+    REQUIRE(live_renderer.process(block, impossible, live_output.view(), {}, &live_runtime) ==
+            AudioRenderStatus::RealtimeStretchImpossibleRatio);
+    REQUIRE(std::all_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return sample == 0.0f; }));
+
+    auto next_loop_pass = host_mapped(live_position);
+    next_loop_pass.range_count = 2;
+    next_loop_pass.ranges[0].frame_count = 64;
+    next_loop_pass.ranges[0].timeline_tick_end =
+        program->tempo_map().samples_to_ticks({live_position + 64});
+    next_loop_pass.ranges[0].host_tick_end =
+        static_cast<double>(next_loop_pass.ranges[0].timeline_tick_end.value);
+    next_loop_pass.ranges[1] = host_mapped(0).ranges[0];
+    next_loop_pass.ranges[1].sample_offset = 64;
+    next_loop_pass.ranges[1].frame_count = 64;
+    next_loop_pass.ranges[1].timeline_tick_end = program->tempo_map().samples_to_ticks({64});
+    next_loop_pass.ranges[1].host_tick_end =
+        static_cast<double>(next_loop_pass.ranges[1].timeline_tick_end.value);
+    next_loop_pass.ranges[1].discontinuity = true;
+    next_loop_pass.ranges[1].loop_pass_index = 1;
+    REQUIRE(live_renderer.process(block, next_loop_pass, live_output.view(), {}, &live_runtime) ==
+            AudioRenderStatus::RealtimeStretchGap);
+    REQUIRE(std::any_of(live_output.storage[0].begin(), live_output.storage[0].end(),
+                        [](float sample) { return std::abs(sample) > 1.0e-7f; }));
+    auto scrub = host_mapped(live_position + 128);
+    scrub.scrubbing = true;
+    REQUIRE(live_renderer.process(block, scrub, live_output.view(), {}, &live_runtime) ==
+            AudioRenderStatus::RealtimeStretchUnsupportedScrubbing);
+
+    // A callback boundary that cuts through one fractional document-sample
+    // interval must not assign that interval to the earlier callback or shift
+    // startup by one callback. Compare the identical host line rendered as
+    // 128-frame blocks and as alternating 37/91-frame partitions.
+    const auto render_partition = [&](bool split) {
+        RealtimeStretchProgramRuntime runtime;
+        REQUIRE(runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+        ArrangementAudioTrackRenderer renderer({10});
+        const auto total = ((runtime.latency_samples() + 1'024u + 127u) / 128u) * 128u;
+        std::vector<float> rendered;
+        rendered.reserve(total);
+        std::uint32_t output_position = 0;
+        std::uint32_t callback_index = 0;
+        while (output_position < total) {
+            const auto frames = split ? (callback_index % 2u == 0u ? 37u : 91u) : 128u;
+            const auto document_start = 0.25L + output_position / 1.25L;
+            const auto document_end = 0.25L + (output_position + frames) / 1.25L;
+            TransportSnapshot state;
+            state.tempo_map = &program->tempo_map();
+            state.sample_rate = program->tempo_map().sample_rate();
+            state.frame_count = frames;
+            state.is_playing = true;
+            state.range_count = 1;
+            auto& range = state.ranges[0];
+            range.frame_count = frames;
+            range.timeline_sample_start = {static_cast<std::int64_t>(document_start)};
+            range.timeline_tick_start =
+                program->tempo_map().samples_to_ticks({static_cast<std::int64_t>(document_start)});
+            range.timeline_tick_end =
+                program->tempo_map().samples_to_ticks({static_cast<std::int64_t>(document_end)});
+            range.host_beat_mapping = true;
+            range.has_precise_host_ticks = true;
+            range.host_tick_start = static_cast<double>(
+                program->tempo_map().fractional_samples_to_ticks(document_start));
+            range.host_tick_end =
+                static_cast<double>(program->tempo_map().fractional_samples_to_ticks(document_end));
+            Output callback(1, frames);
+            const auto status = renderer.process(block, state, callback.view(), {}, &runtime);
+            REQUIRE(status == (callback_index == 0 ? AudioRenderStatus::RealtimeStretchGap
+                                                   : AudioRenderStatus::Rendered));
+            rendered.insert(rendered.end(), callback.storage[0].begin(), callback.storage[0].end());
+            output_position += frames;
+            ++callback_index;
+        }
+        return rendered;
+    };
+    const auto unsplit = render_partition(false);
+    const auto split = render_partition(true);
+    REQUIRE(split.size() == unsplit.size());
+    const auto first_audible = [](const auto& samples) {
+        return static_cast<std::size_t>(
+            std::find_if(samples.begin(), samples.end(),
+                         [](float sample) { return std::abs(sample) > 1.0e-7f; }) -
+            samples.begin());
+    };
+    REQUIRE(first_audible(unsplit) < unsplit.size());
+    REQUIRE(first_audible(split) == first_audible(unsplit));
+    for (std::size_t frame = 0; frame < split.size(); ++frame)
+        REQUIRE_THAT(split[frame], WithinAbs(unsplit[frame], 1.0e-5));
 
     auto missing_provenance = compiled;
     missing_provenance.offline_stretch_provenance.reset();
@@ -467,20 +929,145 @@ TEST_CASE("program compiler publishes and renders offline Stretch one-to-one",
     REQUIRE(missing_link.error().code == AudioRendererErrorCode::InvalidAsset);
 
     auto wrong_provenance = compiled;
-    wrong_provenance.offline_stretch_provenance =
-        std::make_shared<const OfflineStretchProvenance>(OfflineStretchProvenance{
-            {999}, fixture.project->id(), 7, program->generation(), false});
+    wrong_provenance.offline_stretch_provenance = std::make_shared<const OfflineStretchProvenance>(
+        OfflineStretchProvenance{{999}, fixture.project->id(), 7, program->generation(), false});
     const auto wrong_link = link_audio_track_program({10}, {wrong_provenance}, {});
     REQUIRE_FALSE(wrong_link);
     REQUIRE(wrong_link.error().code == AudioRendererErrorCode::InvalidAsset);
     REQUIRE_FALSE(wrong_provenance.offline_stretch_provenance->matches(
         fixture.clip.id(), fixture.project->id(), 7, program->generation()));
-    REQUIRE_FALSE(compiled.offline_stretch_provenance->matches(
-        fixture.clip.id(), {999}, 7, program->generation()));
+    REQUIRE_FALSE(compiled.offline_stretch_provenance->matches(fixture.clip.id(), {999}, 7,
+                                                               program->generation()));
     REQUIRE_FALSE(compiled.offline_stretch_provenance->matches(
         fixture.clip.id(), fixture.project->id(), 8, program->generation()));
     REQUIRE_FALSE(compiled.offline_stretch_provenance->matches(
         fixture.clip.id(), fixture.project->id(), 7, program->generation() + 1));
+}
+
+TEST_CASE("48 kHz Stretch preserves fixed-latency waveform across mapping producer handoffs",
+          "[playback][realtime-stretch]") {
+    const auto fixture = stretch_fixture(48'000, 48'000, 4 * kTicksPerQuarter);
+    CompiledFixture compiled(fixture.project, fixture.map, pool({fixture.decoded}));
+    const auto program = compiled.store.read();
+    const auto* track = program->find_track({10});
+    REQUIRE(track);
+    REQUIRE(track->audio_program());
+    REQUIRE(track->audio_program()->clips().size() == 1);
+    const auto& artifact = *track->audio_program()->clips().front().offline_stretch_artifact->audio;
+
+    RealtimeStretchProgramRuntime runtime;
+    REQUIRE(runtime.prepare(*program, 48'000.0, 128, 1, program->audio_limits()));
+    const auto latency = runtime.latency_samples();
+    REQUIRE(latency > 0);
+    const auto round_block = [](std::uint64_t frames) { return (frames + 127u) / 128u * 128u; };
+    const auto fallback_start = round_block(std::max<std::uint64_t>(latency + 512u, 6'400u));
+    const auto host_restart = fallback_start + round_block(latency + 1'024u);
+    const auto render_end = host_restart + round_block(latency + 1'024u);
+    REQUIRE(render_end < artifact.num_frames());
+
+    ArrangementAudioTrackRenderer renderer({10});
+    PlaybackProgramBlock block(program.get());
+    std::vector<float> rendered;
+    rendered.reserve(render_end);
+    for (std::uint64_t position = 0; position < render_end; position += 128u) {
+        auto transport = snapshot(*program, 128, static_cast<std::int64_t>(position));
+        const bool host_mapped = position < fallback_start || position >= host_restart;
+        if (host_mapped) {
+            auto& range = transport.ranges[0];
+            range.host_beat_mapping = true;
+            range.has_precise_host_ticks = true;
+            range.host_tick_start =
+                static_cast<double>(program->tempo_map().fractional_samples_to_ticks(
+                    static_cast<long double>(position)));
+            range.host_tick_end =
+                static_cast<double>(program->tempo_map().fractional_samples_to_ticks(
+                    static_cast<long double>(position + 128u)));
+            if (position == 5'120u)
+                range.host_tick_end =
+                    std::nextafter(range.host_tick_end, std::numeric_limits<double>::infinity());
+        }
+        Output output(1, 128);
+        const auto preflight = runtime.preflight_track(*program, *track, transport, output.view());
+        const auto status = renderer.process(block, transport, output.view(), {}, &runtime);
+        INFO("position " << position << " preflight " << static_cast<int>(preflight) << " status "
+                         << static_cast<int>(status));
+        REQUIRE((status == AudioRenderStatus::Rendered ||
+                 status == AudioRenderStatus::RealtimeStretchGap));
+        rendered.insert(rendered.end(), output.storage[0].begin(), output.storage[0].end());
+    }
+
+    // The fallback producer is the immutable Stage-2C artifact itself. Its
+    // entire delayed interval, including the fallback->host handoff tail, is
+    // bit-identical and appears at the one declared fixed latency.
+    for (std::uint64_t output_frame = fallback_start + latency;
+         output_frame < host_restart + latency; ++output_frame) {
+        const auto document_frame = output_frame - latency;
+        INFO("output frame " << output_frame << " document frame " << document_frame);
+        REQUIRE(std::bit_cast<std::uint32_t>(rendered[output_frame]) ==
+                std::bit_cast<std::uint32_t>(artifact.channels[0][document_frame]));
+    }
+
+    // Finalizing the prior live producer must bridge the first latency window
+    // after host->fallback without a callback-sized silent hole.
+    std::uint32_t consecutive_silence = 0;
+    std::uint32_t maximum_silence = 0;
+    for (std::uint64_t frame = fallback_start; frame < fallback_start + latency; ++frame) {
+        if (std::abs(rendered[frame]) <= 1.0e-7f) {
+            maximum_silence = std::max(maximum_silence, ++consecutive_silence);
+        } else {
+            consecutive_silence = 0;
+        }
+    }
+    REQUIRE(maximum_silence < 128);
+    REQUIRE(std::any_of(rendered.begin() + static_cast<std::ptrdiff_t>(host_restart + latency),
+                        rendered.end(), [](float sample) { return std::abs(sample) > 1.0e-7f; }));
+}
+
+TEST_CASE("document-clock Stretch mixer automation follows a tempo-ramp sample oracle",
+          "[playback][realtime-stretch][automation]") {
+    const auto fixture = stretch_ramp_fixture(true);
+    CompiledFixture compiled(fixture.project, fixture.map, pool({fixture.decoded}));
+    const auto program = compiled.store.read();
+    const auto* track = program->find_track({10});
+    REQUIRE(track);
+    REQUIRE(track->audio_program());
+    const auto& artifact = *track->audio_program()->clips().front().offline_stretch_artifact->audio;
+
+    RealtimeStretchProgramRuntime runtime;
+    REQUIRE(runtime.prepare(*program, 4'800.0, 128, 1, program->audio_limits()));
+    const auto latency = runtime.latency_samples();
+    REQUIRE(latency > 0);
+    constexpr std::uint64_t kOracleFrames = 512;
+    REQUIRE(kOracleFrames < artifact.num_frames());
+    const auto total = ((static_cast<std::uint64_t>(latency) + kOracleFrames + 127u) / 128u) * 128u;
+    ArrangementAudioTrackRenderer renderer({10});
+    PlaybackProgramBlock block(program.get());
+    std::vector<float> rendered;
+    rendered.reserve(total);
+    for (std::uint64_t position = 0; position < total; position += 128u) {
+        auto transport = snapshot(*program, 128, static_cast<std::int64_t>(position));
+        Output output(1, 128);
+        const auto status = renderer.process(block, transport, output.view(), {}, &runtime);
+        REQUIRE(status == (position == 0 ? AudioRenderStatus::RealtimeStretchGap
+                                         : AudioRenderStatus::Rendered));
+        rendered.insert(rendered.end(), output.storage[0].begin(), output.storage[0].end());
+    }
+
+    bool oracle_is_audible = false;
+    bool ramp_changes_gain = false;
+    for (std::uint64_t document_frame = 0; document_frame < kOracleFrames; ++document_frame) {
+        const auto tick = program->tempo_map().fractional_samples_to_ticks(
+            static_cast<long double>(document_frame));
+        const auto gain = 0.2L + 0.6L * tick / static_cast<long double>(kTicksPerQuarter);
+        const auto source = artifact.channels[0][document_frame];
+        const auto expected = static_cast<float>(static_cast<long double>(source) * gain);
+        INFO("document frame " << document_frame << " tick " << static_cast<double>(tick));
+        REQUIRE_THAT(rendered[latency + document_frame], WithinAbs(expected, 2.0e-5f));
+        oracle_is_audible = oracle_is_audible || std::abs(source) > 1.0e-5f;
+        ramp_changes_gain = ramp_changes_gain || gain > 0.21L;
+    }
+    REQUIRE(oracle_is_audible);
+    REQUIRE(ramp_changes_gain);
 }
 
 TEST_CASE("incremental compilation refreshes unchanged offline Stretch provenance",
@@ -488,10 +1075,11 @@ TEST_CASE("incremental compilation refreshes unchanged offline Stretch provenanc
     const auto fixture = stretch_fixture();
     auto stretch_track = take(Track::create({10}, "offline stretch", {fixture.clip}));
     auto other_track = take(Track::create({11}, "independently dirty", {}));
-    const auto project = project_with_tracks(
-        {std::move(stretch_track), std::move(other_track)},
-        {{3, "finite.wav", fixture.decoded.audio->num_frames(),
-          {fixture.decoded.audio->sample_rate, 1}}});
+    const auto project = project_with_tracks({std::move(stretch_track), std::move(other_track)},
+                                             {{3,
+                                               "finite.wav",
+                                               fixture.decoded.audio->num_frames(),
+                                               {fixture.decoded.audio->sample_rate, 1}}});
     const auto assets = pool({fixture.decoded});
     PlaybackProgramStore store;
     InlineExecutor executor;
@@ -529,8 +1117,8 @@ TEST_CASE("incremental compilation refreshes unchanged offline Stretch provenanc
     REQUIRE(refreshed_clip.offline_stretch_artifact == first_artifact);
     REQUIRE(refreshed_clip.offline_stretch_provenance);
     REQUIRE(refreshed_clip.offline_stretch_provenance->cache_hit);
-    REQUIRE(refreshed_clip.offline_stretch_provenance->matches(
-        fixture.clip.id(), project->id(), 2, second->generation()));
+    REQUIRE(refreshed_clip.offline_stretch_provenance->matches(fixture.clip.id(), project->id(), 2,
+                                                               second->generation()));
 }
 
 TEST_CASE("superseded offline Stretch programs never publish stale revisions",

@@ -25,6 +25,7 @@ function(pulp_resolve_playback_sources root output)
         program_validator.cpp
         recording_commit.cpp
         realtime_stretch_state_bank.cpp
+        realtime_stretch_renderer.cpp
         sequence_compile_bookkeeping.cpp
         sequence_content_lowerer.cpp
         sequence_dirty_lowering.cpp

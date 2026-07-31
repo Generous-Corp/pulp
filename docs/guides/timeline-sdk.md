@@ -296,9 +296,19 @@ change duration and pitch together. `None` retains native-rate playback.
 the decoded asset pool, converts it to the compiled timeline sample rate,
 applies the authored tempo schedule at stretch-analysis boundaries, and
 publishes an immutable audio artifact with exactly the clip's compiled timeline
-frame count. The realtime
-renderer consumes that artifact 1:1. Capacity, ratio, or exact-length failures
-fail program compilation; playback never falls back to `None` or `Resample`.
+frame count. On the document clock the renderer consumes that artifact 1:1.
+With a precise host-beat mapping, `TimelineGraphPlaybackBinding` and
+`SequenceProcessor` prepare a program-wide live Stretch runtime off the audio
+thread. It streams the immutable artifact through a bounded causal stretcher,
+reports one fixed latency for graph compensation, and delays the track's
+conventional audio and mixer automation by that same amount. Publication is
+object-, generation-, and tempo-map-exact. Identity changes and discontinuities
+are reported explicitly while a charged FIFO preserves the old segment through
+the delayed cut and a bounded finalization hands off to the reset stream.
+Missing or stale state, impossible ratios, backpressure, and underflow fail
+closed with distinct status rather than falling back to `None` or `Resample`.
+Host-mapped Stretch scrubbing is explicitly unsupported. Capacity, ratio, or
+exact-length failures in the document-clock artifact still fail compilation.
 
 ### Reusing and diverging sequences
 

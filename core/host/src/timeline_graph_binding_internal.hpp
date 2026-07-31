@@ -2,6 +2,7 @@
 
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/timeline_graph_binding.hpp>
+#include <pulp/playback/realtime_stretch_renderer.hpp>
 
 #include "timeline_automation_delivery.hpp"
 
@@ -18,10 +19,8 @@ namespace pulp::host {
 
 namespace detail::timeline_graph_binding {
 
-inline TimelineGraphAdmission reject(TimelineGraphAdmissionCode code,
-                                     std::uint64_t actual = 0,
-                                     std::uint64_t limit = 0,
-                                     timeline::ItemId item = {},
+inline TimelineGraphAdmission reject(TimelineGraphAdmissionCode code, std::uint64_t actual = 0,
+                                     std::uint64_t limit = 0, timeline::ItemId item = {},
                                      NodeId node = 0) noexcept {
     return {code, actual, limit, item, node};
 }
@@ -33,27 +32,24 @@ inline bool checked_add(std::uint64_t& value, std::uint64_t add) noexcept {
     return true;
 }
 
-inline std::string custom_type_id(std::uint64_t binding_instance_id,
-                                  timeline::ItemId id) {
-    return "pulp.timeline.arrangement-audio-track." +
-           std::to_string(binding_instance_id) + "." + std::to_string(id.value);
+inline std::string custom_type_id(std::uint64_t binding_instance_id, timeline::ItemId id) {
+    return "pulp.timeline.arrangement-audio-track." + std::to_string(binding_instance_id) + "." +
+           std::to_string(id.value);
 }
 
-inline std::string mixer_custom_type_id(std::uint64_t binding_instance_id,
-                                        timeline::ItemId id) {
-    return "pulp.timeline.post-device-track-mixer." +
-           std::to_string(binding_instance_id) + "." + std::to_string(id.value);
+inline std::string mixer_custom_type_id(std::uint64_t binding_instance_id, timeline::ItemId id) {
+    return "pulp.timeline.post-device-track-mixer." + std::to_string(binding_instance_id) + "." +
+           std::to_string(id.value);
 }
 
 inline double sample_rate_double(timebase::RationalRate rate) noexcept {
     return static_cast<double>(rate.as_long_double());
 }
 
-inline void saturating_add(std::uint32_t& destination,
-                           std::uint32_t value) noexcept {
+inline void saturating_add(std::uint32_t& destination, std::uint32_t value) noexcept {
     destination = value > std::numeric_limits<std::uint32_t>::max() - destination
-        ? std::numeric_limits<std::uint32_t>::max()
-        : destination + value;
+                      ? std::numeric_limits<std::uint32_t>::max()
+                      : destination + value;
 }
 
 struct DetachedAudioEdge {
@@ -68,11 +64,9 @@ struct DetachedAudioEdge {
 inline bool is_plain_audio_edge(const Connection& connection,
                                 const DetachedAudioEdge& edge) noexcept {
     return connection.source_node == edge.source_node &&
-           connection.source_port == edge.source_port &&
-           connection.dest_node == edge.dest_node &&
-           connection.dest_port == edge.dest_port && !connection.feedback &&
-           !connection.midi && !connection.automation &&
-           !connection.audio_rate_modulation && !connection.sidechain;
+           connection.source_port == edge.source_port && connection.dest_node == edge.dest_node &&
+           connection.dest_port == edge.dest_port && !connection.feedback && !connection.midi &&
+           !connection.automation && !connection.audio_rate_modulation && !connection.sidechain;
 }
 
 } // namespace detail::timeline_graph_binding
@@ -80,7 +74,23 @@ inline bool is_plain_audio_edge(const Connection& connection,
 struct detail::TimelineGraphSharedBlockState {
     std::atomic<const playback::PlaybackProgramBlock*> block{nullptr};
     std::atomic<const playback::TransportSnapshot*> transport{nullptr};
+    std::atomic<playback::RealtimeStretchProgramRuntime*> realtime_stretch{nullptr};
     std::atomic<TimelineGraphProcessCode> audio_code{TimelineGraphProcessCode::Ok};
+
+    void report_audio_code(TimelineGraphProcessCode code) noexcept {
+        if (code == TimelineGraphProcessCode::Ok)
+            return;
+        auto observed = audio_code.load(std::memory_order_relaxed);
+        for (;;) {
+            const bool observed_is_hard = observed != TimelineGraphProcessCode::Ok &&
+                                          observed != TimelineGraphProcessCode::RealtimeStretchGap;
+            if (observed_is_hard || (observed == TimelineGraphProcessCode::RealtimeStretchGap &&
+                                     code == TimelineGraphProcessCode::RealtimeStretchGap))
+                return;
+            if (audio_code.compare_exchange_weak(observed, code, std::memory_order_relaxed))
+                return;
+        }
+    }
 };
 
 namespace detail::timeline_graph_binding {
@@ -96,17 +106,45 @@ struct AudioNodeInstance {
         // atomic block pointers and failure code.
         const auto* block = shared->block.load(std::memory_order_acquire);
         const auto* transport = shared->transport.load(std::memory_order_acquire);
+        auto* realtime_stretch = shared->realtime_stretch.load(std::memory_order_acquire);
         if (block == nullptr || transport == nullptr) {
             output.clear();
-            shared->audio_code.store(TimelineGraphProcessCode::MissingProgram,
-                                     std::memory_order_relaxed);
+            shared->report_audio_code(TimelineGraphProcessCode::MissingProgram);
             return;
         }
-        const auto status = renderer->process(*block, *transport, output, limits);
+        const auto status = renderer->process(*block, *transport, output, limits, realtime_stretch);
+        if (status == playback::AudioRenderStatus::RealtimeStretchGap) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchGap);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchStateRequired) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchStateRequired);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchStalePublication) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchStalePublication);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchImpossibleRatio) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchImpossibleRatio);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchBackpressure) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchBackpressure);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchUnderflow) {
+            shared->report_audio_code(TimelineGraphProcessCode::RealtimeStretchUnderflow);
+            return;
+        }
+        if (status == playback::AudioRenderStatus::RealtimeStretchUnsupportedScrubbing) {
+            shared->report_audio_code(
+                TimelineGraphProcessCode::RealtimeStretchUnsupportedScrubbing);
+            return;
+        }
         if (status != playback::AudioRenderStatus::Rendered &&
             status != playback::AudioRenderStatus::Silent) {
-            shared->audio_code.store(TimelineGraphProcessCode::AudioRenderFailed,
-                                     std::memory_order_relaxed);
+            shared->report_audio_code(TimelineGraphProcessCode::AudioRenderFailed);
         }
     }
 
@@ -127,17 +165,14 @@ struct MixerNodeInstance {
         const auto* transport = shared->transport.load(std::memory_order_acquire);
         if (block == nullptr || transport == nullptr) {
             output.clear();
-            shared->audio_code.store(TimelineGraphProcessCode::MissingProgram,
-                                     std::memory_order_relaxed);
+            shared->report_audio_code(TimelineGraphProcessCode::MissingProgram);
             return;
         }
-        const auto status =
-            renderer->process(*block, *transport, output, input, limits);
+        const auto status = renderer->process(*block, *transport, output, input, limits);
         if (status != playback::AudioRenderStatus::Rendered &&
             status != playback::AudioRenderStatus::Silent) {
             output.clear();
-            shared->audio_code.store(TimelineGraphProcessCode::AudioRenderFailed,
-                                     std::memory_order_relaxed);
+            shared->report_audio_code(TimelineGraphProcessCode::AudioRenderFailed);
         }
     }
 
@@ -164,9 +199,9 @@ struct detail::TimelineGraphBindingState {
     TimelineGraphBindingConfig config;
     std::vector<timeline::ItemId> prepared_track_ids;
     std::vector<timeline::ItemId> post_device_routed_track_ids;
-    std::vector<timeline_graph_binding::DetachedAudioEdge>
-        detached_post_device_bypasses;
+    std::vector<timeline_graph_binding::DetachedAudioEdge> detached_post_device_bypasses;
     std::shared_ptr<const playback::PlaybackProgram> program;
+    std::shared_ptr<playback::RealtimeStretchProgramRuntime> realtime_stretch;
     SignalGraph::ExecutionSnapshot graph_snapshot;
     std::shared_ptr<ExactParameterIngressOwner> automation_claim_owner;
     mutable std::atomic<bool> delivery_poisoned{false};
@@ -186,52 +221,50 @@ struct detail::TimelineGraphPreparedCandidate {
 
 namespace detail::timeline_graph_binding {
 
-inline TimelineGraphAdmission admit_candidate(
-    const SignalGraph& graph, std::span<const GraphNode> nodes,
-    std::span<const Connection> connections) {
+inline TimelineGraphAdmission admit_candidate(const SignalGraph& graph,
+                                              std::span<const GraphNode> nodes,
+                                              std::span<const Connection> connections) {
     const auto graph_limits = graph.limits();
     if (nodes.size() > graph_limits.max_nodes)
         return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, nodes.size(),
                       graph_limits.max_nodes);
     if (connections.size() > graph_limits.max_connections)
-        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded,
-                      connections.size(), graph_limits.max_connections);
+        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded, connections.size(),
+                      graph_limits.max_connections);
     std::uint64_t graph_ports = 0;
     for (const auto& node : nodes) {
-        if (!checked_add(graph_ports, static_cast<std::uint64_t>(
-                                          std::max(0, node.num_input_ports))) ||
-            !checked_add(graph_ports, static_cast<std::uint64_t>(
-                                          std::max(0, node.num_output_ports))))
+        if (!checked_add(graph_ports,
+                         static_cast<std::uint64_t>(std::max(0, node.num_input_ports))) ||
+            !checked_add(graph_ports,
+                         static_cast<std::uint64_t>(std::max(0, node.num_output_ports))))
             return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
-                          std::numeric_limits<std::uint64_t>::max(),
-                          graph_limits.max_ports);
+                          std::numeric_limits<std::uint64_t>::max(), graph_limits.max_ports);
     }
     if (graph_ports > graph_limits.max_ports)
-        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
-                      graph_ports, graph_limits.max_ports);
+        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, graph_ports,
+                      graph_limits.max_ports);
 
-    const auto routed =
-        validate_signal_graph_executor_topology(nodes, connections);
+    const auto routed = validate_signal_graph_executor_topology(nodes, connections);
     switch (routed.code) {
     case ExecutorTopologyValidationCode::Accepted:
         return {};
     case ExecutorTopologyValidationCode::TopologyIneligible:
         return reject(TimelineGraphAdmissionCode::RoutedTopologyIneligible);
     case ExecutorTopologyValidationCode::NodeLimitExceeded:
-        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded,
-                      routed.actual, routed.limit, {}, routed.node);
+        return reject(TimelineGraphAdmissionCode::NodeLimitExceeded, routed.actual, routed.limit,
+                      {}, routed.node);
     case ExecutorTopologyValidationCode::ConnectionLimitExceeded:
-        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded,
-                      routed.actual, routed.limit, {}, routed.node);
+        return reject(TimelineGraphAdmissionCode::ConnectionLimitExceeded, routed.actual,
+                      routed.limit, {}, routed.node);
     case ExecutorTopologyValidationCode::PerNodePortLimitExceeded:
-        return reject(TimelineGraphAdmissionCode::PerNodePortLimitExceeded,
-                      routed.actual, routed.limit, {}, routed.node);
+        return reject(TimelineGraphAdmissionCode::PerNodePortLimitExceeded, routed.actual,
+                      routed.limit, {}, routed.node);
     case ExecutorTopologyValidationCode::TotalPortLimitExceeded:
-        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded,
-                      routed.actual, routed.limit, {}, routed.node);
+        return reject(TimelineGraphAdmissionCode::TotalPortLimitExceeded, routed.actual,
+                      routed.limit, {}, routed.node);
     case ExecutorTopologyValidationCode::PlanRejected:
-        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected,
-                      routed.index, 0, {}, routed.node);
+        return reject(TimelineGraphAdmissionCode::RoutedPlanRejected, routed.index, 0, {},
+                      routed.node);
     }
     return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
 }

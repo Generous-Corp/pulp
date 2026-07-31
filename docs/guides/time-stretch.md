@@ -67,12 +67,31 @@ readable. This is scheduling latency, not a silence prefix:
 frame zero. All streaming calls are allocation-free after `prepare()` and are
 bounded by `RealtimePitchTimeConfig::max_block` and the prepared output ring.
 `TimeConform::Stretch` uses the finite stream during Timeline program
-compilation, never in the audio callback. The compiler materializes the source
+compilation. The compiler materializes the source
 slice at timeline rate, drives ratios at analysis boundaries, and accepts only
 the exact authored target count. Offline compilation uses scalar double DSP and
 a bounded deterministic conversion into the immutable float artifact, which is
-then read 1:1 by playback. Live transport-driven realtime stretching remains a
-separate lifecycle.
+then read 1:1 on the document clock. When a plugin host supplies a different
+precise beat mapping, the prepared timeline adapter streams that artifact
+through a separate realtime stretcher so duration follows the host without the
+pitch shift that variable-rate resampling would introduce. The adapter admits
+all live states against one program-wide count/byte budget and publishes the
+prepared generation with its program; the callback performs no allocation.
+It uses `maximum_stream_output_lag_samples()` as one conservative, fixed causal
+latency for the complete admitted ratio range. Track-local conventional audio
+and mixer automation are delayed by the same amount, while the graph reports
+that latency for compensation of parallel non-Stretch tracks.
+
+Live identity is the exact program publication, generation, tempo-map object,
+track, clip, playback epoch, and loop pass. An identity change or discontinuity
+reports an explicit gap observation while a charged per-clip FIFO preserves the
+old segment through its fixed-latency cut and a bounded finalization hands off
+to the reset stream. Missing/stale state, impossible ratios, backpressure, and
+underflow fail closed with distinct typed status; there is no `None` or
+`Resample` fallback. Host-mapped Stretch scrubbing is currently unsupported and
+reports that fact explicitly. A block contains at most the two transport ranges
+admitted by `TransportSnapshot`, which bounds loop tail/head and adjacent-boundary
+work.
 
 For control-thread preprocessing that must yield between bounded units, use
 `FiniteStretchBuilder64` for reproducible offline artifacts. It keeps the

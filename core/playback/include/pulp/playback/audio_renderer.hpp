@@ -5,6 +5,7 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
+#include <pulp/playback/realtime_stretch_state_bank.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
 #include <pulp/playback/transport.hpp>
 #include <pulp/runtime/result.hpp>
@@ -21,6 +22,7 @@ namespace pulp::playback {
 class PlaybackProgram;
 class ProgramCompilerTask;
 class AudioClipConversionArtifact;
+class RealtimeStretchProgramRuntime;
 struct OfflineStretchArtifact;
 struct OfflineStretchProvenance;
 
@@ -171,6 +173,13 @@ enum class AudioRenderStatus : std::uint8_t {
     InvalidTransport,
     InvalidOutput,
     CapacityExceeded,
+    RealtimeStretchStateRequired,
+    RealtimeStretchGap,
+    RealtimeStretchStalePublication,
+    RealtimeStretchImpossibleRatio,
+    RealtimeStretchBackpressure,
+    RealtimeStretchUnderflow,
+    RealtimeStretchUnsupportedScrubbing,
 };
 
 /// Renders every arrangement-selected audio track in PlaybackProgram order.
@@ -203,8 +212,8 @@ class ArrangementAudioTrackRenderer {
         : shell_(track_id), apply_track_mixer_(apply_track_mixer) {}
 
     AudioRenderStatus process(const PlaybackProgramBlock& block, const TransportSnapshot& transport,
-                              audio::BufferView<float> output,
-                              AudioRendererLimits limits = {}) noexcept;
+                              audio::BufferView<float> output, AudioRendererLimits limits = {},
+                              RealtimeStretchProgramRuntime* realtime_stretch = nullptr) noexcept;
 
     RendererProgramKey active_key() const noexcept {
         return shell_.active_key();

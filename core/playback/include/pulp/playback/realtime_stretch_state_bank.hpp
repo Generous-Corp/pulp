@@ -12,6 +12,8 @@
 
 namespace pulp::playback {
 
+class PlaybackProgram;
+
 struct RealtimeStretchStateSpec {
     timeline::ItemId clip_id;
     std::uint32_t channels = 0;
@@ -39,8 +41,7 @@ struct RealtimeStretchStateBankAdmission {
     std::uint64_t actual = 0;
     std::uint64_t limit = 0;
     std::uint64_t reserved_state_bytes = 0;
-    signal::PitchTimePrepareStatus processor_status =
-        signal::PitchTimePrepareStatus::prepared;
+    signal::PitchTimePrepareStatus processor_status = signal::PitchTimePrepareStatus::prepared;
 
     constexpr explicit operator bool() const noexcept {
         return code == RealtimeStretchStateBankError::None;
@@ -50,9 +51,18 @@ struct RealtimeStretchStateBankAdmission {
 /// Pure, allocation-free admission for one immutable bank shape. The byte
 /// calculation checked-sums each processor geometry's conservative retained
 /// charge. The separate per-allocation ceiling remains an addressability bound.
-RealtimeStretchStateBankAdmission admit_realtime_stretch_state_bank(
-    std::span<const RealtimeStretchStateSpec> specs, double sample_rate,
-    std::uint32_t maximum_block_frames, const AudioRendererLimits& limits) noexcept;
+RealtimeStretchStateBankAdmission
+admit_realtime_stretch_state_bank(std::span<const RealtimeStretchStateSpec> specs,
+                                  double sample_rate, std::uint32_t maximum_block_frames,
+                                  const AudioRendererLimits& limits) noexcept;
+
+/// Control-thread aggregate admission for the exact immutable publication.
+/// Per-track banks partition this already-admitted set so parallel graph nodes
+/// retain single-owner DSP state without multiplying the global ceilings.
+RealtimeStretchStateBankAdmission admit_realtime_stretch_program(const PlaybackProgram& program,
+                                                                 double sample_rate,
+                                                                 std::uint32_t maximum_block_frames,
+                                                                 const AudioRendererLimits& limits);
 
 /// Control-thread-prepared bank of clip-keyed realtime stretch processors.
 /// prepare() is transactional: it prepares a complete candidate and swaps it
@@ -72,17 +82,22 @@ class RealtimeStretchStateBank {
     RealtimeStretchStateBank(const RealtimeStretchStateBank&) = delete;
     RealtimeStretchStateBank& operator=(const RealtimeStretchStateBank&) = delete;
 
-    RealtimeStretchStateBankAdmission prepare(
-        std::span<const RealtimeStretchStateSpec> specs, double sample_rate,
-        std::uint32_t maximum_block_frames, const AudioRendererLimits& limits);
+    RealtimeStretchStateBankAdmission prepare(std::span<const RealtimeStretchStateSpec> specs,
+                                              double sample_rate,
+                                              std::uint32_t maximum_block_frames,
+                                              const AudioRendererLimits& limits);
 
-    signal::RealtimePitchTimeProcessor*
-    state_for_epoch(timeline::ItemId clip_id, std::uint64_t playback_epoch) noexcept;
+    signal::RealtimePitchTimeProcessor* state_for_epoch(timeline::ItemId clip_id,
+                                                        std::uint64_t playback_epoch) noexcept;
     const signal::RealtimePitchTimeProcessor* find(timeline::ItemId clip_id) const noexcept;
     void reset() noexcept;
 
-    std::size_t size() const noexcept { return states_.size(); }
-    std::uint64_t reserved_state_bytes() const noexcept { return reserved_state_bytes_; }
+    std::size_t size() const noexcept {
+        return states_.size();
+    }
+    std::uint64_t reserved_state_bytes() const noexcept {
+        return reserved_state_bytes_;
+    }
 
   private:
     struct State;
