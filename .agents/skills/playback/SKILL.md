@@ -471,6 +471,60 @@ must red both that fuzz and the deterministic
 `a scrub window restart releases the notes it strands` case; if it does not, the
 scrub coverage has gone vacuous.
 
+### The RT probe's wiring fails closed — keep it that way
+
+`ScopedRtProcessProbe` has two backends. In the counting backend
+`allocation_count()` reports what the harness `operator new` override saw. In
+the trap backend — `PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1`, the one every
+playback RT suite uses on Unix — it **unconditionally returns 0**, because a
+violation aborts the process before the assertion runs. So in a trap build the
+`REQUIRE(allocations == 0)` line carries no information: the abort is the
+signal, and the assertion is only there to keep both backends writing the same
+test.
+
+That looks like it should be silently vacuous whenever the trap translation
+unit is not linked, since it is a strong override of a **weak no-op default** in
+`core/native-components/src/native_core.cpp`. It is not, and the reason is worth
+protecting. `RtNoAllocScope`'s constructor and destructor are declared in
+`rt_test_scope.hpp` but **defined out of line** in
+`test/native_components/rt_intercept_test_support.cpp`, so a registration that
+sets the define while omitting the source fails at link:
+
+```
+Undefined symbols for architecture arm64:
+  "pulp::native_components::test::RtNoAllocScope::RtNoAllocScope()", referenced from:
+      CATCH2_INTERNAL_TEST_20() in test_playback_program.cpp.o
+```
+
+The counting backend fails closed the same way — `RtAllocationProbe`'s
+constructor and the `operator new` override that feeds it live in the same TU
+(`harness/rt_allocation_probe.cpp`), so they can never be split.
+
+**Do not inline those constructors into the headers.** They look like trivial
+one-liners begging to be moved, and moving them would convert a hard link error
+into a probe that returns a hardcoded 0 forever. The out-of-line definition is
+the guard.
+
+What the link check cannot catch is a probe scope that does not actually
+enclose the RT call, or an allocation the optimizer elides because nothing
+escapes. Those need a control: put a `new` inside the scope whose result
+escapes through a `volatile` sink, rebuild, confirm the binary aborts with
+`[pulp-rt-trap]`, then remove it. Worth doing whenever you add a probe or doubt
+an existing one — cheap, and it is the only way to tell a scope that proves
+something from one that merely runs.
+
+Copy the registration shape from `pulp-test-playback-program` in
+`test/cmake/timeline_tests.cmake`: the `$<BOOL:${UNIX}>` source split,
+`pulp::native-components`, `${CMAKE_DL_LIBS}` (the pthread interposers use
+`dlsym`), and the generator-expression define.
+
+Two things that waste time here. The trap message names the violation kind, so
+`blocking lock inside no-alloc scope` means a lock, not a hidden `new` — do not
+go hunting for an allocation. And restoring a patched test file with `mv` gives
+it an mtime *older* than the object built from the patched copy, so `make` skips
+the rebuild and you re-run the control binary believing you reverted; `touch`
+after every revert.
+
 When export/install wiring changes, also run the installed SDK consumer smoke.
 Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
