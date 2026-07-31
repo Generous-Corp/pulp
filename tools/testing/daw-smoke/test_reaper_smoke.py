@@ -522,5 +522,32 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
                             for c in run.call_args_list))
 
 
+class EditorBuildIsOptIn(unittest.TestCase):
+    """It must not drive somebody's screen because a script felt like it.
+
+    editor-build posts real clicks and real keystrokes at screen coordinates.
+    It typed a prompt into somebody's terminal twice: once because "REAPER is
+    frontmost" was believed while its window sat buried, and once because a
+    dark rectangle was taken for the editor when it was that terminal's
+    background. Each guard was right and each was defeated by the next
+    assumption, so the mode itself is now the thing that has to be asked for.
+    """
+
+    def test_it_skips_unless_explicitly_allowed(self):
+        import argparse
+        args = argparse.Namespace(mode="editor-build", plugin_name="X",
+                                  plugin_path=__file__, format="clap",
+                                  timeout=30)
+        env = {k: v for k, v in os.environ.items()
+               if k != "PULP_DAW_SMOKE_DRIVE_MY_SCREEN"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            rc = rs.run_editor_build_mode(pathlib.Path("/tmp/reaper"), args)
+        self.assertEqual(rc, rs.EXIT_SKIP,
+                         "it drove the screen without being asked to")
+
+    def test_a_skip_is_not_a_pass(self):
+        self.assertNotEqual(rs.EXIT_SKIP, rs.EXIT_PASS)
+
+
 if __name__ == "__main__":
     unittest.main()

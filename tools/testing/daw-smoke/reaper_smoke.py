@@ -529,6 +529,52 @@ def _editor_is_really_in_front(uidriver: str, x: int, y: int,
     return True
 
 
+def _editor_rect_in(window: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+    """Where the PLUGIN's editor sits inside the host's window.
+
+    A hosted editor is not the window. REAPER wraps it in a preset strip and
+    pads it, so the plugin's surface is a smaller box offset down and inset --
+    and window-relative fractions land in the padding. That is why a Build
+    click kept missing while the window was plainly in front: one press hit
+    the Module tab and started a module build nobody asked for.
+
+    Measured rather than assumed: Forge's editor is a dark surface on REAPER's
+    light grey chrome, so its bounding box is found from the pixels. A guess
+    that is off by a preset strip is a click into somebody else's control.
+    """
+    x, y, w, h = window
+    shot = "/tmp/pulp-daw-smoke-rect.png"
+    subprocess.run(["screencapture", "-x", "-o", shot], check=False)
+    _dismiss_own_screenshot_ui()
+    try:
+        from PIL import Image
+        im = Image.open(shot).convert("RGB")
+    except Exception as e:
+        log(f"cannot measure the editor ({e})")
+        return None
+    factor = 2 if im.width > (x + w) * 1.5 else 1
+    left, top = int(x * factor), int(y * factor)
+    right, bottom = min(int((x + w) * factor), im.width), min(int((y + h) * factor), im.height)
+    px = im.load()
+    xs, ys = [], []
+    step = max(2, (right - left) // 200)
+    for sx in range(left, right, step):
+        for sy in range(top, bottom, step):
+            r, g, b = px[sx, sy]
+            if r < 60 and g < 66 and b < 74:          # Forge's dark surface
+                xs.append(sx)
+                ys.append(sy)
+    if len(xs) < 50:
+        log("could not find the editor's surface inside the host window")
+        return None
+    ex, ey = min(xs) // factor, min(ys) // factor
+    ew, eh = (max(xs) - min(xs)) // factor, (max(ys) - min(ys)) // factor
+    if ew < 200 or eh < 200:
+        log(f"the editor measured {ew}x{eh}, too small to be the editor")
+        return None
+    return ex, ey, ew, eh
+
+
 def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     """Generate a patch from INSIDE the host, by pressing the editor's Build.
 
@@ -545,6 +591,23 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     bad = _validate_inputs([plugin])
     if bad is not None:
         return bad
+
+    # OPT-IN, and deliberately awkward. This mode drives real clicks and real
+    # keystrokes at screen coordinates. Every safeguard here was written after
+    # it typed a prompt into somebody's terminal: first because "frontmost"
+    # was believed, then because a dark rectangle was assumed to be the
+    # editor when it was that same terminal's background. Each guard was
+    # correct and each was defeated by the next assumption.
+    #
+    # So it does not run unless somebody has said, in as many words, that this
+    # machine is theirs to drive. On a shared or working machine a mis-aimed
+    # click is not a failed test.
+    if os.environ.get("PULP_DAW_SMOKE_DRIVE_MY_SCREEN") != "1":
+        log("editor-build drives real clicks and keystrokes at screen "
+            "coordinates. It has typed into somebody's terminal twice. Set "
+            "PULP_DAW_SMOKE_DRIVE_MY_SCREEN=1 only on a machine you are "
+            "willing to have driven, with nothing else in front. — SKIP")
+        return EXIT_SKIP
 
     uidriver = Path(os.path.expanduser("~/.cache/forge-modular/uidriver"))
     if not uidriver.exists():
@@ -589,7 +652,16 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
                 "there is nothing safe to click — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
         x, y, w, h = box
-        log(f"editor window at {x},{y} {w}x{h}")
+        log(f"host window at {x},{y} {w}x{h}")
+        time.sleep(2)
+        inner = _editor_rect_in(box)
+        if inner is None:
+            log("the plugin's own surface could not be located inside the "
+                "host window — refusing to click at guessed coordinates — "
+                "INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        x, y, w, h = inner
+        log(f"the plugin's editor is at {x},{y} {w}x{h} inside it")
 
         # FOCUS FIRST, and fail if it cannot be had. Typing into a window that
         # is not key goes nowhere, Build then refuses an empty prompt, and the
