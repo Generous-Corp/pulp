@@ -492,8 +492,12 @@ def _dismiss_own_screenshot_ui() -> None:
     The harness cleans up after itself rather than learning to ignore a window
     that is genuinely in the way.
     """
-    subprocess.run(["osascript", "-e", 'tell application "Screenshot" to quit'],
-                   capture_output=True)
+    # screencaptureui, NOT "Screenshot". The window `screencapture` leaves
+    # behind belongs to the transient capture UI, and quitting the Screenshot
+    # *app* does not touch it -- which is why the dismiss appeared to do
+    # nothing while the window went on covering the editor for run after run.
+    # It relaunches on demand, so stopping it costs nobody anything.
+    subprocess.run(["pkill", "-x", "screencaptureui"], capture_output=True)
     time.sleep(0.6)
 
 
