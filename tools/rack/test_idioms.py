@@ -175,6 +175,68 @@ TEXTBOOK = [
 ]
 
 
+# A module nobody cartographed used to make its idiom unsatisfiable: a port
+# with no name matched no port KIND, so a requirement naming one could never be
+# met. The only quantizer a stock Rack has is such a module, so "a bass sound
+# that stays in the key of C" was told its quantizer never reached the
+# oscillator however it was wired.
+#
+# (name, cables, holds?, must-mention)
+QUANTIZER = [
+    ("wired through the quantizer",
+     [(1, 0, 2, 0), (2, 0, 3, 0), (3, 2, 4, 0)], True, None),
+    # The control. If an unknown port satisfied everything, this would pass
+    # too -- and then the rule would be "any patch containing a quantizer".
+    ("quantizer present but bypassed",
+     [(1, 0, 3, 0), (3, 2, 4, 0)], False, "reach the quantizer"),
+    ("quantizer fed but its output unused",
+     [(1, 0, 2, 0), (3, 2, 4, 0)], False, "has to be what reaches"),
+]
+
+
+def check_unknown_ports(idioms) -> int:
+    inv = vendor_inventory()
+    roles = idiom_check.load_roles()
+    mods = [("Fundamental", "LFO"), ("Fundamental", "Quantizer"),
+            ("Fundamental", "VCO"), ("Core", "AudioInterface2")]
+    bad = 0
+
+    # The premise. If somebody cartographs the Quantizer these cases stop
+    # testing what they were written for, and should be moved to a module that
+    # still has no map rather than quietly passing for a new reason.
+    entry = inv["Fundamental"]["modules"]["Quantizer"]
+    if entry.get("inputs") or entry.get("outputs"):
+        print("  WRONG  Fundamental/Quantizer now has a port map, so these "
+              "cases no longer test an uncartographed module")
+        return 1
+
+    for name, wires, should_hold, expect in QUANTIZER:
+        patch = _p(mods, wires)
+        unchecked: list = []
+        problems = idiom_check.check(patch, inv, idioms["quantized-voice"],
+                                     roles, unchecked)
+        held = not problems
+        if held != should_hold:
+            print(f"  WRONG  {name}: expected {'holds' if should_hold else 'fails'},"
+                  f" got {'holds' if held else problems}")
+            bad += 1
+            continue
+        if expect and not any(expect in p for p in problems):
+            print(f"  WRONG  {name}: failed, but not for {expect!r}: {problems}")
+            bad += 1
+            continue
+        # A hold that rested on an unreadable jack has to SAY so. Silence
+        # would make "every jack was verified" and "one could not be looked
+        # at" the same sentence.
+        if should_hold and not unchecked:
+            print(f"  WRONG  {name}: held without admitting the quantizer's "
+                  f"jacks could not be checked")
+            bad += 1
+            continue
+        print(f"  ok     {name}")
+    return bad
+
+
 def vendor_inventory() -> dict:
     """A rack holding only what a bare Rack install has, from the recording."""
     import json
@@ -377,6 +439,7 @@ def main() -> int:
 
     print("\nthe modules everyone actually has:")
     bad += check_vendor(idioms)
+    bad += check_unknown_ports(idioms)
     bad += check_vendor_freshness()
 
     print("\nreal patches are told apart:")

@@ -144,11 +144,40 @@ def _port_info(inv: dict, mod: dict, kind: str, index: int):
     return role, label
 
 
-def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None) -> list[str]:
-    """Every requirement of `idiom` this patch fails, in words. [] means it holds."""
+def _uncartographed(inv: dict, mod: dict, kind: str) -> bool:
+    """Nobody has ever recorded what THIS module's jacks are.
+
+    Distinct from "this jack is something else". A module with no port map at
+    all cannot satisfy a requirement that names a port kind, so every idiom
+    needing one rejected every patch built with it -- and the modules with no
+    map are the vendor's, which is most of the library. The only quantizer a
+    stock Rack has is one of them, so `a bass sound that stays in the key of C`
+    was told its quantizer did not reach the oscillator no matter how it was
+    wired.
+
+    An unknown port therefore does not PROVE a requirement wrong. It cannot
+    prove it right either, which is why `check` counts these and says so: the
+    honest verdict is "holds, except where nothing could be checked", not a
+    silent pass.
+    """
+    entry = _entry(inv, mod)
+    return not (entry.get("outputs" if kind == "out" else "inputs") or [])
+
+
+def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None,
+          unchecked: list | None = None) -> list[str]:
+    """Every requirement of `idiom` this patch fails, in words. [] means it holds.
+
+    `unchecked`, when given, collects the requirements that were satisfied only
+    because a module has no port map. Those are honest holds with a gap in
+    them, and a caller that wants to say so can; a caller that does not is no
+    worse off than before, when the same patches were simply rejected.
+    """
     roles = roles if roles is not None else load_roles()
     by_id = {m.get("id"): m for m in patch.get("modules", [])}
     problems: list[str] = []
+    if unchecked is None:
+        unchecked = []
 
     # Which modules could play each named part.
     def candidates(role: str) -> set:
@@ -199,11 +228,24 @@ def check(patch: dict, inv: dict, idiom: dict, roles: dict | None = None) -> lis
                 continue
             srole, slabel = _port_info(inv, src, "out", c.get("outputId", 0))
             drole, dlabel = _port_info(inv, dst, "in", c.get("inputId", 0))
+            # A port nobody has cartographed is UNKNOWN, not wrong. Rejecting
+            # on it made every idiom unsatisfiable for the vendor modules that
+            # make up most of any real rack.
+            blind: list[str] = []
             if not _port_matches(from_port, srole, slabel, roles):
-                continue
+                if not _uncartographed(inv, src, "out"):
+                    continue
+                blind.append(f"{src.get('plugin')}/{src.get('model')}")
             if not _port_matches(to_port, drole, dlabel, roles):
-                continue
+                if not _uncartographed(inv, dst, "in"):
+                    continue
+                blind.append(f"{dst.get('plugin')}/{dst.get('model')}")
             found = True
+            if blind:
+                unchecked.append(
+                    f"{req.get('id') or f'{from_role} → {to_role}'}: the cable "
+                    f"is there, but {' and '.join(blind)} has no port map, so "
+                    f"which jack it lands on could not be checked")
             break
 
         if not found:
@@ -477,9 +519,15 @@ def main(argv: list[str]) -> int:
         print(f"no such idiom: {slug}")
         return 2
 
-    problems = check(patch, inv, idiom)
+    unchecked: list[str] = []
+    problems = check(patch, inv, idiom, None, unchecked)
     if not problems:
         print(f"  {slug}: holds")
+        # A hold with a gap in it says so. Silence here would be the same
+        # sentence for "every jack was verified" and "one of them could not
+        # be looked at", which are not the same claim.
+        for note in unchecked:
+            print(f"    (not fully checked) {note}")
         return 0
     print(f"  {slug}: not a {slug} patch yet —")
     for p in problems:
