@@ -196,6 +196,25 @@ it compiles to nothing when `PULP_TRACING` is off.
 > **Trace files are dev artifacts.** They contain parameter names, plugin names,
 > and file paths. They are local-only and never auto-uploaded (consistent with
 > Pulp's analytics posture).
+>
+> **No `frame` spans is usually not a bug — check which host you got.** The
+> render spans (`frame`, `paint`, `gpu_acquire`, `gpu_submit`, `gpu_present`)
+> are emitted on the GPU paint path. An editor that is neither scripted nor
+> declares `requires_gpu_host()` gets a CPU-raster host, paints correctly, and
+> emits none of them. The adapter logs the decision at attach —
+> `[plugin-gpu-host] adapter mode=autoui use_gpu=false wants_gpu=false` — and
+> `mode=` is the first thing to read when a capture has input and layout spans
+> but no frames. A CPU-raster editor's frame times are not comparable with a
+> GPU capture's.
+>
+> **Render-span coverage is not uniform across hosts.** Only the Windows plug-in
+> editor emits the full set. The Linux plug-in editor emits `gpu_acquire` (via
+> the shared `PluginFrameRenderer`) but no host-level `frame`/`paint`; the macOS
+> plug-in editor emits neither, because it has its own `render_frame()` with no
+> trace sites — the macOS *standalone* host is the one with `frame`/`paint`. So
+> a missing `frame` span on a macOS plug-in editor is a coverage gap, not a
+> regression. The `trace-analysis` skill has the full matrix and a diagnostic
+> ladder.
 
 ---
 
