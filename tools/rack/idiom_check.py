@@ -276,8 +276,8 @@ def self_test(verbose: bool = True) -> int:
     for slug, idiom in sorted(idioms.items()):
         patch = synthesize(idiom, inv, roles)
         if patch is None:
-            print(f"  WRONG  {slug}: cannot be satisfied by any patch — "
-                  f"its topology refers to something unbuildable")
+            print(f"  WRONG  {slug}: cannot be built — two of its requirements "
+                  f"want the same input jack, and Rack takes one cable per input")
             bad += 1
             continue
 
@@ -331,13 +331,22 @@ def _fixture_inventory(roles: dict) -> dict:
     modules = {}
     for role, spec in roles["roles"].items():
         tags = list(spec.get("tags") or [])
+        # The jack list repeats so a fan-in module's second and third inputs
+        # still resolve to the same KIND. Without the repeats the mixer's
+        # extra jacks fell off the end of the list and the idiom failed its
+        # own patch -- a fixture artefact reported as a library fault.
+        ins = ["IN", "V/OCT", "GATE", "CLK", "CV", "TRIG", "TIME", "SPARE"]
+        in_roles = ["Audio", "Pitch", "Gate", "Clock", "Cv", "Trigger", "Cv", "Cv"]
+        outs = ["OUT", "GATE", "EOC", "CV", "SAW", "CLK", "TRIG", "SPARE"]
+        out_roles = ["Audio", "Gate", "Trigger", "Cv", "Audio", "Clock",
+                     "Trigger", "Cv"]
         modules[role] = {
             "name": role.upper(),
             "tags": tags,
-            "inputs": ["IN", "V/OCT", "GATE", "CLK", "CV", "TRIG", "TIME"],
-            "roles_in": ["Audio", "Pitch", "Gate", "Clock", "Cv", "Trigger", "Cv"],
-            "outputs": ["OUT", "GATE", "EOC", "CV", "SAW", "CLK", "TRIG"],
-            "roles_out": ["Audio", "Gate", "Trigger", "Cv", "Audio", "Clock", "Trigger"],
+            "inputs": ins * 4,
+            "roles_in": in_roles * 4,
+            "outputs": outs * 4,
+            "roles_out": out_roles * 4,
         }
     return {"Fixture": {"modules": modules}}
 
@@ -370,6 +379,12 @@ def synthesize(idiom: dict, inv: dict, roles: dict) -> dict | None:
         for i in range(n):
             module_for(role, role if i == 0 else f"{role}#{i}")
 
+    # Rack allows exactly ONE cable per input: it keeps the last and silently
+    # drops the rest. An idiom whose requirements need two cables in the same
+    # jack cannot be built, and the fixture has to refuse it here or the
+    # self-test certifies an idiom no real patch can ever satisfy. This is
+    # precisely what happened to the first bouncing-ball record.
+    taken: set[tuple[int, int]] = set()
     cables = []
     for req in idiom.get("topology", []):
         f_role = req.get("from_module", "any")
@@ -378,11 +393,29 @@ def synthesize(idiom: dict, inv: dict, roles: dict) -> dict | None:
         dst = src if req.get("same_module") else module_for(t_role)
         if not req.get("same_module") and req.get("different_module") and src == dst:
             dst = module_for(t_role, t_role + "#alt")
+        in_index = _PORT_INDEX.get(req.get("to_port", "any_in"), 0)
+        if (dst, in_index) in taken:
+            if roles["roles"].get(t_role, {}).get("fan_in"):
+                # A mixer or a multiple really does take several cables of a
+                # kind, so it gets another jack.
+                while (dst, in_index) in taken:
+                    in_index += 8
+            elif f_role == t_role and (src, in_index) not in taken:
+                # Two requirements between one pair of same-role modules is a
+                # MUTUAL link -- cross-modulation, where each modulates the
+                # other. The second cable runs the other way.
+                src, dst = dst, src
+                taken.add((dst, in_index))
+            else:
+                # Everything else takes one cable per input: Rack's own rule,
+                # and an idiom that needs two is unbuildable.
+                return None
+        taken.add((dst, in_index))
         cables.append({
             "outputModuleId": src,
             "outputId": _PORT_INDEX.get(req.get("from_port", "any_out"), 0),
             "inputModuleId": dst,
-            "inputId": _PORT_INDEX.get(req.get("to_port", "any_in"), 0),
+            "inputId": in_index,
         })
 
     if not modules:

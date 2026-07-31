@@ -5,260 +5,581 @@
     "is made of, what space it sits in, how dense it is. The failure mode here",
     "is a patch that is merely quiet or merely wet and calls itself ambient."
   ],
-
   "idioms": [
     {
       "slug": "feedback-delay-texture",
-      "names": ["feedback delay", "delay feedback"],
-      "implies": ["repeats that build", "self oscillating delay", "delay that feeds itself"],
+      "names": [
+        "feedback delay",
+        "delay feedback"
+      ],
+      "implies": [
+        "repeats that build",
+        "self oscillating delay",
+        "delay that feeds itself"
+      ],
       "is": "A delay whose output returns to its own input, so repeats accumulate rather than simply decaying.",
       "sounds_right_when": "repeats build and smear instead of fading identically.",
       "source": "Standard practice; the tape-loop lineage",
-      "at_least": {"delay": 1},
+      "at_least": {
+        "delay": 1,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "into-delay", "from_module": "any", "from_port": "audio_out",
-         "to_module": "delay", "to_port": "audio_in",
-         "describe": "something has to feed the delay"},
-        {"id": "feedback", "from_module": "delay", "from_port": "audio_out",
-         "to_module": "delay", "to_port": "audio_in", "same_module": true,
-         "describe": "the delay has to feed back into itself, or the repeats never accumulate"}
+        {
+          "id": "into-delay",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "something has to feed the mixer"
+        },
+        {
+          "id": "feedback-return",
+          "from_module": "delay",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the delay's output has to return to the mixer, or the repeats never build"
+        },
+        {
+          "id": "feedback-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "delay",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
       ],
-      "behaviour": {"sustained": true},
+      "behaviour": {
+        "sustained": true
+      },
       "common_mistakes": [
-        {"id": "no-feedback", "do": "cut", "requirement": "feedback",
-         "message": "the delay does not feed back, so repeats decay identically"},
-        {"id": "no-source", "do": "cut", "requirement": "into-delay",
-         "message": "nothing feeds the delay"}
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-delay",
+          "message": "nothing feeds the delay"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "feedback-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
       ]
     },
-
     {
       "slug": "reverb-wash",
-      "names": ["reverb wash", "wash"],
-      "implies": ["big space", "huge reverb", "washed out", "cavernous"],
+      "names": [
+        "reverb wash",
+        "wash"
+      ],
+      "implies": [
+        "big space",
+        "huge reverb",
+        "washed out",
+        "cavernous"
+      ],
       "is": "A sustained source into a long reverb, with the dry signal well back, so the space is the subject rather than the source.",
       "sounds_right_when": "you hear the room more than the thing in it.",
       "source": "Standard ambient practice",
-      "at_least": {"reverb": 1},
+      "at_least": {
+        "reverb": 1
+      },
       "topology": [
-        {"id": "into-reverb", "from_module": "any", "from_port": "audio_out",
-         "to_module": "reverb", "to_port": "audio_in",
-         "describe": "something has to feed the reverb"},
-        {"id": "reverb-out", "from_module": "reverb", "from_port": "audio_out",
-         "to_module": "any", "to_port": "audio_in",
-         "describe": "the reverb has to reach the output"}
+        {
+          "id": "into-reverb",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "reverb",
+          "to_port": "audio_in",
+          "describe": "something has to feed the reverb"
+        },
+        {
+          "id": "reverb-out",
+          "from_module": "reverb",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the reverb has to reach the output"
+        }
       ],
-      "behaviour": {"sustained": true},
+      "behaviour": {
+        "sustained": true
+      },
       "common_mistakes": [
-        {"id": "no-source", "do": "cut", "requirement": "into-reverb",
-         "message": "nothing feeds the reverb"},
-        {"id": "unheard", "do": "cut", "requirement": "reverb-out",
-         "message": "the reverb never reaches the output"}
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-reverb",
+          "message": "nothing feeds the reverb"
+        },
+        {
+          "id": "unheard",
+          "do": "cut",
+          "requirement": "reverb-out",
+          "message": "the reverb never reaches the output"
+        }
       ]
     },
-
     {
       "slug": "noise-texture",
-      "names": ["noise texture", "filtered noise"],
-      "implies": ["wind", "rain", "hiss", "atmosphere", "static"],
+      "names": [
+        "noise texture",
+        "filtered noise"
+      ],
+      "implies": [
+        "wind",
+        "rain",
+        "hiss",
+        "atmosphere",
+        "static"
+      ],
       "is": "Noise shaped by a moving filter, so the texture reads as weather rather than as hiss.",
       "sounds_right_when": "the noise has a moving centre of gravity, not a fixed one.",
       "source": "Strange's treatment of noise as a sound source",
-      "at_least": {"noise": 1, "filter": 1},
+      "at_least": {
+        "noise": 1,
+        "filter": 1
+      },
       "topology": [
-        {"id": "noise-in", "from_module": "noise", "from_port": "any_out",
-         "to_module": "filter", "to_port": "audio_in",
-         "describe": "noise has to reach the filter"},
-        {"id": "filter-moves", "from_module": "any", "from_port": "cv_out",
-         "to_module": "filter", "to_port": "cv_in",
-         "describe": "the filter has to move, or this is static hiss"}
+        {
+          "id": "noise-in",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "noise has to reach the filter"
+        },
+        {
+          "id": "filter-moves",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "the filter has to move, or this is static hiss"
+        }
       ],
-      "behaviour": {"sustained": true, "spectrally_varying": true},
+      "behaviour": {
+        "sustained": true,
+        "spectrally_varying": true
+      },
       "common_mistakes": [
-        {"id": "static-filter", "do": "cut", "requirement": "filter-moves",
-         "message": "the filter never moves, so this is fixed hiss"},
-        {"id": "no-noise", "do": "cut", "requirement": "noise-in",
-         "message": "no noise reaches the filter"}
+        {
+          "id": "static-filter",
+          "do": "cut",
+          "requirement": "filter-moves",
+          "message": "the filter never moves, so this is fixed hiss"
+        },
+        {
+          "id": "no-noise",
+          "do": "cut",
+          "requirement": "noise-in",
+          "message": "no noise reaches the filter"
+        }
       ]
     },
-
     {
       "slug": "drone-cluster",
-      "names": ["drone cluster", "cluster"],
-      "implies": ["detuned oscillators", "thick drone", "beating tones", "stacked drone"],
+      "names": [
+        "drone cluster",
+        "cluster"
+      ],
+      "implies": [
+        "detuned oscillators",
+        "thick drone",
+        "beating tones",
+        "stacked drone"
+      ],
       "is": "Several oscillators tuned close together and summed, so their slight differences beat against each other.",
       "sounds_right_when": "you hear slow beating that nobody is modulating.",
       "source": "Standard practice; the basis of most thick analogue sounds",
-      "at_least": {"audio_oscillator": 2, "mixer": 1},
+      "at_least": {
+        "audio_oscillator": 2,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "summed", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "mixer", "to_port": "audio_in",
-         "describe": "the oscillators have to be summed for their differences to beat"},
-        {"id": "reaches-out", "from_module": "mixer", "from_port": "audio_out",
-         "to_module": "any", "to_port": "audio_in",
-         "describe": "the mix has to reach the output"}
+        {
+          "id": "summed",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the oscillators have to be summed for their differences to beat"
+        },
+        {
+          "id": "reaches-out",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the mix has to reach the output"
+        }
       ],
-      "behaviour": {"sustained": true},
+      "behaviour": {
+        "sustained": true
+      },
       "common_mistakes": [
-        {"id": "unsummed", "do": "cut", "requirement": "summed",
-         "message": "the oscillators are never summed, so nothing beats"},
-        {"id": "unheard", "do": "cut", "requirement": "reaches-out",
-         "message": "the mix never reaches the output"}
+        {
+          "id": "unsummed",
+          "do": "cut",
+          "requirement": "summed",
+          "message": "the oscillators are never summed, so nothing beats"
+        },
+        {
+          "id": "unheard",
+          "do": "cut",
+          "requirement": "reaches-out",
+          "message": "the mix never reaches the output"
+        }
       ]
     },
-
     {
       "slug": "karplus-strong",
-      "names": ["karplus strong", "plucked string"],
-      "implies": ["plucked string", "string sound", "physical string"],
+      "names": [
+        "karplus strong",
+        "plucked string"
+      ],
+      "implies": [
+        "plucked string",
+        "string sound",
+        "physical string"
+      ],
       "is": "A burst of noise into a short filtered delay whose feedback sustains it — the delay's length becomes the pitch and the filter becomes the decay.",
       "sounds_right_when": "you hear a pluck with a pitch, not a filtered noise burst.",
       "source": "Karplus and Strong's plucked-string algorithm, patched",
-      "at_least": {"noise": 1, "delay": 1},
+      "at_least": {
+        "noise": 1,
+        "delay": 1,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "excite", "from_module": "noise", "from_port": "any_out",
-         "to_module": "delay", "to_port": "audio_in",
-         "describe": "a noise burst has to excite the delay line"},
-        {"id": "sustain", "from_module": "delay", "from_port": "audio_out",
-         "to_module": "delay", "to_port": "audio_in", "same_module": true,
-         "describe": "the delay has to feed back, or the pluck does not ring"}
+        {
+          "id": "excite",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "a noise burst has to enter the loop through the mixer — the delay's input takes one cable, and that one carries the sum of the burst and what is already ringing"
+        },
+        {
+          "id": "sustain-return",
+          "from_module": "delay",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the delay's output has to return, or the string does not ring"
+        },
+        {
+          "id": "sustain-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "delay",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "no-feedback", "do": "cut", "requirement": "sustain",
-         "message": "the delay does not feed back, so there is no string, only a click"},
-        {"id": "no-excitation", "do": "cut", "requirement": "excite",
-         "message": "nothing excites the string"}
+        {
+          "id": "no-excitation",
+          "do": "cut",
+          "requirement": "excite",
+          "message": "nothing excites the string"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "sustain-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
       ]
     },
-
     {
       "slug": "ring-modulated-texture",
-      "names": ["ring modulation", "ring mod"],
-      "implies": ["clangorous", "inharmonic", "bell like", "metallic texture"],
+      "names": [
+        "ring modulation",
+        "ring mod"
+      ],
+      "implies": [
+        "clangorous",
+        "inharmonic",
+        "bell like",
+        "metallic texture"
+      ],
       "is": "Two audio signals multiplied, producing sums and differences that rarely belong to either — inharmonic by construction.",
       "sounds_right_when": "the result is bell-like or clangorous rather than a chord.",
       "source": "Strange on ring modulation",
-      "at_least": {"audio_oscillator": 2},
+      "at_least": {
+        "audio_oscillator": 2
+      },
       "topology": [
-        {"id": "carrier", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "one signal has to be the carrier"},
-        {"id": "modulator", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "cv_in", "different_module": true,
-         "describe": "the other has to modulate it at audio rate"}
+        {
+          "id": "carrier",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "one signal has to be the carrier"
+        },
+        {
+          "id": "modulator",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "different_module": true,
+          "describe": "the other has to modulate it at audio rate"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "no-modulator", "do": "cut", "requirement": "modulator",
-         "message": "nothing modulates at audio rate, so there are no sidebands"},
-        {"id": "no-carrier", "do": "cut", "requirement": "carrier",
-         "message": "no carrier passes through"}
+        {
+          "id": "no-modulator",
+          "do": "cut",
+          "requirement": "modulator",
+          "message": "nothing modulates at audio rate, so there are no sidebands"
+        },
+        {
+          "id": "no-carrier",
+          "do": "cut",
+          "requirement": "carrier",
+          "message": "no carrier passes through"
+        }
       ]
     },
-
     {
       "slug": "wavefolded-texture",
-      "names": ["wavefolding", "wavefolder texture"],
-      "implies": ["fold the wave", "harmonically rich", "add harmonics by folding"],
+      "names": [
+        "wavefolding",
+        "wavefolder texture"
+      ],
+      "implies": [
+        "fold the wave",
+        "harmonically rich",
+        "add harmonics by folding"
+      ],
       "is": "A simple waveform driven into a folder, where increasing level adds harmonics rather than volume.",
       "sounds_right_when": "pushing the drive makes it brighter and busier rather than louder.",
       "source": "West-coast practice; the folder as a harmonic generator",
-      "at_least": {"waveshaper": 1},
+      "at_least": {
+        "waveshaper": 1
+      },
       "topology": [
-        {"id": "into-folder", "from_module": "audio_oscillator", "from_port": "audio_out",
-         "to_module": "waveshaper", "to_port": "audio_in",
-         "describe": "a waveform has to reach the folder"},
-        {"id": "drive-moves", "from_module": "any", "from_port": "cv_out",
-         "to_module": "waveshaper", "to_port": "cv_in",
-         "describe": "the fold amount has to move, or the texture is fixed"}
+        {
+          "id": "into-folder",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "waveshaper",
+          "to_port": "audio_in",
+          "describe": "a waveform has to reach the folder"
+        },
+        {
+          "id": "drive-moves",
+          "from_module": "any",
+          "from_port": "cv_out",
+          "to_module": "waveshaper",
+          "to_port": "cv_in",
+          "describe": "the fold amount has to move, or the texture is fixed"
+        }
       ],
-      "behaviour": {"spectrally_varying": true},
+      "behaviour": {
+        "spectrally_varying": true
+      },
       "common_mistakes": [
-        {"id": "static-fold", "do": "cut", "requirement": "drive-moves",
-         "message": "the fold amount never moves, so the texture is fixed"},
-        {"id": "nothing-folded", "do": "cut", "requirement": "into-folder",
-         "message": "nothing reaches the folder"}
+        {
+          "id": "static-fold",
+          "do": "cut",
+          "requirement": "drive-moves",
+          "message": "the fold amount never moves, so the texture is fixed"
+        },
+        {
+          "id": "nothing-folded",
+          "do": "cut",
+          "requirement": "into-folder",
+          "message": "nothing reaches the folder"
+        }
       ]
     },
-
     {
       "slug": "granular-cloud",
-      "names": ["granular", "grain cloud"],
-      "implies": ["cloud of grains", "shimmering texture", "granulated"],
+      "names": [
+        "granular",
+        "grain cloud"
+      ],
+      "implies": [
+        "cloud of grains",
+        "shimmering texture",
+        "granulated"
+      ],
       "is": "A source repeatedly re-triggered into short windows, so the ear hears a cloud of fragments rather than a continuous signal.",
       "sounds_right_when": "the texture is made of audible particles whose density can change.",
       "source": "Roads' granular synthesis, as approximated in modular",
-      "at_least": {"amplifier": 1, "clock": 1},
+      "at_least": {
+        "amplifier": 1,
+        "clock": 1
+      },
       "topology": [
-        {"id": "windowing", "from_module": "envelope", "from_port": "cv_out",
-         "to_module": "amplifier", "to_port": "cv_in",
-         "describe": "a fast envelope has to window the source into grains"},
-        {"id": "grain-rate", "from_module": "clock", "from_port": "clock_out",
-         "to_module": "envelope", "to_port": "gate_in",
-         "describe": "something has to fire the grains repeatedly"},
-        {"id": "source", "from_module": "any", "from_port": "audio_out",
-         "to_module": "amplifier", "to_port": "audio_in",
-         "describe": "there has to be a source to granulate"}
+        {
+          "id": "windowing",
+          "from_module": "envelope",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "a fast envelope has to window the source into grains"
+        },
+        {
+          "id": "grain-rate",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "something has to fire the grains repeatedly"
+        },
+        {
+          "id": "source",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "amplifier",
+          "to_port": "audio_in",
+          "describe": "there has to be a source to granulate"
+        }
       ],
-      "behaviour": {"sustained": true},
+      "behaviour": {
+        "sustained": true
+      },
       "common_mistakes": [
-        {"id": "no-windowing", "do": "cut", "requirement": "windowing",
-         "message": "nothing windows the source, so this is a continuous signal"},
-        {"id": "no-rate", "do": "cut", "requirement": "grain-rate",
-         "message": "nothing fires the grains"},
-        {"id": "no-source", "do": "cut", "requirement": "source",
-         "message": "there is nothing to granulate"}
+        {
+          "id": "no-windowing",
+          "do": "cut",
+          "requirement": "windowing",
+          "message": "nothing windows the source, so this is a continuous signal"
+        },
+        {
+          "id": "no-rate",
+          "do": "cut",
+          "requirement": "grain-rate",
+          "message": "nothing fires the grains"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "source",
+          "message": "there is nothing to granulate"
+        }
       ]
     },
-
     {
       "slug": "shimmer",
-      "names": ["shimmer"],
-      "implies": ["pitch shifted reverb", "rising sparkle", "octave up reverb"],
+      "names": [
+        "shimmer"
+      ],
+      "implies": [
+        "pitch shifted reverb",
+        "rising sparkle",
+        "octave up reverb"
+      ],
       "is": "A reverb whose feedback path is pitch-shifted upward, so the tail rises as it decays.",
       "sounds_right_when": "the tail climbs in pitch instead of merely fading.",
       "source": "Standard practice, after the Eno/Lanois studio technique",
-      "at_least": {"reverb": 1},
+      "at_least": {
+        "reverb": 1,
+        "mixer": 1
+      },
       "topology": [
-        {"id": "into-reverb", "from_module": "any", "from_port": "audio_out",
-         "to_module": "reverb", "to_port": "audio_in",
-         "describe": "something has to feed the reverb"},
-        {"id": "feedback", "from_module": "reverb", "from_port": "audio_out",
-         "to_module": "reverb", "to_port": "audio_in", "same_module": true,
-         "describe": "the tail has to be fed back for the shift to accumulate"}
+        {
+          "id": "into-reverb",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "something has to feed the mixer"
+        },
+        {
+          "id": "feedback-return",
+          "from_module": "reverb",
+          "from_port": "audio_out",
+          "to_module": "mixer",
+          "to_port": "audio_in",
+          "describe": "the reverb tail has to return, or the shift never accumulates"
+        },
+        {
+          "id": "feedback-sum",
+          "from_module": "mixer",
+          "from_port": "audio_out",
+          "to_module": "reverb",
+          "to_port": "audio_in",
+          "describe": "the sum of the source and the returning signal has to go back in — an input takes one cable, so the two are mixed rather than both patched to the same jack"
+        }
       ],
-      "behaviour": {"sustained": true},
+      "behaviour": {
+        "sustained": true
+      },
       "common_mistakes": [
-        {"id": "no-feedback", "do": "cut", "requirement": "feedback",
-         "message": "the tail is never fed back, so nothing shimmers"},
-        {"id": "no-source", "do": "cut", "requirement": "into-reverb",
-         "message": "nothing feeds the reverb"}
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "into-reverb",
+          "message": "nothing feeds the reverb"
+        },
+        {
+          "id": "loop-open",
+          "do": "cut",
+          "requirement": "feedback-sum",
+          "message": "the loop is never closed, so nothing accumulates"
+        }
       ]
     },
-
     {
       "slug": "distorted-texture",
-      "names": ["distortion", "overdriven texture"],
-      "implies": ["gritty", "dirty", "saturated", "crunchy"],
+      "names": [
+        "distortion",
+        "overdriven texture"
+      ],
+      "implies": [
+        "gritty",
+        "dirty",
+        "saturated",
+        "crunchy"
+      ],
       "is": "A signal driven past a stage's limit so its peaks are reshaped, adding harmonics that were never in the source.",
       "sounds_right_when": "the character changes with level rather than only the loudness.",
       "source": "Standard practice",
-      "at_least": {"waveshaper": 1},
+      "at_least": {
+        "waveshaper": 1
+      },
       "topology": [
-        {"id": "into-stage", "from_module": "any", "from_port": "audio_out",
-         "to_module": "waveshaper", "to_port": "audio_in",
-         "describe": "a signal has to reach the distortion stage"},
-        {"id": "out-of-stage", "from_module": "waveshaper", "from_port": "audio_out",
-         "to_module": "any", "to_port": "audio_in",
-         "describe": "the distorted signal has to reach the output"}
+        {
+          "id": "into-stage",
+          "from_module": "any",
+          "from_port": "audio_out",
+          "to_module": "waveshaper",
+          "to_port": "audio_in",
+          "describe": "a signal has to reach the distortion stage"
+        },
+        {
+          "id": "out-of-stage",
+          "from_module": "waveshaper",
+          "from_port": "audio_out",
+          "to_module": "any",
+          "to_port": "audio_in",
+          "describe": "the distorted signal has to reach the output"
+        }
       ],
       "behaviour": {},
       "common_mistakes": [
-        {"id": "bypassed", "do": "cut", "requirement": "out-of-stage",
-         "message": "the distorted signal goes nowhere"},
-        {"id": "no-input", "do": "cut", "requirement": "into-stage",
-         "message": "nothing reaches the distortion"}
+        {
+          "id": "bypassed",
+          "do": "cut",
+          "requirement": "out-of-stage",
+          "message": "the distorted signal goes nowhere"
+        },
+        {
+          "id": "no-input",
+          "do": "cut",
+          "requirement": "into-stage",
+          "message": "nothing reaches the distortion"
+        }
       ]
     }
   ]

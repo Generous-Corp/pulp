@@ -476,6 +476,58 @@ def explain(patch: dict, inv: dict, why: dict | None = None) -> str:
 
 # ── Lint ─────────────────────────────────────────────────────────────────────
 
+def lint_why(patch: dict, inv: dict, why: dict | None) -> list[str]:
+    """Ways the prose could be talking about a patch other than this one.
+
+    A correct patch with a wrong sentence is worse than a correct patch with
+    no sentence: the reader has no way to tell, and learns the wrong mechanism
+    with confidence. These are the two disagreements that are mechanically
+    detectable -- a reason attached to a cable that does not exist, and a
+    module named in a clause that is not in the rack.
+
+    Whether a clause is TRUE of the cable it names is not checkable here, and
+    pretending otherwise would be its own kind of lie.
+    """
+    if not why:
+        return []
+    problems: list[str] = []
+    keys = {f"{c.get('outputModuleId')}:{c.get('outputId', 0)}>"
+            f"{c.get('inputModuleId')}:{c.get('inputId', 0)}"
+            for c in patch.get("cables", [])}
+    for key in why:
+        if key not in keys:
+            problems.append(f"a reason is attached to {key}, which is not a "
+                            f"cable in this patch")
+
+    # Module names as they appear in prose. Matched on the display label the
+    # explanation itself uses, so this asks the same question the reader will.
+    dis = _disambiguate(patch, inv)
+    present = {label(inv, m, dis).upper() for m in patch.get("modules", [])}
+    present |= {str(m.get("model", "")).upper() for m in patch.get("modules", [])}
+    for key, note in why.items():
+        for word in re.findall(r"\b[A-Z][A-Z0-9/ ]{2,}\b", note or ""):
+            word = word.strip()
+            # Only words that LOOK like a module name and are not a port name.
+            if len(word) < 3 or word in ("CV", "LFO CV"):
+                continue
+            if word in present:
+                continue
+            # A port label is fair game in prose; a module name that is not
+            # here is not.
+            if any(word in (label(inv, m, dis).upper() + " " +
+                            " ".join((inv.get(m["plugin"], {})
+                                      .get("modules", {}).get(m["model"], {})
+                                      .get("outputs") or []) +
+                                     ((inv.get(m["plugin"], {})
+                                       .get("modules", {}).get(m["model"], {})
+                                       .get("inputs")) or [])).upper())
+                   for m in patch.get("modules", [])):
+                continue
+            problems.append(f"a reason mentions {word!r}, which is not in this "
+                            f"patch")
+    return problems
+
+
 def lint(patch: dict, inv: dict) -> list[str]:
     """Reasons Rack would not load this patch as intended.
 
