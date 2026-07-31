@@ -21,27 +21,13 @@ TOOLS="${FORGE_MODULAR_TOOLS:-$HOME/Library/Application Support/Forge Modular/to
 ONLY="${1:-all}"
 pass=0; fail=0; skip=0
 
-# macOS ships no `timeout` -- it is GNU coreutils, and a machine that has never
-# had this installed will not have it. Without a shim every capped command here
-# dies with "command not found", which reads as the surface failing rather than
-# the harness missing a tool.
-if command -v timeout >/dev/null 2>&1; then
-    cap() { timeout "$@"; }
-elif command -v gtimeout >/dev/null 2>&1; then
-    cap() { gtimeout "$@"; }
-else
-    cap() {
-        local secs="$1"; shift
-        "$@" &
-        local job=$!
-        ( sleep "$secs"; kill -TERM "$job" 2>/dev/null ) 2>/dev/null &
-        local killer=$!
-        wait "$job" 2>/dev/null
-        local rc=$?
-        kill "$killer" 2>/dev/null
-        return "$rc"
-    }
-fi
+# `cap SECONDS command...` -- a time limit that works on a machine
+# with no coreutils. One shim, shared, because two copies drift.
+. "$HERE/cap.sh"
+
+# Which generator this proof is about, and whether it is the one being read.
+. "$HERE/toolchain.sh"
+toolchain_report "$HERE" "$TOOLS"
 
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
@@ -66,7 +52,7 @@ sys.exit(0 if P.inventory() else 1)
         path="$(printf '%s' "$out" | sed -n 's/.*cables → \(.*\)$/\1/p' | tail -1)"
         if [ -n "$path" ] && [ -f "$path" ]; then
             # Not "the log said built" -- the file, and the idiom it claimed.
-            v="$(cd "$HERE" && python3 idiom_check.py "$path" subtractive-voice 2>&1)"
+            v="$(cd "$TOOLS" && python3 idiom_check.py "$path" subtractive-voice 2>&1)"
             if printf '%s' "$v" | grep -q holds; then
                 ok "a patch was generated and holds its idiom: $(basename "$path")"
             else

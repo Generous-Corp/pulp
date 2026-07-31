@@ -1281,6 +1281,30 @@ def sounds(patch: dict) -> tuple[bool, str]:
         os.unlink(tmp)
 
 
+def model_failure(stdout: str, stderr: str) -> str:
+    """Why the model call failed, in a form somebody can act on.
+
+    `claude` writes "Not logged in · Please run /login" to STDOUT and exits 1
+    with an empty stderr, so a message built from stderr alone reads
+    "model call failed: " -- a blank where the reason should be. That exact
+    blank came back from the M5 twice and told nobody anything; the machine had
+    a perfectly good login, in a keychain a non-interactive SSH session is not
+    allowed to open.
+    """
+    said = (stdout or "").strip() or (stderr or "").strip()
+    if "not logged in" in said.lower() or "/login" in said:
+        return (
+            "the model CLI is not logged in for this session.\n"
+            "  It said: " + said.splitlines()[0][:200] + "\n"
+            "  Over SSH this is usually not a missing login but an unreachable\n"
+            "  one: the credential sits in the login keychain, and a\n"
+            "  non-interactive session may not open it. Either run this from a\n"
+            "  window on that machine, or unlock the keychain first:\n"
+            "    security unlock-keychain ~/Library/Keychains/login.keychain-db")
+    return "model call failed: " + (said[:400] if said else
+                                    "it exited non-zero and said nothing at all")
+
+
 def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     """Prompt -> a patch that lints clean and makes a sound."""
     import re
@@ -1329,7 +1353,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                            capture_output=True, text=True, timeout=600,
                            env=toolpaths.tool_env())
         if r.returncode != 0:
-            raise SystemExit(f"model call failed: {r.stderr[:400]}")
+            raise SystemExit(model_failure(r.stdout, r.stderr))
         pj = re.search(r"```(?:json patch|json)\s*\n(.*?)```", r.stdout, re.S)
         wj = re.search(r"```json why\s*\n(.*?)```", r.stdout, re.S)
         if not pj:

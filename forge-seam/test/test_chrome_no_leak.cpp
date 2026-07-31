@@ -1434,6 +1434,78 @@ TEST_CASE("hovering a line lights its cable and dims the rest", "[rack][hover]")
     CHECK(preview.cable_alpha(0) == Approx(1.0f));
 }
 
+TEST_CASE("pointing at a cable in the rack finds that cable", "[rack][hover]") {
+    // The half that was missing. Hovering a SENTENCE lit its cable, and only
+    // that way round -- so the rack, which is the half a person actually looks
+    // at, could not be interrogated at all. You could read the explanation to
+    // find the cable, never point at the cable to find the explanation.
+    forge_modular::RackPreview preview;
+    preview.set_rack(sample_rack(), sample_patch());
+    preview.set_bounds({0, 0, 900, 420});
+
+    const auto L = preview.layout_for(900, 420);
+    const auto& cables = preview.connections();
+    REQUIRE(cables.size() == 3);
+
+    // Halfway along each cable, which is the part of it that hangs in free
+    // space and is the hardest place for a straight-line test to find.
+    for (std::size_t i = 0; i < cables.size(); ++i) {
+        const auto& c = cables[i];
+        const auto a = forge_modular::port_point(L, preview.modules(),
+                                                 c.from_module, c.from_port,
+                                                 c.to_module);
+        const auto b = forge_modular::port_point(L, preview.modules(),
+                                                 c.to_module, c.to_port,
+                                                 c.from_module);
+        float x = 0, y = 0;
+        forge_modular::cable_point(forge_modular::cable_curve(a, b), 0.5f, x, y);
+        INFO("cable " << i << " midpoint " << x << "," << y);
+        const auto found = preview.cable_at(x, y);
+        REQUIRE(found.has_value());
+        CHECK(*found == i);
+    }
+
+    // The negative control, and the one that matters: a point in the empty
+    // air above the rack must find NOTHING. A hit test that answered "nearest
+    // cable" would satisfy every assertion above while lighting a cable
+    // whenever the pointer was anywhere on the stage at all.
+    CHECK_FALSE(preview.cable_at(2.0f, 2.0f).has_value());
+}
+
+TEST_CASE("the pointer leaving the rack lets every cable go", "[rack][hover]") {
+    forge_modular::RackPreview preview;
+    preview.set_rack(sample_rack(), sample_patch());
+    preview.set_bounds({0, 0, 900, 420});
+
+    std::vector<std::optional<std::size_t>> heard;
+    preview.on_cable_hover = [&](std::optional<std::size_t> i) { heard.push_back(i); };
+
+    const auto L = preview.layout_for(900, 420);
+    const auto& c = preview.connections()[1];
+    const auto a = forge_modular::port_point(L, preview.modules(), c.from_module,
+                                             c.from_port, c.to_module);
+    const auto b = forge_modular::port_point(L, preview.modules(), c.to_module,
+                                             c.to_port, c.from_module);
+    float x = 0, y = 0;
+    forge_modular::cable_point(forge_modular::cable_curve(a, b), 0.5f, x, y);
+
+    preview.on_hover_move({x, y});
+    REQUIRE(heard.size() == 1);
+    REQUIRE(heard[0].has_value());
+    CHECK(*heard[0] == 1);
+
+    // Moving along the same cable must not chatter: a callback per hover
+    // sample would rebuild the explanation's rows continuously.
+    preview.on_hover_move({x + 0.5f, y});
+    CHECK(heard.size() == 1);
+
+    preview.on_mouse_leave();
+    REQUIRE(heard.size() == 2);
+    CHECK_FALSE(heard[1].has_value());
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK(preview.cable_alpha(i) == Approx(1.0f));
+}
+
 TEST_CASE("cables reach across as the patch is wired", "[rack][hover]") {
     forge_modular::RackPreview preview;
     preview.set_rack(sample_rack(), sample_patch());
@@ -1642,6 +1714,34 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
         *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
         shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
     CHECK(std::filesystem::file_size(shot) > 20000);
+
+    // And the same pairing from the rack, in the shell that ships rather than
+    // in a re-creation of its wiring: point at a cable, the sentence that
+    // explains it lights.
+    {
+        const auto L = preview->layout_for(preview->bounds().width,
+                                           preview->bounds().height);
+        const auto& c = preview->connections()[2];
+        const auto a = forge_modular::port_point(L, preview->modules(),
+                                                 c.from_module, c.from_port,
+                                                 c.to_module);
+        const auto b = forge_modular::port_point(L, preview->modules(),
+                                                 c.to_module, c.to_port,
+                                                 c.from_module);
+        float x = 0, y = 0;
+        forge_modular::cable_point(forge_modular::cable_curve(a, b), 0.5f, x, y);
+        // After the render above, so the rack has been through the real
+        // layout pass. Hovering before it, the preview's bounds are still
+        // 0x0 and the hit test is asked about a rack with no size.
+        REQUIRE(preview->bounds().width > 0);
+        ex->hover_line(std::nullopt);
+        preview->on_hover_move({x, y});
+        REQUIRE(ex->hovered().has_value());
+        CHECK(*ex->hovered() == 2);
+
+        preview->on_mouse_leave();
+        CHECK_FALSE(ex->hovered().has_value());
+    }
 }
 
 TEST_CASE("a patch nobody generated still says something", "[rack]") {

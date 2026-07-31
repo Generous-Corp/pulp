@@ -31,9 +31,27 @@ fi
 # named here is NOT copied -- that is deliberate, because the checkout also
 # holds Forge's own sources, which this repo must never carry.
 MODULAR_FILES=(
-    build_monitor mention_overlay modular_shell patch_explanation
-    patch_loader process_engine rack_layout rack_preview
+    build_monitor mention_overlay modular_shell module_summary
+    patch_explanation patch_loader process_engine rack_layout rack_preview
 )
+
+# A file this repo carries that the list above forgets is a file that drifts in
+# silence -- it is here, it looks synced, and nothing ever copies it.
+# module_summary was exactly that for as long as it existed.
+for existing in "$SEAM"/modular/*.cpp "$SEAM"/modular/*.hpp; do
+    stem="$(basename "$existing")"; stem="${stem%.*}"
+    listed=0
+    for known in "${MODULAR_FILES[@]}"; do
+        [ "$known" = "$stem" ] && listed=1 && break
+    done
+    # The format entry points and the standalone main live in their own
+    # subdirectories in the checkout, so they are not stems of this list.
+    case "$stem" in main|*_entry) listed=1 ;; esac
+    if [ "$listed" -eq 0 ]; then
+        echo "  NOT SYNCED: modular/$stem — add it to MODULAR_FILES" >&2
+        exit 3
+    fi
+done
 
 drift=0
 report() { # <label> <src> <dst>

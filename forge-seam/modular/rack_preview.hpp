@@ -15,12 +15,18 @@
 
 #include <pulp/view/view.hpp>
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace forge_modular {
+
+/// How close a pointer has to be to a cable to count as pointing at it, in
+/// view points. Generous enough to grab a 4-point cable without a steady hand,
+/// small enough that the gap between two cables is still a gap.
+inline constexpr float kCableGrabPoints = 9.0f;
 
 class RackPreview : public pulp::view::View {
 public:
@@ -60,6 +66,25 @@ public:
     /// How strongly a cable is drawn: 1 when it is the highlight or nothing is
     /// highlighted, dimmed otherwise.
     float cable_alpha(std::size_t index) const;
+
+    /// Which cable is under a point in this view, if any.
+    ///
+    /// Pure given the current bounds, so a test can assert what a pointer
+    /// would find without a window, a host or a mouse. Nearest wins, and only
+    /// within `kCableGrabPoints` -- pointing at the empty middle of the rack
+    /// must find NOTHING, or every cable lights whenever the pointer is over
+    /// the stage at all.
+    std::optional<std::size_t> cable_at(float x, float y) const;
+
+    /// Pointing at a cable in the rack lights its line in the explanation.
+    ///
+    /// The other direction already worked, and only that direction. Hovering
+    /// a sentence lit its cable, but the rack was the half a person actually
+    /// looks at, and pointing at the thing you can see taught you nothing.
+    std::function<void(std::optional<std::size_t>)> on_cable_hover;
+
+    void on_hover_move(pulp::view::Point local_pos) override;
+    void on_mouse_leave() override;
 
     void paint(pulp::canvas::Canvas& canvas) override;
 

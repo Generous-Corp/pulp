@@ -38,27 +38,13 @@ PROMPTS=(
   "texture|two detuned oscillators beating against each other|named"
 )
 
-# macOS ships no `timeout` -- it is GNU coreutils, so a machine that has never
-# had it installed dies with "command not found" on every build, which reads as
-# twelve failing prompts rather than a missing tool. Same shim as
-# prove_surfaces.sh, for the same reason.
-if command -v timeout >/dev/null 2>&1; then
-    cap() { timeout "$@"; }
-elif command -v gtimeout >/dev/null 2>&1; then
-    cap() { gtimeout "$@"; }
-else
-    cap() {
-        local secs="$1"; shift
-        "$@" &
-        local job=$!
-        ( sleep "$secs"; kill -TERM "$job" 2>/dev/null ) 2>/dev/null &
-        local killer=$!
-        wait "$job" 2>/dev/null
-        local rc=$?
-        kill "$killer" 2>/dev/null
-        return "$rc"
-    }
-fi
+# `cap SECONDS command...` -- a time limit that works on a machine
+# with no coreutils. One shim, shared, because two copies drift.
+. "$HERE/cap.sh"
+
+# Which generator this proof is about, and whether it is the one being read.
+. "$HERE/toolchain.sh"
+toolchain_report "$HERE" "$TOOLS"
 
 only="${1:-}"
 LOGS="${PROVE_LOGS:-${OUT%.txt}-logs}"
@@ -112,7 +98,7 @@ print(resolve('''$prompt''') or '')
         fail=$((fail + 1))
         continue
     fi
-    verdict="$(cd "$HERE" && python3 idiom_check.py "$path" "$slug" 2>&1)"
+    verdict="$(cd "$TOOLS" && python3 idiom_check.py "$path" "$slug" 2>&1)"
     if printf '%s' "$verdict" | grep -q "holds"; then
         printf '    HOLDS  %s\n' "$(basename "$path")" | tee -a "$OUT"
         pass=$((pass + 1))

@@ -481,6 +481,21 @@ std::unique_ptr<View> ForgeModularShell::stage_accessory() {
     // a cable's reason is read WHILE looking at the cable.
     auto preview = std::make_unique<RackPreview>();
     rack_preview_ = preview.get();
+    // The pairing from the side a person is actually looking at: point at a
+    // cable and the sentence explaining it lights. Wired HERE, on the view
+    // that certainly exists, rather than beside the explanation's own hover
+    // handler -- the two are built by different functions, and the rail runs
+    // first, so a `if (rack_preview_)` guard over there silently wired
+    // nothing at all and the feature shipped dead.
+    //
+    // `explanation_` is read when the hover happens, not now, so this does not
+    // care which half is built first.
+    //
+    // The two do not chase each other: each setter returns early when handed
+    // the index it already has.
+    preview->on_cable_hover = [this](std::optional<std::size_t> index) {
+        if (explanation_) explanation_->hover_line(index);
+    };
     preview->set_panel_directory(panels_dir());
     preview->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
     preview->flex().flex_grow = 1;

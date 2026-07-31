@@ -130,4 +130,21 @@ struct CableCurve {
 /// the sag grows with the distance it spans.
 CableCurve cable_curve(const JackPoint& from, const JackPoint& to, float t = 1.0f);
 
+/// How many straight pieces a cable is drawn as. Shared by the painting and by
+/// the hit test, so the cable a pointer finds is the cable that was drawn --
+/// two different flattenings would put the sag in two different places and the
+/// glow would land on a cable the pointer is not over.
+inline constexpr int kCableSegments = 24;
+
+/// A point along a cable, `t` from 0 at the output jack to 1 at the input.
+void cable_point(const CableCurve& c, float t, float& x, float& y);
+
+/// How far a point is from a cable, in the same units the layout is in.
+///
+/// Measured to the flattened curve rather than to the straight line between
+/// the jacks: a cable sags, and the gap between the two is most of a panel's
+/// height on a long run -- so a straight-line test lights a cable while the
+/// pointer is nowhere near it.
+float distance_to_cable(const CableCurve& c, float x, float y);
+
 }  // namespace forge_modular

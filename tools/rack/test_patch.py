@@ -144,9 +144,19 @@ def check_role_colors(inv) -> int:
     audio, which is a wrong lesson attached to a correct patch.
     """
     bad = 0
-    # A sequencer's gate into an envelope, an LFO into a filter's CV, and an
-    # oscillator into a filter's audio input: three cables whose role is not in
-    # any doubt, handed in with deliberately wrong colours.
+    # A sequencer's gate into an envelope, an LFO into a filter's cutoff, and
+    # an oscillator into a filter's audio input: three cables whose role is not
+    # in any doubt, handed in with deliberately wrong colours.
+    #
+    # The PORT INDICES matter and did not always say what this comment says.
+    # They were written when no vendor port had a name, so the grouping came
+    # from the source module's tags alone and any index did. Read literally the
+    # old ones were a sequencer's CV 2 into an envelope's ATTACK and an
+    # oscillator into a filter's FREQUENCY -- three modulation cables described
+    # as three different roles. Now that ports are read, the indices are the
+    # jacks the comment names, and the oscillator's cable comes back AUDIO
+    # where it used to come back MODULATION: a wrong lesson on a right cable,
+    # which is the exact failure this check exists for.
     patch = {
         "modules": [
             {"id": 1, "plugin": "Fundamental", "model": "SEQ3"},
@@ -156,12 +166,15 @@ def check_role_colors(inv) -> int:
             {"id": 5, "plugin": "Fundamental", "model": "VCO"},
         ],
         "cables": [
-            {"outputModuleId": 1, "outputId": 2, "inputModuleId": 2,
-             "inputId": 0, "color": "#f3374b"},
+            # SEQ3 "Trigger" -> ADSR "Gate"
+            {"outputModuleId": 1, "outputId": 0, "inputModuleId": 2,
+             "inputId": 4, "color": "#f3374b"},
+            # LFO "Sine" -> VCF "Frequency"
             {"outputModuleId": 3, "outputId": 0, "inputModuleId": 4,
-             "inputId": 1, "color": "#f3374b"},
-            {"outputModuleId": 5, "outputId": 0, "inputModuleId": 4,
              "inputId": 0, "color": "#f3374b"},
+            # VCO "Sawtooth" -> VCF "Audio"
+            {"outputModuleId": 5, "outputId": 2, "inputModuleId": 4,
+             "inputId": 3, "color": "#f3374b"},
         ],
     }
     out = patch_mod.color_cables_by_role(patch, inv)
@@ -184,6 +197,36 @@ def check_role_colors(inv) -> int:
         bad += 1
     else:
         print("  ok     every colour is one the app can read back")
+    return bad
+
+
+def check_model_failure() -> int:
+    """A failed model call has to SAY something.
+
+    `claude` reports "Not logged in · Please run /login" on STDOUT and exits 1
+    with an empty stderr, so a message built from stderr alone came back as
+    "model call failed: " -- a colon and a blank. That blank was the entire
+    result of two M5 proof runs, and it named neither the problem nor the
+    machine it was on.
+    """
+    cases = [
+        ("the not-logged-in case, which is the one that happened",
+         "Not logged in · Please run /login\n", "",
+         ("not logged in", "keychain")),
+        ("a real error, which arrives on stderr",
+         "", "connection reset by peer", ("connection reset",)),
+        ("a tool that exits non-zero and says nothing at all",
+         "", "", ("said nothing",)),
+    ]
+    bad = 0
+    for name, out, err, wanted in cases:
+        msg = P.model_failure(out, err)
+        missing = [w for w in wanted if w.lower() not in msg.lower()]
+        if missing:
+            print(f"  WRONG  {name}: never mentions {missing} — {msg!r}")
+            bad += 1
+    if not bad:
+        print("  ok     a failed model call names a reason, from either stream")
     return bad
 
 
@@ -213,7 +256,8 @@ def main():
 
     bad += check_disambiguation(inv)
     bad += check_role_colors(inv)
-    print(f"\n{len(CASES) + 3 - bad}/{len(CASES) + 3} correct")
+    bad += check_model_failure()
+    print(f"\n{len(CASES) + 4 - bad}/{len(CASES) + 4} correct")
     return 1 if bad else 0
 
 

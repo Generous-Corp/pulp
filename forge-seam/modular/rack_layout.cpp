@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace forge_modular {
 
@@ -128,6 +129,35 @@ CableCurve cable_curve(const JackPoint& from, const JackPoint& to, float t) {
     c.cx = (c.x1 + c.x2) / 2.0f;
     c.cy = std::max(c.y1, c.y2) + sag * 0.86f;
     return c;
+}
+
+void cable_point(const CableCurve& c, float t, float& x, float& y) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    const float u = 1.0f - t;
+    x = u * u * c.x1 + 2 * u * t * c.cx + t * t * c.x2;
+    y = u * u * c.y1 + 2 * u * t * c.cy + t * t * c.y2;
+}
+
+float distance_to_cable(const CableCurve& c, float x, float y) {
+    float best = std::numeric_limits<float>::max();
+    float px = 0, py = 0;
+    cable_point(c, 0.0f, px, py);
+    for (int i = 1; i <= kCableSegments; ++i) {
+        float qx = 0, qy = 0;
+        cable_point(c, static_cast<float>(i) / kCableSegments, qx, qy);
+        // Nearest point on this piece, clamped to its ends so the distance is
+        // to the segment and not to the infinite line it lies on.
+        const float dx = qx - px, dy = qy - py;
+        const float len2 = dx * dx + dy * dy;
+        float t = 0.0f;
+        if (len2 > 0.0f)
+            t = std::clamp(((x - px) * dx + (y - py) * dy) / len2, 0.0f, 1.0f);
+        const float ex = px + dx * t - x, ey = py + dy * t - y;
+        best = std::min(best, std::sqrt(ex * ex + ey * ey));
+        px = qx;
+        py = qy;
+    }
+    return best;
 }
 
 }  // namespace forge_modular

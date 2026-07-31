@@ -29,19 +29,17 @@ Color from_rgb(std::uint32_t rgb, float alpha) {
 /// reads as a diagram, not a cable.
 void stroke_curve(Canvas& canvas, const CableCurve& c, Color stroke, float width,
                   float dy) {
-    constexpr int kSegments = 24;
-    Canvas::Point2D pts[kSegments + 1];
-    for (int i = 0; i <= kSegments; ++i) {
-        const float t = static_cast<float>(i) / kSegments;
-        const float u = 1.0f - t;
-        pts[i].x = u * u * c.x1 + 2 * u * t * c.cx + t * t * c.x2;
-        pts[i].y = u * u * (c.y1 + dy) + 2 * u * t * (c.cy + dy) +
-                   t * t * (c.y2 + dy);
+    // The same flattening the hit test uses, so the cable a pointer finds is
+    // the cable that was drawn.
+    Canvas::Point2D pts[kCableSegments + 1];
+    for (int i = 0; i <= kCableSegments; ++i) {
+        cable_point(c, static_cast<float>(i) / kCableSegments, pts[i].x, pts[i].y);
+        pts[i].y += dy;
     }
     canvas.set_stroke_color(stroke);
     canvas.set_line_width(width);
     canvas.set_line_cap(pulp::canvas::LineCap::round);
-    canvas.stroke_path(pts, kSegments + 1);
+    canvas.stroke_path(pts, kCableSegments + 1);
 }
 
 }  // namespace
@@ -111,6 +109,44 @@ float RackPreview::cable_alpha(std::size_t index) const {
     if (highlight_ && *highlight_ == index) return 1.0f;
     if (highlight_role_ && connections_[index].role == *highlight_role_) return 1.0f;
     return 0.35f;
+}
+
+std::optional<std::size_t> RackPreview::cable_at(float x, float y) const {
+    const auto b = bounds();
+    const auto L = layout_rack(modules_, b.width, b.height);
+    std::optional<std::size_t> best;
+    float best_d = kCableGrabPoints;
+    for (std::size_t i = 0; i < connections_.size(); ++i) {
+        const auto& c = connections_[i];
+        const auto from = port_point(L, modules_, c.from_module, c.from_port,
+                                     c.to_module);
+        const auto to = port_point(L, modules_, c.to_module, c.to_port,
+                                   c.from_module);
+        // progress_, not 1: a cable that is only half drawn can only be
+        // pointed at where it has actually been drawn.
+        const float d = distance_to_cable(cable_curve(from, to, progress_), x, y);
+        if (d < best_d) {
+            best_d = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+void RackPreview::on_hover_move(pulp::view::Point local_pos) {
+    const auto found = cable_at(static_cast<float>(local_pos.x),
+                                static_cast<float>(local_pos.y));
+    if (found == highlight_) return;
+    set_highlight(found);
+    if (on_cable_hover) on_cable_hover(found);
+}
+
+void RackPreview::on_mouse_leave() {
+    // The pointer leaving the rack has to clear BOTH ends, or a line stays lit
+    // in the explanation pointing at a cable nobody is near.
+    if (!highlight_) return;
+    set_highlight(std::nullopt);
+    if (on_cable_hover) on_cable_hover(std::nullopt);
 }
 
 void RackPreview::paint(Canvas& canvas) {
