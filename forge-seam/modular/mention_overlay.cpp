@@ -25,6 +25,10 @@ using pulp::view::View;
 
 constexpr float kRowHeight = 34.0f;
 constexpr int kMaxRows = 6;
+/// Where the list hangs. The composer sits low in the window, and the list
+/// grows downward from here, so this clears the header and lands the rows
+/// beside the prompt rather than over the title bar.
+constexpr float kListTopMargin = 380.0f;
 
 // Key codes, matching the platform's. Named so the handler reads as intent.
 constexpr int kKeyReturn = 36;
@@ -54,13 +58,36 @@ std::unique_ptr<View> MentionOverlay::build() {
     root_ = root.get();
     root->set_position(View::Position::absolute);
     root->flex().direction = FlexDirection::column;
-    // Placed over the composer. The prompt card is centred at 680 wide in a
-    // 1280 design, so the list hangs from its left edge.
-    root->flex().dim_start = {300, pulp::view::DimensionUnit::px};
+    // Anchored ABOVE the composer, which is where a dropdown for that field
+    // belongs. It had only a horizontal offset, so it rendered against the top
+    // of the window -- far from the text it was completing, and easy to miss
+    // entirely when a narrow query left one row.
+    //
+    // Bottom-anchored rather than top: the list grows upward as matches are
+    // added, so the row nearest the prompt stays put instead of the whole list
+    // sliding while the user types.
+    // Near the composer, not the window corner. It had only a horizontal
+    // offset, so it rendered against the TOP of the window -- nowhere near the
+    // text it completes, and easy to miss entirely when a narrow query left a
+    // single row. That is what "typing @braids does nothing" actually was.
+    //
+    // Absolute placement here is margin-driven, the same as every other
+    // absolutely-placed view in the chrome.
+    root->flex().margin_left = 300;
+    root->flex().margin_top = kListTopMargin;
     root->flex().preferred_width = 380;
     root->set_background_color(surface_panel);
     root->set_border(line, 1, forge::design::radius::medium);
     root->set_visible(false);
+
+    // Arrows and Enter belong to the LIST while it is open. The text field
+    // owns them otherwise -- it needs arrows to move the caret -- so this runs
+    // ahead of normal dispatch and consumes only what an open list is for.
+    // Set here rather than by the shell because the overlay owns this view and
+    // rebuilds it per editor; a hook installed elsewhere would outlive it.
+    root->on_global_key = [this](const pulp::view::KeyEvent& e) {
+        return handle_key_event(e);
+    };
 
     auto list = std::make_unique<View>();
     list_ = list.get();
@@ -72,8 +99,11 @@ std::unique_ptr<View> MentionOverlay::build() {
 void MentionOverlay::refresh(const std::string& query) {
     query_ = query;
     candidates_ = source_ ? source_(query) : std::vector<MentionCandidate>{};
-    if (candidates_.size() > static_cast<std::size_t>(kMaxRows))
-        candidates_.resize(kMaxRows);
+    // Every match is kept. This used to truncate to the six that fit, which
+    // meant there was nothing to scroll TO -- the rest were discarded before
+    // anything could ask for them, so a list of two hundred silently became a
+    // list of six.
+    first_visible_ = 0;
     // Land on something insertable if there is one, so Enter does the useful
     // thing rather than picking a module the user cannot wire.
     selected_ = 0;
@@ -83,13 +113,78 @@ void MentionOverlay::refresh(const std::string& query) {
     rebuild_rows();
 }
 
+int MentionOverlay::visible_rows() { return kMaxRows; }
+
+void MentionOverlay::move_selection(int delta) {
+    if (candidates_.empty()) return;
+    const int n = static_cast<int>(candidates_.size());
+    // Wraps, like a menu. Landing on nothing at the end of a long list is a
+    // dead end the user has to back out of.
+    selected_ = ((selected_ + delta) % n + n) % n;
+    scroll_to_selection();
+    rebuild_rows();
+}
+
+void MentionOverlay::scroll_to_selection() {
+    const int n = static_cast<int>(candidates_.size());
+    const int rows = kMaxRows;
+    if (n <= rows) { first_visible_ = 0; return; }
+    if (selected_ < first_visible_) first_visible_ = selected_;
+    if (selected_ >= first_visible_ + rows) first_visible_ = selected_ - rows + 1;
+    first_visible_ = std::max(0, std::min(first_visible_, n - rows));
+}
+
+void MentionOverlay::choose(std::size_t index) {
+    if (index >= candidates_.size()) return;
+    const auto& c = candidates_[index];
+    // Choosing a module that is not installed does nothing rather than
+    // inserting it: a patch wired to a module the user does not have cannot
+    // make sound, and silently producing one is worse than refusing.
+    if (!c.insertable()) return;
+    if (on_choose) on_choose(c.slug);
+    close();
+}
+
 void MentionOverlay::rebuild_rows() {
     if (!list_ || !root_) return;
     while (list_->child_count() > 0) list_->remove_child(list_->child_at(0));
 
-    for (std::size_t i = 0; i < candidates_.size(); ++i) {
+    const int n = static_cast<int>(candidates_.size());
+    const int last = std::min(n, first_visible_ + kMaxRows);
+
+    // "More above" / "more below", the way a menu says there is further to go.
+    // Without them a windowed list is indistinguishable from a short one, and
+    // the user has no reason to press Down again.
+    auto affordance = [&](const char* glyph, int delta) {
+        auto bar = std::make_unique<View>();
+        bar->flex().direction = FlexDirection::row;
+        bar->flex().justify_content = pulp::view::FlexJustify::center;
+        bar->flex().align_items = FlexAlign::center;
+        bar->flex().preferred_height = 16;
+        auto mark = std::make_unique<Label>(glyph);
+        mark->set_font_family(forge::design::type::mono);
+        mark->set_font_size(9);
+        mark->set_text_color(text_faint);
+        bar->add_child(std::move(mark));
+        // Clickable, because an arrow that is only a hint is a control that
+        // does not work.
+        bar->on_click = [this, delta] { move_selection(delta); };
+        list_->add_child(std::move(bar));
+    };
+    if (first_visible_ > 0) affordance("\u25B2", -1);
+
+    for (std::size_t i = static_cast<std::size_t>(first_visible_);
+         i < static_cast<std::size_t>(last); ++i) {
         const auto& c = candidates_[i];
         auto row = std::make_unique<View>();
+        // Click to choose, hover to select -- a dropdown's two obvious
+        // gestures. Neither existed, so the list could be looked at and not
+        // used.
+        row->on_click = [this, i] { choose(i); };
+        row->on_hover_enter = [this, i] {
+            selected_ = static_cast<int>(i);
+            rebuild_rows();
+        };
         row->flex().direction = FlexDirection::row;
         row->flex().align_items = FlexAlign::center;
         row->flex().preferred_height = kRowHeight;
@@ -125,6 +220,7 @@ void MentionOverlay::rebuild_rows() {
         }
         list_->add_child(std::move(row));
     }
+    if (last < n) affordance("\u25BC", 1);
     root_->request_repaint();
 }
 
@@ -142,25 +238,37 @@ bool MentionOverlay::handle_text(const std::string& text, std::size_t caret) {
     return false;
 }
 
+bool MentionOverlay::handle_key_event(const pulp::view::KeyEvent& event) {
+    if (!open_ || !event.is_down) return false;
+    using K = pulp::view::KeyCode;
+    switch (event.key) {
+        case K::up:     move_selection(-1); return true;
+        case K::down:   move_selection(1);  return true;
+        case K::escape: close();            return true;
+        case K::enter:
+            // Enter belongs to the LIST while it is open, or choosing a module
+            // would also submit the prompt -- one keystroke doing two things,
+            // one of them unasked for.
+            if (!candidates_.empty()) {
+                choose(static_cast<std::size_t>(selected_));
+                return true;
+            }
+            return false;
+        default: return false;
+    }
+}
+
 bool MentionOverlay::handle_key(int key_code) {
     if (!open_) return false;
     if (key_code == kKeyEscape) { close(); return true; }
     if (candidates_.empty()) return false;
 
     if (key_code == kKeyDown || key_code == kKeyUp) {
-        const int n = static_cast<int>(candidates_.size());
-        selected_ = (selected_ + (key_code == kKeyDown ? 1 : n - 1)) % n;
-        rebuild_rows();
+        move_selection(key_code == kKeyDown ? 1 : -1);
         return true;
     }
     if (key_code == kKeyReturn) {
-        const auto& c = candidates_[static_cast<std::size_t>(selected_)];
-        // Enter on a module that is not installed does nothing rather than
-        // inserting it: a patch wired to a module the user does not have cannot
-        // make sound, and silently producing one is worse than refusing.
-        if (!c.insertable()) return true;
-        if (on_choose) on_choose(c.slug);
-        close();
+        choose(static_cast<std::size_t>(selected_));
         return true;
     }
     return false;

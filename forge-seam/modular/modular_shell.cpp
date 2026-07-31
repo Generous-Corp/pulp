@@ -1,5 +1,7 @@
 #include "forge/modular_shell.hpp"
 
+#include "forge/module_catalog.hpp"
+
 #include "forge/module_summary.hpp"
 
 #include <forge/chrome.hpp>
@@ -389,6 +391,27 @@ std::unique_ptr<View> ForgeModularShell::overlay_accessory() {
     // the 4,705-module library index -- so this file never learns where that
     // index lives.
     auto v = mentions_.build();
+    // Where the "@" list gets its modules. Nothing set this, so the overlay
+    // opened onto an empty list every time -- the feature existed and had
+    // never listed anything.
+    //
+    // Installed modules first, because only those can be wired into a patch
+    // that will sound. The rest of the library is offered anyway: being able
+    // to name a module you do not own is how you find out it exists.
+    mentions_.set_source([](const std::string& query) {
+        return search_modules(query);
+    });
+    // Typing has to reach the list, or it never narrows. This was the whole
+    // reason "@braids" appeared to do nothing: handle_text ran ONCE, when the
+    // mention button was pressed, and every keystroke after it went only to
+    // the text field. The list stayed on whatever the first call produced.
+    if (auto* c = chrome()) {
+        if (auto* input = c->prompt_input()) {
+            input->on_change = [this](const std::string& text) {
+                mentions_.handle_text(text, text.size());
+            };
+        }
+    }
     mentions_.on_choose = [this](const std::string& slug) {
         if (auto* c = chrome()) {
             if (auto* input = c->prompt_input()) {

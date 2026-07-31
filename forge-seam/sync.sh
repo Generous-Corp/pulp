@@ -32,7 +32,7 @@ fi
 # holds Forge's own sources, which this repo must never carry.
 MODULAR_FILES=(
     build_monitor mention_overlay modular_shell module_summary
-    patch_explanation patch_loader process_engine rack_layout rack_preview
+    patch_explanation patch_loader module_catalog portmap process_engine rack_layout rack_preview
 )
 
 # A file this repo carries that the list above forgets is a file that drifts in

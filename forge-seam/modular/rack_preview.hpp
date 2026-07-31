@@ -131,7 +131,13 @@ private:
     /// Read `<dir>/<slug>.svg`, preferring the light face Rack shows.
     static std::string read_panel(const std::string& dir, const std::string& slug);
     /// One knob, in panel millimetres, as the module's manifest declares it.
-    struct KnobSpec { float x_mm = 0, y_mm = 0, diameter_mm = 0; };
+    /// One control. Ours arrive in millimetres from a manifest; a vendor's
+    /// arrive in panel points from CARTOG, and converting either into the
+    /// other's units would be a second place for the two to disagree.
+    struct KnobSpec {
+        float x_mm = 0, y_mm = 0, diameter_mm = 0;
+        bool already_points = false;
+    };
     /// The knobs of one of OUR modules, cached per model.
     const std::vector<KnobSpec>& module_knobs(const std::string& model) const;
     /// Paint them over the panel, which is where Rack composites its own.

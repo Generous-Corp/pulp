@@ -1,4 +1,6 @@
 #include "forge/patch_loader.hpp"
+
+#include "forge/portmap.hpp"
 #include <map>
 
 #include <choc/text/choc_JSON.h>
@@ -143,13 +145,48 @@ LoadedPatch load_patch(const std::string& path) {
                        ? m["plugin"].getWithDefault<std::string>("") : "";
         rm.name = m.hasObjectMember("model")
                       ? m["model"].getWithDefault<std::string>("") : rm.id;
-        // A patch carries no panel width, so a module the local inventory does
-        // not know gets a plain default rather than a guess dressed up as fact.
+        // A patch carries neither panel width nor jack coordinates, so both
+        // used to be a default: every module 8 HP, every module "unplaced" so
+        // its cables docked at the panel edge.
+        //
+        // That default is visibly wrong once you look at it. Fundamental's
+        // Scope is 13 HP drawn at 8 -- squashed by a third -- and its VCA is
+        // 5 HP stretched to 8. A rack of them reads as a bad drawing rather
+        // than as a rack, and every cable ends at a panel border instead of a
+        // jack.
+        //
+        // CARTOG measured both from inside Rack, so use what it measured.
+        // A module nobody has scanned still gets the honest default: the
+        // fallback is for the unmeasured, not for everyone.
         rm.hp = 8;
-        // Nor does it carry jack coordinates. Ports are discovered from the
-        // cables below, and every module is treated as unplaced so its cables
-        // dock at the panel edge instead of landing on invented positions.
         rm.placed = false;
+        if (const auto* mapped = PortMap::shared().find(rm.brand, rm.name)) {
+            if (mapped->width > 0.0f) {
+                // 15 points to the HP, which is Rack's own RACK_GRID_WIDTH.
+                rm.hp = std::max(1, static_cast<int>(
+                                        std::lround(mapped->width / 15.0f)));
+            }
+            const float w = mapped->width > 0.0f ? mapped->width : 1.0f;
+            auto add = [&](const std::vector<MappedWidget>& group,
+                           const char* prefix, bool input) {
+                for (const auto& jack : group) {
+                    Port port;
+                    port.id = prefix + std::to_string(jack.index);
+                    // The author's own label -- "Frequency modulation" rather
+                    // than "in1", which is what makes a wiring explanation
+                    // readable for a module we did not write.
+                    port.name = jack.name.empty() ? port.id : jack.name;
+                    port.x = jack.x / w;      // across the panel, 0..1
+                    port.y = jack.y;          // down it, already in points
+                    port.input = input;
+                    rm.ports.push_back(port);
+                }
+            };
+            add(mapped->inputs, "in", true);
+            add(mapped->outputs, "out", false);
+            // Placed means "we know where its jacks are", which is now true.
+            rm.placed = !rm.ports.empty();
+        }
         rm.available = rack_can_create(rm.brand, rm.name);
         out.modules.push_back(std::move(rm));
     }

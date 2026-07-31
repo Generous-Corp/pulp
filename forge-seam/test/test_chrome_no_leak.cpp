@@ -211,6 +211,7 @@ TEST_CASE("Forge MIDI's Home frame matches its baseline", "[no-leak]") {
 #include <forge/build_monitor.hpp>
 #include <forge/mention_overlay.hpp>
 #include <forge/modular_shell.hpp>
+#include <forge/module_catalog.hpp>
 
 TEST_CASE("Forge Modular's copy reaches the chrome", "[seam]") {
     forge_modular::ForgeModularShell shell;
@@ -5017,4 +5018,139 @@ TEST_CASE("our modules draw their knobs, at the sizes they declare",
     // A model we do not ship resolves to no knobs rather than to some other
     // module's.
     CHECK(preview.knob_summary("NoSuchModelAnywhere").first == 0);
+}
+
+TEST_CASE("the @ list actually lists modules", "[rack][mention]") {
+    // The overlay opened onto an EMPTY list every time: nothing ever called
+    // set_source, so the search function was null and returned nothing. The
+    // feature was reachable, tested for openness, and had never named a single
+    // module. Same shape as the depth tabs -- present in code, absent in use.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    const auto counts = forge_modular::catalog_counts();
+    if (counts.installed == 0 && counts.catalogued == 0) {
+        WARN("no Rack install and no cached library here — a skip, not a pass");
+        return;
+    }
+
+    shell.begin_mention();
+    REQUIRE(shell.mentions().is_open());
+    CHECK_FALSE(shell.mentions().candidates().empty());   // the missing part
+
+    // Searching narrows rather than returning everything regardless.
+    const auto vco = forge_modular::search_modules("VCO");
+    const auto nonsense = forge_modular::search_modules("zzzznosuchthing");
+    CHECK_FALSE(vco.empty());
+    CHECK(nonsense.empty());
+
+    // Installed modules rank above catalogued ones, because only they can be
+    // wired into a patch that will sound. A list that offered an uninstallable
+    // module first would be ranking novelty over usefulness.
+    if (counts.installed > 0) {
+        const auto all = forge_modular::search_modules("", 200);
+        REQUIRE_FALSE(all.empty());
+        CHECK(all.front().insertable());
+    }
+}
+
+TEST_CASE("the mention list behaves like a dropdown", "[rack][mention]") {
+    // It behaved like a label. Reported as "typing @ mention does nothing",
+    // "search puts a dropdown at the top of the app" and "i can't select
+    // anything can't figure out wtf that is supposed to do" -- three symptoms
+    // of a list that was drawn and never wired.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto& m = shell.mentions();
+
+    // A source with more rows than fit, so the window and its affordances are
+    // exercised rather than assumed.
+    const int kMany = 20;
+    m.set_source([&](const std::string& q) {
+        std::vector<forge_modular::MentionCandidate> out;
+        for (int i = 0; i < kMany; ++i) {
+            forge_modular::MentionCandidate c;
+            c.brand = "Test";
+            c.name = "Mod" + std::to_string(i);
+            c.slug = "SLUG" + std::to_string(i);
+            c.state = forge_modular::MentionCandidate::Availability::ready;
+            if (q.empty() || c.name.find(q) != std::string::npos)
+                out.push_back(c);
+        }
+        return out;
+    });
+
+    // TYPING narrows. handle_text ran once, when the button was pressed, and
+    // every keystroke after it went only to the text field -- which is why
+    // "@braids" stayed on whatever the first call produced.
+    m.handle_text("@", 1);
+    REQUIRE(m.is_open());
+    CHECK(m.candidates().size() == kMany);      // every match kept, not 6
+    m.handle_text("@Mod1", 5);
+    CHECK(m.candidates().size() < static_cast<std::size_t>(kMany));
+    CHECK_FALSE(m.candidates().empty());
+
+    m.handle_text("@", 1);
+    REQUIRE(m.candidates().size() == kMany);
+
+    // ARROWS move the selection and scroll it into view.
+    const int rows = forge_modular::MentionOverlay::visible_rows();
+    CHECK(m.selected_index() == 0);
+    CHECK(m.scroll_top() == 0);
+    for (int i = 0; i < rows; ++i) m.move_selection(1);
+    CHECK(m.selected_index() == rows);
+    CHECK(m.scroll_top() > 0);                  // the window followed
+
+    // UP walks back, then WRAPS to the end -- what a menu does rather than
+    // stopping dead at the top.
+    for (int i = 0; i < rows; ++i) m.move_selection(-1);
+    CHECK(m.selected_index() == 0);
+    m.move_selection(-1);
+    CHECK(m.selected_index() == kMany - 1);
+    CHECK(m.scroll_top() == kMany - rows);      // scrolled to the bottom
+
+    // CLICKING a row chooses it -- the same path the mouse takes.
+    std::string chosen;
+    m.on_choose = [&](const std::string& slug) { chosen = slug; };
+    m.handle_text("@", 1);
+    m.choose(3);
+    CHECK(chosen == "SLUG3");
+    CHECK_FALSE(m.is_open());                   // and the list goes away
+
+    // ESCAPE dismisses without choosing.
+    chosen.clear();
+    m.handle_text("@", 1);
+    REQUIRE(m.is_open());
+    pulp::view::KeyEvent esc;
+    esc.key = pulp::view::KeyCode::escape;
+    CHECK(m.handle_key_event(esc));
+    CHECK_FALSE(m.is_open());
+    CHECK(chosen.empty());
+
+    // ENTER chooses the selected row, and is CONSUMED so it does not also
+    // submit the prompt -- one keystroke doing two things, one unasked for.
+    m.handle_text("@", 1);
+    pulp::view::KeyEvent down;
+    down.key = pulp::view::KeyCode::down;
+    CHECK(m.handle_key_event(down));
+    pulp::view::KeyEvent ret;
+    ret.key = pulp::view::KeyCode::enter;
+    CHECK(m.handle_key_event(ret));
+    CHECK(chosen == "SLUG1");
+
+    // And with the list CLOSED the keys are left alone, or the prompt could
+    // never be submitted with Enter again.
+    CHECK_FALSE(m.is_open());
+    CHECK_FALSE(m.handle_key_event(ret));
+    CHECK_FALSE(m.handle_key_event(down));
 }

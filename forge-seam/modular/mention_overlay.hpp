@@ -70,6 +70,11 @@ public:
     /// reason.
     bool handle_key(int key_code);
 
+    /// The same, from a real key event. Kept separate from the raw-code form
+    /// because the raw codes are macOS virtual keys and an event carries a
+    /// portable enum -- translating in one place beats two tables that drift.
+    bool handle_key_event(const pulp::view::KeyEvent& event);
+
     bool is_open() const { return open_; }
     void close();
 
@@ -90,9 +95,27 @@ public:
     const std::vector<MentionCandidate>& candidates() const { return candidates_; }
     int selected_index() const { return selected_; }
 
+    /// First candidate currently drawn. The list holds every match and shows a
+    /// window of them, so this is what the up/down affordances are about.
+    int scroll_top() const { return first_visible_; }
+
+    /// How many rows are drawn at once.
+    static int visible_rows();
+
+    /// Choose the row at `index` -- what a click does. Public so a test can
+    /// exercise the same path the mouse takes rather than a private cousin.
+    void choose(std::size_t index);
+
+    /// Move the selection, scrolling it into view. `delta` of +1 is Down.
+    void move_selection(int delta);
+
 private:
     void refresh(const std::string& query);
     void rebuild_rows();
+    /// Keep the selected row inside the drawn window.
+    void scroll_to_selection();
+
+    int first_visible_ = 0;
 
     pulp::view::View* root_ = nullptr;
     pulp::view::View* list_ = nullptr;

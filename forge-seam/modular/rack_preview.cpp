@@ -2,6 +2,8 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "forge/portmap.hpp"
+
 #include <forge/design_tokens.hpp>
 
 #include <algorithm>
@@ -337,8 +339,29 @@ RackPreview::module_knobs(const std::string& model) const {
 void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
                              const RackModule& mod, float scale) const {
     static const std::string kOurs = "ForgeModular";
-    if (mod.brand != kOurs) return;   // a vendor's knobs are in their artwork
-    const auto& knobs = module_knobs(mod.name);
+
+    // Two sources, and the difference is where the truth lives.
+    //
+    // OURS come from the manifest their panel was emitted from: always
+    // present, never needs a scan, exact by construction.
+    //
+    // ANYBODY ELSE'S come from what CARTOG measured inside Rack, because a
+    // vendor's control positions exist only in their compiled widget code. A
+    // module nobody has scanned has no entry, and then nothing is drawn --
+    // a plain face, rather than a confident guess at somebody else's panel.
+    std::vector<KnobSpec> knobs;
+    if (mod.brand == kOurs) {
+        knobs = module_knobs(mod.name);
+    } else if (const auto* m = PortMap::shared().find(mod.brand, mod.name)) {
+        // Rack's units are the layout's units -- a panel is 380 of them tall
+        // and one HP is 15 wide -- so these arrive ready to use. The recorded
+        // size is what Rack DRAWS, which is why a fader comes out a fader
+        // without our knowing anything about the vendor's conventions.
+        for (const auto& p : m->params) {
+            if (!(p.w > 0.0f)) continue;
+            knobs.push_back({p.x, p.y, std::min(p.w, p.h), /*already_points=*/true});
+        }
+    }
     if (knobs.empty()) return;
 
     // A panel is 380 unscaled points tall and PANEL_H_MM millimetres, which is
@@ -346,9 +369,10 @@ void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel
     // so widths agree with the layout without a second conversion.
     const float ppmm = 75.0f / 25.4f * scale;
     for (const auto& k : knobs) {
-        const float cx = panel.x + k.x_mm * ppmm;
-        const float cy = panel.y + k.y_mm * ppmm;
-        const float r = k.diameter_mm * ppmm / 2.0f;
+        const float unit = k.already_points ? scale : ppmm;
+        const float cx = panel.x + k.x_mm * unit;
+        const float cy = panel.y + k.y_mm * unit;
+        const float r = k.diameter_mm * unit / 2.0f;
         if (!(r > 0.5f)) continue;    // below this it is a smudge, not a knob
         // The same shape components.py draws: a rim the knob sinks into, a
         // body, and an indicator running from the centre outward. A dot on the

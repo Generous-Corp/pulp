@@ -1,41 +1,28 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 63b40c2..0c95fb3 100644
+index 63b40c2..b186c8e 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -332,6 +332,24 @@ if(FORGE_HAS_PULP_HTTP_STREAMING)
-         src/gen/gemini_backend.cpp)            # native Gemini HTTP/SSE transport
- endif()
+@@ -334,6 +334,16 @@ endif()
  
-+# Forge Modular's shell and its views. They live in the pulp-modular-rack seam
-+# and are copied in, so they are untracked here and every one is guarded --
-+# a Forge-only checkout has none of them and must still configure.
-+#
-+# These belong in FORGE_SOURCES rather than in modular/CMakeLists.txt because
-+# the modular plugin builds ${FORGE_SOURCES} like its three siblings do. Adding
-+# the subdirectory WITHOUT adding these configures and compiles, then fails at
-+# link with "typeinfo for forge_modular::ForgeModularShell" -- the shell the
-+# product is made of, missing from the library the product links.
+ # Absolute paths so the list also resolves from a plugin subdirectory (a
+ # subdir's relative source paths would otherwise anchor at that subdir).
 +foreach(_forge_modular_src
 +        modular_shell.cpp rack_preview.cpp rack_layout.cpp
-+        patch_explanation.cpp patch_loader.cpp build_monitor.cpp
-+        process_engine.cpp mention_overlay.cpp module_summary.cpp)
++        patch_explanation.cpp patch_loader.cpp module_catalog.cpp portmap.cpp
++        build_monitor.cpp process_engine.cpp mention_overlay.cpp
++        module_summary.cpp)
 +    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${_forge_modular_src}")
 +        list(APPEND FORGE_SOURCES "src/${_forge_modular_src}")
 +    endif()
 +endforeach()
 +
- # Absolute paths so the list also resolves from a plugin subdirectory (a
- # subdir's relative source paths would otherwise anchor at that subdir).
  list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-@@ -645,6 +663,30 @@ if(FORGE_BUILD_TESTS)
+ 
+ # M2's Designer document consumes Pulp's optional design-import surface. Keep
+@@ -645,6 +655,25 @@ if(FORGE_BUILD_TESTS)
              forge_core Catch2::Catch2WithMain)
          catch_discover_tests(forge-test-chrome)
  
-+        # Forge Modular's chrome/lifetime suite. The file is copied in from the
-+        # pulp-modular-rack seam and is untracked here, so the guard is what
-+        # keeps a Forge-only checkout configuring -- and registering it here,
-+        # rather than leaving it as a step in a README, is what stops a rebuilt
-+        # worktree from quietly having no coverage of the shared chrome.
 +        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_chrome_no_leak.cpp")
 +            add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
 +            target_include_directories(forge-test-chrome-no-leak PRIVATE
@@ -45,27 +32,23 @@ index 63b40c2..0c95fb3 100644
 +            catch_discover_tests(forge-test-chrome-no-leak)
 +        endif()
 +
-+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_depth.cpp")
-+            add_executable(forge-shot-depth test/shot_depth.cpp)
-+            target_link_libraries(forge-shot-depth PRIVATE forge_core)
++        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_mention.cpp")
++            add_executable(forge-shot-mention test/shot_mention.cpp)
++            target_link_libraries(forge-shot-mention PRIVATE forge_core)
 +        endif()
 +
-+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_rack.cpp")
-+            add_executable(forge-shot-rack test/shot_rack.cpp)
-+            target_link_libraries(forge-shot-rack PRIVATE forge_core)
++        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_q.cpp")
++            add_executable(forge-q test/shot_q.cpp)
++            target_link_libraries(forge-q PRIVATE forge_core)
 +        endif()
 +
          add_executable(forge-test-audio-asset-coordinator
              test/test_audio_asset_coordinator.cpp)
          target_include_directories(forge-test-audio-asset-coordinator PRIVATE
-@@ -1573,6 +1615,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -1573,6 +1602,10 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  
-+    # Forge Modular, which generates VCV Rack modules and patches. Its sources
-+    # live in the pulp-modular-rack seam and are copied in, so the directory is
-+    # untracked here and this guard is what keeps a Forge-only checkout
-+    # configuring.
 +    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modular/CMakeLists.txt")
 +        add_subdirectory(modular)
 +    endif()
