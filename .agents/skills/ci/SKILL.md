@@ -606,6 +606,29 @@ A run being `cancelled` on `main` is different and usually benign: coverage
 sets `cancel-in-progress: false`, and GitHub queues only ONE run per group, so
 a burst of merges replaces the queued run and only the latest head runs.
 
+## An advisory lane can be red for days and still cost you merges
+
+A red advisory check blocks nothing, so nobody acts on it — while it keeps
+consuming the hosted-runner pool the *required* checks queue behind. The Tier-1
+Rosetta lane sat red for seven consecutive runs at ~52 minutes of hosted macOS per
+triggering PR, and the visible symptom was required checks waiting ~16 minutes for
+a machine.
+
+So when merges are slow, audit what advisory work is running and whether it is
+even producing signal:
+
+```sh
+gh run list --repo Generous-Corp/pulp --workflow <name>.yml --limit 10 \
+  --json conclusion,createdAt --jq '.[]|"\(.createdAt[11:16]) \(.conclusion)"'
+```
+
+An all-red history means the lane is spending capacity to tell you nothing.
+
+Related trap: ctest label-exclusion lists drift between lanes. `build.yml` excludes
+`validation|slow|windows-pr-quarantine|performance|bench|quality-lab` on PR runs;
+the Rosetta lane excluded only `validation|slow`, which let wall-clock-budget tests
+run under an emulator at a third of native speed. When adding a timing-sensitive
+test or label, update every lane's `-LE`.
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
