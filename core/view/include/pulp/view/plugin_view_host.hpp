@@ -40,9 +40,48 @@ public:
         uint32_t height = 300;
     };
 
+    /// How a host presents finished frames (WAH-13).
+    ///
+    /// This was an unexplained `cfg.vsync = false` buried in the Windows host
+    /// and an unexplained `true` elsewhere. Two different hosts had two
+    /// different answers with no shared statement of WHY, which is how a
+    /// measured fix in one place fails to reach the other.
+    enum class PresentPolicy {
+        /// Block until the display's next refresh (Fifo). Correct for a host
+        /// that OWNS its frame loop — a standalone window driven by a display
+        /// link, where pacing to the refresh is the point.
+        vsync,
+        /// Do not block on acquire (Mailbox, then Immediate, then Fifo).
+        /// Correct for an EMBEDDED editor: it renders synchronously from the
+        /// DAW's paint message, on the DAW's UI thread, and the DAW already
+        /// composites at its own cadence. Blocking there stalls the message
+        /// pump that delivers further input.
+        ///
+        /// Measured on the REAPER VM during a knob drag (Perfetto): the frame's
+        /// own work was ~2 ms (paint ~1 ms, submit ~1 ms, present ~0.1 ms)
+        /// while whole frames took 19-45 ms — the difference was all acquire.
+        /// Seven frames were produced across eight drag sweeps.
+        nonblocking,
+    };
+
     struct Options {
         Size size = {400, 300};
         bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
+
+        /// Presentation policy for this host. Embedded plug-in editors default
+        /// to `nonblocking` because that is what every plug-in host IS; a
+        /// standalone window host overrides to `vsync`.
+        PresentPolicy present_policy = PresentPolicy::nonblocking;
+
+        /// Enable GPU timing instrumentation (Dawn timestamp queries).
+        ///
+        /// OFF by default, and that default is load-bearing. Dawn gates
+        /// `writeTimestamp` behind the `allow_unsafe_apis` toggle, so
+        /// requesting timestamps silently relaxes the device's validation
+        /// posture for ORDINARY RENDERING. Enabling a diagnostic must be a
+        /// decision, not a side effect of the adapter happening to advertise a
+        /// feature.
+        bool enable_gpu_timing = false;
     };
 
     // Create a plugin view host for the given view tree.

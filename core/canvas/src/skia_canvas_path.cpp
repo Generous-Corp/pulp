@@ -31,16 +31,133 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <unordered_map>
 #include <cmath>
 #include <limits>
 
 namespace pulp::canvas {
 
+// Renderer-owned storage for sealed compositing layers (WAH-12).
+//
+// Four things were wrong with the previous shape, and each one is a hazard
+// rather than a style preference:
+//
+//   * `std::vector<std::pair<uint64_t, SkiaLayer>>` with a LINEAR scan on every
+//     find_layer(). A frame that composites N cached layers is O(N^2), and this
+//     is on the paint path.
+//   * `const void*` owner plus a `uint8_t` backend tag as identity. Two
+//     different backends can hand out the same pointer value at different
+//     times, so "same owner" was decided by comparing an address whose meaning
+//     depended on a separate byte nobody could typecheck.
+//   * NO BUDGET. Retained layers are GPU textures; a UI that opens layers under
+//     a scroll or an animation grows this without bound.
+//   * A sealed non-cacheable layer that is never drawn is never removed. Its
+//     texture lives until the store is replaced.
+//
+// The class stays private to this TU: the header only forward-declares it, so
+// the plumbing is not part of SkiaCanvas's public surface.
 class SkiaCanvas::RetainedLayerStore {
 public:
-    std::vector<std::pair<uint64_t, SkiaLayer>> layers;
-    const void* owner = nullptr;
-    uint8_t backend_kind = 0;
+    /// Which renderer/backend object owns the GPU resources in this store.
+    ///
+    /// Typed, so "same owner" is a comparison of two things that mean the same
+    /// thing. GPU images cannot cross the recorder/context that created them,
+    /// which is what makes getting this wrong a use-after-free rather than a
+    /// cache miss.
+    enum class Backend : std::uint8_t { none, graphite_recorder, ganesh_context };
+
+    struct Owner {
+        Backend backend = Backend::none;
+        const void* handle = nullptr;
+
+        bool operator==(const Owner& other) const noexcept {
+            return backend == other.backend && handle == other.handle;
+        }
+        bool operator!=(const Owner& other) const noexcept {
+            return !(*this == other);
+        }
+        explicit operator bool() const noexcept {
+            return backend != Backend::none && handle != nullptr;
+        }
+    };
+
+    /// Cap on retained layers. Retained layers are GPU textures, so an
+    /// unbounded store is an unbounded VRAM leak driven by whatever the UI
+    /// happens to draw. Eviction is least-recently-used: the entry a frame has
+    /// gone longest without touching is the one least likely to be composited
+    /// next.
+    static constexpr std::size_t kMaxRetainedLayers = 64;
+
+    Owner owner;
+
+    SkiaLayer* find(std::uint64_t id) {
+        if (id == 0) return nullptr;
+        auto it = layers_.find(id);
+        if (it == layers_.end()) return nullptr;
+        it->second.last_used = ++clock_;
+        return &it->second.layer;
+    }
+
+    const SkiaLayer* find(std::uint64_t id) const {
+        if (id == 0) return nullptr;
+        auto it = layers_.find(id);
+        return it == layers_.end() ? nullptr : &it->second.layer;
+    }
+
+    void insert(std::uint64_t id, SkiaLayer layer) {
+        if (id == 0) return;
+        evict_if_over_budget();
+        layers_.insert_or_assign(id, Entry{std::move(layer), ++clock_});
+    }
+
+    bool erase(std::uint64_t id) { return layers_.erase(id) != 0; }
+
+    void clear() { layers_.clear(); }
+
+    std::size_t size() const noexcept { return layers_.size(); }
+
+    /// Drop sealed NON-CACHEABLE layers that were never composited.
+    ///
+    /// A non-cacheable layer is consumed by its first draw. One that is sealed
+    /// and then abandoned — the caller took a different branch, or the widget
+    /// left the tree — has no future reader, so holding its texture to the end
+    /// of the store's life is pure waste. Called at the frame boundary, which
+    /// is the point at which "never drawn" becomes knowable.
+    std::size_t prune_abandoned_non_cacheable() {
+        std::size_t removed = 0;
+        for (auto it = layers_.begin(); it != layers_.end();) {
+            if (!it->second.layer.cacheable) {
+                it = layers_.erase(it);
+                ++removed;
+            } else {
+                ++it;
+            }
+        }
+        return removed;
+    }
+
+private:
+    struct Entry {
+        SkiaLayer layer;
+        std::uint64_t last_used = 0;
+    };
+
+    void evict_if_over_budget() {
+        while (layers_.size() >= kMaxRetainedLayers) {
+            auto oldest = layers_.begin();
+            for (auto it = layers_.begin(); it != layers_.end(); ++it) {
+                if (it->second.last_used < oldest->second.last_used) oldest = it;
+            }
+            if (oldest == layers_.end()) return;
+            layers_.erase(oldest);
+        }
+    }
+
+    std::unordered_map<std::uint64_t, Entry> layers_;
+    /// Monotonic touch counter for LRU. Never wraps in practice: at one touch
+    /// per layer per frame at 120 Hz it would take ~4.8 billion years.
+    std::uint64_t clock_ = 0;
 };
 
 std::shared_ptr<SkiaCanvas::RetainedLayerStore>
@@ -123,14 +240,16 @@ SkPaint::Join to_sk_join(LineJoin join) {
 void SkiaCanvas::bind_retained_layer_store(const void* owner,
                                            uint8_t backend_kind) {
     if (!owner || backend_kind == 0) return;
-    if (retained_layers_->owner &&
-        (retained_layers_->owner != owner ||
-         retained_layers_->backend_kind != backend_kind)) {
-        // GPU images cannot cross the recorder/context that created them.
-        retained_layers_->layers.clear();
+    const RetainedLayerStore::Owner next{
+        static_cast<RetainedLayerStore::Backend>(backend_kind), owner};
+    if (retained_layers_->owner && retained_layers_->owner != next) {
+        // GPU images cannot cross the recorder/context that created them, so a
+        // backend or surface REPLACEMENT invalidates every retained texture.
+        // Comparing a typed {backend, handle} pair rather than a bare address
+        // is what makes "different owner" mean the same thing on both sides.
+        retained_layers_->clear();
     }
-    retained_layers_->owner = owner;
-    retained_layers_->backend_kind = backend_kind;
+    retained_layers_->owner = next;
 }
 
 SkiaCanvas::SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder)
@@ -150,7 +269,10 @@ SkiaCanvas::SkiaCanvas(
                            ? retained_layers
                            : create_retained_layer_store()),
       retained_layer_cache_supported_(retained_layers != nullptr) {
-    if (recorder_) bind_retained_layer_store(recorder_, 1);
+    if (recorder_)
+        bind_retained_layer_store(
+            recorder_,
+            static_cast<uint8_t>(RetainedLayerStore::Backend::graphite_recorder));
 }
 
 SkiaCanvas::~SkiaCanvas() {
@@ -164,7 +286,10 @@ SkiaCanvas::~SkiaCanvas() {
 
 void SkiaCanvas::set_gpu_upload_context(GrDirectContext* context) {
     gr_context_ = context;
-    if (context) bind_retained_layer_store(context, 2);
+    if (context)
+        bind_retained_layer_store(
+            context,
+            static_cast<uint8_t>(RetainedLayerStore::Backend::ganesh_context));
 }
 
 // ── Retained path draws ──────────────────────────────────────────────────
@@ -273,17 +398,11 @@ void SkiaCanvas::draw_path_shadow(const Path& path, float dx, float dy,
 // ── Retained compositing layers ──────────────────────────────────────────
 
 SkiaCanvas::SkiaLayer* SkiaCanvas::find_layer(uint64_t id) {
-    if (id == 0) return nullptr;
-    for (auto& [lid, rec] : retained_layers_->layers)
-        if (lid == id) return &rec;
-    return nullptr;
+    return retained_layers_->find(id);
 }
 
 const SkiaCanvas::SkiaLayer* SkiaCanvas::find_layer(uint64_t id) const {
-    if (id == 0) return nullptr;
-    for (const auto& [lid, rec] : retained_layers_->layers)
-        if (lid == id) return &rec;
-    return nullptr;
+    return retained_layers_->find(id);
 }
 
 Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
@@ -358,7 +477,7 @@ Canvas::LayerHandle SkiaCanvas::end_layer() {
 
     // Only sealed images enter the renderer-owned cross-frame store. An open
     // surface stays local, so invalidation cannot leave a dangling SkCanvas.
-    retained_layers_->layers.emplace_back(open.id, std::move(open.layer));
+    retained_layers_->insert(open.id, std::move(open.layer));
     return LayerHandle{open.id};
 }
 
@@ -435,13 +554,20 @@ void SkiaCanvas::invalidate_layer(LayerHandle layer) {
             return;
         }
     }
-    auto& layers = retained_layers_->layers;
-    for (auto it = layers.begin(); it != layers.end(); ++it) {
-        if (it->first == layer.id) {
-            layers.erase(it);
-            return;
-        }
-    }
+    retained_layers_->erase(layer.id);
+}
+
+std::size_t SkiaCanvas::prune_abandoned_retained_layers() {
+    return retained_layers_ ? retained_layers_->prune_abandoned_non_cacheable()
+                            : 0u;
+}
+
+std::size_t SkiaCanvas::retained_layer_count() const {
+    return retained_layers_ ? retained_layers_->size() : 0u;
+}
+
+std::size_t SkiaCanvas::max_retained_layers() {
+    return RetainedLayerStore::kMaxRetainedLayers;
 }
 
 }  // namespace pulp::canvas

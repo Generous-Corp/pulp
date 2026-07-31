@@ -172,3 +172,58 @@ TEST_CASE("the paint body balances its save/restore with and without a clip",
     paint_plugin_scene(canvas, root, plain_geometry(), &clip);
     REQUIRE(canvas.save_count() == before);
 }
+
+// ── FrameGeometry's pixel arithmetic (WAH-6) ────────────────────────────────
+//
+// This rule used to be a private `pixel_w()`/`pixel_h()` pair copied into each
+// platform host. Three consumers depend on the SAME answer — the GPU
+// swapchain's size, the CPU raster fallback's buffer, and the headless capture
+// the embed smoke asserts on — so a host that computed it differently from its
+// own surface produced a capture that did not match what it presented.
+
+TEST_CASE("pixel dimensions are logical size times scale",
+          "[plugin-frame][wah-6]") {
+    FrameGeometry g;
+    g.width = 400.0f;
+    g.height = 300.0f;
+    g.scale = 2.0f;
+
+    REQUIRE(g.pixel_width() == 800);
+    REQUIRE(g.pixel_height() == 600);
+}
+
+TEST_CASE("fractional pixel dimensions truncate rather than round up",
+          "[plugin-frame][wah-6]") {
+    // The surface must never be asked for MORE pixels than the window has, or
+    // the readback reads past the drawable.
+    FrameGeometry g;
+    g.width = 100.0f;
+    g.height = 100.0f;
+    g.scale = 1.5f;
+
+    REQUIRE(g.pixel_width() == 150);
+    REQUIRE(g.pixel_height() == 150);
+
+    g.scale = 1.255f;  // 125.5 -> 125
+    REQUIRE(g.pixel_width() == 125);
+}
+
+TEST_CASE("a collapsed editor still asks for at least one pixel",
+          "[plugin-frame][wah-6]") {
+    // A DAW can size an editor to zero mid-teardown. A 0-sized surface is a
+    // backend error on every platform, so the clamp is what keeps a collapse
+    // from becoming a crash.
+    FrameGeometry g;
+    g.width = 0.0f;
+    g.height = 0.0f;
+    g.scale = 1.0f;
+
+    REQUIRE(g.pixel_width() == 1);
+    REQUIRE(g.pixel_height() == 1);
+
+    g.width = 10.0f;
+    g.height = 10.0f;
+    g.scale = 0.01f;  // 0.1 logical pixels
+    REQUIRE(g.pixel_width() == 1);
+    REQUIRE(g.pixel_height() == 1);
+}

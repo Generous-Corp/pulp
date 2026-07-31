@@ -353,3 +353,20 @@ tscon <session-id> /dest:console     # session stays Active, RDP client detaches
 
 Pair with auto-logon so a session exists after reboot, and run long builds under
 Task Scheduler (S4U) — an SSH drop otherwise kills `cmake`/MSBuild mid-build.
+
+## GPU render time is now OPT-IN (WAH-13)
+
+`SkiaSurface::gpu_render_timing_available()` reporting false is no longer
+evidence of an adapter that lacks `timestamp-query`. Timestamps are requested
+only when the host asks, via `PluginViewHost::Options::enable_gpu_timing`
+(default OFF), rather than whenever the adapter advertises the feature.
+
+That default is deliberate and worth understanding before you "fix" it: Dawn
+gates `writeTimestamp` behind the `allow_unsafe_apis` toggle on every backend,
+so requesting the feature forces that toggle on — and it applies to the DEVICE,
+not to the diagnostic. Ordinary rendering was silently running with relaxed
+validation on every machine whose adapter happened to offer timestamps.
+
+If you need per-recording GPU time in a capture, enable it explicitly on the
+host's Options. If a trace shows no `gpu_render_time`, check that flag before
+suspecting the adapter.

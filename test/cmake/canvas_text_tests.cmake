@@ -153,6 +153,16 @@ endif()
 # with every other GPU test and contend for a process-global resource, which
 # surfaces as an intermittent short readback: the frame composites fewer
 # pixels than the assertion expects, on a PR that changed nothing related.
+# Renderer-owned retained compositing layers (WAH-12): keyed lookup, typed
+# owner identity, pruning of sealed-but-never-drawn non-cacheable layers, and a
+# bounded LRU budget. Raster-only — none of this needs a GPU.
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-retained-layer-store
+        LIBRARIES pulp::canvas
+        INCLUDE_DIRS ${SKIA_INCLUDE_DIRS}
+        COMPILE_DEFINITIONS PULP_HAS_SKIA=1)
+endif()
+
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     add_executable(pulp-test-font-rendering-goldens-gpu
         test_font_rendering_goldens_gpu.cpp)
