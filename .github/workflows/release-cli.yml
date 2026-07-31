@@ -471,12 +471,14 @@ jobs:
 
       # A normal post-contract tag carries these files itself. An old tag or an
       # explicit old source_ref may not. Manual dispatches always use the current
-      # verifier and provenance stamper as compatibility helpers while retaining
-      # the selected source's product matrix. Keep those current helpers outside
-      # tracked source paths: provenance stamping must see the selected tag's
-      # tracked tree as clean. Otherwise fetch helpers only when absent. The
-      # matrix floor makes a pre-contract source an explicit skip rather than an
-      # accidental pass.
+      # verifier, provenance stamper, and CLI packager as compatibility helpers
+      # while retaining the selected source's product matrix. Keep those current
+      # helpers outside tracked source paths: provenance stamping must see the
+      # selected tag's tracked tree as clean. The current packager is also
+      # required because historical copies can omit release repairs such as
+      # signing a staged macOS wgpu runtime. Otherwise fetch helpers only when
+      # absent. The matrix floor makes a pre-contract source an explicit skip
+      # rather than an accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
@@ -484,19 +486,27 @@ jobs:
           repo='${{ github.repository }}'
           compat_dir=.release-backfill-helpers
           rm -rf "$compat_dir"
-          mkdir -p "$compat_dir"
+          mkdir -p "$compat_dir/tools/scripts"
           for path in \
+              tools/scripts/package_cli.py \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
               tools/scripts/sdk_provenance.py \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
-                && { [ "$path" = tools/scripts/release_artifact_contents.py ] \
+                && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/scripts/release_artifact_contents.py ] \
                   || [ "$path" = tools/scripts/sdk_provenance.py ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
-              curl -fsSL "$url" -o "$compat_dir/${path##*/}"
+              compat_path="$compat_dir/${path##*/}"
+              if [ "$path" = tools/scripts/package_cli.py ]; then
+                # package_cli.py resolves the import-design runtime manifest
+                # relative to tools/scripts, so preserve that layout.
+                compat_path="$compat_dir/tools/scripts/package_cli.py"
+              fi
+              curl -fsSL "$url" -o "$compat_path"
               continue
             fi
             if [ ! -f "$path" ]; then
@@ -506,16 +516,23 @@ jobs:
             fi
           done
           if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then
+            # Make the selected tag's runtime manifest visible at the relative
+            # path expected by the current compatibility packager.
+            ln -s ../../tools/import-design "$compat_dir/tools/import-design"
             cp tools/scripts/release_product_matrix.json \
               "$compat_dir/release_product_matrix.json"
             echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
           else
             echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
           fi
 
@@ -788,7 +805,7 @@ jobs:
               --import-design-runtime-dir build/tools/import-design/browser_capture-v1
             )
           fi
-          python3 tools/scripts/package_cli.py \
+          python3 "$PULP_RELEASE_PACKAGER" \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
@@ -811,7 +828,7 @@ jobs:
               'build/tools/import-design/Release/browser_capture-v1'
             )
           }
-          python tools/scripts/package_cli.py `
+          python $env:PULP_RELEASE_PACKAGER `
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `

@@ -388,7 +388,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_unix_package_step_bundles_cpp_delegate(self) -> None:
         run_block = self._find_step_run("Package CLI (Unix)")
-        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertIn('"$PULP_RELEASE_PACKAGER"', run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/pulp-mcp")
@@ -429,7 +429,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
 
     def test_windows_package_step_bundles_cpp_delegate(self) -> None:
         run_block = self._find_step_run("Package CLI (Windows)")
-        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertIn("$env:PULP_RELEASE_PACKAGER", run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp\.exe")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/Release/pulp-cpp\.exe")
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
@@ -644,6 +644,10 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
+            "[ \"$path\" = tools/scripts/package_cli.py ]",
+            run_block,
+        )
+        self.assertIn(
             "[ \"$path\" = tools/scripts/sdk_provenance.py ]",
             run_block,
         )
@@ -653,7 +657,15 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
-            'curl -fsSL "$url" -o "$compat_dir/${path##*/}"',
+            'curl -fsSL "$url" -o "$compat_path"',
+            run_block,
+        )
+        self.assertIn(
+            'compat_path="$compat_dir/tools/scripts/package_cli.py"',
+            run_block,
+        )
+        self.assertIn(
+            'ln -s ../../tools/import-design "$compat_dir/tools/import-design"',
             run_block,
         )
         self.assertIn(
@@ -675,13 +687,22 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         windows_verify = self._find_step_run(
             "Verify release archive product matrix (Windows)"
         )
+        unix_package = self._find_step_run("Package CLI (Unix)")
+        windows_package = self._find_step_run("Package CLI (Windows)")
         self.assertIn("compat_dir=.release-backfill-helpers", ensure_block)
         self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
         self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
+        self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)
+        self.assertIn(
+            "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py",
+            ensure_block,
+        )
         self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_stamp)
         self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_stamp)
         self.assertIn('"$PULP_RELEASE_CONTENT_VERIFIER"', unix_verify)
         self.assertIn("$env:PULP_RELEASE_CONTENT_VERIFIER", windows_verify)
+        self.assertIn('"$PULP_RELEASE_PACKAGER"', unix_package)
+        self.assertIn("$env:PULP_RELEASE_PACKAGER", windows_package)
 
     def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
         unix_block = self._find_step_run("Build SDK tarball (Unix)")
