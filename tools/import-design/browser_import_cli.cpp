@@ -733,6 +733,27 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
             {diff_path, published_diff_path, true});
     }
 
+    // When the root was cropped out of a larger capture, the reference must be
+    // cropped the same way or the comparison is between two different pictures.
+    // The offset lives on the capture child as a negative position, and the
+    // reference is at device scale, so the rect is scaled by the DPR.
+    int crop_x = 0, crop_y = 0, crop_w = 0, crop_h = 0;
+    for (const auto& child : design_ir.root.children) {
+        if (child.render_mode != pulp::view::NodeRenderMode::faithful_capture)
+            continue;
+        const float left = child.style.left.value_or(0.0f);
+        const float top = child.style.top.value_or(0.0f);
+        if (left >= 0.0f && top >= 0.0f) break;   // not a crop
+        constexpr int kCaptureDpr = 2;
+        crop_x = static_cast<int>(std::lround(-left)) * kCaptureDpr;
+        crop_y = static_cast<int>(std::lround(-top)) * kCaptureDpr;
+        crop_w = static_cast<int>(std::lround(
+                     design_ir.root.style.width.value_or(0.0f))) * kCaptureDpr;
+        crop_h = static_cast<int>(std::lround(
+                     design_ir.root.style.height.value_or(0.0f))) * kCaptureDpr;
+        break;
+    }
+
     const auto comparison = operations.validate_capture(
         design_ir,
         {.reference = reference_image,
@@ -741,6 +762,10 @@ BrowserImportCliResult internal::run_browser_import_cli_with_operations(
          .width = render_width,
          .height = render_height,
          .fail_below_percent = request.fail_below_percent,
+         .reference_crop_x = crop_x,
+         .reference_crop_y = crop_y,
+         .reference_crop_width = crop_w,
+         .reference_crop_height = crop_h,
          .backend = request.screenshot_backend});
     if (!comparison.valid) {
         std::cerr << "Validation error: " << comparison.error << "\n";

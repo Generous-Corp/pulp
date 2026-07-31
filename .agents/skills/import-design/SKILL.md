@@ -5082,3 +5082,43 @@ Only `blur()` is read out of a filter list. `brightness`, `saturate` and the
 rest need a real filter chain, so a node carrying them is left unfiltered
 rather than approximated: an unfiltered element is visibly missing, a wrongly
 blurred one looks intentional.
+
+## Pixel-parity cannot see invented component markup
+
+A 100% similarity score compares our render against the browser's render of the
+**same** source. When authored markup uses a class the design system never
+defines, the browser paints an unstyled box and we paint the identical unstyled
+box — so the import reports `Similarity: 100%`, `Validation: PASS`, and every
+control bound, on a visibly broken panel. This is a structural blind spot, not a
+tuning problem, and no threshold change closes it.
+
+Two real instances, both of which survived repeated review by eye:
+
+- a meter authored as `.meter-track > .meter-fill` where the system defines
+  `.pulp-meter > .level` + `.peak` — rendered as a flat empty rectangle;
+- a header authored as `.pulp-panel-header > .panel-title` / `.panel-subtitle`,
+  none of which exist — rendered as default body text next to correctly styled
+  `.knob-label` runs, which is what makes it so easy to miss.
+
+Run `tools/import-design/component_contract.py --system <dir> panel.html`
+before trusting a similarity score on agent- or hand-authored HTML. It reports
+invented children (naming the classes the component *does* style) and invented
+`pulp-*` component names, whose children are unstyled too. Tests:
+`tools/import-design/test_component_contract.py`.
+
+Corollary for prompts: an agent asked to author design-system HTML will invent
+plausible class names. The component contract is the gate that catches it —
+"it rendered and matched" is not evidence the markup was real.
+
+## A stale importer binary silently falls back to the old parser
+
+`pulp-import-design` built from an older tree can still run and still print
+`PASS` while exercising a retired code path — e.g. a regex parser that main has
+since replaced (there is a commit literally titled *"retire stale Claude parser
+guidance"*). The symptom is a result that looks plausible but does not reflect
+the change you are testing.
+
+Before concluding anything from an import run, confirm the binary matches the
+worktree you edited: check `git log --oneline -1` in the checkout you built
+from, and rebuild if the change you are validating is not in it. Testing an old
+worktree and reporting the result as current has burned real debugging hours.

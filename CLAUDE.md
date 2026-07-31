@@ -813,6 +813,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 
 **design-import** — get a design into Pulp
+- Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
+  - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
+- Catch a panel that invents component classes or child parts the design system never defined. → `tools/import-design/component_contract.py`
+  - ⚠ **Cannot see:** Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
 - A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`

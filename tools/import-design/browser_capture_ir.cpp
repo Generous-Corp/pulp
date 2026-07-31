@@ -78,6 +78,16 @@ choc::value::ValueView object_member(const choc::value::ValueView& object,
     return object[key];
 }
 
+/// object_member insists the member is an OBJECT and hands back an empty view
+/// for an array, which reads as "absent" — a silent zero rather than an error.
+choc::value::ValueView array_member(const choc::value::ValueView& object,
+                                    const char* key) {
+    if (!object.isObject() || !object.hasObjectMember(key) ||
+        !object[key].isArray())
+        return {};
+    return object[key];
+}
+
 bool load_token_report(const fs::path& path,
                        DesignIR& ir,
                        int expected_colors,
@@ -191,6 +201,165 @@ bool validate_semantic_report(const fs::path& path,
         return false;
     }
     return true;
+}
+
+/// Lower each bound semantic candidate into a control node beneath the
+/// faithful-capture backdrop.
+///
+/// The capture is a picture; these children are what make it a panel. Every
+/// step downstream already exists — design_codegen emits createKnob/createFader
+/// /createMeter for any node carrying audio_widget, and the designed-control
+/// skin paints value-only geometry so the design underneath is not erased.
+///
+/// Geometry comes from the author-declared paint box when present. It is NOT
+/// the component box: a knob's component includes its caption (116x139.9 where
+/// the dial is 116x116), so painting a value ring into it lands the ring ~12px
+/// below the dial centre — which renders, looks almost right, and is invisible
+/// to pixel-parity and to the component and macro contracts alike.
+///
+/// Only BOUND candidates become controls. An unbound candidate drives nothing,
+/// and a live widget over the design that moves no parameter is worse than
+/// leaving that part of the picture alone.
+int lower_semantic_controls(const fs::path& path,
+                            const DesignIR& ir,
+                            double dx, double dy,
+                            pulp::view::IRNode& root,
+                            int& undeclared_paint_boxes,
+                            std::string& error) {
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream bytes;
+    bytes << input.rdbuf();
+    choc::value::Value report;
+    try {
+        report = choc::json::parse(bytes.str());
+    } catch (const std::exception& e) {
+        error = std::string("invalid browser semantic JSON: ") + e.what();
+        return -1;
+    }
+    const auto candidates = array_member(report, "candidates");
+    if (!candidates.isArray()) return 0;
+
+    int lowered = 0;
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        const auto candidate = candidates[i];
+        if (!candidate.isObject()) continue;
+        if (string_member(candidate, "binding_status") != "bound") continue;
+
+        const auto kind = string_member(candidate, "kind");
+        auto widget = pulp::view::AudioWidgetType::none;
+        if (kind == "knob") widget = pulp::view::AudioWidgetType::knob;
+        else if (kind == "fader") widget = pulp::view::AudioWidgetType::fader;
+        else if (kind == "meter") widget = pulp::view::AudioWidgetType::meter;
+        else continue;  // buttons and unknowns stay part of the backdrop
+
+        const auto data = object_member(candidate, "data_pulp");
+        std::string param = string_member(data, "param");
+        if (param.empty()) param = string_member(data, "meter");
+        if (param.empty()) continue;  // "bound" without a key is not a binding
+
+        // Prefer the declared paint box; fall back to the component box and
+        // count it, so an undeclared control is reported rather than silently
+        // mispainted. A meter legitimately has no inner paint box — the
+        // component IS its track — so the fallback is correct there.
+        auto box = object_member(candidate, "paint_bounds");
+        if (!box.isObject()) {
+            box = object_member(candidate, "bounds");
+            ++undeclared_paint_boxes;
+        }
+
+        pulp::view::IRNode control;
+        control.type = "frame";
+        control.name = string_member(candidate, "name");
+        control.audio_widget = widget;
+        // design_codegen keys the host binding off attributes["binding"] —
+        // IRNode::param_key does not exist; that field belongs to the
+        // geometry-detected element struct, which is a different lane.
+        // Two consumers read the host binding under DIFFERENT names, and a
+        // control that carries only one is silently half-wired: the JS codegen
+        // keys off "binding", while the C++ path's binding metadata reads
+        // "pulpParamKey". Exporting a panel with only the first produced eight
+        // real widgets and an EMPTY binding manifest -- knobs that render and
+        // move nothing.
+        control.attributes["binding"] = param;
+        control.attributes["pulpParamKey"] = param;
+        // A param key alone gets the control into the binding MANIFEST but not
+        // into the emitted C++. `collect_resolved_binding_plan` admits a helper
+        // route only when the node ALSO carries a route id and a stable anchor:
+        // the emitted helper finds its widget by anchor and claims it by route
+        // id, so without both there is nothing to find and nothing to claim.
+        // The manifest then lists bindings that no generated code applies --
+        // which reads as wired and moves nothing.
+        //
+        // Keyed on the macro plus the candidate index rather than the macro
+        // alone: a meter may legitimately share a macro with the control that
+        // drives it, and two routes with one anchor make the emitted lookup
+        // ambiguous, which the generated code treats as no match at all.
+        const auto anchor = "capture:" + param + ":" + std::to_string(i);
+        control.stable_anchor_id = anchor;
+        control.anchor_strategy = "path";
+        control.attributes["pulpRouteId"] = anchor;
+        // The body of this control is the captured bitmap beneath it, so it
+        // carries no background of its own and would otherwise fail the
+        // has-a-body test that selects the value-only skin -- and be painted
+        // over by an opaque default widget body.
+        control.attributes["designed_body"] = "capture";
+        // The caption is already in the capture. audio_label would draw a
+        // second copy on top of it; the name survives on the node for host
+        // parameter naming.
+        control.audio_label.clear();
+        // The design draws the control at a value; the widget must open at the
+        // same one or the panel changes the moment it loads. Declared, not
+        // inferred: the value lives in a CSS custom property the stylesheet
+        // reads, and which property that is differs per design system.
+        const auto declared_value = string_member(data, "value");
+        if (!declared_value.empty()) {
+            try {
+                control.audio_default = std::stof(declared_value);
+            } catch (const std::exception&) {
+                // A malformed value must not take the control down with it;
+                // the default stands and the design still renders.
+            }
+        }
+        control.style.position = "absolute";
+        control.style.left =
+            static_cast<float>(number_member(box, "left", 0.0) + dx);
+        control.style.top =
+            static_cast<float>(number_member(box, "top", 0.0) + dy);
+        control.style.width = static_cast<float>(number_member(box, "width", 0.0));
+        control.style.height = static_cast<float>(number_member(box, "height", 0.0));
+        // The value layer's colours come from the DESIGN's tokens, not the
+        // widget defaults. DesignedControlSkin's header says exactly this, but
+        // its call site passes a default-constructed skin whose accent is a
+        // hardcoded teal -- so a warm cream panel drew teal arcs and a green
+        // meter while the browser capture beside it was perfectly coherent.
+        const auto token = [&ir](const char* name) -> std::string {
+            const auto it = ir.tokens.colors.find(name);
+            return it == ir.tokens.colors.end() ? std::string{} : it->second;
+        };
+        // The control's OWN resolved accent wins over the pack token. A panel
+        // that scopes or overrides its palette -- which a good one does -- is
+        // invisible to the pack's token set, so the pack accent lands a green
+        // arc on an orange knob and our render comes out WORSE than the
+        // browser's, with every pixel gate still green because the arc is ours.
+        //
+        // Read from the CANDIDATE, not from `data`: `data` is the author's
+        // data-pulp-* attributes, and the accent is resolved by the browser
+        // rather than declared. Reading it from `data` compiles, runs, and is
+        // always empty -- a silent fall-through to the pack token.
+        const auto declared_accent = string_member(candidate, "accent");
+        if (!declared_accent.empty())
+            control.attributes["design_accent"] = declared_accent;
+        else if (const auto accent = token("css/accent"); !accent.empty())
+            control.attributes["design_accent"] = accent;
+        if (const auto track = token("css/line-strong"); !track.empty())
+            control.attributes["design_track"] = track;
+        if (const auto ind = token("css/text-strong"); !ind.empty())
+            control.attributes["design_indicator"] = ind;
+
+        root.children.push_back(std::move(control));
+        ++lowered;
+    }
+    return lowered;
 }
 
 bool validate_png_header(const fs::path& path,
@@ -431,6 +600,18 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     const double logical_width = number_member(reference, "logical_width");
     const double logical_height = number_member(reference, "logical_height");
     const double dpr = number_member(reference, "device_scale_factor");
+    // The panel's own bounds, which the capture already measures. The document
+    // is the VIEWPORT plus whatever room the overhang needed, so using it as
+    // the root opens a plugin far larger than its design with dead space
+    // around it.
+    const auto surface = object_member(
+        object_member(object_member(object_member(envelope, "provenance"),
+                                    "viewport"), "document"),
+        "primary_surface");
+    const double surface_left = number_member(surface, "left", 0.0);
+    const double surface_top = number_member(surface, "top", 0.0);
+    const double surface_width = number_member(surface, "width", 0.0);
+    const double surface_height = number_member(surface, "height", 0.0);
     if (reference_id.empty()) {
         result.error =
             "browser capture reference requires a non-empty asset_id";
@@ -590,14 +771,44 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     ir.settle_rounds =
         static_cast<int>(number_member(settle, "rounds", 0.0));
 
+    // A panel smaller than the document it was captured in becomes a CLIPPED
+    // frame the size of the design, holding the full capture at a negative
+    // offset. The plugin then opens at the size it was designed, and the
+    // pixels outside it are simply not in the window.
+    const bool crop_to_surface =
+        surface_width > 1.0 && surface_height > 1.0 &&
+        (surface_width < logical_width - 1.0 ||
+         surface_height < logical_height - 1.0);
+
     ir.root.type = "frame";
     ir.root.name = "Browser-evaluated HTML";
-    ir.root.render_mode = NodeRenderMode::faithful_capture;
-    ir.root.capture_asset_id = reference_id;
-    ir.root.style.width = static_cast<float>(logical_width);
-    ir.root.style.height = static_cast<float>(logical_height);
-    ir.root.style.object_fit = "fill";
-    ir.root.style.overflow = "hidden";
+    if (crop_to_surface) {
+        ir.root.style.width = static_cast<float>(surface_width);
+        ir.root.style.height = static_cast<float>(surface_height);
+        ir.root.style.overflow = "hidden";
+        ir.root.style.position = "relative";
+
+        pulp::view::IRNode capture;
+        capture.type = "frame";
+        capture.name = "Browser capture";
+        capture.render_mode = NodeRenderMode::faithful_capture;
+        capture.capture_asset_id = reference_id;
+        capture.style.position = "absolute";
+        capture.style.left = static_cast<float>(-surface_left);
+        capture.style.top = static_cast<float>(-surface_top);
+        capture.style.width = static_cast<float>(logical_width);
+        capture.style.height = static_cast<float>(logical_height);
+        capture.style.object_fit = "fill";
+        capture.attributes["asset_ref"] = reference_id;
+        ir.root.children.push_back(std::move(capture));
+    } else {
+        ir.root.render_mode = NodeRenderMode::faithful_capture;
+        ir.root.capture_asset_id = reference_id;
+        ir.root.style.width = static_cast<float>(logical_width);
+        ir.root.style.height = static_cast<float>(logical_height);
+        ir.root.style.object_fit = "fill";
+        ir.root.style.overflow = "hidden";
+    }
     ir.root.stable_anchor_id = "browser:root";
     ir.root.anchor_strategy = "adapter";
     ir.root.source_adapter = "browser-capture";
@@ -606,6 +817,27 @@ BrowserCaptureIrResult lower_browser_capture_to_ir(
     // existing source-agnostic manifest refresh/localization pass aware of the
     // same backing without teaching that utility a browser-specific field.
     ir.root.attributes["asset_ref"] = reference_id;
+
+    // The backdrop alone is a picture. These children are the live controls.
+    // Their bounds are page coordinates, so when the root is cropped they must
+    // move with it -- otherwise every control sits exactly one padding-width
+    // down and right of the design it belongs to, which looks deliberate and
+    // is not.
+    const double control_dx = crop_to_surface ? -surface_left : 0.0;
+    const double control_dy = crop_to_surface ? -surface_top : 0.0;
+    int undeclared_paint_boxes = 0;
+    const int lowered = lower_semantic_controls(
+        *semantic_report, ir, control_dx, control_dy, ir.root,
+        undeclared_paint_boxes, result.error);
+    if (lowered < 0) return result;
+    ir.root.attributes["controls_lowered"] = std::to_string(lowered);
+    // Surfaced rather than swallowed: an undeclared paint box means the widget
+    // was placed on the component box, which for a captioned control paints its
+    // value geometry low. Correct for a meter, wrong for a knob, and nothing
+    // downstream can tell the difference.
+    if (undeclared_paint_boxes > 0)
+        ir.root.attributes["controls_without_paint_box"] =
+            std::to_string(undeclared_paint_boxes);
     // These are evidence identifiers, not filesystem dependencies. Keep them
     // portable when the DesignIR and its localized asset directory move.
     ir.root.attributes["browser_capture_envelope"] =
