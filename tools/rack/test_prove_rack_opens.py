@@ -198,6 +198,24 @@ def main():
         else:
             ok("a stub reporting exactly the patch's modules passes")
 
+    # No window session: Rack cannot start at all, and finding that out by
+    # launching it means an abort and a crash report per patch. That is what
+    # happened on a machine sitting at the login window -- report after report,
+    # none of them about any patch.
+    env = dict(os.environ, PROVE_RACK_CONSOLE_USER="root")
+    r = subprocess.run([sys.executable, str(PROOF), str(REAL)],
+                       capture_output=True, text=True, timeout=300, env=env)
+    out = r.stdout + r.stderr
+    if r.returncode != 3:
+        wrong(f"with no window session it exited {r.returncode}, not 3 (skip) — "
+              "it either launched Rack anyway or called it a pass")
+    elif "no window session" not in out:
+        wrong(f"it skipped, but did not say why:\n{out}")
+    elif "not a pass" not in out:
+        wrong("it skipped without saying a skip is not a pass")
+    else:
+        ok("no window session is refused without launching Rack")
+
     print()
     print("all good" if not bad else "FAILED")
     return 1 if bad else 0

@@ -44,6 +44,38 @@ USER_DIR = Path.home() / "Library" / "Application Support" / "Rack2"
 BRAND = "Forge"
 
 
+def console_owner():
+    """Who owns the window session, or "root" when nobody is logged in.
+
+    Overridable so the refusal below can be tested without logging anyone out.
+    """
+    override = os.environ.get("PROVE_RACK_CONSOLE_USER")
+    if override is not None:
+        return override
+    r = subprocess.run(["stat", "-f", "%Su", "/dev/console"],
+                       capture_output=True, text=True, timeout=20)
+    return r.stdout.strip()
+
+
+def can_start_rack():
+    """Can Rack even start here?
+
+    Rack initialises MIDI before it loads any plugin, and RtMidi's CoreMIDI
+    backend THROWS when MIDIClientCreate fails -- which is what happens with no
+    window session. Rack does not catch it, so the process calls terminate and
+    aborts in rtmidiInit, having loaded nothing.
+
+    Over SSH to a machine sitting at the login window that is every launch. The
+    checker was handing Rack patch after patch and collecting a crash report
+    for each one, while the answer -- "Rack cannot run here" -- had nothing to
+    do with any patch. Ask first; do not find out by crashing it.
+
+    A LOCKED screen is fine: someone is logged in, the session exists, and
+    Rack starts normally. The fatal case is nobody logged in at all.
+    """
+    return console_owner() not in ("", "root")
+
+
 def installed_plugin_dir():
     """Where Rack keeps the plugin it would actually load."""
     for name in ("plugins-mac-arm64", "plugins-mac-x64", "plugins"):
@@ -74,6 +106,9 @@ def rack_creates(patch, plugin_dir):
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=180)
         log = (Path(tmp) / "log.txt").read_text(errors="replace")
+        if os.environ.get("PROVE_RACK_KEEP_LOG"):
+            Path(os.environ["PROVE_RACK_KEEP_LOG"],
+                 Path(patch).stem + ".log").write_text(log)
     if "Loaded plugin ForgeModular" not in log:
         raise RuntimeError("Rack never loaded the ForgeModular plugin — this run "
                            "proves nothing about the patch")
@@ -88,6 +123,12 @@ def main(argv):
     if not RACK.exists():
         print(f"Rack is not installed at {RACK} — cannot ask it anything.")
         return 3            # not a pass, and not a failure of the patches
+    if not can_start_rack():
+        print("no window session on this machine (console owner: "
+              f"{console_owner() or 'nobody'}) — Rack aborts in MIDI init "
+              "before loading anything, so nothing here can be checked.\n"
+              "This is a skip, not a pass, and not a fault of the patches.")
+        return 3
     plugin_dir = installed_plugin_dir()
     if plugin_dir is None:
         print("no ForgeModular plugin is installed in Rack — nothing to compare")
@@ -99,7 +140,7 @@ def main(argv):
         print("no patches to check")
         return 3
 
-    bad = []
+    bad, flaky = [], []
     for patch in patches:
         doc = json.load(open(patch))
         want = Counter(names[m["model"]] for m in doc["modules"]
@@ -133,8 +174,29 @@ def main(argv):
             bad.append(patch.name)
             continue
 
-        try:
+        # Retried ONCE, loudly, on a mismatch.
+        #
+        # Launching eighteen Racks back to back is not the same as launching
+        # one: a sweep called sixmix a mismatch that passes three times out of
+        # three on its own, and two later sweeps passed all eighteen. The cause
+        # is not understood, so this does not paper over it -- a patch that
+        # only passes on the retry is REPORTED as having flaked, and one that
+        # fails twice is a failure. A silent retry would turn an intermittent
+        # checker into a checker that looks reliable.
+        def ask_rack():
             got, _ = rack_creates(patch, plugin_dir)
+            return got
+
+        try:
+            got = ask_rack()
+            if got != want:
+                second = ask_rack()
+                if second == want:
+                    print(f"{patch.name:24} {sum(want.values()):2} modules  "
+                          "ok (FLAKED once — first launch disagreed)")
+                    flaky.append(patch.name)
+                    continue
+                got = second
         except subprocess.TimeoutExpired:
             print(f"{patch.name:24} RACK NEVER FINISHED — it is most likely "
                   "waiting on a dialog nobody can click")
@@ -158,6 +220,10 @@ def main(argv):
             bad.append(patch.name)
 
     print()
+    if flaky:
+        print(f"NOTE — {len(flaky)} passed only on a second launch: "
+              f"{', '.join(flaky)}")
+        print("      Rack disagreed with itself; the cause is not understood.")
     if bad:
         print(f"FAILED — {len(bad)} of {len(patches)}: {', '.join(bad)}")
         return 1
