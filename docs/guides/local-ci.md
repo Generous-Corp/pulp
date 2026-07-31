@@ -7,6 +7,140 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 > + first-run gotchas (git-lfs hook conflict, Xcode license,
 > Apple Clang version skew).
 
+## Pull requests from forks never reach the local Macs
+
+The macOS runner is chosen by the resolver in `build.yml`, which normally honors
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the Mac Studios (or the M5 on
+overflow). For a pull request whose head branch lives in **another repository**,
+both self-hosted selectors are ignored and the leg falls through to the
+GitHub-hosted `macos-15` label.
+
+This is a security boundary, not a preference. The local Macs hold the Developer
+ID signing keychain and the notary key (`~/.config/pulp/secrets/`), and
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable** — variables, unlike
+secrets, *do* resolve for fork runs. Without the guard, one "Approve and run"
+click on a fork pull request would execute contributor code on the credentialed
+machines.
+
+The leg is rerouted rather than skipped, so a fork contributor still gets a real
+macOS result on a clean throwaway runner. Note that the required `macos` check
+is posted by the local lane, so a fork PR still cannot merge on its own — the
+maintainer adopts the commits onto an in-repo `contrib/*` branch and ships that.
+
+Same-repo pull requests, pushes, and `workflow_dispatch` runs are unaffected.
+Covered by `tools/scripts/test_fork_pr_runner_routing.py` (ctest:
+`fork-pr-runner-routing`), which runs the resolver the workflow actually embeds.
+## The Linux x64 lane runs on macpro (Proxmox)
+
+`build.yml`'s `Linux (x64)` leg routes via `PULP_LOCAL_LINUX_RUNS_ON_JSON` to
+ephemeral Proxmox VMs on **macpro** — a Late-2013 Mac Pro (Xeon E5-1650 v2, 6c/12t,
+31 GB) repurposed as a Linux CI host. Native x86_64, which the job requires: the
+lane's earlier ARM64/Tart declaration would have changed its architecture rather
+than relocating it, silently deleting the only x64 Linux coverage.
+
+```
+ssh macpro                       # 192.168.86.43, Proxmox VE 8.4
+qm list                          # 9xxx = pulp-linux-golden* (templates)
+systemctl status 'pulp-ephemeral-pool@*'
+journalctl -u 'pulp-ephemeral-pool@1' -f
+```
+
+The supervisor and its systemd unit are versioned here as
+`tools/ci/proxmox-ephemeral-runner-linux.sh` and `tools/ci/pulp-ephemeral-pool@.service`;
+the host copies live at `/usr/local/sbin/` and `/etc/systemd/system/`. The script's
+`GOLDEN=` names the template in use — read it rather than trusting a number written
+down here, since re-baking a warmer golden mints a new id.
+
+**Golden + disposable clone.** The golden carries the dependency set, prebuilt
+Skia (`external/skia-build/.../libskia.a`), a warm ccache, and the shared
+FetchContent **source** cache that `setup.sh` consults via
+`PULP_SHARED_FETCHCONTENT_SOURCE_DIR`. That last one is not optional: with it
+empty, every job re-clones three.js (~2.2 GB of history) before it can compile.
+Each job gets a
+linked clone (copy-on-write, ~28 s to boot), registers a `--ephemeral` runner, takes
+exactly one job, and the clone is destroyed. Nothing accumulates, so nothing needs
+cleaning — and the cache a job inherits cannot be poisoned by the job before it.
+This closes the reused-build-dir class outright, which matters because `build.yml`
+sets `clean: false` on self-hosted runners.
+
+Two slots run via `pulp-ephemeral-pool@{1,2}.service`; systemd restarting a slot is
+what provisions the next clone. Add a slot by enabling `@3` — but check the governor
+first.
+
+**Resource governance**, mirroring the tiers in `CLAUDE.md`:
+
+- *Tier 0* — per-VM `cores=4 cpulimit=4 cpuunits=50 balloon=0`, hypervisor-enforced.
+  `cpuunits=50` is below the default so build VMs yield to the host; `balloon=0`
+  pins memory so a build is never squeezed mid-link.
+- *Tier 1* — `/usr/local/sbin/macpro-governor.sh` (`status` / `can-start-new`).
+  Reserves 2 threads + 4 GB for the hypervisor. **Memory is a hard limit; CPU allows
+  1.5x overcommit.** That asymmetry is deliberate: an OOM mid-link yields a
+  truncated object file that reads like a compiler bug, while CPU contention only
+  costs time. Every clone is admitted through it, so nothing can oversubscribe the
+  host.
+
+**Rollback:** unset `PULP_LOCAL_LINUX_RUNS_ON_JSON` and the leg returns to
+GitHub-hosted. `runs-on` has no automatic fallback, so if macpro is down or its pool
+is stopped, jobs routed here queue indefinitely rather than erroring — unset the
+variable rather than waiting.
+
+Registration uses a fine-grained PAT at
+`/root/.config/pulp/secrets/gh-runner-pat` (mode 600, root) with only
+`Administration: read/write`, minting a single-use registration token per job.
+## Routing the Linux advisory lanes to macpro
+
+Three advisory Linux lanes can run on the self-hosted x86_64 host instead of
+GitHub's pool. Measured cost on hosted runners, per PR:
+
+| Lane | Variable | Hosted wait | Hosted run |
+|---|---|---|---|
+| GCC compile (core, Linux) | `PULP_LOCAL_GCC_RUNS_ON_JSON` | 63.2m | 11.3m |
+| IWYU (Linux, Clang) | `PULP_LOCAL_IWYU_RUNS_ON_JSON` | 4.2m | 5.2m |
+| Public headers standalone | `PULP_LOCAL_HEADERS_RUNS_ON_JSON` | 9.7m | 2.9m |
+
+About 96 job-minutes of hosted load per PR. None is a required check, so a red
+result here never blocks a merge — which is why they are the right lanes to move
+first.
+
+Each falls back to its GitHub-hosted label when the variable is unset, so the
+workflow change is inert until a variable is set. **Flip them one at a time and
+watch a full cycle**: `runs-on` has no automatic fallback once a variable *is*
+set, so a lane pointed at a stopped pool queues indefinitely rather than erroring.
+Rollback is unsetting the variable.
+
+```sh
+gh variable set PULP_LOCAL_IWYU_RUNS_ON_JSON \
+  --repo Generous-Corp/pulp \
+  --body '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro"]'
+```
+
+Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
+Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
+remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
+against each other before they queue against GitHub.
+## Windows runs nightly, not per merge
+
+Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
+Windows context appears in `main`'s required checks, so the merge queue never waits
+for it. Measured across 12 runs it was roughly **90% of billable Actions spend**,
+and with `max_entries_to_build=2` each merge cycle ran it twice.
+
+It now runs on `schedule` and `workflow_dispatch` only. Coverage did not move to
+nobody: `cross-platform-check.yml` already builds and tests Windows nightly, and its
+`tracking-issues` job find-or-creates a per-platform issue on failure, reopens a
+closed one, and auto-closes it on recovery. So a Windows regression is caught,
+filed as a work item, and picked up deliberately — instead of consuming queue
+capacity that the required checks are waiting behind.
+
+Need Windows on a specific change before the nightly? Dispatch it:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
+exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
+active workstream rather than a background one.
 ## The FetchContent cache had to point at a real path
 
 `build.yml` restored and saved three FetchContent paths and none of them ever

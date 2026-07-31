@@ -64,13 +64,20 @@ def _fold(labels) -> set[str]:
 
 
 def load_lanes(contract: Path) -> list[dict]:
-    """Self-hosted lanes from the routing contract, as {variable, expect}."""
+    """Self-hosted lanes from the routing contract, as {variable, expect, supervisor}."""
     data = json.loads(contract.read_text())
     lanes = []
     for raw in data.get("lanes", []):
         expect = raw.get("expect")
         if isinstance(expect, list) and SELF_HOSTED in expect:
-            lanes.append({"variable": raw["variable"], "expect": expect})
+            lanes.append({
+                "variable": raw["variable"],
+                "expect": expect,
+                # Carried through because routing depends on it: which supervisor
+                # provisions a lane decides which host labels it can register,
+                # and a lane stripped of that reads as launchd-supervised.
+                "supervisor": raw.get("supervisor", DEFAULT_SUPERVISOR),
+            })
     return lanes
 
 
@@ -80,14 +87,34 @@ def lanes_for(platform: str, lanes: list[dict]) -> list[dict]:
     return [ln for ln in lanes if want in _fold(ln["expect"])]
 
 
-def known_host_labels(lanes: list[dict]) -> set[str]:
+# The supervisor a lane's runners are provisioned by. Until an x86_64 Proxmox
+# machine joined the fleet, every self-hosted lane was served by a launchd-managed
+# supervisor on an Apple-Silicon Mac (Tart for Linux, QEMU for Windows), so a lane
+# that names no supervisor still means that one.
+DEFAULT_SUPERVISOR = "launchd"
+
+
+def lane_supervisor(lane: dict) -> str:
+    """Which supervisor provisions this lane's runners."""
+    return lane.get("supervisor", DEFAULT_SUPERVISOR)
+
+
+def known_host_labels(lanes: list[dict], supervisor: str | None = None) -> set[str]:
     """Every `pulp-host-*` label any declared lane routes to.
 
     Derived from the contract rather than listed here, so adding a machine is a
     lane edit — the same reviewed artifact that authorizes the routing — and
     never a second table that can drift out of step with it.
+
+    `supervisor` narrows the answer to hosts one supervisor actually provisions.
+    That distinction only started to matter once the fleet held more than one:
+    the launchd/Tart supervisor registers ARM64 runners because it runs on Apple
+    Silicon, so asking whether its defaults route on an x86_64 Proxmox host asks
+    a question neither side ever claimed — and answers it "broken".
     """
-    return {lbl for ln in lanes for lbl in ln["expect"]
+    return {lbl for ln in lanes
+            if supervisor is None or lane_supervisor(ln) == supervisor
+            for lbl in ln["expect"]
             if lbl.casefold().startswith(HOST_PREFIX)}
 
 

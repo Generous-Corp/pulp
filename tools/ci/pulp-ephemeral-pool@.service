@@ -1,0 +1,25 @@
+[Unit]
+Description=Pulp ephemeral CI runner slot %i (golden clone, one job, destroy)
+Documentation=planning/2026-07-30-macpro-proxmox-ci-handoff.md
+After=network-online.target pve-guests.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# One job per invocation: the runner is --ephemeral, so run.sh exits when the job
+# completes and the clone is destroyed on the way out. systemd restarts us, which
+# provisions a fresh clone for the next job. That loop IS the pool.
+ExecStart=/usr/local/sbin/pulp-ephemeral-runner.sh
+Restart=always
+# 30s between jobs: long enough that a persistent failure (bad golden, revoked
+# PAT) backs off visibly in the journal instead of spinning, short enough that a
+# queued job waits seconds rather than minutes.
+RestartSec=30
+# Exit 75 is the governor refusing admission — not a fault. Back off longer and
+# retry rather than restarting into the same refusal.
+RestartPreventExitStatus=
+TimeoutStopSec=180
+User=root
+
+[Install]
+WantedBy=multi-user.target

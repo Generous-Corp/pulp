@@ -520,6 +520,48 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
+## Fork PRs are structurally kept off the local Macs
+
+`build.yml`'s resolver blanks both self-hosted macOS selectors when a pull
+request's head lives in another repository, so the leg falls through to
+GitHub-hosted `macos-15`. The reason it must be structural rather than a habit:
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable**, and variables — unlike
+secrets — *do* resolve for fork runs, so an "Approve and run" click would
+otherwise dispatch contributor code onto the Studios that hold the signing
+keychain and notary key.
+
+Consequences worth knowing:
+
+- A fork PR still gets a macOS result (clean hosted runner), but the required
+  `macos` check is posted by the local lane, so it **cannot merge on its own**.
+  That is intended — adopt the commits onto an in-repo `contrib/*` branch and
+  ship that (see the `contrib-intake` skill).
+- If a fork PR's macOS leg unexpectedly shows a self-hosted runner, the guard has
+  regressed — `tools/scripts/test_fork_pr_runner_routing.py` (ctest
+  `fork-pr-runner-routing`) exists to catch that, and runs the resolver the
+  workflow actually embeds rather than a copy of its logic.
+- Same-repo PRs, pushes, and `workflow_dispatch` are unaffected.
+## Re-running a wedged required check
+
+`macos` and `Enforce version & skill sync` can be re-dispatched
+(`ghapp workflow run <workflow> --ref <branch>`). The two Vellum gates now can
+too — they take a `pr_number` input:
+
+```sh
+ghapp workflow run vellum-freeze-check.yml  --ref main -f pr_number=<N>
+ghapp workflow run vellum-trusted-gate.yml  --ref main -f pr_number=<N>
+```
+
+Before that they declared only `pull_request(_target)` and `merge_group`, so a
+wedged or cancelled run left a required check with no path back except pushing a
+commit to fire `synchronize` — which rewrites the history under review to fix a
+CI problem.
+
+Both refuse a closed PR: the trusted gate posts a commit status, and putting a
+fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
+checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
+it was fired from, and the inventory steps would then validate `main` instead of
+the PR.
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
@@ -564,6 +606,108 @@ A run being `cancelled` on `main` is different and usually benign: coverage
 sets `cancel-in-progress: false`, and GitHub queues only ONE run per group, so
 a burst of merges replaces the queued run and only the latest head runs.
 
+## An advisory lane can be red for days and still cost you merges
+
+A red advisory check blocks nothing, so nobody acts on it — while it keeps
+consuming the hosted-runner pool the *required* checks queue behind. The Tier-1
+Rosetta lane sat red for seven consecutive runs at ~52 minutes of hosted macOS per
+triggering PR, and the visible symptom was required checks waiting ~16 minutes for
+a machine.
+
+So when merges are slow, audit what advisory work is running and whether it is
+even producing signal:
+
+```sh
+gh run list --repo Generous-Corp/pulp --workflow <name>.yml --limit 10 \
+  --json conclusion,createdAt --jq '.[]|"\(.createdAt[11:16]) \(.conclusion)"'
+```
+
+An all-red history means the lane is spending capacity to tell you nothing.
+
+Related trap: ctest label-exclusion lists drift between lanes. `build.yml` excludes
+`validation|slow|windows-pr-quarantine|performance|bench|quality-lab` on PR runs;
+the Rosetta lane excluded only `validation|slow`, which let wall-clock-budget tests
+run under an emulator at a third of native speed. When adding a timing-sensitive
+test or label, update every lane's `-LE`.
+## Moving ADVISORY work is what shortens the required path
+
+The instinct when merges are slow is to speed up the required checks. On Pulp the
+required checks are mostly fast — they are *waiting*. Measured on one PR: three
+required checks each sat ~16 minutes to do under 2 minutes of work, while advisory
+lanes held the hosted pool.
+
+So the lever is relocating advisory load, not optimising required jobs:
+
+```
+UndefinedBehaviorSanitizer (macOS)   81.6m wait + 75.4m run   advisory
+x86_64 Rosetta                       43.3m wait + 51.7m run   advisory
+Linux (x64)                          74.8m wait + 26.1m run   advisory
+GCC compile (core, Linux)            63.2m wait + 11.3m run   advisory
+Build + prove (wclap)                22.3m wait + 16.5m run   REQUIRED
+```
+
+**Route advisory lanes, never required ones, to home hardware.** `runs-on` has no
+automatic fallback: once a variable points at a self-hosted pool, a power or ISP
+outage makes jobs queue indefinitely rather than error. On an advisory lane that is
+a slow check; on a required one it strands every merge, including for external
+contributors.
+
+Pattern for adding a routable lane — ship the plumbing inert, flip later:
+
+```yaml
+runs-on: ${{ fromJSON(vars.PULP_LOCAL_X_RUNS_ON_JSON || '"ubuntu-24.04"') }}
+```
+
+Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in the
+same change, or the hourly topology check reports an unset lane as having no route
+at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
+it.
+## Windows is nightly-only, and that is deliberate
+
+Windows does not run on `pull_request` **or** `merge_group`. It runs on `schedule`
+and `workflow_dispatch`.
+
+Why: Windows is the single largest consumer of hosted runner *time* and **gates
+nothing** — no Windows context appears in `main`'s required checks, so the merge
+queue never waits for it. It was occupying the hosted pool the *required* checks
+queue behind, and with `max_entries_to_build=2` it ran twice per cycle.
+
+The argument is **minutes, not dollars** — the org's own July 2026 usage, which
+corrects an earlier claim here that Windows was "~90% of billable spend":
+
+| SKU | minutes | share of minutes | share of cost |
+|---|---|---|---|
+| Windows | 94,548 | 37% | 17% |
+| Linux | 88,646 | 35% | 9% |
+| macOS 3-core | 66,033 | 26% | **73%** |
+
+macOS dominates *cost* (it bills at ~10x Linux per minute), Windows dominates
+*occupancy*. Moving Windows off the per-merge path buys queue throughput, not a
+smaller invoice — and the macOS gate is the thing to protect, precisely because
+it is both the expensive lane and the only required one.
+
+Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
+and its `tracking-issues` job find-or-creates a per-platform issue on failure,
+reopens a closed one, and auto-closes on recovery. So a Windows regression becomes
+a filed work item, not a queue tax.
+
+Need Windows on a specific branch before the nightly:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+**Before "fixing" this by putting Windows back on merge_group**, note the trade was
+explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
+capacity. Revisit only if Windows parity becomes an active workstream rather than a
+background one.
+
+Related, and rejected on measurement: moving the Ubuntu preamble jobs off the Macs.
+`pulp-preamble-m5` and `pulp-studio-02` do also carry the `pulp-build` gate label,
+so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, and
+the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
+a slot for a build's duration. Relocating them pushes four more jobs into the
+contended hosted pool to reclaim half a minute.
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
