@@ -79,6 +79,14 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
         src/chrome.cpp include/forge/fx_shell.hpp include/forge/instrument_shell.hpp \
         include/forge/midi_shell.hpp CMakeLists.txt ) \
         > "$SEAM/patches/0001-chrome-copy-from-the-shell.patch" || true
+    # The commit the patch is a diff AGAINST, recorded beside it.
+    #
+    # The resume note said `git worktree add /tmp/forge-cur origin/main`, and
+    # Forge's main moves. Once it had, the patch no longer applied there --
+    # CMakeLists.txt, chrome.hpp and chrome.cpp all rejected -- and the
+    # instruction gave no way to find the base it WAS built from. A patch
+    # whose base is a moving reference has a shelf life nobody can see.
+    ( cd "$SRC" && git rev-parse HEAD ) > "$SEAM/patches/BASE" || true
 fi
 
 if [ "$drift" -eq 0 ]; then
