@@ -332,7 +332,8 @@ pulp_add_test_suite(pulp-test-fixture-runner-cli
     LIBRARIES pulp::platform)
 add_dependencies(pulp-test-fixture-runner-cli pulp-fixture-runner)
 target_compile_definitions(pulp-test-fixture-runner-cli PRIVATE
-    PULP_FIXTURE_RUNNER_BINARY="$<TARGET_FILE:pulp-fixture-runner>")
+    PULP_FIXTURE_RUNNER_BINARY="$<TARGET_FILE:pulp-fixture-runner>"
+    PULP_TIMELINE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not

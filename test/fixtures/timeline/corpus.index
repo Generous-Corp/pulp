@@ -20,6 +20,14 @@
 #   payload   A raw byte blob that is never parsed as timeline JSON — it is
 #             embedded as OpaqueContent to prove unknown content round-trips
 #             byte for byte. Deliberately never decoded.
+#   ignore    Present in the tree but not part of this corpus — a foreign-format
+#             interchange input, or a golden owned by a specific test. Listed so
+#             the index stays exhaustive, which is what lets a completeness
+#             check treat any unlisted file as an omission.
+#
+# Every entry is opened, including the kinds that are not validated: an entry
+# reported as skipped but never touched would let a rename silently degrade the
+# index into a comment while the run stayed green.
 #
 # Regenerate document manifests with:
 #   pulp-fixture-runner --corpus <dir> --update
@@ -33,7 +41,12 @@ document v1/track-opaque.json
 document v2/device-chain.json
 document v3/automation-lane.json
 document v4/sequence-markers.json
+document v6/sequence-track-order.json
 
 fragment v4/sequence-before-scenes.json
 
 payload v1/unknown-content-envelope.json
+
+ignore v1/replay-render.golden
+ignore dawproject/linear_subset.dawproject.xml
+ignore dawproject/out_of_subset.dawproject.xml
