@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import patch as patch_mod
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import patch as P  # noqa: E402
@@ -132,6 +133,60 @@ def check_disambiguation(inv) -> int:
     return 0
 
 
+def check_role_colors(inv) -> int:
+    """A cable's colour must follow its structure, not the model's taste.
+
+    The app reads role back out of the colour field to group the explanation,
+    colour the dot and choose which concept to teach. While the model picked
+    colours, that role was a guess: on a really generated patch, eight of
+    sixteen cables carried colours outside the convention and every one of them
+    was silently classified 'audio' -- so a modulation cable was taught as
+    audio, which is a wrong lesson attached to a correct patch.
+    """
+    bad = 0
+    # A sequencer's gate into an envelope, an LFO into a filter's CV, and an
+    # oscillator into a filter's audio input: three cables whose role is not in
+    # any doubt, handed in with deliberately wrong colours.
+    patch = {
+        "modules": [
+            {"id": 1, "plugin": "Fundamental", "model": "SEQ3"},
+            {"id": 2, "plugin": "Fundamental", "model": "ADSR"},
+            {"id": 3, "plugin": "Fundamental", "model": "LFO"},
+            {"id": 4, "plugin": "Fundamental", "model": "VCF"},
+            {"id": 5, "plugin": "Fundamental", "model": "VCO"},
+        ],
+        "cables": [
+            {"outputModuleId": 1, "outputId": 2, "inputModuleId": 2,
+             "inputId": 0, "color": "#f3374b"},
+            {"outputModuleId": 3, "outputId": 0, "inputModuleId": 4,
+             "inputId": 1, "color": "#f3374b"},
+            {"outputModuleId": 5, "outputId": 0, "inputModuleId": 4,
+             "inputId": 0, "color": "#f3374b"},
+        ],
+    }
+    out = patch_mod.color_cables_by_role(patch, inv)
+    colors = [c["color"] for c in out["cables"]]
+
+    if any(c == "#f3374b" for c in colors):
+        print("  WRONG  role colours: a cable kept the colour it came in with")
+        bad += 1
+    elif len(set(colors)) < 2:
+        # The negative control: a function that stamped every cable the same
+        # colour would satisfy the check above and be just as wrong.
+        print(f"  WRONG  role colours: every cable got the same colour {colors}")
+        bad += 1
+    else:
+        print("  ok     a cable's colour follows its structure")
+
+    known = set(patch_mod.ROLE_COLORS.values())
+    if not all(c in known for c in colors):
+        print(f"  WRONG  role colours: a colour outside the convention {colors}")
+        bad += 1
+    else:
+        print("  ok     every colour is one the app can read back")
+    return bad
+
+
 def main():
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
@@ -157,7 +212,8 @@ def main():
         print(f"  ok     {name}")
 
     bad += check_disambiguation(inv)
-    print(f"\n{len(CASES) + 1 - bad}/{len(CASES) + 1} correct")
+    bad += check_role_colors(inv)
+    print(f"\n{len(CASES) + 3 - bad}/{len(CASES) + 3} correct")
     return 1 if bad else 0
 
 

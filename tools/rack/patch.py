@@ -264,6 +264,42 @@ MOD_TAGS = {"Low-frequency oscillator", "Envelope generator", "Random",
 CLOCK_TAGS = {"Clock generator", "Clock modulator", "Sequencer", "Arpeggiator"}
 
 
+# The colour Rack draws for each structural group, and the ONLY place a cable
+# colour is decided. The app reads a cable's role back out of this field to
+# group the explanation, colour the dot and pick which concept to teach -- so
+# when the model chose its own colours, that role was a guess, and a wrong guess
+# taught the wrong concept for a perfectly correct cable. The model is not asked
+# for colours; the structure decides them.
+ROLE_COLORS = {
+    "AUDIO":        "#00b56e",
+    "PITCH & GATE": "#3695ef",
+    "CLOCK":        "#ffb437",
+    "MODULATION":   "#8b4ade",
+    "OUTPUT":       "#00b56e",
+}
+
+
+def color_cables_by_role(patch: dict, inv: dict) -> dict:
+    """Overwrite every cable colour with the one its structure implies."""
+    by_id = {m.get("id"): m for m in patch.get("modules", [])}
+    for c in patch.get("cables", []):
+        src = by_id.get(c.get("outputModuleId"))
+        dst = by_id.get(c.get("inputModuleId"))
+        if not src or not dst:
+            continue
+        oi = c.get("outputId", 0)
+        ii = c.get("inputId", 0)
+        role = port_role(inv, dst["plugin"], dst["model"], "in", ii)
+        g = _group_of(inv, (src["plugin"], src["model"]), oi, role)
+        # A clock is a gate structurally, but reads as its own thing in the
+        # rack: a steady pulse that everything times against. The explanation
+        # already separates them, so the colour does too.
+        if g == "PITCH & GATE" and role == "Clock":
+            g = "CLOCK"
+        c["color"] = ROLE_COLORS.get(g, ROLE_COLORS["AUDIO"])
+    return patch
+
+
 def _group_of(inv, mod_ref, out_idx, in_role):
     if in_role in ("Pitch", "Gate", "Trigger", "Clock"):
         return {"Pitch": "PITCH & GATE", "Gate": "PITCH & GATE",
@@ -1163,6 +1199,9 @@ def main(argv):
             while os.path.exists(out):
                 out = os.path.join(pdir, f"{slug}-{n}.vcv")
                 n += 1
+        # Colour by structure before writing, so the file Rack opens and the
+        # file the app reads agree about what every cable is.
+        patch = color_cables_by_role(patch, inv)
         json.dump(patch, open(out, "w"), indent=1)
         # The reason each cable exists, beside the patch that has the cables.
         # Rack owns the .vcv format and will not carry our prose, so it travels

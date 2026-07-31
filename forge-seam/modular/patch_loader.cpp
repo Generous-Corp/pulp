@@ -13,10 +13,17 @@ namespace {
 
 /// The role a cable's colour encodes.
 ///
-/// Read from the file rather than re-derived: the generator writes the colour
-/// field by role, and Rack shows that same colour. Guessing a role here could
-/// disagree with what the user sees in Rack, which is the one thing the preview
-/// must never do.
+/// Read from the file rather than re-derived, so the preview never disagrees
+/// with what Rack shows -- but that only works because the GENERATOR now writes
+/// this field from the patch's structure (patch.py, ROLE_COLORS) rather than
+/// letting the model choose. While the model chose, most colours fell outside
+/// the convention and landed in the fallback below, which taught "audio" for
+/// cables that were nothing of the kind.
+///
+/// A patch a person wired themselves still lands in the fallback, and honestly
+/// so: their colours mean whatever they meant to that person. Deriving role
+/// structurally for imported patches needs the module inventory here, which the
+/// app does not yet load.
 SignalRole role_from_color(const std::string& hex) {
     if (hex.size() < 7) return SignalRole::audio;
     auto eq = [&](const char* other) {
@@ -27,6 +34,9 @@ SignalRole role_from_color(const std::string& hex) {
     if (eq("#3695ef")) return SignalRole::pitch;
     if (eq("#ffb437")) return SignalRole::clock;
     if (eq("#8b4ade")) return SignalRole::mod;
+    if (eq("#00b56e")) return SignalRole::audio;
+    // Anything else came from a hand-wired patch. Audio is the honest default:
+    // it is the role every patch has at least one of.
     return SignalRole::audio;
 }
 
