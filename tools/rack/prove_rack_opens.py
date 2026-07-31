@@ -54,36 +54,49 @@ class RackDidNotStart(RuntimeError):
     """
 
 
-def console_owner():
-    """Who owns the window session, or "root" when nobody is logged in.
-
-    Overridable so the refusal below can be tested without logging anyone out.
-    """
-    override = os.environ.get("PROVE_RACK_CONSOLE_USER")
-    if override is not None:
-        return override
-    r = subprocess.run(["stat", "-f", "%Su", "/dev/console"],
-                       capture_output=True, text=True, timeout=20)
-    return r.stdout.strip()
-
-
 def can_start_rack():
     """Can Rack even start here?
 
     Rack initialises MIDI before it loads any plugin, and RtMidi's CoreMIDI
-    backend THROWS when MIDIClientCreate fails -- which is what happens with no
-    window session. Rack does not catch it, so the process calls terminate and
-    aborts in rtmidiInit, having loaded nothing.
+    backend THROWS when MIDIClientCreate fails. Rack does not catch it, so the
+    process aborts in rtmidiInit having loaded nothing -- one crash report per
+    launch, about nothing to do with any patch.
 
-    Over SSH to a machine sitting at the login window that is every launch. The
-    checker was handing Rack patch after patch and collecting a crash report
-    for each one, while the answer -- "Rack cannot run here" -- had nothing to
-    do with any patch. Ask first; do not find out by crashing it.
+    So ask CoreMIDI the same question Rack is about to ask, in-process and
+    without starting anything. Creating a client is the exact operation that
+    fails, and it costs a few milliseconds.
 
-    A LOCKED screen is fine: someone is logged in, the session exists, and
-    Rack starts normally. The fatal case is nobody logged in at all.
+    This replaced a check on who owns /dev/console. That was a proxy, and a
+    wrong one: a machine driven over remote desktop reports `root` at the
+    console while having a perfectly good window session -- Rack starts, loads
+    plugins and creates modules there. The proxy refused to run on a machine
+    that works. Probe the precondition, do not guess at it.
     """
-    return console_owner() not in ("", "root")
+    override = os.environ.get("PROVE_RACK_CAN_START")
+    if override is not None:
+        return override not in ("0", "no", "false")
+    try:
+        import ctypes
+        import ctypes.util
+        midi = ctypes.CDLL(ctypes.util.find_library("CoreMIDI"))
+        cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+        cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+        cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                                 ctypes.c_uint32]
+        name = cf.CFStringCreateWithCString(None, b"forge-can-start-probe", 0x08000100)
+        client = ctypes.c_uint32(0)
+        midi.MIDIClientCreate.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                          ctypes.c_void_p,
+                                          ctypes.POINTER(ctypes.c_uint32)]
+        status = midi.MIDIClientCreate(name, None, None, ctypes.byref(client))
+        if status == 0:
+            midi.MIDIClientDispose(client)
+            return True
+        return False
+    except Exception:                                  # noqa: BLE001
+        # Unable to ask is not the same as knowing the answer. Let the run
+        # proceed; the startup-abort path below still catches a real failure.
+        return True
 
 
 def installed_plugin_dir():
@@ -151,9 +164,9 @@ def main(argv):
         print(f"Rack is not installed at {RACK} — cannot ask it anything.")
         return 3            # not a pass, and not a failure of the patches
     if not can_start_rack():
-        print("no window session on this machine (console owner: "
-              f"{console_owner() or 'nobody'}) — Rack aborts in MIDI init "
-              "before loading anything, so nothing here can be checked.\n"
+        print("CoreMIDI will not create a client here, so Rack aborts in MIDI "
+              "init before loading anything and nothing can be checked.\n"
+              "Usually means no window session — log in, then re-run.\n"
               "This is a skip, not a pass, and not a fault of the patches.")
         return 3
     plugin_dir = installed_plugin_dir()
