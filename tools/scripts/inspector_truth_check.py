@@ -229,6 +229,19 @@ REQUIRED_SECURITY_CONTRACTS = {
         "const auto authentication_timeout = remaining()",
         "impl_->wait_for_response(1, remaining())",
     ),
+    "core/events/include/pulp/events/interprocess_connection.hpp": (
+        "std::shared_ptr<Impl> impl_",
+    ),
+    "core/events/src/interprocess_connection.cpp": (
+        "bool read_running = false",
+        "const auto impl = impl_",
+        "return !lifecycle->read_running",
+        "read_thread.detach()",
+        "if (!runtime::AliveToken::is_alive(alive))",
+    ),
+    "test/test_ipc.cpp": (
+        "IPC read callback destruction coordinates with external disconnect",
+    ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (
         "must be an integer from 1 to 65535",
     ),
