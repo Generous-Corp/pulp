@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
+#include <pulp/view/platform/win_surface_lifecycle.hpp>
 
 #include <cstdint>
 

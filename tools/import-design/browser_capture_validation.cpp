@@ -82,8 +82,36 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     if (!write_bytes_atomically(options.rendered, rendered, result.error))
         return result;
 
-    const auto comparison = pulp::view::compare_screenshot_files(
-        options.reference.string(), options.rendered.string());
+    // Read the reference once and crop it when the design was cut out of a
+    // larger capture: our render is the panel alone, the reference is the whole
+    // document, and comparing them whole reports a similarity that can never
+    // pass. Cropping HERE rather than only for the diff image is the difference
+    // between fixing the gate and fixing the picture of the gate.
+    std::vector<std::uint8_t> reference_bytes;
+    {
+        std::ifstream input(options.reference, std::ios::binary);
+        if (!input) {
+            result.error = "could not read browser validation reference";
+            return result;
+        }
+        reference_bytes.assign(std::istreambuf_iterator<char>(input),
+                               std::istreambuf_iterator<char>());
+    }
+    if (options.reference_crop_width > 0 && options.reference_crop_height > 0) {
+        auto cropped = pulp::view::crop_png(
+            reference_bytes, static_cast<std::uint32_t>(options.reference_crop_x),
+            static_cast<std::uint32_t>(options.reference_crop_y),
+            static_cast<std::uint32_t>(options.reference_crop_width),
+            static_cast<std::uint32_t>(options.reference_crop_height));
+        if (cropped.empty()) {
+            result.error = "reference crop produced no image";
+            return result;
+        }
+        reference_bytes = std::move(cropped);
+    }
+
+    const auto comparison =
+        pulp::view::compare_screenshots(reference_bytes, rendered);
     if (!comparison.valid) {
         result.error = comparison.error;
         return result;
@@ -98,14 +126,7 @@ BrowserCaptureValidationResult validate_browser_capture_design_ir(
     result.passes = comparison.passes(gate);
 
     if (!options.diff.empty()) {
-        std::ifstream input(options.reference, std::ios::binary);
-        if (!input) {
-            result.error = "could not read browser validation reference";
-            return result;
-        }
-        const std::vector<std::uint8_t> reference{
-            std::istreambuf_iterator<char>(input),
-            std::istreambuf_iterator<char>()};
+        const std::vector<std::uint8_t>& reference = reference_bytes;
         const auto diff = pulp::view::generate_diff_image(reference, rendered);
         if (diff.empty()) {
             result.error = "could not generate browser validation diff";

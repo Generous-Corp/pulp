@@ -18,7 +18,19 @@ class ReleaseContentWiring(unittest.TestCase):
         self.assertIn("Verify release archive product matrix (Unix)", RELEASE)
         self.assertIn("--native-signatures", RELEASE)
         self.assertIn("--all-platforms --version", RELEASE)
-        self.assertIn('--matrix "$matrix"', RELEASE)
+        self.assertIn('--matrix "$publication_matrix"', RELEASE)
+
+    def test_downloaded_draft_uses_trusted_current_provenance_floor(self) -> None:
+        self.assertIn(
+            'selected["sdk_provenance_floor"] = '
+            'authoritative["sdk_provenance_floor"]',
+            RELEASE,
+        )
+        self.assertIn(
+            '"repos/${REPO}/contents/tools/scripts/'
+            'release_product_matrix.json?ref=${DEFAULT_BRANCH}"',
+            RELEASE,
+        )
 
     def test_installed_macho_is_resigned_and_verified_before_sdk_archive(self) -> None:
         resign = RELEASE.index("python3 tools/scripts/resign_macos_release_tree.py sdk-staging")

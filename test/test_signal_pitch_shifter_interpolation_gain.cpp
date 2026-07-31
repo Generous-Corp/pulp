@@ -1,5 +1,7 @@
 #include "test_signal_pitch_shifter_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("cubic interpolation is available and changes only the tap read",
           "[signal][pitch-shifter]") {
     auto linear = make_direct(7.0);
@@ -92,7 +94,7 @@ TEST_CASE("The peak-gain bound holds on sustained near-DC content too",
         const int frames = static_cast<int>(kSr * 2.0);
         for (int n = 0; n < frames; ++n) {
             // 0.5 Hz square: as close to DC as anything musical gets.
-            const double x = std::sin(2.0 * M_PI * 0.5 * n / kSr) >= 0.0 ? 1.0 : -1.0;
+            const double x = std::sin(2.0 * std::numbers::pi * 0.5 * n / kSr) >= 0.0 ? 1.0 : -1.0;
             worst = std::max(worst, std::abs(shifter.process(x)));
         }
         REQUIRE(worst <= Shifter::kDcBlockerPeakGain);

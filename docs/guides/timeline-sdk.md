@@ -151,6 +151,12 @@ responsibilities. See
 representative supported document; malformed or out-of-subset input returns a
 typed `DawProjectImportError` rather than a partial project.
 
+That raw-member contract belongs to the low-level installed SDK. The higher-level
+`pulp seq` and Timeline MCP interchange operations own bounded package I/O:
+they import a standard `.dawproject` ZIP, require a safe root `project.xml`,
+resolve only safe package-relative media, and export a standard `.dawproject`
+ZIP containing the XML, manifest, and referenced media.
+
 ## Optional Standard MIDI File interop
 
 Standard MIDI File (SMF) import and export live in their own target for the same
@@ -271,6 +277,45 @@ The cookbook provides the compile-backed
 [compile/publish/render](timeline-cookbook.md#compile-publish-and-render)
 recipes for that ownership flow.
 
+### Audio clip time-conform intent
+
+`Clip::time_conform()` records how authored media is intended to adapt when a
+musical clip's duration and its source-media duration differ:
+
+- `TimeConform::None` is the default and preserves the existing, unconformed
+  behavior.
+- `TimeConform::Resample` requests varispeed, coupling duration and pitch.
+- `TimeConform::Stretch` requests tempo-preserving time stretch.
+
+Pass the intent as the final argument to `Clip::create()` or
+derive a new immutable snapshot with `with_time_conform()`. `Resample` and
+`Stretch` are valid only for musical clips whose content is a `MediaRef`;
+absolute clips and non-media content reject non-default intent with
+`InvalidTimeConform`. Clip schema v2 persists the required values as `none`,
+`resample`, and `stretch`; v1 clips load as `None`, and release downgrade to v1
+refuses an authored non-default value rather than discarding it.
+
+Playback consumes `Resample` as bounded realtime varispeed: source phase spans
+the clip's musical tick interval, so tempo ramps and precise host beat mapping
+change duration and pitch together. `None` retains native-rate playback.
+`Stretch` compiles off the audio thread. The compiler takes the exact slice from
+the decoded asset pool, converts it to the compiled timeline sample rate,
+applies the authored tempo schedule at stretch-analysis boundaries, and
+publishes an immutable audio artifact with exactly the clip's compiled timeline
+frame count. On the document clock the renderer consumes that artifact 1:1.
+With a precise host-beat mapping, `TimelineGraphPlaybackBinding` and
+`SequenceProcessor` prepare a program-wide live Stretch runtime off the audio
+thread. It streams the immutable artifact through a bounded causal stretcher,
+reports one fixed latency for graph compensation, and delays the track's
+conventional audio and mixer automation by that same amount. Publication is
+object-, generation-, and tempo-map-exact. Identity changes and discontinuities
+are reported explicitly while a charged FIFO preserves the old segment through
+the delayed cut and a bounded finalization hands off to the reset stream.
+Missing or stale state, impossible ratios, backpressure, and underflow fail
+closed with distinct status rather than falling back to `None` or `Resample`.
+Host-mapped Stretch scrubbing is explicitly unsupported. Capacity, ratio, or
+exact-length failures in the document-clock artifact still fail compilation.
+
 ### Reusing and diverging sequences
 
 A musical clip may contain `SequenceRef{sequence_id, source_start}` instead of
@@ -291,7 +336,11 @@ reusing writer-scoped command IDs.
 audio thread. Stage 1 fails closed when a child contains device processing,
 automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
-closed because Stage 1 has no envelope-offset representation. Set
+closed. Complete nested media clips retain their authored time-conform intent;
+a source window that trims a `Resample` or `Stretch` clip fails with
+`NestedSequenceUnsupported` until playback can map that partial conforming
+source range without changing its authored phase.
+Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
 and reference traversal, including charges carried by reused track programs.

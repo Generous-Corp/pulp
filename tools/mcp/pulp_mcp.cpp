@@ -91,11 +91,7 @@ using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_audio_plugin_inspect;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
-using pulp_mcp::handle_timeline_project_open;
-using pulp_mcp::handle_timeline_command_apply;
-using pulp_mcp::handle_timeline_validate;
-using pulp_mcp::handle_timeline_explain;
-using pulp_mcp::handle_timeline_render;
+using pulp_mcp::handle_timeline_tool;
 using pulp_mcp::handle_inspect_pending_requests;
 
 namespace {
@@ -433,11 +429,7 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_plugin_inspect") result = handle_audio_plugin_inspect(args_json);
         else if (name == "pulp_audio_render")         result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")        result = handle_audio_compare(args_json);
-        else if (name == pulp_mcp::kTimelineMcpToolNames[0]) result = handle_timeline_project_open(args_json);
-        else if (name == pulp_mcp::kTimelineMcpToolNames[1]) result = handle_timeline_command_apply(args_json);
-        else if (name == pulp_mcp::kTimelineMcpToolNames[2]) result = handle_timeline_validate(args_json);
-        else if (name == pulp_mcp::kTimelineMcpToolNames[3]) result = handle_timeline_explain(args_json);
-        else if (name == pulp_mcp::kTimelineMcpToolNames[4]) result = handle_timeline_render(args_json);
+        else if (auto timeline = handle_timeline_tool(name, args_json)) result = std::move(*timeline);
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();

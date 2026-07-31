@@ -1078,3 +1078,22 @@ the `-dealloc` main-thread teardown block alongside `_viewHost.reset()`.
 Why it changed: the read was correct on iOS (this host builds its surface
 in the constructor) but wrong on Windows, and one shared code path beats
 six per-format copies with one silently-broken member.
+
+### `window_to_root_point` is shared now, not per-host (WAH-10)
+
+`plugin_view_host_ios.mm` no longer carries its own inverse letterbox
+transform. It calls `WindowHost::design_viewport_window_to_root()`, the same
+one the macOS and Windows plug-in hosts use.
+
+Why it matters here specifically: the iOS host maps TOUCH points through this,
+and the transform must stay identical to the one paint applies — including
+`design_top_align`, which AU v3 sets. When these were four separate copies, a
+change to the paint-side transform could leave one host's INPUT mapping behind,
+and the symptom is touches landing on the wrong control rather than anything
+that looks like a coordinate bug.
+
+If you need to change the mapping, change it in `window_host.hpp` beside the
+forward transform it inverts, and let `pulp-test-design-viewport-inverse`
+(round-trip: the point paint places at X is the point input recovers from a
+touch at X) tell you whether the pair still agree.
+

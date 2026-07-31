@@ -1967,6 +1967,10 @@
             "kind": "option"
           },
           {
+            "name": "--browser-interactions",
+            "kind": "option"
+          },
+          {
             "name": "--offline",
             "kind": "flag"
           },
@@ -3114,6 +3118,56 @@
               }
             ],
             "subcommands": []
+          },
+          {
+            "name": "export",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--accept-loss",
+                "kind": "option"
+              },
+              {
+                "name": "--plan",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "import",
+            "arguments": [
+              {
+                "name": "input",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
           }
         ]
       },
@@ -4050,6 +4104,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "seq",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "ship",
         "disposition": "candidate-shared-later"
       },
@@ -4081,6 +4139,10 @@
     "agent_skills": [
       {
         "name": "aax",
+        "disposition": "excluded"
+      },
+      {
+        "name": "ableton-link",
         "disposition": "excluded"
       },
       {
@@ -4578,7 +4640,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.400.0",
+        "version": "0.402.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4593,13 +4655,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.400.0",
+        "catalog_version": "0.402.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.400.0",
+        "version": "0.402.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

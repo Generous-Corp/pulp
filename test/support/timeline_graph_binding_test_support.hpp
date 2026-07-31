@@ -14,8 +14,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -37,8 +37,7 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 
 std::shared_ptr<const CompiledTempoMap> tempo_map(RationalRate rate = {48'000, 1}) {
     const std::array points{TempoPoint{{0}, 120.0}};
-    return std::make_shared<const CompiledTempoMap>(
-        take(CompiledTempoMap::compile(points, rate)));
+    return std::make_shared<const CompiledTempoMap>(take(CompiledTempoMap::compile(points, rate)));
 }
 
 std::shared_ptr<const audio::AudioFileData> audio_data(std::vector<float> mono) {
@@ -48,8 +47,7 @@ std::shared_ptr<const audio::AudioFileData> audio_data(std::vector<float> mono) 
     return result;
 }
 
-[[maybe_unused]] std::shared_ptr<const DecodedAudioAssetPool>
-asset_pool(std::vector<float> mono) {
+[[maybe_unused]] std::shared_ptr<const DecodedAudioAssetPool> asset_pool(std::vector<float> mono) {
     return take(DecodedAudioAssetPool::create({{{3}, audio_data(std::move(mono))}}));
 }
 
@@ -60,8 +58,8 @@ Clip audio_clip(float gain = 1.0f, std::uint64_t frames = 512) {
                                       properties));
 }
 
-[[maybe_unused]] std::shared_ptr<const Project>
-audio_project(float gain = 1.0f, std::uint64_t frames = 512) {
+[[maybe_unused]] std::shared_ptr<const Project> audio_project(float gain = 1.0f,
+                                                              std::uint64_t frames = 512) {
     auto track = take(Track::create({10}, "audio", {audio_clip(gain, frames)}));
     auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
                                           std::vector<Track>{std::move(track)}));
@@ -109,8 +107,7 @@ audio_project(float gain = 1.0f, std::uint64_t frames = 512) {
 }
 
 [[maybe_unused]] std::shared_ptr<const Project>
-parallel_audio_project(std::uint64_t frames = 512,
-                       bool reverse_tracks = false) {
+parallel_audio_project(std::uint64_t frames = 512, bool reverse_tracks = false) {
     ClipPlaybackProperties properties;
     auto first_clip = take(Clip::create_absolute({100}, {0}, frames, {48'000, 1},
                                                  MediaRef{{3}, {0}, frames}, properties));
@@ -124,8 +121,8 @@ parallel_audio_project(std::uint64_t frames = 512,
     tracks.push_back(std::move(second));
     if (reverse_tracks)
         std::reverse(tracks.begin(), tracks.end());
-    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
-                                          std::move(tracks)));
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, std::move(tracks)));
     const auto hash = ContentHash::from_hex(std::string(64, 'a'));
     if (!hash)
         std::abort();
@@ -144,64 +141,63 @@ parallel_audio_project(std::uint64_t frames = 512,
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
-[[maybe_unused]] std::shared_ptr<const Project> automation_project(
-    const CompiledTempoMap& map, float first_value = 0.25f,
-    float second_value = 0.75f, std::uint32_t parameter = 7) {
+[[maybe_unused]] std::shared_ptr<const Project> automation_project(const CompiledTempoMap& map,
+                                                                   float first_value = 0.25f,
+                                                                   float second_value = 0.75f,
+                                                                   std::uint32_t parameter = 7) {
     auto curve = take(AutomationCurve::create({
         {{41}, map.samples_to_ticks({0}), first_value},
         {{42}, map.samples_to_ticks({16}), second_value},
     }));
-    auto lane = take(AutomationLane::create(
-        {31}, DeviceParameterTarget{{20}, parameter}, std::move(curve)));
+    auto lane = take(
+        AutomationLane::create({31}, DeviceParameterTarget{{20}, parameter}, std::move(curve)));
     auto track = take(Track::create(TrackInput{
         .id = {10},
         .name = "automation",
         .device_chain = {{{20}}},
         .automation_lanes = {std::move(lane)},
     }));
-    auto sequence = take(Sequence::create(
-        {2}, "root", std::nullopt, std::nullopt,
-        std::vector<Track>{std::move(track)}));
-    return std::make_shared<const Project>(take(Project::create(
-        ProjectInput{{1}, "automation", 1'000, {2}, {}, {std::move(sequence)}})));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "automation", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
 [[maybe_unused]] std::shared_ptr<const Project> device_project() {
     auto track = take(Track::create(TrackInput{
-        .id = {10}, .name = "device", .device_chain = {{{20}}},
+        .id = {10},
+        .name = "device",
+        .device_chain = {{{20}}},
     }));
-    auto sequence = take(Sequence::create(
-        {2}, "root", std::nullopt, std::nullopt,
-        std::vector<Track>{std::move(track)}));
-    return std::make_shared<const Project>(take(Project::create(
-        ProjectInput{{1}, "device", 1'000, {2}, {}, {std::move(sequence)}})));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(
+        take(Project::create(ProjectInput{{1}, "device", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
-[[maybe_unused]] std::shared_ptr<const Project> two_device_automation_project(
-    const CompiledTempoMap& map) {
-    const auto make_lane = [&](ItemId lane_id, ItemId point_id,
-                               ItemId placement, std::uint32_t parameter) {
-        auto curve = take(AutomationCurve::create(
-            {AutomationPoint{point_id, map.samples_to_ticks({0}), 0.5f}}));
-        return take(AutomationLane::create(
-            lane_id, DeviceParameterTarget{placement, parameter},
-            std::move(curve)));
+[[maybe_unused]] std::shared_ptr<const Project>
+two_device_automation_project(const CompiledTempoMap& map) {
+    const auto make_lane = [&](ItemId lane_id, ItemId point_id, ItemId placement,
+                               std::uint32_t parameter) {
+        auto curve = take(
+            AutomationCurve::create({AutomationPoint{point_id, map.samples_to_ticks({0}), 0.5f}}));
+        return take(AutomationLane::create(lane_id, DeviceParameterTarget{placement, parameter},
+                                           std::move(curve)));
     };
     auto track = take(Track::create(TrackInput{
         .id = {10},
         .name = "two devices",
         .device_chain = {{{20}}, {{21}}},
-        .automation_lanes = {
-            make_lane({31}, {41}, {20}, 7),
-            make_lane({32}, {42}, {21}, 7),
-        },
+        .automation_lanes =
+            {
+                make_lane({31}, {41}, {20}, 7),
+                make_lane({32}, {42}, {21}, 7),
+            },
     }));
-    auto sequence = take(Sequence::create(
-        {2}, "root", std::nullopt, std::nullopt,
-        std::vector<Track>{std::move(track)}));
-    return std::make_shared<const Project>(take(Project::create(
-        ProjectInput{{1}, "two devices", 1'000, {2}, {},
-                     {std::move(sequence)}})));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "two devices", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
 NoteEvent note(const CompiledTempoMap& map, std::uint64_t id, std::int64_t start_sample,
@@ -209,6 +205,50 @@ NoteEvent note(const CompiledTempoMap& map, std::uint64_t id, std::int64_t start
     const auto start = map.samples_to_ticks({start_sample});
     const auto end = map.samples_to_ticks({end_sample});
     return {{id}, start, end - start, 0xffff, 60, 0};
+}
+
+[[maybe_unused]] std::shared_ptr<const Project>
+stretch_sibling_project(const CompiledTempoMap& map, std::uint64_t frames = 32'768) {
+    const auto duration =
+        map.samples_to_ticks({static_cast<std::int64_t>(frames)}) - TickPosition{0};
+    auto stretch_clip_result = Clip::create({100}, {0}, duration, MediaRef{{3}, {0}, frames},
+                                            ClipPlaybackProperties{}, TimeConform::Stretch);
+    REQUIRE(stretch_clip_result);
+    auto stretch_track_result =
+        Track::create({10}, "live Stretch", {std::move(stretch_clip_result).value()});
+    REQUIRE(stretch_track_result);
+
+    auto notes_result = NoteContent::create({note(map, 202, 5, 20)});
+    REQUIRE(notes_result);
+    auto sibling_note_result = Clip::create(
+        {201}, {0}, map.samples_to_ticks({128}) - TickPosition{0}, std::move(notes_result).value());
+    REQUIRE(sibling_note_result);
+    auto sibling_track_result =
+        Track::create({11}, "event sibling", {std::move(sibling_note_result).value()});
+    REQUIRE(sibling_track_result);
+    auto sequence_result =
+        Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                         std::vector<Track>{std::move(stretch_track_result).value(),
+                                            std::move(sibling_track_result).value()});
+    REQUIRE(sequence_result);
+    const auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    if (!hash)
+        std::abort();
+    MediaAsset asset{.id = {3},
+                     .name = "stretch-and-sibling",
+                     .frame_count = frames,
+                     .sample_rate = {48'000, 1},
+                     .content_hash = *hash};
+    ProjectInput input;
+    input.id = {1};
+    input.name = "stretch publication";
+    input.next_item_id = 1'000;
+    input.root_sequence_id = {2};
+    input.assets = {asset};
+    input.sequences = {std::move(sequence_result).value()};
+    auto project = Project::create(std::move(input));
+    REQUIRE(project);
+    return std::make_shared<const Project>(std::move(project).value());
 }
 
 [[maybe_unused]] std::shared_ptr<const Project> note_project(const CompiledTempoMap& map) {
@@ -303,29 +343,52 @@ class ReportedLatencySilence final : public PluginSlot {
         info_.num_inputs = 1;
         info_.num_outputs = 1;
     }
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
-                 const midi::MidiBuffer&, midi::MidiBuffer&,
-                 const ParameterEventQueue&, int frames) override {
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 const midi::MidiBuffer&, midi::MidiBuffer&, const ParameterEventQueue&,
+                 int frames) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
             std::memset(output.channel_ptr(channel), 0,
                         sizeof(float) * static_cast<std::size_t>(frames));
     }
-    std::vector<HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return 2; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 2;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
 
   private:
@@ -342,32 +405,54 @@ class MidiCountingSlot final : public PluginSlot {
         info_.num_inputs = 1;
         info_.num_outputs = 1;
     }
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
-                 const midi::MidiBuffer& events, midi::MidiBuffer&,
-                 const ParameterEventQueue&, int) override {
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 const midi::MidiBuffer& events, midi::MidiBuffer&, const ParameterEventQueue&,
+                 int) override {
         last_event_count = events.size();
-        for (std::size_t index = 0;
-             index < std::min(events.size(), last_offsets.size()); ++index) {
+        for (std::size_t index = 0; index < std::min(events.size(), last_offsets.size()); ++index) {
             last_offsets[index] = events[index].sample_offset;
         }
         output.clear();
     }
-    std::vector<HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return 0; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
 
     std::size_t last_event_count = 0;
@@ -443,8 +528,7 @@ class ConstantInstrumentSlot final : public PluginSlot {
 
 class AutomationRecordingSlot final : public PluginSlot {
   public:
-    explicit AutomationRecordingSlot(std::uint32_t parameter = 7,
-                                     ParamFlags flags = {}) {
+    explicit AutomationRecordingSlot(std::uint32_t parameter = 7, ParamFlags flags = {}) {
         info_.name = "timeline automation recorder";
         info_.unique_id = "pulp.test.timeline-automation-recorder";
         info_.format = PluginFormat::CLAP;
@@ -455,14 +539,19 @@ class AutomationRecordingSlot final : public PluginSlot {
         param_.name = "gain";
         param_.flags = flags;
     }
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return loaded; }
-    bool prepare(double, int) override { return true; }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return loaded;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>&,
-                 const midi::MidiBuffer&, midi::MidiBuffer&,
-                 const ParameterEventQueue& events, int) override {
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 const midi::MidiBuffer&, midi::MidiBuffer&, const ParameterEventQueue& events,
+                 int) override {
         const auto call = process_count.fetch_add(1, std::memory_order_relaxed);
         if (call < call_event_counts.size()) {
             call_event_counts[call].store(events.size(), std::memory_order_relaxed);
@@ -477,17 +566,35 @@ class AutomationRecordingSlot final : public PluginSlot {
         }
         output.clear();
     }
-    std::vector<HostParamInfo> parameters() const override { return {param_}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<HostParamInfo> parameters() const override {
+        return {param_};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return 0; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
 
     PluginInfo info_;
@@ -512,8 +619,12 @@ class DimensionTrackingSlot final : public PluginSlot {
         info_.num_inputs = 1;
         info_.num_outputs = 1;
     }
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
     bool prepare(double sample_rate, int max_block_size) override {
         if (fail_sample_rate.load(std::memory_order_relaxed) == sample_rate)
             return false;
@@ -522,25 +633,42 @@ class DimensionTrackingSlot final : public PluginSlot {
         return true;
     }
     void release() override {}
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
-                 const midi::MidiBuffer&, midi::MidiBuffer&,
-                 const ParameterEventQueue&, int frames) override {
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 const midi::MidiBuffer&, midi::MidiBuffer&, const ParameterEventQueue&,
+                 int frames) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
             std::memcpy(output.channel_ptr(channel), input.channel_ptr(channel),
                         sizeof(float) * static_cast<std::size_t>(frames));
     }
-    std::vector<HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    int latency_samples() const override { return 0; }
-    int tail_samples() const override { return 0; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
 
     std::atomic<double> prepared_sample_rate{0.0};
@@ -560,7 +688,8 @@ struct BindingPublishPause {
     }
     bool wait_until_entered() const noexcept {
         for (int spin = 0; spin < 1'000'000; ++spin) {
-            if (entered.load(std::memory_order_acquire)) return true;
+            if (entered.load(std::memory_order_acquire))
+                return true;
             std::this_thread::yield();
         }
         return false;
@@ -617,9 +746,9 @@ static_assert(TrackMixerTrackRenderer::process_rt_safety_class ==
 // a SnapshotParameterIngressPasskey, never through this passkey-free form. The
 // generic inject_parameter_events(node, events) remains public by design.
 template <typename T>
-concept HasPublicExactParameterInjection = requires(
-    const T& snapshot_handle, const ParameterEventQueue& events) {
-    snapshot_handle.inject_exact_parameter_events(NodeId{1}, events);
-};
+concept HasPublicExactParameterInjection =
+    requires(const T& snapshot_handle, const ParameterEventQueue& events) {
+        snapshot_handle.inject_exact_parameter_events(NodeId{1}, events);
+    };
 
 static_assert(!HasPublicExactParameterInjection<SignalGraph::ExecutionSnapshot>);

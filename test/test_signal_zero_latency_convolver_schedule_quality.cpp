@@ -1,5 +1,7 @@
 #include "test_signal_zero_latency_convolver_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("Analysis bins are exact", "[signal][convolution][instrument]") {
     // The spectral tests only mean anything if the sine under test and every
     // partition rate land on integer bins. They do, by construction: fs/L is
@@ -260,7 +262,7 @@ TEST_CASE("No partition-rate artefacts on a sustained tone",
     const int warmup = 4 * conv.level_block_length(conv.num_levels() - 1);
     std::vector<double> x(static_cast<std::size_t>(warmup + kAnalysisFft));
     for (std::size_t i = 0; i < x.size(); ++i)
-        x[i] = std::sin(2.0 * M_PI * tone_hz * static_cast<double>(i) / kFs);
+        x[i] = std::sin(2.0 * std::numbers::pi * tone_hz * static_cast<double>(i) / kFs);
 
     const auto y = render_mono(conv, x, kBlock);
     const std::vector<double> window(y.begin() + warmup, y.end());
@@ -585,8 +587,8 @@ TEST_CASE("Resampled magnitude response tracks an offline resample",
     std::vector<double> ir(kSrcLen);
     for (int i = 0; i < kSrcLen; ++i)
         ir[static_cast<std::size_t>(i)] =
-            std::sin(2.0 * M_PI * kToneHz * static_cast<double>(i) / kSrcRate) *
-            (0.5 - 0.5 * std::cos(2.0 * M_PI * static_cast<double>(i) / (kSrcLen - 1)));
+            std::sin(2.0 * std::numbers::pi * kToneHz * static_cast<double>(i) / kSrcRate) *
+            (0.5 - 0.5 * std::cos(2.0 * std::numbers::pi * static_cast<double>(i) / (kSrcLen - 1)));
 
     ZeroLatencyConvolver64 conv;
     conv.prepare(kFs, kBlock, 1);
@@ -715,7 +717,7 @@ TEST_CASE("Tail trim ends on an exact zero through the shipped fade",
     for (int i = 0; i < fade; ++i) {
         const int idx = keep - fade + i;
         const double t = static_cast<double>(i + 1) / fade;
-        const double g = 0.5 * (1.0 + std::cos(M_PI * t));
+        const double g = 0.5 * (1.0 + std::cos(std::numbers::pi * t));
         const double want = (ir[static_cast<std::size_t>(idx)] - mean) * g;
         worst = std::max(worst, std::abs(taps[static_cast<std::size_t>(idx)] - want));
     }

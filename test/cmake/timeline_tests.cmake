@@ -43,7 +43,7 @@ pulp_add_test_suite(pulp-test-playback-production
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
-    SOURCES test_playback_transport.cpp
+    SOURCES test_playback_transport.cpp test_playback_transport_epoch.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
@@ -64,6 +64,23 @@ pulp_add_test_suite(pulp-test-standalone-recording
 pulp_add_test_suite(pulp-test-playback-external-sync
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
+pulp_add_test_suite(pulp-test-playback-tempo-sync
+    SOURCES test_playback_tempo_sync.cpp
+    LIBRARIES pulp::playback)
+
+# The SDK-present lane is always visible in ctest. A stock build returns 77 and
+# is reported as SKIPPED with the exact opt-in knobs; an SDK-enabled build links
+# and executes the real adapter instead of silently omitting the test.
+add_executable(pulp-test-ableton-link-sdk test_ableton_link_sdk.cpp)
+if(TARGET pulp::ableton-link)
+    target_link_libraries(pulp-test-ableton-link-sdk PRIVATE pulp::ableton-link)
+else()
+    target_link_libraries(pulp-test-ableton-link-sdk PRIVATE pulp::playback)
+endif()
+add_test(NAME playback-ableton-link-sdk-present COMMAND pulp-test-ableton-link-sdk)
+set_tests_properties(playback-ableton-link-sdk-present PROPERTIES
+    LABELS "playback;vendor-sdk"
+    SKIP_RETURN_CODE 77)
 pulp_add_test_suite(pulp-test-playback-program
     SOURCES test_playback_program.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -101,6 +118,9 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
 pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp
         test_playback_audio_renderer_conversion.cpp
+        test_playback_offline_stretch.cpp
+        test_playback_stretch_lifecycle.cpp
+        test_playback_realtime_stretch_state_bank.cpp
         test_playback_track_freeze.cpp
         test_playback_track_mixer.cpp
         harness/rt_allocation_probe.cpp
@@ -177,6 +197,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
         test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
         test_timeline_marker_commands.cpp test_timeline_track_mixer.cpp
+        test_timeline_track_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
@@ -236,6 +257,7 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         test_timeline_graph_binding_publication.cpp
         test_host_transport_projector.cpp
         test_sequence_processor.cpp
+        test_sequence_stretch_alignment.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}
@@ -291,6 +313,28 @@ pulp_add_test_suite(pulp-test-timeline-daw-project
         ${CMAKE_SOURCE_DIR}/examples/timeline-session/test_timeline_daw_project.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session
     LIBRARIES pulp::playback pulp::timeline pulp::timebase)
+
+# Portable conformance runner over the timeline fixture corpus. Deliberately
+# free of Catch2 and of any desktop dependency: the same binary is meant to run
+# here under ctest, on the Android emulator lane via `adb push`, and compiled to
+# WASM, so it links only the portable floor (timeline + interchange) and takes
+# its corpus path on argv rather than through a compile-time host path.
+add_executable(pulp-fixture-runner fixture_runner_main.cpp)
+target_link_libraries(pulp-fixture-runner PRIVATE pulp::timeline pulp::interchange)
+add_test(NAME timeline-fixture-corpus
+    COMMAND pulp-fixture-runner --corpus "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+
+# The corpus run above proves the runner passes on a good corpus. It cannot
+# prove the runner FAILS on a bad one, and a conformance gate that cannot go red
+# is indistinguishable from no gate. This suite shells out to the binary against
+# deliberately broken temporary corpora and asserts each exit code and message.
+pulp_add_test_suite(pulp-test-fixture-runner-cli
+    SOURCES test_fixture_runner_cli.cpp
+    LIBRARIES pulp::platform)
+add_dependencies(pulp-test-fixture-runner-cli pulp-fixture-runner)
+target_compile_definitions(pulp-test-fixture-runner-cli PRIVATE
+    PULP_FIXTURE_RUNNER_BINARY="$<TARGET_FILE:pulp-fixture-runner>"
+    PULP_TIMELINE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not

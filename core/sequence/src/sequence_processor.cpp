@@ -1,6 +1,9 @@
 #include <pulp/sequence/sequence_processor.hpp>
 
+#include "midi_latency_queue.hpp"
+
 #include <pulp/midi/block_ops.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -21,37 +24,41 @@ bool same_sample_rate(double sample_rate, timebase::RationalRate expected) noexc
 
 bool acceptable(playback::AudioRenderStatus status) noexcept {
     return status == playback::AudioRenderStatus::Rendered ||
-           status == playback::AudioRenderStatus::Silent;
+           status == playback::AudioRenderStatus::Silent ||
+           status == playback::AudioRenderStatus::RealtimeStretchGap;
 }
 
-// ArrangementNoteRenderer emits every physical note in MIDI 1 plus a
-// full-resolution UMP mirror. Some plugin hosts expose MIDI output without a
-// UMP sidecar. That is a supported downgrade, not an incomplete block: deliver
-// the representable MIDI 1 stream and copy the mirror only when the adapter
-// supplied a destination UMP buffer.
-bool copy_arrangement_note_output(const midi::MidiBuffer& source,
-                                  midi::MidiBuffer& destination) noexcept {
-    bool complete = source.dropped_event_count() == 0 && source.dropped_sysex_count() == 0;
-    for (const auto& event : source) {
-        if (!destination.add(event))
-            complete = false;
+playback::AudioRenderStatus audio_status(playback::RealtimeStretchRenderCode code) noexcept {
+    using RenderCode = playback::RealtimeStretchRenderCode;
+    using Status = playback::AudioRenderStatus;
+    switch (code) {
+    case RenderCode::NotRequired:
+    case RenderCode::Rendered:
+        return Status::Rendered;
+    case RenderCode::GapIdentityChanged:
+        return Status::RealtimeStretchGap;
+    case RenderCode::StateRequired:
+        return Status::RealtimeStretchStateRequired;
+    case RenderCode::StalePublication:
+        return Status::RealtimeStretchStalePublication;
+    case RenderCode::UnsupportedScrubbing:
+        return Status::RealtimeStretchUnsupportedScrubbing;
+    case RenderCode::ImpossibleRatio:
+        return Status::RealtimeStretchImpossibleRatio;
+    case RenderCode::Backpressure:
+        return Status::RealtimeStretchBackpressure;
+    case RenderCode::Underflow:
+        return Status::RealtimeStretchUnderflow;
     }
-    const auto* source_ump = source.ump();
-    auto* destination_ump = destination.ump();
-    if (source_ump != nullptr) {
-        if (source_ump->dropped_event_count() != 0)
-            complete = false;
-        if (destination_ump != nullptr) {
-            for (const auto& event : *source_ump) {
-                if (!destination_ump->add(event))
-                    complete = false;
-            }
-        }
-    }
-    return complete;
+    return Status::RealtimeStretchStateRequired;
 }
 
 } // namespace
+
+struct SequenceProcessor::PreparedPublication {
+    std::shared_ptr<const playback::PlaybackProgram> program;
+    std::unique_ptr<playback::RealtimeStretchProgramRuntime> realtime_stretch;
+};
 
 struct SequenceProcessor::TrackRuntime {
     TrackRuntime(timeline::ItemId id, SequenceProcessor& processor)
@@ -64,7 +71,8 @@ struct SequenceProcessor::TrackRuntime {
 
 SequenceProcessor::SequenceProcessor(const playback::PlaybackProgramStore& store,
                                      SequenceProcessorConfig config)
-    : store_(store), config_(std::move(config)) {}
+    : store_(store), config_(std::move(config)),
+      midi_delay_(std::make_unique<detail::MidiLatencyQueue>()) {}
 
 SequenceProcessor::~SequenceProcessor() = default;
 
@@ -104,12 +112,23 @@ void SequenceProcessor::prepare(const format::PrepareContext& context) {
         status_ = SequenceProcessorStatus::SampleRateMismatch;
         return;
     }
-    if (!prepare_graph(*program, static_cast<std::uint32_t>(context.max_buffer_size))) {
+    auto publication = std::make_shared<PreparedPublication>();
+    publication->program = std::make_shared<const playback::PlaybackProgram>(*program);
+    publication->realtime_stretch = std::make_unique<playback::RealtimeStretchProgramRuntime>();
+    const auto stretch_admission = publication->realtime_stretch->prepare(
+        *publication->program, context.sample_rate,
+        static_cast<std::uint32_t>(context.max_buffer_size), config_.output_channels,
+        publication->program->audio_limits());
+    if (!stretch_admission) {
+        status_ = SequenceProcessorStatus::RealtimeStretchRejected;
+        return;
+    }
+    if (!prepare_graph(*publication, static_cast<std::uint32_t>(context.max_buffer_size))) {
         if (status_ == SequenceProcessorStatus::Unprepared)
             status_ = SequenceProcessorStatus::InvalidConfiguration;
         return;
     }
-    if (transport_.prepare(program->tempo_map(),
+    if (transport_.prepare(publication->program->tempo_map(),
                            static_cast<std::uint32_t>(context.max_buffer_size)) !=
         HostTransportProjectionError::None) {
         release();
@@ -117,7 +136,9 @@ void SequenceProcessor::prepare(const format::PrepareContext& context) {
         return;
     }
     maximum_block_size_ = static_cast<std::uint32_t>(context.max_buffer_size);
-    prepared_tempo_map_ = &program->tempo_map();
+    prepared_tempo_map_ = &publication->program->tempo_map();
+    prepared_latency_samples_ = publication->realtime_stretch->latency_samples();
+    publication_.publish(std::move(publication));
     prepared_ = true;
     status_ = SequenceProcessorStatus::Ready;
 }
@@ -125,28 +146,36 @@ void SequenceProcessor::prepare(const format::PrepareContext& context) {
 void SequenceProcessor::release() {
     active_program_ = nullptr;
     active_transport_ = nullptr;
+    active_realtime_stretch_ = nullptr;
     last_observation_ = {};
     maximum_block_size_ = 0;
     prepared_ = false;
     midi_output_node_index_ = 0;
     prepared_tempo_map_ = nullptr;
+    if (publication_.has_value())
+        publication_.unpublish();
     tracks_.clear();
     track_ids_.clear();
     snapshot_.clear();
     pool_.clear();
     midi_scratch_.clear();
+    midi_delay_->reset();
+    midi_delay_publication_ = nullptr;
+    midi_delay_playback_epoch_ = 0;
+    prepared_latency_samples_ = 0;
     transport_.reset();
     status_ = SequenceProcessorStatus::Unprepared;
 }
 
-bool SequenceProcessor::prepare_graph(const playback::PlaybackProgram& program,
+bool SequenceProcessor::prepare_graph(const PreparedPublication& publication,
                                       std::uint32_t maximum_block_size) {
+    const auto& program = *publication.program;
+    const auto& realtime_stretch = *publication.realtime_stretch;
     const auto track_count = program.tracks().size();
     if (track_count + 2 > graph::GraphRuntimeLimits{}.max_nodes)
         return false;
-    if (track_count != 0 &&
-        config_.maximum_note_events_per_track_per_block >
-            std::numeric_limits<std::size_t>::max() / track_count)
+    if (track_count != 0 && config_.maximum_note_events_per_track_per_block >
+                                std::numeric_limits<std::size_t>::max() / track_count)
         return false;
     const auto aggregate_note_capacity =
         std::max<std::size_t>(1, track_count * config_.maximum_note_events_per_track_per_block);
@@ -174,6 +203,10 @@ bool SequenceProcessor::prepare_graph(const playback::PlaybackProgram& program,
             config_.output_channels,
             0,
             1,
+            false,
+            realtime_stretch.track_uses_realtime_stretch(track_id)
+                ? realtime_stretch.latency_samples()
+                : 0u,
         });
         bindings.push_back({id, &SequenceProcessor::process_track, runtime.get(), true});
         track_ids_.push_back(track_id);
@@ -241,6 +274,9 @@ bool SequenceProcessor::prepare_graph(const playback::PlaybackProgram& program,
         !midi_scratch_.reset(midi_capacities)) {
         return false;
     }
+    if (!midi_delay_->prepare(aggregate_note_capacity, realtime_stretch.latency_samples(),
+                              config_.maximum_delayed_events))
+        return false;
     for (std::uint32_t index = 0; index < snapshot_.plan().nodes.size(); ++index) {
         if (snapshot_.plan().nodes[index].id == midi_output_id) {
             midi_output_node_index_ = index;
@@ -260,6 +296,47 @@ bool SequenceProcessor::topology_matches(const playback::PlaybackProgram& progra
     return true;
 }
 
+bool SequenceProcessor::adopt_latest_program() {
+    if (!prepared_)
+        return false;
+    auto latest = store_.read();
+    if (!latest || !topology_matches(*latest) || &latest->tempo_map() != prepared_tempo_map_ ||
+        latest->tempo_map().sample_rate() != prepared_tempo_map_->sample_rate())
+        return false;
+
+    auto candidate = std::make_shared<PreparedPublication>();
+    candidate->program = std::make_shared<const playback::PlaybackProgram>(*latest);
+    candidate->realtime_stretch = std::make_unique<playback::RealtimeStretchProgramRuntime>();
+    const auto admission = candidate->realtime_stretch->prepare(
+        *candidate->program,
+        static_cast<double>(candidate->program->tempo_map().sample_rate().as_long_double()),
+        maximum_block_size_, config_.output_channels, candidate->program->audio_limits());
+    if (!admission)
+        return false;
+
+    auto current = publication_.read();
+    if (!current)
+        return false;
+    if (latest->generation() < current->program->generation())
+        return false;
+    if (current->realtime_stretch->latency_samples() !=
+        candidate->realtime_stretch->latency_samples())
+        return false;
+    for (const auto id : track_ids_)
+        if (current->realtime_stretch->track_uses_realtime_stretch(id) !=
+            candidate->realtime_stretch->track_uses_realtime_stretch(id))
+            return false;
+
+    publication_.publish(std::move(candidate));
+    return true;
+}
+
+void SequenceProcessor::force_realtime_stretch_failure_for_test() noexcept {
+    auto publication = publication_.read();
+    if (publication && publication->realtime_stretch)
+        publication->realtime_stretch->force_post_mutation_failure_for_test();
+}
+
 bool SequenceProcessor::process_track(format::ProcessBlock&,
                                       const format::GraphRuntimeNodeProcessContext& context,
                                       void* user_data) noexcept {
@@ -270,9 +347,16 @@ bool SequenceProcessor::process_track(format::ProcessBlock&,
     }
 
     playback::PlaybackProgramBlock block(track->owner.active_program_);
-    const auto audio_status =
-        track->audio.process(block, *track->owner.active_transport_, context.node_outputs,
-                             track->owner.active_program_->audio_limits());
+    const auto audio_status = track->audio.process(
+        block, *track->owner.active_transport_, context.node_outputs,
+        track->owner.active_program_->audio_limits(), track->owner.active_realtime_stretch_);
+    if (!acceptable(audio_status)) {
+        track->owner.block_audio_status_.store(audio_status, std::memory_order_relaxed);
+    } else {
+        auto expected = playback::AudioRenderStatus::Silent;
+        (void)track->owner.block_audio_status_.compare_exchange_strong(expected, audio_status,
+                                                                       std::memory_order_relaxed);
+    }
     if (!acceptable(audio_status))
         return false;
 
@@ -301,18 +385,13 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
         return;
     }
 
-    auto program = latch_.begin_block(store_);
-    if (!program) {
+    auto publication = publication_.read();
+    if (!publication) {
         audio_output.clear();
         status_ = SequenceProcessorStatus::MissingProgram;
         return;
     }
-    if (!topology_matches(*program.program()) ||
-        &program.program()->tempo_map() != prepared_tempo_map_) {
-        audio_output.clear();
-        status_ = SequenceProcessorStatus::TopologyChanged;
-        return;
-    }
+    const auto* program = publication->program.get();
 
     playback::TransportSnapshot transport;
     if (transport_.project(context, transport) != HostTransportProjectionError::None) {
@@ -324,6 +403,38 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
     last_observation_.discontinuity = transport.ranges[0].discontinuity;
     last_observation_.emitted_midi_events = 0;
     last_observation_.valid = true;
+    last_observation_.audio_status = playback::AudioRenderStatus::Silent;
+
+    // The queue is callback-owned. Publication adoption and transport seeks
+    // are observed here so the control thread never races its ring indices and
+    // no old-generation/old-position note can emerge after the boundary.
+    if (!transport.is_playing || midi_delay_publication_ != program ||
+        midi_delay_playback_epoch_ != transport.ranges[0].playback_epoch ||
+        transport.ranges[0].discontinuity) {
+        midi_delay_->clear_pending();
+        midi_delay_publication_ = program;
+        midi_delay_playback_epoch_ = transport.ranges[0].playback_epoch;
+    }
+    if (!transport.is_playing)
+        publication->realtime_stretch->reset();
+
+    // Reject the complete block before GraphRuntimeExecutor or any note
+    // renderer can mutate callback state. A rejected Stretch lane therefore
+    // cannot leave successful siblings' audio or MIDI side effects behind.
+    if (transport.is_playing) {
+        for (const auto& track : program->tracks()) {
+            const auto preflight = publication->realtime_stretch->preflight_track(
+                *program, *track, transport, audio_output);
+            if (preflight != playback::RealtimeStretchRenderCode::NotRequired &&
+                preflight != playback::RealtimeStretchRenderCode::Rendered &&
+                preflight != playback::RealtimeStretchRenderCode::GapIdentityChanged) {
+                audio_output.clear();
+                last_observation_.audio_status = audio_status(preflight);
+                status_ = SequenceProcessorStatus::RenderFailed;
+                return;
+            }
+        }
+    }
 
     format::BusBufferSet buses;
     buses.add_output("main", audio_output, format::BusRole::Main);
@@ -335,11 +446,15 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
     process_block.transport = &context;
     process_block.buses = &buses;
 
-    active_program_ = program.program();
+    active_program_ = program;
+    active_realtime_stretch_ = publication->realtime_stretch.get();
+    block_audio_status_.store(playback::AudioRenderStatus::Silent, std::memory_order_relaxed);
     active_transport_ = &transport;
     const auto result = executor_.process_routed(process_block, snapshot_, pool_, &midi_scratch_);
     active_transport_ = nullptr;
+    active_realtime_stretch_ = nullptr;
     active_program_ = nullptr;
+    last_observation_.audio_status = block_audio_status_.load(std::memory_order_relaxed);
     if (!result.ok()) {
         audio_output.clear();
         status_ = result.error == format::GraphRuntimeExecutorErrorCode::NodeProcessorFailed
@@ -349,12 +464,28 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
     }
 
     auto* rendered_midi = midi_scratch_.in(midi_output_node_index_);
-    if (rendered_midi == nullptr || !copy_arrangement_note_output(*rendered_midi, midi_out)) {
+    if (rendered_midi == nullptr) {
         midi::clear_midi_block(midi_out);
         status_ = SequenceProcessorStatus::RenderFailed;
         return;
     }
-    last_observation_.emitted_midi_events = static_cast<std::uint32_t>(rendered_midi->size());
+    if (!transport.is_playing) {
+        midi_delay_->clear_pending();
+        if (!midi::copy_midi_block(*rendered_midi, midi_out)) {
+            midi::clear_midi_block(midi_out);
+            status_ = SequenceProcessorStatus::RenderFailed;
+            return;
+        }
+        last_observation_.emitted_midi_events = static_cast<std::uint32_t>(midi_out.size());
+        status_ = SequenceProcessorStatus::Ready;
+        return;
+    }
+    if (!midi_delay_->process(*rendered_midi, midi_out, static_cast<std::uint32_t>(frames))) {
+        midi::clear_midi_block(midi_out);
+        status_ = SequenceProcessorStatus::RenderFailed;
+        return;
+    }
+    last_observation_.emitted_midi_events = static_cast<std::uint32_t>(midi_out.size());
     status_ = SequenceProcessorStatus::Ready;
 }
 

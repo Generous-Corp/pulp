@@ -138,6 +138,74 @@ TEST_CASE("browser CLI adapter tags non-browser input as not applicable",
     CHECK(std::holds_alternative<id::BrowserImportNotApplicable>(result));
 }
 
+TEST_CASE("browser CLI forwards a plan and rejects non-browser input",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions = tree.root / "interactions.json";
+    std::optional<fs::path> observed;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            observed = capture_request.browser_interactions;
+            return id::BrowserHtmlNotApplicable{};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("non-browser input must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("non-browser input must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "not html", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+    REQUIRE(observed);
+    CHECK(*observed == *request.browser_interactions);
+}
+
+TEST_CASE("browser interactions cannot select the offline parser",
+          "[import-design][browser-capture][cli-adapter]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.offline = true;
+    request.browser_interactions = tree.root / "interactions.json";
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [](const id::BrowserHtmlImportRequest&, std::string_view) {
+            return id::BrowserHtmlLegacyFallback{"generic-html"};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("offline input must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("offline input must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+}
+
 TEST_CASE("browser import session preserves non-capture result policy",
           "[import-design][browser-capture][session]") {
     std::ostringstream diagnostics;
@@ -280,7 +348,7 @@ TEST_CASE("browser CLI adapter stages proof and commits evidence once",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;
     auto request = request_for(tree);
-    request.diff_output = tree.root / "elsewhere/capture.json";
+    request.diff_output = (tree.root / "elsewhere/capture.json").string();
     std::vector<std::string> order;
     id::BrowserCaptureValidationOptions observed;
 
@@ -561,6 +629,12 @@ TEST_CASE("browser CLI adapter rejects proof publication collisions",
     SECTION("explicit diff cannot overwrite source input") {
         request.diff_output = request.input_file.string();
     }
+    SECTION("explicit diff cannot overwrite interaction plan") {
+        request.browser_interactions =
+            tree.root / "interaction-plan.json";
+        request.diff_output =
+            request.browser_interactions->string();
+    }
     SECTION("explicit diff cannot overwrite explicit reference") {
         request.reference_image =
             (tree.root / "reference.png").string();
@@ -587,13 +661,17 @@ TEST_CASE("browser CLI adapter rejects proof publication collisions",
     }
 #if defined(__APPLE__) || defined(_WIN32)
     SECTION("nonexistent mixed-case output aliases are collisions") {
-        request.diff_output =
-            request.output_file.parent_path() / "UI.JS";
+        request.diff_output = (request.output_file.parent_path() / "UI.JS").string();
     }
     SECTION("nonexistent mixed-case durable aliases are contained") {
         request.diff_output =
-            request.output_file.parent_path() /
-            "UI-BROWSER-CAPTURE/proof.png";
+            (request.output_file.parent_path() / "UI-BROWSER-CAPTURE/proof.png").string();
+    }
+    SECTION("nonexistent mixed-case interaction aliases are collisions") {
+        request.browser_interactions =
+            request.output_file.parent_path() / "Interaction-Plan.JSON";
+        request.diff_output =
+            (request.output_file.parent_path() / "interaction-plan.json").string();
     }
 #endif
 
@@ -652,7 +730,7 @@ TEST_CASE("evidence commit rechecks filesystem aliases",
           "[import-design][browser-capture][cli-adapter][transaction]") {
     TempTree tree;
     auto request = request_for(tree);
-    request.diff_output = tree.root / "proof/diff.png";
+    request.diff_output = (tree.root / "proof/diff.png").string();
 
     id::internal::BrowserImportCliOperations operations;
     operations.import_html =
@@ -690,6 +768,90 @@ TEST_CASE("evidence commit rechecks filesystem aliases",
     CHECK(diagnostics.str().find("aliases a protected path") !=
           std::string::npos);
     CHECK(tree.read(request.output_file) == "primary-output");
+}
+
+TEST_CASE("evidence commit rechecks aliases against the interaction plan",
+          "[import-design][browser-capture][cli-adapter][transaction][security]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions =
+        tree.root / "interaction-plan.json";
+    request.diff_output = (tree.root / "proof/diff.png").string();
+    tree.write(*request.browser_interactions, "interaction-plan");
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest& capture_request,
+            std::string_view) {
+            return captured_import(capture_request, tree);
+        };
+    operations.validate_capture =
+        [&](const pulp::view::DesignIR&,
+            const id::BrowserCaptureValidationOptions& options) {
+            tree.write(options.rendered, "render");
+            tree.write(options.diff, "diff");
+            id::BrowserCaptureValidationResult result;
+            result.valid = true;
+            result.passes = true;
+            return result;
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            return true;
+        };
+
+    auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    auto session = require_live_session(std::move(result));
+    REQUIRE(session.has_capture());
+    fs::create_directories(fs::path(request.diff_output).parent_path());
+    fs::create_hard_link(
+        *request.browser_interactions, request.diff_output);
+
+    std::ostringstream diagnostics;
+    CHECK_FALSE(session.publish(diagnostics));
+    CHECK(diagnostics.str().find("aliases a protected path") !=
+          std::string::npos);
+    CHECK(tree.read(*request.browser_interactions) == "interaction-plan");
+}
+
+TEST_CASE("browser primary output cannot replace the interaction plan",
+          "[import-design][browser-capture][cli-adapter][transaction][security]") {
+    TempTree tree;
+    auto request = request_for(tree);
+    request.browser_interactions =
+        tree.root / "interaction-plan.json";
+    request.output_file = *request.browser_interactions;
+    tree.write(*request.browser_interactions, "interaction-plan");
+    bool capture_called = false;
+
+    id::internal::BrowserImportCliOperations operations;
+    operations.import_html =
+        [&](const id::BrowserHtmlImportRequest&, std::string_view) {
+            capture_called = true;
+            return id::BrowserHtmlImportResult{};
+        };
+    operations.validate_capture =
+        [](const pulp::view::DesignIR&,
+           const id::BrowserCaptureValidationOptions&) {
+            FAIL("colliding primary output must not validate");
+            return id::BrowserCaptureValidationResult{};
+        };
+    operations.localize_assets =
+        [](pulp::view::DesignIR&, const std::string&, std::string*) {
+            FAIL("colliding primary output must not localize");
+            return false;
+        };
+
+    const auto result =
+        id::internal::run_browser_import_cli_with_operations(
+            request, "<html>", operations);
+    const auto* failure = std::get_if<id::BrowserImportFailure>(&result);
+    REQUIRE(failure);
+    CHECK(failure->exit_code == 2);
+    CHECK_FALSE(capture_called);
+    CHECK(tree.read(*request.browser_interactions) == "interaction-plan");
 }
 
 TEST_CASE("late evidence failure restores primary, tokens, and required assets",

@@ -77,13 +77,14 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.clip": Object.freeze({
     schemaType: "pulp.timeline.clip",
     domain: "Document",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
       Object.freeze({ name: "content", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "fade_in_duration", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "fade_out_duration", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "gain_linear_bits", kind: "U64String", jsType: "string", required: false }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "time_conform", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "time_range", kind: "Object", jsType: "object", required: true }),
     ]),
   }),
@@ -193,6 +194,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.insert_track": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_track",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "before_track_id", kind: "U64String", jsType: "string", required: false }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.track" }),
+    ]),
+  }),
   "pulp.timeline.command.move_clip": Object.freeze({
     schemaType: "pulp.timeline.command.move_clip",
     domain: "Command",
@@ -295,6 +306,15 @@ export const timelineSchema = Object.freeze({
     version: 1,
     fields: Object.freeze([
       Object.freeze({ name: "lane_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_track": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_track",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
@@ -562,7 +582,7 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.sequence": Object.freeze({
     schemaType: "pulp.timeline.sequence",
     domain: "Document",
-    version: 5,
+    version: 6,
     fields: Object.freeze([
       Object.freeze({ name: "absolute_duration", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "chord_scale_lane", kind: "Array", jsType: "array", required: true }),
@@ -573,6 +593,7 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "regions", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "scenes", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "track_order", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "tracks", kind: "Array", jsType: "array", required: true }),
     ]),
   }),
@@ -650,6 +671,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.insert_slot",
   "pulp.timeline.command.insert_take",
   "pulp.timeline.command.insert_take_lane",
+  "pulp.timeline.command.insert_track",
   "pulp.timeline.command.move_clip",
   "pulp.timeline.command.remove_asset",
   "pulp.timeline.command.remove_automation_lane",
@@ -661,6 +683,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_slot",
   "pulp.timeline.command.remove_take",
   "pulp.timeline.command.remove_take_lane",
+  "pulp.timeline.command.remove_track",
   "pulp.timeline.command.replace_note_content",
   "pulp.timeline.command.set_active_take_lane",
   "pulp.timeline.command.set_chord_scale_lane",

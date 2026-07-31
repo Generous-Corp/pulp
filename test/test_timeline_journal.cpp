@@ -59,6 +59,26 @@ Project make_device_chain_project(std::vector<DevicePlacement> device_chain) {
     return std::move(project).value();
 }
 
+// Two tracks stored 7 then 4 -- not ascending, because tracks() preserves the
+// caller's order -- arranged in whatever order the caller states.
+Project make_track_order_project(std::vector<ItemId> authored_order) {
+    auto first = Track::create({7}, "first", {});
+    REQUIRE(first);
+    auto second = Track::create({4}, "second", {make_note_clip({5}, {6}, 0)});
+    REQUIRE(second);
+    auto sequence =
+        Sequence::create(SequenceInput{.id = {3},
+                                       .name = "sequence",
+                                       .musical_duration = TickDuration{8 * kTicksPerQuarter},
+                                       .tracks = {std::move(first).value(),
+                                                  std::move(second).value()},
+                                       .track_order = std::move(authored_order)});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 9, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
 class ProbeJournalSink final : public JournalSink {
   public:
     pulp::runtime::Result<bool, JournalSinkError>
@@ -380,6 +400,22 @@ TEST_CASE("Timeline journal checkpoint equality includes device-chain order") {
     REQUIRE(session->submit(writer, std::move(edit)));
 
     const auto reordered = make_device_chain_project({{{8}}, {{7}}});
+    auto rejected = session->journal().replay(reordered, {});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+}
+
+TEST_CASE("Timeline journal checkpoint equality includes authored track order") {
+    const auto checkpoint = make_track_order_project({{4}, {7}});
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    // The two checkpoints hold the same tracks in the same identity order and
+    // differ only in how they are arranged, which is still a different document
+    // to replay onto.
+    const auto reordered = make_track_order_project({{7}, {4}});
     auto rejected = session->journal().replay(reordered, {});
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);

@@ -27,12 +27,16 @@
 /// Crochiere 1980 (weighted overlap-add). No allocation or locks after
 /// `prepare()`.
 
+#include <pulp/signal/checked_allocation.hpp>
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <algorithm>
 #include <cassert>
 #include <complex>
 #include <cstdint>
+#include <limits>
+#include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace pulp::signal {
@@ -46,6 +50,99 @@ struct SpectralFrameEngineConfig {
     int max_synthesis_hop = 0; // 0 = 2 * analysis_hop; upper bound for synthesize_frame()
     WindowFunction::Type window = WindowFunction::Type::hann;
 };
+
+inline constexpr int kSpectralFrameEngineMinimumFftSize = 256;
+inline constexpr int kSpectralFrameEngineMaximumFftSize = 16384;
+inline constexpr std::uint64_t kSpectralFrameEngineMaximumRingSize =
+    std::uint64_t{1} << 30u;
+
+struct SpectralFrameEngineGeometry {
+    int max_synthesis_hop = 0;
+    int num_bins = 0;
+    int ring_size = 0;
+    std::uint64_t input_ring_elements = 0;
+    std::uint64_t output_ring_elements = 0;
+    std::uint64_t frame_elements = 0;
+    std::uint64_t retained_bytes = 0;
+};
+
+inline bool is_valid_spectral_frame_geometry(int fft_size, int analysis_hop) noexcept {
+    return fft_size >= kSpectralFrameEngineMinimumFftSize
+        && fft_size <= kSpectralFrameEngineMaximumFftSize
+        && (fft_size & (fft_size - 1)) == 0
+        && analysis_hop > 0
+        && analysis_hop <= fft_size / 2;
+}
+
+/// Derive every integer and typed backing-store capacity used by prepare().
+/// target_max_bytes makes 32-bit target limits testable on a 64-bit host.
+template <typename SampleType>
+inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_geometry(
+    const SpectralFrameEngineConfig& config,
+    std::uint64_t target_max_bytes = kTargetAddressMaximumBytes) noexcept {
+    static_assert(std::is_floating_point_v<SampleType>);
+    if (!is_valid_spectral_frame_geometry(config.fft_size, config.analysis_hop)
+        || config.channels < 1 || config.max_block <= 0)
+        return std::nullopt;
+
+    const int max_synthesis_hop = config.max_synthesis_hop > 0
+        ? config.max_synthesis_hop
+        : 2 * config.analysis_hop;
+    if (max_synthesis_hop <= 0) return std::nullopt;
+
+    const auto fft_size = static_cast<std::uint64_t>(config.fft_size);
+    const auto channels = static_cast<std::uint64_t>(config.channels);
+    const auto max_block = static_cast<std::uint64_t>(config.max_block);
+    const auto synthesis_hop = static_cast<std::uint64_t>(max_synthesis_hop);
+    const auto worst_frames = max_block / static_cast<std::uint64_t>(config.analysis_hop) + 2u;
+
+    std::uint64_t backlog = 0;
+    std::uint64_t ring_span = 0;
+    if (!checked_capacity_product(worst_frames, synthesis_hop,
+                                  kSpectralFrameEngineMaximumRingSize, backlog)
+        || !checked_capacity_sum(fft_size, max_block,
+                                 kSpectralFrameEngineMaximumRingSize, ring_span)
+        || !checked_capacity_sum(ring_span, backlog,
+                                 kSpectralFrameEngineMaximumRingSize, ring_span))
+        return std::nullopt;
+
+    std::uint64_t ring_size = 1;
+    while (ring_size < ring_span) ring_size <<= 1u;
+
+    const auto num_bins = fft_size / 2u + 1u;
+    SpectralFrameEngineGeometry geometry;
+    if (!checked_capacity_product(channels, fft_size,
+                                  std::numeric_limits<std::uint64_t>::max(),
+                                  geometry.input_ring_elements)
+        || !checked_capacity_product(channels, ring_size,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     geometry.output_ring_elements)
+        || !checked_capacity_product(channels, num_bins,
+                                     std::numeric_limits<std::uint64_t>::max(),
+                                     geometry.frame_elements))
+        return std::nullopt;
+
+    CheckedRetainedByteCharge charge(target_max_bytes);
+    std::uint64_t fft_retained_bytes = 0;
+    if (!charge.add<SampleType>(geometry.input_ring_elements)
+        || !charge.add<SampleType>(geometry.output_ring_elements)
+        || !charge.add<SampleType>(ring_size) // norm ring
+        || !charge.add<SampleType>(fft_size) // window
+        || !charge.add<SampleType>(fft_size) // time scratch
+        || !charge.add<std::complex<SampleType>>(geometry.frame_elements)
+        || !charge.add<std::complex<SampleType>>(fft_size) // freq scratch
+        || !charge.add<std::complex<SampleType>*>(channels) // frame pointers
+        || !checked_fft_retained_bytes<SampleType>(fft_size, target_max_bytes,
+                                                   fft_retained_bytes)
+        || !charge.add_retained_bytes(fft_retained_bytes))
+        return std::nullopt;
+
+    geometry.max_synthesis_hop = max_synthesis_hop;
+    geometry.num_bins = static_cast<int>(num_bins);
+    geometry.ring_size = static_cast<int>(ring_size);
+    geometry.retained_bytes = charge.total();
+    return geometry;
+}
 
 /// Streaming multichannel STFT/WOLA engine. Not thread-safe; one instance
 /// per audio stream.
@@ -61,15 +158,13 @@ public:
     /// synthesis hops no larger than max_synthesis_hop. The callback must also
     /// be RT-safe.
     void prepare(const SpectralFrameEngineConfig& config) {
-        assert(config.fft_size >= 256 && config.fft_size <= 16384);
-        assert((config.fft_size & (config.fft_size - 1)) == 0);
-        assert(config.analysis_hop > 0 && config.analysis_hop <= config.fft_size / 2);
-        assert(config.channels >= 1);
+        const auto geometry = checked_spectral_frame_engine_geometry<SampleType>(config);
+        assert(geometry.has_value());
+        if (!geometry) return;
 
         config_ = config;
-        if (config_.max_synthesis_hop <= 0)
-            config_.max_synthesis_hop = 2 * config_.analysis_hop;
-        num_bins_ = config_.fft_size / 2 + 1;
+        config_.max_synthesis_hop = geometry->max_synthesis_hop;
+        num_bins_ = geometry->num_bins;
 
         fft_ = FftT<SampleType>(config_.fft_size);
         window_ = WindowFunction::generate<SampleType>(config_.fft_size,
@@ -94,21 +189,16 @@ public:
         min_norm_ = std::max(static_cast<SampleType>(steady) * SampleType{0.25f},
                              SampleType{1e-9f});
 
-        // Output ring must hold the unfinalized span (fft_size) plus the
-        // worst-case backlog a caller can create in one process() call.
-        const int worst_frames_per_block =
-            config_.max_block / config_.analysis_hop + 2;
-        ring_size_ = next_pow2(config_.fft_size + config_.max_block
-                               + worst_frames_per_block * config_.max_synthesis_hop);
+        ring_size_ = geometry->ring_size;
         ring_mask_ = ring_size_ - 1;
 
-        input_ring_.assign(static_cast<size_t>(config_.channels) * config_.fft_size,
+        input_ring_.assign(static_cast<size_t>(geometry->input_ring_elements),
                            SampleType{0.0f});
-        output_ring_.assign(static_cast<size_t>(config_.channels) * ring_size_,
+        output_ring_.assign(static_cast<size_t>(geometry->output_ring_elements),
                             SampleType{0.0f});
         norm_ring_.assign(ring_size_, SampleType{0.0f});
 
-        frames_.assign(static_cast<size_t>(config_.channels) * num_bins_,
+        frames_.assign(static_cast<size_t>(geometry->frame_elements),
                        std::complex<SampleType>(SampleType{0.0f}, SampleType{0.0f}));
         frame_ptrs_.resize(config_.channels);
         for (int ch = 0; ch < config_.channels; ++ch)
@@ -271,12 +361,6 @@ public:
     }
 
 private:
-    static int next_pow2(int v) {
-        int p = 1;
-        while (p < v) p <<= 1;
-        return p;
-    }
-
     // Pop one final sample (all channels) into out[..][i], normalizing by
     // the accumulated squared synthesis window and clearing the slot.
     void pop_one(SampleType* const* out, int i) {

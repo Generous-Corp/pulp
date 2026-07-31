@@ -12,6 +12,12 @@ Pulp versions three surfaces independently:
   consume, not a surface we ship; see [Dependency Update
   Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
+  This pin governs what a *fresh* checkout installs, so an
+  already-provisioned machine keeps running whatever it has and any drift
+  between the two is invisible from the repo. When reasoning about it,
+  check what the hosts actually run (`shipyard --version` on each) rather
+  than assuming this file describes them.
+
 The first two are **enforced**: PRs that change code in a surface's
 trigger paths without bumping its version are rejected before merge.
 The third is covered by the existing `tools/deps/audit.py` path and is
@@ -349,7 +355,11 @@ macOS/linux run broke `main`). A genuine build failure — no budget hit, no
 report — still fails loudly. The suite runs ctest in parallel with a per-test
 `--timeout` (`scripts/run_coverage.sh`) so it finishes well under budget; the
 `coverage-staleness-check` watchdog is the alarm if coverage genuinely stops
-flowing.
+flowing. Report verification and Codecov transport are separate contracts:
+missing or structurally empty reports fail the producing leg, while the shared
+upload action records transport failure without making Codecov availability a
+merge prerequisite. `coverage-upload-watchdog.yml` counts a main run as fresh
+only when the action emitted both Linux and macOS upload receipts.
 
 ---
 

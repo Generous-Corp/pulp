@@ -21,7 +21,17 @@ if(PULP_BUILD_TESTS)
     target_link_libraries(pulp-delay-test PRIVATE
         pulp::audio-analysis pulp::format pulp::signal pulp::view Catch2::Catch2WithMain)
     target_include_directories(pulp-delay-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    catch_discover_tests(pulp-delay-test)
+    # Keep hardware-sensitive timing probes out of the required correctness
+    # lane. Catch tags are not CTest labels, so discover the two groups
+    # separately and label the performance cases explicitly.
+    catch_discover_tests(pulp-delay-test
+        TEST_SPEC "~[performance]"
+        TEST_LIST PULP_DELAY_CORRECTNESS_TESTS)
+    catch_discover_tests(pulp-delay-test
+        TEST_SPEC "[performance]"
+        TEST_PREFIX "performance: "
+        PROPERTIES LABELS performance
+        TEST_LIST PULP_DELAY_PERFORMANCE_TESTS)
 
     add_executable(pulp-delay-ui-shots
         pulp_delay_shots.cpp

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/importer-differential-manifest-v1.schema.json",
+  "title": "Pulp importer differential manifest v1",
+  "type": "object",
+  "required": ["schema", "version", "license", "ownership", "fixtures"],
+  "properties": {
+    "schema": {"const": "pulp-importer-differential-manifest-v1"},
+    "version": {"const": 1},
+    "license": {"type": "string"},
+    "ownership": {"type": "string"},
+    "defaults": {"type": "object"},
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "shape", "from", "split", "expected_blockers"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "pattern": "\\.html?$"},
+          "shape": {"const": "self-contained-html"},
+          "from": {"enum": ["claude", "html", "stitch"]},
+          "split": {"type": "string"},
+          "expected_blockers": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

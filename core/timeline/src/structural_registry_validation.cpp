@@ -1,4 +1,5 @@
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "project_schema_policy.hpp"
 #include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
@@ -89,6 +90,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"name", SchemaValueKind::String},
         {"regions", SchemaValueKind::Array},
         {"scenes", SchemaValueKind::Array},
+        {"track_order", SchemaValueKind::Array},
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField chord_scale_event_fields[] = {
@@ -178,6 +180,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"fade_out_duration", SchemaValueKind::U64String, false},
         {"gain_linear_bits", SchemaValueKind::U64String, false},
         {"id", SchemaValueKind::U64String},
+        {"time_conform", SchemaValueKind::String},
         {"time_range", SchemaValueKind::Object},
     };
     static constexpr ExpectedField media_fields[] = {
@@ -220,7 +223,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
         {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
-        {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
+        {SchemaDomain::Document, clip_schema_policy.type_name, clip_fields,
+         clip_schema_policy.current_version, clip_schema_policy.oldest_readable_version},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
         {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields, 2, 1},

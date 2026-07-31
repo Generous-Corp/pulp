@@ -13,18 +13,24 @@ file(READ
     PULP_TIMELINE_MCP_TOOLS_JSON)
 string(JSON PULP_TIMELINE_MCP_TOOL_COUNT
     LENGTH "${PULP_TIMELINE_MCP_TOOLS_JSON}" tools)
-if(NOT PULP_TIMELINE_MCP_TOOL_COUNT EQUAL 5)
+if(NOT PULP_TIMELINE_MCP_TOOL_COUNT EQUAL 10)
     message(FATAL_ERROR
-        "timeline_mcp_tools.json must define exactly five generated operations")
+        "timeline_mcp_tools.json must define exactly ten generated operations")
 endif()
 set(_PULP_TIMELINE_MCP_EXPECTED_NAMES
     pulp_timeline_project_open
     pulp_timeline_command_apply
+    pulp_timeline_diff
+    pulp_timeline_undo
+    pulp_timeline_redo
     pulp_timeline_validate
     pulp_timeline_explain
     pulp_timeline_render)
+list(APPEND _PULP_TIMELINE_MCP_EXPECTED_NAMES
+    pulp_timeline_export
+    pulp_timeline_import)
 set(PULP_TIMELINE_MCP_TOOLS_ARRAY "")
-foreach(_index RANGE 0 4)
+foreach(_index RANGE 0 9)
     string(JSON _tool_name GET "${PULP_TIMELINE_MCP_TOOLS_JSON}" tools ${_index} name)
     list(GET _PULP_TIMELINE_MCP_EXPECTED_NAMES ${_index} _expected_name)
     if(NOT _tool_name STREQUAL _expected_name)
@@ -58,11 +64,14 @@ add_library(pulp-mcp-core STATIC
     mcp_kit_content_tools.cpp
     mcp_audio_tools.cpp
     mcp_inspect_tools.cpp
-    mcp_timeline_tools.cpp)
+    mcp_timeline_tools.cpp
+    timeline_session_store.cpp)
 target_compile_features(pulp-mcp-core PRIVATE cxx_std_20)
 target_include_directories(pulp-mcp-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}")
+    "${CMAKE_CURRENT_BINARY_DIR}"
+    PRIVATE
+        "${PROJECT_SOURCE_DIR}/core/timeline/src")
 target_link_libraries(pulp-mcp-core
     PUBLIC
         pulp::tool-audio

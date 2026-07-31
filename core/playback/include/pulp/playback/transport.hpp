@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/rt_safety_contract.hpp>
+#include <pulp/playback/tempo_sync.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -21,7 +22,18 @@ enum class TransportError {
     InvalidScrubWindow,
     ScrubWindowTooShortForMaximumBlock,
     NotScrubbing,
+    InvalidTempo,
+    InvalidTempoSyncConfig,
+    TempoSyncHostTimeRequired,
+    TempoSyncUnavailable,
+    InvalidTempoSyncState,
+    PlaybackEpochExhausted,
 };
+
+namespace detail {
+/// Advances an epoch without ever wrapping to an aliased identity.
+TransportError advance_playback_epoch(std::uint64_t& epoch) noexcept;
+}
 
 using MeterSignature = timebase::MeterSignature;
 
@@ -48,6 +60,10 @@ struct TransportRange {
     double host_tick_start = 0.0;
     double host_tick_end = 0.0;
     bool has_precise_host_ticks = false;
+    /// Identity of the continuous playback interval containing this range.
+    /// A block may contain two epochs only when its second range applies a
+    /// newly latched scrub anchor. Ordinary loop wraps retain the epoch.
+    std::uint64_t playback_epoch = 0;
     /// Zero-based loop pass within the transport's current playback epoch.
     /// Transport producers own this state so newly attached renderers and
     /// renderers that skip a callback observe the same pass.
@@ -60,6 +76,9 @@ struct TransportSnapshot {
     const timebase::CompiledTempoMap* tempo_map = nullptr;
     timebase::RationalRate sample_rate{};
     std::uint64_t block_index = 0;
+    /// Epoch of ranges[0]. Later ranges carry their own epoch so a scrub-anchor
+    /// discontinuity may be represented precisely when it splits a block.
+    std::uint64_t playback_epoch = 0;
     std::uint32_t frame_count = 0;
     MeterSignature meter{};
     LoopRegion loop{};
@@ -106,6 +125,11 @@ struct MasterTransportConfig {
     LoopRegion loop{};
     timebase::TickPosition initial_position{};
     bool initially_playing = false;
+    /// Optional non-owning session-tempo source. It must outlive this transport
+    /// or the next reset()/prepare(). When present, callers use the host-time
+    /// begin_block overload; failure never falls back to the document clock.
+    TempoSyncSource* tempo_sync_source = nullptr;
+    double tempo_sync_quantum_beats = 4.0;
 };
 
 /// Master musical transport with one control-thread writer and one audio-thread
@@ -122,6 +146,10 @@ class MasterTransport {
     TransportError prepare(const timebase::CompiledTempoMap& tempo_map,
                            const MasterTransportConfig& config) noexcept;
     TransportError set_playing(bool playing) noexcept;
+    /// Publishes an explicit session-tempo request. This never edits the
+    /// document TempoMap; it is sent to the configured TempoSyncSource at the
+    /// next audio block.
+    TransportError set_tempo_sync_tempo(double tempo_bpm) noexcept;
     TransportError seek(timebase::TickPosition position) noexcept;
     TransportError set_loop(LoopRegion loop) noexcept;
     TransportError set_meter(MeterSignature meter) noexcept;
@@ -151,9 +179,16 @@ class MasterTransport {
     TransportError end_scrub() noexcept;
 
     TransportError begin_block(std::uint32_t frame_count, TransportSnapshot& snapshot) noexcept;
+    /// output_host_time names the first sample's output-boundary time and must
+    /// have been produced by the configured TempoSyncSource. Required only when
+    /// a source is configured; the ordinary document-clock path is unchanged.
+    TransportError begin_block(std::uint32_t frame_count, TempoSyncHostTime output_host_time,
+                               TransportSnapshot& snapshot) noexcept;
     void reset() noexcept;
 
   private:
+    struct BlockProjection;
+    struct RangeProjection;
     struct DesiredState {
         MeterSignature meter{};
         LoopRegion loop{};
@@ -164,17 +199,34 @@ class MasterTransport {
         bool scrubbing = false;
         std::uint64_t seek_generation = 0;
         std::uint64_t scrub_generation = 0;
+        std::uint64_t playing_generation = 0;
+        std::uint64_t tempo_sync_tempo_generation = 0;
+        double tempo_sync_tempo_bpm = 120.0;
     };
 
     static_assert(std::is_trivially_copyable_v<DesiredState>);
 
     TransportError validate_loop(LoopRegion loop) const noexcept;
     void publish_desired() noexcept;
+    TransportError begin_internal_block(std::uint32_t frame_count,
+                                        TransportSnapshot& snapshot) noexcept;
+    TransportError begin_tempo_synced_block(std::uint32_t frame_count,
+                                            std::int64_t output_host_time_micros,
+                                            TransportSnapshot& snapshot) noexcept;
+    void begin_projected_block(const DesiredState& desired, const BlockProjection& projection,
+                               timebase::TickPosition anchor_tick,
+                               TransportSnapshot& snapshot) noexcept;
+    void append_projected_range(const RangeProjection& projection,
+                                TransportSnapshot& snapshot) noexcept;
+    void finish_projected_block(const DesiredState& desired, const BlockProjection& projection,
+                                TransportSnapshot& snapshot) noexcept;
 
     runtime::SeqLock<DesiredState> desired_{};
     DesiredState control_state_{};
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;
     timebase::TempoCursor tempo_cursor_{};
+    TempoSyncSource* tempo_sync_source_ = nullptr;
+    double tempo_sync_quantum_beats_ = 4.0;
     std::uint32_t max_buffer_size_ = 0;
 
     timebase::SamplePosition timeline_sample_{};
@@ -185,16 +237,25 @@ class MasterTransport {
     MeterSignature meter_anchor_signature_{};
     std::uint64_t applied_seek_generation_ = 0;
     std::uint64_t applied_scrub_generation_ = 0;
+    std::uint64_t applied_tempo_sync_playing_generation_ = 0;
+    std::uint64_t applied_tempo_sync_seek_generation_ = 0;
+    std::uint64_t applied_tempo_sync_tempo_generation_ = 0;
     std::uint64_t block_index_ = 0;
+    std::uint64_t playback_epoch_ = 0;
+    bool playback_epoch_exhausted_ = false;
     std::uint64_t loop_pass_index_ = 0;
     std::uint32_t scrub_window_remaining_ = 0;
     bool previous_scrubbing_ = false;
+    bool has_applied_scrub_position_ = false;
+    timebase::TickPosition applied_scrub_position_{};
     bool previous_playing_ = false;
     MeterSignature previous_meter_{};
     LoopRegion previous_loop_{};
     double previous_tempo_bpm_ = 120.0;
     bool first_block_ = true;
     bool pending_discontinuity_ = false;
+    bool has_expected_tempo_sync_beat_ = false;
+    double expected_tempo_sync_beat_ = 0.0;
 };
 
 } // namespace pulp::playback

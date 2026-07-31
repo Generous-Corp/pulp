@@ -385,6 +385,94 @@ TEST_CASE("the idle pump runs once per frame, before the swapchain acquire",
     REQUIRE(acquire_at_idle == 0);
 }
 
+// ── The shared CPU raster path (WAH-6) ──────────────────────────────────────
+//
+// Windows and Linux carried byte-identical copies of this. It is the ONLY
+// render path guaranteed to exist — the headless capture that proves a
+// non-black frame with no GPU at all — so a divergence between the copies
+// would have meant the proof differed from the thing it proves.
+
+TEST_CASE("the raster path produces a frame at physical-pixel size",
+          "[plugin-frame][raster][wah-6]") {
+    View root;
+    root.set_bounds({0, 0, 40, 30});
+
+    FrameGeometry g;
+    g.width = 40.0f;
+    g.height = 30.0f;
+    g.scale = 2.0f;
+
+    std::uint32_t w = 0, h = 0;
+    const auto pixels = raster_plugin_scene_rgba(root, g, &w, &h);
+
+    REQUIRE(w == 80);
+    REQUIRE(h == 60);
+    // Tightly packed RGBA8888 — the DIB blit and the PNG encoder both index it
+    // with a stride of exactly w*4.
+    REQUIRE(pixels.size() == static_cast<std::size_t>(w) * h * 4u);
+}
+
+TEST_CASE("the raster path paints the editor background, not black",
+          "[plugin-frame][raster][wah-6]") {
+    // The whole point of the capture path is telling "rendered" apart from
+    // "black window". If it returned zeroes, a broken editor and a working one
+    // would produce identical evidence.
+    View root;
+    root.set_bounds({0, 0, 16, 16});
+
+    FrameGeometry g;
+    g.width = 16.0f;
+    g.height = 16.0f;
+
+    std::uint32_t w = 0, h = 0;
+    const auto pixels = raster_plugin_scene_rgba(root, g, &w, &h);
+    REQUIRE(pixels.size() >= 4u);
+
+    REQUIRE(pixels[0] == kEditorHostClearR);
+    REQUIRE(pixels[1] == kEditorHostClearG);
+    REQUIRE(pixels[2] == kEditorHostClearB);
+    REQUIRE(pixels[3] == 255);
+}
+
+TEST_CASE("a zero-scale geometry still rasters one pixel",
+          "[plugin-frame][raster][wah-6]") {
+    View root;
+    root.set_bounds({0, 0, 10, 10});
+
+    FrameGeometry g;
+    g.width = 0.0f;
+    g.height = 0.0f;
+
+    std::uint32_t w = 0, h = 0;
+    const auto pixels = raster_plugin_scene_rgba(root, g, &w, &h);
+
+    REQUIRE(w == 1);
+    REQUIRE(h == 1);
+    REQUIRE(pixels.size() == 4u);
+}
+
+TEST_CASE("encode_rgba_png emits a real PNG and rejects empty input",
+          "[plugin-frame][raster][wah-6]") {
+    View root;
+    root.set_bounds({0, 0, 8, 8});
+    FrameGeometry g;
+    g.width = 8.0f;
+    g.height = 8.0f;
+
+    std::uint32_t w = 0, h = 0;
+    const auto pixels = raster_plugin_scene_rgba(root, g, &w, &h);
+    const auto png = encode_rgba_png(pixels, w, h);
+
+    REQUIRE(png.size() > 8);
+    // The 8-byte PNG signature. Asserting non-empty alone would pass on the
+    // wrong SkPngEncoder overload, which compiles and returns nothing useful.
+    const std::uint8_t sig[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    for (int i = 0; i < 8; ++i) REQUIRE(png[static_cast<std::size_t>(i)] == sig[i]);
+
+    REQUIRE(encode_rgba_png({}, 8, 8).empty());
+    REQUIRE(encode_rgba_png(pixels, 0, 8).empty());
+}
+
 #else
 
 TEST_CASE("PluginFrameRenderer requires a Skia build",
@@ -393,5 +481,6 @@ TEST_CASE("PluginFrameRenderer requires a Skia build",
     // test_plugin_frame_clip.cpp.
     SUCCEED("Not a Skia build — the GPU frame drive is not compiled.");
 }
+
 
 #endif  // PULP_HAS_SKIA

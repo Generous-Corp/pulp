@@ -25,6 +25,7 @@ exists:
 | Render an import at the design's own canvas size | `tools/scripts/render-figma-import.sh` |
 | Masked per-region diff vs a reference | `python3 tools/import-validation/diff_against_reference_regions.py` |
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
+| Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
 
 The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
@@ -205,6 +206,17 @@ reproduces the design; the others below do NOT and waste hours:
   If system discovery is insufficient, run
   `pulp tool install chrome-for-testing`; use
   `pulp tool doctor chrome-for-testing --run` for diagnostics.
+- When improving the offline/native HTML importer, use the development-only
+  Importer Differential Lab rather than changing the authoritative browser
+  route. It runs Chromium and `--offline` separately, renders the candidate
+  DesignIR through Pulp/Skia, and compares structure, geometry, typography,
+  and pixels without modifying canonical output:
+  `python3 tools/import-validation/importer_differential_lab.py
+  analyze-corpus --importer <pulp-import-design> --observer
+  <pulp-design-ir-observe> --manifest
+  test/fixtures/import-differential/manifest.json --output <dir>`.
+  Production native promotion is disabled; `threshold_eligible` is advisory
+  evidence only. See `docs/tools/importer-differential-lab.md`.
 
 **The lane that works (Figma is the source of truth):**
 ```bash
@@ -3254,6 +3266,20 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - If authored async initialization has a real completion boundary, the page
   may expose `globalThis.__pulpCaptureReady` as a Promise or function returning
   one. Capture awaits it and fails on rejection. Do not add arbitrary sleeps.
+- If the requested screen is not the landing state, pass
+  `--browser-interactions <plan.json>`. The
+  `pulp-browser-interactions-v1` plan accepts only bounded `click`, `type`,
+  `wait-for`, and `wait-ms` actions. End navigation sequences with
+  `wait-for` on a visible selector; strings in hidden/inert DOM or bundled
+  script source do not prove which screen rendered. Capture records action
+  results and typed-text length without retaining the text or a per-action
+  text hash in the interaction report. Typed text remains live rendered state
+  and may appear in screenshot, DOM/semantic, or token evidence, so never put
+  passwords, credentials, private drafts, or other secrets in a plan. Popup
+  pages are rejected. For a distinct post-action asynchronous completion
+  boundary, expose `globalThis.__pulpInteractionReady`; capture awaits it after
+  the plan without calling the initial `__pulpCaptureReady` contract twice.
+  Never add an arbitrary JavaScript action.
 - If Chrome/Chromium is missing, install it from the URL printed by the CLI or
   pass `--browser <path>`. `--offline` explicitly selects the legacy partial
   static/QuickJS fallback. Chrome and Node are import-time tools only; generated
@@ -5056,3 +5082,43 @@ Only `blur()` is read out of a filter list. `brightness`, `saturate` and the
 rest need a real filter chain, so a node carrying them is left unfiltered
 rather than approximated: an unfiltered element is visibly missing, a wrongly
 blurred one looks intentional.
+
+## Pixel-parity cannot see invented component markup
+
+A 100% similarity score compares our render against the browser's render of the
+**same** source. When authored markup uses a class the design system never
+defines, the browser paints an unstyled box and we paint the identical unstyled
+box — so the import reports `Similarity: 100%`, `Validation: PASS`, and every
+control bound, on a visibly broken panel. This is a structural blind spot, not a
+tuning problem, and no threshold change closes it.
+
+Two real instances, both of which survived repeated review by eye:
+
+- a meter authored as `.meter-track > .meter-fill` where the system defines
+  `.pulp-meter > .level` + `.peak` — rendered as a flat empty rectangle;
+- a header authored as `.pulp-panel-header > .panel-title` / `.panel-subtitle`,
+  none of which exist — rendered as default body text next to correctly styled
+  `.knob-label` runs, which is what makes it so easy to miss.
+
+Run `tools/import-design/component_contract.py --system <dir> panel.html`
+before trusting a similarity score on agent- or hand-authored HTML. It reports
+invented children (naming the classes the component *does* style) and invented
+`pulp-*` component names, whose children are unstyled too. Tests:
+`tools/import-design/test_component_contract.py`.
+
+Corollary for prompts: an agent asked to author design-system HTML will invent
+plausible class names. The component contract is the gate that catches it —
+"it rendered and matched" is not evidence the markup was real.
+
+## A stale importer binary silently falls back to the old parser
+
+`pulp-import-design` built from an older tree can still run and still print
+`PASS` while exercising a retired code path — e.g. a regex parser that main has
+since replaced (there is a commit literally titled *"retire stale Claude parser
+guidance"*). The symptom is a result that looks plausible but does not reflect
+the change you are testing.
+
+Before concluding anything from an import run, confirm the binary matches the
+worktree you edited: check `git log --oneline -1` in the checkout you built
+from, and rebuild if the change you are validating is not in it. Testing an old
+worktree and reporting the result as current has burned real debugging hours.

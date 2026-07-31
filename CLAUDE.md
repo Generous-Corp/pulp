@@ -799,6 +799,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
 - Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
   - ⚠ **Cannot see:** Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
+- Measure whether the offline/native HTML importer is converging on Chromium without changing canonical import output. → `tools/import-validation/importer_differential_lab.py analyze-corpus`
+  - ⚠ **Cannot see:** Development-only and advisory. Chromium remains authoritative, production native promotion is disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
 - An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
   - ⚠ **Cannot see:** BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
 - An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?". → `tools/import-design/material_audit.mjs`
@@ -811,6 +813,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
 
 **design-import** — get a design into Pulp
+- Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
+  - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
+- Catch a panel that invents component classes or child parts the design system never defined. → `tools/import-design/component_contract.py`
+  - ⚠ **Cannot see:** Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
 - Decode a local .fig file offline — no Figma desktop, no REST quota. → `tools/import-design/fig_decode.mjs emit`
 - A vector ILLUSTRATION group imported as a flat stack of boxes instead of art. → `tools/import-design/figma_rasterize_vector_frames.py`
 - Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit. → `tools/import-design/figma_rest_export.py`
@@ -1532,6 +1538,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | Skill | Purpose |
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
+| `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
 | `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |

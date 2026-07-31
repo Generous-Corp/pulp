@@ -90,6 +90,7 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     NonAutomatableAutomationParameter,
     DeviceNodeAutomationConflict,
     AutomationRendererRejected,
+    RealtimeStretchRejected,
     CleanupRecoveryRequired,
 };
 
@@ -113,6 +114,13 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     InvalidTransport,
     NoteRenderFailed,
     AudioRenderFailed,
+    RealtimeStretchGap,
+    RealtimeStretchStateRequired,
+    RealtimeStretchStalePublication,
+    RealtimeStretchImpossibleRatio,
+    RealtimeStretchBackpressure,
+    RealtimeStretchUnderflow,
+    RealtimeStretchUnsupportedScrubbing,
     CapacityExceeded,
     InputShapeMismatch,
     TopologyChanged,
@@ -174,20 +182,19 @@ class TimelineGraphPlaybackBinding {
     /// process(), MIDI injection, and anticipation are stopped. External plugins
     /// and retained custom nodes are re-prepared; renderer carry is deliberately
     /// reset after a successful sample-rate or maximum-block change.
-    TimelineGraphAdmission prepare_quiesced(
-        const playback::PlaybackProgram& program,
-        std::span<const TimelineTrackGraphRoute> routes,
-        const TimelineGraphBindingConfig& config, double sample_rate,
-        int maximum_block_size);
+    TimelineGraphAdmission prepare_quiesced(const playback::PlaybackProgram& program,
+                                            std::span<const TimelineTrackGraphRoute> routes,
+                                            const TimelineGraphBindingConfig& config,
+                                            double sample_rate, int maximum_block_size);
 
     using BeforeBindingPublishHookForTest = void (*)(void*) noexcept;
-    void set_before_binding_publish_hook_for_test(
-        BeforeBindingPublishHookForTest hook, void* context = nullptr) noexcept {
+    void set_before_binding_publish_hook_for_test(BeforeBindingPublishHookForTest hook,
+                                                  void* context = nullptr) noexcept {
         before_binding_publish_hook_for_test_ = hook;
         before_binding_publish_context_for_test_ = context;
     }
-    void set_before_graph_commit_hook_for_test(
-        BeforeBindingPublishHookForTest hook, void* context = nullptr) noexcept {
+    void set_before_graph_commit_hook_for_test(BeforeBindingPublishHookForTest hook,
+                                               void* context = nullptr) noexcept {
         before_graph_commit_hook_for_test_ = hook;
         before_graph_commit_context_for_test_ = context;
     }
@@ -202,17 +209,15 @@ class TimelineGraphPlaybackBinding {
     playback::RendererCarryState renderer_state_for(timeline::ItemId track_id) const noexcept;
 
   private:
-    TimelineGraphAdmission build_candidate(
-        const playback::PlaybackProgram& program,
-        std::span<const TimelineTrackGraphRoute> routes,
-        const TimelineGraphBindingConfig& config, double sample_rate,
-        int maximum_block_size,
-        detail::TimelineGraphPreparedCandidate& candidate) const;
-    TimelineGraphAdmission prepare_impl(
-        const playback::PlaybackProgram& program,
-        std::span<const TimelineTrackGraphRoute> routes,
-        const TimelineGraphBindingConfig& config, double sample_rate,
-        int maximum_block_size, bool quiesced);
+    TimelineGraphAdmission build_candidate(const playback::PlaybackProgram& program,
+                                           std::span<const TimelineTrackGraphRoute> routes,
+                                           const TimelineGraphBindingConfig& config,
+                                           double sample_rate, int maximum_block_size,
+                                           detail::TimelineGraphPreparedCandidate& candidate) const;
+    TimelineGraphAdmission prepare_impl(const playback::PlaybackProgram& program,
+                                        std::span<const TimelineTrackGraphRoute> routes,
+                                        const TimelineGraphBindingConfig& config,
+                                        double sample_rate, int maximum_block_size, bool quiesced);
     void remove_all_owned_nodes() noexcept;
 
     SignalGraph& graph_;

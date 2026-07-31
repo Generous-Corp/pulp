@@ -90,6 +90,19 @@ pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
 # frame path transitively.
 pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
 
+# Presentation + GPU-diagnostics policy (WAH-13): the embedded-editor
+# non-blocking default that both the Windows and Linux hosts now read from one
+# place, and the opt-in gate on Dawn timestamp queries.
+# pulp::view only: pulp::render does not exist in a no-GPU build, which is
+# the configuration the diff-coverage lane uses. The GpuSurface::Config
+# assertions are __has_include-guarded in the source.
+pulp_add_test_suite(pulp-test-present-policy LIBRARIES pulp::view)
+
+# Shared window->root inverse transform (WAH-10). Round-trip against the
+# forward transform, because that is the property that matters: the point paint
+# places at X must be the point input recovers from a click at X.
+pulp_add_test_suite(pulp-test-design-viewport-inverse LIBRARIES pulp::view)
+
 # Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
 # WindowHost dirty-region accumulation. Pins the local->root mapping, the
 # bounding-box union, and the full-repaint escalations (no-arg, transform,
@@ -367,7 +380,19 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
-pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
+# Pointer dispatch, split into four focused suites (WAH-7). The single file
+# was ~1,370 lines spanning focus, coordinate mapping, delivery/capture/
+# reentrancy, and gestures — four subjects with four reasons to change, where a
+# failure in one told you little about where to look. Fixtures stayed LOCAL to
+# each suite rather than moving to a shared helper.
+pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
+# The Windows editor's input state machine. Deliberately NOT gated on WIN32:
+# win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
+# re-entrancy and capture rules run on the required macOS gate.
+pulp_add_test_suite(pulp-test-win-plugin-input-router LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract

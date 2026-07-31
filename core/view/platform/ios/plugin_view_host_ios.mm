@@ -1134,16 +1134,14 @@ public:
     }
 
     Point window_to_root_point(Point pt) const override {
-        float sx, sy, tx, ty;
-        if (!WindowHost::compute_design_viewport_transform(
-                static_cast<float>(size_.width),
-                static_cast<float>(size_.height),
-                design_viewport_w_, design_viewport_h_,
-                sx, sy, tx, ty, design_top_align_)) {
-            return pt;
-        }
-        if (sx <= 0.0f || sy <= 0.0f) return pt;
-        return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+        // One shared inverse (WAH-10). This was byte-identical in the two
+        // macOS plug-in hosts, the iOS host and the Windows host; four copies
+        // of an inverse letterbox transform is four chances to drift from the
+        // paint-side transform, and that drift shows up as clicks landing on
+        // the wrong control rather than as an obvious coordinate bug.
+        return WindowHost::design_viewport_window_to_root(
+            pt, static_cast<float>(size_.width), static_cast<float>(size_.height),
+            design_viewport_w_, design_viewport_h_, design_top_align_);
     }
 
     bool attach_native_child_view(NativeViewHandle child_view,

@@ -3,6 +3,7 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/dirty_track_resolver.hpp>
+#include <pulp/playback/offline_stretch_artifact.hpp>
 #include <pulp/playback/program.hpp>
 
 #include <chrono>
@@ -48,6 +49,7 @@ enum class CompileErrorCode : std::uint8_t {
     NestedSequenceUnsupported,
     ExpansionBudgetExceeded,
     NoteProgramCapacityExceeded,
+    OfflineStretchFailed,
 };
 
 struct CompileError {
@@ -55,6 +57,7 @@ struct CompileError {
     timeline::ItemId item;
     std::uint64_t revision = 0;
     AudioRendererErrorCode audio_detail = AudioRendererErrorCode::InvalidAsset;
+    OfflineStretchErrorCode offline_stretch_detail = OfflineStretchErrorCode::None;
 };
 
 struct CompileTicket {

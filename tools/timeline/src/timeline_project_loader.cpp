@@ -29,7 +29,8 @@ std::optional<std::string> read_file(const fs::path& path,
                                      std::uint64_t max_bytes = kMaxAssetWorkingSetBytes) {
     std::error_code error;
     const auto size = fs::file_size(path, error);
-    if (error || size > max_bytes || size > std::numeric_limits<std::size_t>::max())
+    if (error || size > max_bytes || size > std::numeric_limits<std::size_t>::max() ||
+        size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
         return std::nullopt;
     try {
         std::ifstream stream(path, std::ios::binary);
@@ -37,6 +38,30 @@ std::optional<std::string> read_file(const fs::path& path,
             return std::nullopt;
         std::string bytes(static_cast<std::size_t>(size), '\0');
         if (size != 0 && !stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
+            return std::nullopt;
+        if (stream.peek() != std::ifstream::traits_type::eof())
+            return std::nullopt;
+        return bytes;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<std::vector<std::uint8_t>> read_file_bytes(const fs::path& path,
+                                                         std::uint64_t max_bytes) {
+    std::error_code error;
+    const auto size = fs::file_size(path, error);
+    if (error || size > max_bytes || size > std::numeric_limits<std::size_t>::max() ||
+        size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+        return std::nullopt;
+    try {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            return std::nullopt;
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+        if (!bytes.empty() &&
+            !stream.read(reinterpret_cast<char*>(bytes.data()),
+                         static_cast<std::streamsize>(bytes.size())))
             return std::nullopt;
         if (stream.peek() != std::ifstream::traits_type::eof())
             return std::nullopt;
@@ -201,6 +226,35 @@ load_assets(const LoadedProject& project,
 }
 
 } // namespace
+
+std::optional<std::vector<std::uint8_t>>
+read_verified_asset_bytes(const LoadedProject& project, const pulp::timeline::MediaAsset& asset,
+                          std::uint64_t max_bytes) {
+    std::error_code package_base_error;
+    const auto canonical_package_base = fs::canonical(project.base_directory, package_base_error);
+    for (const auto& locator : asset.locators) {
+        if (locator.hint.empty())
+            continue;
+        std::optional<fs::path> candidate;
+        if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative) {
+            if (!package_base_error)
+                candidate = resolve_package_relative_asset(canonical_package_base, locator.hint);
+        } else {
+            candidate = resolve_external_asset(project.base_directory, locator.hint);
+        }
+        if (!candidate)
+            continue;
+        std::error_code error;
+        if (!fs::is_regular_file(*candidate, error))
+            continue;
+        auto bytes = read_file_bytes(*candidate, max_bytes);
+        if (!bytes || pulp::runtime::sha256_hex(bytes->data(), bytes->size()) !=
+                          asset.content_hash.to_hex())
+            continue;
+        return bytes;
+    }
+    return std::nullopt;
+}
 
 runtime::Result<std::unordered_set<std::uint64_t>,
                 playback::CompileError>

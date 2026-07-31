@@ -25,6 +25,8 @@
 /// RT contract: build() allocates the kernel table and is not audio-thread
 /// safe. apply(), read(), and accessors are allocation-free after build().
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -34,6 +36,20 @@ namespace pulp::signal {
 
 template <typename SampleType = float> class SincResamplerT {
   public:
+    static bool checked_retained_bytes(int half_width, int phases,
+                                       std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        std::uint64_t elements = 0;
+        if (!checked_capacity_product(static_cast<std::uint64_t>(std::max(1, phases) + 1),
+                                      static_cast<std::uint64_t>(2 * std::max(1, half_width)),
+                                      UINT64_MAX, elements))
+            return false;
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<SampleType>(elements)) return false;
+        bytes = charge.total();
+        return true;
+    }
+
     /// Build the kernel. `half_width` taps each side (quality vs cost; 16 is
     /// a good default), `phases` sub-sample resolution (table rows; 512 is
     /// transparent with linear phase interpolation), `beta` the Kaiser shape

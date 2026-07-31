@@ -113,10 +113,19 @@ timebase::BarPosition bar_at_tick(timebase::TickPosition tick,
 
 } // namespace
 
+HostTransportProjectionError detail::advance_host_playback_epoch(std::uint64_t& epoch) noexcept {
+    if (playback::detail::advance_playback_epoch(epoch) ==
+        playback::TransportError::PlaybackEpochExhausted)
+        return HostTransportProjectionError::PlaybackEpochExhausted;
+    return HostTransportProjectionError::None;
+}
+
 HostTransportProjectionError
 HostTransportProjector::prepare(const timebase::CompiledTempoMap& tempo_map,
                                 std::uint32_t maximum_block_size) noexcept {
     reset();
+    if (playback_epoch_exhausted_)
+        return HostTransportProjectionError::PlaybackEpochExhausted;
     if (maximum_block_size == 0 ||
         maximum_block_size > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) {
         return HostTransportProjectionError::InvalidFrameCount;
@@ -131,6 +140,8 @@ HostTransportProjector::project(const format::ProcessContext& context,
                                 playback::TransportSnapshot& snapshot) noexcept {
     if (tempo_map_ == nullptr)
         return HostTransportProjectionError::NotPrepared;
+    if (playback_epoch_exhausted_)
+        return HostTransportProjectionError::PlaybackEpochExhausted;
     if (context.num_samples <= 0 ||
         static_cast<std::uint32_t>(context.num_samples) > maximum_block_size_) {
         return HostTransportProjectionError::InvalidFrameCount;
@@ -202,6 +213,13 @@ HostTransportProjector::project(const format::ProcessContext& context,
            context.loop_end_beats != previous_host_loop_end_beats_)));
     const bool transport_started =
         context.transport_started || (context.is_playing && (first_block_ || !previous_playing_));
+    const bool epoch_change = context.reset_requested || unexpected_transport_jump ||
+                              inferred_jump || mapping_transition || transport_started ||
+                              loop_identity_changed;
+    auto projected_epoch = playback_epoch_;
+    if (epoch_change && detail::advance_host_playback_epoch(projected_epoch) !=
+                            HostTransportProjectionError::None)
+        return HostTransportProjectionError::PlaybackEpochExhausted;
     if (!context.is_playing || !loop.enabled || context.reset_requested ||
         unexpected_transport_jump || inferred_jump || mapping_transition ||
         transport_started || loop_identity_changed)
@@ -274,6 +292,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
         range.tempo_changed = index == 0 ? context.tempo_changed
                                          : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = range_discontinuity;
+        range.playback_epoch = projected_epoch;
         range.host_beat_mapping = use_host_beat_clock;
         range.loop_pass_index =
             context.is_playing && loop.enabled ? loop_pass_index_ : 0;
@@ -352,7 +371,9 @@ HostTransportProjector::project(const format::ProcessContext& context,
         }
     }
 
+    snapshot.playback_epoch = snapshot.ranges[0].playback_epoch;
     snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
+    playback_epoch_ = projected_epoch;
     has_expected_sample_ = true;
     previous_meter_ = meter;
     previous_loop_ = loop;
@@ -369,6 +390,9 @@ HostTransportProjector::project(const format::ProcessContext& context,
 }
 
 void HostTransportProjector::reset() noexcept {
+    if (detail::advance_host_playback_epoch(playback_epoch_) !=
+        HostTransportProjectionError::None)
+        playback_epoch_exhausted_ = true;
     tempo_map_ = nullptr;
     maximum_block_size_ = 0;
     monotonic_ = {};

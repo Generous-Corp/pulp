@@ -54,6 +54,19 @@ target_link_libraries(pulp-import-design PRIVATE
     pulp::state
     pulp::platform)
 
+# Match the SDK's bin/ + lib/ install layout so the installed helper can
+# resolve shared dependencies such as wgpu-native from the same prefix.
+if(APPLE)
+    set_target_properties(pulp-import-design PROPERTIES
+        INSTALL_RPATH "@executable_path/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE
+        MACOSX_RPATH TRUE)
+elseif(UNIX)
+    set_target_properties(pulp-import-design PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
+
 file(STRINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/browser_capture/runtime_manifest.txt"
     _pulp_browser_capture_runtime_names)
@@ -90,6 +103,17 @@ target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::state
     pulp::platform)
 
+# Development-only observer used by the Importer Differential Lab. It reads a
+# serialized DesignIR directly, avoiding codegen/QuickJS as a confounding layer
+# when measuring the candidate importer's native tree.
+add_executable(pulp-design-ir-observe
+    design_ir_observe.cpp)
+target_include_directories(pulp-design-ir-observe PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-design-ir-observe PRIVATE
+    pulp::view
+    pulp::state
+    pulp::platform)
+
 # Annotated-capture import lane: manifest parse + DesignFrameView codegen.
 # Kept as a small static lib so the test target can link the parser/codegen core
 # directly (no CLI process spawn) while the CLI below drives it end-to-end.
@@ -114,4 +138,5 @@ target_link_libraries(pulp-svg-probe PRIVATE pulp::view pulp::state pulp::platfo
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
 pulp_link_fontconfig_after_skia(pulp-import-design)
 pulp_link_fontconfig_after_skia(pulp-design-import-bench)
+pulp_link_fontconfig_after_skia(pulp-design-ir-observe)
 pulp_link_fontconfig_after_skia(pulp-annotated-capture-import)

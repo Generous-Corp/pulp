@@ -92,6 +92,9 @@ constexpr std::string_view v4_members[] = {
 constexpr std::string_view v5_members[] = {
     "absolute_duration", "chord_scale_lane", "groove",  "id",    "markers",
     "musical_duration",  "name",             "regions", "scenes", "tracks"};
+constexpr std::string_view v6_members[] = {
+    "absolute_duration", "chord_scale_lane", "groove", "id",          "markers", "musical_duration",
+    "name",              "regions",          "scenes", "track_order", "tracks"};
 constexpr std::string_view groove_members[] = {
     "name",            "step",            "steps",           "swing_denominator", "swing_grid",
     "swing_numerator", "timing_strength", "velocity_strength"};
@@ -116,6 +119,28 @@ bool states_no_feel(const JsonValue& groove) noexcept {
            scalar_is(groove.object[5].second, JsonValue::Kind::String, "1") &&
            scalar_is(groove.object[6].second, JsonValue::Kind::Number, "1000") &&
            scalar_is(groove.object[7].second, JsonValue::Kind::Number, "1000");
+}
+
+// Whether the authored order says the same thing as the track list read
+// top to bottom. An empty order already means the identity order, so both
+// spellings of "nothing was reordered" survive a downgrade; anything else is
+// authored intent a v5 reader would resolve to identity order instead.
+bool states_identity_track_order(const JsonValue& order, const JsonValue& tracks) noexcept {
+    if (order.kind != JsonValue::Kind::Array || tracks.kind != JsonValue::Kind::Array)
+        return false;
+    if (order.array.empty())
+        return true;
+    if (order.array.size() != tracks.array.size())
+        return false;
+    for (std::size_t index = 0; index < order.array.size(); ++index) {
+        const auto& named = order.array[index];
+        const auto* data = tracks.array[index].find("data");
+        const auto* id = data ? data->find("id") : nullptr;
+        if (!id || named.kind != JsonValue::Kind::String || id->kind != JsonValue::Kind::String ||
+            named.scalar != id->scalar)
+            return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -304,6 +329,49 @@ migrate_sequence_v5_to_v4(std::string_view source, BoundedJsonSink& output, cons
         return fail();
     std::array edits{RawEdit{scenes_comma, scenes.end, {}},
                      RawEdit{version->begin, version->end, "4"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v5_to_v6(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 5) || !has_exact_members(*data, v5_members) ||
+        version->begin >= version->end)
+        return fail();
+    // An empty order records no authored order, so the upgraded document adopts
+    // the identity order of its track list -- exactly what a v5 reader saw.
+    const auto& scenes = data->object[8].second;
+    if (scenes.begin >= scenes.end)
+        return fail();
+    std::array edits{RawEdit{scenes.end, scenes.end, ",\"track_order\":[]"},
+                     RawEdit{version->begin, version->end, "6"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v6_to_v5(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 6) || !has_exact_members(*data, v6_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& track_order = data->object[9].second;
+    if (!states_identity_track_order(track_order, data->object[10].second))
+        return fail();
+    const auto order_comma = source.find(',', data->object[8].second.end);
+    if (order_comma == std::string_view::npos || order_comma >= track_order.begin)
+        return fail();
+    std::array edits{RawEdit{order_comma, track_order.end, {}},
+                     RawEdit{version->begin, version->end, "5"}};
     return finish(output, apply_edits(source, edits, output));
 }
 

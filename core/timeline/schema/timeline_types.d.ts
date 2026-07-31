@@ -52,13 +52,14 @@ export interface PulpTimelineChordScaleEvent {
   scale_root: number | string;
 }
 
-/** `pulp.timeline.clip` — domain Document, schema version 1. */
+/** `pulp.timeline.clip` — domain Document, schema version 2. */
 export interface PulpTimelineClip {
   content: Record<string, unknown>;
   fade_in_duration?: number | string;
   fade_out_duration?: number | string;
   gain_linear_bits?: number | string;
   id: number | string;
+  time_conform: string;
   time_range: Record<string, unknown>;
 }
 
@@ -135,6 +136,13 @@ export interface PulpTimelineCommandInsertTakeLane {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_track` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertTrack {
+  before_track_id?: number | string;
+  sequence_id: number | string;
+  track: PulpTimelineTrack;
+}
+
 /** `pulp.timeline.command.move_clip` — domain Command, schema version 1. */
 export interface PulpTimelineCommandMoveClip {
   clip_id: number | string;
@@ -204,6 +212,12 @@ export interface PulpTimelineCommandRemoveTake {
 /** `pulp.timeline.command.remove_take_lane` — domain Command, schema version 1. */
 export interface PulpTimelineCommandRemoveTakeLane {
   lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_track` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveTrack {
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -396,7 +410,7 @@ export interface PulpTimelineScene {
   slots: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 5. */
+/** `pulp.timeline.sequence` — domain Document, schema version 6. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
@@ -407,6 +421,7 @@ export interface PulpTimelineSequence {
   name: string;
   regions: readonly unknown[];
   scenes: readonly unknown[];
+  track_order: readonly unknown[];
   tracks: readonly unknown[];
 }
 
@@ -470,6 +485,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_slot"
   | "pulp.timeline.command.insert_take"
   | "pulp.timeline.command.insert_take_lane"
+  | "pulp.timeline.command.insert_track"
   | "pulp.timeline.command.move_clip"
   | "pulp.timeline.command.remove_asset"
   | "pulp.timeline.command.remove_automation_lane"
@@ -481,6 +497,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_slot"
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
+  | "pulp.timeline.command.remove_track"
   | "pulp.timeline.command.replace_note_content"
   | "pulp.timeline.command.set_active_take_lane"
   | "pulp.timeline.command.set_chord_scale_lane"
@@ -531,6 +548,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_slot": PulpTimelineCommandInsertSlot;
   "pulp.timeline.command.insert_take": PulpTimelineCommandInsertTake;
   "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
+  "pulp.timeline.command.insert_track": PulpTimelineCommandInsertTrack;
   "pulp.timeline.command.move_clip": PulpTimelineCommandMoveClip;
   "pulp.timeline.command.remove_asset": PulpTimelineCommandRemoveAsset;
   "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
@@ -542,6 +560,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_slot": PulpTimelineCommandRemoveSlot;
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
+  "pulp.timeline.command.remove_track": PulpTimelineCommandRemoveTrack;
   "pulp.timeline.command.replace_note_content": PulpTimelineCommandReplaceNoteContent;
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
   "pulp.timeline.command.set_chord_scale_lane": PulpTimelineCommandSetChordScaleLane;

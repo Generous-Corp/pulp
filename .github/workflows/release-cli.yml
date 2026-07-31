@@ -30,11 +30,10 @@ on:
       source_ref:
         description: |
           Git ref to BUILD from. Leave blank to build from `version` (the
-          tag itself, normal backfill). Set to `main` only when you want
-          to publish current `main` content under the `version` label —
-          ill-advised unless you understand the risk. Added in #1962 so
-          backfilling a broken release can run the FIXED workflow from
-          `main` while still checking out the broken TAG's source code.
+          tag itself, normal backfill). Historical tags before the SDK
+          provenance floor may set this for emergency repair. Marker-era
+          releases reject source substitution because their positive marker
+          binds the release label to the exact tag commit.
         required: false
         default: ''
       make_latest:
@@ -109,6 +108,49 @@ jobs:
       # repo. Always resolve from the DEFAULT branch's copy, never the tag's: a
       # backfill of an old tag must use today's routing, not whatever routing
       # existed when that tag was cut.
+      # Evaluate marker-era policy before the operator-selected source_ref is
+      # checked out. Otherwise that ref could supply an older matrix that omits
+      # sdk_provenance_floor and thereby disable its own guard.
+      - uses: actions/checkout@v5
+        with:
+          # This first checkout is a trusted policy bootstrap. The source build
+          # checkout below may use an operator-selected ref, but only after the
+          # default branch has decided whether that substitution is permitted.
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Reject marker-era source substitution
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${GITHUB_REPOSITORY}/contents/tools/scripts/release_product_matrix.json?ref=${DEFAULT_BRANCH}" \
+            >"$authoritative_matrix"
+          python3 - "$authoritative_matrix" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          def version(value):
+              return tuple(int(part) for part in value.removeprefix("v").split("."))
+
+          matrix = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          floor = matrix["sdk_provenance_floor"]
+          if version(os.environ["RELEASE_VERSION"]) >= version(floor):
+              raise SystemExit(
+                  "marker-era releases cannot substitute source_ref for the release tag"
+              )
+          print("pre-marker repair: source_ref substitution remains permitted")
+          PY
+
       - uses: actions/checkout@v5
         with:
           lfs: false
@@ -262,29 +304,39 @@ jobs:
           # See pulp #1962 for the backfill safety rationale.
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
 
+      # A workflow_dispatch backfill can check out a tag older than the local
+      # dependency action referenced by this workflow. Materialize only that
+      # compatibility tooling before the action is resolved; the release still
+      # builds the selected tag's product source.
+      - name: Ensure shared Linux dependency action exists
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          workflow_sha='${{ github.workflow_sha }}'
+          required=(
+            .github/actions/install-linux-build-deps/action.yml
+            tools/ci/install_linux_build_deps.py
+            tools/ci/linux_build_deps.json
+          )
+          for path in "${required[@]}"; do
+            if [ ! -f "${path}" ]; then
+              mkdir -p "$(dirname "${path}")"
+              curl -fsSL "https://raw.githubusercontent.com/${repo}/${workflow_sha}/${path}" \
+                -o "${path}"
+            fi
+          done
+
       - name: Set up Namespace macOS cache
         if: matrix.os == 'macos-15' && contains(needs.resolve-macos-runner.outputs.runs_on_json, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # libfontconfig1-dev added in #1970: chrome/m144 Skia exposes
-        # fontconfig symbols (FcInitLoadConfigAndFonts, FcConfigGetSysRoot,
-        # FcPatternGetString, etc.) that earlier Skia releases hid. Without
-        # the dev package, `pkg_check_modules(FONTCONFIG fontconfig)` in
-        # core/canvas/CMakeLists.txt comes up empty and the link step
-        # fails on undefined references. Symptom on the v0.97.0 backfill
-        # (run 25874113981, 4 of 5 matrix legs green, only linux-x64
-        # failing in Build) is what motivated this addition.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native-webview
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
@@ -314,6 +366,8 @@ jobs:
       - name: Overlay latest release-pipeline files (workflow_dispatch backfill)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref == '' }}
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         # Pull the current `main` copies of files that gate release-cli's
         # success but live in the source tree rather than the workflow
         # itself. Without this, a backfill against a tag created BEFORE
@@ -332,6 +386,8 @@ jobs:
         #     linux-arm64, when backfilling older tags.
         #   - tools/scripts/package_cli.py: release packaging/rpath fixes,
         #     including macOS ad-hoc re-signing after install_name_tool rewrites.
+        #   - tools/scripts/release_artifact_contents.py: current compatibility
+        #     engine interprets the exact matrix and release version from the tag.
         #   - tools/scripts/resign_macos_release_tree.py: install-time signature
         #     repair is safe and required for every backfilled Darwin SDK.
         #
@@ -341,15 +397,38 @@ jobs:
         # tail-link block below so the tag keeps its own source list.
         run: |
           set -euo pipefail
-          repo='${{ github.repository }}'
+          matrix_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/tools/scripts/release_product_matrix.json"
+          matrix_file="${RUNNER_TEMP}/release-product-matrix.json"
+          curl -fsSL "$matrix_url" -o "$matrix_file"
+          release_era="$(python3 - "$RELEASE_VERSION" "$matrix_file" <<'PY'
+          import json
+          import sys
+
+          def version(value):
+              return tuple(int(part) for part in value.removeprefix("v").split("."))
+
+          with open(sys.argv[2], encoding="utf-8") as handle:
+              matrix = json.load(handle)
+          print(
+              "marker-era"
+              if version(sys.argv[1]) >= version(matrix["sdk_provenance_floor"])
+              else "legacy"
+          )
+          PY
+          )"
+          if [[ "$release_era" == "marker-era" ]]; then
+            echo "Marker-era release ${RELEASE_VERSION}: refusing current-main source overlays"
+            exit 0
+          fi
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               tools/scripts/package_cli.py \
+              tools/scripts/release_artifact_contents.py \
               tools/scripts/resign_macos_release_tree.py \
               core/canvas/CMakeLists.txt \
               tools/deps/manifest.json \
               ; do
-            url="https://raw.githubusercontent.com/${repo}/main/${path}"
+            url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${path}"
             echo "Overlaying ${path} from ${url}"
             curl -fsSL "$url" -o "$path"
             wc -c "$path"
@@ -391,25 +470,77 @@ jobs:
           PY
 
       # A normal post-contract tag carries these files itself. An old tag or an
-      # explicit old source_ref does not; fetch the current verifier as a
-      # compatibility engine only when absent. Its matrix floor makes a
-      # pre-contract source an explicit skip rather than an accidental pass.
+      # explicit old source_ref may not. Manual dispatches always use the current
+      # verifier, provenance stamper, and CLI packager as compatibility helpers
+      # while retaining the selected source's product matrix. Keep those current
+      # helpers outside tracked source paths: provenance stamping must see the
+      # selected tag's tracked tree as clean. The current packager is also
+      # required because historical copies can omit release repairs such as
+      # signing a staged macOS wgpu runtime. Otherwise fetch helpers only when
+      # absent. The matrix floor makes a pre-contract source an explicit skip
+      # rather than an accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
+          compat_dir=.release-backfill-helpers
+          rm -rf "$compat_dir"
+          mkdir -p "$compat_dir/tools/scripts"
           for path in \
+              tools/scripts/package_cli.py \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
+              tools/scripts/sdk_provenance.py \
+              tools/cmake/PulpSdkProvenance.cmake \
               ; do
+            if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
+                && { [ "$path" = tools/scripts/package_cli.py ] \
+                  || [ "$path" = tools/scripts/release_artifact_contents.py ] \
+                  || [ "$path" = tools/scripts/sdk_provenance.py ] \
+                  || [ "$path" = tools/cmake/PulpSdkProvenance.cmake ]; }; then
+              url="https://raw.githubusercontent.com/${repo}/main/${path}"
+              echo "Overlaying current backfill compatibility engine from ${url}"
+              compat_path="$compat_dir/${path##*/}"
+              if [ "$path" = tools/scripts/package_cli.py ]; then
+                # package_cli.py resolves the import-design runtime manifest
+                # relative to tools/scripts, so preserve that layout.
+                compat_path="$compat_dir/tools/scripts/package_cli.py"
+              fi
+              curl -fsSL "$url" -o "$compat_path"
+              continue
+            fi
             if [ ! -f "$path" ]; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Fetching missing release helper from ${url}"
               curl -fsSL "$url" -o "$path"
             fi
           done
+          if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then
+            # Make the selected tag's runtime manifest visible at the relative
+            # path expected by the current compatibility packager.
+            ln -s ../../tools/import-design "$compat_dir/tools/import-design"
+            cp tools/scripts/release_product_matrix.json \
+              "$compat_dir/release_product_matrix.json"
+            echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
+              >> "$GITHUB_ENV"
+          else
+            echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
+              >> "$GITHUB_ENV"
+          fi
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -562,6 +693,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF \
             $REQUIRE_GPU \
             $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
@@ -615,6 +747,8 @@ jobs:
       # `tools/cli/`. The release tarball must include both.
       - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
+        # Container jobs default to POSIX sh, but this step uses Bash arrays.
+        shell: bash
         # Linux: GNU strip works directly. macOS (Apple Silicon): binaries are
         # ad-hoc code-signed at link time, and `strip` invalidates that
         # signature — on the self-hosted Macs that surfaces as a hard `strip`
@@ -624,7 +758,11 @@ jobs:
         # #2067: pulp-mcp ships in the CLI tarball so the Claude Code plugin's
         # MCP launcher can resolve it on $PATH after install.
         run: |
-          for bin in build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp build/tools/import-design/pulp-import-design; do
+          release_bins=(build/pulp build/tools/cli/pulp-cpp build/tools/mcp/pulp-mcp)
+          if [ -f build/tools/import-design/pulp-import-design ]; then
+            release_bins+=(build/tools/import-design/pulp-import-design)
+          fi
+          for bin in "${release_bins[@]}"; do
             # Fail LOUD if a binary is missing. The strip itself is best-effort
             # on macOS (below), which would otherwise SILENTLY swallow an
             # absent binary — exactly how a skipped Rust `build/pulp` target hid
@@ -665,12 +803,19 @@ jobs:
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
-          python3 tools/scripts/package_cli.py \
+          import_design_args=()
+          if [ -x build/tools/import-design/pulp-import-design ] \
+              && [ -d build/tools/import-design/browser_capture-v1 ]; then
+            import_design_args=(
+              --import-design-binary build/tools/import-design/pulp-import-design
+              --import-design-runtime-dir build/tools/import-design/browser_capture-v1
+            )
+          fi
+          python3 "$PULP_RELEASE_PACKAGER" \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
             --mcp-binary build/tools/mcp/pulp-mcp \
-            --import-design-binary build/tools/import-design/pulp-import-design \
-            --import-design-runtime-dir build/tools/import-design/browser_capture-v1 \
+            "${import_design_args[@]}" \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -679,12 +824,21 @@ jobs:
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
-          python tools/scripts/package_cli.py `
+          $importDesignArgs = @()
+          if ((Test-Path build/tools/import-design/Release/pulp-import-design.exe) `
+              -and (Test-Path build/tools/import-design/Release/browser_capture-v1)) {
+            $importDesignArgs = @(
+              '--import-design-binary',
+              'build/tools/import-design/Release/pulp-import-design.exe',
+              '--import-design-runtime-dir',
+              'build/tools/import-design/Release/browser_capture-v1'
+            )
+          }
+          python $env:PULP_RELEASE_PACKAGER `
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `
-            --import-design-binary build/tools/import-design/Release/pulp-import-design.exe `
-            --import-design-runtime-dir build/tools/import-design/Release/browser_capture-v1 `
+            @importDesignArgs `
             --build-dir build `
             --platform ${{ matrix.platform }} `
             --out pulp-${{ matrix.platform }}.zip
@@ -718,6 +872,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
@@ -749,12 +904,29 @@ jobs:
         if: runner.os != 'Windows'
         env:
           MATRIX_PLATFORM: ${{ matrix.platform }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           # build-sdk on Linux is the WebView=ON build (separate dir to
           # avoid re-linking the CLI binary against libwebkit2gtk).
           # build-sdk on macOS is a symlink to build (CLI was built with
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
+          if [ -z "$SOURCE_REF" ]; then
+            # The current positive release marker must ship with the current
+            # fail-closed consumer validator. Historical tag copies recognize
+            # only development markers and reject an official SDK at
+            # find_package(Pulp) time.
+            install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE" \
+              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
+            python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
+              --prefix sdk-staging \
+              --build-dir build-sdk \
+              --source-dir . \
+              --release-tag "$RELEASE_TAG" \
+              --source-sha "$(git rev-parse HEAD)" \
+              --platform "${{ matrix.platform }}"
+          fi
           test -f sdk-staging/lib/libpulp-view.a
           test -f sdk-staging/lib/libpulp-view-core.a
           # CMake rewrites install RPATHs while copying executables into the SDK.
@@ -800,8 +972,27 @@ jobs:
 
       - name: Build SDK tarball (Windows)
         if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           cmake --install build --prefix sdk-staging --config Release
+          if ([string]::IsNullOrEmpty($env:SOURCE_REF)) {
+            Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE `
+              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
+            $releaseTag = $env:RELEASE_TAG
+            $sourceSha = (git rev-parse HEAD).Trim()
+            python $env:PULP_SDK_PROVENANCE_HELPER stamp `
+              --prefix sdk-staging `
+              --build-dir build `
+              --source-dir . `
+              --release-tag $releaseTag `
+              --source-sha $sourceSha `
+              --platform '${{ matrix.platform }}'
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Failed to stamp official SDK provenance'
+            }
+          }
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
@@ -826,9 +1017,15 @@ jobs:
           if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
             signature_args+=(--native-signatures)
           fi
-          python3 tools/scripts/release_artifact_contents.py . \
+          source_sha_args=()
+          if python3 "$PULP_RELEASE_CONTENT_VERIFIER" --help \
+              2>&1 | grep -q -- '--source-sha'; then
+            source_sha_args+=(--source-sha "$(git rev-parse HEAD)")
+          fi
+          python3 "$PULP_RELEASE_CONTENT_VERIFIER" . \
             --platform "${{ matrix.platform }}" \
             --version "${RELEASE_TAG#v}" \
+            "${source_sha_args[@]}" \
             "${signature_args[@]}"
 
       - name: Verify release archive product matrix (Windows)
@@ -839,9 +1036,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_TAG.TrimStart('v')
-          python tools/scripts/release_artifact_contents.py . `
+          $verifierHelp = python $env:PULP_RELEASE_CONTENT_VERIFIER --help 2>&1 |
+            Out-String
+          $sourceShaArgs = @()
+          if ($verifierHelp.Contains('--source-sha')) {
+            $sourceShaArgs = @('--source-sha', (git rev-parse HEAD).Trim())
+          }
+          python $env:PULP_RELEASE_CONTENT_VERIFIER . `
             --platform "${{ matrix.platform }}" `
-            --version $version
+            --version $version `
+            @sourceShaArgs
 
       # Carry the floor from the exact checkout that produced each macOS
       # artifact. A workflow_dispatch backfill may build an old tag while the
@@ -1004,7 +1208,13 @@ jobs:
               *)        echo "help" ;;
             esac
           }
-          for ART in pulp pulp-cpp pulp-mcp pulp-import-design; do
+          CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)
+          if [ -x /tmp/pulp-smoke/pulp-import-design ]; then
+            CLI_ARTIFACTS+=(pulp-import-design)
+            test -s /tmp/pulp-smoke/browser_capture/capture.mjs
+            /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
+          fi
+          for ART in "${CLI_ARTIFACTS[@]}"; do
             BIN=/tmp/pulp-smoke/$ART
             CMD=$(smoke_cmd "$ART")
             echo "===== Testing $BIN $CMD ====="
@@ -1065,8 +1275,6 @@ jobs:
             fi
             echo "OK: $ART is portable on ${{ matrix.platform }}."
           done
-          test -s /tmp/pulp-smoke/browser_capture/capture.mjs
-          /tmp/pulp-smoke/pulp import-design --help >/tmp/pulp-import-delegate.out
           # The bundled wgpu-native dylib must match the CLI arch too —
           # package_cli.py returns the first dylib it finds without an
           # arch check, so a stale arm64 dylib beside an x86_64 binary
@@ -1103,13 +1311,15 @@ jobs:
               "pulp.exe"      = "help"
               "pulp-cpp.exe"  = "help"
               "pulp-mcp.exe"  = "--version"
-              "pulp-import-design.exe" = "--help"
           }
-          if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
-              throw "browser capture runtime missing from archive"
+          if (Test-Path "$env:TEMP\pulp-smoke\pulp-import-design.exe") {
+              $artCmd["pulp-import-design.exe"] = "--help"
+              if (-not (Test-Path "$env:TEMP\pulp-smoke\browser_capture\capture.mjs")) {
+                  throw "browser capture runtime missing from archive"
+              }
+              & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
+              if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
           }
-          & "$env:TEMP\pulp-smoke\pulp.exe" import-design --help
-          if ($LASTEXITCODE -ne 0) { throw "pulp import-design delegate smoke failed" }
           foreach ($art in $artCmd.Keys) {
               $cmd = $artCmd[$art]
               $bin = Join-Path $env:TEMP "pulp-smoke\$art"
@@ -1313,7 +1523,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
-          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           set -euo pipefail
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
@@ -1382,6 +1591,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
           # A manual dispatch is usually an OLD-tag backfill, so it must opt in
           # before it may claim the latest-release pointer.
           ALLOW_LATEST: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
@@ -1435,8 +1646,36 @@ jobs:
             git show "${matrix_ref}:${matrix}" > "$RUNNER_TEMP/release_product_matrix.json"
             matrix="$RUNNER_TEMP/release_product_matrix.json"
           fi
+          # The selected tag/source matrix remains authoritative for historical
+          # artifact membership, but it must not choose whether its own SDKs need
+          # positive provenance. Import only that policy boundary from the trusted
+          # current default branch and fail hard if it is unavailable.
+          authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${REPO}/contents/tools/scripts/release_product_matrix.json?ref=${DEFAULT_BRANCH}" \
+            >"$authoritative_matrix"
+          publication_matrix="$RUNNER_TEMP/publication-release-product-matrix.json"
+          python3 - "$matrix" "$authoritative_matrix" "$publication_matrix" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          selected_path, authoritative_path, output_path = map(Path, sys.argv[1:])
+          selected = json.loads(selected_path.read_text(encoding="utf-8"))
+          authoritative = json.loads(
+              authoritative_path.read_text(encoding="utf-8")
+          )
+          selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
+          output_path.write_text(
+              json.dumps(selected, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
           python3 tools/scripts/release_artifact_contents.py release-assets \
-            --all-platforms --version "${TAG#v}" --matrix "$matrix"
+            --all-platforms --version "${TAG#v}" \
+            --source-sha "$(git rev-parse "${TAG}^{commit}")" \
+            --matrix "$publication_matrix"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do

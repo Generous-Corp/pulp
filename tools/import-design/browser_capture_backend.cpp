@@ -437,12 +437,13 @@ std::optional<fs::path> prepare_capture_output_directory(
         return std::nullopt;
     }
 
-    constexpr std::array<std::string_view, 6> kGeneratedArtifacts{
+    constexpr std::array<std::string_view, 7> kGeneratedArtifacts{
         "capture.json",
         "browser.png",
         "semantic-report.json",
         "tokens.json",
         "dom-snapshot.json",
+        "interaction-report.json",
         "capture-error.json",
     };
     for (const auto name : kGeneratedArtifacts) {
@@ -751,6 +752,10 @@ CaptureResult capture_document(
         "--initial-height", std::to_string(request.initial_height),
         "--dpr", std::to_string(request.device_scale_factor),
         "--timeout-ms", std::to_string(request.timeout_ms)};
+    if (request.interaction_plan) {
+        args.push_back("--interactions");
+        args.push_back(request.interaction_plan->string());
+    }
     if (request.allow_network) args.push_back("--allow-network");
     if (request.allow_network) {
         for (const auto& origin : declared_https_origins(canonical_root)) {
@@ -797,7 +802,11 @@ CaptureResult capture_document(
         *output_directory / "browser.png",
         *output_directory / "semantic-report.json",
         *output_directory / "tokens.json",
-        *output_directory / "dom-snapshot.json"};
+        *output_directory / "dom-snapshot.json",
+        request.interaction_plan
+            ? std::optional<fs::path>{
+                  *output_directory / "interaction-report.json"}
+            : std::nullopt};
     const std::pair<const char*, fs::path> required[] = {
         {"capture envelope", artifacts.envelope},
         {"browser reference", artifacts.reference_png},
@@ -815,6 +824,15 @@ CaptureResult capture_document(
             failure.process = std::move(process);
             return failure;
         }
+    }
+    if (artifacts.interaction_report &&
+        !nonempty_regular_file(*artifacts.interaction_report)) {
+        auto failure = capture_failure(
+            "browser-capture-incomplete", "capture-artifacts",
+            "browser capture did not emit a non-empty interaction report",
+            *output_directory);
+        failure.process = std::move(process);
+        return failure;
     }
 
     CaptureResult result;

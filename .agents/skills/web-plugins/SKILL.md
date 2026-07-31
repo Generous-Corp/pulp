@@ -329,6 +329,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   change must touch the web lists — and keep new small render-path helpers
   header-only when they have no state to define, so the closure surface does not
   grow for free.
+  Musical `TimeConform::Resample` follows the same existing portable playback
+  units: its stateless source-phase mapping and analytic tempo-ramp inverse add
+  no translation unit, allocation, thread, or web-specific adapter.
+  `TimeConform::Stretch` adds the finite artifact compiler and the prepared
+  realtime stream behind the audio-domain boundary; both audio translation
+  units belong in the WAM and WebCLAP portable dependency inventories. This
+  keeps persisted projects and playback compilation portable, but does not by
+  itself create a JavaScript authoring surface or a browser timeline host.
   These builds also share Timeline's persistent indexes: initial Track/Project
   construction and identity restoration bulk-build sorted balanced trees,
   while ordinary edits path-copy only the changed search paths. Do not replace
@@ -903,6 +911,25 @@ module has no archive to fall back on.
 The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
+
+## The source list covers `core/runtime/` too — not just the adapter's TUs
+
+The rule above ("a new CLAP adapter TU must be added to `PulpWclap.cmake`")
+generalises further than it reads: `PulpWclap.cmake`'s list is the wasm module's
+**entire world**, because it does not link `pulp::runtime` either. So a symbol
+the adapter merely *references* has to be there as well.
+
+Concretely: `clap_adapter.cpp` gained a `runtime::ScopedTracingAttachment`, which
+calls `Tracing::attach()` / `detach()`. Under the default `PULP_TRACING=OFF`
+those compile to no-op stubs — but the symbols still have to exist, and
+`core/runtime/src/trace.cpp` was not in the list. Native builds linked fine
+(they get it out of the `pulp::runtime` archive); every WebCLAP target failed
+with `wasm-ld: undefined symbol: pulp::runtime::Tracing::attach()`.
+
+The failure mode is what makes this expensive: it is invisible locally and on
+the required macOS gate, and surfaces only in the `Build + prove` lane. When you
+add ANY dependency to a TU on this list — not just a new TU — check whether its
+definition is in the list too.
 
 ## The Ganesh/WebGL surface reports a frame outcome now (WAH-2)
 

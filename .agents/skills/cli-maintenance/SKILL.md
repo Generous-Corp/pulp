@@ -124,7 +124,17 @@ sync with `tools/scripts/cli_sync_check.py` and
 `tools/scripts/cli_mcp_parity_baseline.json`.
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, audio-harness, audio-inspect, audio-compare
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, ci-host, upgrade, prototype-loop, motion, trace, seq, audio-harness, audio-inspect, audio-compare
+
+`/seq` is the agent workflow for the top-level `pulp seq` timeline command. It
+wraps schema discovery, validate, explain, typed-command apply, import, and
+consent-gated export. Keep its examples aligned with `cmd_seq.cpp`, the `seq`
+entry in `docs/status/cli-commands.yaml`, `docs/reference/cli.md#seq`, and the
+timeline skill. The export workflow must plan first and may pass only repeated
+exact `--accept-loss <concept-id>` values when publishing; outputless `--plan`
+rejects both `--out` and `--accept-loss`, while publishing requires `--out`.
+Never document a force, wildcard, or accept-all shortcut. `seq` therefore must not return to
+`SKIP_SLASH_COMMANDS` in `cli_sync_check.py`.
 
 `audio-harness` is a workflow slash command (wraps the audio observability harness `ctest` targets + the `audio-harness` skill) — it is NOT a `pulp` CLI subcommand. Note the distinction from the `pulp audio` CLI: that command owns the model/bundle tooling (model/excerpt-find/read-bundle), the offline `pulp audio validate <verb>` harness CLI (summarize/doctor/compare/assert, `tools/cli/cmd_audio_validate.cpp`, over captured WAVs / `audio-run/` bundles — no live plugin), AND `pulp audio render` (`tools/cli/cmd_audio_render.cpp` driver + `cmd_audio_render_parse.cpp` pure parser + the header-only `cmd_audio_render_step.hpp` block stepper), which DOES load a plugin: it renders an explicit `--plugin <bundle>` offline through `pulp::host::PluginSlot` and emits a WAV + the same metrics manifest the `validate` verbs read. Three `render` gotchas: `--param <id>=<value>` is the **PLAIN** parameter domain (native min..max, NOT normalized `[0,1]` — the `PluginSlot::set_parameter` arg name `normalized_value` is a misnomer; every loader treats it as plain); `--param @frame` is **sample-accurate** — the per-block queue the stepper builds is forwarded straight to `PluginSlot::process` (all four loaders apply `param_events` at the sample offset; LV2 block-rate by its control-port nature) and the driver does NOT also call `set_parameter` (that double-applies); and the stepper is a deliberate callback-driven parallel to `OfflineRenderHost::render` (PluginSlot has no `ProcessContext`, so it can't reuse the core renderer) guarded by a block-partition-invariance test. `pulp audio` intentionally has no slash command of its own; the `/audio-harness` command documents the `validate` and `render` verbs. Keep the live boundary in sync with the `audio-harness` skill: live Audio Inspector use is landed under `/audio-inspect` / `pulp run --audio-inspector`, and live capture-to-WAV is landed in two modes — `pulp run --audio-capture-wav` (earliest-window int16 dump — good for `validate summarize`/`assert`) and `pulp run --audio-capture-rolling` (last-N via `RollingAudioCaptureBuffer` — the steady-state window `doctor`/`compare` want — float by default, or int24 via `--audio-capture-rolling-format int24`). When adding a `run` capture flag, mirror slice A/A2's surfaces: `cmd_run.hpp`/`cmd_run_parse.cpp`/`cmd_run.cpp`, the standalone `detail/standalone_audio_capture_*` writer + `standalone_environment.hpp` env+predicate, `docs/status/cli-commands.yaml` (under `run`), `docs/reference/cli.md#run`, and both the `audio-harness` and this skill. When adding a `validate` or `render` flag, update the matching `cmd_audio_*.cpp`, `docs/status/cli-commands.yaml` (nested under `audio`), `docs/reference/cli.md#audio`, and both skills. WAV writing is `write_wav_file(path, data, WavBitDepth)` — `Int16` (default overload), `Int24`, or `Float32`. `pulp audio render` is also exposed as the `pulp_audio_render` MCP tool (`tools/mcp/mcp_tools.cpp` handler + `pulp_mcp.cpp` tools_list/dispatch + `test/test_mcp_server.cpp` membership/required-arg coverage + the `docs/guides/claude-code-plugin.md` tool table); it takes a single `param`/`midi` token (the hand-rolled MCP JSON has no array extractor), returns the metrics JSON, and defaults `--out` to a temp WAV. When adding a render flag worth exposing, mirror it there too.
 
@@ -2556,6 +2566,16 @@ such limit, so it builds fine locally and only fails on the Windows release lane
 Fix: split into adjacent raw-string literals — `)JSON" R"JSON(` — which the
 compiler concatenates (output byte-identical). Keep each chunk well under 16 KB;
 when you add MCP tools, watch the literal size.
+
+Generated timeline iteration tools are stateful within one `pulp-mcp` process:
+`pulp_timeline_project_open` returns a bounded session identifier consumed by
+apply/diff/undo/redo. Seven timeline operations retain stateless
+`pulp::tool-timeline` entry points; diff/undo/redo are MCP-local
+`DocumentSession` operations with no `pulp seq` session subtools. Keep their
+generated names, explicit typed handler bindings, MCP-only parity rows,
+membership tests, and required-argument tests aligned; do not
+reimplement undo from a serialized project because the real undo groups live in
+`DocumentSession`.
 
 ## `pulp validate --json` carries machine-readable evidence
 

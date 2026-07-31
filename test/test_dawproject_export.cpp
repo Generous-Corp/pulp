@@ -7,6 +7,8 @@
 #include <pulp/timeline/model.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +42,57 @@ Project note_project() {
     input.tempo_map = take(TempoMap::create(std::array{TempoPoint{{0}, 140.0}}));
     input.meter_map = take(MeterMap::create(std::array{MeterPoint{{0}, {3, 4}}}));
     return take(Project::create(std::move(input)));
+}
+
+void append_u16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8u));
+}
+
+void append_u32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (unsigned shift = 0; shift != 32u; shift += 8u)
+        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+const std::vector<std::uint8_t>& window_media_bytes() {
+    static const std::vector<std::uint8_t> bytes = [] {
+        constexpr std::uint32_t sample_rate = 48'000;
+        constexpr std::uint32_t frames = 1'000;
+        constexpr std::uint32_t data_bytes = frames * 2u;
+        std::vector<std::uint8_t> wav;
+        wav.insert(wav.end(), {'R', 'I', 'F', 'F'});
+        append_u32(wav, 36u + data_bytes);
+        wav.insert(wav.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+        append_u32(wav, 16u);
+        append_u16(wav, 1u);
+        append_u16(wav, 1u);
+        append_u32(wav, sample_rate);
+        append_u32(wav, sample_rate * 2u);
+        append_u16(wav, 2u);
+        append_u16(wav, 16u);
+        wav.insert(wav.end(), {'d', 'a', 't', 'a'});
+        append_u32(wav, data_bytes);
+        wav.resize(wav.size() + data_bytes);
+        return wav;
+    }();
+    return bytes;
+}
+
+Project media_window_project() {
+    auto clip = take(Clip::create({10}, {0}, {kQuarter}, MediaRef{{2}, {125}, 500}));
+    auto track = take(Track::create({5}, "window", {std::move(clip)}));
+    auto sequence = take(Sequence::create({3}, "arrangement", TickDuration{4 * kQuarter},
+                                          {std::move(track)}));
+    const auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    REQUIRE(hash.has_value());
+    return take(Project::create(ProjectInput{
+        {1},
+        "window",
+        40,
+        {3},
+        {MediaAsset{{2}, "window.wav", 1'000, {48'000, 1}, *hash,
+                    AssetStoragePolicy::External, {}, {}, {}}},
+        {std::move(sequence)}}));
 }
 
 std::string export_xml(const Project& project, const std::vector<Concept>& accept = {}) {
@@ -202,6 +255,53 @@ TEST_CASE("an export refuses a loss the caller has not accepted",
         REQUIRE(json.find("\"lossless\":false") != std::string::npos);
     }
     REQUIRE(found_manifest);
+}
+
+TEST_CASE("DAWproject source-window mutation is explicit and consent-gated",
+          "[interchange][dawproject][export]") {
+    const Project original = media_window_project();
+    const auto plan = interchange::plan_export(original, interchange::Format::DawProject);
+    REQUIRE(plan.required_consent() == std::vector{Concept::ClipMediaWindow});
+
+    auto refused = interchange::run_export(
+        plan, interchange::ExportOptions{}, dawproject::writer());
+    REQUIRE_FALSE(refused.has_value());
+    REQUIRE(refused.error().code == interchange::ExportErrorCode::UnacceptedLoss);
+    REQUIRE(refused.error().concepts == std::vector{Concept::ClipMediaWindow});
+
+    interchange::ExportOptions accepted;
+    accepted.accepted_losses = {Concept::ClipMediaWindow};
+    auto exported = interchange::run_export(plan, accepted, dawproject::writer());
+    REQUIRE(exported.has_value());
+
+    std::string xml;
+    bool manifest_names_window = false;
+    for (const auto& artifact : exported.value().artifacts) {
+        const std::string text(artifact.bytes.begin(), artifact.bytes.end());
+        if (artifact.name == "project.xml")
+            xml = text;
+        if (artifact.name == "pulp-loss-manifest.json")
+            manifest_names_window = text.find("\"clip.media-window\"") != std::string::npos;
+    }
+    REQUIRE_FALSE(xml.empty());
+    REQUIRE(manifest_names_window);
+
+    const Project imported = take(import_dawproject_xml(
+        xml, [](std::string_view path) -> std::optional<std::vector<std::uint8_t>> {
+            if (path != "audio/window.wav")
+                return std::nullopt;
+            return window_media_bytes();
+        }));
+    const MediaRef& before =
+        std::get<MediaRef>(original.sequences()[0].tracks()[0].clips()[0].content());
+    const MediaRef& after =
+        std::get<MediaRef>(imported.sequences()[0].tracks()[0].clips()[0].content());
+    REQUIRE(before.source_start == SamplePosition{125});
+    REQUIRE(before.frame_count == 500);
+    REQUIRE(after.source_start == SamplePosition{0});
+    REQUIRE(after.frame_count == 1'000);
+    REQUIRE(after.source_start != before.source_start);
+    REQUIRE(after.frame_count != before.frame_count);
 }
 
 TEST_CASE("consented absolute clips are omitted instead of serialized at zero",

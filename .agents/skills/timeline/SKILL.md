@@ -7,13 +7,19 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
 
 ## Choose the surface
 
-- Use MCP for agent-driven project inspection, command application, validation,
-  explanation, and render. Its five operations are `pulp_timeline_project_open`,
-  `pulp_timeline_command_apply`, `pulp_timeline_validate`,
-  `pulp_timeline_explain`, and `pulp_timeline_render`.
-- Use `pulp seq` and `pulp render` for shell scripts, CI, and human-operated
-  headless workflows. Prefer `seq apply` with typed command envelopes over
-  inventing one-off mutation flags.
+- Use MCP for agent-driven project inspection, command application, diff,
+  undo/redo, validation, explanation, render, export, and import. Its ten
+  operations are
+  `pulp_timeline_project_open`, `pulp_timeline_command_apply`,
+  `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`,
+  `pulp_timeline_validate`, `pulp_timeline_explain`,
+  `pulp_timeline_render`, `pulp_timeline_export`, and `pulp_timeline_import`.
+  Seven operations retain stateless `pulp::tool-timeline` entry points; diff,
+  undo, and redo are MCP-local operations backed by a live `DocumentSession`.
+- Use `/seq` for the agent-guided inspect, validate, edit, explain, import, and
+  consent-gated export workflow. Use `pulp seq` and `pulp render` directly for
+  shell scripts, CI, and human-operated headless workflows. Prefer `seq apply`
+  with typed command envelopes over inventing one-off mutation flags.
 - Use the C++ SDK when embedding an editor, transport, compiler, renderer,
   recorder, or durable session. Keep document mutation in `DocumentSession`,
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
@@ -26,6 +32,12 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   not hand-copy schema vocabularies into a client.
 
 Start with `project_open` or `seq validate` when the source is unfamiliar.
+MCP `project_open` returns a bounded process-local `session_id`; use that
+identifier for apply, diff, undo, and redo. A session keeps the real
+`DocumentSession` undo stack and latest canonical `DirtySet`; session handles
+expire when that server process exits and may expire after it reaches its
+bounded session capacity, so preserve the returned project snapshot as the
+durable handoff.
 Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
@@ -67,6 +79,19 @@ artifact is needed. Never modify canonical project JSON text directly.
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
   Track until a context-owned tempo/rate projection can compare them safely.
+- `TimeConform` is clip-level document intent: `None` is the default and keeps
+  legacy behavior, `Resample` requests pitch-coupled varispeed, and `Stretch`
+  requests tempo-preserving stretch. Non-default intent is valid only on a
+  musical `MediaRef`; absolute clips and every non-media content alternative
+  fail with `InvalidTimeConform`. Clip schema v2 persists the required lowercase
+  spelling; v1 loads as `None`, and v2→v1 refuses either non-default value.
+  Playback consumes `Resample` as pitch-coupled varispeed by mapping source
+  phase across the authored musical tick interval, including tempo ramps and
+  precise host beat mapping. `None` retains native-rate playback. `Stretch`
+  compiles a timeline-rate immutable artifact off the audio thread with exactly
+  the authored frame count, then plays it 1:1. A missing, over-capacity, or
+  length-mismatched Stretch artifact fails compilation; it never degrades to
+  native-rate playback.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another
@@ -78,7 +103,10 @@ artifact is needed. Never modify canonical project JSON text directly.
   programs. Stage 1 accepts child note/audio clips and rejects child devices,
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
   reference gain/fades. Source windows that intersect child audio fades also
-  fail closed because Stage 1 cannot represent an envelope offset. Expansion
+  fail closed because Stage 1 cannot represent an envelope offset. A complete
+  nested media clip preserves its `TimeConform` intent, but a source window
+  that trims a conforming clip fails with `NestedSequenceUnsupported` until
+  playback has a conform-aware source-range mapping. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent
@@ -167,6 +195,23 @@ artifact is needed. Never modify canonical project JSON text directly.
   validate deletions by scanning every scene.
   `InsertScene` / `RemoveScene` and `InsertSlot` / `RemoveSlot` reduce through
   `transaction_scene_internal` with exact inverse and tombstone ownership.
+- **A track owns eight identity kinds across four levels, and an incomplete
+  owned set cannot fail at remove time.** `InsertTrack` / `RemoveTrack` reduce
+  through `transaction_track_internal`. `plan_identity_deactivate` validates
+  nothing — it emits one `Deactivate` per identity handed to it — so a missed
+  kind leaks an identity that stays `active` with its owner gone, and only
+  surfaces later as an unrelated `IdentityNotAvailable`, or as undo failing
+  because tombstone restore requires each id to exist and be inactive. The two
+  that get missed are the lane-parented pair, `AutomationPoint` and `Take`.
+  Never hand-write the list: `visit_track_owned_identities()` in
+  `owned_identity_traversal.hpp` is the single enumeration, and
+  `visit_sequence_owned_identities()` calls it, so the two cannot diverge.
+  `has_same_owner` compares only kind and parent while `target_error` compares
+  all four coordinates, so right ids with a wrong coordinate cache survive both
+  undo and redo and reject the next command two edits later — assert the
+  complete `ItemLocation` of every level, not just `active`.
+  `RemoveTrack`'s inverse is `InsertTrack{sequence_id, removed, following}`;
+  `following` is what restores authored position exactly instead of appending.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -258,6 +303,9 @@ artifact is needed. Never modify canonical project JSON text directly.
   Track schema v6 adds optional `freeze`; v5→v6 is version-only because absence
   means unfrozen, while v6→v5 succeeds only when `freeze` is absent. Never
   silently discard a selected artifact during downgrade.
+- Clip schema v2 adds required `time_conform`. Its v1 upgrade inserts `none`;
+  its v2 downgrade succeeds only for `none`, and a v1 envelope that illegally
+  carries the field is rejected rather than normalized.
 - Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
   only when that field is absent, and a v1 envelope that illegally contains
   the field is rejected rather than silently normalized.
@@ -284,10 +332,68 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Unknown or future extension content is retained as exact validated envelope
   bytes. Saving may splice those bytes unchanged and reports
   `has_opaque_objects`; ID remapping must fail closed for any opaque subtree.
+- **Adding a field to a persisted entity touches more than encode and decode, and
+  the sites people miss lose data silently.** Beyond `serialize_encode.cpp` /
+  `serialize_project_decode.cpp` you must also update the schema policy header
+  (`current_version` plus an `<field>_introduced_version` predicate),
+  `schema_registry.cpp` (declare the field, register BOTH migrations),
+  `structural_registry_validation.cpp`, and `schema_json_preflight.cpp`. Then two
+  more that no gate points at: **`id_remap.cpp`**, or every copy/paste/import
+  quietly resets the field to its default, and **`snapshot_equivalence.cpp`**, or
+  the journal-replay checkpoint guard treats documents differing only in that
+  field as identical — and it is also the round-trip oracle, so a round-trip test
+  asserted through `equivalent()` passes even when the field was never persisted.
+  Grow the oracle in the same change, and prove a round-trip test fails with the
+  encode disabled before trusting it.
+- **Field order in the canonical JSON is alphabetical, so a new field renumbers
+  its neighbours.** `track_order` sorts before `tracks` (`_` < `s`), which moved
+  `tracks` from member index 9 to 10 in the preflight walk. A wrong index
+  **compiles and silently reads the neighbouring member**. Re-derive every index
+  after inserting a field rather than appending to the end of the list.
+- A migration that adds an optional collection should write it **empty** rather
+  than materializing a default, when the model already normalizes empty to the
+  default: `Sequence::create` turns an empty `track_order` into identity order, so
+  the v5→v6 upgrade writes `[]` and every upgraded document loads correctly
+  without bloating. The **downgrade** is the asymmetric half — it must fail closed
+  with `MigrationFailed` when the value is not equivalent to the default, exactly
+  as the v5→v4 scenes downgrade refuses a non-empty scene list.
 - Versioned persistence fixtures live under `test/fixtures/timeline/vN/` and
   remain permanent compatibility inputs. Exercise unknown envelopes from those
   files instead of rebuilding equivalent JSON inside a test so whitespace,
   escapes, and member order cover the exact-byte re-save contract.
+- **Not every `.json` under `test/fixtures/timeline/` is a project.** The corpus
+  holds three shapes and nothing in the files distinguishes them: complete
+  `pulp.timeline.project` envelopes; single-entity **fragments** such as
+  `v4/sequence-before-scenes.json`, a bare `pulp.timeline.sequence` at v4 used to
+  drive `registry.migrate()` directly; and raw **payloads** such as
+  `v1/unknown-content-envelope.json`, which is never parsed as timeline JSON at
+  all — it is embedded as `OpaqueContent` to prove unknown bytes survive a round
+  trip. Decoding a fragment or a payload as a project fails `InvalidSchema`, and
+  that is correct refusal, not a broken fixture. `test/fixtures/timeline/corpus.index`
+  declares each entry's kind so the distinction is stated rather than guessed;
+  a new fixture must be listed there with its kind.
+- `pulp-fixture-runner` validates every `document` entry against a sibling
+  `<path>.expect` manifest: schema envelope version, identity, structural counts
+  from `peek_project_summary()`, and the interchange concept census. Regenerate
+  manifests with `pulp-fixture-runner --corpus test/fixtures/timeline --update`;
+  generation is deterministic, so a regeneration that dirties the tree means a
+  document actually changed. The manifest is checked in **both** directions — an
+  entry declared but not observed fails too, because a document that *lost* an
+  entity would otherwise pass with every observed value still matching.
+- **`test/fixtures/timeline/` is exhaustively indexed: every file must appear in
+  `corpus.index`, and a host-side sweep enforces it.** Adding a fixture without an
+  index line reddens that sweep on a file your diff never mentions. Two
+  consequences worth knowing before you merge anything touching that tree. First,
+  a `.expect` manifest is *excluded* from the sweep, so an unindexed fixture with a
+  manifest is dead weight no gate can see. Second, and the one that actually bites:
+  **any branch cut before the index existed cannot index its own fixture**, so the
+  breakage appears only when the two branches meet on main — neither PR's CI can
+  see it alone. Check `corpus.index` covers the tree before merging a
+  fixture-adding branch.
+- The census the runner records is `pulp::interchange::census()`, which lives in
+  `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
+  interchange dependency; that is on the portable floor, but it is a dependency
+  edge worth knowing before adding one.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
@@ -703,8 +809,9 @@ that the emitted module parses, imports, and is deeply frozen (skipped, not
 failed, without `node`).
 
 The **MCP tool-definition surface** is another manifest projection:
-`core/timeline/tools/schema_mcp_emit.py` emits the fixed five engine operations
-(project open, command apply, validate, explain, and render) into
+`core/timeline/tools/schema_mcp_emit.py` emits the fixed ten operations
+(project open, command apply, diff, undo, redo, validate, explain, render,
+export, and import) into
 `core/timeline/schema/timeline_mcp_tools.json`. The operation set is an API
 decision rather than a copy of the schema CLI-verb table. Its type vocabularies
 remain manifest-derived: project open lists every Document type, command apply
@@ -715,7 +822,9 @@ the registry defines one. JSON Schema forbids an empty `enum`, and the released
 MCP Tool wire contract requires property schemas to be objects rather than
 boolean schemas; omitting the enum would accidentally accept an unbounded
 string. The live MCP server consumes this generated artifact for both
-advertisement and exact-five operation dispatch.
+advertisement and exact-ten operation dispatch. Export's accepted-loss enum is
+projected from the committed interchange concept authority, excluding
+`unknown`; never hand-copy or broaden that vocabulary.
 
 ```
 python3 core/timeline/tools/schema_mcp_emit.py \
@@ -752,6 +861,12 @@ pulp seq schema
 pulp seq validate <project.json>
 pulp seq explain <project.json> [--sample-rate <hz>]
 pulp seq apply <project.json> <commands.json> [--out <project.json>]
+pulp seq export <project.json> --format <smf|dawproject> --plan
+pulp seq export <project.json> --format smf --out <new-directory> \
+pulp seq export <project.json> --format dawproject --out <new-file.dawproject> \
+  [--accept-loss <concept-id>]...
+pulp seq import <file.mid|file.dawproject> --format <smf|dawproject> \
+  --out <new-directory>
 pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
 ```
 
@@ -760,9 +875,41 @@ registry-derived typed command envelopes. `render` emits Float32 WAV and does
 not silently instantiate hosted devices or invent plugin delay compensation.
 The headless explain result reports unknown PDC offsets as JSON `null`.
 
+Import and export refuse every existing destination, stage into a private
+sibling directory, and publish the complete directory atomically. Never add a
+force, overwrite, or accept-all path. Export requires separate consent for
+every planned lossy concept so a newly introduced loss stops an unattended
+pipeline. Run `--plan` first: it returns the canonical manifest and
+`required_consent` without writing anything, even when the project is lossless.
+Planning rejects `--out` and `--accept-loss`; it does not invent a destination.
+Publishing requires `--out`. MCP uses the equivalent outputless
+`plan_only: true` input and rejects `output` or `accept_losses` in that mode.
+Refusal and successful export
+results carry the same manifest object. SMF exports contain `project.mid`;
+DAWproject export publishes one standard `.dawproject` ZIP containing a root
+`project.xml`, the manifest, and referenced media entries. DAWproject import
+requires a `.dawproject` ZIP, rejects unsafe or unsupported archive entries,
+confines media resolution to safe package-relative entries, and publishes
+canonical `project.json` plus sealed sibling artifacts into a new directory.
+
 The live MCP server embeds `timeline_mcp_tools.json` at configure time and
-dispatches exactly its five operations through `pulp::tool-timeline`. Do not
-copy their input schemas into `pulp_mcp.cpp`; regenerate the artifact from the
+dispatches exactly ten operations. Seven operations retain stateless
+`pulp::tool-timeline` entry points; diff, undo, and redo retain an actual
+`DocumentSession` in the bounded MCP process. The CLI has no `pulp seq diff`,
+`undo`, or `redo` session verbs. The production store admits at most 32 sessions
+and applies a 64 MiB aggregate admission charge equal to twice each session's
+canonical JSON size plus its fixed history reservation. This deterministic charge
+is a resource proxy, not a direct heap measurement. Each complete encoded MCP
+result is independently capped at 64 MiB. The store evicts the oldest session
+first when a new or changed session would exceed the count or aggregate charge.
+With the default limits, each session reserves half of the aggregate charge
+divided across the session cap for journal and undo history; a sufficiently long
+uncheckpointed session can therefore refuse a later edit without changing its
+state. Sessions are process-local and expire on eviction or server restart.
+`diff` describes only the latest successful apply, undo, or redo transition and
+returns its exact dirty set plus `before_revision` and `after_revision`; it is not
+an arbitrary since-revision query. Do not copy their input schemas into
+`pulp_mcp.cpp`; regenerate the artifact from the
 timeline manifest and let the server consume it. The MCP render result can be
 fed to `pulp_audio_compare` for an advisory before/after judgment when the
 opt-in Audio Quality Lab tool is installed.

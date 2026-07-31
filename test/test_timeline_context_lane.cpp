@@ -143,7 +143,7 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":5") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":6") !=
             std::string::npos);
     REQUIRE(
         first.value().json.find(
@@ -286,10 +286,17 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto scenes_at = legacy.find(R"("scenes":[],)");
     REQUIRE(scenes_at != std::string::npos);
     legacy.erase(scenes_at, std::string_view(R"("scenes":[],)").size());
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":5)");
+    // A pre-order document carries no authored track order. Its contents vary
+    // with the track ids, so erase the member by span rather than by literal.
+    const auto order_at = legacy.find(R"("track_order":[)");
+    REQUIRE(order_at != std::string::npos);
+    const auto order_end = legacy.find("],", order_at);
+    REQUIRE(order_end != std::string::npos);
+    legacy.erase(order_at, order_end + 2 - order_at);
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":6)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at,
-                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":5)").size(),
+                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":6)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));

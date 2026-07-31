@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,6 +67,19 @@ struct DawProjectImportError {
 /// retains successful bytes only within the configured limits.
 using DawProjectMediaResolver =
     std::function<std::optional<std::vector<std::uint8_t>>(std::string_view package_path)>;
+
+namespace detail {
+struct DawProjectMediaViewResolver {
+    // The returned view is consumed synchronously and is never retained.
+    using Function = std::optional<std::span<const std::uint8_t>> (*)(void*, std::string_view);
+    void* context = nullptr;
+    Function function = nullptr;
+    explicit operator bool() const noexcept { return function != nullptr; }
+    std::optional<std::span<const std::uint8_t>> operator()(std::string_view path) const {
+        return function(context, path);
+    }
+};
+}
 
 /// Hard resource ceilings for one import.
 ///
@@ -133,6 +147,13 @@ import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver medi
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver,
                       const DawProjectImportLimits& limits);
+
+namespace detail {
+runtime::Result<Project, DawProjectImportError>
+import_dawproject_xml_view(std::string_view project_xml,
+                           DawProjectMediaViewResolver media_resolver,
+                           const DawProjectImportLimits& limits);
+}
 
 /// @}
 

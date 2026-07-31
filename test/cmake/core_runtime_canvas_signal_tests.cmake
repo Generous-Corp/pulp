@@ -18,6 +18,12 @@ pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
 # Session lifecycle + macro smoke. Config-agnostic: OFF verifies the no-op
 # contract; ON emits spans from two threads and byte-checks the flushed trace.
 pulp_add_test_suite(pulp-test-tracing-session LIBRARIES pulp::runtime)
+
+# Perfetto auto-flush timeout: cancel-before-deadline, join-on-cancel (the
+# property that makes plug-in module unload safe), re-arm replacing rather than
+# adding a timer, and the session-generation guard that stops a stale timer
+# truncating a later capture. Runs in the DEFAULT PULP_TRACING=OFF build.
+pulp_add_test_suite(pulp-test-trace-timeout LIBRARIES pulp::runtime)
 if(NOT PULP_TRACING AND NOT WIN32)
     add_custom_command(TARGET pulp-test-tracing POST_BUILD
         COMMAND ${CMAKE_COMMAND}
@@ -180,7 +186,12 @@ pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
 pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
-pulp_add_test_suite(pulp-test-spectral-primitives SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp test_sinc_pitch.cpp LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-spectral-primitives
+    SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp
+            test_realtime_pitch_time_stream_contract.cpp test_finite_stretch_builder.cpp
+            test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp
+            test_sinc_pitch.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
 pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)

@@ -147,7 +147,7 @@ Load command 2
                         with self.assertRaises(SystemExit) as cm:
                             pc.fix_rpath_macos(binary)
 
-        self.assertIn("codesign re-sign", str(cm.exception))
+        self.assertIn("codesign of", str(cm.exception))
 
     def test_fix_rpath_linux_skips_when_patchelf_is_missing(self) -> None:
         out = io.StringIO()
@@ -286,24 +286,27 @@ class MainTests(unittest.TestCase):
 
             with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
                 with mock.patch.object(pc, "fix_rpath_macos") as fix_rpath:
-                    with argv(
-                        [
-                            "package_cli.py",
-                            "--binary",
-                            str(pulp),
-                            "--cpp-binary",
-                            str(cpp),
-                            "--build-dir",
-                            str(root / "build"),
-                            "--platform",
-                            "darwin-arm64",
-                            "--out",
-                            str(out),
-                        ]
-                    ):
-                        rc = pc.main()
+                    with mock.patch.object(pc, "resign_macos") as resign:
+                        with argv(
+                            [
+                                "package_cli.py",
+                                "--binary",
+                                str(pulp),
+                                "--cpp-binary",
+                                str(cpp),
+                                "--build-dir",
+                                str(root / "build"),
+                                "--platform",
+                                "darwin-arm64",
+                                "--out",
+                                str(out),
+                            ]
+                        ):
+                            rc = pc.main()
 
             self.assertEqual(rc, 0)
+            resign.assert_called_once()
+            self.assertEqual(resign.call_args.args[0].name, "libwgpu_native.dylib")
             # Both binaries must get rpath rewriting, otherwise the
             # delegate path (pulp-cpp) crashes on a clean machine.
             self.assertEqual(fix_rpath.call_count, 2)
@@ -396,26 +399,29 @@ class MainTests(unittest.TestCase):
 
             with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
                 with mock.patch.object(pc, "fix_rpath_macos") as fix_rpath:
-                    with argv(
-                        [
-                            "package_cli.py",
-                            "--binary",
-                            str(pulp),
-                            "--cpp-binary",
-                            str(cpp),
-                            "--mcp-binary",
-                            str(mcp),
-                            "--build-dir",
-                            str(root / "build"),
-                            "--platform",
-                            "darwin-arm64",
-                            "--out",
-                            str(out),
-                        ]
-                    ):
-                        rc = pc.main()
+                    with mock.patch.object(pc, "resign_macos") as resign:
+                        with argv(
+                            [
+                                "package_cli.py",
+                                "--binary",
+                                str(pulp),
+                                "--cpp-binary",
+                                str(cpp),
+                                "--mcp-binary",
+                                str(mcp),
+                                "--build-dir",
+                                str(root / "build"),
+                                "--platform",
+                                "darwin-arm64",
+                                "--out",
+                                str(out),
+                            ]
+                        ):
+                            rc = pc.main()
 
             self.assertEqual(rc, 0)
+            resign.assert_called_once()
+            self.assertEqual(resign.call_args.args[0].name, "libwgpu_native.dylib")
             # All three binaries must get rpath rewriting, otherwise the
             # MCP binary crashes on a clean machine when the plugin
             # launcher exec's it.
@@ -507,6 +513,9 @@ class MainTests(unittest.TestCase):
                 "browser_process.mjs",
                 "capture.mjs",
                 "health.mjs",
+                "interaction_executor.mjs",
+                "interaction_plan.mjs",
+                "interaction_plan_protocol.json",
                 "lifecycle.mjs",
                 "network_dependencies.mjs",
                 "renderers.mjs",
@@ -552,6 +561,9 @@ class MainTests(unittest.TestCase):
                     "browser_capture/browser_process.mjs",
                     "browser_capture/capture.mjs",
                     "browser_capture/health.mjs",
+                    "browser_capture/interaction_executor.mjs",
+                    "browser_capture/interaction_plan.mjs",
+                    "browser_capture/interaction_plan_protocol.json",
                     "browser_capture/lifecycle.mjs",
                     "browser_capture/network_dependencies.mjs",
                     "browser_capture/renderers.mjs",

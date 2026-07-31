@@ -26,11 +26,22 @@ struct SequenceSlotEraseResult {
     std::optional<ItemId> following;
 };
 
+// `following` names the item that stood after the removed one in authored
+// order, which is what an inverse edit needs to restore the exact position.
+// It is empty when the removed item was last.
+struct SequenceTrackEraseResult {
+    Sequence sequence;
+    Track removed;
+    std::optional<ItemId> following;
+};
+
 struct SequenceEditAccess {
     static runtime::Result<SequenceSceneEraseResult, ModelError>
     erase_scene(const Sequence& source, ItemId id);
     static runtime::Result<SequenceSlotEraseResult, ModelError>
     erase_slot(const Sequence& source, ItemId scene_id, ItemId slot_id);
+    static runtime::Result<SequenceTrackEraseResult, ModelError>
+    erase_track(const Sequence& source, ItemId id);
 };
 
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>

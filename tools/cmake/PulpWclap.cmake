@@ -132,9 +132,17 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/state/src/state_migration.cpp
     ${_PULP_WCLAP_ROOT}/core/state/src/wasm/preset_manager_wasm.cpp
     ${_PULP_WCLAP_ROOT}/core/midi/src/mpe_voice_tracker.cpp
+    ${_PULP_WCLAP_ROOT}/core/audio/src/finite_time_stretch.cpp
+    ${_PULP_WCLAP_ROOT}/core/audio/src/realtime_time_stretch.cpp
     ${_PULP_WCLAP_ROOT}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${_PULP_WCLAP_ROOT}/core/runtime/src/sha256.cpp
     ${_PULP_WCLAP_ROOT}/core/runtime/src/scoped_no_alloc.cpp
+    # clap_adapter.cpp holds a ScopedTracingAttachment, so it references
+    # Tracing::attach()/detach(). Under the default PULP_TRACING=OFF these
+    # compile to no-op stubs, but the SYMBOLS still have to exist — and this
+    # list is the module's whole world, since the wasm build does not link
+    # pulp::runtime. Omitting it links fine natively and fails only here.
+    ${_PULP_WCLAP_ROOT}/core/runtime/src/trace.cpp
 )
 
 add_library(pulp-wclap-dsp OBJECT ${_PULP_WCLAP_CORE_SOURCES})

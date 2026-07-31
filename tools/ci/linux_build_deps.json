@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "native": {
+      "packages": [
+        "libasound2-dev",
+        "libdbus-1-dev",
+        "libdrm-dev",
+        "libegl1-mesa-dev",
+        "libfontconfig1-dev",
+        "libgbm-dev",
+        "libgl1-mesa-dev",
+        "libjack-jackd2-dev",
+        "libwayland-dev",
+        "libx11-dev",
+        "libxext-dev",
+        "libxfixes-dev",
+        "libxi-dev",
+        "libxinerama-dev",
+        "libxkbcommon-dev",
+        "libxrandr-dev",
+        "libxrender-dev",
+        "libxss-dev",
+        "libxtst-dev",
+        "wayland-protocols"
+      ]
+    },
+    "native-webview": {
+      "extends": [
+        "native"
+      ],
+      "packages": [
+        "libatk-bridge2.0-dev",
+        "libatk1.0-dev",
+        "libgtk-3-dev",
+        "libwebkit2gtk-4.1-dev"
+      ]
+    }
+  }
+}

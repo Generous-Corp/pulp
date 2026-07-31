@@ -39,7 +39,7 @@ concurrency:
 jobs:
   self-contained:
     name: Public headers compile standalone (Linux Clang)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_HEADERS_RUNS_ON_JSON || '"ubuntu-24.04"') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -47,11 +47,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install Clang + Linux dev headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang \
-            libasound2-dev libdbus-1-dev libgl1-mesa-dev libx11-dev \
-            libxext-dev libxrandr-dev libxkbcommon-dev libfontconfig1-dev
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: clang
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only

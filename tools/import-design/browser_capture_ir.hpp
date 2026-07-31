@@ -15,6 +15,7 @@ struct BrowserCaptureIrResult {
     std::optional<pulp::view::DesignIR> design_ir;
     std::filesystem::path reference_png;
     std::filesystem::path semantic_report;
+    std::optional<std::filesystem::path> interaction_report;
     std::string error;
 
     explicit operator bool() const noexcept { return design_ir.has_value(); }
@@ -23,6 +24,7 @@ struct BrowserCaptureIrResult {
 struct BrowserCaptureIrOptions {
     pulp::view::DesignSource source = pulp::view::DesignSource::claude;
     std::string source_file;
+    bool require_interaction_report = false;
 };
 
 /// Parse and validate a capture envelope, reject sidecar paths that escape its

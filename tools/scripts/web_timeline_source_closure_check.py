@@ -12,6 +12,8 @@ import sys
 
 SUBSYSTEMS = ("timebase", "timeline", "playback")
 PORTABLE_DEPENDENCIES = (
+    "core/audio/src/finite_time_stretch.cpp",
+    "core/audio/src/realtime_time_stretch.cpp",
     "core/audio/src/rolling_audio_capture_buffer.cpp",
     "core/runtime/src/sha256.cpp",
 )

@@ -598,3 +598,126 @@ TEST_CASE("host beat-domain projection rejects a precise range that cannot advan
     REQUIRE(projector.project(context, projected) ==
             sequence::HostTransportProjectionError::BeatPositionOutOfRange);
 }
+
+TEST_CASE("host projection epochs follow starts jumps mapping and loop identity") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.position_samples = 0;
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto parked_epoch = projected.playback_epoch;
+    REQUIRE(projected.ranges[0].playback_epoch == parked_epoch);
+    REQUIRE(valid_transport_ranges(projected));
+
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == parked_epoch);
+
+    context.is_playing = true;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto started_epoch = parked_epoch + 1;
+    REQUIRE(projected.playback_epoch == started_epoch);
+    REQUIRE(projected.ranges[0].playback_epoch == started_epoch);
+
+    context.position_samples = 32;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == started_epoch);
+
+    context.position_samples = 64;
+    context.reset_requested = true;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto reset_epoch = started_epoch + 1;
+    REQUIRE(projected.playback_epoch == reset_epoch);
+    context.reset_requested = false;
+
+    context.position_samples = 96;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == reset_epoch);
+
+    context.position_samples = 256;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto jumped_epoch = reset_epoch + 1;
+    REQUIRE(projected.playback_epoch == jumped_epoch);
+    REQUIRE(projected.reset_requested);
+
+    context.position_samples = 288;
+    context.position_beats = 288.0 / 24'000.0;
+    context.tempo_bpm = 120.0;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto mapped_epoch = jumped_epoch + 1;
+    REQUIRE(projected.playback_epoch == mapped_epoch);
+    REQUIRE(projected.ranges[0].playback_epoch == mapped_epoch);
+
+    context.position_samples = 320;
+    context.position_beats = 320.0 / 24'000.0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == mapped_epoch);
+
+    context.position_samples = 352;
+    context.position_beats = 352.0 / 24'000.0;
+    context.is_looping = true;
+    context.loop_start_beats = 0.0;
+    context.loop_end_beats = 1.0;
+    context.transport_validity.set(format::TransportField::LoopRange);
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    const auto loop_epoch = mapped_epoch + 1;
+    REQUIRE(projected.playback_epoch == loop_epoch);
+
+    context.position_samples = 384;
+    context.position_beats = 384.0 / 24'000.0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == loop_epoch);
+
+    context.position_samples = 416;
+    context.position_beats = 416.0 / 24'000.0;
+    context.loop_end_beats = 2.0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == loop_epoch + 1);
+    REQUIRE(valid_transport_ranges(projected));
+}
+
+TEST_CASE("ordinary host loop wraps retain one playback epoch") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 96) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 96;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.loop_start_beats = 0.0;
+    context.loop_end_beats = 64.0 / 24'000.0;
+    context.position_samples = 32;
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    const auto epoch = projected.playback_epoch;
+    REQUIRE(projected.ranges[0].playback_epoch == epoch);
+    REQUIRE(projected.ranges[1].playback_epoch == epoch);
+    REQUIRE(valid_transport_ranges(projected));
+
+    context.num_samples = 32;
+    context.position_samples = 0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.playback_epoch == epoch);
+    REQUIRE(projected.ranges[0].playback_epoch == epoch);
+    REQUIRE(valid_transport_ranges(projected));
+}
+
+TEST_CASE("host playback epoch exhaustion fails without wrapping identity") {
+    auto epoch = std::numeric_limits<std::uint64_t>::max() - 1;
+    REQUIRE(sequence::detail::advance_host_playback_epoch(epoch) ==
+            sequence::HostTransportProjectionError::None);
+    REQUIRE(epoch == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(sequence::detail::advance_host_playback_epoch(epoch) ==
+            sequence::HostTransportProjectionError::PlaybackEpochExhausted);
+    REQUIRE(epoch == std::numeric_limits<std::uint64_t>::max());
+}

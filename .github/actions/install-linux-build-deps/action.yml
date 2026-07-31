@@ -1,0 +1,26 @@
+name: Install Linux build dependencies
+description: Install the canonical apt profile for native Pulp compilation
+
+inputs:
+  profile:
+    description: Capability profile from tools/ci/linux_build_deps.json
+    required: false
+    default: native
+  extra-packages:
+    description: Whitespace-separated packages owned by this lane
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve and install apt packages
+      shell: bash
+      env:
+        PULP_LINUX_DEPS_PROFILE: ${{ inputs.profile }}
+        PULP_LINUX_DEPS_EXTRAS: ${{ inputs.extra-packages }}
+      run: |
+        set -euo pipefail
+        python3 tools/ci/install_linux_build_deps.py \
+          --profile "${PULP_LINUX_DEPS_PROFILE}" \
+          --extra-packages "${PULP_LINUX_DEPS_EXTRAS}"

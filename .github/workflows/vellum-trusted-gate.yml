@@ -4,6 +4,16 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited]
   merge_group:
+  # Manual re-run. This check is REQUIRED and posts its own commit status, so a
+  # wedged or cancelled run leaves a PR unmergeable with no way back except
+  # pushing a commit to fire `synchronize` — which rewrites the history under
+  # review. Dispatch is restricted to users with write access.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,13 +22,47 @@ permissions:
 jobs:
   trusted-gate:
     name: Trusted base executor
-    if: github.event_name == 'pull_request_target'
+    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      # Resolve before checkout: the checkout below needs the base sha, and on a
+      # dispatch there is no event payload to read it from. For
+      # pull_request_target this just echoes what the event already carries, so
+      # both paths converge on one set of values.
+      - name: Resolve pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_NUMBER: ${{ github.event.pull_request.number }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR")"
+            state="$(printf '%s' "$pr_json" | jq -r .state)"
+            if [ "$state" != "open" ]; then
+              echo "PR #$DISPATCH_PR is $state — refusing to post a status to a closed PR" >&2
+              exit 1
+            fi
+            base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+            head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+            number="$DISPATCH_PR"
+          else
+            base="$EVENT_BASE"; head="$EVENT_HEAD"; number="$EVENT_NUMBER"
+          fi
+          {
+            echo "base_sha=$base"
+            echo "head_sha=$head"
+            echo "number=$number"
+          } >> "$GITHUB_OUTPUT"
+          echo "evaluating PR #$number: base=$base head=$head" >&2
+
       - name: Check out trusted base controls
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.pr.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -50,9 +94,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
           VELLUM_READER_APP_JWT: ${{ steps.vellum-reader-jwt.outputs.app_jwt }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ steps.pr.outputs.base_sha }}
+          PR_HEAD: ${{ steps.pr.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           STATUS_REPOSITORY: ${{ github.repository }}
           STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

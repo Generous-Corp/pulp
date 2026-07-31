@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "bounded_increment.hpp"
 #include "json_span_reader.hpp"
 #include "project_schema_policy.hpp"
@@ -497,6 +498,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"regions"},
             detail::JsonSpanMember{"scenes"},
+            detail::JsonSpanMember{"track_order"},
             detail::JsonSpanMember{"tracks"},
         };
         // These indices are positional into `requested`, which is in canonical
@@ -556,7 +558,15 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
             return false;
         }
-        if (!requested[9].found) {
+        const auto requires_track_order =
+            detail::sequence_schema_policy.requires_track_order(version);
+        if (requires_track_order != requested[9].found ||
+            (requested[9].found && !has_shape(requested[9].span, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/track_order");
+            return false;
+        }
+        if (!requested[10].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
@@ -596,7 +606,22 @@ class StructuralScanner {
                                                   data_path + "/scenes/" + std::to_string(index));
                             }))
             return false;
-        const auto tracks = requested[9].span;
+        // The order names existing tracks, so it can never legitimately hold more
+        // entries than a sequence may hold tracks. The count is local rather than
+        // shared with counts_.tracks: charging both arrays to one quota would
+        // halve how many tracks a document may actually carry.
+        std::size_t order_entries = 0;
+        if (requested[9].found &&
+            !governed_array(requested[9].span, order_entries, limits_.max_tracks,
+                            data_path + "/track_order", [&](Span entry, std::size_t index) {
+                                if (has_shape(entry, StringShape))
+                                    return true;
+                                set_error(PersistenceErrorCode::InvalidSchema, entry.begin, 0, 0,
+                                          data_path + "/track_order/" + std::to_string(index));
+                                return false;
+                            }))
+            return false;
+        const auto tracks = requested[10].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
@@ -952,22 +977,34 @@ class StructuralScanner {
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape))
             return false;
-        if (type != "pulp.timeline.clip") {
+        if (type != detail::clip_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::clip_schema_policy.oldest_readable_version,
+                                      detail::clip_schema_policy.current_version))
             return false;
+        const auto clip_version = version;
         const auto data_path = path + "/data";
         std::array requested{
             detail::JsonSpanMember{"content"},
             detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"time_conform"},
             detail::JsonSpanMember{"time_range"},
         };
         if (!members(data, requested) ||
             !require_shape(requested[1], StringShape, data.begin, data_path) ||
-            !require_shape(requested[2], ObjectShape, data.begin, data_path))
+            !require_shape(requested[3], ObjectShape, data.begin, data_path))
             return false;
+        if (detail::clip_schema_policy.requires_time_conform(clip_version)) {
+            if (!require_shape(requested[2], StringShape, data.begin, data_path))
+                return false;
+        } else if (requested[2].found) {
+            set_error(PersistenceErrorCode::InvalidSchema, requested[2].span.begin, 0, 0,
+                      data_path + "/time_conform");
+            return false;
+        }
         if (!requested[0].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/content");

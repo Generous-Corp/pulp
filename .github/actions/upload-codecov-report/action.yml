@@ -1,0 +1,90 @@
+name: Upload verified coverage report
+description: Upload explicit coverage files and record successful Codecov transport
+
+inputs:
+  files:
+    description: Comma-separated report files that have passed semantic verification
+    required: true
+  flags:
+    description: Optional Codecov flag for this upload
+    required: false
+    default: ''
+  token:
+    description: Codecov token; public fork uploads may omit it
+    required: false
+    default: ''
+  receipt-name:
+    description: Unique artifact name proving that Codecov accepted the upload command
+    required: true
+
+outputs:
+  uploaded:
+    description: Whether the Codecov action completed successfully
+    value: ${{ steps.result.outputs.uploaded }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate explicit report files
+      shell: bash
+      env:
+        PULP_CODECOV_FILES: ${{ inputs.files }}
+      run: |
+        set -euo pipefail
+        IFS=',' read -ra reports <<< "${PULP_CODECOV_FILES}"
+        if [ "${#reports[@]}" -eq 0 ]; then
+          echo "::error::No coverage reports were provided."
+          exit 1
+        fi
+        for report in "${reports[@]}"; do
+          if [ -z "${report}" ] || [ ! -s "${report}" ]; then
+            echo "::error::Coverage report is missing or empty: ${report:-<empty path>}"
+            exit 1
+          fi
+        done
+
+    - name: Upload reports to Codecov
+      id: upload
+      continue-on-error: true
+      uses: codecov/codecov-action@v5
+      with:
+        files: ${{ inputs.files }}
+        flags: ${{ inputs.flags }}
+        disable_search: true
+        token: ${{ inputs.token }}
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Record upload result
+      id: result
+      if: always()
+      shell: bash
+      env:
+        PULP_CODECOV_OUTCOME: ${{ steps.upload.outcome }}
+        PULP_CODECOV_FILES: ${{ inputs.files }}
+        PULP_CODECOV_FLAGS: ${{ inputs.flags }}
+        PULP_CODECOV_RECEIPT: ${{ inputs.receipt-name }}
+      run: |
+        set -euo pipefail
+        if [ "${PULP_CODECOV_OUTCOME}" != "success" ]; then
+          echo "uploaded=false" >> "${GITHUB_OUTPUT}"
+          echo "::warning::Codecov transport failed after local reports were verified."
+          exit 0
+        fi
+        receipt="${RUNNER_TEMP}/${PULP_CODECOV_RECEIPT}.txt"
+        {
+          echo "sha=${GITHUB_SHA}"
+          echo "files=${PULP_CODECOV_FILES}"
+          echo "flags=${PULP_CODECOV_FLAGS}"
+        } > "${receipt}"
+        echo "receipt=${receipt}" >> "${GITHUB_OUTPUT}"
+        echo "uploaded=true" >> "${GITHUB_OUTPUT}"
+
+    - name: Publish Codecov upload receipt
+      if: steps.upload.outcome == 'success'
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ inputs.receipt-name }}
+        path: ${{ steps.result.outputs.receipt }}
+        retention-days: 14
+        if-no-files-found: error

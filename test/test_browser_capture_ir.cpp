@@ -7,6 +7,10 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
+#include <set>
+#include <vector>
 
 namespace {
 
@@ -111,6 +115,54 @@ std::string envelope(
 })JSON";
 }
 
+constexpr std::string_view kInteractionPlanHash =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+std::string interaction_report(
+    std::string_view plan_hash = kInteractionPlanHash) {
+    return std::string(R"JSON({
+  "schema":"pulp-browser-interactions-v1",
+  "version":1,
+  "plan_sha256":")JSON") + std::string(plan_hash) + R"JSON(",
+  "action_count":2,
+  "actions":[
+    {
+      "action":"click",
+      "selector":"#open",
+      "timeout_ms":5000,
+      "status":"completed"
+    },
+    {
+      "action":"type",
+      "selector":"input",
+      "timeout_ms":5000,
+      "text_length":7,
+      "status":"completed"
+    }
+  ]
+})JSON";
+}
+
+std::string with_interaction_provenance(
+    std::string capture,
+    std::string_view report_hash,
+    std::string_view report_path = "interaction-report.json",
+    std::string_view plan_hash = kInteractionPlanHash,
+    int action_count = 2) {
+    const std::string settle =
+        R"JSON("settle":{"rounds":4,"stable_rounds":2,"elapsed_ms":120})JSON";
+    const auto position = capture.find(settle);
+    REQUIRE(position != std::string::npos);
+    const std::string replacement = settle +
+        R"JSON(,"interactions":{"schema":"pulp-browser-interactions-v1","version":1,"report":")JSON" +
+        std::string(report_path) +
+        R"JSON(","report_sha256":")JSON" + std::string(report_hash) +
+        R"JSON(","plan_sha256":")JSON" + std::string(plan_hash) +
+        R"JSON(","action_count":)JSON" + std::to_string(action_count) + "}";
+    capture.replace(position, settle.size(), replacement);
+    return capture;
+}
+
 void write_valid_reports(const TempCapture& temp) {
     temp.write("semantic-report.json", R"JSON({
       "schema":"pulp-browser-semantics-v1",
@@ -165,6 +217,7 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
          .source_file = "/source/editor.html"});
 
     REQUIRE(result);
+    REQUIRE_FALSE(result.interaction_report);
     REQUIRE(result.reference_png == fs::weakly_canonical(temp.root / "browser.png"));
     REQUIRE(result.design_ir->capture_method == "chromium-cdp");
     REQUIRE(result.design_ir->settle_rounds == 4);
@@ -189,6 +242,116 @@ TEST_CASE("browser capture envelope lowers to an honest faithful_capture DesignI
             "pulp-capture:///capture.json");
     REQUIRE(result.design_ir->root.attributes.at("browser_semantic_report") ==
             "pulp-capture:///semantic-report.json");
+}
+
+TEST_CASE("browser interaction evidence is contained parsed and integrity-bound",
+          "[import-design][browser-capture][ir][interactions][security]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto report = interaction_report();
+    temp.write("browser.png", png);
+    temp.write("interaction-report.json", report);
+    write_valid_reports(temp);
+    temp.write("capture.json", with_interaction_provenance(
+        envelope("browser.png", pulp::runtime::sha256_hex(png)),
+        pulp::runtime::sha256_hex(report)));
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.require_interaction_report = true;
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json", options);
+
+    REQUIRE(result);
+    REQUIRE(result.interaction_report);
+    CHECK(*result.interaction_report ==
+          fs::weakly_canonical(temp.root / "interaction-report.json"));
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_report") ==
+          "pulp-capture:///interaction-report.json");
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_report_sha256") ==
+          pulp::runtime::sha256_hex(report));
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_plan_sha256") ==
+          kInteractionPlanHash);
+    CHECK(result.design_ir->root.attributes.at(
+              "browser_interaction_action_count") == "2");
+}
+
+TEST_CASE("browser interaction lowering fails closed on missing or unsafe evidence",
+          "[import-design][browser-capture][ir][interactions][security]") {
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    const auto report = interaction_report();
+    temp.write("browser.png", png);
+    write_valid_reports(temp);
+    pulp::import_design::BrowserCaptureIrOptions options;
+    options.require_interaction_report = true;
+
+    SECTION("requested interactions require provenance") {
+        temp.write("capture.json", envelope(
+            "browser.png", pulp::runtime::sha256_hex(png)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("omitted interaction provenance") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report cannot escape the capture directory") {
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(report), "../interaction-report.json"));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("escapes the capture directory") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report bytes must match provenance") {
+        temp.write("interaction-report.json", report + " ");
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(report)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("report hash does not match") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction report must parse") {
+        const std::string malformed = "{not-json";
+        temp.write("interaction-report.json", malformed);
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(malformed)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("invalid browser interaction JSON") !=
+              std::string::npos);
+    }
+
+    SECTION("interaction plan identity must match the report") {
+        const auto mismatched_report = interaction_report(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        temp.write("interaction-report.json", mismatched_report);
+        temp.write("capture.json", with_interaction_provenance(
+            envelope("browser.png", pulp::runtime::sha256_hex(png)),
+            pulp::runtime::sha256_hex(mismatched_report)));
+        const auto result =
+            pulp::import_design::lower_browser_capture_to_ir(
+                temp.root / "capture.json", options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error.find("does not match capture provenance") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("browser capture lowering rejects sidecars outside the capture directory",
@@ -400,4 +563,143 @@ TEST_CASE("browser capture lowering rejects image dimension drift",
 
     REQUIRE_FALSE(result);
     REQUIRE(result.error.find("PNG dimensions") != std::string::npos);
+}
+
+TEST_CASE("a control's own accent outranks the pack token",
+          "[import-design][browser-capture][ir]") {
+    // The pack token is a DEFAULT, not what a control ended up. A panel that
+    // scopes its palette -- which a good one does -- leaves the token set
+    // describing a colour no control on screen uses, and painting the value
+    // layer from it puts a teal arc on an orange knob. Nothing catches that:
+    // the arc is drawn by us and by nobody in the reference, so the A/B
+    // comparison is identical either way.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"stock",
+         "accent":"",
+         "bounds":{"left":0,"top":0,"width":64,"height":80},
+         "paint_bounds":{"left":0,"top":0,"width":64,"height":64},
+         "data_pulp":{"param":"a"}},
+        {"kind":"knob","binding_status":"bound","name":"scoped",
+         "accent":"#ff7a1a",
+         "bounds":{"left":80,"top":0,"width":64,"height":80},
+         "paint_bounds":{"left":80,"top":0,"width":64,"height":64},
+         "data_pulp":{"param":"b"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::map<std::string, std::string> accent_by_binding;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            const auto binding = node.attributes.find("binding");
+            if (binding != node.attributes.end()) {
+                const auto accent = node.attributes.find("design_accent");
+                accent_by_binding[binding->second] =
+                    accent == node.attributes.end() ? "" : accent->second;
+            }
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    REQUIRE(accent_by_binding.size() == 2);
+    // The scoped control keeps its OWN colour...
+    REQUIRE(accent_by_binding.at("b") == "#ff7a1a");
+    // ...and the one that declared none still falls back to the pack token,
+    // so the fix adds per-control accuracy without dropping the default.
+    REQUIRE(accent_by_binding.at("a") == "#16dac2");
+    // The real regression is the two collapsing to one value: that is what
+    // reading the pack token for every control looks like from here.
+    REQUIRE(accent_by_binding.at("a") != accent_by_binding.at("b"));
+}
+
+TEST_CASE("a lowered control carries what the binding-helper gate requires",
+          "[import-design][browser-capture][ir]") {
+    // A param key alone puts a control in the binding MANIFEST but emits no
+    // binding code: collect_resolved_binding_plan admits a helper route only
+    // when the node ALSO has a route id and a stable anchor, because the
+    // emitted helper finds its widget by anchor and claims it by route id.
+    // Carrying only the key produces a manifest full of bindings that nothing
+    // applies -- a panel that reads as wired and moves nothing.
+    //
+    // Anchors must also be DISTINCT. The generated lookup requires exactly one
+    // match and treats two as no match, so two controls sharing an anchor
+    // silently bind neither -- which is why the key alone is not enough of an
+    // anchor: a meter may legitimately share its macro with the control that
+    // drives it.
+    TempCapture temp;
+    const auto png = png_header(1912, 1272);
+    temp.write("browser.png", png);
+    temp.write("semantic-report.json", R"JSON({
+      "schema":"pulp-browser-semantics-v1",
+      "version":1,
+      "summary":{"candidates":7,"resolved":2,"unresolved":5},
+      "candidates":[
+        {"kind":"knob","binding_status":"bound","name":"drive",
+         "bounds":{"left":0,"top":0,"width":64,"height":80},
+         "paint_bounds":{"left":0,"top":0,"width":64,"height":64},
+         "data_pulp":{"param":"shared"}},
+        {"kind":"meter","binding_status":"bound","name":"readout",
+         "bounds":{"left":80,"top":0,"width":10,"height":64},
+         "data_pulp":{"meter":"shared"}}
+      ]
+    })JSON");
+    temp.write("tokens.json", R"JSON({
+      "schema":"pulp-browser-tokens-v1",
+      "version":1,
+      "colors":{"css/accent":"#16dac2"},
+      "dimensions":{"css/radius":12},
+      "strings":{"css/width":"100%","css/space":"1rem"},
+      "source_identity":{}
+    })JSON");
+    temp.write("capture.json", envelope(
+        "browser.png", pulp::runtime::sha256_hex(png)));
+
+    const auto result = pulp::import_design::lower_browser_capture_to_ir(
+        temp.root / "capture.json");
+    REQUIRE(result);
+
+    std::vector<const pulp::view::IRNode*> controls;
+    std::function<void(const pulp::view::IRNode&)> walk =
+        [&](const pulp::view::IRNode& node) {
+            if (node.attributes.count("pulpParamKey") != 0) controls.push_back(&node);
+            for (const auto& child : node.children) walk(child);
+        };
+    walk(result.design_ir->root);
+
+    REQUIRE(controls.size() == 2);
+    std::set<std::string> anchors;
+    for (const auto* control : controls) {
+        const auto route = control->attributes.find("pulpRouteId");
+        REQUIRE(route != control->attributes.end());
+        REQUIRE_FALSE(route->second.empty());
+        REQUIRE(control->stable_anchor_id.has_value());
+        REQUIRE_FALSE(control->stable_anchor_id->empty());
+        // The helper claims by route id the view it found by anchor, so the two
+        // must agree or the claim rejects the widget the lookup just resolved.
+        REQUIRE(route->second == *control->stable_anchor_id);
+        anchors.insert(*control->stable_anchor_id);
+    }
+    // Both controls name the SAME macro, so a macro-keyed anchor would collide
+    // here and bind neither.
+    REQUIRE(anchors.size() == 2);
 }

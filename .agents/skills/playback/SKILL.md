@@ -25,13 +25,38 @@ For MediaRef clips, prepare a `DecodedAudioAssetPool` off the audio thread. Use
 `DecodedAudioAssetPool::decode_wav()` for bounded in-memory WAV bytes, then pass
 the immutable pool in `ProgramCompileRequest::audio_assets`. The existing
 compiler incrementally lowers media clips into each `TrackProgram`; do not build
-a second playback-program model. The renderer uses bounded stateless linear SRC so
-source audio runs at its native wall-clock rate after sample-rate conversion.
-A musically anchored clip changes placement and timeline extent through the
-tempo map but does not imply warp or time-stretch.
+a second playback-program model. `TimeConform::None` uses the existing bounded
+native-rate source mapping after sample-rate conversion. `TimeConform::Resample`
+uses bounded stateless varispeed: map each
+rendered musical tick to the same fraction of the referenced source range and
+derive the effective source step for anti-aliasing. Use the compiled tempo map's
+analytic fractional sample-to-tick inverse for ordinary playback and precise
+host ticks for host beat mapping; sample-fraction interpolation across a tempo
+ramp is not musical phase. `TimeConform::Stretch` is compiled off the audio
+thread: slice the source, fixed-SRC it into the compiled timeline-rate domain,
+drive the finite stretcher with an analysis-boundary tempo schedule, and publish
+only an immutable artifact with exactly the authored timeline frame count.
+Use the scalar double finite builder for deterministic offline compilation,
+then convert its exact result to the public float artifact in bounded blocks.
+Document-tempo playback consumes that artifact 1:1. For live host-tempo
+projection, prepare a complete `RealtimeStretchProgramRuntime` off the audio
+thread and stream the artifact through its preallocated low-latency processor;
+the audio callback may stretch but must never allocate, lock, or prepare DSP.
+The runtime publishes one fixed causal latency for all parallel audio and MIDI
+paths and resets coherently on transport/program epochs. Keep
+source/tempo/algorithm semantic identity in the artifact cache key and document
+revision/program generation in separate provenance.
+Compiler work-block size is scheduling only and must change neither key nor
+output. Never route `Stretch` through `Resample`, pad/trim a length mismatch, or
+fall back to `None`.
 Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
+When sequence lowering flattens a complete nested media clip, preserve its
+authored `TimeConform` value. Reject a nested source window that trims a
+`Resample` or `Stretch` clip with `NestedSequenceUnsupported`; advancing a raw
+source-frame offset is valid only for unconformed media and would corrupt the
+authored phase until playback owns a conform-aware source-range mapping.
 
 When host beat mapping intentionally makes musical material follow the host
 tempo, keep absolute clips, take-comp segments, and frozen artifacts on
@@ -207,6 +232,46 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   same as a loop wrap, so neither exceeds `max_messages_per_block`. Do not add a
   scrub branch to either; if the behavior needs to change, change what the
   transport publishes.
+- `TempoSyncSource` is the backend-neutral session-tempo boundary. Its only
+  virtual operation is the realtime `capture_audio_block()` mapping/command
+  exchange. Backend enablement, peer discovery, and start/stop-sync policy do
+  not belong on the interface; the desktop `AbletonLinkTempoSync` adapter owns
+  those Link-specific controls.
+- A configured `TempoSyncSource*` is non-owning and must outlive
+  `MasterTransport`. It switches callers to the host-time `begin_block`
+  overload. Its opaque `TempoSyncHostTime` is created by the source and tagged
+  with that source's clock domain; a default token or a token from another
+  source fails before capture. The timestamp names the first sample at the
+  output boundary, so the audio-device layer must add output latency before
+  entering playback. A missing host time, disabled backend, backend failure, or
+  invalid mapping fails closed and never advances on the document clock.
+- Joining an external tempo session is passive. `prepare()` does not broadcast
+  `initial_position` or `initially_playing`; only later explicit `seek()`,
+  `set_playing()`, or `set_tempo_sync_tempo()` calls become one-shot commands
+  on the next audio block. Applied generations advance only after a valid
+  capture, so a failed block retries the command rather than losing it.
+- Session-tempo projection still obeys the fixed one-or-two-range contract,
+  including one loop wrap and precise fractional host ticks. `begin_scrub()`
+  rejects an active sync source: scrubbing owns a private repeated-window clock
+  and cannot share authority with a network beat mapping. The audio-thread guard
+  rejects any impossible mixed state defensively as well.
+- Both document-tempo and session-tempo blocks publish through the same
+  canonical block/range projection pipeline. Keep flags, meter anchoring,
+  monotonic ticks, host mapping, and previous-state publication there; source
+  paths should only derive their mode-specific projections.
+- A tempo source must preserve the host-clock time at which its reported
+  `is_playing` state becomes effective. `project_tempo_sync_playing()` applies a
+  transition at or before the first sample and defers one inside or beyond the
+  half-open block, because `TransportSnapshot::is_playing` is block-wide. Keep
+  this quantization explicit; silently discarding the timestamp makes remote
+  starts and stops early, while pretending to split them would contradict the
+  snapshot consumed by renderers.
+- Keep `tempo_sync.cpp` in `PulpPlaybackSources.cmake`, which mirrors it into
+  native, threadless, WAM, and WebCLAP builds. Keep SDK-backed adapters such as
+  `adapters/ableton_link.cpp` outside `core/playback/src/` and in a separate
+  non-installed target; the source-closure gate treats every `src/*.cpp` as
+  portable, so an SDK-backed translation unit there would be pulled toward the
+  wasm lanes.
 - A stopped block still emits one range covering all callback frames, but both
   musical clock intervals have zero duration.
 - The control thread is the sole writer of the complete desired-state `SeqLock`.

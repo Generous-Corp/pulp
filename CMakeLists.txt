@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.764.0
+    VERSION 0.766.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -194,6 +194,7 @@ option(PULP_ENABLE_INSPECTOR
 # different sizeof(StandaloneApp) (ODR).
 option(PULP_ENABLE_AUDIO_PROBES "Wire the RT output-boundary probe into the standalone host (dev/examples ON, release-ship OFF)" ON)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
+option(PULP_ENABLE_ABLETON_LINK "Enable optional desktop Ableton Link support with a developer-supplied SDK" OFF)
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_ENABLE_MTS_ESP "Enable optional ODDSound MTS-ESP microtuning client integration" OFF)
 option(PULP_ENABLE_SCALA_TUNING "Enable optional Scala .scl/.kbm microtuning support via Surge Synth Team tuning-library" OFF)
@@ -212,6 +213,7 @@ endif()
 option(PULP_REAL_PLUGIN_TESTS "Build the opt-in real-plugin integration suite (item 4.2)" OFF)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
+set(PULP_ABLETON_LINK_SDK_DIR "" CACHE PATH "Path to a developer-supplied desktop Ableton/link SDK kept outside the Pulp source tree")
 set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
@@ -290,6 +292,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
 pulp_configure_aax_sdk()
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAbletonLink.cmake)
+pulp_configure_ableton_link_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.

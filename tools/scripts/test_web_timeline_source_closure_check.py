@@ -27,6 +27,8 @@ set({sources}
     ${{{root}}}/core/timebase/src/compiled_time.cpp
     ${{{timeline}}}
     ${{{root}}}/core/playback/src/transport.cpp
+    ${{{root}}}/core/audio/src/finite_time_stretch.cpp
+    ${{{root}}}/core/audio/src/realtime_time_stretch.cpp
     ${{{root}}}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${{{root}}}/core/runtime/src/sha256.cpp
 )
@@ -139,6 +141,36 @@ class SourceClosureTests(unittest.TestCase):
         failures = self.check()
         self.assertEqual(
             sum("missing portable dependency core/runtime/src/sha256.cpp" in failure
+                for failure in failures),
+            2)
+
+    def test_realtime_stretch_audio_boundary_is_required(self) -> None:
+        for filename in ("PulpWam.cmake", "PulpWclap.cmake"):
+            prefix = "WAM" if filename == "PulpWam.cmake" else "WCLAP"
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"    ${{_PULP_{prefix}_ROOT}}/core/audio/src/"
+                "realtime_time_stretch.cpp\n",
+                "")
+        failures = self.check()
+        self.assertEqual(
+            sum("missing portable dependency "
+                "core/audio/src/realtime_time_stretch.cpp" in failure
+                for failure in failures),
+            2)
+
+    def test_finite_stretch_audio_boundary_is_required(self) -> None:
+        for filename in ("PulpWam.cmake", "PulpWclap.cmake"):
+            prefix = "WAM" if filename == "PulpWam.cmake" else "WCLAP"
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"    ${{_PULP_{prefix}_ROOT}}/core/audio/src/"
+                "finite_time_stretch.cpp\n",
+                "")
+        failures = self.check()
+        self.assertEqual(
+            sum("missing portable dependency "
+                "core/audio/src/finite_time_stretch.cpp" in failure
                 for failure in failures),
             2)
 

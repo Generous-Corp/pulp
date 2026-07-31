@@ -7,6 +7,8 @@ function(pulp_resolve_timeline_sources root output)
         automation_curve.cpp
         automation_document_internal.cpp
         automation_lane.cpp
+        clip.cpp
+        clip_schema_migrations.cpp
         command.cpp
         compile_context.cpp
         document_session.cpp
@@ -30,6 +32,7 @@ function(pulp_resolve_timeline_sources root output)
         transaction_sequence_internal.cpp
         transaction_note_internal.cpp
         transaction_take_internal.cpp
+        transaction_track_internal.cpp
         transaction_track_state_internal.cpp
         transaction_reduction_support.cpp
         undo.cpp

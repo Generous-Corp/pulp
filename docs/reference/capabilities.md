@@ -478,8 +478,8 @@ device I/O, media publication, plugin instantiation, and UI ownership.
 | DAWproject linear-subset import | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-importer) | [SDK consumer source](https://github.com/Generous-Corp/pulp/tree/main/examples/timeline-sdk-consumer) |
 | DAWproject bounded export (per-concept consent + loss manifest) | experimental | [dawproject](modules.md#dawproject) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-exporter) | [interchange matrix](interchange-matrix.md#dawproject) |
 | Standard MIDI File strict import/export plus consent-gated export | experimental | [smf](modules.md#smf) / [interchange](modules.md#interchange) | [Timeline SDK](../guides/timeline-sdk.md#optional-standard-midi-file-interop) | [interchange matrix](interchange-matrix.md#standard-midi-file) |
-| `pulp seq` validate/explain/apply and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
-| Five Timeline MCP operations + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |
+| `pulp seq` schema/validate/explain/apply/import/export and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
+| Ten Timeline MCP operations, including bounded session diff/undo/redo, + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |
 | `SequenceProcessor` plugin-format adapter | experimental | [sequence](modules.md#sequence) | [Timeline SDK](../guides/timeline-sdk.md#optional-plugin-format-adapter) | |
 
 The headless CLI/MCP renderer resolves sealed local assets and renders

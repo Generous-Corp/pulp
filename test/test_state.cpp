@@ -1,6 +1,10 @@
 #include <fstream>
 #include <cstdio>
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 #include <string>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -26,6 +30,42 @@
 
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+int stream_descriptor(FILE* stream) {
+#if defined(_WIN32)
+    return _fileno(stream);
+#else
+    return fileno(stream);
+#endif
+}
+
+int duplicate_descriptor(int descriptor) {
+#if defined(_WIN32)
+    return _dup(descriptor);
+#else
+    return dup(descriptor);
+#endif
+}
+
+int restore_descriptor(int saved, int destination) {
+#if defined(_WIN32)
+    return _dup2(saved, destination);
+#else
+    return dup2(saved, destination);
+#endif
+}
+
+int close_descriptor(int descriptor) {
+#if defined(_WIN32)
+    return _close(descriptor);
+#else
+    return close(descriptor);
+#endif
+}
+
+}  // namespace
 
 static ParamInfo make_param_info(ParamID id, const char* name, const char* unit, ParamRange range) {
     ParamInfo info;
@@ -2892,7 +2932,7 @@ TEST_CASE("StateStore reports a default it had to clamp into range",
         const std::string path =
             std::string(std::tmpnam(nullptr)) + "-pulp-param-default.log";
         std::fflush(stderr);
-        const int saved = dup(fileno(stderr));
+        const int saved = duplicate_descriptor(stream_descriptor(stderr));
         REQUIRE(saved >= 0);
         FILE* redirected = std::freopen(path.c_str(), "w", stderr);
         REQUIRE(redirected != nullptr);
@@ -2903,8 +2943,8 @@ TEST_CASE("StateStore reports a default it had to clamp into range",
         }
 
         std::fflush(stderr);
-        dup2(saved, fileno(stderr));
-        close(saved);
+        REQUIRE(restore_descriptor(saved, stream_descriptor(stderr)) >= 0);
+        REQUIRE(close_descriptor(saved) == 0);
 
         std::ifstream in(path);
         std::string text((std::istreambuf_iterator<char>(in)),

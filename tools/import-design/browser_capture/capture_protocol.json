@@ -34,7 +34,46 @@
         "reduced_motion",
         "settle",
         "network"
-      ]
+      ],
+      "properties": {
+        "interactions": {
+          "type": "object",
+          "required": [
+            "schema",
+            "version",
+            "report",
+            "report_sha256",
+            "plan_sha256",
+            "action_count"
+          ],
+          "properties": {
+            "schema": {
+              "const": "pulp-browser-interactions-v1"
+            },
+            "version": {
+              "const": 1
+            },
+            "report": {
+              "const": "interaction-report.json"
+            },
+            "report_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plan_sha256": {
+              "type": "string",
+              "description": "SHA-256 of the canonical plan with typed text replaced by its length",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "action_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            }
+          },
+          "additionalProperties": false
+        }
+      }
     },
     "documents": {
       "type": "array",

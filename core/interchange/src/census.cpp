@@ -23,7 +23,8 @@ constexpr std::uint16_t velocity_7_to_16(std::uint8_t value) noexcept {
                                       127u);
 }
 
-void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLimits& limits) {
+void record_clip(ConceptCensus& out, const timeline::Project& project,
+                 const timeline::Clip& clip, const CensusLimits& limits) {
     const ItemId id = clip.id();
     out.record(clip.time_anchor() == timeline::ClipTimeAnchor::Musical ? Concept::ClipMusical
                                                                        : Concept::ClipAbsolute,
@@ -32,7 +33,16 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
     std::visit(
         timeline::ClipContentCases{
             [&](const timeline::EmptyContent&) { out.record(Concept::ClipEmpty, id, limits); },
-            [&](const timeline::MediaRef&) { out.record(Concept::ClipMedia, id, limits); },
+            [&](const timeline::MediaRef& media) {
+                out.record(Concept::ClipMedia, id, limits);
+                const timeline::MediaAsset* asset = project.find_asset(media.asset_id);
+                // Project validation guarantees the asset exists. Keep the
+                // defensive null check here so an unresolved reference can
+                // never be mistaken for a lossless full-asset window.
+                if (!asset || media.source_start.value != 0 ||
+                    media.frame_count != asset->frame_count)
+                    out.record(Concept::ClipMediaWindow, id, limits);
+            },
             [&](const timeline::NoteContent& notes) {
                 out.record(Concept::ClipNote, id, limits);
                 if (std::any_of(notes.notes().begin(), notes.notes().end(), [](const auto& note) {
@@ -65,14 +75,15 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
         out.record(Concept::ClipFades, id, limits);
 }
 
-void record_track(ConceptCensus& out, const timeline::Track& track, const CensusLimits& limits) {
+void record_track(ConceptCensus& out, const timeline::Project& project,
+                  const timeline::Track& track, const CensusLimits& limits) {
     const ItemId id = track.id();
     // Every track in the model holds its clips directly; grouping is a concept
     // the document cannot express yet, so it is never recorded here.
     out.record(Concept::TrackFlat, id, limits);
 
     for (const timeline::Clip& clip : track.clips())
-        record_clip(out, clip, limits);
+        record_clip(out, project, clip, limits);
 
     for (const timeline::DevicePlacement& device : track.device_chain())
         out.record(Concept::DevicePlacement, device.id, limits);
@@ -180,7 +191,7 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
         for (const timeline::Scene& scene : sequence.scenes())
             out.record(Concept::ClipLaunch, scene.id, limits);
         for (const timeline::Track& track : sequence.tracks())
-            record_track(out, track, limits);
+            record_track(out, project, track, limits);
     }
     if (project.sequences().size() > 1)
         out.record(Concept::SequenceMultiple, project_id, limits);

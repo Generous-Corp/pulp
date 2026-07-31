@@ -59,8 +59,9 @@ draft immediately before publication.
 
 The contract is deliberately exact where stale build output is dangerous:
 
-- CLI archives contain only `pulp`, `pulp-cpp`, `pulp-mcp`, and the platform
-  WebGPU runtime (with `.exe`/DLL names on Windows).
+- CLI archives contain only `pulp`, `pulp-cpp`, `pulp-import-design`,
+  `pulp-mcp`, the import-design browser-capture runtime, and the platform WebGPU
+  runtime (with `.exe`/DLL names on Windows).
 - Every SDK carries the complete public `pulp-*` library target set plus the
   VST3, CLAP, and LV2 development surfaces; Darwin also requires Audio Unit.
 - A vanished target is missing, while a target left over from an old staging
@@ -80,7 +81,10 @@ and remain governed by their historical outer-asset contract. A backfill uses
 the tag's own matrix when present, so future product-matrix evolution is
 evaluated against the contract versioned with the source being rebuilt. A
 manual dispatch with `source_ref` resolves the matrix from that source ref
-rather than from the version label.
+rather than from the version label. Matrices before the declarative CLI fields
+retain their historical contract: `v0.764.0` introduced the import-design
+payload, while earlier matrix-governed releases use the original three-binary
+CLI contract.
 
 ## Required gate liveness (post-merge coverage)
 
