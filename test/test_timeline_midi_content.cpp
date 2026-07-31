@@ -1,5 +1,8 @@
 #include "support/timeline_persistence_test_support.hpp"
 
+#include <algorithm>
+#include <optional>
+
 namespace {
 
 constexpr std::uint64_t kModifierSeed = 1'234'567'890'123'456'789ull;
@@ -118,6 +121,80 @@ TEST_CASE("MidiContent note replace preserves untouched lane storage",
     CHECK(replaced.modifier_seed() == original.modifier_seed());
     REQUIRE(replaced.modifiers().size() == 1);
     CHECK(replaced.modifiers()[0] == original.modifiers()[0]);
+}
+
+TEST_CASE("Copying a clip issues fresh identities for its lanes and points",
+          "[timeline][midi-content]") {
+    const auto original = content_with_lanes();
+    const auto source = take(Clip::create({4}, {0}, {100}, original));
+    ItemIdAllocator allocator(100);
+    const auto copied = take(remap_ids(source, allocator));
+    const auto& copy = std::get<MidiContent>(copied.clip.content());
+
+    REQUIRE(copy.lanes().size() == 2);
+    // Every identity the copy owns must be one the allocator just issued. A
+    // lane the remap walk never visited comes back either missing or still
+    // carrying the source's identity, and the second is worse: two live
+    // objects would answer to one identity, which is what the two-pass
+    // allocator exists to prevent.
+    const auto issued = [&](ItemId id) {
+        return id.valid() && id.value >= 100 && id.value < allocator.next_value();
+    };
+    std::vector<ItemId> copied_ids;
+    for (std::size_t index = 0; index < copy.lanes().size(); ++index) {
+        const auto& source_lane = original.lanes()[index];
+        const auto& copy_lane = copy.lanes()[index];
+        CHECK(copy_lane.address == source_lane.address);
+        CHECK(copy_lane.id != source_lane.id);
+        CHECK(issued(copy_lane.id));
+        CHECK(copied.ids.find(source_lane.id) == std::optional<ItemId>(copy_lane.id));
+        copied_ids.push_back(copy_lane.id);
+
+        REQUIRE(copy_lane.points.size() == source_lane.points.size());
+        for (std::size_t point = 0; point < copy_lane.points.size(); ++point) {
+            CHECK(copy_lane.points[point].position == source_lane.points[point].position);
+            CHECK(copy_lane.points[point].value == source_lane.points[point].value);
+            CHECK(copy_lane.points[point].id != source_lane.points[point].id);
+            CHECK(issued(copy_lane.points[point].id));
+            CHECK(copied.ids.find(source_lane.points[point].id) ==
+                  std::optional<ItemId>(copy_lane.points[point].id));
+            copied_ids.push_back(copy_lane.points[point].id);
+        }
+    }
+    for (const auto& note : copy.notes())
+        copied_ids.push_back(note.id);
+    // Distinctness is asserted separately from freshness: a walk that visited
+    // every lane but reused one issued identity twice would satisfy every
+    // check above.
+    std::sort(copied_ids.begin(), copied_ids.end());
+    CHECK(std::adjacent_find(copied_ids.begin(), copied_ids.end()) == copied_ids.end());
+    // Two lanes, three points, two notes: the count is asserted so a walk that
+    // silently stopped emitting one kind cannot pass the distinctness check by
+    // having fewer identities to collide.
+    CHECK(copied_ids.size() == 7);
+}
+
+TEST_CASE("Lane identities appear in both walks a sequence copy relies on",
+          "[timeline][midi-content]") {
+    // Remapping a subtree runs two independent enumerations of what a clip
+    // owns: id_remap allocates from its own walk, while preflight, the identity
+    // index, and the carried-id transfer below enumerate through
+    // visit_clip_owned_identities. Nothing makes them agree structurally, so a
+    // kind added to one and missed by the other is invisible until a copy is
+    // rejected or an identity silently escapes validation. Replaying one walk's
+    // table through the other's size check is what ties them together.
+    const auto clip = take(Clip::create({4}, {0}, {100}, content_with_lanes()));
+    const auto track = take(Track::create({3}, "track", {clip}));
+    const auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+
+    ItemIdAllocator allocator(100);
+    const auto copied = take(remap_ids(sequence, allocator));
+    // Sequence, track, clip, two notes, two lanes, three points.
+    CHECK(copied.ids.entries().size() == 10);
+
+    const auto carried = remap_ids(sequence, copied.ids.entries(), RemapIdFixups{});
+    REQUIRE(carried.has_value());
+    CHECK(carried.value().ids.entries().size() == copied.ids.entries().size());
 }
 
 TEST_CASE("MidiContent lanes survive a serialize and deserialize round trip",
