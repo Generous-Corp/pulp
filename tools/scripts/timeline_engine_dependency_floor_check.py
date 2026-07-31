@@ -36,7 +36,10 @@ MODULE_FLOORS = {
     # product shell implements, so a plugin that draws a piano roll over its own
     # engine consumes the editor without acquiring a transport. Both spellings
     # of the module's own name are allowed because the CMake target is
-    # pulp::timeline-editor while the directory is timeline_editor.
+    # pulp::timeline-editor while the directory is timeline_editor. A view
+    # target above this rung takes its own row rather than widening this one:
+    # admitting view here would make every consumer of the editor kernel pay
+    # for the view stack.
     "timeline_editor": {
         "timeline_editor",
         "timeline-editor",
