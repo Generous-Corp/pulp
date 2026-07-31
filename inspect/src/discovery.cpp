@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#include <sys/acl.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #endif
@@ -279,6 +280,83 @@ bool create_owner_only_windows_directory(
 }
 #endif
 
+#ifndef _WIN32
+bool has_no_extended_acl(int descriptor) {
+#ifdef __APPLE__
+    // Darwin represents "no extended ACL" as ENOENT. Any returned ACL object
+    // carries an access policy beyond the owner-only mode bits.
+    errno = 0;
+    acl_t acl = ::acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED);
+    if (!acl)
+        return errno == ENOENT;
+    ::acl_free(acl);
+    return false;
+#else
+    (void)descriptor;
+    return true;
+#endif
+}
+
+[[maybe_unused]] bool clear_extended_acl(int descriptor) {
+#ifdef __APPLE__
+    acl_t empty = ::acl_init(0);
+    if (!empty)
+        return false;
+    const bool cleared =
+        ::acl_set_fd_np(descriptor, empty, ACL_TYPE_EXTENDED) == 0;
+    ::acl_free(empty);
+    return cleared;
+#else
+    (void)descriptor;
+    return true;
+#endif
+}
+
+bool owner_private_descriptor(int descriptor, bool expect_directory) {
+    struct stat info {};
+    return ::fstat(descriptor, &info) == 0 &&
+           (expect_directory ? S_ISDIR(info.st_mode)
+                             : S_ISREG(info.st_mode)) &&
+           info.st_uid == ::geteuid() &&
+           (info.st_mode & 077) == 0 &&
+           has_no_extended_acl(descriptor);
+}
+
+int open_owner_private(const std::filesystem::path& path,
+                       bool expect_directory) {
+    struct stat before {};
+    if (::lstat(path.c_str(), &before) != 0 ||
+        S_ISLNK(before.st_mode) ||
+        (expect_directory ? !S_ISDIR(before.st_mode)
+                          : !S_ISREG(before.st_mode))) {
+        return -1;
+    }
+    int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+#ifdef O_DIRECTORY
+    if (expect_directory)
+        flags |= O_DIRECTORY;
+#endif
+    const int descriptor = ::open(path.c_str(), flags);
+    struct stat opened {};
+    if (descriptor < 0 ||
+        ::fstat(descriptor, &opened) != 0 ||
+        opened.st_dev != before.st_dev ||
+        opened.st_ino != before.st_ino ||
+        !owner_private_descriptor(descriptor, expect_directory)) {
+        if (descriptor >= 0)
+            ::close(descriptor);
+        return -1;
+    }
+    return descriptor;
+}
+#endif
+
 #ifndef PULP_INSPECT_READER_ONLY
 bool ensure_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
@@ -288,10 +366,14 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
     const auto parent = directory.parent_path();
     if (!parent.empty())
         std::filesystem::create_directories(parent, error);
-    if (error ||
-        (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST)) {
+    bool created = false;
+    if (error) {
         return false;
     }
+    if (::mkdir(directory.c_str(), 0700) == 0)
+        created = true;
+    else if (errno != EEXIST)
+        return false;
 
     struct stat before {};
     if (::lstat(directory.c_str(), &before) != 0 ||
@@ -313,6 +395,12 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
     const int descriptor = ::open(directory.c_str(), flags);
     if (descriptor < 0)
         return false;
+    if (created &&
+        (!clear_extended_acl(descriptor) ||
+         ::fchmod(descriptor, 0700) != 0)) {
+        ::close(descriptor);
+        return false;
+    }
     struct stat opened {};
     const bool same_directory =
         ::fstat(descriptor, &opened) == 0 &&
@@ -321,11 +409,7 @@ bool ensure_private_directory(const std::filesystem::path& directory) {
         opened.st_dev == before.st_dev &&
         opened.st_ino == before.st_ino;
     const bool secured =
-        same_directory &&
-        ::fstat(descriptor, &opened) == 0 &&
-        S_ISDIR(opened.st_mode) &&
-        opened.st_uid == ::geteuid() &&
-        (opened.st_mode & 077) == 0;
+        same_directory && owner_private_descriptor(descriptor, true);
     ::close(descriptor);
     return secured;
 #endif
@@ -337,24 +421,14 @@ bool validate_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
     return owner_only_windows_path(directory, true);
 #else
-    struct stat info {};
-    return ::lstat(directory.c_str(), &info) == 0 &&
-           S_ISDIR(info.st_mode) && !S_ISLNK(info.st_mode) &&
-           info.st_uid == ::geteuid() && (info.st_mode & 077) == 0;
+    const int descriptor = open_owner_private(directory, true);
+    if (descriptor < 0)
+        return false;
+    ::close(descriptor);
+    return true;
 #endif
 }
 #endif
-
-bool private_regular_file(const std::filesystem::path& path) {
-#ifdef _WIN32
-    return owner_only_windows_path(path, false);
-#else
-    struct stat info {};
-    return ::lstat(path.c_str(), &info) == 0 &&
-           S_ISREG(info.st_mode) && !S_ISLNK(info.st_mode) &&
-           info.st_uid == ::geteuid() && (info.st_mode & 077) == 0;
-#endif
-}
 
 std::optional<std::string> process_start_identity(std::int64_t process_id) {
     if (process_id <= 0)
@@ -485,6 +559,13 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
                           0600);
     if (fd < 0)
         return false;
+    if (!clear_extended_acl(fd) ||
+        ::fchmod(fd, 0600) != 0 ||
+        !owner_private_descriptor(fd, false)) {
+        ::close(fd);
+        ::unlink(temporary.c_str());
+        return false;
+    }
     std::size_t written = 0;
     while (written < contents.size()) {
         const auto count =
@@ -506,8 +587,6 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
         std::filesystem::remove(temporary, error);
         return false;
     }
-    if (::chmod(destination.c_str(), 0600) != 0)
-        return false;
 #endif
     return true;
 }
@@ -515,7 +594,8 @@ bool write_private_file_atomic(const std::filesystem::path& destination,
 
 std::optional<std::string> read_private_text_file(
     const std::filesystem::path& path) {
-    if (!private_regular_file(path))
+#ifdef _WIN32
+    if (!owner_only_windows_path(path, false))
         return std::nullopt;
     std::error_code error;
     const auto size = std::filesystem::file_size(path, error);
@@ -532,6 +612,35 @@ std::optional<std::string> read_private_text_file(
     if (input.get(trailing))
         return std::nullopt;
     return contents;
+#else
+    const int descriptor = open_owner_private(path, false);
+    if (descriptor < 0)
+        return std::nullopt;
+    struct stat info {};
+    if (::fstat(descriptor, &info) != 0 || info.st_size < 0 ||
+        static_cast<std::uintmax_t>(info.st_size) >
+            kMaxDiscoveryRecordBytes) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    std::string contents(static_cast<std::size_t>(info.st_size), '\0');
+    std::size_t read = 0;
+    while (read < contents.size()) {
+        const auto count =
+            ::read(descriptor, contents.data() + read, contents.size() - read);
+        if (count <= 0) {
+            ::close(descriptor);
+            return std::nullopt;
+        }
+        read += static_cast<std::size_t>(count);
+    }
+    char trailing = '\0';
+    const auto trailing_count = ::read(descriptor, &trailing, 1);
+    ::close(descriptor);
+    if (trailing_count != 0)
+        return std::nullopt;
+    return contents;
+#endif
 }
 
 #ifndef PULP_INSPECT_READER_ONLY
@@ -681,19 +790,24 @@ struct InspectorDiscoveryPublisher::OwnershipLease {
         if (!FlushFileBuffers(lease->handle))
             return nullptr;
 #else
-        int flags = O_RDWR | O_CREAT | O_CLOEXEC;
+        int flags = O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC;
 #ifdef O_NOFOLLOW
         flags |= O_NOFOLLOW;
 #endif
         lease->descriptor = ::open(path.c_str(), flags, 0600);
+        const bool created = lease->descriptor >= 0;
+        if (!created && errno == EEXIST) {
+            flags &= ~(O_CREAT | O_EXCL);
+            lease->descriptor = ::open(path.c_str(), flags);
+        }
         if (lease->descriptor < 0 ||
             ::flock(lease->descriptor, LOCK_EX | LOCK_NB) != 0) {
             return nullptr;
         }
-        struct stat info {};
-        if (::fstat(lease->descriptor, &info) != 0 ||
-            !S_ISREG(info.st_mode) || info.st_uid != ::geteuid() ||
-            ::fchmod(lease->descriptor, 0600) != 0 ||
+        if ((created &&
+             (!clear_extended_acl(lease->descriptor) ||
+              ::fchmod(lease->descriptor, 0600) != 0)) ||
+            !owner_private_descriptor(lease->descriptor, false) ||
             ::ftruncate(lease->descriptor, 0) != 0) {
             return nullptr;
         }
@@ -772,25 +886,19 @@ InspectorDiscoveryReader::read_credential(
     if (!validate_private_directory(runtime_directory_))
         return std::nullopt;
     const auto path = confined_path(runtime_directory_, record.credential_path);
-    if (!path || !private_regular_file(*path))
+    if (!path)
         return std::nullopt;
-    std::error_code error;
-    if (std::filesystem::file_size(*path, error) != 64 || error)
+    auto contents = read_private_text_file(*path);
+    if (!contents || contents->size() != 64)
         return std::nullopt;
-    std::ifstream input(*path, std::ios::binary);
     struct SensitiveHex {
         std::array<char, 64> bytes{};
         ~SensitiveHex() {
             pulp::runtime::secure_zero_memory(bytes.data(), bytes.size());
         }
     } hex;
-    input.read(hex.bytes.data(),
-               static_cast<std::streamsize>(hex.bytes.size()));
-    if (input.gcount() != static_cast<std::streamsize>(hex.bytes.size()))
-        return std::nullopt;
-    char trailing = '\0';
-    if (input.get(trailing))
-        return std::nullopt;
+    std::copy(contents->begin(), contents->end(), hex.bytes.begin());
+    pulp::runtime::secure_zero_memory(contents->data(), contents->size());
     auto nibble = [](char value) -> int {
         if (value >= '0' && value <= '9') return value - '0';
         if (value >= 'a' && value <= 'f') return value - 'a' + 10;

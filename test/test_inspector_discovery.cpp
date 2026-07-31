@@ -13,9 +13,12 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <fcntl.h>
 #include <sys/stat.h>
 #ifdef __APPLE__
 #include <libproc.h>
+#include <membership.h>
+#include <sys/acl.h>
 #include <sys/proc.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -61,6 +64,54 @@ InspectorDiscoveryRecord fixture_record(std::string session) {
     record.profile = InspectorProfile::Observe;
     return record;
 }
+
+#ifdef __APPLE__
+bool add_allow_acl(const std::filesystem::path& path, bool inherited) {
+    const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0)
+        return false;
+    acl_t acl = ::acl_init(1);
+    acl_entry_t entry = nullptr;
+    uuid_t group{};
+    bool succeeded =
+        acl &&
+        ::acl_create_entry(&acl, &entry) == 0 &&
+        ::mbr_gid_to_uuid(::getegid(), group) == 0 &&
+        ::acl_set_tag_type(entry, ACL_EXTENDED_ALLOW) == 0 &&
+        ::acl_set_qualifier(entry, group) == 0;
+    acl_permset_t permissions = nullptr;
+    succeeded =
+        succeeded &&
+        ::acl_get_permset(entry, &permissions) == 0 &&
+        ::acl_add_perm(permissions, ACL_READ_DATA) == 0;
+    if (succeeded && inherited) {
+        acl_flagset_t flags = nullptr;
+        succeeded =
+            ::acl_get_flagset_np(entry, &flags) == 0 &&
+            ::acl_add_flag_np(flags, ACL_ENTRY_FILE_INHERIT) == 0 &&
+            ::acl_add_flag_np(flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0;
+    }
+    succeeded =
+        succeeded &&
+        ::acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED) == 0;
+    if (acl)
+        ::acl_free(acl);
+    ::close(descriptor);
+    return succeeded;
+}
+
+bool has_extended_acl(const std::filesystem::path& path) {
+    const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0)
+        return false;
+    acl_t acl = ::acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED);
+    const bool present = acl != nullptr;
+    if (acl)
+        ::acl_free(acl);
+    ::close(descriptor);
+    return present;
+}
+#endif
 
 } // namespace
 
@@ -365,6 +416,51 @@ TEST_CASE("discovery rejects a stale record after process id reuse",
 }
 
 #ifdef __APPLE__
+TEST_CASE("discovery rejects pre-existing extended ACLs on macOS",
+          "[inspect][discovery][security][macos][acl]") {
+    TemporaryDirectory temporary;
+    std::filesystem::create_directories(temporary.path);
+    REQUIRE(::chmod(temporary.path.c_str(), 0700) == 0);
+    REQUIRE(add_allow_acl(temporary.path, false));
+    REQUIRE(has_extended_acl(temporary.path));
+
+    InspectorDiscoveryReader reader(temporary.path);
+    CHECK(reader.list().empty());
+
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    CHECK_FALSE(publisher.publish(
+        fixture_record("acl-runtime"), *token, 5s));
+    CHECK(has_extended_acl(temporary.path));
+}
+
+TEST_CASE("discovery strips inherited ACLs from newly created objects on macOS",
+          "[inspect][discovery][security][macos][acl]") {
+    TemporaryDirectory temporary;
+    std::filesystem::create_directories(temporary.path);
+    REQUIRE(::chmod(temporary.path.c_str(), 0700) == 0);
+    REQUIRE(add_allow_acl(temporary.path, true));
+
+    const auto runtime = temporary.path / "runtime";
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(runtime);
+    REQUIRE(publisher.publish(
+        fixture_record("inherited-acl"), *token, 5s));
+    REQUIRE(publisher.record().has_value());
+    CHECK_FALSE(has_extended_acl(runtime));
+    CHECK_FALSE(has_extended_acl(publisher.record()->record_path));
+    CHECK_FALSE(has_extended_acl(publisher.record()->credential_path));
+    CHECK_FALSE(has_extended_acl(
+        runtime / "13-inherited-acl-instance-1.lock"));
+
+    REQUIRE(add_allow_acl(publisher.record()->credential_path, false));
+    InspectorDiscoveryReader reader(runtime);
+    CHECK(reader.list().empty());
+    CHECK_FALSE(reader.read_credential(*publisher.record()).has_value());
+}
+
 TEST_CASE("discovery rejects a zombie publisher on macOS",
           "[inspect][discovery][security][macos]") {
     struct ZombieChild {
