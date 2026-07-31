@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -202,6 +203,23 @@ TEST_CASE("discovery rejects records and credentials above their fixed bounds",
     }
     CHECK(reader.list().empty());
     CHECK_FALSE(reader.read_credential(*publisher.record()).has_value());
+}
+
+TEST_CASE("discovery preparation remains invisible until commit",
+          "[inspect][discovery][publication][transaction]") {
+    TemporaryDirectory temporary;
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    const auto record = fixture_record("prepared-publication");
+    InspectorDiscoveryReader reader(temporary.path);
+
+    REQUIRE(publisher.prepare(record, *token, 5s));
+    REQUIRE(publisher.record().has_value());
+    CHECK(reader.list().empty());
+    REQUIRE(publisher.commit());
+    REQUIRE(reader.list().size() == 1);
+    CHECK_FALSE(publisher.commit());
 }
 
 TEST_CASE("discovery rejects expiration arithmetic overflow",

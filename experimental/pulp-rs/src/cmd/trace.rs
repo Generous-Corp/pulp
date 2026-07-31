@@ -57,9 +57,13 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::cmd::trace_open::{run_open, OpenArgs};
-use crate::cmd::trace_query::run_offline_query;
+use crate::cmd::trace_open::OpenArgs;
 use crate::error::{CliError, Result};
+
+pub use crate::cmd::trace_dispatch::dispatch;
+pub use crate::cmd::trace_doctor::{
+    resolve_trace_processor, TraceProcessorSource, TraceProcessorStatus,
+};
 
 /// Optional explicit discovery filter understood by the wrapper.
 pub const INSPECTOR_PORT_ENV: &str = crate::cmd::inspector::PORT_ENV;
@@ -205,25 +209,23 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             globals.json = true;
         } else if a == "--port" {
             i += 1;
-            let v = args.get(i).ok_or_else(|| {
-                CliError::BadUsage("--port requires a value".to_owned())
-            })?;
-            let port = v.parse::<u16>().map_err(|_| {
-                CliError::BadUsage(format!("--port: invalid u16 value `{v}`"))
-            })?;
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage("--port requires a value".to_owned()))?;
+            let port = v
+                .parse::<u16>()
+                .map_err(|_| CliError::BadUsage(format!("--port: invalid u16 value `{v}`")))?;
             if port == 0 {
                 return Err(CliError::BadUsage(
                     "--port must be between 1 and 65535".to_owned(),
                 ));
             }
             globals.port = Some(port);
-        } else if a == "--session" || a == "--instance" ||
-            a == "--publication"
-        {
+        } else if a == "--session" || a == "--instance" || a == "--publication" {
             i += 1;
-            let v = args.get(i).ok_or_else(|| {
-                CliError::BadUsage(format!("{a} requires a value"))
-            })?;
+            let v = args
+                .get(i)
+                .ok_or_else(|| CliError::BadUsage(format!("{a} requires a value")))?;
             if !crate::cmd::inspector::valid_session_identity(v) {
                 return Err(CliError::BadUsage(format!(
                     "{a} must contain only ASCII letters, digits, `-`, or `_`"
@@ -246,8 +248,8 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             "--session and --instance must be supplied together".to_owned(),
         ));
     }
-    if globals.publication_id.is_some() &&
-        (globals.session_id.is_none() || globals.instance_id.is_none())
+    if globals.publication_id.is_some()
+        && (globals.session_id.is_none() || globals.instance_id.is_none())
     {
         return Err(CliError::BadUsage(
             "--publication requires --session and --instance".to_owned(),
@@ -261,21 +263,16 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     match verb.as_str() {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "start" => parse_start(&rest[1..]).map(|s| (s, globals)),
-        "stop" => no_args("stop", &rest[1..])
-            .map(|()| (Sub::Stop, globals)),
+        "stop" => no_args("stop", &rest[1..]).map(|()| (Sub::Stop, globals)),
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => no_args("snapshot", &rest[1..])
-            .map(|()| (Sub::Snapshot, globals)),
+        "snapshot" => no_args("snapshot", &rest[1..]).map(|()| (Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
-        "doctor" => no_args("doctor", &rest[1..])
-            .map(|()| (Sub::Doctor, globals)),
-        "fetch" => no_args("fetch", &rest[1..])
-            .map(|()| (Sub::Fetch, globals)),
+        "doctor" => no_args("doctor", &rest[1..]).map(|()| (Sub::Doctor, globals)),
+        "fetch" => no_args("fetch", &rest[1..]).map(|()| (Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
-            no_args(verb, &rest[1..])
-                .map(|()| (preset_sub(verb), globals))
+            no_args(verb, &rest[1..]).map(|()| (preset_sub(verb), globals))
         }
         _ => Err(CliError::UnknownSubcommand),
     }
@@ -308,9 +305,7 @@ fn parse_start(args: &[String]) -> Result<Sub> {
             "--categories" | "--category" => {
                 i += 1;
                 let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage(
-                        "--categories requires a value".to_owned(),
-                    )
+                    CliError::BadUsage("--categories requires a value".to_owned())
                 })?;
                 s.categories = v
                     .split(',')
@@ -328,13 +323,11 @@ fn parse_start(args: &[String]) -> Result<Sub> {
             }
             "--ring-mb" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--ring-mb requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--ring-mb requires a value".to_owned()))?;
                 let ring_mb = v.parse::<u32>().map_err(|_| {
-                    CliError::BadUsage(format!(
-                        "--ring-mb: invalid u32 value `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--ring-mb: invalid u32 value `{v}`"))
                 })?;
                 if !(1..=512).contains(&ring_mb) {
                     return Err(CliError::BadUsage(
@@ -361,28 +354,26 @@ fn parse_query(args: &[String]) -> Result<Sub> {
         match args[i].as_str() {
             "--preset" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--preset requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--preset requires a value".to_owned()))?;
                 q.preset = Some(v.clone());
             }
             "--format" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--format requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--format requires a value".to_owned()))?;
                 q.format = QueryFormat::parse(v).ok_or_else(|| {
-                    CliError::BadUsage(format!(
-                        "--format: expected json|table|csv, got `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--format: expected json|table|csv, got `{v}`"))
                 })?;
                 q.format_set = true;
             }
             "--trace" => {
                 i += 1;
-                let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage("--trace requires a value".to_owned())
-                })?;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| CliError::BadUsage("--trace requires a value".to_owned()))?;
                 q.trace = Some(PathBuf::from(v));
             }
             other if other.starts_with("--") => {
@@ -394,8 +385,7 @@ fn parse_query(args: &[String]) -> Result<Sub> {
                 // First bare positional is the SQL string.
                 if q.sql.is_some() {
                     return Err(CliError::BadUsage(
-                        "pulp trace query: only one SQL string is allowed"
-                            .to_owned(),
+                        "pulp trace query: only one SQL string is allowed".to_owned(),
                     ));
                 }
                 q.sql = Some(args[i].clone());
@@ -405,14 +395,12 @@ fn parse_query(args: &[String]) -> Result<Sub> {
     }
     if q.sql.is_some() && q.preset.is_some() {
         return Err(CliError::BadUsage(
-            "pulp trace query: pass a SQL string OR --preset, not both"
-                .to_owned(),
+            "pulp trace query: pass a SQL string OR --preset, not both".to_owned(),
         ));
     }
     if q.sql.is_none() && q.preset.is_none() {
         return Err(CliError::BadUsage(
-            "pulp trace query: missing SQL string (or --preset <name>)"
-                .to_owned(),
+            "pulp trace query: missing SQL string (or --preset <name>)".to_owned(),
         ));
     }
     Ok(Sub::Query(q))
@@ -420,9 +408,7 @@ fn parse_query(args: &[String]) -> Result<Sub> {
 
 fn parse_explain(args: &[String]) -> Result<Sub> {
     let question = args.first().ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp trace explain: missing \"<question>\"".to_owned(),
-        )
+        CliError::BadUsage("pulp trace explain: missing \"<question>\"".to_owned())
     })?;
     Ok(Sub::Explain {
         question: question.clone(),
@@ -440,14 +426,10 @@ fn parse_open(args: &[String]) -> Result<Sub> {
             "--keep-alive-seconds" => {
                 i += 1;
                 let v = args.get(i).ok_or_else(|| {
-                    CliError::BadUsage(
-                        "--keep-alive-seconds requires a value".to_owned(),
-                    )
+                    CliError::BadUsage("--keep-alive-seconds requires a value".to_owned())
                 })?;
                 keep_alive_secs = v.parse::<u64>().map_err(|_| {
-                    CliError::BadUsage(format!(
-                        "--keep-alive-seconds: invalid u64 value `{v}`"
-                    ))
+                    CliError::BadUsage(format!("--keep-alive-seconds: invalid u64 value `{v}`"))
                 })?;
             }
             other if other.starts_with("--") => {
@@ -458,8 +440,7 @@ fn parse_open(args: &[String]) -> Result<Sub> {
             _ => {
                 if file.is_some() {
                     return Err(CliError::BadUsage(
-                        "pulp trace open: only one .pftrace file is allowed"
-                            .to_owned(),
+                        "pulp trace open: only one .pftrace file is allowed".to_owned(),
                     ));
                 }
                 file = Some(PathBuf::from(&args[i]));
@@ -467,11 +448,8 @@ fn parse_open(args: &[String]) -> Result<Sub> {
         }
         i += 1;
     }
-    let file = file.ok_or_else(|| {
-        CliError::BadUsage(
-            "pulp trace open: missing <file.pftrace>".to_owned(),
-        )
-    })?;
+    let file = file
+        .ok_or_else(|| CliError::BadUsage("pulp trace open: missing <file.pftrace>".to_owned()))?;
     Ok(Sub::Open(OpenArgs {
         file,
         no_browser,
@@ -486,9 +464,7 @@ fn parse_open(args: &[String]) -> Result<Sub> {
 pub fn to_inspector_call(sub: &Sub) -> Option<(&'static str, String)> {
     match sub {
         Sub::Help => None,
-        Sub::Start(s) => {
-            Some(("Trace.startSession", build_start_params(s)))
-        }
+        Sub::Start(s) => Some(("Trace.startSession", build_start_params(s))),
         Sub::Stop => Some(("Trace.stopSession", "{}".to_owned())),
         Sub::Query(q) => Some(("Trace.query", build_query_params(q))),
         Sub::Snapshot => Some(("Trace.snapshot", "{}".to_owned())),
@@ -559,41 +535,11 @@ fn build_query_params(q: &QueryArgs) -> String {
 /// verbatim. The inspector's `choc::json::parse` rejects anything that
 /// isn't valid JSON afterwards, which gives a clearer error than a
 /// partial escape would.
-fn escape_json(s: &str) -> String {
+pub(crate) fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Trait so tests can swap out the inspector "talker" without spawning
-/// a real `pulp-cpp` subprocess. Production code uses the
-/// [`SystemInspector`] impl below.
-pub trait InspectorTalker {
-    /// Send `method` + `params_json` to the inspector and return the
-    /// raw response body (the inspector's JSON result).
-    ///
-    /// # Errors
-    ///
-    /// Implementations return [`CliError::Other`] with a human message
-    /// on transport failures (binary not on PATH, port not listening,
-    /// command exited non-zero).
-    fn call(&self, port: u16, method: &str, params_json: &str)
-        -> Result<String>;
-
-    /// Send a request to the exact publication selected by an earlier
-    /// authenticated request. Implementations that maintain one persistent
-    /// connection may use the default; subprocess adapters override this so
-    /// each invocation repeats the original session identity.
-    fn call_selected(
-        &self,
-        port: u16,
-        _session_id: &str,
-        _instance_id: &str,
-        _publication_id: &str,
-        method: &str,
-        params_json: &str,
-    ) -> Result<String> {
-        self.call(port, method, params_json)
-    }
-}
+pub use crate::cmd::inspector::InspectorTalker;
 
 /// Production talker — shells out to `pulp-cpp
 /// inspect --command METHOD --params JSON`. Captures stdout and
@@ -602,12 +548,7 @@ pub trait InspectorTalker {
 pub struct SystemInspector;
 
 impl InspectorTalker for SystemInspector {
-    fn call(
-        &self,
-        port: u16,
-        method: &str,
-        params_json: &str,
-    ) -> Result<String> {
+    fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String> {
         crate::cmd::inspector::call("trace", port, method, params_json)
     }
 
@@ -625,19 +566,13 @@ impl InspectorTalker for SystemInspector {
             instance_id: instance_id.to_owned(),
             publication_id: publication_id.to_owned(),
         };
-        crate::cmd::inspector::call_selected(
-            "trace",
-            port,
-            Some(&selection),
-            method,
-            params_json,
-        )
+        crate::cmd::inspector::call_selected("trace", port, Some(&selection), method, params_json)
     }
 }
 
 /// The clear "no inspector" hint string surfaced after an authenticated
 /// inspector request fails and in `pulp trace` help text.
-fn no_inspector_hint(port: u16) -> String {
+pub(crate) fn no_inspector_hint(port: u16) -> String {
     let target = if port == 0 {
         "authenticated discovery".to_owned()
     } else {
@@ -660,625 +595,7 @@ pub fn resolve_port(flags: &GlobalFlags) -> Result<u16> {
     crate::cmd::inspector::resolve_port_from_env(flags.port)
 }
 
-/// Dispatch a parsed [`Sub`] against an [`InspectorTalker`]. Pure glue
-/// — pulls the inspector call, optionally prints the inspector JSON or
-/// the pretty-printed form, and returns.
-///
-/// # Errors
-///
-/// Surfaces any [`CliError`] the talker emits, plus [`CliError::Io`]
-/// on writer failure.
-pub fn dispatch<T: InspectorTalker>(
-    sub: &Sub,
-    flags: &GlobalFlags,
-    talker: &T,
-    out: &mut impl Write,
-) -> Result<()> {
-    if matches!(sub, Sub::Help) {
-        return print_help(out).map_err(io_err);
-    }
-    if let Sub::Open(args) = sub {
-        return run_open(args, flags.json, out);
-    }
-    if matches!(sub, Sub::Fetch) {
-        return crate::cmd::trace_fetch::run_fetch(flags.json, out);
-    }
-    // `query --trace FILE` runs offline against a flushed `.pftrace` via
-    // trace_processor; without `--trace` it falls through to the live
-    // inspector `Trace.query` path below.
-    if let Sub::Query(q) = sub {
-        if q.trace.is_some() {
-            return run_offline_query(
-                q,
-                &resolve_trace_processor(),
-                flags.json,
-                out,
-            );
-        }
-    }
-    let port = resolve_port(flags)?;
-    let explicit_selection = match (
-        flags.session_id.as_deref(),
-        flags.instance_id.as_deref(),
-    ) {
-        (Some(session_id), Some(instance_id)) => {
-            Some(crate::cmd::inspector::SessionSelection {
-                session_id: session_id.to_owned(),
-                instance_id: instance_id.to_owned(),
-                publication_id: flags.publication_id.clone().unwrap_or_default(),
-            })
-        }
-        _ => None,
-    };
-    if matches!(sub, Sub::Doctor) {
-        return run_doctor(
-            port,
-            explicit_selection.as_ref(),
-            flags.json,
-            talker,
-            out,
-        );
-    }
-    let Some((method, params)) = to_inspector_call(sub) else {
-        // The `Help` arm above already returned. This stays here so
-        // adding a new `Sub` variant without a matching
-        // `to_inspector_call` arm fails loudly instead of no-oping.
-        return Err(CliError::Other(format!(
-            "pulp trace: no inspector mapping for {sub:?}"
-        )));
-    };
-    let requires_captured_publication =
-        matches!(sub, Sub::Stop | Sub::Query(_) | Sub::Explain { .. });
-    if requires_captured_publication &&
-        explicit_selection
-            .as_ref()
-            .map_or(true, |selection| selection.publication_id.is_empty())
-    {
-        let message = match sub {
-            Sub::Stop => {
-                concat!(
-                    "pulp trace stop requires --session, --instance, and --publication",
-                    " from the exact command printed by `pulp trace start`"
-                )
-            }
-            Sub::Query(_) => {
-                concat!(
-                    "pulp trace query requires --session, --instance, and --publication",
-                    " from the exact command printed by `pulp trace start`"
-                )
-            }
-            Sub::Explain { .. } => {
-                concat!(
-                    "pulp trace explain requires --session, --instance, and --publication",
-                    " from the exact command printed by `pulp trace start`"
-                )
-            }
-            _ => unreachable!(),
-        };
-        return Err(CliError::BadUsage(message.to_owned()));
-    }
-    let discovered_selection;
-    let selection = if matches!(sub, Sub::Start(_)) &&
-        explicit_selection
-            .as_ref()
-            .map_or(true, |selection| selection.publication_id.is_empty())
-    {
-        let capabilities = match explicit_selection.as_ref() {
-            Some(selection) => talker.call_selected(
-                port,
-                &selection.session_id,
-                &selection.instance_id,
-                &selection.publication_id,
-                "Session.getCapabilities",
-                "{}",
-            )?,
-            None => talker.call(port, "Session.getCapabilities", "{}")?,
-        };
-        discovered_selection =
-            crate::cmd::inspector::parse_session_selection(&capabilities)
-                .ok_or_else(|| {
-                    CliError::Other(
-                        "pulp trace: Session.getCapabilities did not return a \
-                         safe sessionId, instanceId, and publicationId"
-                            .to_owned(),
-                    )
-                })?;
-        Some(&discovered_selection)
-    } else {
-        explicit_selection.as_ref()
-    };
-    let response = match selection {
-        Some(selection) => talker.call_selected(
-            port,
-            &selection.session_id,
-            &selection.instance_id,
-            &selection.publication_id,
-            method,
-            &params,
-        )?,
-        None => talker.call(port, method, &params)?,
-    };
-
-    if flags.json {
-        let rendered = if matches!(sub, Sub::Start(_)) {
-            crate::cmd::inspector::attach_session_selection(
-                &response,
-                selection,
-            )
-        } else {
-            response.trim_end().to_owned()
-        };
-        writeln!(out, "{rendered}").map_err(io_err)?;
-    } else {
-        write_pretty(out, sub, &response, selection).map_err(io_err)?;
-    }
-    Ok(())
-}
-
-/// Pretty-printer per verb. Falls back to the raw JSON when the
-/// response doesn't look like the expected shape — the inspector is
-/// the source of truth, we don't try to second-guess it.
-fn write_pretty(
-    out: &mut impl Write,
-    sub: &Sub,
-    response: &str,
-    selection: Option<&crate::cmd::inspector::SessionSelection>,
-) -> std::io::Result<()> {
-    let trimmed = response.trim();
-    match sub {
-        Sub::Start(_) => {
-            if extract_bool(trimmed, "ok") == Some(false) {
-                writeln!(out, "tracing did not start")?;
-                if let Some(message) = extract_str(trimmed, "message") {
-                    writeln!(out, "  {message}")?;
-                } else {
-                    writeln!(out, "  raw: {trimmed}")?;
-                }
-                return Ok(());
-            }
-            if let Some(path) = extract_str(trimmed, "out_path") {
-                writeln!(out, "tracing started — writing to {path}")?;
-            } else {
-                writeln!(out, "tracing started")?;
-                writeln!(out, "  raw: {trimmed}")?;
-            }
-            writeln!(
-                out,
-                "  stop with: pulp trace stop{}",
-                crate::cmd::inspector::selection_cli_suffix(
-                    selection.map(|value| value.session_id.as_str()),
-                    selection.map(|value| value.instance_id.as_str()),
-                    selection.map(|value| value.publication_id.as_str()),
-                )
-            )?;
-        }
-        Sub::Stop => {
-            // The headline of `stop` is the `.pftrace` path — pull it
-            // out so the user can hand it to ui.perfetto.dev.
-            if let Some(path) = extract_str(trimmed, "out_path") {
-                writeln!(out, "{path}")?;
-            } else {
-                writeln!(out, "{trimmed}")?;
-            }
-        }
-        Sub::Query(_) => {
-            // Query results are data — print the inspector body as-is
-            // (JSON by default, or the pre-formatted table/csv the
-            // inspector rendered).
-            writeln!(out, "{trimmed}")?;
-        }
-        Sub::Snapshot => {
-            writeln!(out, "Trace subsystem snapshot")?;
-            writeln!(out, "  raw: {trimmed}")?;
-        }
-        Sub::Explain { .. } => {
-            // The narrated answer lives in `explanation`; surface it
-            // as prose, not JSON, since that is the L1 product.
-            if let Some(text) = extract_str(trimmed, "explanation") {
-                writeln!(out, "{text}")?;
-            } else {
-                writeln!(out, "{trimmed}")?;
-            }
-        }
-        Sub::Help => {
-            writeln!(out, "{trimmed}")?;
-        }
-        // Doctor and Open are handled in dispatch() and never reach
-        // write_pretty; these arms keep the match exhaustive.
-        Sub::Doctor | Sub::Open(_) | Sub::Fetch => {
-            writeln!(out, "{trimmed}")?;
-        }
-    }
-    Ok(())
-}
-
-/// Tiny grep for `"<key>":"<value>"` in a flat JSON object — used by
-/// `write_pretty` to pull the `.pftrace` path / narrated explanation.
-/// We don't pull serde_json in here because the response shapes are
-/// stable and a substring match is plenty for a pretty-print. Handles
-/// the `\"` / `\\` escapes the inspector emits.
-fn extract_str(json: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\":");
-    let idx = json.find(&needle)?;
-    let tail = &json[idx + needle.len()..];
-    let tail = tail.trim_start();
-    let mut chars = tail.char_indices();
-    // Expect an opening quote.
-    if chars.next().map(|(_, c)| c) != Some('"') {
-        return None;
-    }
-    let mut result = String::new();
-    let mut escaped = false;
-    for (_, c) in chars {
-        if escaped {
-            result.push(c);
-            escaped = false;
-        } else if c == '\\' {
-            escaped = true;
-        } else if c == '"' {
-            return Some(result);
-        } else {
-            result.push(c);
-        }
-    }
-    None
-}
-
-/// Extract a boolean field `"<key>":true|false` from a flat JSON object.
-/// Companion to [`extract_str`] with the same rationale (stable inspector
-/// response shapes make a substring match plenty).
-fn extract_bool(json: &str, key: &str) -> Option<bool> {
-    let needle = format!("\"{key}\":");
-    let idx = json.find(&needle)?;
-    let tail = json[idx + needle.len()..].trim_start();
-    if tail.starts_with("true") {
-        Some(true)
-    } else if tail.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Env var overriding the `trace_processor` binary path.
-const TRACE_PROCESSOR_ENV: &str = "PULP_TRACE_PROCESSOR";
-
-/// Which tier resolved a `trace_processor` binary (or that none did).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TraceProcessorSource {
-    /// `$PULP_TRACE_PROCESSOR` pointed at an existing file.
-    Env,
-    /// The pinned, Pulp-fetched `trace_processor_shell` in the Pulp home.
-    Pinned,
-    /// Found on `$PATH`.
-    Path,
-    /// Not found anywhere.
-    None,
-}
-
-/// Result of probing for a usable `trace_processor` / `trace_processor_shell`.
-#[derive(Debug, Clone)]
-pub struct TraceProcessorStatus {
-    /// Resolved path, or `None` when unavailable.
-    pub path: Option<PathBuf>,
-    /// Which tier resolved it.
-    pub source: TraceProcessorSource,
-}
-
-impl TraceProcessorStatus {
-    /// Whether a usable binary was found.
-    #[must_use]
-    pub fn available(&self) -> bool {
-        self.path.is_some()
-    }
-
-    fn source_str(&self) -> &'static str {
-        match self.source {
-            TraceProcessorSource::Env => "env",
-            TraceProcessorSource::Pinned => "pinned",
-            TraceProcessorSource::Path => "path",
-            TraceProcessorSource::None => "none",
-        }
-    }
-}
-
-/// Probe for a usable `trace_processor` binary. Resolution order:
-/// `$PULP_TRACE_PROCESSOR` (must point at an existing file) → the pinned,
-/// Pulp-fetched `trace_processor_shell` in the Pulp home (populated by
-/// `pulp trace fetch`) → a `trace_processor_shell` / `trace_processor` on
-/// `$PATH`. The pinned tier makes offline query zero-install without a
-/// surprise download: `query` uses it only once fetched.
-#[must_use]
-pub fn resolve_trace_processor() -> TraceProcessorStatus {
-    if let Ok(v) = std::env::var(TRACE_PROCESSOR_ENV) {
-        let p = PathBuf::from(&v);
-        if p.is_file() {
-            return TraceProcessorStatus {
-                path: Some(p),
-                source: TraceProcessorSource::Env,
-            };
-        }
-    }
-    if let Some(p) = crate::cmd::trace_fetch::pinned_binary_if_present() {
-        return TraceProcessorStatus {
-            path: Some(p),
-            source: TraceProcessorSource::Pinned,
-        };
-    }
-    for name in ["trace_processor_shell", "trace_processor"] {
-        if let Some(p) = crate::proc::which(name) {
-            return TraceProcessorStatus {
-                path: Some(p),
-                source: TraceProcessorSource::Path,
-            };
-        }
-    }
-    TraceProcessorStatus {
-        path: None,
-        source: TraceProcessorSource::None,
-    }
-}
-
-/// Run `pulp trace doctor`: aggregate client-side readiness probes
-/// (authenticated session reachability, `Trace.snapshot`,
-/// `trace_processor` availability) with the inspector's own trace facts, then
-/// print a report.
-///
-/// # Errors
-///
-/// Only writer failures ([`CliError::Io`]). An unreachable inspector or a
-/// missing `trace_processor` is reported *in* the doctor output, not as an
-/// error — surfacing that is the whole point of a doctor.
-pub(crate) fn run_doctor<T: InspectorTalker>(
-    port: u16,
-    explicit_selection: Option<&crate::cmd::inspector::SessionSelection>,
-    json: bool,
-    talker: &T,
-    out: &mut impl Write,
-) -> Result<()> {
-    let capabilities_response = match explicit_selection {
-        Some(selection) => talker.call_selected(
-            port,
-            &selection.session_id,
-            &selection.instance_id,
-            &selection.publication_id,
-            "Session.getCapabilities",
-            "{}",
-        ),
-        None => talker.call(port, "Session.getCapabilities", "{}"),
-    };
-    let discovered_selection = if explicit_selection.is_none() {
-        capabilities_response
-            .as_deref()
-            .ok()
-            .and_then(crate::cmd::inspector::parse_session_selection)
-    } else {
-        None
-    };
-    let selection = explicit_selection.or(discovered_selection.as_ref());
-    let controls = selection.as_ref().and_then(|_| {
-        capabilities_response
-            .as_deref()
-            .ok()
-            .and_then(parse_capture_controls)
-    });
-    let snapshot_response = match selection.as_ref() {
-        Some(selection) => talker.call_selected(
-            port,
-            &selection.session_id,
-            &selection.instance_id,
-            &selection.publication_id,
-            "Trace.snapshot",
-            "{}",
-        ),
-        None if capabilities_response.is_ok() => Err(CliError::Other(
-            "Session.getCapabilities did not return a sessionId, instanceId, \
-             and publicationId"
-                .to_owned(),
-        )),
-        None => Err(CliError::Other(
-            "an exact publication identity is required before Trace.snapshot"
-                .to_owned(),
-        )),
-    };
-    let reachable =
-        capabilities_response.is_ok() || snapshot_response.is_ok();
-    let (snapshot, snapshot_error) = match snapshot_response {
-        Ok(snapshot) => (Some(snapshot), None),
-        Err(error) if reachable => (None, Some(error.to_string())),
-        Err(_) => (None, None),
-    };
-    let tp = resolve_trace_processor();
-    let report = build_doctor_report(
-        port,
-        reachable,
-        controls,
-        snapshot.as_deref(),
-        snapshot_error.as_deref(),
-        &tp,
-        json,
-    );
-    write!(out, "{report}").map_err(io_err)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CaptureControls {
-    session: bool,
-    trace: bool,
-    controller_available: bool,
-}
-
-impl CaptureControls {
-    fn ready(self) -> bool {
-        self.session && self.trace && self.controller_available
-    }
-}
-
-fn parse_capture_controls(response: &str) -> Option<CaptureControls> {
-    let value: serde_json::Value = serde_json::from_str(response).ok()?;
-    let effective = value.get("effective")?.as_array()?;
-    let contains = |capability: &str| {
-        effective.iter().any(|value| value.as_str() == Some(capability))
-    };
-    Some(CaptureControls {
-        session: contains("session.control"),
-        trace: contains("trace.control"),
-        controller_available: value.get("controller").is_none(),
-    })
-}
-
-fn json_bool_opt(v: Option<bool>) -> &'static str {
-    match v {
-        Some(true) => "true",
-        Some(false) => "false",
-        None => "null",
-    }
-}
-
-fn json_str_opt(v: Option<&str>) -> String {
-    match v {
-        Some(s) => format!("\"{}\"", escape_json(s)),
-        None => "null".to_owned(),
-    }
-}
-
-/// Build the doctor report (human text or `--json`). Pure: every probe
-/// already ran in [`run_doctor`], so this is fully unit-testable.
-///
-/// `compiled_in` / `active` / `last_trace_path` come from the inspector's
-/// `Trace.snapshot`; they are `None` (JSON `null` / "unknown") when the
-/// inspector is unreachable or the snapshot capability is unavailable.
-/// `ready_to_capture` needs a reachable inspector with tracing compiled in;
-/// `ready_to_query` needs a `trace_processor` plus a captured trace.
-#[must_use]
-fn build_doctor_report(
-    port: u16,
-    reachable: bool,
-    controls: Option<CaptureControls>,
-    snapshot_json: Option<&str>,
-    snapshot_error: Option<&str>,
-    tp: &TraceProcessorStatus,
-    json: bool,
-) -> String {
-    let compiled_in = snapshot_json.and_then(|s| extract_bool(s, "compiled_in"));
-    let active = snapshot_json.and_then(|s| extract_bool(s, "active"));
-    let last_trace_path =
-        snapshot_json.and_then(|s| extract_str(s, "last_trace_path"));
-
-    let ready_to_capture = reachable
-        && compiled_in.unwrap_or(false)
-        && controls.is_some_and(CaptureControls::ready);
-    let ready_to_query = tp.available() && last_trace_path.is_some();
-
-    if json {
-        let tp_path = tp.path.as_deref().and_then(std::path::Path::to_str);
-        let port_json = if port == 0 {
-            "null".to_owned()
-        } else {
-            port.to_string()
-        };
-        return format!(
-            "{{\"port\":{port_json},\
-             \"inspector_reachable\":{reachable},\
-             \"session_control_granted\":{},\
-             \"trace_control_granted\":{},\
-             \"controller_available\":{},\
-             \"compiled_in\":{},\
-             \"active\":{},\
-             \"last_trace_path\":{},\
-             \"snapshot_error\":{},\
-             \"trace_processor_available\":{},\
-             \"trace_processor_path\":{},\
-             \"trace_processor_source\":\"{}\",\
-             \"ready_to_capture\":{ready_to_capture},\
-             \"ready_to_query\":{ready_to_query}}}\n",
-            json_bool_opt(controls.map(|value| value.session)),
-            json_bool_opt(controls.map(|value| value.trace)),
-            json_bool_opt(controls.map(|value| value.controller_available)),
-            json_bool_opt(compiled_in),
-            json_bool_opt(active),
-            json_str_opt(last_trace_path.as_deref()),
-            json_str_opt(snapshot_error),
-            tp.available(),
-            json_str_opt(tp_path),
-            tp.source_str(),
-        );
-    }
-
-    let mut b = String::with_capacity(512);
-    b.push_str("pulp trace doctor\n");
-    let inspector_target = if port == 0 {
-        "authenticated discovery".to_owned()
-    } else {
-        format!("port {port}")
-    };
-    b.push_str(&format!(
-        "  inspector ({inspector_target}) ... {}\n",
-        if reachable { "reachable" } else { "UNREACHABLE" }
-    ));
-    b.push_str(&format!(
-        "  tracing compiled in ..... {}\n",
-        match compiled_in {
-            Some(true) => "yes",
-            Some(false) => "NO (rebuild with -DPULP_TRACING=ON)",
-            None if reachable => "unknown (Trace.snapshot unavailable)",
-            None => "unknown (inspector unreachable)",
-        }
-    ));
-    b.push_str(&format!(
-        "  capture controls ........ {}\n",
-        match controls {
-            Some(value) if value.ready() => "granted",
-            Some(value) if value.session && value.trace =>
-                "controller lease busy",
-            Some(_) => "NOT GRANTED",
-            None => "unknown (Session.getCapabilities unavailable)",
-        }
-    ));
-    if let Some(error) = snapshot_error {
-        b.push_str(&format!(
-            "  trace snapshot .......... unavailable ({error})\n"
-        ));
-    }
-    if let Some(a) = active {
-        b.push_str(&format!(
-            "  session active .......... {}\n",
-            if a { "yes" } else { "no" }
-        ));
-    }
-    b.push_str(&format!(
-        "  last trace .............. {}\n",
-        last_trace_path.as_deref().unwrap_or("none captured yet")
-    ));
-    b.push_str(&format!(
-        "  trace_processor ......... {}\n",
-        match tp.source {
-            TraceProcessorSource::Env => "found (via $PULP_TRACE_PROCESSOR)",
-            TraceProcessorSource::Pinned => "found (pinned, fetched by Pulp)",
-            TraceProcessorSource::Path => "found (on $PATH)",
-            TraceProcessorSource::None =>
-                "MISSING (run `pulp trace fetch` for the pinned build, \
-                 set $PULP_TRACE_PROCESSOR, or install trace_processor_shell)",
-        }
-    ));
-    b.push('\n');
-    b.push_str(&format!(
-        "  ready to capture a trace . {}\n",
-        if ready_to_capture { "yes" } else { "no" }
-    ));
-    b.push_str(&format!(
-        "  ready to query offline ... {}\n",
-        if ready_to_query { "yes" } else { "no" }
-    ));
-    if !reachable {
-        b.push('\n');
-        b.push_str(&no_inspector_hint(port));
-        b.push('\n');
-    }
-    b
-}
-
-fn print_help(out: &mut impl Write) -> std::io::Result<()> {
+pub(crate) fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "pulp trace — wrappers around the inspector Trace.* protocol\n"
@@ -1316,7 +633,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
         out,
         "  slowest-frames                Frames over the vsync budget, worst first"
     )?;
-    writeln!(out, "  xruns                         Audio xrun / deadline-miss events")?;
+    writeln!(
+        out,
+        "  xruns                         Audio xrun / deadline-miss events"
+    )?;
     writeln!(
         out,
         "  dsp-hotspots                  Per-node DSP cost, most expensive first"
@@ -1353,7 +673,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(out)?;
     writeln!(out, "Global flags:")?;
-    writeln!(out, "  --json                        Print the raw inspector JSON response")?;
+    writeln!(
+        out,
+        "  --json                        Print the raw inspector JSON response"
+    )?;
     writeln!(
         out,
         "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)"
@@ -1382,1207 +705,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
 }
 
 #[inline]
-fn io_err(e: std::io::Error) -> CliError {
+pub(crate) fn io_err(e: std::io::Error) -> CliError {
     CliError::io(Path::new("<stdout>"), e)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn s(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|x| (*x).to_owned()).collect()
-    }
-
-    #[test]
-    fn parse_empty_yields_help() {
-        let (sub, _g) = parse(&[]).unwrap();
-        assert!(matches!(sub, Sub::Help));
-    }
-
-    #[test]
-    fn parse_help_aliases() {
-        for a in &["help", "--help", "-h"] {
-            let (sub, _) = parse(&s(&[a])).unwrap();
-            assert!(matches!(sub, Sub::Help), "{a}");
-        }
-    }
-
-    #[test]
-    fn parse_global_json_in_any_position() {
-        let (_sub, g) = parse(&s(&["--json", "snapshot"])).unwrap();
-        assert!(g.json);
-        let (_sub, g) = parse(&s(&["snapshot", "--json"])).unwrap();
-        assert!(g.json);
-    }
-
-    #[test]
-    fn parse_port_override() {
-        let (_sub, g) = parse(&s(&["--port", "9200", "snapshot"])).unwrap();
-        assert_eq!(g.port, Some(9200));
-    }
-
-    #[test]
-    fn parse_port_rejects_garbage() {
-        let err = parse(&s(&["--port", "nope", "snapshot"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_port_rejects_zero() {
-        let err = parse(&s(&["--port", "0", "snapshot"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_exact_publication_selection_accepts_all_identifiers() {
-        let (_sub, flags) = parse(&s(&[
-            "snapshot",
-            "--session",
-            "session-a",
-            "--instance",
-            "instance-b",
-            "--publication",
-            "publication-c",
-        ]))
-        .unwrap();
-        assert_eq!(flags.session_id.as_deref(), Some("session-a"));
-        assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
-        assert_eq!(flags.publication_id.as_deref(), Some("publication-c"));
-
-        for args in [
-            s(&["snapshot", "--session", "session-a"]),
-            s(&["snapshot", "--instance", "instance-b"]),
-            s(&["snapshot", "--publication", "publication-c"]),
-            s(&[
-                "snapshot",
-                "--session",
-                "session a",
-                "--instance",
-                "instance-b",
-            ]),
-        ] {
-            let error = parse(&args).unwrap_err();
-            assert!(matches!(error, CliError::BadUsage(_)));
-        }
-    }
-
-    #[test]
-    fn parse_zero_argument_live_verbs_reject_trailing_arguments() {
-        for verb in [
-            "stop",
-            "snapshot",
-            "doctor",
-            "fetch",
-            "slowest-frames",
-        ] {
-            let error = parse(&s(&[verb, "extra"])).unwrap_err();
-            assert!(matches!(error, CliError::BadUsage(_)), "{verb}");
-        }
-    }
-
-    #[test]
-    fn parse_unknown_verb_is_unknown() {
-        let err = parse(&s(&["blarg"])).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand));
-    }
-
-    #[test]
-    fn parse_start_collects_categories_and_ring() {
-        let (sub, _) = parse(&s(&[
-            "start",
-            "--categories",
-            "dsp, render ,gpu",
-            "--ring-mb",
-            "128",
-        ]))
-        .unwrap();
-        let Sub::Start(a) = sub else {
-            panic!("expected start")
-        };
-        assert_eq!(a.categories, vec!["dsp", "render", "gpu"]);
-        assert_eq!(a.ring_mb, Some(128));
-    }
-
-    #[test]
-    fn parse_start_defaults_are_empty() {
-        let (sub, _) = parse(&s(&["start"])).unwrap();
-        let Sub::Start(a) = sub else { panic!() };
-        assert!(a.categories.is_empty());
-        assert!(a.ring_mb.is_none());
-    }
-
-    #[test]
-    fn parse_start_rejects_bad_ring_mb() {
-        let err = parse(&s(&["start", "--ring-mb", "big"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-        for value in ["0", "513", "4294967295"] {
-            let err =
-                parse(&s(&["start", "--ring-mb", value])).unwrap_err();
-            assert!(matches!(err, CliError::BadUsage(_)));
-        }
-    }
-
-    #[test]
-    fn parse_start_rejects_client_selected_output_path() {
-        let err = parse(&s(&[
-            "start",
-            "--out",
-            "/tmp/client-selected.pftrace",
-        ]))
-        .unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_takes_sql_positional() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT name FROM slice"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.sql.as_deref(), Some("SELECT name FROM slice"));
-        assert!(q.preset.is_none());
-        assert_eq!(q.format, QueryFormat::Json);
-    }
-
-    #[test]
-    fn parse_query_format_flag() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT 1", "--format", "table"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.format, QueryFormat::Table);
-        assert!(q.format_set);
-    }
-
-    #[test]
-    fn parse_query_default_format_is_not_marked_set() {
-        let (sub, _) = parse(&s(&["query", "SELECT 1"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert!(!q.format_set);
-        assert!(q.trace.is_none());
-    }
-
-    #[test]
-    fn parse_query_trace_flag_sets_offline_path() {
-        let (sub, _) =
-            parse(&s(&["query", "SELECT 1", "--trace", "/t/run.pftrace"]))
-                .unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.trace.as_deref(), Some(std::path::Path::new("/t/run.pftrace")));
-        assert_eq!(q.sql.as_deref(), Some("SELECT 1"));
-    }
-
-    #[test]
-    fn parse_query_trace_requires_a_value() {
-        let err = parse(&s(&["query", "SELECT 1", "--trace"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_rejects_bad_format() {
-        let err =
-            parse(&s(&["query", "SELECT 1", "--format", "yaml"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_preset_flag() {
-        let (sub, _) = parse(&s(&["query", "--preset", "xruns"])).unwrap();
-        let Sub::Query(q) = sub else { panic!() };
-        assert_eq!(q.preset.as_deref(), Some("xruns"));
-        assert!(q.sql.is_none());
-    }
-
-    #[test]
-    fn parse_query_rejects_sql_and_preset_together() {
-        let err =
-            parse(&s(&["query", "SELECT 1", "--preset", "xruns"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_query_rejects_missing_sql_and_preset() {
-        let err = parse(&s(&["query"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_preset_verbs_map_to_query() {
-        for name in
-            &["slowest-frames", "xruns", "dsp-hotspots", "layout-vs-paint"]
-        {
-            let (sub, _) = parse(&s(&[name])).unwrap();
-            let Sub::Query(q) = sub else {
-                panic!("{name} should be a query")
-            };
-            assert_eq!(q.preset.as_deref(), Some(*name));
-        }
-    }
-
-    #[test]
-    fn parse_explain_requires_a_question() {
-        let err = parse(&s(&["explain"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-        let (sub, _) = parse(&s(&["explain", "why slow?"])).unwrap();
-        assert!(matches!(sub, Sub::Explain { .. }));
-    }
-
-    #[test]
-    fn to_inspector_call_methods_match_protocol() {
-        assert_eq!(
-            to_inspector_call(&Sub::Start(StartArgs::default())).unwrap().0,
-            "Trace.startSession"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Stop).unwrap().0,
-            "Trace.stopSession"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Query(QueryArgs {
-                sql: Some("SELECT 1".to_owned()),
-                preset: None,
-                format: QueryFormat::Json,
-                ..QueryArgs::default()
-            }))
-            .unwrap()
-            .0,
-            "Trace.query"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Snapshot).unwrap().0,
-            "Trace.snapshot"
-        );
-        assert_eq!(
-            to_inspector_call(&Sub::Explain {
-                question: "why?".to_owned()
-            })
-            .unwrap()
-            .0,
-            "Trace.explain"
-        );
-        assert!(to_inspector_call(&Sub::Help).is_none());
-    }
-
-    #[test]
-    fn build_start_params_includes_only_set_fields() {
-        // Empty → empty object (inspector picks its defaults).
-        let p = build_start_params(&StartArgs::default());
-        assert_eq!(p, "{}");
-        // All fields set.
-        let p = build_start_params(&StartArgs {
-            categories: vec!["dsp".to_owned(), "render".to_owned()],
-            ring_mb: Some(64),
-        });
-        assert!(p.contains("\"categories\":[\"dsp\",\"render\"]"));
-        assert!(p.contains("\"ring_mb\":64"));
-    }
-
-    #[test]
-    fn build_query_params_carries_sql_and_format() {
-        let p = build_query_params(&QueryArgs {
-            sql: Some("SELECT name FROM slice".to_owned()),
-            preset: None,
-            format: QueryFormat::Csv,
-            ..QueryArgs::default()
-        });
-        assert!(p.contains("\"sql\":\"SELECT name FROM slice\""));
-        assert!(p.contains("\"format\":\"csv\""));
-        assert!(!p.contains("preset"));
-    }
-
-    #[test]
-    fn build_query_params_carries_preset() {
-        let p = build_query_params(&QueryArgs {
-            sql: None,
-            preset: Some("slowest-frames".to_owned()),
-            format: QueryFormat::Json,
-            ..QueryArgs::default()
-        });
-        assert!(p.contains("\"preset\":\"slowest-frames\""));
-        assert!(p.contains("\"format\":\"json\""));
-        assert!(!p.contains("\"sql\""));
-    }
-
-    #[test]
-    fn explain_params_escape_the_question() {
-        let (_m, p) = to_inspector_call(&Sub::Explain {
-            question: "why is \"x\" slow?".to_owned(),
-        })
-        .unwrap();
-        assert!(p.contains("\\\""), "expected escaped quote in {p}");
-    }
-
-    #[test]
-    fn extract_str_reads_flat_string_field() {
-        let body = "{\"out_path\":\"/tmp/pulp-1.pftrace\",\"n\":3}";
-        assert_eq!(
-            extract_str(body, "out_path").as_deref(),
-            Some("/tmp/pulp-1.pftrace")
-        );
-        assert_eq!(extract_str(body, "missing"), None);
-    }
-
-    #[test]
-    fn extract_str_handles_escaped_quotes() {
-        let body = "{\"explanation\":\"the \\\"lead\\\" voice dominates\"}";
-        assert_eq!(
-            extract_str(body, "explanation").as_deref(),
-            Some("the \"lead\" voice dominates")
-        );
-    }
-
-    #[test]
-    fn escape_json_handles_quotes_and_backslashes() {
-        assert_eq!(escape_json("a\"b"), "a\\\"b");
-        assert_eq!(escape_json("a\\b"), "a\\\\b");
-    }
-
-    /// Test-only talker that records calls and returns canned
-    /// responses. Lets us exercise `dispatch` without a real
-    /// `pulp-cpp` binary or a live inspector.
-    struct RecordingTalker {
-        responses: std::cell::RefCell<Vec<String>>,
-        calls: std::cell::RefCell<Vec<(u16, String, String)>>,
-        selections: std::cell::RefCell<
-            Vec<Option<crate::cmd::inspector::SessionSelection>>,
-        >,
-    }
-
-    impl RecordingTalker {
-        fn new(responses: Vec<&str>) -> Self {
-            Self {
-                responses: std::cell::RefCell::new(
-                    responses.into_iter().map(str::to_owned).collect(),
-                ),
-                calls: std::cell::RefCell::new(Vec::new()),
-                selections: std::cell::RefCell::new(Vec::new()),
-            }
-        }
-
-        fn record_call(
-            &self,
-            port: u16,
-            selection: Option<crate::cmd::inspector::SessionSelection>,
-            method: &str,
-            params: &str,
-        ) -> Result<String> {
-            self.calls.borrow_mut().push((
-                port,
-                method.to_owned(),
-                params.to_owned(),
-            ));
-            self.selections.borrow_mut().push(selection);
-            let mut responses = self.responses.borrow_mut();
-            if responses.is_empty() {
-                Ok("{}".to_owned())
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
-    }
-
-    impl InspectorTalker for RecordingTalker {
-        fn call(
-            &self,
-            port: u16,
-            method: &str,
-            params: &str,
-        ) -> Result<String> {
-            self.record_call(port, None, method, params)
-        }
-
-        fn call_selected(
-            &self,
-            port: u16,
-            session_id: &str,
-            instance_id: &str,
-            publication_id: &str,
-            method: &str,
-            params: &str,
-        ) -> Result<String> {
-            self.record_call(
-                port,
-                Some(crate::cmd::inspector::SessionSelection {
-                    session_id: session_id.to_owned(),
-                    instance_id: instance_id.to_owned(),
-                    publication_id: publication_id.to_owned(),
-                }),
-                method,
-                params,
-            )
-        }
-    }
-
-    #[test]
-    fn dispatch_start_passes_method_and_params() {
-        let t = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-             \"publicationId\":\"publication-c\"}",
-            "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Start(StartArgs {
-            categories: vec!["dsp".to_owned()],
-            ring_mb: None,
-        });
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let calls = t.calls.borrow();
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].0, 0);
-        assert_eq!(calls[0].1, "Session.getCapabilities");
-        assert_eq!(calls[1].1, "Trace.startSession");
-        assert!(calls[1].2.contains("\"categories\":[\"dsp\"]"));
-        assert_eq!(
-            t.selections.borrow()[1],
-            Some(crate::cmd::inspector::SessionSelection {
-                session_id: "session-a".to_owned(),
-                instance_id: "instance-b".to_owned(),
-                publication_id: "publication-c".to_owned(),
-            })
-        );
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("/tmp/pulp-9.pftrace"), "{out}");
-        assert!(out.contains(
-            "pulp trace stop --session session-a --instance instance-b \
-             --publication publication-c"
-        ), "{out}");
-    }
-
-    #[test]
-    fn dispatch_start_preserves_exact_selection_in_stop_hint() {
-        let talker = RecordingTalker::new(vec![
-            "{\"compiled_in\":true,\"active\":true,\"ok\":true}",
-        ]);
-        let flags = GlobalFlags {
-            session_id: Some("session-a".to_owned()),
-            instance_id: Some("instance-b".to_owned()),
-            publication_id: Some("publication-c".to_owned()),
-            ..GlobalFlags::default()
-        };
-        let mut output = Vec::new();
-        dispatch(
-            &Sub::Start(StartArgs::default()),
-            &flags,
-            &talker,
-            &mut output,
-        )
-        .unwrap();
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains(
-            "pulp trace stop --session session-a --instance instance-b \
-             --publication publication-c"
-        ), "{output}");
-    }
-
-    #[test]
-    fn dispatch_start_failure_does_not_print_a_stop_command() {
-        let talker = RecordingTalker::new(vec![
-            "{\"compiled_in\":false,\"active\":false,\"ok\":false,\
-             \"message\":\"Tracing is not compiled in\"}",
-        ]);
-        let flags = GlobalFlags {
-            session_id: Some("session-a".to_owned()),
-            instance_id: Some("instance-b".to_owned()),
-            publication_id: Some("publication-c".to_owned()),
-            ..GlobalFlags::default()
-        };
-        let mut output = Vec::new();
-        dispatch(
-            &Sub::Start(StartArgs::default()),
-            &flags,
-            &talker,
-            &mut output,
-        )
-        .unwrap();
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("tracing did not start"), "{output}");
-        assert!(output.contains("Tracing is not compiled in"), "{output}");
-        assert!(!output.contains("pulp trace stop"), "{output}");
-    }
-
-    #[test]
-    fn dispatch_start_json_surfaces_resolved_exact_selection() {
-        let talker = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-             \"publicationId\":\"publication-c\"}",
-            "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
-        ]);
-        let flags = GlobalFlags {
-            json: true,
-            ..GlobalFlags::default()
-        };
-        let mut output = Vec::new();
-        dispatch(
-            &Sub::Start(StartArgs::default()),
-            &flags,
-            &talker,
-            &mut output,
-        )
-        .unwrap();
-        let value: serde_json::Value =
-            serde_json::from_slice(&output).unwrap();
-        assert_eq!(value["sessionId"], "session-a");
-        assert_eq!(value["instanceId"], "instance-b");
-        assert_eq!(value["out_path"], "/tmp/pulp-9.pftrace");
-    }
-
-    #[test]
-    fn dispatch_live_command_uses_exact_session_selection() {
-        let talker = RecordingTalker::new(vec!["{}"]);
-        let mut output = Vec::new();
-        let (sub, flags) = parse(&s(&[
-            "snapshot",
-            "--session",
-            "session-a",
-            "--instance",
-            "instance-b",
-        ]))
-        .unwrap();
-        dispatch(&sub, &flags, &talker, &mut output).unwrap();
-        assert_eq!(
-            &*talker.selections.borrow(),
-            &[Some(crate::cmd::inspector::SessionSelection {
-                session_id: "session-a".to_owned(),
-                instance_id: "instance-b".to_owned(),
-                publication_id: String::new(),
-            })]
-        );
-    }
-
-    #[test]
-    fn dispatch_stop_prints_pftrace_path() {
-        let t = RecordingTalker::new(vec![
-            "{\"out_path\":\"/tmp/pulp-42.pftrace\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags {
-            session_id: Some("session-a".to_owned()),
-            instance_id: Some("instance-b".to_owned()),
-            publication_id: Some("publication-c".to_owned()),
-            ..GlobalFlags::default()
-        };
-        dispatch(&Sub::Stop, &flags, &t, &mut buf).unwrap();
-        assert_eq!(t.calls.borrow()[0].1, "Trace.stopSession");
-        let out = String::from_utf8(buf).unwrap();
-        assert_eq!(out.trim(), "/tmp/pulp-42.pftrace");
-    }
-
-    #[test]
-    fn dispatch_stop_requires_exact_selection_before_calling_inspector() {
-        let talker = RecordingTalker::new(vec![]);
-        let mut output = Vec::new();
-        let error = dispatch(
-            &Sub::Stop,
-            &GlobalFlags::default(),
-            &talker,
-            &mut output,
-        )
-        .unwrap_err();
-        assert!(matches!(error, CliError::BadUsage(_)), "{error}");
-        assert!(talker.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn dispatch_live_followups_require_exact_selection() {
-        let talker = RecordingTalker::new(vec![]);
-        for sub in [
-            Sub::Query(QueryArgs {
-                sql: Some("select 1".to_owned()),
-                ..QueryArgs::default()
-            }),
-            Sub::Explain {
-                question: "why slow?".to_owned(),
-            },
-        ] {
-            let mut output = Vec::new();
-            let error = dispatch(
-                &sub,
-                &GlobalFlags::default(),
-                &talker,
-                &mut output,
-            )
-            .unwrap_err();
-            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
-        }
-        assert!(talker.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn dispatch_query_preset_verb_routes_to_trace_query() {
-        let t = RecordingTalker::new(vec!["[]"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let (sub, flags) = parse(&s(&[
-            "slowest-frames",
-            "--session",
-            "session-a",
-            "--instance",
-            "instance-b",
-            "--publication",
-            "publication-c",
-        ]))
-        .unwrap();
-        dispatch(&sub, &flags, &t, &mut buf).unwrap();
-        let calls = t.calls.borrow();
-        assert_eq!(calls[0].1, "Trace.query");
-        assert!(calls[0].2.contains("\"preset\":\"slowest-frames\""));
-    }
-
-    #[test]
-    fn dispatch_json_flag_prints_raw_response() {
-        let t = RecordingTalker::new(vec!["[{\"name\":\"process\"}]"]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags {
-            json: true,
-            port: None,
-            session_id: Some("session-a".to_owned()),
-            instance_id: Some("instance-b".to_owned()),
-            publication_id: Some("publication-c".to_owned()),
-            ..GlobalFlags::default()
-        };
-        let sub = Sub::Query(QueryArgs {
-            sql: Some("SELECT name FROM slice".to_owned()),
-            preset: None,
-            format: QueryFormat::Json,
-            ..QueryArgs::default()
-        });
-        dispatch(&sub, &flags, &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("[{\"name\":\"process\"}]"), "{out}");
-    }
-
-    #[test]
-    fn dispatch_explain_prints_narrated_prose() {
-        let t = RecordingTalker::new(vec![
-            "{\"explanation\":\"Root cause: font-atlas build.\"}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let sub = Sub::Explain {
-            question: "why slow to open?".to_owned(),
-        };
-        let flags = GlobalFlags {
-            session_id: Some("session-a".to_owned()),
-            instance_id: Some("instance-b".to_owned()),
-            publication_id: Some("publication-c".to_owned()),
-            ..GlobalFlags::default()
-        };
-        dispatch(&sub, &flags, &t, &mut buf).unwrap();
-        assert_eq!(t.calls.borrow()[0].1, "Trace.explain");
-        let out = String::from_utf8(buf).unwrap();
-        assert_eq!(out.trim(), "Root cause: font-atlas build.");
-    }
-
-    #[test]
-    fn dispatch_help_prints_usage_without_calling_inspector() {
-        let t = RecordingTalker::new(vec![]);
-        let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Help, &GlobalFlags::default(), &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("pulp trace — wrappers"));
-        assert!(t.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn no_inspector_hint_names_the_explicit_host_ownership() {
-        let s = no_inspector_hint(9200);
-        assert!(s.contains("port 9200"), "{s}");
-        assert!(s.contains("constructs InspectorServer"), "{s}");
-        assert!(s.contains("wires DomainHandler"), "{s}");
-        assert!(s.contains("PULP_TRACE_SERVER is not implemented"), "{s}");
-    }
-
-    #[test]
-    fn parse_doctor_verb() {
-        let (sub, _) = parse(&s(&["doctor"])).unwrap();
-        assert!(matches!(sub, Sub::Doctor));
-    }
-
-    #[test]
-    fn doctor_has_no_single_inspector_call() {
-        assert!(to_inspector_call(&Sub::Doctor).is_none());
-    }
-
-    #[test]
-    fn parse_fetch_verb() {
-        let (sub, _) = parse(&s(&["fetch"])).unwrap();
-        assert!(matches!(sub, Sub::Fetch));
-    }
-
-    #[test]
-    fn fetch_has_no_single_inspector_call() {
-        assert!(to_inspector_call(&Sub::Fetch).is_none());
-    }
-
-    #[test]
-    fn extract_bool_reads_true_false_and_missing() {
-        let body = "{\"compiled_in\":true,\"active\":false}";
-        assert_eq!(extract_bool(body, "compiled_in"), Some(true));
-        assert_eq!(extract_bool(body, "active"), Some(false));
-        assert_eq!(extract_bool(body, "missing"), None);
-    }
-
-    #[test]
-    fn capture_controls_come_from_effective_capabilities() {
-        let controls = parse_capture_controls(
-            "{\"effective\":[\"session.control\",\"trace.control\"]}",
-        )
-        .unwrap();
-        assert!(controls.ready());
-
-        let observe = parse_capture_controls(
-            "{\"effective\":[\"session.describe\",\"diagnostics.read\"]}",
-        )
-        .unwrap();
-        assert!(!observe.ready());
-        let busy = parse_capture_controls(
-            "{\"effective\":[\"session.control\",\"trace.control\"],\
-             \"controller\":\"another-client\"}",
-        )
-        .unwrap();
-        assert!(!busy.ready());
-        assert!(parse_capture_controls("{}").is_none());
-    }
-
-    fn tp(source: TraceProcessorSource, path: Option<&str>) -> TraceProcessorStatus {
-        TraceProcessorStatus {
-            path: path.map(PathBuf::from),
-            source,
-        }
-    }
-
-    fn controls() -> Option<CaptureControls> {
-        Some(CaptureControls {
-            session: true,
-            trace: true,
-            controller_available: true,
-        })
-    }
-
-    #[test]
-    fn doctor_report_all_green_is_ready() {
-        let snap = "{\"compiled_in\":true,\"active\":false,\
-                    \"last_trace_path\":\"/tmp/x.pftrace\"}";
-        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human =
-            build_doctor_report(9147, true, controls(), Some(snap), None, &status, false);
-        assert!(human.contains("inspector (port 9147) ... reachable"), "{human}");
-        assert!(human.contains("tracing compiled in ..... yes"), "{human}");
-        assert!(human.contains("last trace .............. /tmp/x.pftrace"), "{human}");
-        assert!(human.contains("ready to capture a trace . yes"), "{human}");
-        assert!(human.contains("ready to query offline ... yes"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_unreachable_marks_unknowns_and_prints_hint() {
-        let status = tp(TraceProcessorSource::None, None);
-        let human =
-            build_doctor_report(9200, false, None, None, None, &status, false);
-        assert!(human.contains("inspector (port 9200) ... UNREACHABLE"), "{human}");
-        assert!(human.contains("tracing compiled in ..... unknown"), "{human}");
-        assert!(human.contains("ready to capture a trace . no"), "{human}");
-        assert!(human.contains("constructs InspectorServer"), "{human}");
-        assert!(human.contains("PULP_TRACE_SERVER is not implemented"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_distinguishes_snapshot_denial_from_unreachable() {
-        let status = tp(TraceProcessorSource::None, None);
-        let human = build_doctor_report(
-            9200,
-            true,
-            None,
-            None,
-            Some("capability_denied"),
-            &status,
-            false,
-        );
-        assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
-        assert!(
-            human.contains("trace snapshot .......... unavailable (capability_denied)"),
-            "{human}"
-        );
-        assert!(!human.contains("no inspector available"), "{human}");
-
-        let json = build_doctor_report(
-            9200,
-            true,
-            None,
-            None,
-            Some("capability_denied"),
-            &status,
-            true,
-        );
-        let value: serde_json::Value =
-            serde_json::from_str(json.trim()).unwrap();
-        assert_eq!(value["inspector_reachable"], true);
-        assert_eq!(value["snapshot_error"], "capability_denied");
-    }
-
-    #[test]
-    fn doctor_report_not_compiled_in_blocks_capture() {
-        let snap = "{\"compiled_in\":false,\"active\":false}";
-        let status = tp(TraceProcessorSource::Path, Some("/usr/bin/trace_processor_shell"));
-        let human =
-            build_doctor_report(9147, true, controls(), Some(snap), None, &status, false);
-        assert!(human.contains("tracing compiled in ..... NO"), "{human}");
-        assert!(human.contains("ready to capture a trace . no"), "{human}");
-        // No trace yet, so offline query is not ready even with the binary.
-        assert!(human.contains("ready to query offline ... no"), "{human}");
-    }
-
-    #[test]
-    fn doctor_report_requires_both_capture_controls() {
-        let snap = "{\"compiled_in\":true,\"active\":false}";
-        let status = tp(TraceProcessorSource::None, None);
-        let controls = Some(CaptureControls {
-            session: true,
-            trace: false,
-            controller_available: true,
-        });
-        let json = build_doctor_report(
-            9147,
-            true,
-            controls,
-            Some(snap),
-            None,
-            &status,
-            true,
-        );
-        let value: serde_json::Value =
-            serde_json::from_str(json.trim()).unwrap();
-        assert_eq!(value["session_control_granted"], true);
-        assert_eq!(value["trace_control_granted"], false);
-        assert_eq!(value["ready_to_capture"], false);
-    }
-
-    #[test]
-    fn doctor_report_rejects_a_busy_controller_lease() {
-        let snap = "{\"compiled_in\":true,\"active\":false}";
-        let status = tp(TraceProcessorSource::None, None);
-        let controls = Some(CaptureControls {
-            session: true,
-            trace: true,
-            controller_available: false,
-        });
-        let json = build_doctor_report(
-            9147,
-            true,
-            controls,
-            Some(snap),
-            None,
-            &status,
-            true,
-        );
-        let value: serde_json::Value =
-            serde_json::from_str(json.trim()).unwrap();
-        assert_eq!(value["controller_available"], false);
-        assert_eq!(value["ready_to_capture"], false);
-    }
-
-    #[test]
-    fn doctor_report_json_shape() {
-        let snap = "{\"compiled_in\":true,\"active\":true,\
-                    \"last_trace_path\":\"/tmp/y.pftrace\"}";
-        let status = tp(TraceProcessorSource::Env, Some("/opt/tp"));
-        let json =
-            build_doctor_report(9147, true, controls(), Some(snap), None, &status, true);
-        // Parses as one flat JSON object with the readiness contract.
-        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
-        assert_eq!(v["port"], 9147);
-        assert_eq!(v["inspector_reachable"], true);
-        assert_eq!(v["compiled_in"], true);
-        assert_eq!(v["active"], true);
-        assert_eq!(v["last_trace_path"], "/tmp/y.pftrace");
-        assert_eq!(v["trace_processor_available"], true);
-        assert_eq!(v["trace_processor_path"], "/opt/tp");
-        assert_eq!(v["trace_processor_source"], "env");
-        assert_eq!(v["ready_to_capture"], true);
-        assert_eq!(v["ready_to_query"], true);
-    }
-
-    #[test]
-    fn doctor_report_json_nulls_when_unreachable() {
-        let status = tp(TraceProcessorSource::None, None);
-        let json =
-            build_doctor_report(9147, false, None, None, None, &status, true);
-        let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
-        assert!(v["compiled_in"].is_null());
-        assert!(v["last_trace_path"].is_null());
-        assert!(v["trace_processor_path"].is_null());
-        assert_eq!(v["trace_processor_source"], "none");
-        assert_eq!(v["ready_to_query"], false);
-    }
-
-    #[test]
-    fn doctor_report_labels_authenticated_discovery() {
-        let status = tp(TraceProcessorSource::None, None);
-        let human =
-            build_doctor_report(0, false, None, None, None, &status, false);
-        assert!(human.contains("inspector (authenticated discovery)"));
-        let json =
-            build_doctor_report(0, false, None, None, None, &status, true);
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(value["port"].is_null());
-    }
-
-    #[test]
-    fn resolve_trace_processor_honors_env_override() {
-        // Serialize with the pinned-tier test: both drive resolution off the
-        // process-global PULP_* env vars.
-        let _g = crate::cmd::trace_fetch::ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut f = std::env::temp_dir();
-        f.push("pulp-doctor-test-tp");
-        std::fs::write(&f, b"#!/bin/sh\n").unwrap();
-        std::env::set_var("PULP_TRACE_PROCESSOR", &f);
-        let status = resolve_trace_processor();
-        std::env::remove_var("PULP_TRACE_PROCESSOR");
-        let _ = std::fs::remove_file(&f);
-        assert_eq!(status.source, TraceProcessorSource::Env);
-        assert_eq!(status.path.as_deref(), Some(f.as_path()));
-    }
-
-    #[test]
-    fn resolve_prefers_pinned_over_path_when_env_unset() {
-        let Some(key) = crate::cmd::trace_fetch::host_platform_key() else {
-            return;
-        };
-        let pin = crate::cmd::trace_fetch::pin_for(key).unwrap();
-        let _g = crate::cmd::trace_fetch::ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let prev_tp = std::env::var_os("PULP_TRACE_PROCESSOR");
-        let prev_home = std::env::var_os("PULP_HOME");
-        std::env::remove_var("PULP_TRACE_PROCESSOR");
-        let home = std::env::temp_dir()
-            .join(format!("pulp-resolve-pin-{}", std::process::id()));
-        let cached =
-            crate::cmd::trace_fetch::pinned_cache_path_under(&home, pin);
-        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
-        std::fs::write(&cached, b"pinned tp").unwrap();
-        std::env::set_var("PULP_HOME", &home);
-        let status = resolve_trace_processor();
-        match prev_tp {
-            Some(v) => std::env::set_var("PULP_TRACE_PROCESSOR", v),
-            None => std::env::remove_var("PULP_TRACE_PROCESSOR"),
-        }
-        match prev_home {
-            Some(v) => std::env::set_var("PULP_HOME", v),
-            None => std::env::remove_var("PULP_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&home);
-        assert_eq!(status.source, TraceProcessorSource::Pinned);
-        assert_eq!(status.path.as_deref(), Some(cached.as_path()));
-    }
-
-    #[test]
-    fn dispatch_doctor_uses_the_authenticated_protocol_connection() {
-        let t = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-             \"publicationId\":\"publication-c\",\
-             \"effective\":[\"session.control\",\"trace.control\"]}",
-            "{}",
-        ]);
-        let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags {
-            json: false,
-            port: Some(1),
-            ..GlobalFlags::default()
-        };
-        dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
-        let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("pulp trace doctor"), "{out}");
-        assert!(out.contains("reachable"), "{out}");
-        assert_eq!(
-            &*t.calls.borrow(),
-            &[
-                (1, "Session.getCapabilities".to_owned(), "{}".to_owned()),
-                (1, "Trace.snapshot".to_owned(), "{}".to_owned()),
-            ]
-        );
-        assert_eq!(
-            &*t.selections.borrow(),
-            &[
-                None,
-                Some(crate::cmd::inspector::SessionSelection {
-                    session_id: "session-a".to_owned(),
-                    instance_id: "instance-b".to_owned(),
-                    publication_id: "publication-c".to_owned(),
-                }),
-            ]
-        );
-    }
-
-    #[test]
-    fn dispatch_doctor_keeps_explicit_selection_for_both_probes() {
-        let talker = RecordingTalker::new(vec![
-            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
-             \"publicationId\":\"publication-c\",\
-             \"effective\":[\"session.control\",\"trace.control\"]}",
-            "{}",
-        ]);
-        let mut output = Vec::new();
-        let (sub, flags) = parse(&s(&[
-            "doctor",
-            "--session",
-            "session-a",
-            "--instance",
-            "instance-b",
-        ]))
-        .unwrap();
-        dispatch(&sub, &flags, &talker, &mut output).unwrap();
-        let expected = Some(crate::cmd::inspector::SessionSelection {
-            session_id: "session-a".to_owned(),
-            instance_id: "instance-b".to_owned(),
-            publication_id: String::new(),
-        });
-        assert_eq!(
-            &*talker.selections.borrow(),
-            &[expected.clone(), expected]
-        );
-    }
-
-    #[test]
-    fn dispatch_doctor_keeps_reachability_when_snapshot_is_denied() {
-        struct SnapshotDeniedTalker;
-        impl InspectorTalker for SnapshotDeniedTalker {
-            fn call(
-                &self,
-                _port: u16,
-                method: &str,
-                _params: &str,
-            ) -> Result<String> {
-                if method == "Session.getCapabilities" {
-                    Ok(
-                        "{\"sessionId\":\"session-a\",\
-                         \"instanceId\":\"instance-b\",\
-                         \"publicationId\":\"publication-c\"}"
-                            .to_owned(),
-                    )
-                } else {
-                    Err(CliError::Other("capability_denied".to_owned()))
-                }
-            }
-        }
-
-        let mut output = Vec::new();
-        run_doctor(
-            9200,
-            None,
-            false,
-            &SnapshotDeniedTalker,
-            &mut output,
-        )
-        .unwrap();
-        let human = String::from_utf8(output).unwrap();
-        assert!(human.contains("inspector (port 9200) ... reachable"), "{human}");
-        assert!(human.contains("capability_denied"), "{human}");
-        assert!(!human.contains("no inspector available"), "{human}");
-    }
-
-    #[test]
-    fn dispatch_doctor_does_not_snapshot_without_an_exact_session_identity() {
-        let talker = RecordingTalker::new(vec![
-            "{\"effective\":[\"session.control\",\"trace.control\"]}",
-            "{\"compiled_in\":true,\"active\":true}",
-        ]);
-        let mut output = Vec::new();
-        run_doctor(9200, None, true, &talker, &mut output).unwrap();
-
-        let value: serde_json::Value =
-            serde_json::from_slice(&output).unwrap();
-        assert_eq!(value["inspector_reachable"], true);
-        assert!(value["compiled_in"].is_null());
-        assert_eq!(value["ready_to_capture"], false);
-        assert!(value["snapshot_error"]
-            .as_str()
-            .unwrap()
-            .contains("sessionId, instanceId, and publicationId"));
-        assert_eq!(talker.calls.borrow().len(), 1);
-    }
-
-    #[test]
-    fn dispatch_doctor_keeps_reachability_when_capability_listing_is_denied() {
-        struct CapabilitiesDeniedTalker;
-        impl InspectorTalker for CapabilitiesDeniedTalker {
-            fn call(
-                &self,
-                _port: u16,
-                method: &str,
-                _params: &str,
-            ) -> Result<String> {
-                if method == "Trace.snapshot" {
-                    Ok("{\"compiled_in\":true}".to_owned())
-                } else {
-                    Err(CliError::Other("capability_denied".to_owned()))
-                }
-            }
-        }
-
-        let mut output = Vec::new();
-        let selection = crate::cmd::inspector::SessionSelection {
-            session_id: "session-a".to_owned(),
-            instance_id: "instance-b".to_owned(),
-            publication_id: String::new(),
-        };
-        run_doctor(
-            9200,
-            Some(&selection),
-            true,
-            &CapabilitiesDeniedTalker,
-            &mut output,
-        )
-        .unwrap();
-        let value: serde_json::Value =
-            serde_json::from_slice(&output).unwrap();
-        assert_eq!(value["inspector_reachable"], true);
-        assert_eq!(value["compiled_in"], true);
-        assert!(value["session_control_granted"].is_null());
-        assert_eq!(value["ready_to_capture"], false);
-    }
-
-    #[test]
-    fn parse_open_verb_defaults() {
-        let (sub, _) = parse(&s(&["open", "/tmp/x.pftrace"])).unwrap();
-        let Sub::Open(a) = sub else { panic!("expected open") };
-        assert_eq!(a.file, Path::new("/tmp/x.pftrace"));
-        assert!(!a.no_browser);
-        assert_eq!(a.keep_alive_secs, OpenArgs::DEFAULT_KEEP_ALIVE_SECS);
-    }
-
-    #[test]
-    fn parse_open_collects_flags() {
-        let (sub, _) = parse(&s(&[
-            "open",
-            "/tmp/y.pftrace",
-            "--no-browser",
-            "--keep-alive-seconds",
-            "3",
-        ]))
-        .unwrap();
-        let Sub::Open(a) = sub else { panic!("expected open") };
-        assert!(a.no_browser);
-        assert_eq!(a.keep_alive_secs, 3);
-    }
-
-    #[test]
-    fn parse_open_requires_a_file() {
-        let err = parse(&s(&["open", "--no-browser"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn parse_open_rejects_a_second_file() {
-        let err = parse(&s(&["open", "a.pftrace", "b.pftrace"])).unwrap_err();
-        assert!(matches!(err, CliError::BadUsage(_)));
-    }
-
-    #[test]
-    fn open_has_no_single_inspector_call() {
-        let sub = Sub::Open(OpenArgs {
-            file: PathBuf::from("/tmp/x.pftrace"),
-            no_browser: true,
-            keep_alive_secs: 0,
-        });
-        assert!(to_inspector_call(&sub).is_none());
-    }
-}
+#[path = "trace_parse_tests.rs"]
+mod tests;

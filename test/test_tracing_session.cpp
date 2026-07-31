@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -18,6 +20,44 @@
 #include <pulp/runtime/trace_session.hpp>
 
 using pulp::runtime::Tracing;
+
+namespace {
+
+void set_environment(
+    const char* name,
+    const std::optional<std::string>& value) {
+#if defined(_WIN32)
+    _putenv_s(name, value ? value->c_str() : "");
+#else
+    if (value)
+        setenv(name, value->c_str(), 1);
+    else
+        unsetenv(name);
+#endif
+}
+
+class ScopedEnvironment {
+public:
+    ScopedEnvironment(
+        const char* name,
+        std::optional<std::string> value)
+        : name_(name),
+          previous_(std::getenv(name)
+              ? std::optional<std::string>(std::getenv(name))
+              : std::nullopt) {
+        set_environment(name_.c_str(), value);
+    }
+
+    ~ScopedEnvironment() {
+        set_environment(name_.c_str(), previous_);
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> previous_;
+};
+
+} // namespace
 
 TEST_CASE("tracing session lifecycle", "[tracing]") {
     if (!pulp::runtime::kTracingEnabled) {
@@ -35,8 +75,14 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
 
     REQUIRE(Tracing::start(/*categories=*/{}, out.string(), /*ring_kb=*/4096));
     REQUIRE(Tracing::active());
-    // A second start cannot silently claim it applied a new configuration.
-    REQUIRE_FALSE(Tracing::start());
+    // The public API remains idempotent, while exclusive callers can tell that
+    // their replacement configuration was not applied.
+    REQUIRE(Tracing::start());
+    REQUIRE(Tracing::start_exclusive().status ==
+            pulp::runtime::TraceStartStatus::AlreadyActive);
+    const auto unowned = Tracing::ownership_status(nullptr);
+    CHECK(unowned.active);
+    CHECK_FALSE(unowned.owned);
 
     std::thread a([] {
         for (int i = 0; i < 500; ++i) {
@@ -73,4 +119,42 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
     REQUIRE(bytes.find("block_b") != std::string::npos);
     // The runtime-computed name survived as UTF-8, proving the DynamicString path.
     REQUIRE(bytes.find("node_42") != std::string::npos);
+}
+
+TEST_CASE("runtime detach stops only its attach-owned capture",
+          "[tracing][ownership]") {
+    if (!pulp::runtime::kTracingEnabled)
+        return;
+
+    // Attaching while another controller is active must not claim it.
+    auto external = Tracing::start_exclusive();
+    REQUIRE(external.status == pulp::runtime::TraceStartStatus::Started);
+    REQUIRE(external.ownership.has_value());
+    auto transferred = std::move(*external.ownership);
+    CHECK_FALSE(Tracing::ownership_status(&*external.ownership).owned);
+    CHECK_FALSE(Tracing::stop_owned(*external.ownership).ok);
+    CHECK(Tracing::active());
+    Tracing::attach();
+    Tracing::detach();
+    CHECK(Tracing::ownership_status(&transferred).owned);
+    REQUIRE(Tracing::stop_owned(transferred).ok);
+
+    // If an attach-owned capture ends and is replaced before final detach,
+    // its stale ownership token must not stop the replacement.
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        "pulp-trace-attach-ownership.pftrace";
+    ScopedEnvironment path_environment(
+        "PULP_TRACE_PATH", path.string());
+    ScopedEnvironment seconds_environment(
+        "PULP_TRACE_SECONDS", std::nullopt);
+    Tracing::attach();
+    REQUIRE(Tracing::active());
+    REQUIRE(Tracing::stop().ok);
+    auto replacement = Tracing::start_exclusive();
+    REQUIRE(replacement.status == pulp::runtime::TraceStartStatus::Started);
+    REQUIRE(replacement.ownership.has_value());
+    Tracing::detach();
+    CHECK(Tracing::ownership_status(&*replacement.ownership).owned);
+    REQUIRE(Tracing::stop_owned(*replacement.ownership).ok);
 }

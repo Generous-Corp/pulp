@@ -97,12 +97,12 @@ public:
     std::atomic<int> port{0};
     InspectorSession* session = nullptr;
     detail::InspectorPublication publication;
-    std::mutex publication_id_mutex;
-    std::string publication_id;
     std::vector<std::uint8_t> token;
     std::chrono::milliseconds authentication_timeout =
         std::chrono::seconds(3);
     std::mutex lifecycle_mutex;
+    // Publication lease destruction is extension code and may synchronously
+    // re-enter stop(); recursive serialization keeps that teardown idempotent.
     std::recursive_mutex transition_mutex;
     std::atomic<bool> stop_requested{false};
     std::atomic<bool> transition_waiting_for_callbacks{false};
@@ -165,15 +165,10 @@ public:
                 raw->disconnect();
                 return;
             }
-            std::string current_publication_id;
-            {
-                std::lock_guard lock(publication_id_mutex);
-                current_publication_id = publication_id;
-            }
             const auto challenge = make_inspector_auth_challenge(
                 session->info().session_id,
                 session->info().instance_id,
-                std::move(current_publication_id),
+                publication.publication_id(),
                 session->info().protocol_version);
             if (!challenge) {
                 raw->disconnect();
@@ -311,8 +306,12 @@ public:
                 if (client)
                     client->disconnect();
             }
-            if (!should_stop)
-                publication.refresh_if_due(now);
+            if (!should_stop) {
+                const auto refresh_generation =
+                    session_generation.load(std::memory_order_acquire);
+                if (!publication.refresh_if_due(now))
+                    stop_generation(refresh_generation);
+            }
             if (should_stop)
                 break;
             lock.lock();
@@ -321,6 +320,7 @@ public:
 
     bool start_authenticated(InspectorServerConfig config);
     void stop();
+    void stop_generation(std::uint64_t expected_generation);
     void stop_locked();
     void broadcast(const InspectorMessage& event);
     int client_count();
@@ -378,6 +378,43 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
         config.record.plugin_id != config.session->info().plugin_id) {
         return false;
     }
+    auto binding_registrations = config.domain_bindings
+        ? config.domain_bindings->publication_bindings()
+        : std::vector<InspectorPublicationBindingRegistration>{};
+    std::vector<InspectorCapability> bound_capabilities;
+    std::vector<std::shared_ptr<InspectorPublicationBinding>>
+        publication_bindings;
+    for (auto& registration : binding_registrations) {
+        if (!registration.binding ||
+            std::find(
+                bound_capabilities.begin(),
+                bound_capabilities.end(),
+                registration.capability) != bound_capabilities.end()) {
+            return false;
+        }
+        bound_capabilities.push_back(registration.capability);
+        if (std::none_of(
+                publication_bindings.begin(),
+                publication_bindings.end(),
+                [&registration](const auto& binding) {
+                    return binding.get() == registration.binding.get();
+                })) {
+            publication_bindings.push_back(
+                std::move(registration.binding));
+        }
+    }
+    for (const auto& descriptor : inspector_capability_registry()) {
+        if (config.session->policy().is_granted(
+                descriptor.capability) &&
+            capability_requires_publication_binding(
+                descriptor.capability) &&
+            std::find(
+                bound_capabilities.begin(),
+                bound_capabilities.end(),
+                descriptor.capability) == bound_capabilities.end()) {
+            return false;
+        }
+    }
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         session = config.session;
@@ -421,13 +458,10 @@ bool InspectorServer::Impl::start_authenticated(InspectorServerConfig config) {
     config.record.profile = session->policy().profile();
     if (!publication.publish(
             *config.discovery, config.record, token,
-            config.heartbeat_interval)) {
+            config.heartbeat_interval,
+            std::move(publication_bindings))) {
         stop_locked();
         return false;
-    }
-    {
-        std::lock_guard lock(publication_id_mutex);
-        publication_id = config.discovery->record()->publication_id;
     }
     if (stop_requested.load(std::memory_order_acquire)) {
         stop_locked();
@@ -463,6 +497,17 @@ void InspectorServer::Impl::stop() {
     stop_locked();
 }
 
+void InspectorServer::Impl::stop_generation(
+    std::uint64_t expected_generation) {
+    std::lock_guard transition_lock(transition_mutex);
+    if (session_generation.load(std::memory_order_acquire) !=
+        expected_generation) {
+        return;
+    }
+    stop_requested.store(true, std::memory_order_release);
+    stop_locked();
+}
+
 void InspectorServer::Impl::stop_locked() {
     session_generation.fetch_add(1, std::memory_order_acq_rel);
     transition_waiting_for_callbacks.store(true, std::memory_order_release);
@@ -473,6 +518,7 @@ void InspectorServer::Impl::stop_locked() {
         stopping_callbacks = true;
     }
     server.stop();
+    port.store(0, std::memory_order_release);
     std::vector<std::shared_ptr<detail::InspectorConnectedClient>>
         clients_to_stop;
     std::vector<std::shared_ptr<detail::InspectorOutboundClient>>
@@ -514,22 +560,20 @@ void InspectorServer::Impl::stop_locked() {
     }
     transition_waiting_for_callbacks.store(false, std::memory_order_release);
     clients_to_stop.clear();
+    // Publication callbacks acquire lifecycle_mutex so detach the callback
+    // before taking that mutex. The generation check makes a delayed loss
+    // notification inert after a subsequent start.
+    publication.clear_after_endpoint_stop();
     {
         std::lock_guard lifecycle_lock(lifecycle_mutex);
         if (session) {
             for (const auto& client_id : authenticated_clients)
                 session->disconnect(client_id);
         }
-        publication.clear();
-        {
-            std::lock_guard lock(publication_id_mutex);
-            publication_id.clear();
-        }
         session = nullptr;
         pulp::runtime::secure_zero_memory(token.data(), token.size());
         token.clear();
     }
-    port.store(0, std::memory_order_release);
 }
 
 void InspectorServer::Impl::broadcast(const InspectorMessage& event) {

@@ -1271,7 +1271,7 @@ commands:
       - name: layout-vs-paint
         summary: Reserved L0 preset; currently returns `capability_unavailable`
       - name: snapshot
-        summary: Print `{tracing_active, categories, ring_bytes, out_path}` via `Trace.snapshot`
+        summary: Print `compiled_in`, process-global `active`, per-publication `trace_control_available`, and optional `last_trace_path` via `Trace.snapshot`
       - name: explain
         summary: Reserved live surface; currently returns `capability_unavailable`. Use the trace-analysis skill with a flushed `.pftrace`.
         args:
@@ -1280,7 +1280,7 @@ commands:
             required: true
             description: Plain-English question to investigate
       - name: doctor
-        summary: Readiness check. Uses the authenticated `Trace.snapshot` request as the inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object.
+        summary: Readiness check. Uses the authenticated `Trace.snapshot` request as the inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `trace_control_available` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object.
       - name: fetch
         summary: Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME`, so offline `query --trace` works zero-install. Idempotent; no-op when already present. `--json` emits `{version, platform, path, already_present}`.
       - name: open

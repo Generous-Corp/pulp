@@ -16,7 +16,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::runtime {
@@ -41,6 +43,53 @@ struct TraceStopResult {
     bool ok = false;            ///< A session was active and a trace was written.
     std::string path;           ///< Absolute path to the flushed .pftrace.
     std::uint64_t trace_bytes = 0;
+};
+
+/// Outcome of an exclusive attempt to start the process-global trace session.
+/// Inspector control uses this to distinguish a newly configured capture from
+/// a session that was already active under another owner.
+enum class TraceStartStatus {
+    Started,
+    AlreadyActive,
+    Unavailable,
+};
+
+/// Opaque authority over one exact process-global trace generation.
+class TraceOwnership {
+public:
+    TraceOwnership(TraceOwnership&& other) noexcept
+        : generation_(std::exchange(other.generation_, 0)),
+          token_(std::exchange(other.token_, 0)) {}
+    TraceOwnership& operator=(TraceOwnership&& other) noexcept {
+        if (this != &other) {
+            generation_ = std::exchange(other.generation_, 0);
+            token_ = std::exchange(other.token_, 0);
+        }
+        return *this;
+    }
+    TraceOwnership(const TraceOwnership&) = delete;
+    TraceOwnership& operator=(const TraceOwnership&) = delete;
+
+private:
+    friend class Tracing;
+    TraceOwnership(std::uint64_t generation,
+                   std::uint64_t token) noexcept
+        : generation_(generation), token_(token) {}
+
+    std::uint64_t generation_ = 0;
+    std::uint64_t token_ = 0;
+};
+
+struct TraceStartResult {
+    TraceStartStatus status = TraceStartStatus::Unavailable;
+    /// Capability returned only to the caller that started this generation.
+    std::optional<TraceOwnership> ownership;
+};
+
+/// Atomic view of the process-global session relative to one ownership token.
+struct TraceOwnershipStatus {
+    bool active = false;
+    bool owned = false;
 };
 
 /// Process-global tracing controller. All methods are thread-safe and safe to
@@ -71,14 +120,28 @@ public:
     /// Start the single process session if none is active. `categories` selects
     /// the enabled track-event categories (empty = all). `out_path` overrides
     /// the default temp path (also overridable via $PULP_TRACE_PATH).
-    /// `ring_kb` sizes the in-process ring (default 80 MB). Returns true only
-    /// when this call starts a new session; duplicate starts return false.
+    /// `ring_kb` sizes the in-process ring (default 80 MB). Returns true when a
+    /// session is active on return, including after an idempotent duplicate.
     static bool start(const std::vector<std::string>& categories = {},
                       const std::string& out_path = {},
                       std::uint32_t ring_kb = 80u * 1024u);
 
+    /// Start only when no process session exists, reporting whether this call
+    /// actually applied the requested configuration.
+    static TraceStartResult start_exclusive(
+        const std::vector<std::string>& categories = {},
+        const std::string& out_path = {},
+        std::uint32_t ring_kb = 80u * 1024u);
+
     /// Stop the active session, flush, and write the .pftrace. No-op → ok=false.
     static TraceStopResult stop();
+
+    /// Stop only when both opaque ownership fields match the active session.
+    static TraceStopResult stop_owned(const TraceOwnership& ownership);
+
+    /// Read active and ownership state under one runtime lock.
+    static TraceOwnershipStatus ownership_status(
+        const TraceOwnership* ownership);
 
     /// Whether a process session is currently active.
     static bool active();

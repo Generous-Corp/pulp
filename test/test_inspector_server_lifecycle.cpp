@@ -1,5 +1,121 @@
 #include "inspector_client_test_support.hpp"
 
+#include <stdexcept>
+#include <vector>
+
+using pulp::inspect::InspectorPublicationBinding;
+using pulp::inspect::InspectorPublicationLease;
+
+namespace {
+
+class ThrowingPublicationBinding final
+    : public InspectorPublicationBinding {
+public:
+    bool throw_on_bind = false;
+    std::atomic<int> bind_calls{0};
+    std::atomic<int> unbind_calls{0};
+
+    class Lease final : public InspectorPublicationLease {
+    public:
+        explicit Lease(std::atomic<int>& unbind_calls)
+            : unbind_calls_(&unbind_calls) {}
+
+        ~Lease() override {
+            ++*unbind_calls_;
+        }
+
+    private:
+        std::atomic<int>* unbind_calls_;
+    };
+
+    std::unique_ptr<InspectorPublicationLease> bind_publication(
+        const InspectorDiscoveryRecord&) override {
+        ++bind_calls;
+        if (throw_on_bind)
+            throw std::runtime_error("bind failed");
+        return std::make_unique<Lease>(unbind_calls);
+    }
+};
+
+class StaticPublicationBindings final
+    : public pulp::inspect::InspectorDomainPublicationBindings {
+public:
+    explicit StaticPublicationBindings(
+        std::vector<pulp::inspect::InspectorPublicationBindingRegistration>
+            registrations)
+        : registrations_(std::move(registrations)) {}
+
+    std::vector<pulp::inspect::InspectorPublicationBindingRegistration>
+    publication_bindings() const override {
+        return registrations_;
+    }
+
+private:
+    std::vector<pulp::inspect::InspectorPublicationBindingRegistration>
+        registrations_;
+};
+
+class SentinelObservingPublicationBinding final
+    : public InspectorPublicationBinding {
+public:
+    SentinelObservingPublicationBinding(
+        InspectorDiscoveryReader& reader,
+        InspectorDiscoveryPublisher& competing,
+        std::span<const std::uint8_t> token)
+        : reader_(&reader),
+          competing_(&competing),
+          token_(token.begin(), token.end()) {}
+
+    std::atomic<bool> released{false};
+    std::atomic<bool> visibility_hidden_before_release{false};
+    std::atomic<bool> competitor_acquired_during_release{false};
+    std::atomic<bool> reentrant_stop_returned{false};
+    std::optional<InspectorDiscoveryRecord> bound_record;
+    InspectorServer* reentrant_server = nullptr;
+
+    class Lease final : public InspectorPublicationLease {
+    public:
+        Lease(
+            SentinelObservingPublicationBinding& owner,
+            InspectorDiscoveryRecord record)
+            : owner_(&owner),
+              record_(std::move(record)) {}
+
+        ~Lease() override {
+            owner_->visibility_hidden_before_release.store(
+                owner_->reader_->list().empty(),
+                std::memory_order_release);
+            owner_->competitor_acquired_during_release.store(
+                owner_->competing_->publish(
+                    record_, owner_->token_, std::chrono::seconds(5)),
+                std::memory_order_release);
+            if (owner_->reentrant_server) {
+                owner_->reentrant_server->stop();
+                owner_->reentrant_stop_returned.store(
+                    true, std::memory_order_release);
+            }
+            owner_->released.store(true, std::memory_order_release);
+        }
+
+    private:
+        SentinelObservingPublicationBinding* owner_;
+        InspectorDiscoveryRecord record_;
+    };
+
+    std::unique_ptr<InspectorPublicationLease> bind_publication(
+        const InspectorDiscoveryRecord& record) override {
+        bound_record = record;
+        return std::make_unique<Lease>(*this, record);
+    }
+
+private:
+    InspectorDiscoveryReader* reader_;
+    InspectorDiscoveryPublisher* competing_;
+    std::vector<std::uint8_t> token_;
+};
+
+} // namespace
+
 TEST_CASE("server stop is reentrant from a request callback",
           "[inspect][client][teardown][reentrant]") {
     TemporaryDirectory temporary;
@@ -224,6 +340,7 @@ TEST_CASE("callback stop cancels a concurrent authenticated restart",
     policy.profile = InspectorProfile::Observe;
     policy.available_capabilities = {
         InspectorCapability::SessionDescribe,
+        InspectorCapability::DiagnosticsRead,
         InspectorCapability::StateRead,
     };
     InspectorServer server;
@@ -436,4 +553,132 @@ TEST_CASE("server rejects heartbeat schedules that cannot be represented",
         std::chrono::milliseconds::max() / 3;
     CHECK_FALSE(server.start_authenticated(std::move(config)));
     CHECK_FALSE(publisher.record().has_value());
+}
+
+TEST_CASE("publication binding exceptions cannot escape server lifecycle",
+          "[inspect][publication][exceptions]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-binding-exception", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+
+    auto prerequisite = std::make_shared<ThrowingPublicationBinding>();
+    auto binding = std::make_shared<ThrowingPublicationBinding>();
+    StaticPublicationBindings bindings({{
+        InspectorCapability::SessionDescribe,
+        prerequisite,
+    }, {
+        InspectorCapability::DiagnosticsRead,
+        binding,
+    }});
+    binding->throw_on_bind = true;
+    InspectorServerConfig rejected{
+        &session, &publisher, record, *token};
+    rejected.domain_bindings = &bindings;
+    InspectorServer server;
+    CHECK_FALSE(server.start_authenticated(std::move(rejected)));
+    CHECK(server.port() == 0);
+    CHECK(reader.list().empty());
+    CHECK(prerequisite->bind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(prerequisite->unbind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(binding->bind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 0);
+
+    binding->throw_on_bind = false;
+    InspectorServerConfig accepted{
+        &session, &publisher, record, *token};
+    accepted.domain_bindings = &bindings;
+    accepted.heartbeat_interval = std::chrono::milliseconds(1);
+    REQUIRE(server.start_authenticated(std::move(accepted)));
+    CHECK(prerequisite->bind_calls.load(std::memory_order_acquire) == 2);
+    CHECK(binding->bind_calls.load(std::memory_order_acquire) == 2);
+#ifndef _WIN32
+    REQUIRE(publisher.record().has_value());
+    auto ownership_path = publisher.record()->record_path;
+    ownership_path.replace_extension(".lock");
+    {
+        std::ofstream corrupted(ownership_path, std::ios::trunc);
+        REQUIRE(corrupted.good());
+        corrupted << "not-the-live-owner";
+    }
+    const auto loss_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (binding->unbind_calls.load(std::memory_order_acquire) == 0 &&
+           std::chrono::steady_clock::now() < loss_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(prerequisite->unbind_calls.load(std::memory_order_acquire) == 2);
+    CHECK(server.port() == 0);
+    // The corrupted ownership marker prevents safe file removal, so the stale
+    // record may remain until TTL expiry, but it no longer names a live server.
+    CHECK(reader.list().size() == 1);
+#endif
+    CHECK_NOTHROW(server.stop());
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(prerequisite->unbind_calls.load(std::memory_order_acquire) == 2);
+}
+
+TEST_CASE("publication retirement hides visibility before releasing its binding",
+          "[inspect][publication][ownership][teardown]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryPublisher competing(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+    };
+    InspectorSession session(
+        {"session-retirement-order", "instance", "plugin", "1"},
+        policy,
+        [](const auto& request) { return make_response(request.id, "{}"); });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+
+    auto binding = std::make_shared<SentinelObservingPublicationBinding>(
+        reader, competing, *token);
+    StaticPublicationBindings bindings({{
+        InspectorCapability::SessionDescribe,
+        binding,
+    }});
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.domain_bindings = &bindings;
+    InspectorServer server;
+    binding->reentrant_server = &server;
+    REQUIRE(server.start_authenticated(std::move(config)));
+    REQUIRE(reader.list().size() == 1);
+
+    server.stop();
+
+    CHECK(binding->released.load(std::memory_order_acquire));
+    CHECK(binding->visibility_hidden_before_release.load(
+        std::memory_order_acquire));
+    CHECK_FALSE(binding->competitor_acquired_during_release.load(
+        std::memory_order_acquire));
+    CHECK(binding->reentrant_stop_returned.load(std::memory_order_acquire));
+    CHECK_FALSE(publisher.record().has_value());
+    REQUIRE(binding->bound_record.has_value());
+    REQUIRE(competing.publish(
+        *binding->bound_record, *token, std::chrono::seconds(5)));
 }

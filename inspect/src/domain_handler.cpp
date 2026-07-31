@@ -32,6 +32,22 @@ using namespace pulp::view;
 
 // ── Config / wiring ─────────────────────────────────────────────────────────
 
+void DomainHandler::set_trace_inspector(
+    std::shared_ptr<TraceInspector> trace) {
+    trace_ = trace.get();
+    trace_binding_ = std::move(trace);
+}
+
+std::vector<InspectorPublicationBindingRegistration>
+DomainHandler::publication_bindings() const {
+    if (!trace_binding_)
+        return {};
+    return {{
+        InspectorCapability::TraceSessionControl,
+        trace_binding_,
+    }};
+}
+
 void DomainHandler::set_config(InspectorConfig config) {
     config_ = std::move(config);
     // Keep the overlay's `J`-hotkey config in lockstep with the
