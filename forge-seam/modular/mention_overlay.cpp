@@ -25,10 +25,11 @@ using pulp::view::View;
 
 constexpr float kRowHeight = 34.0f;
 constexpr int kMaxRows = 6;
-/// Where the list hangs. The composer sits low in the window, and the list
-/// grows downward from here, so this clears the header and lands the rows
-/// beside the prompt rather than over the title bar.
-constexpr float kListTopMargin = 380.0f;
+/// Where the list hangs: just below the composer card, which ends around
+/// y=437 in the 1280x800 design. Rendered and measured rather than guessed --
+/// at 380 the list sat ON the card, hiding the search and Random buttons,
+/// which is its own kind of broken even though the rows were visible.
+constexpr float kListTopMargin = 448.0f;
 
 // Key codes, matching the platform's. Named so the handler reads as intent.
 constexpr int kKeyReturn = 36;
