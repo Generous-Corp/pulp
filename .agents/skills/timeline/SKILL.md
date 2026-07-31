@@ -656,6 +656,31 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 `test_timeline_command_persistence.cpp` (which asserts one decoded command per
 alternative, in variant order).
 
+### Device neutrality is enforced by the module graph, not by discipline
+
+`EditIntent` (`edit_intent.hpp`) lives in `core/timeline` **because** that module's
+dependency floor is `{timeline, timebase, platform, runtime}` — it cannot link
+`view`, so the header physically cannot name a pointer type. That placement is the
+guarantee. Moving intents "up" into an editor module that *can* see `view` would
+turn a structural impossibility back into a convention people have to remember,
+which is how the touch-retrofit bug class returns.
+
+The corollary for anyone extending this: a front-end resolves device differences
+**before** it builds an intent, and hands the kernel only resolved scalars. Hit
+tolerance is the worked example — `HitMetrics` lives in `core/view` and projects a
+pointer type onto one number; the kernel takes the number and never learns what
+produced it.
+
+Two things not to do here:
+
+- **Do not add a fourth `GesturePhase`.** There are already three
+  (`core/timeline/command.hpp`, `core/view/input_events.hpp`,
+  `core/state/sequencer_state_channel.hpp`). Intents reuse the `command.hpp` one.
+  A second spelling of an existing concept is a defect, not a feature.
+- **Do not add a verb that lowers to zero commands.** Select, marquee and
+  zoom-to-range are deliberately absent: they are view state, and routing them
+  through the document channel puts transient selection into undo history.
+
 ## Schema codegen & drift gate
 
 ### Bumping a schema version touches two hand-written validators the codegen never reaches
