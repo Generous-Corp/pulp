@@ -459,6 +459,10 @@ struct SequenceInput {
     // Authored launch order. A scene owns its slots; every non-empty slot
     // references a clip in this sequence.
     std::vector<Scene> scenes;
+    // Authored top-to-bottom track order, naming every track in `tracks`
+    // exactly once. An empty vector records no authored order, and the
+    // sequence adopts the identity order of `tracks` instead.
+    std::vector<ItemId> track_order;
 };
 
 /// Immutable identity-bearing arrangement with tracks, annotations, context, and launch scenes.
@@ -551,6 +555,14 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     /// Returns tracks in canonical identity order.
     std::span<const Track> tracks() const noexcept;
+    /// Returns track identities in authored top-to-bottom order.
+    ///
+    /// Authored order is carried beside `tracks()`, never as a permutation of
+    /// it: compile order, census counts, and render hashes read `tracks()` and
+    /// must not move when a track is only reordered for display. A sequence
+    /// constructed without a recorded order presents the identity order of
+    /// `tracks()` here.
+    std::span<const ItemId> track_order() const noexcept;
     /// Returns sorted unique referenced sequence identities derived from clips.
     ///
     /// This index is not serialized.
@@ -577,6 +589,15 @@ class Sequence {
     const Slot* find_slot(ItemId id) const noexcept;
     /// Returns a snapshot replacing an existing track by identity.
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    /// Inserts `track` before an existing track in authored order, or appends.
+    ///
+    /// The track itself is appended to `tracks()`, so existing identity order
+    /// and every index derived from it stay put; only authored order records
+    /// the requested position.
+    runtime::Result<Sequence, ModelError>
+    insert_track(Track track, std::optional<ItemId> before_track_id = std::nullopt) const;
+    /// Removes a track and its owned clips by identity.
+    runtime::Result<Sequence, ModelError> erase_track(ItemId id) const;
     /// Inserts a validated marker and returns a new snapshot.
     runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
     /// Removes a marker by identity and returns a new snapshot.
