@@ -115,6 +115,58 @@ for AU and VST3.
 **Done when:** each format has produced an installed module from inside a DAW,
 and running two at once produces a clear refusal rather than a corrupted pack.
 
+## Step 4b — Verify a patch does what was ASKED, not merely that it sounds
+
+Two patches exposed this and both passed every gate we have. "A bouncing-ball
+rhythm that slows down as it settles" produced a continuous drone: oscillators
+through a filter into a delay, no trigger source, no envelope, nothing that
+makes discrete hits. "A krell patch where each note chooses the next one's
+length" was wired correctly -- end-of-cycle back to trigger, a sampled random
+voltage setting the next duration -- and played a single note.
+
+Neither failure is visible to what we check. Structure is not behaviour, and
+"reaches the audio interface at non-zero amplitude" is satisfied by a patch that
+fires once and stops.
+
+The properties that distinguish these are measurable, and the patch gate already
+renders audio, so this is a stronger assertion on a signal we have rather than
+new machinery:
+
+- **Does it keep going?** Onset detection across ~10 s. A self-playing patch --
+  krell, generative, sequenced -- must produce recurring transients, not one.
+  This alone catches the krell case.
+- **Does it move?** Amplitude and spectral-centroid variance over a long window.
+  A patch promising evolution, drift or a sweep must not be statistically flat;
+  this catches "slow filter sweep" that never sweeps.
+- **Is it rhythmic when asked?** Onset intervals should cluster, not scatter. For
+  "slows as it settles", successive intervals should trend LONGER -- which is
+  the bouncing ball's defining property and is a two-line assertion once onsets
+  are extracted.
+- **Is it in range?** Peak inside Eurorack levels and mean near zero. Cheap, and
+  it catches DC offset and clipping that make a technically-correct patch
+  unpleasant.
+
+**What is deliberately NOT attempted:** judging whether a patch sounds *good*.
+That is taste, it is not measurable, and a gate that claims to measure it would
+be lying. What is measurable is whether a patch has the STRUCTURE OF BEHAVIOUR
+its prompt describes -- repetition where repetition was asked for, motion where
+motion was asked for, decay where decay was asked for. A patch can satisfy all
+of that and still be dull; none of it can be satisfied by a patch that is
+silent, static, or one-shot when it promised otherwise.
+
+**How the claims are derived:** the generator already writes a per-cable
+rationale ("that settling voltage drags the filter down, so the bounce dulls and
+slows"). Asking it for the same thing as testable claims -- `self_playing`,
+`rhythmic`, `evolving`, `decaying` -- costs one field in the response and makes
+the prompt's intent checkable instead of decorative.
+
+**Done means:** a patch that fires once fails a `self_playing` claim; a patch
+that is statistically flat fails an `evolving` claim; and both failures name the
+claim rather than saying "no sound", which is the message that sent this
+investigation down the wrong path twice.
+
+---
+
 ## Step 5 — Re-validate, sign, notarize the shipping build
 
 Results expire when a binary changes, and every step above changes binaries.
