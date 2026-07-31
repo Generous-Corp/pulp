@@ -42,7 +42,6 @@ struct PendingCall {
     std::mutex mutex;
     std::condition_variable cv;
     bool started = false;
-    bool operation_finished = false;
     bool response_ready = false;
     bool cancelled_before_start = false;
     bool slot_held = true;
@@ -82,7 +81,6 @@ public:
         bool release_slot = false;
         {
             std::lock_guard lock(call->mutex);
-            call->operation_finished = true;
             if (!call->response_ready) {
                 call->response = std::move(response);
                 call->response_ready = true;
@@ -139,53 +137,54 @@ InspectorMainThreadRpc::~InspectorMainThreadRpc() {
 InspectorMessage InspectorMainThreadRpc::call(
     std::int64_t request_id,
     Operation operation) {
+    const auto impl = impl_;
     if (!operation) {
         return make_error(request_id,
                           "Inspector dispatch operation is empty",
                           "invalid_dispatch");
     }
-    if (impl_->is_main_thread && impl_->is_main_thread()) {
-        std::lock_guard operation_lock(impl_->operation_mutex);
-        if (!impl_->accepting.load(std::memory_order_acquire))
+    if (impl->is_main_thread && impl->is_main_thread()) {
+        std::lock_guard operation_lock(impl->operation_mutex);
+        if (!impl->accepting.load(std::memory_order_acquire))
             return cancelled(request_id);
         return run_operation(request_id, operation);
     }
-    if (!impl_->accepting.load(std::memory_order_acquire))
+    if (!impl->accepting.load(std::memory_order_acquire))
         return cancelled(request_id);
 
     auto pending = std::make_shared<PendingCall>(request_id);
-    if (!impl_->register_call(pending)) {
-        if (!impl_->accepting.load(std::memory_order_acquire))
+    if (!impl->register_call(pending)) {
+        if (!impl->accepting.load(std::memory_order_acquire))
             return cancelled(request_id);
         return make_error(request_id,
                           "Inspector main-thread queue is full",
                           "dispatch_queue_full");
     }
 
-    const auto impl = impl_;
-    const bool posted = impl_->post && impl_->post(
+    const bool posted = impl->post && impl->post(
         [impl, pending, request_id, operation = std::move(operation)]() mutable {
             std::lock_guard operation_lock(impl->operation_mutex);
+            bool should_run = false;
             {
                 std::lock_guard lock(pending->mutex);
                 if (pending->cancelled_before_start)
                     return;
+                if (impl->accepting.load(std::memory_order_acquire)) {
+                    pending->started = true;
+                    should_run = true;
+                } else {
+                    pending->cancelled_before_start = true;
+                }
             }
-            if (!impl->accepting.load(std::memory_order_acquire)) {
+            if (!should_run) {
                 impl->complete_call(pending, cancelled(request_id));
                 return;
-            }
-            {
-                std::lock_guard lock(pending->mutex);
-                if (pending->cancelled_before_start)
-                    return;
-                pending->started = true;
             }
             impl->complete_call(
                 pending, run_operation(request_id, operation));
         });
     if (!posted) {
-        impl_->complete_call(
+        impl->complete_call(
             pending,
             make_error(request_id,
                        "No main-thread dispatcher accepted the request",
@@ -193,17 +192,14 @@ InspectorMessage InspectorMainThreadRpc::call(
     }
 
     std::unique_lock lock(pending->mutex);
-    if (!pending->cv.wait_for(lock, impl_->config.timeout,
+    if (!pending->cv.wait_for(lock, impl->config.timeout,
                               [&] { return pending->response_ready; })) {
         const bool may_have_applied = pending->started;
         if (may_have_applied) {
-            // Once execution starts, the synchronous caller remains the
-            // operation's lifetime owner. Wait for the posted mutation to
-            // drain before returning the timeout so session controller-lease
-            // accounting cannot end while old work is still active.
-            pending->cv.wait(lock, [&] {
-                return pending->operation_finished;
-            });
+            // The posted task owns the pending state and operation capture.
+            // Fence this caller at the deadline; complete_call() will release
+            // the slot and discard the late response when execution returns.
+            pending->response_ready = true;
         } else {
             pending->cancelled_before_start = true;
             pending->response_ready = true;
@@ -211,9 +207,9 @@ InspectorMessage InspectorMainThreadRpc::call(
         }
         lock.unlock();
         if (!may_have_applied) {
-            std::lock_guard pending_lock(impl_->pending_mutex);
-            if (impl_->pending_count > 0)
-                --impl_->pending_count;
+            std::lock_guard pending_lock(impl->pending_mutex);
+            if (impl->pending_count > 0)
+                --impl->pending_count;
         }
 
         auto data = std::string(R"({"mayHaveApplied":)") +
@@ -227,30 +223,33 @@ InspectorMessage InspectorMainThreadRpc::call(
 }
 
 void InspectorMainThreadRpc::cancel() {
-    if (!impl_)
+    const auto impl = impl_;
+    if (!impl)
         return;
     const bool was_accepting =
-        impl_->accepting.exchange(false, std::memory_order_acq_rel);
-    std::lock_guard operation_lock(impl_->operation_mutex);
+        impl->accepting.exchange(false, std::memory_order_acq_rel);
     if (!was_accepting)
         return;
 
     std::vector<std::shared_ptr<PendingCall>> calls;
     {
-        std::lock_guard lock(impl_->pending_mutex);
-        for (const auto& item : impl_->pending) {
+        std::lock_guard lock(impl->pending_mutex);
+        for (const auto& item : impl->pending) {
             if (auto call = item.lock())
                 calls.push_back(std::move(call));
         }
     }
     for (const auto& call : calls) {
-        bool started = false;
+        bool cancel_before_start = false;
         {
             std::lock_guard lock(call->mutex);
-            started = call->started;
+            if (!call->started && !call->response_ready) {
+                call->cancelled_before_start = true;
+                cancel_before_start = true;
+            }
         }
-        if (!started)
-            impl_->complete_call(call, cancelled(call->request_id));
+        if (cancel_before_start)
+            impl->complete_call(call, cancelled(call->request_id));
     }
 }
 

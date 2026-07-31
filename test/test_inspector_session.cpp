@@ -11,6 +11,7 @@
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -491,7 +492,7 @@ TEST_CASE("timed-out queued main-thread work cannot mutate later",
     CHECK(mutations == 0);
 }
 
-TEST_CASE("timed-out started main-thread work retains its slot until drained",
+TEST_CASE("timed-out started main-thread work returns while retaining its slot",
           "[inspect][session][main-thread-rpc][timeout][lifetime]") {
     std::mutex mutex;
     std::condition_variable cv;
@@ -533,8 +534,16 @@ TEST_CASE("timed-out started main-thread work retains its slot until drained",
             return operation_started;
         }));
     }
-    std::this_thread::sleep_for(20ms);
-    CHECK_FALSE(caller_returned.load(std::memory_order_acquire));
+    const auto caller_deadline =
+        std::chrono::steady_clock::now() + 1s;
+    while (!caller_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < caller_deadline)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(caller_returned.load(std::memory_order_acquire));
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "main_thread_timeout");
+    CHECK(response.error_data_json.find(
+              R"("mayHaveApplied":true)") != std::string::npos);
     const auto full = rpc.call(
         81, [] { return make_response(81, "{}"); });
     CHECK(full.error_code == "dispatch_queue_full");
@@ -547,11 +556,78 @@ TEST_CASE("timed-out started main-thread work retains its slot until drained",
     executor.join();
     caller.join();
 
-    REQUIRE(response.is_error);
-    CHECK(response.error_code == "main_thread_timeout");
-    CHECK(response.error_data_json.find(
-              R"("mayHaveApplied":true)") != std::string::npos);
     CHECK(caller_returned.load(std::memory_order_acquire));
+}
+
+TEST_CASE("timed-out started work does not block RPC destruction",
+          "[inspect][session][main-thread-rpc][timeout][teardown]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::function<void()> queued;
+    bool operation_started = false;
+    bool release_operation = false;
+    auto rpc = std::make_unique<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{5ms, 1},
+        [&](auto task) {
+            queued = std::move(task);
+            cv.notify_all();
+            return true;
+        },
+        [] { return false; });
+
+    pulp::inspect::InspectorMessage response;
+    std::atomic<bool> caller_returned{false};
+    std::thread caller([&] {
+        response = rpc->call(82, [&] {
+            std::unique_lock lock(mutex);
+            operation_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_operation; });
+            return make_response(82, R"({"late":true})");
+        });
+        caller_returned.store(true, std::memory_order_release);
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] {
+            return static_cast<bool>(queued);
+        }));
+    }
+    std::thread executor([&] { queued(); });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 1s, [&] {
+            return operation_started;
+        }));
+    }
+    const auto caller_deadline =
+        std::chrono::steady_clock::now() + 1s;
+    while (!caller_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < caller_deadline)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(caller_returned.load(std::memory_order_acquire));
+    caller.join();
+    REQUIRE(response.error_code == "main_thread_timeout");
+
+    std::atomic<bool> destroyed{false};
+    std::thread destroyer([&] {
+        rpc.reset();
+        destroyed.store(true, std::memory_order_release);
+    });
+    const auto destruction_deadline =
+        std::chrono::steady_clock::now() + 1s;
+    while (!destroyed.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < destruction_deadline)
+        std::this_thread::sleep_for(1ms);
+    CHECK(destroyed.load(std::memory_order_acquire));
+
+    {
+        std::lock_guard lock(mutex);
+        release_operation = true;
+    }
+    cv.notify_all();
+    executor.join();
+    destroyer.join();
 }
 
 TEST_CASE("cancelling main-thread RPC wakes queued callers and rejects new work",
@@ -589,7 +665,7 @@ TEST_CASE("cancelling main-thread RPC wakes queued callers and rejects new work"
     CHECK(rejected.error_code == "dispatch_cancelled");
 }
 
-TEST_CASE("cancelling main-thread RPC waits for running direct work",
+TEST_CASE("cancelling main-thread RPC does not wait for running direct work",
           "[inspect][session][main-thread-rpc][teardown]") {
     std::mutex mutex;
     std::condition_variable cv;
@@ -620,8 +696,12 @@ TEST_CASE("cancelling main-thread RPC waits for running direct work",
         rpc.cancel();
         cancel_returned.store(true, std::memory_order_release);
     });
-    std::this_thread::sleep_for(20ms);
-    CHECK_FALSE(cancel_returned.load(std::memory_order_acquire));
+    const auto cancel_deadline =
+        std::chrono::steady_clock::now() + 1s;
+    while (!cancel_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < cancel_deadline)
+        std::this_thread::sleep_for(1ms);
+    CHECK(cancel_returned.load(std::memory_order_acquire));
     {
         std::lock_guard lock(mutex);
         release = true;
