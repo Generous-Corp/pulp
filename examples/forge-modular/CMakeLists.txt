@@ -12,11 +12,19 @@ set(_fm_dir "${CMAKE_CURRENT_SOURCE_DIR}")
 # The layout manifests are the single source of truth: the panel SVGs, the
 # plugin.json and the C++ widget placement are all generated from them, so a
 # control and its label cannot drift apart.
-file(GLOB _fm_manifests "${_fm_dir}/modules/*.json")
+# CONFIGURE_DEPENDS so a manifest added AFTER configure still triggers codegen.
+# Without it the glob is evaluated once and a new module is silently missing
+# from the generated header while plugin.json names it -- and Rack refuses the
+# whole plugin over that one mismatch, taking every other module with it.
+file(GLOB _fm_manifests CONFIGURE_DEPENDS "${_fm_dir}/modules/*.json")
 set(_fm_generated "${_fm_dir}/src/generated_modules.hpp")
 
 add_custom_command(
+    # plugin.hpp and plugin.cpp are outputs too: their declaration and
+    # registration blocks are derived from the same manifests, so leaving them
+    # out of OUTPUT lets the build think it is up to date while they drift.
     OUTPUT "${_fm_generated}" "${_fm_dir}/plugin.json"
+           "${_fm_dir}/src/plugin.hpp" "${_fm_dir}/src/plugin.cpp"
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/rack/forge_modular.py"
             all ${_fm_manifests}
     DEPENDS ${_fm_manifests}
