@@ -68,7 +68,9 @@ catch_discover_tests(pulp-test-mcp-server)
 # the agent loop hands its rendered variants to pulp_audio_compare, whose
 # handler lives in the same library, and compiling one of its translation units
 # a second time here would duplicate those symbols.
-add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
+add_executable(pulp-test-mcp-timeline-tools
+    test_mcp_timeline_sessions.cpp
+    test_mcp_timeline_tools.cpp)
 target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
     pulp-mcp-core
     pulp::audio

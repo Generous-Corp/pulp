@@ -26,6 +26,9 @@ spec.loader.exec_module(rac)
 VERSION = "9.8.7"
 ROOT = SCRIPT.parents[2]
 INSTALL_RULES = SCRIPT.parents[1] / "cmake" / "PulpInstallRules.cmake"
+IMPORT_DESIGN_RUNTIME_MANIFEST = (
+    SCRIPT.parents[1] / "import-design" / "browser_capture" / "runtime_manifest.txt"
+)
 
 
 def installed_sdk_targets(text: str | None = None) -> set[str]:
@@ -196,7 +199,9 @@ def write_archive(
             default_mode = (
                 0o755
                 if "/bin/" in name
-                or name in {"pulp", "pulp-cpp", "pulp-mcp", "pulp-import-design"}
+                or name in rac.cli_binary_members(
+                    platform, rac.DEFAULT_MATRIX, VERSION
+                )
                 else 0o644
             )
             info.mode = mode_overrides.get(name, default_mode)
@@ -204,7 +209,7 @@ def write_archive(
 
 
 def make_platform(root: Path, platform: str) -> tuple[set[str], set[str]]:
-    cli = set(rac.cli_members(platform, VERSION))
+    cli = set(rac.cli_members(platform, rac.DEFAULT_MATRIX, VERSION))
     sdk = set(rac.required_sdk_members(platform, rac.DEFAULT_MATRIX, VERSION))
     write_archive(
         root / rac.cli_asset_name(platform),
@@ -237,8 +242,12 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         }
 
-        unix_members = rac.cli_members("darwin-arm64", VERSION)
-        windows_members = rac.cli_members("windows-x64", VERSION)
+        unix_members = rac.cli_members(
+            "darwin-arm64", rac.DEFAULT_MATRIX, VERSION
+        )
+        windows_members = rac.cli_members(
+            "windows-x64", rac.DEFAULT_MATRIX, VERSION
+        )
         self.assertTrue(runtime_members)
         self.assertLessEqual(runtime_members, unix_members)
         self.assertLessEqual(runtime_members, windows_members)
@@ -246,7 +255,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         self.assertIn("pulp-import-design.exe", windows_members)
 
     def test_cli_contract_preserves_pre_import_design_releases(self) -> None:
-        members = rac.cli_members("linux-x64", "0.763.0")
+        members = rac.cli_members(
+            "linux-x64", rac.DEFAULT_MATRIX, "0.763.0"
+        )
         self.assertEqual(
             members,
             frozenset({"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.so"}),
@@ -336,6 +347,92 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             archive_targets,
             matrix_targets,
             "PULP_SDK_TARGETS archives and release_product_matrix.json drifted",
+        )
+
+    def test_packaged_cli_products_match_release_matrix(self) -> None:
+        runtime_members = {
+            f"browser_capture/{line.strip()}"
+            for line in IMPORT_DESIGN_RUNTIME_MANIFEST.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertEqual(
+            rac.DEFAULT_MATRIX.cli_binary_stems,
+            {"pulp", "pulp-cpp", "pulp-import-design", "pulp-mcp"},
+        )
+        self.assertEqual(
+            rac.DEFAULT_MATRIX.common_cli_members,
+            runtime_members,
+            "browser-capture runtime manifest and release product matrix drifted",
+        )
+
+    def test_declared_matrix_selects_historical_cli_contracts(self) -> None:
+        legacy = {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"}
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.763.0"),
+            legacy,
+        )
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.764.0"),
+            {
+                "pulp",
+                "pulp-cpp",
+                "pulp-import-design",
+                "pulp-mcp",
+                "libwgpu_native.dylib",
+                *rac.PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            },
+        )
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", rac.DEFAULT_MATRIX, "0.765.0"),
+            {
+                "pulp",
+                "pulp-cpp",
+                "pulp-import-design",
+                "pulp-mcp",
+                "libwgpu_native.dylib",
+                *rac.DEFAULT_MATRIX.common_cli_members,
+            },
+        )
+
+    def test_legacy_product_matrix_selects_versioned_cli_contract(self) -> None:
+        legacy_doc = json.loads(
+            rac.DEFAULT_MATRIX_PATH.read_text(encoding="utf-8")
+        )
+        legacy_doc.pop("cli_binary_stems")
+        legacy_doc.pop("common_cli_members")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "release_product_matrix.json"
+            path.write_text(json.dumps(legacy_doc), encoding="utf-8")
+            matrix = rac.ProductMatrix.load(path)
+            cli_path = root / rac.cli_asset_name("darwin-arm64")
+            write_archive(
+                cli_path,
+                set(rac.cli_members("darwin-arm64", matrix, "0.764.0")),
+                as_zip=False,
+            )
+            rac.verify_cli_archive(
+                cli_path, "darwin-arm64", "0.764.0", matrix
+            )
+
+        self.assertEqual(matrix.cli_binary_stems, {"pulp", "pulp-cpp", "pulp-mcp"})
+        self.assertEqual(matrix.common_cli_members, set())
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", matrix, "0.763.0"),
+            {"pulp", "pulp-cpp", "pulp-mcp", "libwgpu_native.dylib"},
+        )
+        self.assertEqual(
+            rac.cli_members("darwin-arm64", matrix, "0.764.0"),
+            {
+                "pulp",
+                "pulp-cpp",
+                "pulp-import-design",
+                "pulp-mcp",
+                "libwgpu_native.dylib",
+                *rac.PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            },
         )
 
     def test_complete_windows_matrix_passes_despite_misleading_sdk_suffix(self) -> None:

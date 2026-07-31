@@ -1,5 +1,7 @@
 #include "test_signal_tape_machine_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("Tape machine: latency is constant, exact, and measurable",
           "[signal][tape-machine][latency]") {
     // R14, re-scoped — see the header note. What is asserted:
@@ -319,9 +321,9 @@ TEST_CASE("Tape machine rejects non-finite controls and audio without latching r
         recovered_r(kSamples), reference_l(kSamples), reference_r(kSamples);
     for (int i = 0; i < kSamples; ++i) {
         in_l[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 997.0 * i / kSr));
+            static_cast<float>(0.2 * std::sin(2.0 * std::numbers::pi * 997.0 * i / kSr));
         in_r[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+            static_cast<float>(0.2 * std::sin(2.0 * std::numbers::pi * 431.0 * i / kSr));
     }
     poisoned.process(in_l.data(), in_r.data(), recovered_l.data(), recovered_r.data(), kSamples);
     fresh.process(in_l.data(), in_r.data(), reference_l.data(), reference_r.data(), kSamples);
@@ -353,9 +355,9 @@ TEST_CASE("Tape machine audio-fault recovery discards populated dynamic historie
         scratch_l(kWarmupSamples), scratch_r(kWarmupSamples);
     for (int i = 0; i < kWarmupSamples; ++i) {
         warm_l[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.31 * std::sin(2.0 * M_PI * 613.0 * i / kSr));
+            static_cast<float>(0.31 * std::sin(2.0 * std::numbers::pi * 613.0 * i / kSr));
         warm_r[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.27 * std::sin(2.0 * M_PI * 887.0 * i / kSr));
+            static_cast<float>(0.27 * std::sin(2.0 * std::numbers::pi * 887.0 * i / kSr));
     }
     poisoned.process(warm_l.data(), warm_r.data(), scratch_l.data(), scratch_r.data(),
                      kWarmupSamples);
@@ -378,9 +380,9 @@ TEST_CASE("Tape machine audio-fault recovery discards populated dynamic historie
         reference_l(kRecoverySamples), reference_r(kRecoverySamples);
     for (int i = 0; i < kRecoverySamples; ++i) {
         in_l[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 997.0 * i / kSr));
+            static_cast<float>(0.2 * std::sin(2.0 * std::numbers::pi * 997.0 * i / kSr));
         in_r[static_cast<std::size_t>(i)] =
-            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+            static_cast<float>(0.2 * std::sin(2.0 * std::numbers::pi * 431.0 * i / kSr));
     }
     poisoned.process(in_l.data(), in_r.data(), recovered_l.data(), recovered_r.data(),
                      kRecoverySamples);

@@ -394,7 +394,26 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(
             run_block,
             r"--import-design-runtime-dir\s+build/tools/import-design/browser_capture-v1")
+        self.assertIn("[ -x build/tools/import-design/pulp-import-design ]", run_block)
+        self.assertIn('"${import_design_args[@]}"', run_block)
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+
+    def test_unix_strip_treats_import_design_as_versioned_payload(self) -> None:
+        run_block = self._find_step_run("Strip binaries (Unix)")
+        self.assertIn(
+            "release_bins=(build/pulp build/tools/cli/pulp-cpp "
+            "build/tools/mcp/pulp-mcp)",
+            run_block,
+        )
+        self.assertIn(
+            "[ -f build/tools/import-design/pulp-import-design ]",
+            run_block,
+        )
+        self.assertIn(
+            "release_bins+=(build/tools/import-design/pulp-import-design)",
+            run_block,
+        )
+        self.assertIn('for bin in "${release_bins[@]}"', run_block)
 
     def test_windows_package_step_bundles_cpp_delegate(self) -> None:
         run_block = self._find_step_run("Package CLI (Windows)")
@@ -404,10 +423,17 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
         self.assertRegex(
             run_block,
-            r"--import-design-binary\s+build/tools/import-design/Release/pulp-import-design\.exe")
+            r"'--import-design-binary',\s*"
+            r"'build/tools/import-design/Release/pulp-import-design\.exe'")
         self.assertRegex(
             run_block,
-            r"--import-design-runtime-dir\s+build/tools/import-design/Release/browser_capture-v1")
+            r"'--import-design-runtime-dir',\s*"
+            r"'build/tools/import-design/Release/browser_capture-v1'")
+        self.assertIn(
+            "Test-Path build/tools/import-design/Release/pulp-import-design.exe",
+            run_block,
+        )
+        self.assertIn("@importDesignArgs", run_block)
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
     def test_dry_run_package_step_uses_versioned_browser_runtime(self) -> None:
@@ -434,9 +460,9 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         run_block = self._find_step_run(
             "Smoke CLI, delegates, MCP, and import-design runtime (Unix)"
         )
-        self.assertRegex(
-            run_block,
-            r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp\s+pulp-import-design")
+        self.assertIn("CLI_ARTIFACTS=(pulp pulp-cpp pulp-mcp)", run_block)
+        self.assertIn("CLI_ARTIFACTS+=(pulp-import-design)", run_block)
+        self.assertIn('for ART in "${CLI_ARTIFACTS[@]}"', run_block)
         self.assertIn('pulp-mcp) echo "--version"', run_block)
         self.assertIn('pulp-import-design) echo "--help"', run_block)
         self.assertIn("browser_capture/capture.mjs", run_block)
@@ -452,7 +478,9 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn('"pulp.exe"      = "help"', run_block)
         self.assertIn('"pulp-cpp.exe"  = "help"', run_block)
         self.assertIn('"pulp-mcp.exe"  = "--version"', run_block)
-        self.assertIn('"pulp-import-design.exe" = "--help"', run_block)
+        self.assertIn(
+            '$artCmd["pulp-import-design.exe"] = "--help"', run_block
+        )
         self.assertIn("browser_capture\\capture.mjs", run_block)
         self.assertIn("import-design --help", run_block)
         self.assertIn("-ArgumentList $cmd", run_block)
@@ -551,6 +579,7 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         overlay_paths = loop_match.group("body")
         self.assertIn("tools/scripts/fetch_skia_for_release.py", overlay_paths)
         self.assertIn("tools/scripts/package_cli.py", overlay_paths)
+        self.assertIn("tools/scripts/release_artifact_contents.py", overlay_paths)
         self.assertIn("core/canvas/CMakeLists.txt", overlay_paths)
         self.assertIn("tools/deps/manifest.json", overlay_paths)
         self.assertNotIn(
@@ -570,6 +599,23 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("_PULP_CLI_FONTCONFIG", run_block)
         self.assertIn("path.write_text(text", run_block)
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
+
+    def test_manual_dispatch_uses_current_verifier_with_selected_matrix(self) -> None:
+        run_block = self._find_step_run(
+            "Ensure release-content verifier helpers exist"
+        )
+        self.assertIn(
+            "[ '${{ github.event_name }}' = 'workflow_dispatch' ]",
+            run_block,
+        )
+        self.assertIn(
+            "[ \"$path\" = tools/scripts/release_artifact_contents.py ]",
+            run_block,
+        )
+        self.assertIn(
+            "Overlaying current backfill compatibility engine",
+            run_block,
+        )
 
 
 class SingleOwnerReleasePublication(unittest.TestCase):

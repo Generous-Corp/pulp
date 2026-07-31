@@ -19,52 +19,17 @@
 #include <vector>
 
 #include "../tools/mcp/mcp_tools.hpp"
+#include "../tools/mcp/timeline_session_store.hpp"
 #include "../tools/timeline/src/timeline_agent_internal.hpp"
 #include "mcp_server_test_support.hpp"
+#include "mcp_timeline_test_support.hpp"
 
 namespace {
 
 using Catch::Matchers::WithinAbs;
 using namespace mcp_test;
+using namespace mcp_timeline_test;
 using namespace pulp_mcp;
-
-template <typename T, typename E> T require_timeline_result(pulp::runtime::Result<T, E> result) {
-    REQUIRE(result);
-    return std::move(result).value();
-}
-
-std::string make_timeline_project_json(
-    const std::filesystem::path& source,
-    pulp::timeline::AssetLocatorKind locator_kind = pulp::timeline::AssetLocatorKind::ExternalUri,
-    std::string locator_hint = {}) {
-    using namespace pulp::timeline;
-    constexpr std::uint64_t frame_count = 32;
-    auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
-                                                              MediaRef{{5}, {0}, frame_count},
-                                                              {.gain_linear = 1.0f}));
-    auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
-    auto sequence = require_timeline_result(Sequence::create(
-        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
-    std::ifstream stream(source, std::ios::binary);
-    REQUIRE(stream);
-    const std::string bytes{std::istreambuf_iterator<char>(stream),
-                            std::istreambuf_iterator<char>()};
-    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
-    REQUIRE(hash);
-    MediaAsset asset{{5},
-                     "source.wav",
-                     frame_count,
-                     {48'000, 1},
-                     *hash,
-                     AssetStoragePolicy::External,
-                     {{locator_kind, locator_hint.empty() ? source.string() : locator_hint}},
-                     {},
-                     {}};
-    auto project = require_timeline_result(
-        Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}}));
-    auto registry = require_timeline_result(make_builtin_timeline_registry());
-    return require_timeline_result(serialize_project(project, registry)).json;
-}
 
 void write_zip(const std::filesystem::path& path,
                const std::vector<std::pair<std::string, std::vector<std::uint8_t>>>& entries) {
@@ -183,15 +148,6 @@ make_nested_timeline_project_json(const std::filesystem::path& source) {
     auto registry =
         require_timeline_result(make_builtin_timeline_registry());
     return require_timeline_result(serialize_project(project, registry)).json;
-}
-
-std::string timeline_project_from_response(const std::string& response) {
-    auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
-    const auto* structured = parsed->root().find("structuredContent");
-    REQUIRE(structured != nullptr);
-    const auto* project = structured->find("project");
-    REQUIRE(project != nullptr);
-    return std::string(parsed->raw(*project));
 }
 
 TEST_CASE("timeline asset discovery budgets non-intersecting nested probes",

@@ -1,5 +1,7 @@
 #include "test_signal_tape_machine_support.hpp"
 
+#include <numbers>
+
 TEST_CASE("Tape machine: the NAB record network matches the analytic prototype",
           "[signal][tape-machine][eq]") {
     // R1. The prototype is evaluated from the SHIPPED time constants, so this
@@ -270,7 +272,7 @@ TEST_CASE("Tape machine: crosstalk leaks at the configured level",
             out_r(static_cast<std::size_t>(n));
         for (int k = 0; k < n; ++k)
             in_l[static_cast<std::size_t>(k)] =
-                static_cast<float>(0.1 * std::sin(2.0 * M_PI * 1000.0 * k / kSr));
+                static_cast<float>(0.1 * std::sin(2.0 * std::numbers::pi * 1000.0 * k / kSr));
         machine.process(in_l.data(), in_r.data(), out_l.data(), out_r.data(), n);
 
         const double leak_db = 20.0 * std::log10(bin_magnitude(out_r, 1000.0) /
@@ -310,7 +312,7 @@ TEST_CASE("Tape machine: a companded round trip is transparent",
         const int n = static_cast<int>(kSr);
         double out_peak = 0.0, in_peak = 0.0;
         for (int k = 0; k < n; ++k) {
-            const double x = amplitude * std::sin(2.0 * M_PI * 1000.0 * k / kSr);
+            const double x = amplitude * std::sin(2.0 * std::numbers::pi * 1000.0 * k / kSr);
             const double y = compander.decode(compander.encode(x));
             if (k > n / 2) {
                 out_peak = std::max(out_peak, std::abs(y));
