@@ -256,6 +256,7 @@ private:
     MentionOverlay mentions_;
     BuildMonitor monitor_;
     bool watching_ = false;
+    std::string monitor_log_path_;
     BuildOutcome reported_outcome_ = BuildOutcome::running;
     int reported_stage_ = -2;
     std::chrono::steady_clock::time_point run_started_{};

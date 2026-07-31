@@ -160,7 +160,7 @@ void ForgeModularShell::set_artifact(Artifact a) {
     // Every string on the home screen depends on this -- the hero, the badge,
     // the Build label -- so the chrome is told rather than left to disagree
     // with the tab the user just pressed.
-    if (auto* c = chrome()) c->refresh_copy();
+    if (auto* c = chrome()) { c->refresh_copy(); c->refresh_composer_row(); }
     // The depth tabs belong to patches; revealing them here is what makes
     // switching artifact mid-session work at all.
     if (depth_group_) depth_group_->set_visible(artifact_ == Artifact::patch);
@@ -220,7 +220,7 @@ forge::ComposerRow ForgeModularShell::composer_row() {
         .on_click = [this] { ask(); },
     });
     row.right.push_back({
-        .label = patch ? "Build patch" : "Build module",
+        .label = patch ? "Create patch" : "Build module",
         .access_label = patch ? "Build the patch" : "Build the module",
         .icon = forge::ComposerAction::Icon::arrow_up,
         .primary = true,
@@ -678,48 +678,101 @@ std::string ForgeModularShell::artifact_path() const {
     return {};
 }
 
+namespace {
+
+/// Where a Rack artifact can be opened on this machine.
+struct RackPresence {
+    bool standalone_installed = false;
+    bool standalone_running = false;
+    bool plugin_installed = false;     ///< Rack Pro as AU/VST3/CLAP
+};
+
+RackPresence look_for_rack() {
+    RackPresence r;
+    std::error_code ec;
+    for (const char* app : {"/Applications/VCV Rack 2 Free.app",
+                            "/Applications/VCV Rack 2 Pro.app",
+                            "/Applications/VCV Rack 2.app"}) {
+        if (std::filesystem::exists(app, ec)) { r.standalone_installed = true; break; }
+    }
+    std::string out;
+    // -x so "Rack" does not match "Rack SDK" or a path that merely mentions it.
+    r.standalone_running = ProcessEngine::run("pgrep -x Rack >/dev/null 2>&1", out) == 0;
+
+    const char* home = std::getenv("HOME");
+    const std::string h = home ? home : ".";
+    for (const auto& p : {h + "/Library/Audio/Plug-Ins/VST3/VCV Rack 2.vst3",
+                          h + "/Library/Audio/Plug-Ins/CLAP/VCV Rack 2.clap",
+                          h + "/Library/Audio/Plug-Ins/Components/VCV Rack 2.component",
+                          std::string("/Library/Audio/Plug-Ins/VST3/VCV Rack 2.vst3")}) {
+        if (std::filesystem::exists(p, ec)) { r.plugin_installed = true; break; }
+    }
+    return r;
+}
+
+}  // namespace
+
 std::string ForgeModularShell::open_in_rack() {
     // Re-checked at click time, not just at paint time. A generation can start
     // between the two, and opening a file being rewritten is worse than
     // refusing.
     if (monitor_.outcome() == BuildOutcome::running)
-        return "a build is running — the patch is being rewritten";
+        return "a build is running \u2014 the patch is being rewritten";
     const auto path = artifact_path();
     if (path.empty()) return "nothing has finished building yet";
-    // Hosted builds open it too. The earlier behaviour -- printing the path
-    // and not launching -- was a button labelled "Open in Rack" that did not
-    // open Rack, which is the same say-one-thing-do-another this whole screen
-    // has been cured of. Rack Free (the desktop app) is all that is needed;
-    // Rack Pro is only for running Rack ITSELF inside a DAW, which is not what
-    // this does.
     std::error_code ec;
     if (!std::filesystem::exists(path, ec))
         return "the generator named a file that is not there: " + path;
 
-    // Rack will claim an audio device when it starts, which is worth saying
-    // out loud from inside a DAW session rather than discovering.
-    const std::string note =
-        is_standalone() ? std::string{}
-                        : std::string("opening VCV Rack \u2014 it will take an "
-                                      "audio device");
+    const auto rack = look_for_rack();
 
-    // No Rack, no launch. Show the folder instead so the artifact is still
-    // reachable rather than merely described.
-    if (!std::filesystem::exists("/Applications/VCV Rack 2 Free.app", ec)) {
+    auto launch = [path] {
+        // A running Rack takes the file into the instance already open rather
+        // than starting a second one, which is what `open` does with a live
+        // application -- and two Racks fighting for one audio device is the
+        // silence this button exists to avoid.
         std::thread([path] {
             std::string out;
-            ProcessEngine::run("open -R '" + path + "' &", out);
+            ProcessEngine::run("open -a \"/Applications/VCV Rack 2 Free.app\" '" +
+                               path + "' &", out);
         }).detach();
-        return "VCV Rack is not installed — showing the file in Finder instead";
+    };
+
+    // Already open: hand it the patch, wherever we are running. `open` on a
+    // live application routes the file into THAT instance rather than starting
+    // a second one.
+    if (rack.standalone_running) {
+        launch();
+        // Hosted always says something. From inside a DAW the Rack window may
+        // come up behind the host, and silence there is indistinguishable from
+        // a button that did nothing.
+        return is_standalone() ? std::string{}
+                               : std::string("sent to the VCV Rack window "
+                                             "already open");
     }
-    // Detached, and never blocking the UI thread: launching an app touches the
-    // filesystem and can take a moment.
+
+    // Hosted, with Rack available as a plugin: the patch belongs in THIS
+    // session, not in a second application competing for the audio device.
+    // We cannot insert a plugin into a running host from outside -- no host
+    // exposes that -- so say where the patch is and let the user place Rack.
+    if (!is_standalone() && rack.plugin_installed) {
+        return "add VCV Rack to a track and open this patch in it: " + path;
+    }
+
+    if (rack.standalone_installed) {
+        launch();
+        return is_standalone()
+                   ? std::string{}
+                   : std::string("opening VCV Rack \u2014 it will take an "
+                                 "audio device");
+    }
+
+    // No Rack at all. Show the file rather than describing it.
     std::thread([path] {
-        std::string cmd = "open -a \"/Applications/VCV Rack 2 Free.app\" '" + path + "' &";
         std::string out;
-        ProcessEngine::run(cmd, out);
+        ProcessEngine::run("open -R '" + path + "' &", out);
     }).detach();
-    return note;
+    return "VCV Rack is not installed \u2014 showing the file in Finder instead";
 }
 
 std::string ForgeModularShell::ask() {

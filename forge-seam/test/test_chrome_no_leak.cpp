@@ -241,7 +241,7 @@ TEST_CASE("Forge Modular describes its own composer row", "[seam]") {
     }
 
     shell.set_artifact(forge_modular::Artifact::patch);
-    CHECK(shell.composer_row().right[1].label == "Build patch");
+    CHECK(shell.composer_row().right[1].label == "Create patch");
 }
 
 TEST_CASE("Forge Modular's home accessory reaches the chrome", "[seam]") {
@@ -366,7 +366,7 @@ TEST_CASE("clicking a tab switches the artifact, both ways", "[seam]") {
     CHECK(shell.artifact() == forge_modular::Artifact::patch);
     CHECK(shell.chrome_copy().hero_title == "What should the patch do?");
     CHECK(shell.chrome_copy().badge == "PATCH");
-    CHECK(shell.composer_row().right[1].label == "Build patch");
+    CHECK(shell.composer_row().right[1].label == "Create patch");
 
     module_tab->on_click();               // and back, so it is not one-way
     CHECK(shell.artifact() == forge_modular::Artifact::module);
@@ -2218,11 +2218,15 @@ TEST_CASE("every build starts its own clock and its own card",
     std::filesystem::remove(log);
 }
 
-TEST_CASE("Open in Rack opens Rack from a plugin too", "[phase7][artifact]") {
-    // A button labelled "Open in Rack" that prints a path instead is the same
-    // say-one-thing-do-another this screen has been cured of elsewhere. Rack
-    // Free is all that is needed: Rack Pro is only for running Rack ITSELF
-    // inside a DAW, which is not what this does.
+TEST_CASE("Open in Rack picks a sensible place to open", "[phase7][artifact]") {
+    // The rules, in the order they are decided:
+    //   Rack already running        -> hand it the patch, wherever we are
+    //   hosted + Rack Pro installed -> the patch belongs in THIS session, and
+    //                                  a second Rack would fight for the audio
+    //                                  device; we cannot insert a plugin into
+    //                                  a running host from outside, so say so
+    //   Rack installed              -> open the desktop app
+    //   nothing                     -> reveal the file rather than describe it
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
     pulp::state::StateStore store;
@@ -2232,7 +2236,6 @@ TEST_CASE("Open in Rack opens Rack from a plugin too", "[phase7][artifact]") {
     pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
     pc.input_channels = 1; pc.output_channels = 2;
     shell.prepare(pc);
-    shell.set_standalone(false);          // hosted, as in a DAW
     auto view = shell.create_view();
     REQUIRE(view != nullptr);
     shell.chrome()->enter_build();
@@ -2242,7 +2245,7 @@ TEST_CASE("Open in Rack opens Rack from a plugin too", "[phase7][artifact]") {
         WARN("no generated patch present; skipping");
         return;
     }
-    const auto log = std::filesystem::temp_directory_path() / "fm-hosted.log";
+    const auto log = std::filesystem::temp_directory_path() / "fm-where.log";
     std::filesystem::remove(log);
     shell.watch_build_log(log.string());
     { std::ofstream f(log);
@@ -2250,13 +2253,22 @@ TEST_CASE("Open in Rack opens Rack from a plugin too", "[phase7][artifact]") {
     shell.on_poll();
     REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
 
-    // It does NOT refuse with "installed for VCV Rack: <path>" any more.
-    const auto said = shell.open_in_rack();
-    INFO("said: " << said);
-    CHECK(said.find("installed for") == std::string::npos);
-    // It warns instead, because Rack claims an audio device when it starts and
-    // that matters more inside a DAW session than outside one.
-    CHECK(said.find("audio device") != std::string::npos);
+    // Whatever this machine has, the answer is never the old "installed for
+    // VCV Rack: <path>" refusal that launched nothing.
+    shell.set_standalone(true);
+    const auto standalone_said = shell.open_in_rack();
+    INFO("standalone: " << standalone_said);
+    CHECK(standalone_said.find("installed for") == std::string::npos);
+
+    shell.set_standalone(false);
+    const auto hosted_said = shell.open_in_rack();
+    INFO("hosted: " << hosted_said);
+    CHECK(hosted_said.find("installed for") == std::string::npos);
+    // Hosted always says something -- either where to place Rack, or that a
+    // second Rack is about to claim an audio device. Silence would leave a
+    // DAW user wondering what just happened.
+    CHECK_FALSE(hosted_said.empty());
 
     std::filesystem::remove(log);
 }
+

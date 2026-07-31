@@ -1,5 +1,48 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 63b40c2..272dd01 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -241,6 +241,14 @@ set(FORGE_SOURCES
+     src/tempo_sync_feeder.cpp    # audio-thread tempo->param feeder for synced nodes
+     src/instrument_shell.cpp     # the ONE instrument shell (generated VoiceGraph poly engine)
+     src/voice_oscillator.cpp     # per-slot multi-engine oscillator (va/dco/vco/wt/wt_lofi dispatch)
++    src/build_monitor.cpp        # Forge Modular generator-log reader
++    src/mention_overlay.cpp      # Forge Modular @-mention dropdown
++    src/modular_shell.cpp        # Forge Modular shell (VCV Rack artifacts)
++    src/rack_layout.cpp          # rack + cable geometry (pure, no canvas)
++    src/rack_preview.cpp         # paints that geometry
++    src/patch_explanation.cpp    # the patch in words, wired to the picture
++    src/process_engine.cpp       # the generator, as a child process
++    src/patch_loader.cpp         # a .vcv file, as something the preview can draw
+     src/midi_shell.cpp           # MIDI-effect shell (hot-swappable transform chain)
+     src/midi_transform.cpp              # dispatcher, public API + the small per-event kinds
+     src/midi_transform_strum.cpp        # strum: spread a cluster over time
+@@ -645,6 +653,15 @@ if(FORGE_BUILD_TESTS)
+             forge_core Catch2::Catch2WithMain)
+         catch_discover_tests(forge-test-chrome)
+ 
++        # The no-leak guard: every product's Home frame against a committed
++        # baseline, so a change made for one cannot silently move another.
++        add_executable(forge-test-chrome-no-leak test/test_chrome_no_leak.cpp)
++        target_include_directories(forge-test-chrome-no-leak PRIVATE
++            ${CMAKE_CURRENT_SOURCE_DIR}/test)
++        target_link_libraries(forge-test-chrome-no-leak PRIVATE
++            forge_core Catch2::Catch2WithMain)
++        catch_discover_tests(forge-test-chrome-no-leak)
++
+         add_executable(forge-test-audio-asset-coordinator
+             test/test_audio_asset_coordinator.cpp)
+         target_include_directories(forge-test-audio-asset-coordinator PRIVATE
+@@ -1571,6 +1588,7 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+ 
+     # The generated MIDI-effect plugin. CLAP note-effect is fully playable
+     # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
++    add_subdirectory(modular)
+     add_subdirectory(midi)
+ 
+     # A replacement bundle with unchanged Info.plist version can remain stale
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..df17139 100644
+index 0863f43..b9f8998 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
 @@ -640,6 +640,47 @@ public:
@@ -50,7 +93,7 @@ index 0863f43..df17139 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -696,6 +737,34 @@ public:
+@@ -696,6 +737,38 @@ public:
      float chamber_progress() const;
      std::string chamber_header_text() const;
      int active_chip() const { return active_chip_; }
@@ -78,6 +121,10 @@ index 0863f43..df17139 100644
 +    /// transcript for things worth reading afterwards; a product that instead
 +    /// pushes every log line into the chat buries the one message that mattered
 +    /// under fifty that did not.
++    /// Rebuild the product-described composer row after state it depends on
++    /// has changed.
++    void refresh_composer_row();
++
 +    void set_status_activity(const std::string& text);
 +    void set_status_note(const std::string& text);
 +    std::string status_activity_text() const;
@@ -85,7 +132,7 @@ index 0863f43..df17139 100644
      int macro_knob_count() const { return macro_knob_count_; }
      bool materialized() const { return materialized_; }
      bool has_project() const { return has_project_; }
-@@ -712,6 +781,16 @@ public:
+@@ -712,6 +785,16 @@ public:
      std::string first_tile_badge_text() const;
      bool delete_affordance_visible() const;
      const std::string& project_title() const { return project_title_; }
@@ -102,7 +149,7 @@ index 0863f43..df17139 100644
      // The FIRST shelf tile — the live build's (tests: drive its hover reveal
      // without coordinates).
      pulp::view::View* shelf_tile() { return shelf_tile_; }
-@@ -722,6 +801,14 @@ public:
+@@ -722,6 +805,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -117,16 +164,17 @@ index 0863f43..df17139 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1220,8 @@ private:
+@@ -1133,6 +1224,9 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
 +    pulp::view::View* build_accessory_ = nullptr;
 +    pulp::view::View* stage_accessory_ = nullptr;
++    pulp::view::View* composer_actions_ = nullptr;
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1260,7 @@ private:
+@@ -1171,6 +1265,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
@@ -134,6 +182,98 @@ index 0863f43..df17139 100644
      pulp::view::View* title_bar_ = nullptr;
      pulp::view::View* shell_body_ = nullptr;
      pulp::view::View* shell_rail_ = nullptr;
+diff --git a/include/forge/fx_shell.hpp b/include/forge/fx_shell.hpp
+index 528e598..2e8e820 100644
+--- a/include/forge/fx_shell.hpp
++++ b/include/forge/fx_shell.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include "forge/brand.hpp"
+ #include "forge/lofi_delay.hpp"
+ #include "forge/gen/tempo_division.hpp"  // DeriveUnit, Division for derived macros
+ #include "forge/param_map.hpp"
+@@ -166,6 +167,18 @@ public:
+     const pulp::format::reload::ProcessorHotSwapSlot& slot() const { return slot_; }
+ 
+     // ── ForgeShell hooks (effect-specific DSP) ───────────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " FX",
++                 .prompt_placeholder = "Build a lo-fi multi-fx plugin \u2014 reverb, delay, chorus. Nocturne, dreamy, a visualizer per effect.",
++                 .followup_placeholder = "refine it \u2014 e.g. darker feedback tail",
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Lo-Fi Delay" };
++    }
++
+     bool has_build() const override { return slot_.has_active(); }
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
+diff --git a/include/forge/instrument_shell.hpp b/include/forge/instrument_shell.hpp
+index d4b60cd..3d2b611 100644
+--- a/include/forge/instrument_shell.hpp
++++ b/include/forge/instrument_shell.hpp
+@@ -24,6 +24,7 @@
+ //    current value — the SAME contract the FX chrome + generated ui.js read, so
+ //    an instrument inherits the art-directed believable UI automatically.
+ 
++#include "forge/brand.hpp"
+ #include "forge/param_map.hpp"
+ #include "forge/prepared_bank_exchange.hpp"
+ #include "forge/shell.hpp"
+@@ -252,6 +253,18 @@ public:
+     }
+ 
+     // ── ForgeShell hooks (instrument-specific DSP) ───────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " INST",
++                 .prompt_placeholder = "a warm analog pad with a slow filter sweep\u2026",
++                 .followup_placeholder = "refine it \u2014 e.g. faster attack, brighter tone",
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Subtractive Synth" };
++    }
++
+     bool has_build() const override { return true; }  // the poly engine always renders
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
+diff --git a/include/forge/midi_shell.hpp b/include/forge/midi_shell.hpp
+index 27f98d0..cdecceb 100644
+--- a/include/forge/midi_shell.hpp
++++ b/include/forge/midi_shell.hpp
+@@ -24,6 +24,7 @@
+ //  * process() runs the chain over midi_in → midi_out, reading its macros from
+ //    the BOUND state() each block (the instrument BUG-A discipline).
+ 
++#include "forge/brand.hpp"
+ #include "forge/midi_transform.hpp"
+ #include "forge/gen/midi_chain_loader.hpp"  // ResolvedMidiMacro
+ #include "forge/param_map.hpp"
+@@ -79,6 +80,18 @@ public:
+                                  std::string& err);
+ 
+     // ── ForgeShell hooks (MIDI-specific) ─────────────────────────────────────
++    // The words the chrome shows for this product. These are exactly what
++    // chrome.cpp's switch statements returned before the copy moved here.
++    ChromeCopy chrome_copy() const override {
++        return { .badge = std::string(brand::kProductNameUpper) + " MIDI",
++                 .prompt_placeholder = "a scale-locked up-down arpeggiator\u2026",
++                 .followup_placeholder = "refine it \u2014 e.g. swing the offbeats",
++                 .hero_eyebrow = std::string(brand::kProductNameUpper) +
++                             " \u00b7 AI PLUGIN FACTORY",
++             .hero_title = "What do you want to build?",
++             .default_build_title = "Note Pass" };
++    }
++
+     bool has_build() const override { return true; }  // a chain is always installed
+     std::vector<MacroDesc> macro_descriptors() const override;
+     bool install_generated_bundle(
 diff --git a/include/forge/shell.hpp b/include/forge/shell.hpp
 index c8101e1..433eb33 100644
 --- a/include/forge/shell.hpp
@@ -274,7 +414,7 @@ index c8101e1..433eb33 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..b649015 100644
+index 1c3814e..551866b 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,81 @@ private:
@@ -484,7 +624,7 @@ index 1c3814e..b649015 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -1993,6 +2057,28 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1993,6 +2057,29 @@ void ForgeChrome::build_home(View& parent) {
      actions->flex().align_items = FlexAlign::center;
      actions->flex().margin_top = 10;
      actions->flex().flex_shrink = 0;
@@ -492,6 +632,7 @@ index 1c3814e..b649015 100644
 +    // A product may describe its own row. An empty description means "the
 +    // standard one", so the three original products are unaffected and this is
 +    // not a breaking change for anything that does not care.
++    composer_actions_ = actions.get();
 +    if (auto described = shell_.composer_row();
 +        !described.left.empty() || !described.right.empty()) {
 +        for (const auto& a : described.left) {
@@ -513,7 +654,7 @@ index 1c3814e..b649015 100644
      auto attach = std::make_unique<TextButton>();
      home_attach_button_ = attach.get();
      attach->set_style(TextButton::Style::ghost);
-@@ -2047,6 +2133,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -2047,6 +2134,7 @@ void ForgeChrome::build_home(View& parent) {
      };
      actions->add_child(std::move(send));
      box->add_child(std::move(actions));
@@ -521,7 +662,7 @@ index 1c3814e..b649015 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3401,7 +3488,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3401,7 +3489,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -530,7 +671,7 @@ index 1c3814e..b649015 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -3611,6 +3698,13 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3611,6 +3699,13 @@ void ForgeChrome::build_stage(View& parent) {
      scripted->set_visible(false);
      stage->add_child(std::move(scripted));
  
@@ -544,7 +685,7 @@ index 1c3814e..b649015 100644
      viewport->add_child(std::move(stage));
      viewport->set_content_size(
          {static_cast<float>(kDesignWidth), static_cast<float>(kDesignHeight)});
-@@ -4268,7 +4362,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4363,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -553,7 +694,7 @@ index 1c3814e..b649015 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -4327,6 +4421,66 @@ void ForgeChrome::enter_home() {
+@@ -4327,6 +4422,91 @@ void ForgeChrome::enter_home() {
      apply_modes();
  }
  
@@ -565,6 +706,31 @@ index 1c3814e..b649015 100644
 +    // "Untitled module" for the whole build.
 +    refresh_shell_chrome();
 +    if (root_) root_->request_repaint();
++}
++
++void ForgeChrome::refresh_composer_row() {
++    // Rebuild the described row from the shell. It was built once, so a
++    // product whose row depends on state -- Forge Modular's Build button says
++    // "module" or "patch" -- kept the label it was born with: the Patch tab
++    // selected above a button still offering to build a module.
++    if (!composer_actions_) return;
++    auto described = shell_.composer_row();
++    if (described.left.empty() && described.right.empty()) return;
++
++    while (composer_actions_->child_count() > 0)
++        composer_actions_->remove_child(composer_actions_->child_at(0));
++    for (const auto& a : described.left) {
++        auto b = make_composer_action(a);
++        b->flex().margin_right = 8;
++        composer_actions_->add_child(std::move(b));
++    }
++    composer_actions_->add_child(make_spacer());
++    for (const auto& a : described.right) {
++        auto b = make_composer_action(a);
++        b->flex().margin_left = 8;
++        composer_actions_->add_child(std::move(b));
++    }
++    if (root_) { root_->invalidate_layout(); root_->request_repaint(); }
 +}
 +
 +void ForgeChrome::set_status_activity(const std::string& text) {
@@ -620,7 +786,7 @@ index 1c3814e..b649015 100644
  void ForgeChrome::enter_build() {
      // The shell's generated source is worker-owned until the exact terminal
      // event has been reduced. Build can become the visible destination now,
-@@ -5726,7 +5880,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5906,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -629,7 +795,7 @@ index 1c3814e..b649015 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +6013,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +6039,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -638,7 +804,7 @@ index 1c3814e..b649015 100644
      enter_home();
  }
  
-@@ -5920,6 +6074,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -5920,6 +6100,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
      // reduced, so it owns the mutation transaction for that whole interval.
      if (marketplace_open_worker_.joinable()) return false;
      const std::string text = trim_copy(prompt);
@@ -655,7 +821,7 @@ index 1c3814e..b649015 100644
      std::optional<RecoverableTurn> pending_replay;
      bool replaying_pending_submission = false;
      const RecoverableTurn* pending_submission =
-@@ -6189,6 +6353,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -6189,6 +6379,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
  }
  
  void ForgeChrome::poll() {
@@ -666,7 +832,7 @@ index 1c3814e..b649015 100644
      // Publication callbacks may arrive on arbitrary provider threads. They
      // write only to a shared mailbox; the host's UI-thread tick owns every
      // ForgeChrome and widget mutation.
-@@ -6379,7 +6547,7 @@ void ForgeChrome::schedule_poll() {
+@@ -6379,7 +6573,7 @@ void ForgeChrome::schedule_poll() {
              if (!alive->load(std::memory_order_acquire)) return;
              poll_armed_ = false;
              poll();
@@ -675,7 +841,7 @@ index 1c3814e..b649015 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -8630,6 +8798,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8824,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -695,7 +861,7 @@ index 1c3814e..b649015 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9181,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9207,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -710,7 +876,7 @@ index 1c3814e..b649015 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9195,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9221,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -721,7 +887,7 @@ index 1c3814e..b649015 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9206,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9232,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
