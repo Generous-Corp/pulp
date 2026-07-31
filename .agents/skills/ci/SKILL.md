@@ -629,6 +629,39 @@ Related trap: ctest label-exclusion lists drift between lanes. `build.yml` exclu
 the Rosetta lane excluded only `validation|slow`, which let wall-clock-budget tests
 run under an emulator at a third of native speed. When adding a timing-sensitive
 test or label, update every lane's `-LE`.
+## Moving ADVISORY work is what shortens the required path
+
+The instinct when merges are slow is to speed up the required checks. On Pulp the
+required checks are mostly fast — they are *waiting*. Measured on one PR: three
+required checks each sat ~16 minutes to do under 2 minutes of work, while advisory
+lanes held the hosted pool.
+
+So the lever is relocating advisory load, not optimising required jobs:
+
+```
+UndefinedBehaviorSanitizer (macOS)   81.6m wait + 75.4m run   advisory
+x86_64 Rosetta                       43.3m wait + 51.7m run   advisory
+Linux (x64)                          74.8m wait + 26.1m run   advisory
+GCC compile (core, Linux)            63.2m wait + 11.3m run   advisory
+Build + prove (wclap)                22.3m wait + 16.5m run   REQUIRED
+```
+
+**Route advisory lanes, never required ones, to home hardware.** `runs-on` has no
+automatic fallback: once a variable points at a self-hosted pool, a power or ISP
+outage makes jobs queue indefinitely rather than error. On an advisory lane that is
+a slow check; on a required one it strands every merge, including for external
+contributors.
+
+Pattern for adding a routable lane — ship the plumbing inert, flip later:
+
+```yaml
+runs-on: ${{ fromJSON(vars.PULP_LOCAL_X_RUNS_ON_JSON || '"ubuntu-24.04"') }}
+```
+
+Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in the
+same change, or the hourly topology check reports an unset lane as having no route
+at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
+it.
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
