@@ -78,8 +78,24 @@ for part in "${PARTS[@]}"; do
       printf '%s\n' 'modules/' 'patches/' 'plugin.json' \
         'src/generated_modules.hpp' 'src/*.cpp' 'res/' >> "$exclude_file"
     fi
-    rsync -a --delete --exclude-from="$exclude_file" \
-      "$SRC/$part/" "$DEST/$part/"
+    # A FRESH install has no generated state to protect, and the exclusions
+    # above would leave it with none at all: no manifests, so nothing to emit a
+    # panel from, so the verification below fails on a machine that has done
+    # nothing wrong. Seed it once from the committed set, which is internally
+    # consistent by construction because it was committed together.
+    #
+    # Keyed on the plugin-level manifest rather than on the directory: an
+    # interrupted first install can leave modules/ existing and empty, and
+    # seeding is exactly what that machine still needs.
+    if [ "$part" = "examples/forge-modular" ] &&
+       [ ! -f "$DEST/$part/modules/_plugin.json" ]; then
+      echo "  seeding the module pack (first install)"
+      rsync -a --exclude=__pycache__ --exclude='*.pyc' --exclude=build \
+        "$SRC/$part/" "$DEST/$part/"
+    else
+      rsync -a --delete --exclude-from="$exclude_file" \
+        "$SRC/$part/" "$DEST/$part/"
+    fi
     rm -f "$exclude_file"
   else
     cp "$SRC/$part" "$DEST/$part"
