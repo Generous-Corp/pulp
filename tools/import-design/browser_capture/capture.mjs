@@ -697,7 +697,15 @@ async function runCapture(options) {
       : "";
     await Promise.all([
       writeFile(path.join(outputDir, "browser.png"), screenshotBytes),
-      writeJson(path.join(outputDir, "dom-snapshot.json"), sanitizedSnapshot),
+      // `layout.styles` rows are positional: entry N is the Nth property of
+      // the request. Recording the request order alongside the data keeps the
+      // snapshot self-describing, so a consumer never has to hardcode a
+      // parallel copy of COMPUTED_STYLES that would silently map a background
+      // into a border the first time this list changes.
+      writeJson(path.join(outputDir, "dom-snapshot.json"), {
+        ...sanitizedSnapshot,
+        computedStyleNames: COMPUTED_STYLES,
+      }),
       writeJson(path.join(outputDir, "semantic-report.json"), semanticReport),
       writeJson(path.join(outputDir, "tokens.json"), tokenReport),
       ...(interactionReport

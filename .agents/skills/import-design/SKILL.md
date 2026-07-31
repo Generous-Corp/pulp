@@ -206,6 +206,43 @@ reproduces the design; the others below do NOT and waste hours:
   If system discovery is insufficient, run
   `pulp tool install chrome-for-testing`; use
   `pulp tool doctor chrome-for-testing --run` for diagnostics.
+**Chrome's solved appearance reaches the IR through `dom-snapshot.json`.**
+`DOMSnapshot.captureSnapshot` is asked for the `COMPUTED_STYLES` list in
+`browser_capture/semantics.mjs`, and the values land in
+`documents[0].layout.styles` — rows of string-table indices, one row per
+*layout* node, each row **positional** against the requested property list.
+`browser_capture_styles.cpp` owns the join and the CSS→`IRStyle` mapping.
+Facts worth knowing before touching any of it:
+
+- **The rows are addressed by layout node; the semantic report is addressed by
+  `backend_node_id`.** The join is three hops: backend id → node index
+  (`nodes.backendNodeId`) → layout index (`layout.nodeIndex`) → style row.
+- **A control's own node usually carries only its label's styling.** The
+  gradient, radius, and shadow stack that make it look like a knob sit on an
+  inner face element. Resolve through the candidate's `paint_bounds` — match it
+  against `layout.bounds` within the candidate's subtree — or you get the
+  caption's font where you expected the knob's fill.
+- **`computedStyleNames` in the snapshot is the property order.** It is written
+  alongside the data precisely so no consumer hardcodes a parallel copy of
+  `COMPUTED_STYLES`; a drifted copy does not fail loudly, it maps a background
+  into a border. A snapshot without that key is skipped rather than decoded
+  against a guess.
+- **Gotcha — the capture's path-redaction pass used to eat the CSS alpha
+  separator.** `sanitizeSnapshot` (`security.mjs`) rewrites bare local paths to
+  `<local-path>`, and a lone `/` surrounded by spaces matched. Chrome serializes
+  translucent modern colours as `oklab(L a b / 0.34)` — and `color-mix(in oklab,
+  … )` resolves to exactly that — so every translucent colour and every
+  box-shadow layer arrived unparseable, silently, with no error and no log. The
+  regex now requires at least one character after the slash. If you touch those
+  redaction regexes, re-run the capture on a panel built from `color-mix()` and
+  grep the snapshot for `<local-path>`: zero hits is the pass condition.
+- **Do not carry `transform` onto a control node.** It is placed by its
+  `paint_bounds`, which is already the transformed rectangle; re-applying the
+  matrix transforms it twice, off its own artwork.
+- **Do not carry a border colour without a border width.** Computed style
+  reports `border-*-color` on every element whether or not one is drawn, so an
+  ungated mapping paints borders the design never had.
+
 - When improving the offline/native HTML importer, use the development-only
   Importer Differential Lab rather than changing the authoritative browser
   route. It runs Chromium and `--offline` separately, renders the candidate
