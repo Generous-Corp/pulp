@@ -45,13 +45,30 @@ const char* role_primer(SignalRole role) {
 /// asserted the STRINGS, which were correct, rather than whether they fitted.
 constexpr float kCharWidth = 6.95f;
 
+/// The same, for the monospaced face the wiring is set in. Every glyph is one
+/// advance wide there, so this is the measurement rather than an average.
+constexpr float kMonoCharWidth = 7.35f;
+
+/// Type sizes. The wiring is a shade smaller than the prose it explains: it is
+/// a label, and monospace at a matched size reads as louder than the sentence
+/// it is supposed to be subordinate to.
+constexpr float kWiringSize = 12.0f;
+constexpr float kProseSize = 12.5f;
+
+/// How far a reason is indented under the cable it belongs to. Enough that the
+/// wiring above it starts a column of its own.
+constexpr float kWhyIndent = 13.0f;
+
+/// The row's own padding, which the text does not get to use.
+constexpr float kRowPadding = 34.0f;
+
 /// Columns that fit a given content width, floored so a very narrow pane still
 /// breaks somewhere rather than emitting one enormous line.
-std::size_t columns_for(float width) {
-    // The row's own padding, which the text does not get to use.
-    const float usable = width - 34.0f;
+std::size_t columns_for(float width, float char_width = kCharWidth,
+                        float indent = 0.0f) {
+    const float usable = width - kRowPadding - indent;
     if (usable < 40.0f) return 20;
-    return static_cast<std::size_t>(usable / kCharWidth);
+    return static_cast<std::size_t>(usable / char_width);
 }
 
 }  // namespace
@@ -61,6 +78,7 @@ void PatchExplanation::set_connections(std::vector<Connection> connections,
     connections_ = std::move(connections);
     modules_ = std::move(modules);
     hovered_.reset();
+    hovered_role_.reset();
     rebuild();
 }
 
@@ -91,17 +109,25 @@ std::string PatchExplanation::line_text(std::size_t index) const {
 
     // The connection itself, always: at every depth the reader can still see
     // what is plugged into what. Depth adds, it never removes the wiring.
-    std::string text = port_label(c.from_module, c.from_port) + " \xE2\x86\x92 " +
-                       port_label(c.to_module, c.to_port);
+    //
+    // Just the wiring. The reason is a different claim and is set as one, on
+    // its own line -- see why_text(). Concatenating them here produced a
+    // paragraph in which "VCO SAW" and "the raw material the filter shapes"
+    // carried the same weight, and the list could no longer be skimmed for
+    // the connection alone.
+    return port_label(c.from_module, c.from_port) + " \xE2\x86\x92 " +
+           port_label(c.to_module, c.to_port);
+}
 
-    if (depth_ == ExplainDepth::terse) return text;
-    if (!c.why.empty()) text += " \xE2\x80\x94 " + c.why;
+std::string PatchExplanation::why_text(std::size_t index) const {
+    if (index >= connections_.size()) return {};
+    if (depth_ == ExplainDepth::terse) return {};
     // The role primer is NOT repeated here. It belongs to the role, not to
     // each cable that has it, and a patch with six modulation cables used to
     // print the same sentence six times -- which reads as padding and made
     // "learning has more lines than standard" true without teaching anything.
     // It is written once, under the heading, in rebuild().
-    return text;
+    return connections_[index].why;
 }
 
 std::vector<std::string> PatchExplanation::wrap(const std::string& text,
@@ -248,12 +274,20 @@ void PatchExplanation::apply_pending_rewrap() {
 void PatchExplanation::rebuild() {
     while (child_count() > 0) remove_child(child_at(0));
     rows_.clear();
+    headings_.clear();
 
     flex().direction = FlexDirection::column;
-    flex().gap = 6;
+    // Cables of one role sit tight against each other and the space is spent
+    // at the group boundaries instead, which is what makes the grouping
+    // visible. A uniform gap spaced a role's own cables exactly as far apart
+    // as two different roles, so the headings were the only thing saying the
+    // list had a shape.
+    flex().gap = 2;
 
     // Derived from the pane the explanation is actually in, not a constant.
     const auto columns = columns_for(bounds().width);
+    const auto wiring_columns = columns_for(bounds().width, kMonoCharWidth);
+    const auto why_columns = columns_for(bounds().width, kCharWidth, kWhyIndent);
     wrapped_at_ = bounds().width;
 
     // A patch nobody generated -- imported, or one of the shipped examples --
@@ -327,20 +361,35 @@ void PatchExplanation::rebuild() {
         header->flex().direction = FlexDirection::row;
         header->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
         header->flex().flex_shrink = 0;
-        header->flex().padding_top = 10;
-        header->flex().padding_bottom = 2;
+        // The air between one role and the next. Deliberately much larger than
+        // the gap between two cables of the same role.
+        header->flex().padding_top = 16;
+        header->flex().padding_bottom = 6;
 
         auto glyph = std::make_unique<RoleGlyph>(group.role);
         glyph->flex().margin_right = 7;
         glyph->flex().margin_top = 2;
         header->add_child(std::move(glyph));
 
+        // The strong ink: a heading is the thing being scanned for, and set in
+        // the same grey as the sentences beneath it, it stopped acting as one.
         auto title = std::make_unique<Label>(group.title);
         title->set_font_family(forge::design::type::mono);
         title->set_font_size(10.5f);
-        title->set_text_color(color::text_muted);
-        title->flex().flex_grow = 1;
+        title->set_text_color(color::text_strong);
+        title->flex().flex_shrink = 0;
         header->add_child(std::move(title));
+
+        // A rule from the title to the count, so a group reads as a band
+        // across the pane rather than as one more line of text.
+        auto rule = std::make_unique<View>();
+        rule->flex().flex_grow = 1;
+        rule->flex().preferred_height = 1;
+        rule->flex().align_self = FlexAlign::center;
+        rule->flex().margin_left = 10;
+        rule->flex().margin_right = 10;
+        rule->set_background_color(color::line);
+        header->add_child(std::move(rule));
 
         // The count, because "3 CABLES" tells you the shape of the patch
         // before you read a word of it.
@@ -350,7 +399,10 @@ void PatchExplanation::rebuild() {
         count->set_font_family(forge::design::type::mono);
         count->set_font_size(10.5f);
         count->set_text_color(color::text_faint);
+        count->flex().flex_shrink = 0;
         header->add_child(std::move(count));
+        header->set_border_radius(7);
+        headings_.push_back({header.get(), group.role});
         add_child(std::move(header));
 
         // At the deepest setting the group says what its role IS, once. This
@@ -363,20 +415,37 @@ void PatchExplanation::rebuild() {
                 // them like paragraphs while the cable lines beneath stayed
                 // tight -- the same text set two different ways.
                 auto note_block = std::make_unique<View>();
-                note_block->flex().direction = FlexDirection::column;
+                note_block->flex().direction = FlexDirection::row;
                 note_block->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
                 note_block->flex().flex_shrink = 0;
                 note_block->flex().padding_left = 24;
-                note_block->flex().padding_bottom = 2;
-                for (const auto& piece : wrap(primer, columns)) {
+                note_block->flex().padding_bottom = 6;
+
+                // A rule down the side, so the aside reads as a quotation
+                // about the role rather than as the role's first cable. It
+                // stretches to whatever the text beside it needs, which is
+                // what the default cross-axis stretch already gives.
+                auto edge = std::make_unique<View>();
+                edge->flex().preferred_width = 1;
+                edge->flex().flex_shrink = 0;
+                edge->set_background_color(color::line);
+                note_block->add_child(std::move(edge));
+
+                auto note_text = std::make_unique<View>();
+                note_text->flex().direction = FlexDirection::column;
+                note_text->flex().flex_grow = 1;
+                note_text->flex().padding_left = 11;
+                for (const auto& piece :
+                     wrap(primer, columns_for(bounds().width, kCharWidth, 12.0f))) {
                     auto note = std::make_unique<Label>(piece);
                     note->set_font_family(forge::design::type::display);
                     note->set_font_size(12.0f);
-                    note->set_text_color(color::text_faint);
+                    note->set_text_color(color::text_muted);
                     note->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
                     note->flex().flex_shrink = 0;
-                    note_block->add_child(std::move(note));
+                    note_text->add_child(std::move(note));
                 }
+                note_block->add_child(std::move(note_text));
                 add_child(std::move(note_block));
             }
         }
@@ -395,8 +464,8 @@ void PatchExplanation::rebuild() {
         row->flex().flex_shrink = 0;
         row->flex().padding_left = 24;   // room for the role dot
         row->flex().padding_right = 10;
-        row->flex().padding_top = 6;
-        row->flex().padding_bottom = 6;
+        row->flex().padding_top = 5;
+        row->flex().padding_bottom = 5;
         row->set_border_radius(7);
 
         // A dot in the cable's own colour, so a line and its cable are matched
@@ -413,7 +482,10 @@ void PatchExplanation::rebuild() {
         dot->flex().preferred_height = 8;
         // Centred on the FIRST line rather than sitting at the row's top edge,
         // where it read as a bullet on a line of its own above the text.
-        dot->flex().margin_top = 12;
+        // Tuned to the monospaced face the wiring is set in: its ink sits
+        // higher in the line box than the reading face does, and a dot placed
+        // for the reading face lands under the wiring rather than beside it.
+        dot->flex().margin_top = 7;
         dot->set_background_color(pulp::canvas::Color::rgba8(
             static_cast<std::uint8_t>((rgb >> 16) & 0xFF),
             static_cast<std::uint8_t>((rgb >> 8) & 0xFF),
@@ -421,11 +493,14 @@ void PatchExplanation::rebuild() {
         dot->set_border_radius(4);
         row->add_child(std::move(dot));
 
-        for (const auto& text : wrap(line_text(i), columns)) {
+        // The wiring, monospaced and in the strong ink: a jack name is a label
+        // off a panel, and setting it in the same face and grey as the prose
+        // beneath made the two indistinguishable at a glance.
+        for (const auto& text : wrap(line_text(i), wiring_columns)) {
             auto label = std::make_unique<Label>(text);
-            label->set_font_family(forge::design::type::display);
-            label->set_font_size(12.5f);
-            label->set_text_color(color::text_muted);
+            label->set_font_family(forge::design::type::mono);
+            label->set_font_size(kWiringSize);
+            label->set_text_color(color::text_strong);
             label->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
             // No explicit height: a single-line Label measures itself
             // correctly. Pinning one only fights a measurement that is
@@ -434,26 +509,113 @@ void PatchExplanation::rebuild() {
             row->add_child(std::move(label));
         }
 
+        // The reason, in the reading face, indented under the cable it
+        // explains -- a sentence about why someone made this choice, which is
+        // a different kind of statement from the choice itself.
+        if (const auto why = why_text(i); !why.empty()) {
+            auto why_block = std::make_unique<View>();
+            why_block->flex().direction = FlexDirection::column;
+            why_block->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+            why_block->flex().flex_shrink = 0;
+            why_block->flex().padding_left = kWhyIndent;
+            why_block->flex().padding_top = 3;
+            for (const auto& text : wrap(why, why_columns)) {
+                auto label = std::make_unique<Label>(text);
+                label->set_font_family(forge::design::type::display);
+                label->set_font_size(kProseSize);
+                label->set_text_color(color::text_muted);
+                label->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+                label->flex().flex_shrink = 0;
+                why_block->add_child(std::move(label));
+            }
+            row->add_child(std::move(why_block));
+        }
+
         rows_[i] = row.get();
         add_child(std::move(row));
         }
     }
+    // The views the hover was painted on are gone; paint it onto the new ones.
+    apply_hover_styles();
     request_repaint();
+}
+
+const View* PatchExplanation::heading_for(SignalRole role) const {
+    for (const auto& h : headings_)
+        if (h.role == role) return h.view;
+    return nullptr;
+}
+
+/// Paint the current hover onto whatever rows and headings exist now.
+///
+/// Called after a rebuild as well as from the two setters, because a rebuild
+/// throws away the very views the highlight was painted on: change depth while
+/// pointing at a role and the fresh heading came back unlit, while the setter's
+/// "you are already hovering this" early return meant pointing at it again did
+/// nothing at all.
+void PatchExplanation::apply_hover_styles() {
+    const auto clear = pulp::canvas::Color::rgba8(0, 0, 0, 0);
+    for (std::size_t i = 0; i < rows_.size(); ++i) {
+        if (!rows_[i]) continue;
+        const bool on = hovered_ && *hovered_ == i;
+        rows_[i]->set_background_color(on ? color::surface_raised : clear);
+        rows_[i]->request_repaint();
+    }
+    for (const auto& h : headings_) {
+        if (!h.view) continue;
+        const bool on = hovered_role_ && *hovered_role_ == h.role;
+        h.view->set_background_color(on ? color::surface_raised : clear);
+        h.view->request_repaint();
+    }
 }
 
 void PatchExplanation::hover_line(std::optional<std::size_t> index) {
     if (index && *index >= connections_.size()) index.reset();
+    // A cable and a role are two readings of the same rack, and holding both
+    // would light one role plus one stray wire outside it.
+    if (index) hover_role(std::nullopt);
     if (index == hovered_) return;
     hovered_ = index;
+    apply_hover_styles();
+    if (on_hover) on_hover(hovered_);
+}
 
+void PatchExplanation::hover_role(std::optional<SignalRole> role) {
+    if (role && !heading_for(*role)) role.reset();
+    if (role) hover_line(std::nullopt);
+    if (role == hovered_role_) return;
+    hovered_role_ = role;
+    apply_hover_styles();
+    if (on_role_hover) on_role_hover(hovered_role_);
+}
+
+void PatchExplanation::on_hover_move(pulp::view::Point local_pos) {
+    // Rows and headings are laid out as a stack, so the pointer's y alone says
+    // which one it is over -- and a point in the gap between two of them is
+    // over neither, which is the honest answer.
+    for (const auto& h : headings_) {
+        if (!h.view) continue;
+        const auto b = h.view->bounds();
+        if (local_pos.y >= b.y && local_pos.y < b.y + b.height) {
+            hover_role(h.role);
+            return;
+        }
+    }
     for (std::size_t i = 0; i < rows_.size(); ++i) {
         if (!rows_[i]) continue;
-        const bool on = hovered_ && *hovered_ == i;
-        rows_[i]->set_background_color(on ? color::surface_raised
-                                          : pulp::canvas::Color::rgba8(0, 0, 0, 0));
-        rows_[i]->request_repaint();
+        const auto b = rows_[i]->bounds();
+        if (local_pos.y >= b.y && local_pos.y < b.y + b.height) {
+            hover_line(i);
+            return;
+        }
     }
-    if (on_hover) on_hover(hovered_);
+    hover_line(std::nullopt);
+    hover_role(std::nullopt);
+}
+
+void PatchExplanation::on_mouse_leave() {
+    hover_line(std::nullopt);
+    hover_role(std::nullopt);
 }
 
 }  // namespace forge_modular

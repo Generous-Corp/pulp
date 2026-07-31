@@ -73,6 +73,18 @@ public:
     bool is_open() const { return open_; }
     void close();
 
+    /// Drop the pointers into a view tree that is going away.
+    ///
+    /// The overlay belongs to the shell, which outlives every editor, while the
+    /// views belong to the editor's tree. `build()` supplies fresh ones for the
+    /// next editor; between the two there is nothing here to point at, and a
+    /// kept pointer would name freed memory.
+    void forget_views() {
+        root_ = nullptr;
+        list_ = nullptr;
+        open_ = false;
+    }
+
     /// What is currently listed, in order. Exposed so a test can assert the
     /// filtering rather than scrape the view tree.
     const std::vector<MentionCandidate>& candidates() const { return candidates_; }

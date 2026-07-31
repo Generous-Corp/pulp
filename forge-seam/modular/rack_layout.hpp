@@ -113,6 +113,33 @@ inline constexpr float kHorizontalPitch = 15.0f;
 /// A 3U panel's height, unscaled.
 inline constexpr float kPanelHeight = 380.0f;
 
+/// How far a rail screw sits from the panel's own edge, unscaled.
+///
+/// These are the holes the generated artwork already draws -- 7.62mm in from
+/// each side, 2.54mm down from each rail -- restated in panel points so the
+/// painted screw lands ON the hole rather than beside it. A second screw drawn
+/// a few points off the first reads as a printing error, which is worse than
+/// the flat hole it was meant to improve.
+inline constexpr float kScrewInsetX = 22.5f;   ///< 1.5 HP
+inline constexpr float kScrewInsetY = 7.5f;    ///< 0.5 HP
+/// A rail screw's head radius, unscaled. Slightly proud of the 7.53pt hole in
+/// the artwork, so the head covers it instead of leaving a ring around itself.
+inline constexpr float kScrewRadius = 7.9f;
+
+/// A jack's outer radius, unscaled: the nut a lead screws into, sized to the
+/// 10.6mm jacks the generated artwork draws so a socket painted on a bare
+/// panel is the same size as one that came with its module's picture.
+inline constexpr float kJackRadius = 13.0f;
+
+/// Where a panel's rail screws go, in view coordinates.
+///
+/// Two per rail on anything wider than 3 HP; a 3 HP panel has room for one, and
+/// the two columns collapse onto it rather than producing a pair of screws
+/// 5 mm apart. Ordered top-left, top-right, bottom-left, bottom-right, with the
+/// right-hand column dropped when it coincides with the left.
+struct ScrewPoint { float x = 0, y = 0; };
+std::vector<ScrewPoint> screw_points(const PanelBox& panel, float scale);
+
 /// Lay the rack out inside a viewport.
 ///
 /// Panels butt together with no gutters, because that is what a rack does.

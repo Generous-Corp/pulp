@@ -160,6 +160,25 @@ public:
     /// last step of every build was "go find the file yourself".
     std::string open_in_rack();
 
+    /// How this shell is allowed to start another application.
+    ///
+    /// Nothing is launched unless something INSTALLS one of these. A bare
+    /// shell -- which is what every test builds -- decides what it would run,
+    /// records it, and runs nothing.
+    ///
+    /// It used to call `open` directly, so the test suite really launched VCV
+    /// Rack: twice per run, taking over the screen of whoever was using the
+    /// machine, and again for every agent looping the suite. A test may prove
+    /// which command it chose; it may not open an application on somebody's
+    /// desktop.
+    using Launcher = std::function<void(const std::string& command)>;
+    void set_launcher(Launcher l) { launcher_ = std::move(l); }
+
+    /// Every command this shell would have run, in order. Exposed so a test
+    /// can assert the DECISION -- which command, and when -- without anything
+    /// being launched.
+    const std::vector<std::string>& launched() const { return launched_; }
+
     /// True only for the standalone app. Hosted builds must not steal focus
     /// from the DAW session by launching another application.
     bool is_standalone() const;
@@ -220,6 +239,23 @@ public:
     std::unique_ptr<pulp::view::View> chat_accessory() override;
 
     void on_poll() override;
+
+    /// Forget every pointer into the editor's view tree.
+    ///
+    /// This shell IS the processor: it outlives every editor its host opens.
+    /// The pointers below are borrowed from a tree the chrome owns, so once the
+    /// editor closes they name freed memory -- and a build finishing a beat
+    /// later still walks them, because `on_poll` reaches `show_rack` through
+    /// the outcome it has just read from the log. `set_connections` then
+    /// move-assigns over the destroyed view's `connections_`, freeing a pointer
+    /// that was never allocated, which is an immediate abort inside libmalloc.
+    ///
+    /// Cleared BEFORE the base class runs, because the chrome owns some of
+    /// these views outright rather than merely containing them: the chat
+    /// accessory is held in `retired_chat_`, so it dies inside `~ForgeChrome`
+    /// -- during this call -- and not with the tree afterwards.
+    void on_view_closed(pulp::view::View& view) override;
+
     bool busy() const override;
     bool owns_generation() const override { return true; }
     std::string submit_own(const std::string& prompt) override;
@@ -315,6 +351,11 @@ private:
     std::vector<pulp::view::Label*> depth_labels_;
     pulp::view::View* depth_group_ = nullptr;
     pulp::view::TextButton* open_button_ = nullptr;
+    Launcher launcher_;
+    std::vector<std::string> launched_;
+    /// Run `command`, or merely record it when nobody installed a launcher.
+    void run_detached(const std::string& command);
+
     pulp::view::Label* rack_pill_ = nullptr;
     std::string rack_phrase_;
     /// When the presence was last probed. `pgrep` on every poll would be a

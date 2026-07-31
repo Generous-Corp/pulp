@@ -72,6 +72,15 @@ ProcessEngine& shared_engine() {
 
 std::unique_ptr<pulp::format::Processor> create_forge_modular() {
     auto shell = std::make_unique<ForgeModularShell>();
+    // The real launcher is installed HERE, on the way to being a plugin or an
+    // app -- never in the shell's constructor. A shell built by a test has
+    // none and therefore cannot open anything on anyone's screen.
+    shell->set_launcher([](const std::string& command) {
+        std::thread([command] {
+            std::string out;
+            ProcessEngine::run(command + " &", out);
+        }).detach();
+    });
     shell->set_engine(&shared_engine());
     shell->watch_build_log(build_log_path());
     return shell;
@@ -570,6 +579,13 @@ std::unique_ptr<View> ForgeModularShell::chat_accessory() {
     explanation->on_hover = [this](std::optional<std::size_t> index) {
         if (rack_preview_) rack_preview_->set_highlight(index);
     };
+    // The larger unit: point at a role's heading and every cable carrying it
+    // lights at once, so the audio path is read as a shape through the rack
+    // rather than as three sentences that happen to be adjacent. The preview
+    // could already draw this; nothing had ever asked it to.
+    explanation->on_role_hover = [this](std::optional<SignalRole> role) {
+        if (rack_preview_) rack_preview_->highlight_role(role);
+    };
     column->add_child(std::move(explanation));
 
     show_for_artifact();
@@ -860,6 +876,13 @@ std::string rack_open_command(const std::string& app, const std::string& patch,
     return "open -a " + quoted(app) + " --args " + quoted(patch);
 }
 
+void ForgeModularShell::run_detached(const std::string& command) {
+    // Recorded either way, so a test can assert WHICH command was chosen.
+    launched_.push_back(command);
+    if (!launcher_) return;   // nobody wired one: decide, record, launch nothing
+    launcher_(command);
+}
+
 std::string ForgeModularShell::open_in_rack() {
     // Re-checked at click time, not just at paint time. A generation can start
     // between the two, and opening a file being rewritten is worse than
@@ -874,14 +897,9 @@ std::string ForgeModularShell::open_in_rack() {
 
     const auto rack = look_for_rack();
 
-    auto launch = [path, &rack] {
-        const bool running = rack.standalone_running;
-        std::thread([path, running] {
-            std::string out;
-            ProcessEngine::run(
-                rack_open_command("/Applications/VCV Rack 2 Free.app", path,
-                                  running) + " &", out);
-        }).detach();
+    auto launch = [this, path, &rack] {
+        run_detached(rack_open_command("/Applications/VCV Rack 2 Free.app",
+                                       path, rack.standalone_running));
     };
 
     // Already open: hand it the patch, wherever we are running. `open` on a
@@ -914,10 +932,7 @@ std::string ForgeModularShell::open_in_rack() {
     }
 
     // No Rack at all. Show the file rather than describing it.
-    std::thread([path] {
-        std::string out;
-        ProcessEngine::run("open -R '" + path + "' &", out);
-    }).detach();
+    run_detached("open -R '" + path + "'");
     return "VCV Rack is not installed \u2014 showing the file in Finder instead";
 }
 
@@ -1108,6 +1123,38 @@ void ForgeModularShell::on_poll() {
             rack_pill_->request_repaint();
         }
     }
+}
+
+void ForgeModularShell::on_view_closed(pulp::view::View& view) {
+    // Every pointer below is BORROWED from the editor's view tree, and this
+    // shell outlives that tree -- a host closes and reopens a plugin window
+    // freely while the processor stays loaded. Kept across the close they name
+    // freed memory, and the next thing the shell does with them is not a read:
+    // a build that finishes on the following poll runs `show_rack`, whose
+    // `set_connections` move-assigns over the destroyed view's `connections_`
+    // and hands libmalloc a pointer that was never allocated.
+    //
+    // Cleared BEFORE the base runs. The base destroys the chrome, and the
+    // chrome OWNS some of these views rather than merely containing them --
+    // `clear_chat_rail` moves the chat accessory into its retired list -- so
+    // they are freed during that call, not with the tree afterwards.
+    //
+    // Every use site already guards on null, so forgetting them turns the
+    // whole window between one editor and the next into a no-op. The next
+    // `create_view` supplies fresh ones through the accessory hooks.
+    rack_preview_ = nullptr;
+    explanation_ = nullptr;
+    module_summary_ = nullptr;
+    depth_tabs_.clear();
+    depth_labels_.clear();
+    depth_group_ = nullptr;
+    open_button_ = nullptr;
+    rack_pill_ = nullptr;
+    tab_labels_.clear();
+    tab_module_ = nullptr;
+    tab_patch_ = nullptr;
+    mentions_.forget_views();
+    forge::ForgeShell::on_view_closed(view);
 }
 
 void ForgeModularShell::refresh_rack_presence() {

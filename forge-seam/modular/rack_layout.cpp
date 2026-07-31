@@ -59,6 +59,31 @@ RackLayout layout_rack(const std::vector<RackModule>& modules,
     return out;
 }
 
+std::vector<ScrewPoint> screw_points(const PanelBox& panel, float scale) {
+    std::vector<ScrewPoint> out;
+    if (!(panel.width > 0.0f) || !(panel.height > 0.0f)) return out;
+
+    const float inset_x = kScrewInsetX * scale;
+    const float inset_y = kScrewInsetY * scale;
+    const float left = panel.x + inset_x;
+    const float right = panel.x + panel.width - inset_x;
+    // At 3 HP the two columns land on the same point, and a narrower panel
+    // would put them the wrong way round. One centred screw is what the
+    // artwork draws there, and what a real 3 HP module has.
+    const bool one_column = right <= left + 0.5f;
+    const float mid = panel.x + panel.width / 2.0f;
+
+    for (const float y : {panel.y + inset_y, panel.y + panel.height - inset_y}) {
+        if (one_column) {
+            out.push_back({mid, y});
+        } else {
+            out.push_back({left, y});
+            out.push_back({right, y});
+        }
+    }
+    return out;
+}
+
 namespace {
 
 const RackModule* find_module(const std::vector<RackModule>& modules,

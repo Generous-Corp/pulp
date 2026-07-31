@@ -50,6 +50,8 @@ using Catch::Approx;
 #include <algorithm>
 #include <set>
 #include <string>
+#include <array>
+#include <cmath>
 #include <vector>
 
 namespace {
@@ -1619,6 +1621,450 @@ TEST_CASE("the preview names its panels", "[rack][render]") {
     CHECK(named != blank);               // the names actually reached the canvas
 }
 
+namespace {
+
+/// A decoded frame, so a test can look at pixels rather than at file sizes.
+struct Frame {
+    std::size_t w = 0, h = 0;
+    std::vector<std::uint8_t> rgba;
+    bool ok() const { return w > 0 && h > 0; }
+    std::array<int, 3> at(std::size_t x, std::size_t y) const {
+        const std::size_t i = (y * w + x) * 4;
+        return {rgba[i], rgba[i + 1], rgba[i + 2]};
+    }
+    /// Rec. 709 luma, which is what "lighter" and "darker" mean to an eye.
+    double luma(std::size_t x, std::size_t y) const {
+        const auto p = at(x, y);
+        return 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+    }
+};
+
+Frame decode(const std::vector<std::uint8_t>& png) {
+    Frame f;
+    if (png.empty()) return f;
+    auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    auto* src = CGImageSourceCreateWithData(data, nullptr);
+    if (src && CGImageSourceGetCount(src) > 0) {
+        auto* img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        if (img) {
+            const std::size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+            std::vector<std::uint8_t> rgba(w * h * 4, 0);
+            auto* cs = CGColorSpaceCreateDeviceRGB();
+            auto* ctx = CGBitmapContextCreate(rgba.data(), w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast);
+            if (ctx) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+                f.w = w;
+                f.h = h;
+                f.rgba = std::move(rgba);
+                CGContextRelease(ctx);
+            }
+            CGColorSpaceRelease(cs);
+            CGImageRelease(img);
+        }
+    }
+    if (src) CFRelease(src);
+    CFRelease(data);
+    return f;
+}
+
+/// A flat field of one colour, filed as a module's panel artwork.
+///
+/// Uniform on purpose: every assertion below is "this part of the panel is no
+/// longer the colour the panel is", which only means anything when the panel
+/// was one colour to begin with. Real artwork has knobs and silkscreen in it,
+/// so a test written on real artwork would be measuring the artwork.
+std::filesystem::path flat_panel_dir(const char* slug, const char* fill) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     (std::string("forge-flat-panel-") + slug);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::ofstream svg(dir / (std::string(slug) + "-dark.svg"));
+    svg << R"(<svg xmlns="http://www.w3.org/2000/svg" width="150" height="380" )"
+        << R"(viewBox="0 0 150 380"><rect x="-4" y="-4" width="158" height="388" fill=")"
+        << fill << R"("/></svg>)";
+    return dir;
+}
+
+/// The mean luma of one column of the frame.
+double column_luma(const Frame& f, std::size_t x) {
+    if (!f.ok() || x >= f.w) return 0.0;
+    double sum = 0;
+    for (std::size_t y = 0; y < f.h; ++y) sum += f.luma(x, y);
+    return sum / static_cast<double>(f.h);
+}
+
+/// How much of a disc is within `tol` of a colour, 0..1.
+double disc_coverage(const Frame& f, double cx, double cy, double r,
+                     std::array<int, 3> want, int tol) {
+    if (!f.ok() || !(r > 0)) return 0.0;
+    std::size_t hits = 0, total = 0;
+    const int r_i = static_cast<int>(std::ceil(r));
+    for (int dy = -r_i; dy <= r_i; ++dy)
+        for (int dx = -r_i; dx <= r_i; ++dx) {
+            if (dx * dx + dy * dy > r * r) continue;
+            const double x = cx + dx, y = cy + dy;
+            if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
+            ++total;
+            const auto p = f.at(static_cast<std::size_t>(x), static_cast<std::size_t>(y));
+            if (std::abs(p[0] - want[0]) <= tol && std::abs(p[1] - want[1]) <= tol &&
+                std::abs(p[2] - want[2]) <= tol) ++hits;
+        }
+    return total ? double(hits) / double(total) : 0.0;
+}
+
+/// Pixels inside a disc that are both light and close to neutral grey.
+///
+/// The signature of bare metal, and specifically NOT of a cable: every cable
+/// colour in the patch is saturated, so a light pixel with its three channels
+/// within a few counts of each other can only have come from something painted
+/// as hardware.
+std::size_t count_light_neutral(const Frame& f, double cx, double cy, double r,
+                                double min_luma = 100.0, int max_spread = 30) {
+    std::size_t hits = 0;
+    const int r_i = static_cast<int>(std::ceil(r));
+    for (int dy = -r_i; dy <= r_i; ++dy)
+        for (int dx = -r_i; dx <= r_i; ++dx) {
+            if (dx * dx + dy * dy > r * r) continue;
+            const double x = cx + dx, y = cy + dy;
+            if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
+            const auto px = static_cast<std::size_t>(x);
+            const auto py = static_cast<std::size_t>(y);
+            if (f.luma(px, py) < min_luma) continue;
+            const auto p = f.at(px, py);
+            const int spread = *std::max_element(p.begin(), p.end()) -
+                               *std::min_element(p.begin(), p.end());
+            if (spread <= max_spread) ++hits;
+        }
+    return hits;
+}
+
+/// The darkest and lightest luma inside a disc.
+std::pair<double, double> disc_luma_range(const Frame& f, double cx, double cy,
+                                          double r) {
+    double lo = 1e9, hi = -1e9;
+    const int r_i = static_cast<int>(std::ceil(r));
+    for (int dy = -r_i; dy <= r_i; ++dy)
+        for (int dx = -r_i; dx <= r_i; ++dx) {
+            if (dx * dx + dy * dy > r * r) continue;
+            const double x = cx + dx, y = cy + dy;
+            if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
+            const double l = f.luma(static_cast<std::size_t>(x),
+                                    static_cast<std::size_t>(y));
+            lo = std::min(lo, l);
+            hi = std::max(hi, l);
+        }
+    if (lo > hi) return {0.0, 0.0};
+    return {lo, hi};
+}
+
+}  // namespace
+
+TEST_CASE("a rail screw goes where the artwork's hole is", "[rack]") {
+    // The arithmetic behind the painted screw, asserted exactly. The generated
+    // panels draw their screw HOLES at 7.62mm in from each side and 2.54mm
+    // down from each rail; a painted screw a few points off one lands beside
+    // it and reads as a printing error rather than as an improvement.
+    forge_modular::PanelBox wide{"w", 100.0f, 40.0f, 12 * forge_modular::kHorizontalPitch,
+                                 forge_modular::kPanelHeight};
+    const auto pts = forge_modular::screw_points(wide, 1.0f);
+    REQUIRE(pts.size() == 4);
+    CHECK(pts[0].x == Approx(100.0f + 22.5f));
+    CHECK(pts[1].x == Approx(100.0f + 180.0f - 22.5f));
+    CHECK(pts[0].y == Approx(40.0f + 7.5f));
+    CHECK(pts[2].y == Approx(40.0f + 380.0f - 7.5f));
+    // Top pair first, then the bottom pair: the painting relies on nothing
+    // else, but a silently reordered list would move every screw at once.
+    CHECK(pts[0].y == Approx(pts[1].y));
+    CHECK(pts[2].y == Approx(pts[3].y));
+
+    // 22.5pt is 1.5 HP, so at 3 HP the two columns meet. One centred screw is
+    // what the artwork draws there and what a real 3 HP module has -- a pair
+    // 5mm apart would be neither.
+    forge_modular::PanelBox narrow{"n", 0.0f, 0.0f, 3 * forge_modular::kHorizontalPitch,
+                                   forge_modular::kPanelHeight};
+    const auto few = forge_modular::screw_points(narrow, 1.0f);
+    REQUIRE(few.size() == 2);
+    CHECK(few[0].x == Approx(22.5f));
+    CHECK(few[0].x == Approx(narrow.width / 2.0f));
+
+    // Scaled with the rack, or the screws crawl inwards as the window shrinks.
+    forge_modular::PanelBox half{"h", 0.0f, 0.0f,
+                                 12 * forge_modular::kHorizontalPitch * 0.5f,
+                                 forge_modular::kPanelHeight * 0.5f};
+    const auto small = forge_modular::screw_points(half, 0.5f);
+    REQUIRE(small.size() == 4);
+    CHECK(small[0].x == Approx(11.25f));
+    CHECK(small[0].y == Approx(3.75f));
+
+    // A panel with no width lays out no screws rather than dividing by zero.
+    CHECK(forge_modular::screw_points({}, 1.0f).empty());
+}
+
+TEST_CASE("the rack draws a screw rather than a hole", "[rack][render]") {
+    // What the artwork gives us is a hollow ring a third of a point wide,
+    // which at preview scale is a grey smudge. The tell that a screw was
+    // painted over it is RANGE: a head lit from one side and a slot cut across
+    // it put a light tone and a dark tone inside a few points of each other,
+    // which a flat panel and a hairline ring cannot do.
+    const auto dir = flat_panel_dir("SCREWTEST", "#808080");
+
+    forge_modular::RackModule mod;
+    mod.id = "m1";
+    mod.name = "SCREWTEST";
+    mod.brand = "ForgeModular";
+    mod.hp = 12;
+    forge_modular::RackPreview preview;
+    preview.set_rack({mod}, {});
+    preview.set_panel_directory(dir.string());
+    preview.set_bounds({0, 0, 900, 900});
+
+    const auto L = preview.layout_for(900, 900);
+    REQUIRE(L.panels.size() == 1);
+    const auto pts = forge_modular::screw_points(L.panels[0], L.scale);
+    REQUIRE(pts.size() == 4);
+
+    const auto f = decode(pulp::view::render_to_png(
+        preview, 900, 900, 1.0f, pulp::view::ScreenshotBackend::skia));
+    REQUIRE(f.ok());
+
+    // Strictly inside the panel. A screw is seated ON the rail, so a disc of
+    // its full radius reaches over the panel's top edge and picks up the dark
+    // stage behind it and the lit bevel along it -- which between them supply
+    // a light tone and a dark tone whether a screw was drawn or not. Measured
+    // that way this test passes with the screws switched off entirely.
+    const double r = forge_modular::kScrewRadius * L.scale * 0.7;
+    const auto [lo, hi] = disc_luma_range(f, pts[0].x, pts[0].y, r);
+    // The panel under it is a flat mid grey at luma 128. The head is lighter
+    // than that and the slot is much darker; a hollow ring on a flat field
+    // would put both ends within a few counts of 128.
+    INFO("screw disc luma " << lo << " .. " << hi);
+    CHECK(hi > 140.0);
+    CHECK(lo < 60.0);
+
+    // Two controls, both needed. The middle of the panel proves the panel is
+    // flat where nothing was drawn.
+    const auto [bare_lo, bare_hi] = disc_luma_range(
+        f, L.panels[0].x + L.panels[0].width / 2.0f,
+        L.panels[0].y + L.panels[0].height * 0.5f, r);
+    INFO("bare panel disc luma " << bare_lo << " .. " << bare_hi);
+    CHECK(bare_hi - bare_lo < 20.0);
+
+    // And the same distance down from the same rail, midway between the two
+    // screws: this is the one that matters, because it is the measurement
+    // that would still see the top edge if the disc were reaching it.
+    const auto [rail_lo, rail_hi] = disc_luma_range(
+        f, (pts[0].x + pts[1].x) / 2.0f, pts[0].y, r);
+    INFO("same rail, no screw: " << rail_lo << " .. " << rail_hi);
+    CHECK(rail_hi - rail_lo < 20.0);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("butted panels still show where one ends and the next begins",
+          "[rack][render]") {
+    // Panels butt with no gutter, because that is what a rack does -- and with
+    // nothing drawn at the join a row of modules reads as one undifferentiated
+    // strip. A preview you cannot count the modules in cannot be checked
+    // against what was asked for, which is most of what it is for.
+    //
+    // Three panels of the SAME flat artwork, so the only thing that can make
+    // the join visible is the join being drawn. Real artwork would supply its
+    // own edges and this test would pass without the seam existing.
+    const auto dir = flat_panel_dir("SEAMTEST", "#7A7A7A");
+
+    std::vector<forge_modular::RackModule> mods;
+    for (int i = 0; i < 3; ++i) {
+        forge_modular::RackModule m;
+        m.id = "m" + std::to_string(i);
+        m.name = "SEAMTEST";
+        m.brand = "ForgeModular";
+        m.hp = 10;
+        mods.push_back(m);
+    }
+    forge_modular::RackPreview preview;
+    preview.set_rack(mods, {});
+    preview.set_panel_directory(dir.string());
+    preview.set_bounds({0, 0, 700, 460});
+
+    const auto L = preview.layout_for(700, 460);
+    REQUIRE(L.panels.size() == 3);
+    const auto f = decode(pulp::view::render_to_png(
+        preview, 700, 460, 1.0f, pulp::view::ScreenshotBackend::skia));
+    REQUIRE(f.ok());
+
+    // The face of the middle panel, well away from either of its edges.
+    const auto face = column_luma(
+        f, static_cast<std::size_t>(L.panels[1].x + L.panels[1].width / 2.0f));
+    // The join between the first and second. Sampled across three columns
+    // because the seam is a hairline and the frame is anti-aliased; the
+    // darkest of them is the seam wherever the rounding put it.
+    const auto seam_x = static_cast<std::size_t>(L.panels[1].x + 0.5f);
+    double seam = 1e9;
+    for (std::size_t x = seam_x - 1; x <= seam_x + 1; ++x)
+        seam = std::min(seam, column_luma(f, x));
+
+    INFO("panel face luma " << face << ", seam luma " << seam);
+    REQUIRE(face > 40.0);                 // the artwork actually painted
+    // A quarter darker at the join. Without a seam the two are the same
+    // column of the same grey and the ratio is 1.
+    CHECK(seam < face * 0.75);
+
+    // And the seam is a seam, not a wash: a column a tenth of a panel inboard
+    // of it is back to the panel's own tone. A vignette wide enough to darken
+    // the face would pass the check above while making the rack look filthy.
+    const auto inboard = column_luma(
+        f, static_cast<std::size_t>(L.panels[1].x + L.panels[1].width * 0.25f));
+    INFO("inboard luma " << inboard);
+    CHECK(inboard > face * 0.9);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a cable lands on something on a panel with no artwork",
+          "[rack][render]") {
+    // The audio interface "missing connections": Core/AudioInterface2 is a
+    // third-party module, so we have no picture of it and draw a plain face --
+    // and every cable in the patch reached it and ended on a featureless slab.
+    // Nothing there said a lead had arrived, so the module read as unwired
+    // while being wired correctly.
+    forge_modular::RackModule src{"SRC", "ForgeModular", "SRC", 8,
+                                  {forge_modular::Port{"out", "OUT", 0.5f, 300.0f, false}}};
+    forge_modular::RackModule dst{"DST", "Fundamental", "Whatever", 8,
+                                  {forge_modular::Port{"in", "IN", 0.5f, 300.0f, true}}};
+    forge_modular::RackPreview preview;
+    preview.set_rack({src, dst},
+                     {forge_modular::Connection{"SRC", "out", "DST", "in",
+                                                forge_modular::SignalRole::audio, ""}});
+    preview.set_bounds({0, 0, 700, 460});
+
+    const auto L = preview.layout_for(700, 460);
+    const auto jack = forge_modular::port_point(L, preview.modules(), "DST", "in", "SRC");
+    REQUIRE_FALSE(jack.docked);
+
+    const auto f = decode(pulp::view::render_to_png(
+        preview, 700, 460, 1.0f, pulp::view::ScreenshotBackend::skia));
+    REQUIRE(f.ok());
+
+    const double r = forge_modular::kJackRadius * L.scale;
+    // A metal nut: LIGHT and near-NEUTRAL. Both halves are needed. Luma alone
+    // is no evidence, because the cable running into the jack is a mid green
+    // that is lighter than the panel, and the black it casts under itself is
+    // darker -- so a "light tone and a dark tone are present here" test passes
+    // with the socket switched off, measuring the cable and calling it a jack.
+    const auto metal = count_light_neutral(f, jack.x, jack.y, r);
+    INFO("light neutral pixels at the jack: " << metal);
+    CHECK(metal > 40);
+
+    // Two controls, and the second is the one that matters.
+    //
+    // The bare face, a panel's width from any cable: nothing bright at all.
+    const auto* box = L.panel("DST");
+    REQUIRE(box != nullptr);
+    const auto bare = count_light_neutral(
+        f, box->x + box->width * 0.5f, box->y + box->height * 0.2f, r);
+    INFO("light neutral pixels on the bare face: " << bare);
+    CHECK(bare == 0);
+
+    // And the middle of the same cable in the same frame -- a place where
+    // there is definitely a cable and definitely no jack. If THIS showed metal
+    // then the measurement above would be finding the cable.
+    const auto from = forge_modular::port_point(L, preview.modules(), "SRC", "out", "DST");
+    float mx = 0, my = 0;
+    forge_modular::cable_point(forge_modular::cable_curve(from, jack), 0.5f, mx, my);
+    const auto on_cable = count_light_neutral(f, mx, my, r);
+    INFO("light neutral pixels mid-cable: " << on_cable);
+    CHECK(on_cable == 0);
+}
+
+TEST_CASE("a docked cable end reads as a plug rather than a cable stopping",
+          "[rack][render]") {
+    // A module nobody ever placed has no jack coordinates, so its cables dock
+    // at the panel edge rather than guess a position. That honesty cost the
+    // drawing: the cable simply stopped, in mid-air, and a connection that is
+    // there looked like one that is not.
+    forge_modular::RackModule src{"SRC", "ForgeModular", "SRC", 8,
+                                  {forge_modular::Port{"out", "OUT", 0.5f, 300.0f, false}}};
+    forge_modular::RackModule dst{"DST", "Fundamental", "Whatever", 8,
+                                  {forge_modular::Port{"in", "IN", 0.5f, 300.0f, true}}};
+    dst.placed = false;                 // never placed: no coordinates exist
+
+    forge_modular::RackPreview preview;
+    preview.set_rack({src, dst},
+                     {forge_modular::Connection{"SRC", "out", "DST", "in",
+                                                forge_modular::SignalRole::audio, ""}});
+    preview.set_bounds({0, 0, 700, 460});
+
+    const auto L = preview.layout_for(700, 460);
+    const auto dock = forge_modular::port_point(L, preview.modules(), "DST", "in", "SRC");
+    REQUIRE(dock.docked);
+
+    const auto f = decode(pulp::view::render_to_png(
+        preview, 700, 460, 1.0f, pulp::view::ScreenshotBackend::skia));
+    REQUIRE(f.ok());
+
+    const auto rgb = forge_modular::role_color(forge_modular::SignalRole::audio);
+    const std::array<int, 3> role{int((rgb >> 16) & 0xFF), int((rgb >> 8) & 0xFF),
+                                  int(rgb & 0xFF)};
+
+    // A disc a little wider than the cable, centred on the dock. A collar
+    // fills it; a cable merely ending there covers about half of it, because
+    // a stroke is a line and a plug is a body.
+    const double probe = 3.0 * L.scale;
+    const double at_dock = disc_coverage(f, dock.x, dock.y, probe, role, 26);
+
+    // The control, on the same cable in the same frame: a point partway along
+    // it, where there is a cable and nothing else. This is what "a cable
+    // passes through here" looks like, and the dock has to look like more.
+    float mx = 0, my = 0;
+    const auto from = forge_modular::port_point(L, preview.modules(), "SRC", "out", "DST");
+    forge_modular::cable_point(forge_modular::cable_curve(from, dock), 0.5f, mx, my);
+    const double on_cable = disc_coverage(f, mx, my, probe, role, 26);
+
+    INFO("role-coloured coverage at the dock " << at_dock << ", mid-cable "
+         << on_cable);
+    REQUIRE(on_cable > 0.2);          // the cable really is drawn there
+    CHECK(at_dock > 0.85);
+    CHECK(at_dock > on_cable * 1.4);
+}
+
+TEST_CASE("a panel's name stays on its own panel", "[rack][render]") {
+    // "AudioInterface2" is fifteen characters on a 5 HP module. Centred and
+    // unclipped it runs out over both neighbours and labels modules it does
+    // not name -- which undoes the seam either side of it, and mislabels two
+    // modules to fit one.
+    forge_modular::RackModule narrow{"N", "Fundamental", "AudioInterface2", 5, {}};
+    forge_modular::RackPreview preview;
+    preview.set_rack({narrow}, {});
+    preview.set_bounds({0, 0, 700, 460});
+
+    const auto L = preview.layout_for(700, 460);
+    REQUIRE(L.panels.size() == 1);
+    const auto& box = L.panels[0];
+
+    const auto f = decode(pulp::view::render_to_png(
+        preview, 700, 460, 1.0f, pulp::view::ScreenshotBackend::skia));
+    REQUIRE(f.ok());
+
+    // Text is near-white; the panel is a dark blue-grey and the stage behind
+    // it darker still. Anything bright outside the panel is spilled name.
+    const auto title_band_top = static_cast<std::size_t>(box.y + 8.0f * L.scale);
+    const auto title_band_bottom = static_cast<std::size_t>(box.y + 34.0f * L.scale);
+    std::size_t inside = 0, outside = 0;
+    for (std::size_t y = title_band_top; y < title_band_bottom && y < f.h; ++y)
+        for (std::size_t x = 0; x < f.w; ++x) {
+            if (f.luma(x, y) < 120.0) continue;
+            if (x >= static_cast<std::size_t>(box.x) &&
+                x <= static_cast<std::size_t>(box.x + box.width)) ++inside;
+            else ++outside;
+        }
+
+    INFO("bright pixels in the title band: " << inside << " on the panel, "
+         << outside << " off it");
+    REQUIRE(inside > 60);        // the name was actually drawn
+    CHECK(outside == 0);
+}
+
 TEST_CASE("a wired patch replaces the skeleton on the Build stage", "[rack][seam][render]") {
     HermeticProjects isolated;
     forge_modular::ForgeModularShell shell;
@@ -1975,6 +2421,196 @@ TEST_CASE("the explanation is grouped by what each cable carries", "[rack]") {
     for (const auto& h : headings) CHECK(h.find("PITCH") == std::string::npos);
 }
 
+TEST_CASE("a cable's wiring and its reason are set differently", "[rack][render]") {
+    // The wiring is a fact about jacks and the reason is an argument about
+    // intent, and they were run together into one wrapped paragraph in one
+    // face, one size and one grey. Nothing on screen said which half was the
+    // patch, so the list could not be skimmed for the connection alone.
+    //
+    // Asserted on the labels that actually draw: the strings were always
+    // right, which is why every existing test passed while the pane read
+    // badly.
+    forge_modular::PatchExplanation ex;
+    ex.set_depth(forge_modular::ExplainDepth::standard);
+    ex.set_connections(sample_patch(), sample_rack());
+    ex.set_bounds({0, 0, 430, 600});
+
+    const auto* row = ex.row_for(0);
+    REQUIRE(row != nullptr);
+
+    std::vector<const pulp::view::Label*> labels;
+    std::function<void(const pulp::view::View*)> walk =
+        [&](const pulp::view::View* v) {
+            for (int c = 0; c < v->child_count(); ++c) {
+                if (auto* l = dynamic_cast<const pulp::view::Label*>(v->child_at(c)))
+                    labels.push_back(l);
+                walk(v->child_at(c));
+            }
+        };
+    walk(row);
+    REQUIRE(labels.size() >= 2);
+
+    // The first line is the wiring: monospaced, in the strong ink, and it
+    // carries the arrow.
+    const auto* wiring = labels.front();
+    INFO("wiring: " << wiring->text());
+    CHECK(wiring->font_family() == std::string(forge::design::type::mono));
+    CHECK(wiring->text_color() == forge::design::color::text_strong);
+    CHECK(wiring->text().find("\xE2\x86\x92") != std::string::npos);
+
+    // And it is ONLY the wiring: the reason is not glued onto the end of it.
+    CHECK(wiring->text().find("everything else shapes it") == std::string::npos);
+    CHECK(wiring->text().find("\xE2\x80\x94") == std::string::npos);
+
+    // The reason is beneath it, in the reading face and the quieter grey.
+    std::string reason;
+    const pulp::view::Label* first_reason = nullptr;
+    for (std::size_t i = 1; i < labels.size(); ++i) {
+        CHECK(labels[i]->font_family() == std::string(forge::design::type::display));
+        CHECK(labels[i]->text_color() == forge::design::color::text_muted);
+        if (!first_reason) first_reason = labels[i];
+        reason += (reason.empty() ? "" : " ") + labels[i]->text();
+    }
+    REQUIRE(first_reason != nullptr);
+    INFO("reason: " << reason);
+    CHECK(flatten(reason).find("everything else shapes it") != std::string::npos);
+
+    // Stacked, not side by side: the reason is indented under its cable, so it
+    // starts to the right of the wiring and below it.
+    const auto wb = wiring->bounds();
+    const auto rb = first_reason->bounds();
+    CHECK(rb.y + first_reason->parent()->bounds().y >= wb.y + wb.height);
+
+    // Terse drops the reason and keeps the wiring, which is the promise depth
+    // makes. Without this the split above could be satisfied by always
+    // printing both.
+    ex.set_depth(forge_modular::ExplainDepth::terse);
+    const auto terse = flatten(rendered_text(ex.row_for(0)));
+    INFO("terse row: " << terse);
+    CHECK(terse.find("VCO-1 OUT") != std::string::npos);
+    CHECK(terse.find("everything else shapes it") == std::string::npos);
+}
+
+TEST_CASE("pointing at a role's heading lights every cable it carries",
+          "[rack][hover][render]") {
+    // The second way in. A cable is the small unit; a role is the large one,
+    // and "what is the audio path" is a question about the shape of the patch
+    // rather than about any one wire. The preview could already draw a whole
+    // role at once -- highlight_role() existed and was unit-tested -- but
+    // nothing in the app ever called it, so the only way to be taught anything
+    // was one cable at a time.
+    //
+    // Driven through the shell, at the pointer, because that is the path that
+    // was dead: calling hover_role() directly would prove the setter works and
+    // nothing about whether a mouse can reach it.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    shell.set_artifact(forge_modular::Artifact::patch);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    shell.chrome()->enter_build();
+    shell.show_rack(sample_rack(), sample_patch());
+
+    auto* ex = shell.explanation();
+    auto* preview = shell.rack_preview();
+    REQUIRE(ex != nullptr);
+    REQUIRE(preview != nullptr);
+
+    // Through a real layout pass, so the rectangles the pointer is tested
+    // against are the ones that will be on screen. Then the app's own
+    // re-wrap, because the explanation is built before it has ever been
+    // measured and is laid out for the 20-column floor until that runs -- and
+    // the row heights the pointer is tested against change when it does.
+    const auto shot = std::filesystem::temp_directory_path() / "role-hover.png";
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
+    ex->apply_pending_rewrap();
+    REQUIRE(pulp::view::render_to_file(
+        *view, forge::ForgeChrome::kDesignWidth, forge::ForgeChrome::kDesignHeight,
+        shot.string(), 1.0f, pulp::view::ScreenshotBackend::skia));
+
+    // And the pane it ended up in is the pane it wrapped to. The wiring is
+    // short enough to survive the floor, so this is asserted on the prose,
+    // which is where a 20-column wrap is unmistakable.
+    {
+        std::vector<const pulp::view::Label*> prose;
+        std::function<void(const pulp::view::View*)> walk =
+            [&](const pulp::view::View* v) {
+                for (int c = 0; c < v->child_count(); ++c) {
+                    if (auto* l = dynamic_cast<const pulp::view::Label*>(v->child_at(c)))
+                        if (l->font_family() == std::string(forge::design::type::display))
+                            prose.push_back(l);
+                    walk(v->child_at(c));
+                }
+            };
+        walk(ex->row_for(0));
+        REQUIRE_FALSE(prose.empty());
+        std::size_t longest = 0;
+        for (const auto* l : prose) longest = std::max(longest, l->text().size());
+        INFO("longest prose line: " << longest);
+        CHECK(longest > 24);
+    }
+
+    // The sample is two audio cables (0, 1) and one modulation cable (2).
+    const auto* heading = ex->heading_for(forge_modular::SignalRole::audio);
+    REQUIRE(heading != nullptr);
+    const auto hb = heading->bounds();
+    REQUIRE(hb.height > 0);
+    ex->on_hover_move({hb.x + 4.0f, hb.y + hb.height / 2.0f});
+
+    CHECK(ex->hovered_role().has_value());
+    CHECK(*ex->hovered_role() == forge_modular::SignalRole::audio);
+    CHECK(preview->cable_alpha(0) == Approx(1.0f));
+    CHECK(preview->cable_alpha(1) == Approx(1.0f));
+    CHECK(preview->cable_alpha(2) < 1.0f);
+    // A role and a single cable are exclusive readings: holding both would
+    // light one role plus one stray wire outside it.
+    CHECK_FALSE(ex->hovered().has_value());
+
+    // The small unit still works from the pointer, and takes the role reading
+    // away when it does. This direction was unreachable by mouse too: nothing
+    // ever called hover_line() from an event.
+    const auto* row = ex->row_for(2);
+    REQUIRE(row != nullptr);
+    const auto rb = row->bounds();
+    ex->on_hover_move({rb.x + 4.0f, rb.y + rb.height / 2.0f});
+    CHECK(ex->hovered().has_value());
+    CHECK(*ex->hovered() == 2);
+    CHECK_FALSE(ex->hovered_role().has_value());
+    CHECK(preview->cable_alpha(2) == Approx(1.0f));
+    CHECK(preview->cable_alpha(0) < 1.0f);
+
+    // And letting go restores the rack rather than leaving it dimmed.
+    ex->on_mouse_leave();
+    CHECK_FALSE(ex->hovered().has_value());
+    CHECK_FALSE(ex->hovered_role().has_value());
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK(preview->cable_alpha(i) == Approx(1.0f));
+
+    // Changing depth under the pointer rebuilds every row and heading, and the
+    // highlight has to survive onto the new ones. It did not: the fresh
+    // heading came back unlit while the rack stayed lit, and pointing at the
+    // same heading again did nothing, because the setter saw a role it thought
+    // it was already showing.
+    ex->hover_role(forge_modular::SignalRole::audio);
+    shell.set_depth(forge_modular::ForgeModularShell::Depth::learning);
+    const auto* relit = ex->heading_for(forge_modular::SignalRole::audio);
+    REQUIRE(relit != nullptr);
+    CHECK(relit->background_color() == forge::design::color::surface_raised);
+    const auto* other = ex->heading_for(forge_modular::SignalRole::mod);
+    REQUIRE(other != nullptr);
+    CHECK_FALSE(other->background_color() == forge::design::color::surface_raised);
+    ex->on_mouse_leave();
+}
+
 TEST_CASE("render the explanation and rack for a look", "[.look]") {
     // Not part of the suite: a picture for a person to judge. The assertions
     // elsewhere say the geometry is sound; only an eye says it reads well.
@@ -2070,19 +2706,51 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
     // rows only: a role heading is two labels side by side, which is a
     // different shape on purpose and would fail an assertion written for a
     // stack of lines.
+    //
+    // Every label in the row, at any nesting, and in the row's own coordinates.
+    // A cable's reason is set in a block of its own beneath the wiring, so a
+    // scan of DIRECT children alone stops seeing the wrapped prose entirely --
+    // which is exactly the text the overlap bug was about.
+    std::function<void(const pulp::view::View*, float,
+                       std::vector<std::pair<const pulp::view::Label*, float>>&)>
+        collect = [&](const pulp::view::View* v, float offset,
+                      std::vector<std::pair<const pulp::view::Label*, float>>& out) {
+            for (int c = 0; c < v->child_count(); ++c) {
+                const auto* child = v->child_at(c);
+                const float top = offset + child->bounds().y;
+                if (auto* lbl = dynamic_cast<const pulp::view::Label*>(child))
+                    out.push_back({lbl, top});
+                collect(child, top, out);
+            }
+        };
+
     for (std::size_t i = 0; i < sample_patch().size(); ++i) {
         const auto* row = ex.row_for(i);
         REQUIRE(row != nullptr);
+        std::vector<std::pair<const pulp::view::Label*, float>> lines;
+        collect(row, 0.0f, lines);
+        // The wiring, plus one line per wrapped line of the reason.
+        REQUIRE(lines.size() >= 2);
         float previous_top = -1000.0f;
-        for (int c = 0; c < row->child_count(); ++c) {
-            auto* lbl = dynamic_cast<const pulp::view::Label*>(row->child_at(c));
-            if (!lbl) continue;                  // the role dot
+        float previous_height = 0.0f;
+        for (const auto& [lbl, top] : lines) {
             const auto lb = lbl->bounds();
-            INFO("  cable " << i << " line at " << lb.y
-                            << " height " << lb.height);
-            CHECK(lb.height >= 17.0f);           // a full line, not a squeezed one
-            if (previous_top > -999.0f) CHECK(lb.y - previous_top >= 16.0f);
-            previous_top = lb.y;
+            INFO("  cable " << i << " line at " << top << " height " << lb.height
+                            << " size " << lbl->font_size());
+            // A full line box for the size it is set at, not a squeezed one.
+            // Derived from the label's own size rather than a constant, so the
+            // check still means "one line" when the wiring and the prose are
+            // set at different sizes.
+            CHECK(lb.height >= lbl->font_size() * 1.3f);
+            // And the next line clears the previous one's box. A point of
+            // rounding between a line box and its advance is invisible; the
+            // bug this closes was an advance of about nine points against a
+            // 17-point box, which is half a line and put every wrapped line on
+            // top of the one above it.
+            if (previous_top > -999.0f)
+                CHECK(top >= previous_top + previous_height - 2.0f);
+            previous_top = top;
+            previous_height = lb.height;
         }
     }
 
@@ -3634,3 +4302,289 @@ TEST_CASE("Open in Rack picks a sensible place to open", "[phase7][artifact]") {
     std::filesystem::remove(log);
 }
 
+// ─── The editor's views outlive nothing ──────────────────────────────────────
+//
+// This shell IS the processor. A host opens, closes and reopens a plugin
+// window freely while the processor stays loaded, so every pointer the shell
+// keeps into an editor's view tree is borrowed for exactly one editor. Holding
+// one past a close is not a cosmetic mistake: the next build to finish walks
+// it.
+namespace {
+
+/// Is `needle` still reachable by walking down from `root`?
+bool in_tree(const pulp::view::View* root, const pulp::view::View* needle) {
+    if (!root || !needle) return false;
+    if (root == needle) return true;
+    for (std::size_t i = 0; i < root->child_count(); ++i)
+        if (in_tree(root->child_at(i), needle)) return true;
+    return false;
+}
+
+/// A two-module, one-cable patch on disk, with the sidecar that carries its
+/// reasoning -- the shape `open_patch_file` is handed at the end of a build.
+std::string lifetime_patch(const std::filesystem::path& dir, const char* stem) {
+    std::filesystem::create_directories(dir);
+    const auto p = dir / (std::string(stem) + ".vcv");
+    {
+        std::ofstream f(p);
+        f << R"({"version":"2.6.6","modules":[)"
+          << R"({"id":1,"plugin":"ForgeModular","model":"VCO","pos":[0,0]},)"
+          << R"({"id":2,"plugin":"Core","model":"AudioInterface2","pos":[10,0]}],)"
+          << R"("cables":[{"id":1,"outputModuleId":1,"outputId":0,)"
+          << R"("inputModuleId":2,"inputId":0,"color":"#00b56e"}]})";
+    }
+    {
+        std::ofstream f(dir / (std::string(stem) + ".why.json"));
+        f << R"({"cables":{"1:0>2:0":{"why":"the voice reaches the output",)"
+          << R"("from_port":"OUT","to_port":"IN"}}})";
+    }
+    return p.string();
+}
+
+/// A generator that says yes. Without one, start_build_with refuses before it
+/// ever resets the session, and none of the paths below are reached.
+struct WillingLifetimeEngine : forge_modular::EngineClient {
+    bool available() const override { return true; }
+    bool ensure_running() override { return true; }
+    void submit(const std::string&, bool) override {}
+};
+
+}  // namespace
+
+TEST_CASE("a build that lands after the editor closed writes to nothing",
+          "[crash][lifetime]") {
+    // REAPER aborted the moment a build finished inside the hosted plugin:
+    //
+    //   ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
+    //     <- PatchExplanation::set_connections <- show_rack
+    //     <- open_patch_file <- on_poll
+    //
+    // libmalloc is precise about which fault this is: the pointer being freed
+    // was never allocated. `set_connections` move-assigns over `connections_`,
+    // which frees the vector's old buffer -- and on a DESTROYED
+    // PatchExplanation that buffer pointer is whatever the freed memory now
+    // holds. Nothing had to corrupt the heap first; reaching a view the editor
+    // already took away is the whole fault.
+    //
+    // Reproduced here by closing the editor and then letting the generator's
+    // answer arrive, which is what a host does whenever somebody shuts the
+    // plugin window while a build is still running.
+    HermeticProjects isolated;
+    const auto dir = std::filesystem::temp_directory_path() / "forge-lifetime-late";
+    std::filesystem::remove_all(dir);
+    const auto patch = lifetime_patch(dir, "late");
+
+    WillingLifetimeEngine engine;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    // A patch on screen first, so the explanation owns a real connections_
+    // buffer -- an empty vector frees nothing and would abort nowhere.
+    REQUIRE(shell.open_patch_file(patch).empty());
+    REQUIRE(shell.explanation() != nullptr);
+    REQUIRE(shell.explanation()->line_count() == 1);
+
+    // The host's teardown order: the shell drops the chrome, then the bridge
+    // destroys the root the chrome pointed into.
+    shell.on_view_closed(*view);
+    view.reset();
+
+    // Asserted as pointers rather than left to a sanitiser. A use-after-free
+    // only faults when the memory happens to have been reused, so a plain run
+    // can pass over it all day; "the shell still names a view it no longer
+    // has" is unambiguous, and it is exactly what the crash report describes.
+    CHECK(shell.explanation() == nullptr);
+    CHECK(shell.rack_preview() == nullptr);
+
+    // And the step that aborted. It must be a no-op now, not a write.
+    const auto loaded = forge_modular::load_patch(patch);
+    REQUIRE(loaded.ok());
+    shell.show_rack(loaded.modules, loaded.connections);
+    shell.on_poll();
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("reopening the editor never reads the closed one's views",
+          "[crash][lifetime]") {
+    // The same borrowed pointers are read on the way IN, before anything has
+    // replaced them: ForgeChrome's constructor asks the shell for its copy,
+    // and chrome_copy() reads the rack preview and the module summary to put
+    // the patch's size in the badge. On the second editor of a session those
+    // name the first editor's freed views.
+    //
+    // Each round below closes and reopens, and drives everything a person can
+    // do to what is on screen in between, so the sanitiser has every one of
+    // these pointers to walk.
+    HermeticProjects isolated;
+    const auto dir = std::filesystem::temp_directory_path() / "forge-lifetime-reopen";
+    std::filesystem::remove_all(dir);
+    const auto patch = lifetime_patch(dir, "reopen");
+
+    WillingLifetimeEngine engine;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+
+    const auto log = dir / "run.log";
+
+    for (int session = 0; session < 3; ++session) {
+        INFO("session " << session);
+        auto view = shell.create_view();
+        REQUIRE(view != nullptr);
+        auto* chrome = shell.chrome();
+        REQUIRE(chrome != nullptr);
+        REQUIRE(shell.explanation() != nullptr);
+        // Belonging to THIS editor, asserted by reachability rather than by
+        // comparing against the last one's address: the previous explanation
+        // was freed, so the allocator is free to hand its block straight back
+        // and an address comparison would fail on a correct build.
+        CHECK(in_tree(view.get(), shell.explanation()));
+        CHECK(in_tree(view.get(), shell.rack_preview()));
+
+        for (int round = 0; round < 3; ++round) {
+            INFO("round " << round);
+            chrome->enter_home();
+            if (auto* input = chrome->prompt_input())
+                input->set_text("an ambient drone that never repeats");
+            shell.watch_build_log(log.string());
+            // Through the shell's own front door, from Home -- which is what
+            // resets the session and empties the chat rail.
+            CHECK(shell.start_build().empty());
+            { std::ofstream f(log, std::ios::trunc); f << "  asking the model\n"; }
+            chrome->poll();
+            { std::ofstream f(log, std::ios::app);
+              f << "  built 2 modules, 1 cables \xE2\x86\x92 " << patch << "\n"; }
+            chrome->poll();
+            CHECK(shell.build_outcome() == forge_modular::BuildOutcome::done);
+
+            shell.set_depth(forge_modular::ForgeModularShell::Depth::learning);
+            shell.set_depth(forge_modular::ForgeModularShell::Depth::terse);
+            if (auto* e = shell.explanation()) {
+                e->hover_line(0);
+                e->hover_line(std::nullopt);
+                e->apply_pending_rewrap();
+            }
+            if (auto* p = shell.rack_preview()) {
+                p->set_highlight(0);
+                p->set_highlight(std::nullopt);
+            }
+            shell.set_artifact(forge_modular::Artifact::module);
+            shell.set_artifact(forge_modular::Artifact::patch);
+            shell.refresh_rack_presence();
+            chrome->poll();
+        }
+
+        shell.on_view_closed(*view);
+        view.reset();
+        CHECK(shell.explanation() == nullptr);
+        CHECK(shell.rack_preview() == nullptr);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a session reset keeps the product's own accessory in the rail",
+          "[crash][chat-rail]") {
+    // Starting a build from Home empties the chat rail, which is right: the
+    // conversation belongs to the build being replaced. The product's chat
+    // accessory is not part of that conversation -- it shows the ARTIFACT, and
+    // for Forge Modular it is the patch explanation and the module spec.
+    //
+    // Sweeping it out with the bubbles cost two things. It could never come
+    // back, because the accessory hook runs once, when the chrome mounts -- so
+    // from the first build onward the explanation was built, filled and shown
+    // to nobody. And it moved the views' OWNER from the tree to the chrome's
+    // retired list, which ~ForgeChrome frees at the top of editor teardown,
+    // while the shell is still live and still pointing at them.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+
+    auto* explanation = shell.explanation();
+    REQUIRE(explanation != nullptr);
+    REQUIRE(in_tree(view.get(), explanation));
+
+    chrome->begin_new_session();
+    CHECK(shell.explanation() == explanation);   // not rebuilt
+    CHECK(in_tree(view.get(), explanation));     // and not detached
+}
+
+TEST_CASE("a test cannot open an application on somebody's desktop",
+          "[rack][open][launcher]") {
+    // This suite really launched VCV Rack. `open_in_rack()` shelled out to
+    // `open -a "VCV Rack 2 Free.app"` directly, eight cases here call it, and
+    // two of them succeed -- so every full run opened Rack on the screen of
+    // whoever was using the machine. Worse, the patch it was handed lives in
+    // a temp fixture the suite deletes on the way out, so Rack came up and
+    // put a "could not open archive" modal in front of them. It was reported
+    // twice by the person sitting at the machine before anyone here noticed.
+    //
+    // Deciding WHICH command to run is the shell's job and worth testing.
+    // Running it is not something a test may do, so the running is now
+    // somebody else's job: production installs a launcher, and a bare shell
+    // -- which is what every case in this file builds -- has none.
+    HermeticProjects isolated;
+    const auto patch = std::filesystem::temp_directory_path() /
+                       "forge-launcher-test.vcv";
+    { std::ofstream f(patch); f << R"({"version":"2.6.6","modules":[)"
+        << R"({"id":1,"plugin":"Core","model":"AudioInterface2","pos":[0,0]}],)"
+        << R"("cables":[]})"; }
+
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    // A finished build, so the shell is willing to open anything at all --
+    // it refuses while one is in flight, because the patch is being rewritten.
+    const auto log = std::filesystem::temp_directory_path() /
+                     "forge-launcher-test.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+    {
+        std::ofstream f(log);
+        f << "  installed \xE2\x86\x92 /Users/x/Rack2/plugins/ForgeModular.vcvplugin\n"
+          << "  open it with:  \"/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack\" "
+          << patch.string() << "\n";
+    }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+
+    // No launcher: it still DECIDES, and records what it decided.
+    const auto why = shell.open_in_rack();
+    INFO("open_in_rack said: " << why);
+    REQUIRE(shell.launched().size() == 1);
+    CHECK(shell.launched()[0].find("VCV Rack") != std::string::npos);
+    CHECK(shell.launched()[0].find(patch.string()) != std::string::npos);
+
+    // With one installed, that is the ONLY route out. If any path still
+    // shelled out directly, the recorded count and the launcher's count would
+    // disagree -- which is exactly what a direct `ProcessEngine::run` looks
+    // like from here.
+    std::vector<std::string> ran;
+    shell.set_launcher([&](const std::string& c) { ran.push_back(c); });
+    shell.open_in_rack();
+    CHECK(ran.size() == shell.launched().size() - 1);
+    REQUIRE_FALSE(ran.empty());
+    CHECK(ran.back() == shell.launched().back());
+
+    std::filesystem::remove(patch);
+    std::filesystem::remove(log);
+}

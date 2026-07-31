@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <set>
 #include <sstream>
+#include <utility>
 
 namespace forge_modular {
 
@@ -40,6 +42,151 @@ void stroke_curve(Canvas& canvas, const CableCurve& c, Color stroke, float width
     canvas.set_line_width(width);
     canvas.set_line_cap(pulp::canvas::LineCap::round);
     canvas.stroke_path(pts, kCableSegments + 1);
+}
+
+/// The largest size at or below `wanted` that fits `text` into `room`.
+///
+/// A long slug on a narrow panel -- "AudioInterface2" on 5 HP -- has to give
+/// somewhere. Set smaller it is still the module's name; clipped it is a
+/// different word, and centred-and-unclipped it labels the module next door.
+/// Floored rather than shrunk without limit, because a name too small to read
+/// has stopped naming anything; the clip behind it catches that case.
+float fitted_font_size(Canvas& canvas, const char* family,
+                       const std::string& text, float wanted, float room) {
+    if (text.empty() || !(room > 0.0f)) return wanted;
+    canvas.set_font(family, wanted);
+    const float width = canvas.measure_text(text);
+    if (!(width > room)) return wanted;
+    return std::max(wanted * 0.62f, wanted * room / width);
+}
+
+/// Make one panel's boundary legible where it butts against the next.
+///
+/// A real rack has no gutters, and the layout is right not to invent any -- but
+/// a row of panels with no seam reads as one undifferentiated strip, and a rack
+/// you cannot count the modules in cannot be checked against what was asked
+/// for. The boundary is drawn rather than spaced: shading that falls off into
+/// each panel's own face, and a bright/dark hairline pair that meets at the
+/// join the way two machined edges do.
+void draw_panel_edges(Canvas& canvas, const PanelBox& panel) {
+    canvas.save();
+    canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+
+    // Shading into both sides. Falls off within a tenth of the panel, so a wide
+    // panel is not darkened across its face and a narrow one is not swallowed.
+    const Color stops[] = {
+        Color::rgba8(0, 0, 0, 86), Color::rgba8(0, 0, 0, 0),
+        Color::rgba8(0, 0, 0, 0), Color::rgba8(0, 0, 0, 86),
+    };
+    const float at[] = {0.0f, 0.11f, 0.89f, 1.0f};
+    canvas.set_fill_gradient_linear(panel.x, panel.y, panel.x + panel.width,
+                                    panel.y, stops, at, 4);
+    canvas.fill_rect(panel.x, panel.y, panel.width, panel.height);
+    canvas.clear_fill_gradient();
+
+    // The seam itself. Light down the left edge, dark down the right, so the
+    // join between two panels is a lit edge beside a shadowed one -- visible
+    // even where both faces happen to be the same colour, which is exactly the
+    // case a shading gradient alone cannot separate.
+    canvas.set_line_width(1.0f);
+    canvas.set_stroke_color(Color::rgba8(255, 255, 255, 40));
+    canvas.stroke_line(panel.x + 0.5f, panel.y, panel.x + 0.5f,
+                       panel.y + panel.height);
+    canvas.set_stroke_color(Color::rgba8(0, 0, 0, 150));
+    canvas.stroke_line(panel.x + panel.width - 0.5f, panel.y,
+                       panel.x + panel.width - 0.5f, panel.y + panel.height);
+    // A lit top edge, the way a panel catches the light off the rail above it.
+    canvas.set_stroke_color(Color::rgba8(255, 255, 255, 33));
+    canvas.stroke_line(panel.x, panel.y + 0.5f, panel.x + panel.width,
+                       panel.y + 0.5f);
+    canvas.restore();
+}
+
+/// The rail screws, over whatever face was drawn.
+///
+/// The artwork draws its screw HOLES -- a hollow ring a third of a point wide,
+/// which at preview scale is a grey smudge and at any scale is flat. Painting
+/// the screw here gives it a head, a rim and a slot, and gives one to the
+/// third-party panels that have no artwork of their own, so a rack does not
+/// have screws on some modules and not others.
+void draw_screws(Canvas& canvas, const PanelBox& panel, float scale) {
+    // Never smaller than a couple of points: below that a head, a rim and a
+    // slot land on the same pixel and the screw reads as dirt.
+    const float r = std::max(2.2f, kScrewRadius * scale);
+    canvas.save();
+    canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+    for (const auto& s : screw_points(panel, scale)) {
+        // Seated in the panel: a shadow under the head before the head itself.
+        canvas.set_fill_color(Color::rgba8(0, 0, 0, 110));
+        canvas.fill_circle(s.x, s.y + r * 0.16f, r);
+        // A domed head, lit from above and to the left the way the rest of the
+        // chrome is. Graded rather than a lighter disc laid on a darker one:
+        // the join between two flat circles is itself a circle, and the screw
+        // reads as a crescent moon instead of a piece of hardware.
+        const Color head[] = {
+            Color::rgba8(0x8C, 0x95, 0xA1), Color::rgba8(0x5C, 0x65, 0x71),
+            Color::rgba8(0x31, 0x37, 0x3F),
+        };
+        const float at[] = {0.0f, 0.6f, 1.0f};
+        canvas.set_fill_gradient_radial_two_circles(
+            s.x - r * 0.34f, s.y - r * 0.34f, r * 0.1f, s.x, s.y, r * 1.04f,
+            head, at, 3);
+        canvas.fill_circle(s.x, s.y, r);
+        canvas.clear_fill_gradient();
+        canvas.set_stroke_color(Color::rgba8(0x14, 0x18, 0x1E, 170));
+        canvas.set_line_width(std::max(0.7f, r * 0.16f));
+        canvas.stroke_circle(s.x, s.y, r);
+        // The slot. Straight across: a driver leaves it wherever it stopped,
+        // but a preview that angled each one differently would flicker as the
+        // rack relaid out, and a screw that moves is worse than a tidy one.
+        canvas.set_stroke_color(Color::rgba8(0x0C, 0x0F, 0x14, 200));
+        canvas.set_line_width(std::max(0.9f, r * 0.2f));
+        canvas.set_line_cap(pulp::canvas::LineCap::butt);
+        canvas.stroke_line(s.x - r * 0.52f, s.y, s.x + r * 0.52f, s.y);
+    }
+    canvas.restore();
+}
+
+/// A jack socket, for a panel that has no artwork drawing its own.
+///
+/// Without this a cable on a plain face ends on a featureless slab: the ring
+/// alone reads as a cable stopping in mid-air rather than as a lead going into
+/// something. Reported as the audio interface "missing connections" when in
+/// fact every cable reached it -- there was simply nothing there to arrive at.
+void draw_socket(Canvas& canvas, float cx, float cy, float r, Color plug) {
+    canvas.set_fill_color(Color::rgba8(0, 0, 0, 120));
+    canvas.fill_circle(cx, cy + r * 0.14f, r);
+    canvas.set_fill_color(Color::rgba8(0x77, 0x80, 0x8B));      // the nut
+    canvas.fill_circle(cx, cy, r);
+    canvas.set_fill_color(Color::rgba8(0x9C, 0xA5, 0xB0, 190));
+    canvas.fill_circle(cx - r * 0.2f, cy - r * 0.24f, r * 0.66f);
+    canvas.set_stroke_color(Color::rgba8(0, 0, 0, 150));
+    canvas.set_line_width(std::max(0.7f, r * 0.16f));
+    canvas.stroke_circle(cx, cy, r);
+    canvas.set_fill_color(Color::rgba8(0x0B, 0x0E, 0x12));      // the bore
+    canvas.fill_circle(cx, cy, r * 0.56f);
+    // The plug filling the bore, in the cable's own colour, so the socket says
+    // which lead is in it rather than merely that one is.
+    canvas.set_fill_color(plug);
+    canvas.fill_circle(cx, cy, r * 0.42f);
+}
+
+/// The end of a cable whose jack position was never captured.
+///
+/// Docked at the panel edge because guessing a jack centre would look
+/// authoritative and be wrong. That honesty cost the drawing, though: the cable
+/// simply stopped, which reads as a connection that is not there. A collar in
+/// the cable's colour makes it a lead entering the panel from the side -- still
+/// visibly not a jack, and visibly a connection.
+void draw_dock_collar(Canvas& canvas, const JackPoint& p, Color body, float scale) {
+    const float w = std::max(4.0f, 8.0f * scale);
+    const float h = std::max(9.0f, 18.0f * scale);
+    canvas.set_fill_color(body);
+    canvas.fill_rounded_rect(p.x - w / 2.0f, p.y - h / 2.0f, w, h, w / 2.0f);
+    // Tied to the cable's own alpha, so a dimmed cable's collar dims with it.
+    canvas.set_stroke_color(Color{1.0f, 1.0f, 1.0f, body.a * 0.28f});
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(p.x - w / 2.0f, p.y - h / 2.0f, w, h, w / 2.0f);
 }
 
 }  // namespace
@@ -153,6 +300,10 @@ void RackPreview::paint(Canvas& canvas) {
     const auto b = bounds();
     const auto L = layout_rack(modules_, b.width, b.height);
 
+    /// Panels drawn without artwork of their own, so nothing on them says where
+    /// a jack is. Collected here and used by the cable pass below.
+    std::set<std::string> plain_faces;
+
     for (const auto& panel : L.panels) {
         // A module whose artwork is missing gets a plain face rather than a
         // borrowed one: showing another module's panel would misidentify it.
@@ -166,6 +317,7 @@ void RackPreview::paint(Canvas& canvas) {
         const auto& svg = (mod_for_panel && mod_for_panel->brand == kOurs)
                               ? panel_svg(mod_for_panel->name)
                               : std::string{};
+        bool artwork = false;
         if (!svg.empty()) {
             // Clipped to its own slot. Each panel's artwork paints a
             // background rect a millimetre PROUD of its viewBox on every side
@@ -174,12 +326,16 @@ void RackPreview::paint(Canvas& canvas) {
             // straight over the modules either side.
             canvas.save();
             canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
-            const bool drawn =
-                canvas.draw_svg(svg, panel.x, panel.y, panel.width, panel.height);
+            artwork = canvas.draw_svg(svg, panel.x, panel.y, panel.width,
+                                      panel.height);
             canvas.restore();
-            // The real face, knobs and all. Nothing else to draw for it.
-            if (drawn) continue;
         }
+        // The real face, knobs and all: nothing else to draw for it. A panel
+        // with no artwork of its own has no jacks either, so its id is kept --
+        // the cable pass draws a socket where each lead lands, or the cable
+        // arrives on a blank slab and the module reads as unconnected.
+        if (!artwork) plain_faces.insert(panel.id);
+        if (artwork) continue;
 
         // No artwork for this one. Drawn as a HATCHED face at its true width
         // rather than a plain rectangle, because a plain rectangle is exactly
@@ -216,11 +372,20 @@ void RackPreview::paint(Canvas& canvas) {
 
         // Name the panel. A rack of anonymous rectangles cannot be checked
         // against what was asked for, which is most of what a preview is for.
+        //
+        // Clipped to its own panel. A long slug -- "AudioInterface2" on a 5 HP
+        // module -- is centred, so it runs out over both neighbours and labels
+        // modules it does not name. Truncated is honest; spilling is not.
         const auto* mod = find(panel.id);
         if (!mod) continue;
-        canvas.set_font(forge::design::type::display, 12.0f * L.scale);
+        canvas.save();
+        canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
         canvas.set_fill_color(color::text);
         canvas.set_text_align(pulp::canvas::TextAlign::center);
+        canvas.set_font(forge::design::type::display,
+                        fitted_font_size(canvas, forge::design::type::display,
+                                         mod->name, 12.0f * L.scale,
+                                         panel.width - 6.0f * L.scale));
         canvas.fill_text(mod->name, panel.x + panel.width / 2.0f,
                          panel.y + 22.0f * L.scale);
         canvas.set_font(forge::design::type::mono, 8.5f * L.scale);
@@ -228,6 +393,19 @@ void RackPreview::paint(Canvas& canvas) {
         canvas.fill_text(undrawn ? "NO PANEL" : mod->brand,
                          panel.x + panel.width / 2.0f,
                          panel.y + panel.height - 12.0f * L.scale);
+        canvas.restore();
+    }
+
+    // The seams and the rail screws, over every face alike.
+    //
+    // A second pass rather than part of the one above, because the artwork
+    // paints a background a millimetre proud of its own viewBox on all four
+    // sides -- so a panel drawn after its neighbour would paint over the
+    // neighbour's seam, and the strip would have a boundary everywhere except
+    // wherever the loop happened to have got to last.
+    for (const auto& panel : L.panels) {
+        draw_panel_edges(canvas, panel);
+        draw_screws(canvas, panel, L.scale);
     }
 
     // A module Rack cannot create says so, over whatever was drawn for it.
@@ -316,13 +494,31 @@ void RackPreview::paint(Canvas& canvas) {
                      Color::rgba8(255, 255, 255, static_cast<std::uint8_t>(0.20f * a * 255)),
                      1.2f * L.scale, -1.1f);
 
-        // A jack ring at each end, so a docked end is visibly an edge dock
-        // rather than a jack that happens to sit at the panel border.
-        for (const auto& p : {from, to}) {
-            if (p.docked) continue;
+        // Both ends, so a cable arrives at something rather than stopping.
+        const std::pair<const JackPoint&, const std::string&> ends[] = {
+            {from, c.from_module}, {to, c.to_module},
+        };
+        for (const auto& [p, module_id] : ends) {
+            if (p.docked) {
+                // No captured coordinates, so no jack to draw -- a collar in
+                // the cable's colour instead, entering the panel from the side.
+                draw_dock_collar(canvas, p, from_rgb(rgb, a), L.scale);
+                continue;
+            }
+            // A panel with artwork draws its own jacks; one without draws
+            // nothing, and a lead landing on a blank face reads as a module
+            // with no connections at all. The socket is what the cable arrives
+            // at in that case.
+            const float r = std::max(3.4f, kJackRadius * L.scale);
+            if (plain_faces.count(module_id))
+                draw_socket(canvas, p.x, p.y, r, from_rgb(rgb, a));
+            // The same ring at both kinds of end, outside the rim rather than
+            // lost down the bore. A ring sized to the drawn socket on one
+            // module and to nothing in particular on the next makes two
+            // identical connections look like different things.
             canvas.set_stroke_color(from_rgb(rgb, a));
             canvas.set_line_width(1.5f);
-            canvas.stroke_circle(p.x, p.y, 5.0f * L.scale);
+            canvas.stroke_circle(p.x, p.y, r + 3.0f * L.scale);
         }
     }
 }
