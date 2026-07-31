@@ -36,11 +36,21 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "unavailable in normal launches; explicitly wired custom fixture\n",
             "docs/reference/cli.md":
                 "unavailable in normal launches; explicitly wired; "
-                "remote clients cannot select a filesystem path\n",
+                "remote clients cannot select a filesystem path; "
+                "select one exact authenticated session identity; "
+                "both are required together\n",
             "docs/status/cli-commands.yaml":
-                "owner-private authenticated discovery\n",
+                "owner-private authenticated discovery\n"
+                "Exact authenticated session id; must be paired with --instance\n"
+                "Exact authenticated instance id; must be paired with --session\n",
             "experimental/pulp-rs/src/cmd/motion.rs":
-                "authenticated auto-discovery\n",
+                "authenticated auto-discovery\n"
+                'a == "--session" || a == "--instance"\n'
+                "--session and --instance must be supplied together\n"
+                "talker.call_selected(\n"
+                'no_args("play", &rest[1..])\n'
+                'no_args("scrub", &args[1..])\n'
+                'no_args("cost", &args[1..])\n',
             "experimental/pulp-rs/src/cmd/trace.rs":
                 "authenticated auto-discovery\n"
                 "pulp trace start --out is unavailable\n"
@@ -51,7 +61,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "authenticated ephemeral discovery\n",
             ".agents/skills/motion/SKILL.md":
                 "explicitly wired custom fixture; authenticated discovery; "
-                "nonce/HMAC; intentionally unavailable\n",
+                "nonce/HMAC; intentionally unavailable; "
+                "--session ID --instance ID\n",
             ".agents/skills/trace-analysis/SKILL.md":
                 "explicitly wired custom fixture; authenticated discovery\n",
             ".agents/skills/cli-maintenance/SKILL.md":
@@ -320,6 +331,27 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         self.assertIn(
             ".agents/skills/cli-maintenance/SKILL.md retains stale claim", errors
+        )
+
+    def test_rejects_motion_selection_and_argument_drift(self) -> None:
+        root = self.make_root()
+        (root / ".agents/skills/motion/SKILL.md").write_text(
+            "explicitly wired custom fixture; authenticated discovery; "
+            "nonce/HMAC; intentionally unavailable; "
+            "--session-id X --instance-id Y\n",
+            encoding="utf-8",
+        )
+        (root / "experimental/pulp-rs/src/cmd/motion.rs").write_text(
+            "authenticated auto-discovery\n",
+            encoding="utf-8",
+        )
+        errors = " ".join(inspector_truth_check.check_root(root))
+        self.assertIn(
+            ".agents/skills/motion/SKILL.md retains stale claim", errors
+        )
+        self.assertIn(
+            "experimental/pulp-rs/src/cmd/motion.rs omits inspector security contract",
+            errors,
         )
 
     def test_rejects_stale_migration_guide_claim(self) -> None:
