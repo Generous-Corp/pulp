@@ -657,7 +657,15 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
-            'curl -fsSL "$url" -o "$compat_dir/${path##*/}"',
+            'curl -fsSL "$url" -o "$compat_path"',
+            run_block,
+        )
+        self.assertIn(
+            'compat_path="$compat_dir/tools/scripts/package_cli.py"',
+            run_block,
+        )
+        self.assertIn(
+            'ln -s ../../tools/import-design "$compat_dir/tools/import-design"',
             run_block,
         )
         self.assertIn(
@@ -685,6 +693,10 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("PULP_RELEASE_CONTENT_VERIFIER=", ensure_block)
         self.assertIn("PULP_SDK_PROVENANCE_HELPER=", ensure_block)
         self.assertIn("PULP_RELEASE_PACKAGER=", ensure_block)
+        self.assertIn(
+            "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py",
+            ensure_block,
+        )
         self.assertIn('"$PULP_SDK_PROVENANCE_HELPER" stamp', unix_stamp)
         self.assertIn("$env:PULP_SDK_PROVENANCE_HELPER stamp", windows_stamp)
         self.assertIn('"$PULP_RELEASE_CONTENT_VERIFIER"', unix_verify)
