@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 63b40c2..272dd01 100644
+index 63b40c2..b4cd44a 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -241,6 +241,14 @@ set(FORGE_SOURCES
+@@ -241,6 +241,15 @@ set(FORGE_SOURCES
      src/tempo_sync_feeder.cpp    # audio-thread tempo->param feeder for synced nodes
      src/instrument_shell.cpp     # the ONE instrument shell (generated VoiceGraph poly engine)
      src/voice_oscillator.cpp     # per-slot multi-engine oscillator (va/dco/vco/wt/wt_lofi dispatch)
@@ -12,12 +12,13 @@ index 63b40c2..272dd01 100644
 +    src/rack_layout.cpp          # rack + cable geometry (pure, no canvas)
 +    src/rack_preview.cpp         # paints that geometry
 +    src/patch_explanation.cpp    # the patch in words, wired to the picture
++    src/module_summary.cpp       # what a built module actually is
 +    src/process_engine.cpp       # the generator, as a child process
 +    src/patch_loader.cpp         # a .vcv file, as something the preview can draw
      src/midi_shell.cpp           # MIDI-effect shell (hot-swappable transform chain)
      src/midi_transform.cpp              # dispatcher, public API + the small per-event kinds
      src/midi_transform_strum.cpp        # strum: spread a cluster over time
-@@ -645,6 +653,15 @@ if(FORGE_BUILD_TESTS)
+@@ -645,6 +654,15 @@ if(FORGE_BUILD_TESTS)
              forge_core Catch2::Catch2WithMain)
          catch_discover_tests(forge-test-chrome)
  
@@ -33,7 +34,7 @@ index 63b40c2..272dd01 100644
          add_executable(forge-test-audio-asset-coordinator
              test/test_audio_asset_coordinator.cpp)
          target_include_directories(forge-test-audio-asset-coordinator PRIVATE
-@@ -1571,6 +1588,7 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -1571,6 +1589,7 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
  
      # The generated MIDI-effect plugin. CLAP note-effect is fully playable
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).

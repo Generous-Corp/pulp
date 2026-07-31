@@ -14,6 +14,7 @@
 //     FORGE_NO_LEAK_UPDATE=1 ./forge-test-chrome-no-leak
 // and commit the changed PNGs with the reason in the message.
 
+#include "forge/module_summary.hpp"
 #include "forge/patch_loader.hpp"
 #include "forge/rack_preview.hpp"
 #include <ImageIO/ImageIO.h>
@@ -408,6 +409,69 @@ TEST_CASE("a module's own panel artwork is what the stage draws", "[seam]") {
     CHECK(unpainted == 0);
     CHECK(other_vendor == 0);
     CHECK(painted > 200);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a built module says what it is", "[seam]") {
+    // The prototype's left column carried a spec beneath the description. The
+    // app showed a prompt and a verdict, so the only way to learn what you had
+    // was to open Rack.
+    //
+    // Asserted against the manifest each row is DERIVED from, not against
+    // written-down expectations: a spec that disagrees with the module is
+    // worse than no spec, and a test carrying its own copy of the numbers
+    // would agree with itself while the screen disagreed with the module.
+    const auto dir = std::filesystem::temp_directory_path() / "forge-spec-test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto manifest = dir / "thing.json";
+    {
+        std::ofstream f(manifest);
+        f << R"({"modules":[{"slug":"THING","name":"Thing","hp":12,)"
+          << R"("description":"A thing that does a thing.",)"
+          << R"("params":[{"type":"knob"},{"type":"knob"},{"type":"slider"}],)"
+          << R"("inputs":[{"role":"Audio"},{"role":"Cv"}],)"
+          << R"("outputs":[{"role":"Audio"}],)"
+          << R"("lights":[{"color":"green"}]}]})";
+    }
+
+    forge_modular::ModuleSummary spec;
+    REQUIRE(spec.set_manifest(manifest.string()));
+
+    std::map<std::string, std::string> rows;
+    for (const auto& [k, v] : spec.rows()) rows[k] = v;
+
+    // 12 HP is 60.96mm, which is arithmetic on the manifest rather than a
+    // number anybody typed.
+    CHECK(rows["WIDTH"].find("12 HP") != std::string::npos);
+    CHECK(rows["WIDTH"].find("60.9") != std::string::npos);
+    // Counted by kind: two knobs and a slider are not "3 controls".
+    CHECK(rows["CONTROLS"].find("2 knobs") != std::string::npos);
+    CHECK(rows["CONTROLS"].find("1 slider") != std::string::npos);
+    // Split by role: "2 in" would not say what the module expects.
+    CHECK(rows["I/O"].find("Cv in") != std::string::npos);
+    CHECK(rows["I/O"].find("Audio out") != std::string::npos);
+    CHECK(rows["LIGHTS"].find("1 light") != std::string::npos);
+    CHECK(spec.description() == "A thing that does a thing.");
+
+    // A row that cannot be derived is not shown. This manifest has no width,
+    // so there must be no WIDTH row rather than a plausible default.
+    {
+        std::ofstream f(manifest);
+        f << R"({"modules":[{"slug":"BARE","name":"Bare"}]})";
+    }
+    forge_modular::ModuleSummary bare;
+    bare.set_manifest(manifest.string());
+    for (const auto& [k, v] : bare.rows()) {
+        INFO("unexpected row: " << k << " = " << v);
+        CHECK(k != "WIDTH");
+    }
+
+    // And nothing at all from a file that is not a manifest.
+    forge_modular::ModuleSummary junk;
+    CHECK_FALSE(junk.set_manifest((dir / "nothing-here.json").string()));
+    CHECK(junk.rows().empty());
 
     std::filesystem::remove_all(dir);
 }

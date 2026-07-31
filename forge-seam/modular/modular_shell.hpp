@@ -30,6 +30,8 @@
 
 namespace forge_modular {
 
+class ModuleSummary;
+
 /// What Forge Modular is currently set to build.
 enum class Artifact { module, patch };
 
@@ -267,6 +269,9 @@ private:
     RackPreview* rack_preview_ = nullptr;
     std::string open_patch_;
     PatchExplanation* explanation_ = nullptr;
+    ModuleSummary* module_summary_ = nullptr;
+    void refresh_module_summary();
+    void show_for_artifact();
     std::vector<pulp::view::TextButton*> depth_tabs_;
     std::vector<pulp::view::Label*> depth_labels_;
     pulp::view::View* depth_group_ = nullptr;

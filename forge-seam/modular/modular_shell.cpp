@@ -1,5 +1,7 @@
 #include "forge/modular_shell.hpp"
 
+#include "forge/module_summary.hpp"
+
 #include <forge/chrome.hpp>
 #include <forge/design_tokens.hpp>
 #include <forge/patch_loader.hpp>
@@ -172,6 +174,9 @@ void ForgeModularShell::set_artifact(Artifact a) {
     // The depth tabs belong to patches; revealing them here is what makes
     // switching artifact mid-session work at all.
     if (depth_group_) depth_group_->set_visible(artifact_ == Artifact::patch);
+    // And the chat column: a module's spec beside a patch's wiring would be
+    // two answers to one question.
+    show_for_artifact();
 }
 
 forge::ChromeCopy ForgeModularShell::chrome_copy() const {
@@ -460,7 +465,44 @@ std::unique_ptr<View> ForgeModularShell::stage_accessory() {
     return preview;
 }
 
+/// Point the spec at the module that was most recently generated.
+///
+/// The manifest is the source for every row, so the newest one IS the module
+/// just built. Reading the log for a name instead would be a second place that
+/// decides which module we are looking at, and those two would drift.
+void ForgeModularShell::refresh_module_summary() {
+    if (!module_summary_) return;
+    const auto dir = std::filesystem::path(panels_dir()).parent_path() /
+                     "modules";
+    std::error_code ec;
+    std::filesystem::path newest;
+    std::filesystem::file_time_type best{};
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+        const auto name = e.path().filename().string();
+        if (e.path().extension() != ".json" || name.rfind("_", 0) == 0) continue;
+        const auto t = std::filesystem::last_write_time(e, ec);
+        if (newest.empty() || t > best) { best = t; newest = e.path(); }
+    }
+    if (!newest.empty()) module_summary_->set_manifest(newest.string());
+}
+
 std::unique_ptr<View> ForgeModularShell::chat_accessory() {
+    // BOTH live here, and the artifact decides which is visible. The accessory
+    // is asked for once, when the chrome mounts, so returning one or the other
+    // would freeze whichever was current at that moment -- and switching to
+    // Patch afterwards would leave a module's spec on screen.
+    auto column = std::make_unique<View>();
+    column->flex().direction = pulp::view::FlexDirection::column;
+    column->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    column->flex().flex_shrink = 0;
+
+    auto summary = std::make_unique<ModuleSummary>();
+    module_summary_ = summary.get();
+    summary->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+    summary->flex().flex_shrink = 0;
+    column->add_child(std::move(summary));
+    refresh_module_summary();
+
     auto explanation = std::make_unique<PatchExplanation>();
     explanation_ = explanation.get();
     explanation->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
@@ -471,7 +513,21 @@ std::unique_ptr<View> ForgeModularShell::chat_accessory() {
     explanation->on_hover = [this](std::optional<std::size_t> index) {
         if (rack_preview_) rack_preview_->set_highlight(index);
     };
-    return explanation;
+    column->add_child(std::move(explanation));
+
+    show_for_artifact();
+    return column;
+}
+
+/// Show the half that belongs to the current artifact.
+///
+/// A module's spec beside a patch's wiring would be two answers to one
+/// question, and the wrong one is the one nobody notices.
+void ForgeModularShell::show_for_artifact() {
+    const bool patch = artifact_ == Artifact::patch;
+    if (module_summary_) module_summary_->set_visible(!patch);
+    if (explanation_) explanation_->set_visible(patch);
+    if (!patch) refresh_module_summary();
 }
 
 void ForgeModularShell::show_rack(std::vector<RackModule> modules,
