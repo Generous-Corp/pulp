@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import re
 import subprocess
 import sys
 import time
@@ -78,9 +79,11 @@ def generating() -> bool:
     generate.py` also matches any SHELL whose command line mentions it -- so a
     command that begins with `pkill -f generate.py` makes the check report the
     generator as running because it matched the shell doing the killing."""
-    r = subprocess.run(["pgrep", "-f", "python3 generate.py"],
-                       capture_output=True)
-    return r.returncode == 0
+    for pattern in ("python3 generate.py", "python3 patch.py"):
+        if subprocess.run(["pgrep", "-f", pattern],
+                          capture_output=True).returncode == 0:
+            return True
+    return False
 
 
 def running() -> bool:
@@ -192,10 +195,10 @@ def shot(path: str) -> str:
     return path
 
 
-def log_state() -> dict:
+def log_state(expect: str = "") -> dict:
     """What the generator has said, and what that means."""
     out = {"exists": os.path.exists(LOG), "bytes": 0, "tail": [],
-           "generating": generating(),
+           "generating": generating(), "expect": expect,
            "forge_pipeline_ran": False}
     if out["exists"]:
         out["bytes"] = os.path.getsize(LOG)
@@ -209,8 +212,8 @@ def log_state() -> dict:
     return out
 
 
-def verdict() -> int:
-    st = log_state()
+def verdict(expect: str = "") -> int:
+    st = log_state(expect)
     print(json.dumps(st, indent=2))
     if st["forge_pipeline_ran"]:
         print("FAIL: Forge's plugin pipeline ran — a Rack prompt reached the "
@@ -218,14 +221,30 @@ def verdict() -> int:
         return 1
     if st.get("expect") == "patch" and st["tail"]:
         text = "\n".join(st["tail"])
-        if "AUDIO" in text or "MODULATION" in text or ".vcv" in text:
-            print("PASS: a patch was built")
+        # The generator's own success line, anchored. The previous test looked
+        # for "AUDIO" or ".vcv" anywhere in the tail -- both of which appear in
+        # the explanation of a patch that FAILED to write, and neither of which
+        # says a file exists.
+        m = re.search(r"built (\d+) modules?, (\d+) cables? \u2192 (.+)$",
+                      text, re.M)
+        if m:
+            path = m.group(3).strip()
+            if not os.path.exists(path):
+                print(f"FAIL: the log says it built {path}, and it is not there")
+                return 1
+            print(f"PASS: a patch was built — {m.group(1)} modules, "
+                  f"{m.group(2)} cables, and the file exists")
             return 0
     if not st["exists"] or st["bytes"] == 0:
         print("FAIL: the generator never wrote anything — Build did not reach it")
         return 1
     text = "\n".join(st["tail"])
     if "installed" in text and "open it with" in text:
+        m = re.search(r"installed \u2192 (.+)$", text, re.M)
+        if m and not os.path.exists(m.group(1).strip()):
+            print(f"FAIL: the log says it installed {m.group(1).strip()}, "
+                  "and it is not there")
+            return 1
         print("PASS: a module was built and installed into Rack")
         return 0
     if "gave up" in text or "Traceback" in text:
@@ -267,7 +286,9 @@ def main(argv: list[str]) -> int:
         return 0
 
     if cmd == "status":
-        return verdict()
+        # Told what it is judging, because a patch and a module succeed with
+        # different words and a query cannot infer which run it is looking at.
+        return verdict(argv[2] if len(argv) > 2 else "")
 
     if cmd == "open":
         # Click Open in Rack and prove Rack actually loaded it, from Rack's own
@@ -315,8 +336,9 @@ def main(argv: list[str]) -> int:
         # unlinked file -- so the driver ends up reporting on a run that has
         # no log and a prompt nobody typed.
         if log_state()["generating"]:
-            sys.exit("a generation is already running — wait for it or "
-                     "`pkill -f generate.py` first")
+            sys.exit("a generation is already running — wait for it, or "
+                     "`pkill -f 'python3 generate.py'` / "
+                     "`pkill -f 'python3 patch.py'`")
         ensure_home()
         # Pick the artifact BEFORE typing. The tabs change what Build submits,
         # and switching after a prompt is typed is how a patch request gets
@@ -352,7 +374,7 @@ def main(argv: list[str]) -> int:
                      "landed somewhere that is not Build — see "
                      "/tmp/drive-build-nofire.png")
         shot("/tmp/drive-build.png")
-        return verdict()
+        return verdict("patch" if cmd == "patch" else "module")
 
     sys.exit(f"unknown command {cmd!r}")
 
