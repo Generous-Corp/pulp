@@ -170,6 +170,13 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         PointerType pointer_type, float pressure,
                         MouseButton button) {
+    deliver_mouse_drag(root, target, root_pt, modifiers, click_count, button,
+                       PointerAttributes{pointer_type, pressure, 0});
+}
+
+void deliver_mouse_drag(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count,
+                        MouseButton button, const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return;
 
     const Point local = point_to_local(root_pt, target, &root);
@@ -183,8 +190,9 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     me.click_count = click_count;
     me.is_down = true;  // the button is still held during a drag
     me.phase = MousePhase::drag;
-    me.pointer_type = pointer_type;
-    me.pressure = pressure;
+    me.pointer_type = pointer.type;
+    me.pressure = pointer.pressure;
+    me.pointer_id = pointer.pointer_id;
     target->on_mouse_event(me);
 
     // The legacy callbacks carry no button identity and historically mean the
@@ -226,6 +234,14 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
 bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count, bool bubble,
                         MouseButton button, const MouseDownHost& host) {
+    return deliver_mouse_down(root, target, root_pt, modifiers, click_count,
+                              bubble, button, host, PointerAttributes{});
+}
+
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button, const MouseDownHost& host,
+                        const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return false;
     const auto should_continue = [&] {
         return !host.should_continue || host.should_continue();
@@ -242,6 +258,9 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
     me.click_count = click_count;
     me.is_down = true;
     me.phase = MousePhase::press;
+    me.pointer_type = pointer.type;
+    me.pressure = pointer.pressure;
+    me.pointer_id = pointer.pointer_id;
     target->on_mouse_event(me);
 
     // A modern handler may unmount the tree it was dispatched into. Re-validate
@@ -281,6 +300,14 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
 void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host, MouseButton button) {
+    deliver_mouse_up(root, target, root_pt, modifiers, click_count, host, button,
+                     PointerAttributes{});
+}
+
+void deliver_mouse_up(View& root, View* target, Point root_pt,
+                      uint16_t modifiers, int click_count,
+                      const MouseUpHost& host, MouseButton button,
+                      const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return;
 
     const Point local = point_to_local(root_pt, target, &root);
@@ -311,6 +338,9 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
         me.click_count = click_count;
         me.is_down = false;
         me.phase = MousePhase::release;
+        me.pointer_type = pointer.type;
+        me.pressure = pointer.pressure;
+        me.pointer_id = pointer.pointer_id;
         target->on_mouse_event(me);
 
         // 3. W3C pointerup bubble (mirrors the pointerdown bubble).
