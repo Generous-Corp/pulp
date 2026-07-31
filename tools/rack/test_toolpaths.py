@@ -61,6 +61,40 @@ def main() -> int:
         else:
             print(f"  ok     {name}: resolves an absolute path with no PATH set")
 
+    # Every module-level constant a generator REFERS to must exist.
+    #
+    # Editing one of them removed its constants along with an old helper, and
+    # nothing noticed until a plugin inside REAPER printed
+    # `NameError: name 'SDK' is not defined` into its own window. Importing a
+    # function from the file does not catch that, and neither does running it
+    # with no arguments -- usage prints and exits long before the line that
+    # would have failed. So the names are checked statically: every ALL-CAPS
+    # identifier the source uses has to be something the imported module
+    # actually has.
+    import ast as _ast
+    import importlib
+    for name in ("generate", "patch"):
+        src = open(os.path.join(HERE, name + ".py")).read()
+        tree = _ast.parse(src)
+        used = {n.id for n in _ast.walk(tree)
+                if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)
+                and n.id.isupper() and len(n.id) > 2}
+        # Anything the file assigns ANYWHERE is fine, including a constant
+        # local to one function. The question is only whether a name is used
+        # and never bound.
+        bound = {n.id for n in _ast.walk(tree)
+                 if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Store)}
+        used -= bound
+        mod = importlib.import_module(name)
+        missing = sorted(u for u in used
+                         if not hasattr(mod, u) and u not in dir(__builtins__))
+        if missing:
+            print(f"  WRONG  {name}.py refers to {missing}, which it does not "
+                  f"define — that reaches a user as a NameError traceback")
+            bad += 1
+        else:
+            print(f"  ok     {name}.py defines every constant it refers to")
+
     # The environment handed to the tool has to be able to find node, because
     # claude runs its own hooks with it.
     env = toolpaths.tool_env()

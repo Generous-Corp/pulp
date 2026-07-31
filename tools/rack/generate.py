@@ -45,6 +45,15 @@ def find_claude() -> str:
     return toolpaths.find_claude()
 
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+PACK = os.path.join(ROOT, "examples", "forge-modular")
+CONTRACT = os.path.join(HERE, "prompt", "module_contract.md")
+EMITTER = os.path.join(HERE, "forge_modular.py")
+
+SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
+
+
 RACK_APP = "/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack"
 PLUGIN_DIR = os.path.expanduser(
     "~/Library/Application Support/Rack2/plugins-mac-arm64")

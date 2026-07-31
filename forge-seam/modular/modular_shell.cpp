@@ -952,6 +952,40 @@ std::string ForgeModularShell::ask() {
 }
 
 void ForgeModularShell::on_poll() {
+    // A way to ask for a build from OUTSIDE the window, for proving that a
+    // generation works when it is spawned from inside a host.
+    //
+    // That claim is the one no headless test can make: the generator is
+    // spawned BY the plugin, inheriting the host's environment, and a plugin
+    // whose editor draws perfectly can still never reach it -- which is
+    // exactly what happened when the module builder could not find `claude`
+    // with no PATH to search. Proving it previously meant driving synthetic
+    // clicks at screen coordinates, and that typed a prompt into somebody's
+    // terminal twice: every guess about what is on screen finds a new way to
+    // be wrong, and the cost lands on whoever is using the machine.
+    //
+    // So the host-side proof asks through a file instead. Inert unless the
+    // environment names one -- nothing in a shipped plugin reads this.
+    if (const char* trigger = std::getenv("FORGE_MODULAR_TEST_PROMPT");
+        trigger && *trigger) {
+        std::error_code ec;
+        if (std::filesystem::exists(trigger, ec)) {
+            std::string prompt;
+            {
+                std::ifstream f(trigger);
+                std::getline(f, prompt);
+            }
+            // Removed BEFORE submitting, so a build that takes minutes cannot
+            // be started again on the next tick.
+            std::filesystem::remove(trigger, ec);
+            if (!prompt.empty()) {
+                pulp::runtime::log_info(
+                    "Forge Modular: build requested through the test seam");
+                submit_own(prompt);
+            }
+        }
+    }
+
     // Read what the generator has written FIRST. Evaluating the outcome before
     // pumping meant judging lines that had not been read yet, so every verdict
     // arrived a tick late -- and in a test that polls once, never.

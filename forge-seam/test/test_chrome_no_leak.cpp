@@ -2181,6 +2181,65 @@ TEST_CASE("pressing Build through a real click does not tear itself down",
     CHECK(shell.chrome()->mode() == forge::ForgeChrome::Mode::Build);
 }
 
+TEST_CASE("a build can be asked for without driving the screen",
+          "[phase6][controls][seam]") {
+    // The claim no headless test can make is that a generation works when it
+    // is spawned from INSIDE a host: the generator inherits the host's
+    // environment, and a plugin whose editor draws perfectly can still never
+    // reach it. Proving it meant synthetic clicks at screen coordinates,
+    // which typed a prompt into somebody's terminal twice -- every guess
+    // about what is on screen finds a new way to be wrong.
+    //
+    // So the host-side proof asks through a file, and this pins that seam:
+    // it fires once, it consumes the request, and it is INERT unless the
+    // environment names a file.
+    struct WillingEngine : forge_modular::EngineClient {
+        std::vector<std::string> prompts;
+        bool available() const override { return true; }
+        bool ensure_running() override { return true; }
+        void submit(const std::string& p, bool) override { prompts.push_back(p); }
+    } engine;
+
+    HermeticProjects isolated;
+    const auto trigger = std::filesystem::temp_directory_path() /
+                         "forge-modular-test-prompt.txt";
+    std::filesystem::remove(trigger);
+
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // Inert while nothing names a file: a shipped plugin must not read this.
+    unsetenv("FORGE_MODULAR_TEST_PROMPT");
+    { std::ofstream f(trigger); f << "should never be read\n"; }
+    shell.chrome()->poll();
+    CHECK(engine.prompts.empty());
+    CHECK(std::filesystem::exists(trigger));   // untouched
+    std::filesystem::remove(trigger);
+
+    setenv("FORGE_MODULAR_TEST_PROMPT", trigger.c_str(), 1);
+    // And inert when the file is not there, which is every ordinary tick.
+    shell.chrome()->poll();
+    CHECK(engine.prompts.empty());
+
+    { std::ofstream f(trigger); f << "a west coast voice through a low pass gate\n"; }
+    shell.chrome()->poll();
+    REQUIRE(engine.prompts.size() == 1);
+    CHECK(engine.prompts[0] == "a west coast voice through a low pass gate");
+
+    // Consumed, so a build that takes minutes is not started again every tick.
+    CHECK_FALSE(std::filesystem::exists(trigger));
+    shell.chrome()->poll();
+    shell.chrome()->poll();
+    CHECK(engine.prompts.size() == 1);
+
+    unsetenv("FORGE_MODULAR_TEST_PROMPT");
+}
+
 TEST_CASE("no control on Home paints like a control and does nothing",
           "[phase6][controls]") {
     // A control that highlights and does nothing is indistinguishable from a

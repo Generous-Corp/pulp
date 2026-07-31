@@ -363,22 +363,30 @@ class EditorBuildMode(unittest.TestCase):
         self.assertEqual(args.mode, "editor-build")
         rs.validate_mode_args(ap, args)   # must not raise or exit
 
-    def test_it_refuses_to_click_with_no_helper(self):
-        # Without the click helper there is nothing to press, and pretending
-        # otherwise would report a pass for a button nobody touched.
-        import argparse
-        args = argparse.Namespace(
-            mode="editor-build", plugin_name="Forge Modular",
-            plugin_path=__file__, format="clap", timeout=30)
-        # Past the opt-in gate, which is checked first and tested separately.
-        real = os.path.expanduser
-        with mock.patch.dict(os.environ,
-                             {"PULP_DAW_SMOKE_DRIVE_MY_SCREEN": "1"}), \
-             mock.patch.object(rs.os.path, "expanduser",
-                               side_effect=lambda p: "/tmp/definitely-no-helper"
-                               if "uidriver" in p else real(p)):
-            rc = rs.run_editor_build_mode(pathlib.Path("/tmp/reaper"), args)
-        self.assertEqual(rc, rs.EXIT_INCONCLUSIVE)
+    def test_it_does_not_drive_the_screen_at_all(self):
+        """No clicks, no keystrokes, no screen coordinates.
+
+        The earlier version of this mode pressed the editor's Build button by
+        posting synthetic events at computed coordinates. It typed a prompt
+        into somebody's terminal twice -- once believing "REAPER is frontmost"
+        while its window sat buried, once taking that terminal's dark
+        background for the plugin's editor. Each guard was correct and each
+        was defeated by the next assumption.
+
+        The claim being proven is that the generator runs when the PLUGIN
+        spawns it, inheriting the host's environment. That is just as true
+        asked through a file as asked through a button, and a file cannot
+        land on somebody else's window.
+        """
+        src = open(rs.__file__ if hasattr(rs, "__file__")
+                   else MODULE_PATH).read()
+        body = src[src.index("def run_editor_build_mode"):]
+        body = body[:body.index("\ndef ", 1)]
+        for banned in ("uidriver", "screencapture", "click(", "\"type\"",
+                       "AXRaise"):
+            self.assertNotIn(banned, body,
+                             f"editor-build still reaches for {banned!r} — "
+                             f"it must not drive the screen")
 
 
 class FormatIsAsked(unittest.TestCase):
@@ -404,47 +412,6 @@ class FormatIsAsked(unittest.TestCase):
         self.assertEqual(len(set(seen.values())), 3,
                          f"the three formats must ask for three things: {seen}")
 
-
-class RefusesToClickBlind(unittest.TestCase):
-    """It must not click when the editor is not what a click would hit.
-
-    REAPER reported itself frontmost while its FX window sat under a remote-
-    desktop session and a terminal full of live agent sessions. The clicks and
-    the typed prompt went into those. Frontmost-process is not the same
-    question as "what is at this point", and on a shared machine a wrong click
-    is not a failed test -- it is typing into somebody's work.
-    """
-
-    def _driver(self, answers):
-        """A stub uidriver that reports who owns each queried point."""
-        calls = iter(answers)
-
-        def run(cmd, **kw):
-            return mock.Mock(stdout=next(calls) + "\n", returncode=0)
-        return run
-
-    def test_something_over_the_editor_is_refused(self):
-        with mock.patch.object(rs.subprocess, "run",
-                               side_effect=self._driver(["Terminal"])):
-            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
-
-    def test_the_editor_itself_is_accepted(self):
-        with mock.patch.object(rs.subprocess, "run",
-                               side_effect=self._driver(["REAPER"] * 3)):
-            self.assertTrue(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
-
-    def test_every_click_point_is_checked_not_just_the_first(self):
-        # The prompt field and Build are in different places; one of them
-        # being clear says nothing about the other.
-        with mock.patch.object(rs.subprocess, "run",
-                               side_effect=self._driver(["REAPER", "REAPER",
-                                                         "Jump Desktop"])):
-            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
-
-    def test_a_point_owned_by_nothing_is_refused(self):
-        with mock.patch.object(rs.subprocess, "run",
-                               side_effect=self._driver([""])):
-            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
 
 
 class DoesNotWreckSomebodysReaper(unittest.TestCase):
@@ -523,33 +490,6 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
             rs.kill_reaper(only_pid=4321)
         self.assertTrue(any("4321" in " ".join(c.args[0])
                             for c in run.call_args_list))
-
-
-class EditorBuildIsOptIn(unittest.TestCase):
-    """It must not drive somebody's screen because a script felt like it.
-
-    editor-build posts real clicks and real keystrokes at screen coordinates.
-    It typed a prompt into somebody's terminal twice: once because "REAPER is
-    frontmost" was believed while its window sat buried, and once because a
-    dark rectangle was taken for the editor when it was that terminal's
-    background. Each guard was right and each was defeated by the next
-    assumption, so the mode itself is now the thing that has to be asked for.
-    """
-
-    def test_it_skips_unless_explicitly_allowed(self):
-        import argparse
-        args = argparse.Namespace(mode="editor-build", plugin_name="X",
-                                  plugin_path=__file__, format="clap",
-                                  timeout=30)
-        env = {k: v for k, v in os.environ.items()
-               if k != "PULP_DAW_SMOKE_DRIVE_MY_SCREEN"}
-        with mock.patch.dict(os.environ, env, clear=True):
-            rc = rs.run_editor_build_mode(pathlib.Path("/tmp/reaper"), args)
-        self.assertEqual(rc, rs.EXIT_SKIP,
-                         "it drove the screen without being asked to")
-
-    def test_a_skip_is_not_a_pass(self):
-        self.assertNotEqual(rs.EXIT_SKIP, rs.EXIT_PASS)
 
 
 if __name__ == "__main__":

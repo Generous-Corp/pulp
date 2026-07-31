@@ -592,42 +592,13 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     if bad is not None:
         return bad
 
-    # OPT-IN, and deliberately awkward. This mode drives real clicks and real
-    # keystrokes at screen coordinates. Every safeguard here was written after
-    # it typed a prompt into somebody's terminal: first because "frontmost"
-    # was believed, then because a dark rectangle was assumed to be the
-    # editor when it was that same terminal's background. Each guard was
-    # correct and each was defeated by the next assumption.
-    #
-    # So it does not run unless somebody has said, in as many words, that this
-    # machine is theirs to drive. On a shared or working machine a mis-aimed
-    # click is not a failed test.
-    if os.environ.get("PULP_DAW_SMOKE_DRIVE_MY_SCREEN") != "1":
-        log("editor-build drives real clicks and keystrokes at screen "
-            "coordinates. It has typed into somebody's terminal twice. Set "
-            "PULP_DAW_SMOKE_DRIVE_MY_SCREEN=1 only on a machine you are "
-            "willing to have driven, with nothing else in front. — SKIP")
-        return EXIT_SKIP
-
-    uidriver = Path(os.path.expanduser("~/.cache/forge-modular/uidriver"))
-    if not uidriver.exists():
-        log(f"no click helper at {uidriver} — run tools/rack/drive_app.py once "
-            f"to build it, or this cannot press anything — SKIP")
-        return EXIT_INCONCLUSIVE
-
     plugin_log = Path(os.path.expanduser(
         "~/Library/Application Support/Forge Modular/last-run.log"))
-    # Where the log ENDS now, so only what this run appends is ever read, and
-    # the PROMPT, so the artifact has to be the one this run asked for.
-    #
-    # Both guards exist because the first version had neither and reported a
-    # confident PASS naming `a-bouncing-ball-rhythm...vcv` for a run that typed
-    # "a classic subtractive voice" -- it matched a success line left behind by
-    # an earlier build. A gate that reports someone else's work as this run's
-    # is worse than no gate.
     before = plugin_log.stat().st_size if plugin_log.exists() else 0
     prompt = "a classic subtractive voice with a filter envelope"
     want = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:40]
+    trigger = Path("/tmp/pulp-daw-smoke-prompt.txt")
+    trigger.unlink(missing_ok=True)
 
     _announce(f'"{args.plugin_name}" ({args.format}) editor-build smoke '
               f'(it will run a generation inside REAPER)', args.timeout)
@@ -641,107 +612,31 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
             status.unlink()
 
         env = _common_env(args, status)
+        # The shell reads this file once and builds what it names. NO synthetic
+        # clicks: driving a screen typed a prompt into somebody's terminal
+        # twice, because every guess about what is on screen finds a new way
+        # to be wrong. The claim being proven is that the generator runs when
+        # the PLUGIN spawns it, inheriting the host's environment -- and that
+        # is just as true asked through a file as asked through a button.
+        env["FORGE_MODULAR_TEST_PROMPT"] = str(trigger)
         not_shown = session.run_until_fx_shown(env, status)
         if not_shown is not None:
             return not_shown
-        time.sleep(6)          # let the editor paint before touching it
+        time.sleep(4)                     # let the editor settle and poll
+        trigger.write_text(prompt + "\n")
+        log(f"asked the hosted plugin to build: {prompt!r}")
 
-        box = _floating_editor_bounds(args.plugin_name)
-        if box is None:
-            log("the editor is open but its window could not be located, so "
-                "there is nothing safe to click — INCONCLUSIVE")
-            return EXIT_INCONCLUSIVE
-        x, y, w, h = box
-        log(f"host window at {x},{y} {w}x{h}")
-        time.sleep(2)
-        inner = _editor_rect_in(box)
-        if inner is None:
-            log("the plugin's own surface could not be located inside the "
-                "host window — refusing to click at guessed coordinates — "
-                "INCONCLUSIVE")
-            return EXIT_INCONCLUSIVE
-        x, y, w, h = inner
-        log(f"the plugin's editor is at {x},{y} {w}x{h} inside it")
-
-        # FOCUS FIRST, and fail if it cannot be had. Typing into a window that
-        # is not key goes nowhere, Build then refuses an empty prompt, and the
-        # run sits waiting for a generation that was never asked for -- which
-        # is exactly how the first attempt produced no verdict at all. The
-        # standalone driver has refused to click unfocused since two false
-        # readings cost more than the bugs did; this had not learned it yet.
-        _osa('tell application "REAPER" to activate')
-        time.sleep(1.0)
-        _osa(f'tell application "System Events" to tell process "REAPER" to '
-             f'perform action "AXRaise" of window 1 whose name contains '
-             f'"{args.plugin_name}"')
-        time.sleep(1.0)
-        # No frontmost-process check. It is the wrong question -- REAPER
-        # called itself frontmost while its editor sat under a remote-desktop
-        # session -- and it is unreliable besides: System Events answers
-        # "missing value" when the asking process lacks automation rights,
-        # which reads as "could not bring it forward" for a window that is
-        # perfectly well forward. The window server is asked instead, about
-        # the actual points that will be clicked.
-        _dismiss_own_screenshot_ui()
-
-        # Something floating over the editor is not a reason to give up, and
-        # it is certainly not a reason to close somebody's app. The window
-        # this harness opened can simply be moved out from under it. Tried at
-        # a few positions, and each one VERIFIED with the window server before
-        # anything is clicked.
-        if not _editor_is_really_in_front(str(uidriver), x, y, w, h):
-            for nx, ny in ((0, 25), (0, 25 + 40), (60, 25)):
-                _osa(f'tell application "System Events" to tell process '
-                     f'"REAPER" to set position of window 1 whose name '
-                     f'contains "{args.plugin_name}" to {{{nx}, {ny}}}')
-                time.sleep(1.0)
-                moved = _floating_editor_bounds(args.plugin_name)
-                if moved is None:
-                    continue
-                x, y, w, h = moved
-                if _editor_is_really_in_front(str(uidriver), x, y, w, h):
-                    log(f"moved the editor clear, to {x},{y}")
-                    break
-
-        if not _editor_is_really_in_front(str(uidriver), x, y, w, h):
-            log("REAPER says it is frontmost, but the editor is not what is on "
-                "screen where the clicks would land — something else is over "
-                "it. Refusing to click: on a shared machine that types into "
-                "somebody's work. INCONCLUSIVE")
-            return EXIT_INCONCLUSIVE
-
-        # The same fractions the standalone driver uses; the editor is the
-        # same view at the same design size whichever shell is around it.
-        def click(fx: float, fy: float) -> None:
-            subprocess.run([str(uidriver), "click",
-                            str(int(x + w * fx)), str(int(y + h * fy))],
-                           check=False)
-            time.sleep(0.8)
-
-        click(0.567, 0.345)                       # the Patch tab
-        click(0.52, 0.48)                         # the prompt field
-        subprocess.run([str(uidriver), "type", prompt], check=False)
-        time.sleep(0.8)
-        click(0.73, 0.53)                         # Build
-
-        # Did the press START anything? Say plainly that the click missed,
-        # rather than waiting out the cap and calling it inconclusive.
         started = False
-        for _ in range(30):
+        for _ in range(60):
             time.sleep(1)
-            if plugin_log.exists() and plugin_log.stat().st_size > before:
+            if not trigger.exists():      # the plugin consumed the request
                 started = True
                 break
         if not started:
-            subprocess.run(["screencapture", "-x", "-o",
-                            "/tmp/forge-reaper-nofire.png"], check=False)
-            _dismiss_own_screenshot_ui()
-            log("a screenshot of what was on screen is at "
-                "/tmp/forge-reaper-nofire.png")
-            log("the Build click did not start a generation inside the host: "
-                "the prompt was typed and the button was pressed, so the click "
-                "landed somewhere that is not Build — FAIL")
+            log("the hosted plugin never read the request — the build seam is "
+                "not reaching it inside this host — FAIL")
             return EXIT_FAIL
+        log("the hosted plugin took the request")
 
         # Wait for the generation the way a person would: until the plugin's
         # log says it finished, or the cap runs out.
