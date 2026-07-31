@@ -54,8 +54,10 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 The production server binds loopback only and requires fresh, role-separated
 nonce/HMAC proofs from both client and server using an owner-private
 per-session credential. Discovery rejects expired or dead publishers,
-duplicate live publisher identities, insecure files, path escapes, and
-ambiguous selection.
+duplicate live publisher identities, insecure mode bits or extended ACLs,
+path escapes, and ambiguous selection. Newly created Darwin discovery objects
+discard inherited ACLs before any credential material is written; readers
+validate the opened object and fail closed on any remaining extended ACL.
 Capability dispatch is fail-closed before a domain handler runs. The old
 unauthenticated direct-handler server exists only as a non-installed test
 fixture for transport regression coverage.
