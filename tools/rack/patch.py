@@ -21,8 +21,48 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import re
 import sys
+
+
+def find_claude() -> str:
+    """Locate the `claude` binary without relying on PATH.
+
+    An app launched from Finder does not inherit a shell's PATH, so ~/.local/bin
+    is absent and the model call dies instantly with
+    FileNotFoundError: 'claude' -- a build that looks like it gave up. Every
+    generation that worked during development was launched from a terminal,
+    which is exactly the environment a user does not have.
+    """
+    override = os.environ.get("FORGE_CLAUDE_BIN")
+    if override:
+        return override
+    found = shutil.which("claude")
+    if found:
+        return found
+    # Codex CLI drives the same generator with its own PATH, and a shim may be
+    # the only "claude" on it. Honour an explicit Codex binary before falling
+    # back to fixed locations, so a run launched from either agent resolves
+    # something real rather than dying on FileNotFoundError.
+    for env in ("FORGE_CODEX_BIN", "CODEX_BIN"):
+        candidate = os.environ.get(env)
+        if candidate and os.path.exists(candidate):
+            return candidate
+    for name in ("codex",):
+        found = shutil.which(name)
+        if found:
+            return found
+    home = os.path.expanduser("~")
+    for candidate in (f"{home}/.local/bin/claude",
+                      "/opt/homebrew/bin/claude",
+                      "/usr/local/bin/claude",
+                      f"{home}/.claude/local/claude"):
+        if os.path.exists(candidate):
+            return candidate
+    return "claude"   # let the failure name it, rather than guessing further
+
+
 
 RACK_USER = os.path.expanduser("~/Library/Application Support/Rack2")
 PLUGIN_DIRS = [os.path.join(RACK_USER, d) for d in os.listdir(RACK_USER)] \
@@ -910,7 +950,7 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     """Prompt -> a patch that lints clean and makes a sound."""
     import re
     import subprocess
-    claude = os.environ.get("FORGE_CLAUDE_BIN", "claude")
+    claude = find_claude()
     contract = open(CONTRACT).read().replace("<!--INVENTORY-->",
                                              render_inventory(inv, prefer))
     ctx = None

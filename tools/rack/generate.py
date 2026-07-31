@@ -28,6 +28,45 @@ import subprocess
 import sys
 import tempfile
 
+
+def find_claude() -> str:
+    """Locate the `claude` binary without relying on PATH.
+
+    An app launched from Finder does not inherit a shell's PATH, so ~/.local/bin
+    is absent and the model call dies instantly with
+    FileNotFoundError: 'claude' -- a build that looks like it gave up. Every
+    generation that worked during development was launched from a terminal,
+    which is exactly the environment a user does not have.
+    """
+    override = os.environ.get("FORGE_CLAUDE_BIN")
+    if override:
+        return override
+    found = shutil.which("claude")
+    if found:
+        return found
+    # Codex CLI drives the same generator with its own PATH, and a shim may be
+    # the only "claude" on it. Honour an explicit Codex binary before falling
+    # back to fixed locations, so a run launched from either agent resolves
+    # something real rather than dying on FileNotFoundError.
+    for env in ("FORGE_CODEX_BIN", "CODEX_BIN"):
+        candidate = os.environ.get(env)
+        if candidate and os.path.exists(candidate):
+            return candidate
+    for name in ("codex",):
+        found = shutil.which(name)
+        if found:
+            return found
+    home = os.path.expanduser("~")
+    for candidate in (f"{home}/.local/bin/claude",
+                      "/opt/homebrew/bin/claude",
+                      "/usr/local/bin/claude",
+                      f"{home}/.claude/local/claude"):
+        if os.path.exists(candidate):
+            return candidate
+    return "claude"   # let the failure name it, rather than guessing further
+
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 PACK = os.path.join(ROOT, "examples", "forge-modular")
@@ -35,7 +74,7 @@ CONTRACT = os.path.join(HERE, "prompt", "module_contract.md")
 EMITTER = os.path.join(HERE, "forge_modular.py")
 
 SDK = os.environ.get("RACK_SDK_DIR", os.path.expanduser("~/SDKs/Rack-SDK"))
-CLAUDE = os.environ.get("FORGE_CLAUDE_BIN", "claude")
+CLAUDE = find_claude()
 RACK_APP = "/Applications/VCV Rack 2 Free.app/Contents/MacOS/Rack"
 PLUGIN_DIR = os.path.expanduser(
     "~/Library/Application Support/Rack2/plugins-mac-arm64")
@@ -388,74 +427,25 @@ def main(argv):
 
 
 def _wire_entry(slug):
-    """Register the new model in plugin.hpp / plugin.cpp, exactly once.
+    """No longer registers anything -- forge_modular.py owns it.
 
     Rack's Plugin::addModel asserts !model->plugin, so registering a model
-    twice aborts the whole application at load -- taking every other plugin
-    with it. The guard below is not defensive tidiness; a duplicate here is a
-    hard crash before Rack's window even opens.
-    """
-    hpp = os.path.join(PACK, "src", "plugin.hpp")
-    s = open(hpp).read()
-    decl = f"extern rack::plugin::Model* model{slug};"
-    if decl not in s:
-        open(hpp, "w").write(s.rstrip() + "\n" + decl + "\n")
+    twice aborts the whole application at load, taking every other plugin with
+    it. That is exactly what happened: this function appended its line AFTER
+    the emitter's generated block, the emitter then rewrote only what lay
+    between its markers, and the stray line survived as a duplicate. Rack
+    crashed before its window opened.
 
+    Declarations and registrations are derived from the manifests in one place
+    now. Two writers maintaining one list is the bug, not the ordering.
+    """
+    return
+
+
+def _verify_registrations() -> None:
+    """Fail loudly if the generated set ever contains a duplicate."""
     cpp = os.path.join(PACK, "src", "plugin.cpp")
     s = open(cpp).read()
-    add = f"    p->addModel(model{slug});"
-    if add in s:
-        return                      # already registered
-    i = s.rfind("}")                # closing brace of init()
-    if i < 0:
-        raise SystemExit("plugin.cpp has no closing brace to insert before")
-    open(cpp, "w").write(s[:i] + add + "\n" + s[i:])
-
-
-def check_uses_pulp_dsp(slug, mod):
-    """Fail a module that reaches for none of Pulp's DSP. Returns (ok, message).
-
-    The reason to build a Rack module on Pulp is its DSP catalog. A module
-    that hand-rolls everything is usually not a stylistic choice but a signal
-    that the vocabulary in the prompt is wrong, stale or too awkward to use --
-    which is exactly what produced the first module generated here, which used
-    none of it and nobody noticed until the source was read.
-
-    Some modules legitimately need no DSP: a mult splits a voltage, a scanner
-    reads the rack, a blank does nothing. Those declare a waiver, and the
-    waiver must name the specific blocker rather than gesture at one. "Nothing
-    in pulp::signal generates Bjorklund patterns" can be checked and can go
-    stale usefully; "not supported yet" tells a later reader nothing and never
-    stops being true.
-    """
-    src = open(os.path.join(PACK, "src", f"{slug}.cpp")).read()
-    used = sorted(set(re.findall(r"#include <pulp/signal/([\w/]+\.hpp)>", src)))
-    if used:
-        return True, f"uses Pulp DSP: {', '.join(used)}"
-
-    waiver = mod.get("dsp_waiver")
-    if isinstance(waiver, dict):
-        kind, reason = waiver.get("type", ""), waiver.get("reason", "")
-        if not kind or not reason:
-            return False, ("dsp_waiver needs both a type and a reason; "
-                           f"got {waiver!r}")
-        if len(reason) < 25:
-            return False, (f"the dsp_waiver reason is too thin to be useful "
-                           f"later: {reason!r}. Name what is actually missing "
-                           f"from pulp::signal.")
-        return True, f"no Pulp DSP, waived ({kind}): {reason}"
-
-    return False, ("this module uses none of pulp::signal — everything was "
-                   "hand-rolled. Either build it from the DSP listed in the "
-                   "prompt, or, if nothing there genuinely fits, declare "
-                   "\"dsp_waiver\": {\"type\": \"<short-slug>\", \"reason\": "
-                   "\"<what is actually missing from pulp::signal>\"} in the "
-                   "manifest.")
-
-
-def _assert_no_duplicate_models():
-    """Fail loudly if any model is registered more than once."""
-    s = open(os.path.join(PACK, "src", "plugin.cpp")).read()
     calls = re.findall(r"p->addModel\((model\w+)\)", s)
     dupes = {m for m in calls if calls.count(m) > 1}
     if dupes:

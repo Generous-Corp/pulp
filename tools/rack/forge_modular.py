@@ -901,7 +901,11 @@ def main(argv):
             if begin in text and end in text:
                 head = text[:text.index(begin)]
                 tail = text[text.index(end) + len(end):]
-                text = head + block + tail
+                head = "\n".join(l for l in head.splitlines()
+                                  if not l.startswith("extern rack::plugin::Model*"))
+                tail = "\n".join(l for l in tail.splitlines()
+                                  if not l.startswith("extern rack::plugin::Model*"))
+                text = head + "\n" + block + tail
             else:
                 # First run: replace whatever extern lines are there with the
                 # marked block, so this is idempotent from here on.
@@ -929,7 +933,16 @@ def main(argv):
             if begin in text and end in text:
                 head = text[:text.index(begin)]
                 tail = text[text.index(end) + len(end):]
-                text = head + block + tail
+                # Strip stray registrations OUTSIDE the markers before
+                # reinserting. Another writer appended one after the END
+                # marker, the block was rewritten around it, and the survivor
+                # became a duplicate -- which makes Rack's addModel assert and
+                # abort the whole application before its window opens.
+                head = "\n".join(l for l in head.splitlines()
+                                  if "p->addModel(" not in l)
+                tail = "\n".join(l for l in tail.splitlines()
+                                  if "p->addModel(" not in l)
+                text = head + "\n" + block + tail
             else:
                 lines = [ln for ln in text.splitlines()
                          if "p->addModel(" not in ln]
