@@ -12,6 +12,16 @@ target_include_directories(pulp-inspect-protocol
 )
 target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
 
+add_library(pulp-inspect-discovery-support src/discovery_paths.cpp)
+add_library(pulp::inspect-discovery-support
+    ALIAS pulp-inspect-discovery-support)
+target_include_directories(pulp-inspect-discovery-support
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-discovery-support
+    PRIVATE pulp::runtime)
+
 add_library(pulp-inspect-discovery src/discovery.cpp)
 add_library(pulp::inspect-discovery ALIAS pulp-inspect-discovery)
 target_compile_definitions(pulp-inspect-discovery
@@ -20,7 +30,10 @@ target_include_directories(pulp-inspect-discovery
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-inspect-discovery PUBLIC pulp::inspect-protocol)
+target_link_libraries(pulp-inspect-discovery
+    PUBLIC
+        pulp::inspect-protocol
+        pulp::inspect-discovery-support)
 if(WIN32)
     target_link_libraries(pulp-inspect-discovery PRIVATE Advapi32)
 endif()
@@ -34,7 +47,9 @@ target_include_directories(pulp-inspect-publication
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-publication
-    PUBLIC pulp::inspect-discovery)
+    PUBLIC
+        pulp::inspect-protocol
+        pulp::inspect-discovery-support)
 if(WIN32)
     target_link_libraries(pulp-inspect-publication PRIVATE Advapi32)
 endif()
@@ -62,7 +77,6 @@ target_include_directories(pulp-inspect-runtime
 target_link_libraries(pulp-inspect-runtime
     PUBLIC
         pulp::inspect-protocol
-        pulp::inspect-discovery
         pulp::inspect-publication
         pulp::events)
 

@@ -1293,33 +1293,35 @@ fixture that explicitly constructs and wires the inspector server.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
-pulp motion stop --trace-id 1
+# copy the exact stop command printed by record:
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
 pulp motion snapshot
 pulp motion list-traces
-pulp motion scrub 30
-pulp motion play
-pulp motion pause
-pulp motion cost enable
-pulp motion cost disable
+pulp motion scrub 30 --session SESSION --instance INSTANCE
+pulp motion play --session SESSION --instance INSTANCE
+pulp motion pause --session SESSION --instance INSTANCE
+pulp motion cost enable --session SESSION --instance INSTANCE
+pulp motion cost disable --session SESSION --instance INSTANCE
 ```
 
 Options:
 
 - `--port PORT` - inspector port; defaults to owner-private authenticated discovery
 - `--session ID --instance ID` - select one exact authenticated session identity; both are required together
+  for stop, scrub, play, pause, and cost mutations
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Start a trace and print the trace id. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
-| `stop [--trace-id N]` | `Motion.stopTrace` | Release an active trace. |
+| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact session, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
+| `stop [--trace-id N] --session ID --instance ID` | `Motion.stopTrace` | Release an active trace on the exact process selected by `record`; the pair is required. |
 | `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
 | `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `scrub FRAME` | `Motion.scrubTo` | Move the scrubber playhead to a frame. |
-| `play` / `pause` | `Motion.play` / `Motion.pause` | Control fixture playback. |
-| `cost enable` / `cost disable` | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the session. |
+| `scrub FRAME --session ID --instance ID` | `Motion.scrubTo` | Move the exact session's scrubber playhead to a frame. |
+| `play` / `pause` with exact selection | `Motion.play` / `Motion.pause` | Control fixture playback without rediscovering a replacement process. |
+| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact session. |
 
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
@@ -1341,7 +1343,8 @@ inspector session.
 
 ```bash
 pulp trace start --categories dsp,render --ring-mb 128
-pulp trace stop                                   # → prints the .pftrace path
+# copy the exact stop command printed by start:
+pulp trace stop --session SESSION --instance INSTANCE  # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
 pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
 pulp trace query --preset dsp-hotspots
@@ -1360,7 +1363,8 @@ Options:
 - `--port PORT` - optional filter for owner-private authenticated discovery;
   `$PULP_INSPECTOR_PORT` supplies the same explicit filter
 - `--session ID --instance ID` - select one exact authenticated session
-  identity; both are required together for every live `Trace.*` command
+  identity; both are required together for `stop`. An unqualified `start`
+  resolves the pair before mutating and prints the pinned follow-up command.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:

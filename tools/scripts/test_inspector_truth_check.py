@@ -48,6 +48,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 'a == "--session" || a == "--instance"\n'
                 "--session and --instance must be supplied together\n"
                 "talker.call_selected(\n"
+                "parse_session_selection(&capabilities)\n"
+                "pulp motion mutation requires --session and --instance\n"
                 "pulp motion stop --trace-id {id}{}\n"
                 "selection_cli_suffix(\n"
                 "valid_session_identity(v)\n"
@@ -63,6 +65,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "talker.call_selected(\n"
                 'no_args("stop", &rest[1..])\n'
                 "explicit_selection.as_ref()\n"
+                "parse_session_selection(&capabilities)\n"
+                "pulp trace stop requires --session and --instance\n"
                 "pulp trace stop{}\n"
                 "selection_cli_suffix(\n"
                 "valid_session_identity(v)\n",
@@ -79,10 +83,13 @@ class InspectorTruthCheckTests(unittest.TestCase):
             ".agents/skills/cli-maintenance/SKILL.md":
                 "nonce/HMAC; owner-private per-session credential; "
                 "defense-in-depth\n",
-            "tools/mcp/pulp_mcp.cpp":
+                "tools/mcp/pulp_mcp.cpp":
                 '"name":"pulp_inspect_dom","description":"Experimental source-checkout client"\n'
                 '"minimum":1,"maximum":512\n'
-                "The host owns the trace destination.\n",
+                "The host owns the trace destination.\n"
+                "resolve_inspector_selection(root)\n"
+                '"required":["session_id","instance_id"]\n'
+                '"required":["trace_id","session_id","instance_id"]\n',
             "CMakeLists.txt":
                 "if(PULP_ENABLE_INSPECTOR)\n"
                 "    add_subdirectory(inspect)\n"
@@ -90,11 +97,19 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)\n"
                 "target_link_libraries(pulp-standalone PRIVATE pulp::inspect)\n",
             "inspect/CMakeLists.txt":
+                "add_library(pulp-inspect-discovery-support src/discovery_paths.cpp)\n"
+                "pulp::inspect-discovery-support\n"
                 "add_library(pulp-inspect-publication src/discovery.cpp)\n"
                 "PULP_INSPECT_READER_ONLY=1\n"
                 "PULP_INSPECT_PUBLISHER_ONLY=1\n"
                 "pulp::inspect-publication\n"
-                "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)\n",
+                "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)\n"
+                "target_link_libraries(pulp-inspect-publication\n"
+                "  PUBLIC pulp::inspect-protocol pulp::inspect-discovery-support\n"
+                ")\n"
+                "target_link_libraries(pulp-inspect-runtime\n"
+                "  PUBLIC pulp::inspect-publication\n"
+                ")\n",
             "inspect/include/pulp/inspect/discovery.hpp":
                 "class InspectorDiscoveryReader {};\n",
             "inspect/include/pulp/inspect/discovery_publisher.hpp":

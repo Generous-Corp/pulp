@@ -81,7 +81,7 @@ trace-processor` fetches the same pinned artifact via the tool registry.)
 ```bash
 pulp trace start --categories render,gpu,text,js,layout   # pick the categories the question implicates
 # ... reproduce (open the editor, sweep the knob, run the offline render) ...
-pulp trace stop                                           # → /tmp/pulp-<ts>.pftrace
+pulp trace stop --session SESSION --instance INSTANCE     # copy pair from start
 ```
 
 Or accept a `--trace FILE.pftrace` the user hands you. Choose categories from
@@ -216,7 +216,7 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 ```bash
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
-pulp trace stop
+pulp trace stop --session SESSION --instance INSTANCE
 pulp trace explain "why is my plugin slow to open?"
 ```
 

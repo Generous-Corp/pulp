@@ -167,6 +167,8 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
     "inspect/CMakeLists.txt": (
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
+        "add_library(pulp-inspect-discovery-support src/discovery_paths.cpp)",
+        "pulp::inspect-discovery-support",
         "add_library(pulp-inspect-publication src/discovery.cpp)",
         "PULP_INSPECT_READER_ONLY=1",
         "PULP_INSPECT_PUBLISHER_ONLY=1",
@@ -212,6 +214,8 @@ REQUIRED_SECURITY_CONTRACTS = {
         "talker.call_selected(",
         'no_args("stop", &rest[1..])',
         "explicit_selection.as_ref()",
+        "parse_session_selection(&capabilities)",
+        "pulp trace stop requires --session and --instance",
         "pulp trace stop{}",
         "selection_cli_suffix(",
         "valid_session_identity(v)",
@@ -220,6 +224,8 @@ REQUIRED_SECURITY_CONTRACTS = {
         'a == "--session" || a == "--instance"',
         "--session and --instance must be supplied together",
         "talker.call_selected(",
+        "parse_session_selection(&capabilities)",
+        "pulp motion mutation requires --session and --instance",
         "pulp motion stop --trace-id {id}{}",
         "selection_cli_suffix(",
         "valid_session_identity(v)",
@@ -230,6 +236,9 @@ REQUIRED_SECURITY_CONTRACTS = {
     "tools/mcp/pulp_mcp.cpp": (
         '"minimum":1,"maximum":512',
         "The host owns the trace destination.",
+        "resolve_inspector_selection(root)",
+        '"required":["session_id","instance_id"]',
+        '"required":["trace_id","session_id","instance_id"]',
     ),
     "core/runtime/src/socket.cpp": (
         "FIONBIO",
@@ -363,6 +372,22 @@ def check_root(root: pathlib.Path) -> list[str]:
         errors.append(
             "publisher authority header omits InspectorDiscoveryPublisher"
         )
+
+    inspect_cmake = (root / "inspect/CMakeLists.txt").read_text(encoding="utf-8")
+    for target in ("pulp-inspect-publication", "pulp-inspect-runtime"):
+        match = re.search(
+            rf"target_link_libraries\(\s*{re.escape(target)}\b(.*?)\)",
+            inspect_cmake,
+            re.DOTALL,
+        )
+        if not match:
+            errors.append(f"{target} has no inspect link contract")
+        elif re.search(
+            r"pulp::inspect-discovery(?:[\s;]|$)", match.group(1)
+        ):
+            errors.append(
+                f"{target} publicly regains discovery reader authority"
+            )
 
     mcp_source = (root / "tools/mcp/pulp_mcp.cpp").read_text(encoding="utf-8")
     for tool_name, description in MCP_TOOL_RE.findall(mcp_source):

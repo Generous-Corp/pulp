@@ -709,7 +709,33 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp trace: no inspector mapping for {sub:?}"
         )));
     };
-    let response = match explicit_selection.as_ref() {
+    if matches!(sub, Sub::Stop) && explicit_selection.is_none() {
+        return Err(CliError::BadUsage(
+            "pulp trace stop requires --session and --instance from the exact \
+             stop command printed by `pulp trace start`"
+                .to_owned(),
+        ));
+    }
+    let discovered_selection;
+    let selection = if matches!(sub, Sub::Start(_)) &&
+        explicit_selection.is_none()
+    {
+        let capabilities =
+            talker.call(port, "Session.getCapabilities", "{}")?;
+        discovered_selection =
+            crate::cmd::inspector::parse_session_selection(&capabilities)
+                .ok_or_else(|| {
+                    CliError::Other(
+                        "pulp trace: Session.getCapabilities did not return a \
+                         safe sessionId and instanceId"
+                            .to_owned(),
+                    )
+                })?;
+        Some(&discovered_selection)
+    } else {
+        explicit_selection.as_ref()
+    };
+    let response = match selection {
         Some(selection) => talker.call_selected(
             port,
             &selection.session_id,
@@ -721,9 +747,17 @@ pub fn dispatch<T: InspectorTalker>(
     };
 
     if flags.json {
-        writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
+        let rendered = if matches!(sub, Sub::Start(_)) {
+            crate::cmd::inspector::attach_session_selection(
+                &response,
+                selection,
+            )
+        } else {
+            response.trim_end().to_owned()
+        };
+        writeln!(out, "{rendered}").map_err(io_err)?;
     } else {
-        write_pretty(out, sub, &response, flags).map_err(io_err)?;
+        write_pretty(out, sub, &response, selection).map_err(io_err)?;
     }
     Ok(())
 }
@@ -735,7 +769,7 @@ fn write_pretty(
     out: &mut impl Write,
     sub: &Sub,
     response: &str,
-    flags: &GlobalFlags,
+    selection: Option<&crate::cmd::inspector::SessionSelection>,
 ) -> std::io::Result<()> {
     let trimmed = response.trim();
     match sub {
@@ -746,8 +780,8 @@ fn write_pretty(
                     out,
                     "  stop with: pulp trace stop{}",
                     crate::cmd::inspector::selection_cli_suffix(
-                        flags.session_id.as_deref(),
-                        flags.instance_id.as_deref(),
+                        selection.map(|value| value.session_id.as_str()),
+                        selection.map(|value| value.instance_id.as_str()),
                     )
                 )?;
             } else {
@@ -953,7 +987,7 @@ pub(crate) fn run_doctor<T: InspectorTalker>(
         capabilities_response
             .as_deref()
             .ok()
-            .and_then(parse_session_selection)
+            .and_then(crate::cmd::inspector::parse_session_selection)
     } else {
         None
     };
@@ -1024,21 +1058,6 @@ fn parse_capture_controls(response: &str) -> Option<CaptureControls> {
         session: contains("session.control"),
         trace: contains("trace.control"),
         controller_available: value.get("controller").is_none(),
-    })
-}
-
-fn parse_session_selection(
-    response: &str,
-) -> Option<crate::cmd::inspector::SessionSelection> {
-    let value: serde_json::Value = serde_json::from_str(response).ok()?;
-    let session_id = value.get("sessionId")?.as_str()?;
-    let instance_id = value.get("instanceId")?.as_str()?;
-    if session_id.is_empty() || instance_id.is_empty() {
-        return None;
-    }
-    Some(crate::cmd::inspector::SessionSelection {
-        session_id: session_id.to_owned(),
-        instance_id: instance_id.to_owned(),
     })
 }
 
@@ -1283,7 +1302,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(out, "After that host publishes discovery:")?;
     writeln!(out, "  pulp trace start --categories dsp,render")?;
-    writeln!(out, "  pulp trace stop        # → /tmp/pulp-<ts>.pftrace")?;
+    writeln!(
+        out,
+        "  pulp trace stop --session SESSION --instance INSTANCE"
+    )?;
     writeln!(
         out,
         "  pulp trace explain \"why is my plugin slow to open?\""
@@ -1719,6 +1741,7 @@ mod tests {
     #[test]
     fn dispatch_start_passes_method_and_params() {
         let t = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
             "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
         ]);
         let mut buf: Vec<u8> = Vec::new();
@@ -1728,12 +1751,23 @@ mod tests {
         });
         dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
         let calls = t.calls.borrow();
-        assert_eq!(calls.len(), 1);
+        assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, 0);
-        assert_eq!(calls[0].1, "Trace.startSession");
-        assert!(calls[0].2.contains("\"categories\":[\"dsp\"]"));
+        assert_eq!(calls[0].1, "Session.getCapabilities");
+        assert_eq!(calls[1].1, "Trace.startSession");
+        assert!(calls[1].2.contains("\"categories\":[\"dsp\"]"));
+        assert_eq!(
+            t.selections.borrow()[1],
+            Some(crate::cmd::inspector::SessionSelection {
+                session_id: "session-a".to_owned(),
+                instance_id: "instance-b".to_owned(),
+            })
+        );
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("/tmp/pulp-9.pftrace"), "{out}");
+        assert!(out.contains(
+            "pulp trace stop --session session-a --instance instance-b"
+        ), "{out}");
     }
 
     #[test]
@@ -1758,6 +1792,31 @@ mod tests {
         assert!(output.contains(
             "pulp trace stop --session session-a --instance instance-b"
         ), "{output}");
+    }
+
+    #[test]
+    fn dispatch_start_json_surfaces_resolved_exact_selection() {
+        let talker = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\"}",
+            "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
+        ]);
+        let flags = GlobalFlags {
+            json: true,
+            ..GlobalFlags::default()
+        };
+        let mut output = Vec::new();
+        dispatch(
+            &Sub::Start(StartArgs::default()),
+            &flags,
+            &talker,
+            &mut output,
+        )
+        .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["sessionId"], "session-a");
+        assert_eq!(value["instanceId"], "instance-b");
+        assert_eq!(value["out_path"], "/tmp/pulp-9.pftrace");
     }
 
     #[test]
@@ -1788,10 +1847,30 @@ mod tests {
             "{\"out_path\":\"/tmp/pulp-42.pftrace\"}",
         ]);
         let mut buf: Vec<u8> = Vec::new();
-        dispatch(&Sub::Stop, &GlobalFlags::default(), &t, &mut buf).unwrap();
+        let flags = GlobalFlags {
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            ..GlobalFlags::default()
+        };
+        dispatch(&Sub::Stop, &flags, &t, &mut buf).unwrap();
         assert_eq!(t.calls.borrow()[0].1, "Trace.stopSession");
         let out = String::from_utf8(buf).unwrap();
         assert_eq!(out.trim(), "/tmp/pulp-42.pftrace");
+    }
+
+    #[test]
+    fn dispatch_stop_requires_exact_selection_before_calling_inspector() {
+        let talker = RecordingTalker::new(vec![]);
+        let mut output = Vec::new();
+        let error = dispatch(
+            &Sub::Stop,
+            &GlobalFlags::default(),
+            &talker,
+            &mut output,
+        )
+        .unwrap_err();
+        assert!(matches!(error, CliError::BadUsage(_)), "{error}");
+        assert!(talker.calls.borrow().is_empty());
     }
 
     #[test]

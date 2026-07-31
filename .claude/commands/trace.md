@@ -27,7 +27,7 @@ Tracing is a dev-only tool. Never ship a plugin with `PULP_TRACING` enabled.
 # 2. Start a session, reproduce the slow thing, then stop.
 pulp trace start --categories dsp,render
 # ... trigger the suspect interaction / open the editor ...
-pulp trace stop
+pulp trace stop --session SESSION --instance INSTANCE  # copy pair from start
 # → /tmp/pulp-<ts>.pftrace
 
 # 3a. Novice one-liner (L1): narrated root cause + fix, no SQL.

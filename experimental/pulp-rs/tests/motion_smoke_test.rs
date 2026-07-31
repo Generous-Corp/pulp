@@ -296,6 +296,10 @@ fn motion_stop_accepts_trace_id_arg() {
             "stop",
             "--trace-id",
             "42",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
             "--port",
             UNLIKELY_PORT,
         ])

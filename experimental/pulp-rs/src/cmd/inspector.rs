@@ -21,6 +21,52 @@ pub(crate) fn valid_session_identity(value: &str) -> bool {
         })
 }
 
+/// Extract the exact discovery identity returned by
+/// `Session.getCapabilities`.
+pub(crate) fn parse_session_selection(
+    response: &str,
+) -> Option<SessionSelection> {
+    let value: serde_json::Value = serde_json::from_str(response).ok()?;
+    let session_id = value.get("sessionId")?.as_str()?;
+    let instance_id = value.get("instanceId")?.as_str()?;
+    if !valid_session_identity(session_id) ||
+        !valid_session_identity(instance_id)
+    {
+        return None;
+    }
+    Some(SessionSelection {
+        session_id: session_id.to_owned(),
+        instance_id: instance_id.to_owned(),
+    })
+}
+
+/// Add the exact identity to an object response without changing non-object
+/// inspector payloads.
+pub(crate) fn attach_session_selection(
+    response: &str,
+    selection: Option<&SessionSelection>,
+) -> String {
+    let Some(selection) = selection else {
+        return response.trim_end().to_owned();
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(response) else {
+        return response.trim_end().to_owned();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return response.trim_end().to_owned();
+    };
+    object.insert(
+        "sessionId".to_owned(),
+        serde_json::Value::String(selection.session_id.clone()),
+    );
+    object.insert(
+        "instanceId".to_owned(),
+        serde_json::Value::String(selection.instance_id.clone()),
+    );
+    serde_json::to_string(&value)
+        .unwrap_or_else(|_| response.trim_end().to_owned())
+}
+
 /// Render paired exact-session flags for a copyable follow-up command.
 pub(crate) fn selection_cli_suffix(
     session_id: Option<&str>,
@@ -168,5 +214,40 @@ mod tests {
         );
         assert!(selection_cli_suffix(Some("session-a"), None).is_empty());
         assert!(selection_cli_suffix(None, Some("instance-b")).is_empty());
+    }
+
+    #[test]
+    fn capabilities_selection_requires_safe_complete_identity() {
+        assert_eq!(
+            parse_session_selection(
+                r#"{"sessionId":"session-a","instanceId":"instance-b"}"#
+            ),
+            Some(SessionSelection {
+                session_id: "session-a".to_owned(),
+                instance_id: "instance-b".to_owned(),
+            })
+        );
+        assert!(parse_session_selection(
+            r#"{"sessionId":"session a","instanceId":"instance-b"}"#
+        )
+        .is_none());
+        assert!(
+            parse_session_selection(r#"{"sessionId":"session-a"}"#).is_none()
+        );
+    }
+
+    #[test]
+    fn selection_can_be_attached_to_json_object_responses() {
+        let selection = SessionSelection {
+            session_id: "session-a".to_owned(),
+            instance_id: "instance-b".to_owned(),
+        };
+        let value: serde_json::Value = serde_json::from_str(
+            &attach_session_selection(r#"{"trace_id":3}"#, Some(&selection)),
+        )
+        .unwrap();
+        assert_eq!(value["trace_id"], 3);
+        assert_eq!(value["sessionId"], "session-a");
+        assert_eq!(value["instanceId"], "instance-b");
     }
 }
