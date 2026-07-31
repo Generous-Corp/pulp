@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -191,6 +192,43 @@ void RackPreview::paint(Canvas& canvas) {
         canvas.fill_text(undrawn ? "NO PANEL" : mod->brand,
                          panel.x + panel.width / 2.0f,
                          panel.y + panel.height - 12.0f * L.scale);
+    }
+
+    // What each colour means, bottom right, and only for the roles this patch
+    // actually uses. A legend listing four roles for a patch that has two says
+    // something untrue about the rack in front of you.
+    {
+        struct Entry { SignalRole role; const char* title; };
+        static constexpr Entry kEntries[] = {
+            {SignalRole::audio, "AUDIO"},
+            {SignalRole::pitch, "PITCH & GATE"},
+            {SignalRole::clock, "CLOCK"},
+            {SignalRole::mod,   "MODULATION"},
+        };
+        float x = bounds().width - 12.0f;
+        const float y = bounds().height - 14.0f;
+        canvas.set_font(forge::design::type::mono, 9.0f);
+        canvas.set_text_align(pulp::canvas::TextAlign::right);
+        // Right to left, so the rightmost entry sits against the margin
+        // whatever the patch happens to contain.
+        for (int i = 3; i >= 0; --i) {
+            const auto& e = kEntries[i];
+            bool used = false;
+            for (const auto& c : connections_)
+                if (c.role == e.role) { used = true; break; }
+            if (!used) continue;
+            canvas.set_fill_color(color::text_faint);
+            canvas.fill_text(e.title, x, y);
+            x -= static_cast<float>(std::strlen(e.title)) * 5.4f + 10.0f;
+            const auto rgb = role_color(e.role);
+            canvas.set_fill_color(pulp::canvas::Color::rgba8(
+                static_cast<std::uint8_t>((rgb >> 16) & 0xFF),
+                static_cast<std::uint8_t>((rgb >> 8) & 0xFF),
+                static_cast<std::uint8_t>(rgb & 0xFF)));
+            canvas.fill_circle(x + 2.0f, y - 3.0f, 3.5f);
+            x -= 14.0f;
+        }
+        canvas.set_text_align(pulp::canvas::TextAlign::left);
     }
 
     for (std::size_t i = 0; i < connections_.size(); ++i) {

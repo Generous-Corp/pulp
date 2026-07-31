@@ -2037,7 +2037,11 @@ TEST_CASE("the shelf, the library link and settings all go somewhere",
             // The badge names the kind, so a card cannot be mistaken for the
             // other sort of thing.
             const bool patch = kind == forge_modular::Artifact::patch;
-            CHECK(copy.badge == (patch ? "PATCH" : "MODULE"));
+            // Starts with the kind, and may carry the size after it: the badge is
+    // also the prototype's meta pill, so "MODULE · 12 HP" is correct and an
+    // equality check here would forbid the feature rather than test it.
+    INFO("badge: " << copy.badge);
+    CHECK(copy.badge.rfind(patch ? "PATCH" : "MODULE", 0) == 0);
         }
     }
 }

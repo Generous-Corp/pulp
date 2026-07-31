@@ -181,8 +181,31 @@ void ForgeModularShell::set_artifact(Artifact a) {
 
 forge::ChromeCopy ForgeModularShell::chrome_copy() const {
     const bool patch = artifact_ == Artifact::patch;
+
+    // The badge carries the SIZE of what was built, not only its kind. Two
+    // words is the cheapest place in the whole window to say how big a thing
+    // this is, and every number here is already loaded -- nothing is counted
+    // twice or typed in.
+    std::string badge = patch ? "PATCH" : "MODULE";
+    if (patch && rack_preview_ && !rack_preview_->modules().empty()) {
+        const auto mods = rack_preview_->modules().size();
+        const auto cables = rack_preview_->connections().size();
+        badge += " \u00b7 " + std::to_string(mods) +
+                 (mods == 1 ? " MODULE" : " MODULES");
+        badge += " \u00b7 " + std::to_string(cables) +
+                 (cables == 1 ? " CABLE" : " CABLES");
+    } else if (!patch && module_summary_) {
+        for (const auto& [key, value] : module_summary_->rows()) {
+            if (key != "WIDTH") continue;
+            // Just the HP, not the millimetres: the pill is a glance.
+            const auto hp = value.substr(0, value.find(" \xC2\xB7"));
+            if (!hp.empty()) badge += " \u00b7 " + hp;
+            break;
+        }
+    }
+
     return {
-        .badge = patch ? "PATCH" : "MODULE",
+        .badge = badge,
         .prompt_placeholder =
             patch ? "an ambient generative drone that never repeats"
                   : "a 12 HP wavefolder with drive and symmetry, plus a CV input "
