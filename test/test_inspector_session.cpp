@@ -112,6 +112,14 @@ TEST_CASE("InspectorAccessPolicy resolves named profiles against host availabili
     REQUIRE(unavailable.has_value());
     CHECK(unavailable->error_code == "capability_unavailable");
 
+    for (const auto* reserved :
+         {"Trace.query", "Trace.explain"}) {
+        auto reserved_response =
+            observe.authorize(make_request(2, reserved), false);
+        REQUIRE(reserved_response.has_value());
+        CHECK(reserved_response->error_code == "capability_unavailable");
+    }
+
     auto unknown = observe.authorize(
         make_request(3, "Unknown.method"), false);
     REQUIRE(unknown.has_value());

@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 13);
+    REQUIRE(capabilities.size() == 14);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
@@ -51,6 +51,10 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
     }
 
     REQUIRE(find_inspector_method("Unknown.method") == nullptr);
+    REQUIRE(find_inspector_method(methods::kTraceQuery)->capability ==
+            InspectorCapability::Unavailable);
+    REQUIRE(find_inspector_method(methods::kTraceExplain)->capability ==
+            InspectorCapability::Unavailable);
 }
 
 TEST_CASE("Inspector profiles separate observation, typed control, and runtime evaluation",
@@ -70,6 +74,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
     });
     const auto expected_develop = std::to_array<InspectorCapability>({
         InspectorCapability::SessionDescribe,
+        InspectorCapability::SessionControl,
         InspectorCapability::StateRead,
         InspectorCapability::UiRead,
         InspectorCapability::DiagnosticsRead,

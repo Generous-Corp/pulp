@@ -255,16 +255,19 @@ bool owner_only_windows_path(const std::filesystem::path& path,
     return secure;
 }
 
-bool create_owner_only_windows_directory(
+bool create_owner_only_windows_directory_tree(
     const std::filesystem::path& directory) {
     const DWORD attributes = GetFileAttributesW(directory.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES)
         return owner_only_windows_path(directory, true);
 
     const auto parent = directory.parent_path();
+    // Create every missing parent before the secured leaf. CreateDirectoryW
+    // does not provide create_directories semantics, and using the filesystem
+    // helper would lose the explicit owner-only security descriptor.
     if (!parent.empty() &&
         GetFileAttributesW(parent.c_str()) == INVALID_FILE_ATTRIBUTES &&
-        !create_owner_only_windows_directory(parent)) {
+        !create_owner_only_windows_directory_tree(parent)) {
         return false;
     }
 
@@ -359,7 +362,7 @@ int open_owner_private(const std::filesystem::path& path,
 #ifndef PULP_INSPECT_READER_ONLY
 bool ensure_private_directory(const std::filesystem::path& directory) {
 #ifdef _WIN32
-    return create_owner_only_windows_directory(directory);
+    return create_owner_only_windows_directory_tree(directory);
 #else
     std::error_code error;
     const auto parent = directory.parent_path();
