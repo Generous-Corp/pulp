@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 RACK_USER = os.path.expanduser("~/Library/Application Support/Rack2")
@@ -1082,10 +1083,28 @@ def main(argv):
             print("  or pass --anyway: Rack keeps missing modules as")
             print("  placeholders and offers to fetch them when you open it.")
             return 3
-        out = "/tmp/forge-patch.vcv"
+        # One file per patch, beside the modules, NOT a single shared temp
+        # path. Every run wrote /tmp/forge-patch.vcv, so a second patch
+        # silently overwrote the first: reopening the earlier project offered
+        # "Open in Rack" and opened the LATER patch's contents. Wrong but
+        # plausible is worse than missing.
+        out = None
         if "--out" in argv:
             out = argv[argv.index("--out") + 1]
         patch, why = generate(argv[2], inv, prefer)
+        if out is None:
+            slug = re.sub(r"[^a-z0-9]+", "-", argv[2].lower()).strip("-")[:40]
+            if not slug:
+                slug = "patch"
+            pdir = os.path.normpath(os.path.join(PACK_MODULES, "..", "patches"))
+            os.makedirs(pdir, exist_ok=True)
+            out = os.path.join(pdir, slug + ".vcv")
+            # Never clobber a different patch that already answers to this
+            # name -- two prompts can reduce to the same slug.
+            n = 2
+            while os.path.exists(out):
+                out = os.path.join(pdir, f"{slug}-{n}.vcv")
+                n += 1
         json.dump(patch, open(out, "w"), indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
