@@ -1622,7 +1622,7 @@ compiler lowers today is produced in band, so tracks report `synchronous`.
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,
 validation, explanation, render, import/export interchange, and the equivalent
-seven-tool MCP flow.
+ten-tool MCP flow.
 
 ### render
 
