@@ -34,6 +34,29 @@ grep -q "add_subdirectory(modular)" "$PATCH" \
          from it configures without Forge Modular, and applies cleanly while
          doing so"
 
+# Registering the subdirectory is only half. The plugin builds ${FORGE_SOURCES},
+# so the shell and its views have to be IN that list: with the subdirectory
+# added and the sources missing, the build configures, compiles, and fails at
+# link with "typeinfo for forge_modular::ForgeModularShell" -- the shell the
+# product is made of, absent from the library the product links. Checking only
+# the subdirectory would have called that seam complete.
+# Matched on the FACT, not a spelling. The first version of this looked for
+# the literal "src/modular_shell.cpp" and failed against a patch that lists
+# the same files through a loop over bare names -- a test asserting how
+# something is written rather than whether it is there.
+missing_src=""
+for src in modular_shell rack_preview patch_explanation rack_layout; do
+    grep -q "$src\.cpp" "$PATCH" || missing_src="$missing_src $src.cpp"
+done
+if [ -n "$missing_src" ]; then
+    wrong "the patch never adds these to FORGE_SOURCES:$missing_src — the
+         modular plugin will configure and then fail to link"
+elif ! grep -q "FORGE_SOURCES" "$PATCH"; then
+    wrong "the sources are named but never appended to FORGE_SOURCES"
+else
+    ok "the patch adds the modular sources to the build"
+fi
+
 if [ ! -f "$BASE_FILE" ]; then
     wrong "no patches/BASE — nothing records which commit the patch applies to,
          so the only way to find it is trial and error"

@@ -1,8 +1,33 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 63b40c2..c54f3ba 100644
+index 63b40c2..f6964d9 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -1573,6 +1573,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -332,6 +332,24 @@ if(FORGE_HAS_PULP_HTTP_STREAMING)
+         src/gen/gemini_backend.cpp)            # native Gemini HTTP/SSE transport
+ endif()
+ 
++# Forge Modular's shell and its views. They live in the pulp-modular-rack seam
++# and are copied in, so they are untracked here and every one is guarded --
++# a Forge-only checkout has none of them and must still configure.
++#
++# These belong in FORGE_SOURCES rather than in modular/CMakeLists.txt because
++# the modular plugin builds ${FORGE_SOURCES} like its three siblings do. Adding
++# the subdirectory WITHOUT adding these configures and compiles, then fails at
++# link with "typeinfo for forge_modular::ForgeModularShell" -- the shell the
++# product is made of, missing from the library the product links.
++foreach(_forge_modular_src
++        modular_shell.cpp rack_preview.cpp rack_layout.cpp
++        patch_explanation.cpp patch_loader.cpp build_monitor.cpp
++        process_engine.cpp mention_overlay.cpp module_summary.cpp)
++    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${_forge_modular_src}")
++        list(APPEND FORGE_SOURCES "src/${_forge_modular_src}")
++    endif()
++endforeach()
++
+ # Absolute paths so the list also resolves from a plugin subdirectory (a
+ # subdir's relative source paths would otherwise anchor at that subdir).
+ list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+@@ -1573,6 +1591,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  
