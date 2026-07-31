@@ -35,12 +35,12 @@
 //!
 //! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
-//! filter. The C++ client performs authenticated ephemeral discovery and the
-//! real protocol connection is the only connection opened. If no session is
-//! available, the authenticated client reports that no live session was
-//! discovered and exits 1. No guessed-port probe or unimplemented launcher
-//! flag is involved.
+//! `--session ID --instance ID` selects one exact identity. An explicit
+//! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
+//! C++ client performs authenticated ephemeral discovery and the real protocol
+//! connection is the only connection opened. If no session is available, the
+//! authenticated client reports that no live session was discovered and exits
+//! 1. No guessed-port probe or unimplemented launcher flag is involved.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -85,6 +85,10 @@ pub struct GlobalFlags {
     /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
     /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
+    /// Exact session identity forwarded as `pulp inspect --session`.
+    pub session_id: Option<String>,
+    /// Exact instance identity forwarded as `pulp inspect --instance`.
+    pub instance_id: Option<String>,
 }
 
 /// `pulp motion record` flag set.
@@ -146,10 +150,30 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
                 ));
             }
             globals.port = Some(port);
+        } else if a == "--session" || a == "--instance" {
+            i += 1;
+            let v = args.get(i).ok_or_else(|| {
+                CliError::BadUsage(format!("{a} requires a value"))
+            })?;
+            if v.is_empty() {
+                return Err(CliError::BadUsage(format!(
+                    "{a} requires a non-empty value"
+                )));
+            }
+            if a == "--session" {
+                globals.session_id = Some(v.clone());
+            } else {
+                globals.instance_id = Some(v.clone());
+            }
         } else {
             rest.push(a.clone());
         }
         i += 1;
+    }
+    if globals.session_id.is_some() != globals.instance_id.is_some() {
+        return Err(CliError::BadUsage(
+            "--session and --instance must be supplied together".to_owned(),
+        ));
     }
 
     let Some(verb) = rest.first() else {
@@ -160,8 +184,10 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "record" => parse_record(&rest[1..]).map(|s| (s, globals)),
         "stop" => parse_stop(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => Ok((Sub::Snapshot, globals)),
-        "list-traces" | "list" => Ok((Sub::ListTraces, globals)),
+        "snapshot" => no_args("snapshot", &rest[1..])
+            .map(|()| (Sub::Snapshot, globals)),
+        "list-traces" | "list" => no_args(verb, &rest[1..])
+            .map(|()| (Sub::ListTraces, globals)),
         "load-fixture" => Err(CliError::BadUsage(
             "pulp motion load-fixture is unavailable: Motion.loadFixture reads \
              a server-side filesystem path and authenticated inspector policy \
@@ -169,11 +195,22 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
                 .to_owned(),
         )),
         "scrub" => parse_scrub(&rest[1..]).map(|s| (s, globals)),
-        "play" => Ok((Sub::Play, globals)),
-        "pause" => Ok((Sub::Pause, globals)),
+        "play" => no_args("play", &rest[1..])
+            .map(|()| (Sub::Play, globals)),
+        "pause" => no_args("pause", &rest[1..])
+            .map(|()| (Sub::Pause, globals)),
         "cost" => parse_cost(&rest[1..]).map(|s| (s, globals)),
         _ => Err(CliError::UnknownSubcommand),
     }
+}
+
+fn no_args(verb: &str, args: &[String]) -> Result<()> {
+    if let Some(argument) = args.first() {
+        return Err(CliError::BadUsage(format!(
+            "pulp motion {verb}: unexpected argument `{argument}`"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_record(args: &[String]) -> Result<Sub> {
@@ -275,6 +312,7 @@ fn parse_scrub(args: &[String]) -> Result<Sub> {
             "pulp motion scrub: invalid frame value `{frame_s}`"
         ))
     })?;
+    no_args("scrub", &args[1..])?;
     Ok(Sub::Scrub { frame })
 }
 
@@ -284,6 +322,7 @@ fn parse_cost(args: &[String]) -> Result<Sub> {
             "pulp motion cost: missing subcommand (enable|disable)".to_owned(),
         )
     })?;
+    no_args("cost", &args[1..])?;
     match action.as_str() {
         "enable" | "on" => Ok(Sub::Cost { enable: true }),
         "disable" | "off" => Ok(Sub::Cost { enable: false }),
@@ -441,6 +480,18 @@ pub trait InspectorTalker {
     /// listening, command exited non-zero).
     fn call(&self, port: u16, method: &str, params_json: &str)
         -> Result<String>;
+
+    /// Send to one exact authenticated session identity.
+    fn call_selected(
+        &self,
+        port: u16,
+        _session_id: &str,
+        _instance_id: &str,
+        method: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        self.call(port, method, params_json)
+    }
 }
 
 /// Production talker — shells out to `pulp-cpp
@@ -457,6 +508,27 @@ impl InspectorTalker for SystemInspector {
         params_json: &str,
     ) -> Result<String> {
         crate::cmd::inspector::call("motion", port, method, params_json)
+    }
+
+    fn call_selected(
+        &self,
+        port: u16,
+        session_id: &str,
+        instance_id: &str,
+        method: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        let selection = crate::cmd::inspector::SessionSelection {
+            session_id: session_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+        };
+        crate::cmd::inspector::call_selected(
+            "motion",
+            port,
+            Some(&selection),
+            method,
+            params_json,
+        )
     }
 }
 
@@ -498,7 +570,19 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp motion: no inspector mapping for {sub:?}"
         )));
     };
-    let response = talker.call(port, method, &params)?;
+    let response = match (
+        flags.session_id.as_deref(),
+        flags.instance_id.as_deref(),
+    ) {
+        (Some(session_id), Some(instance_id)) => talker.call_selected(
+            port,
+            session_id,
+            instance_id,
+            method,
+            &params,
+        )?,
+        _ => talker.call(port, method, &params)?,
+    };
 
     // For `record`, surface the --out path as a sidecar hint so the
     // user knows the in-process inspector doesn't itself spool a
@@ -660,6 +744,10 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
         out,
         "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
     )?;
+    writeln!(
+        out,
+        "  --session ID --instance ID   Select one exact authenticated session identity\n"
+    )?;
     writeln!(out, "Example: # after a custom host constructs InspectorServer")?;
     writeln!(out, "         pulp motion record --view Card --out card-fade.jsonl")?;
     writeln!(out, "         pulp motion stop --trace-id 1")?;
@@ -717,6 +805,43 @@ mod tests {
     fn parse_port_rejects_zero() {
         let err = parse(&s(&["--port", "0", "snapshot"])).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_exact_session_selection_requires_both_identifiers() {
+        let (_, flags) = parse(&s(&[
+            "play",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+        ]))
+        .unwrap();
+        assert_eq!(flags.session_id.as_deref(), Some("session-a"));
+        assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
+
+        for args in [
+            s(&["play", "--session", "session-a"]),
+            s(&["play", "--instance", "instance-b"]),
+        ] {
+            let err = parse(&args).unwrap_err();
+            assert!(matches!(err, CliError::BadUsage(_)));
+        }
+    }
+
+    #[test]
+    fn zero_argument_verbs_reject_unconsumed_arguments() {
+        for args in [
+            s(&["play", "--session-id", "silently-ignored"]),
+            s(&["pause", "extra"]),
+            s(&["snapshot", "extra"]),
+            s(&["list-traces", "extra"]),
+            s(&["scrub", "1", "extra"]),
+            s(&["cost", "enable", "extra"]),
+        ] {
+            let err = parse(&args).unwrap_err();
+            assert!(matches!(err, CliError::BadUsage(_)));
+        }
     }
 
     #[test]
@@ -947,6 +1072,8 @@ mod tests {
         calls: std::cell::RefCell<
             Vec<(u16, String, String)>, // port, method, params
         >,
+        selections:
+            std::cell::RefCell<Vec<Option<(String, String)>>>,
     }
 
     impl RecordingTalker {
@@ -956,6 +1083,16 @@ mod tests {
                     responses.into_iter().map(str::to_owned).collect(),
                 ),
                 calls: std::cell::RefCell::new(Vec::new()),
+                selections: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn respond(&self) -> String {
+            let mut responses = self.responses.borrow_mut();
+            if responses.is_empty() {
+                "{}".to_owned()
+            } else {
+                responses.remove(0)
             }
         }
     }
@@ -972,13 +1109,55 @@ mod tests {
                 method.to_owned(),
                 params.to_owned(),
             ));
-            let mut r = self.responses.borrow_mut();
-            if r.is_empty() {
-                Ok("{}".to_owned())
-            } else {
-                Ok(r.remove(0))
-            }
+            self.selections.borrow_mut().push(None);
+            Ok(self.respond())
         }
+
+        fn call_selected(
+            &self,
+            port: u16,
+            session_id: &str,
+            instance_id: &str,
+            method: &str,
+            params: &str,
+        ) -> Result<String> {
+            self.calls.borrow_mut().push((
+                port,
+                method.to_owned(),
+                params.to_owned(),
+            ));
+            self.selections.borrow_mut().push(Some((
+                session_id.to_owned(),
+                instance_id.to_owned(),
+            )));
+            Ok(self.respond())
+        }
+    }
+
+    #[test]
+    fn dispatch_forwards_exact_session_selection() {
+        let talker = RecordingTalker::new(vec!["{}"]);
+        let flags = GlobalFlags {
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            ..GlobalFlags::default()
+        };
+        let mut output = Vec::new();
+        dispatch(
+            &Sub::Play,
+            &flags,
+            &talker,
+            &mut output,
+        )
+        .unwrap();
+        assert_eq!(
+            talker.selections.borrow().as_slice(),
+            &[Some((
+                "session-a".to_owned(),
+                "instance-b".to_owned(),
+            ))]
+        );
+        assert_eq!(talker.calls.borrow()[0].1, "Motion.play");
     }
 
     #[test]
@@ -1019,6 +1198,7 @@ mod tests {
         let flags = GlobalFlags {
             json: true,
             port: None,
+            ..GlobalFlags::default()
         };
         dispatch(&Sub::ListTraces, &flags, &t, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();

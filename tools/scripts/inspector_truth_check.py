@@ -60,6 +60,7 @@ FORBIDDEN_CLAIMS = {
         "defaults to `9147`",
         "pulp trace start --categories dsp,render --out",
         "start [--categories LIST] [--out FILE.pftrace]",
+        "- `--host HOST` - inspector host, defaulting to `127.0.0.1`",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "current dispatch does not enforce the registry",
@@ -100,6 +101,8 @@ FORBIDDEN_CLAIMS = {
         "PULP_MOTION_SERVER=1",
         "Raw inspector wire",
         "pulp motion load-fixture captures/",
+        "--session-id",
+        "--instance-id",
     ),
     ".agents/skills/trace-analysis/SKILL.md": (
         "PULP_TRACE_SERVER=1",
@@ -123,6 +126,7 @@ REQUIRED_CLAIMS = {
         "unavailable in normal launches",
         "explicitly wired",
         "remote clients cannot select a filesystem path",
+        "select one exact authenticated session identity; both are required together",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
@@ -137,6 +141,7 @@ REQUIRED_CLAIMS = {
         "authenticated discovery",
         "nonce/HMAC",
         "intentionally unavailable",
+        "--session ID --instance ID",
     ),
     ".agents/skills/trace-analysis/SKILL.md": (
         "explicitly wired custom fixture",
@@ -146,6 +151,10 @@ REQUIRED_CLAIMS = {
         "nonce/HMAC",
         "owner-private per-session credential",
         "defense-in-depth",
+    ),
+    "docs/status/cli-commands.yaml": (
+        "Exact authenticated session id; must be paired with --instance",
+        "Exact authenticated instance id; must be paired with --session",
     ),
 }
 
@@ -193,6 +202,14 @@ REQUIRED_SECURITY_CONTRACTS = {
     "experimental/pulp-rs/src/cmd/trace.rs": (
         "pulp trace start --out is unavailable",
         "if !(1..=512).contains(&ring_mb)",
+    ),
+    "experimental/pulp-rs/src/cmd/motion.rs": (
+        'a == "--session" || a == "--instance"',
+        "--session and --instance must be supplied together",
+        "talker.call_selected(",
+        'no_args("play", &rest[1..])',
+        'no_args("scrub", &args[1..])',
+        'no_args("cost", &args[1..])',
     ),
     "tools/mcp/pulp_mcp.cpp": (
         '"minimum":1,"maximum":512',

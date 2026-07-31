@@ -1305,8 +1305,8 @@ pulp motion cost disable
 
 Options:
 
-- `--host HOST` - inspector host, defaulting to `127.0.0.1`
 - `--port PORT` - inspector port; defaults to owner-private authenticated discovery
+- `--session ID --instance ID` - select one exact authenticated session identity; both are required together
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:

@@ -88,8 +88,8 @@ pulp motion record --view Card --fps 30 --out card-fade.jsonl
 # →   stop with: pulp motion stop --trace-id 1
 ```
 
-Every verb supports authenticated auto-discovery, `--session-id`,
-`--instance-id`, and `--port` as discovery filters, and `--json` for raw
+Every verb supports authenticated auto-discovery, exact
+`--session ID --instance ID` selection, `--port` as a discovery filter, and `--json` for raw
 inspector output. It exits 1 with custom-fixture guidance when no eligible
 session exists. Full list: `record / stop / snapshot / list-traces / scrub /
 play / pause / cost {enable|disable}`. Fixture loading is deliberately absent

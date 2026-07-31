@@ -1130,10 +1130,14 @@ commands:
     status: experimental
     summary: Experimental Motion.* clients requiring a custom source-checkout fixture that explicitly constructs the inspector server; normal Pulp launches do not.
     args:
-      - name: --host
+      - name: --session
         kind: option
         required: false
-        description: Inspector host, defaulting to 127.0.0.1
+        description: Exact authenticated session id; must be paired with --instance
+      - name: --instance
+        kind: option
+        required: false
+        description: Exact authenticated instance id; must be paired with --session
       - name: --port
         kind: option
         required: false
