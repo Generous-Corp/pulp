@@ -59,6 +59,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME fork-pr-runner-routing COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fork_pr_runner_routing.py")
     set_tests_properties(fork-pr-runner-routing PROPERTIES TIMEOUT 120)
+    # Both Vellum gates post or gate a required check and grew a manual
+    # dispatch path. Runs the resolve step the workflow actually embeds.
+    add_test(NAME vellum-workflow-dispatch COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_workflow_dispatch.py")
+    set_tests_properties(vellum-workflow-dispatch PROPERTIES TIMEOUT 120)
 
     # Development-inspector truth gate: mutation tests prove capability/profile
     # and user-facing runtime claims fail when either side drifts.
