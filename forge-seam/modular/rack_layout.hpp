@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -157,6 +158,22 @@ JackPoint port_point(const RackLayout& layout,
                      const std::vector<RackModule>& modules,
                      const std::string& module_id, const std::string& port_id,
                      const std::string& other_module_id);
+
+/// Which cable a question is about, if any.
+///
+/// Asking is meant to point at the picture, not just append a paragraph: "why
+/// did you wire the LFO there?" should light the LFO's cable while the answer
+/// is read. An answer that names a connection the reader then has to hunt for
+/// in a rack of ten modules teaches less than the same words beside a glowing
+/// cable.
+///
+/// Both ends named beats one end named, and an earlier cable beats a later one
+/// so the same question always lights the same cable. Nothing is returned when
+/// the question names no module in this patch -- pointing at an arbitrary
+/// cable would be worse than pointing at none.
+std::optional<std::size_t> cable_for_question(
+    const std::string& question, const std::vector<Connection>& cables,
+    const std::vector<RackModule>& modules);
 
 /// A cable's hanging curve: start, control point, end.
 struct CableCurve {

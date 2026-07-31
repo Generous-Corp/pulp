@@ -4588,3 +4588,88 @@ TEST_CASE("a test cannot open an application on somebody's desktop",
     std::filesystem::remove(patch);
     std::filesystem::remove(log);
 }
+
+TEST_CASE("asking about a module points at its cable", "[rack][ask]") {
+    // The prototype's own note on Ask: it "never mutates the artifact -- it
+    // appends an answer and points at the picture". We had the answer and not
+    // the pointing, so "why did you wire the LFO there?" produced a paragraph
+    // and left the reader to find the LFO's cable in a rack of ten modules.
+    // The same words beside a glowing cable teach more.
+    const auto rack = sample_rack();
+    const auto cables = sample_patch();
+
+    // Both ends named is unambiguous and wins outright.
+    const auto both = forge_modular::cable_for_question(
+        "why does the VCO go into the VCF?", cables, rack);
+    REQUIRE(both.has_value());
+    CHECK(cables[*both].from_module == "VCO");
+    CHECK(cables[*both].to_module == "VCF");
+
+    // One end named still points somewhere useful.
+    const auto one = forge_modular::cable_for_question(
+        "what is the VCF doing here", cables, rack);
+    REQUIRE(one.has_value());
+    CHECK((cables[*one].from_module == "VCF" || cables[*one].to_module == "VCF"));
+
+    // A question naming nothing in this patch lights NOTHING. This is the
+    // assertion that matters: a function that always returned cable 0 would
+    // satisfy both checks above and would point confidently at the wrong
+    // cable for every question anyone ever asked.
+    CHECK_FALSE(forge_modular::cable_for_question(
+        "how much CPU does this use?", cables, rack).has_value());
+    CHECK_FALSE(forge_modular::cable_for_question("", cables, rack).has_value());
+
+    // Whole words only. "ENV" sits inside "ENVELOPE", and a substring match
+    // would light a cable for a word nobody typed.
+    auto named = rack;
+    named[0].name = "ENV";
+    std::vector<forge_modular::Connection> one_cable{
+        {named[0].id, "OUT", named[1].id, "IN", forge_modular::SignalRole::mod, ""}};
+    CHECK(forge_modular::cable_for_question("what does ENV do", one_cable, named)
+              .has_value());
+    CHECK_FALSE(forge_modular::cable_for_question("describe the ENVELOPES",
+                                                  one_cable, named).has_value());
+}
+
+TEST_CASE("Ask lights the cable it is answering about", "[rack][ask]") {
+    // The pure `cable_for_question` being right proves nothing about the
+    // screen: the shell can compute the answer and then paint nothing. This
+    // drives Ask the way a reader does and looks at the picture afterwards.
+    HermeticProjects isolated;
+    const auto dir = std::filesystem::temp_directory_path() / "forge-ask-points";
+    std::filesystem::remove_all(dir);
+    const auto patch = lifetime_patch(dir, "points");   // VCO -> audio out
+
+    WillingLifetimeEngine engine;
+    forge_modular::ForgeModularShell shell;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    REQUIRE(shell.open_patch_file(patch).empty());
+    auto* preview = shell.rack_preview();
+    REQUIRE(preview != nullptr);
+    REQUIRE(preview->connections().size() == 1);
+    REQUIRE_FALSE(preview->highlight().has_value());   // nothing lit yet
+
+    // Naming a module in the rack lights that module's cable.
+    shell.chrome()->prompt_input()->set_text("why is the VCO wired like that?");
+    CHECK(shell.ask().empty());
+    REQUIRE(preview->highlight().has_value());
+    CHECK(*preview->highlight() == 0u);
+
+    // ...and the explanation's own line is lit with it, so the words and the
+    // cable agree instead of two panes pointing at different things.
+    CHECK(shell.explanation()->hovered() == preview->highlight());
+
+    // The assertion that carries the weight: a question naming nothing in
+    // this rack CLEARS the light. Leaving the last question's cable glowing
+    // is worse than never lighting one -- the reader takes the stale glow for
+    // an answer to the question they just asked.
+    shell.chrome()->prompt_input()->set_text("how much CPU does this use?");
+    CHECK(shell.ask().empty());
+    CHECK_FALSE(preview->highlight().has_value());
+    CHECK_FALSE(shell.explanation()->hovered().has_value());
+}

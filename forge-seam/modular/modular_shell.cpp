@@ -949,6 +949,20 @@ std::string ForgeModularShell::ask() {
     c->narrate(prompt.substr(0, 200));
     if (input) input->set_text("");
 
+    // Point at the picture, not only at the words. A question that names a
+    // module lights that module's cable while the answer is read; an answer
+    // naming a connection the reader then has to hunt for in a rack of ten
+    // modules teaches less than the same words beside a glowing cable.
+    //
+    // Nothing is lit when the question names no module in this patch --
+    // pointing at an arbitrary cable would be worse than pointing at none.
+    if (rack_preview_) {
+        const auto lit = cable_for_question(prompt, rack_preview_->connections(),
+                                            rack_preview_->modules());
+        rack_preview_->set_highlight(lit);
+        if (explanation_) explanation_->hover_line(lit);
+    }
+
     // Answer from the patch itself. Derived from the file rather than a model,
     // so it costs nothing to re-ask and cannot claim a cable the patch does
     // not contain -- a confident answer about a connection that does not exist

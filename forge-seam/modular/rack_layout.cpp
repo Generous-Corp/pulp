@@ -137,6 +137,53 @@ JackPoint port_point(const RackLayout& layout,
     return pt;
 }
 
+namespace {
+
+/// Does `text` contain `word` as a whole word, ignoring case?
+///
+/// Whole-word, because "ENV" is inside "ENVELOPE" and a substring match would
+/// light a cable for a word the reader never typed. Module names are short
+/// and shouty, which makes accidental containment likely rather than rare.
+bool mentions(const std::string& text, const std::string& word) {
+    if (word.empty()) return false;
+    auto lower = [](std::string v) {
+        for (auto& ch : v) ch = static_cast<char>(std::tolower(ch));
+        return v;
+    };
+    const auto hay = lower(text), needle = lower(word);
+    for (std::size_t at = hay.find(needle); at != std::string::npos;
+         at = hay.find(needle, at + 1)) {
+        const bool left = at == 0 || !std::isalnum(hay[at - 1]);
+        const std::size_t end = at + needle.size();
+        const bool right = end >= hay.size() || !std::isalnum(hay[end]);
+        if (left && right) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+std::optional<std::size_t> cable_for_question(
+    const std::string& question, const std::vector<Connection>& cables,
+    const std::vector<RackModule>& modules) {
+    auto named = [&](const std::string& id) {
+        for (const auto& m : modules)
+            if (m.id == id)
+                return mentions(question, m.display.empty() ? m.name : m.display)
+                       || mentions(question, m.name);
+        return false;
+    };
+
+    std::optional<std::size_t> one_end;
+    for (std::size_t i = 0; i < cables.size(); ++i) {
+        const bool from = named(cables[i].from_module);
+        const bool to = named(cables[i].to_module);
+        if (from && to) return i;             // both ends: unambiguous
+        if ((from || to) && !one_end) one_end = i;
+    }
+    return one_end;
+}
+
 CableCurve cable_curve(const JackPoint& from, const JackPoint& to, float t) {
     t = std::clamp(t, 0.0f, 1.0f);
     CableCurve c;
