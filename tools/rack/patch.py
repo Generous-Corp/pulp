@@ -1144,6 +1144,13 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
     for problem in patch_vocabulary.guard(contract):
         raise SystemExit(f"the patch contract is not sound: {problem}")
     ctx = None
+    # A claimed idiom is another gate on the same budget: a patch that needs
+    # one wiring fix AND one audio fix had no attempts left, which is what the
+    # first dozen-prompt run showed. More constraints, more chances to satisfy
+    # them -- otherwise adding a gate makes the product worse.
+    if claimed:
+        retries += 2
+
     for attempt in range(retries + 1):
         parts = [contract, "\n---\n\n## Your task\n\nBuild this patch:\n\n> " + prompt]
         if ctx:

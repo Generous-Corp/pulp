@@ -91,7 +91,11 @@
       "implies": [
         "random loop that slowly changes",
         "evolving sequence",
-        "shift register melody"
+        "shift register melody",
+        "repeats then slowly mutates",
+        "melody that repeats then changes",
+        "loop that drifts",
+        "pattern that mutates"
       ],
       "is": "A clocked shift register fed by noise, whose loop can be locked or allowed to mutate — a melody that repeats until you let it change.",
       "sounds_right_when": "a phrase repeats recognisably, then alters by one note rather than becoming a new phrase.",
@@ -340,7 +344,10 @@
       "implies": [
         "several rhythms at once",
         "cross rhythm",
-        "different speeds from one clock"
+        "different speeds from one clock",
+        "different speeds coming from one clock",
+        "several speeds from one clock",
+        "divided clock"
       ],
       "is": "One clock divided several ways, each division triggering a different voice, so the parts drift in and out of phase without ever losing the pulse.",
       "sounds_right_when": "the parts line up periodically rather than randomly, and the whole thing stays in time.",
