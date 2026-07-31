@@ -202,7 +202,7 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
 endif()
 endif()
 
-# An ordinary pulp-format consumer is the Phase 1 stripped-artifact fixture.
+# An ordinary pulp-format consumer is the inspector-stripped artifact fixture.
 # The post-build scan is non-vacuous when inspector components are present:
 # it first proves their archive contains pulp::inspect symbols, then rejects
 # every defined pulp::inspect symbol in this consumer.

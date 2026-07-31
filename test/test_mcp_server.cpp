@@ -2801,8 +2801,8 @@ TEST_CASE("MCP does not expose filesystem-backed motion fixture loading",
     require_contains(response, "Unknown tool: pulp_motion_load_fixture");
 }
 
-// pulp #2153: code-shape check that the grantable pulp_motion_* MCP tools
-// map to the right Motion.* inspector protocol method names. Source
+// This code-shape check proves that the grantable pulp_motion_* MCP tools
+// map to the right Motion.* inspector protocol method names. The source
 // text assertion mirrors the existing inspector-mapping test — the
 // actual round-trip lands at MotionInspector::handle /
 // MotionScrubber::handle, which run inside the inspected process and

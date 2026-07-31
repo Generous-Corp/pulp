@@ -48,8 +48,13 @@
     },
     {
       "path": "core/events/src/interprocess_connection.cpp",
+      "needle": "read_thread([this, impl, lifecycle, start_gate]",
+      "reason": "InterprocessConnection destruction interrupts IO and waits for every registered detached reader before member teardown; the self-destruction path returns immediately after each callback through AliveToken guards while shared implementation and lifecycle state keep final worker cleanup valid"
+    },
+    {
+      "path": "core/events/src/interprocess_connection.cpp",
       "needle": "std::thread([this]",
-      "reason": "IPC read and accept loops have explicit stop or disconnect teardown; read-loop post-callback dereferences are AliveToken guarded"
+      "reason": "InterprocessConnectionServer stop interrupts the blocking listener and joins the tracked accept thread before server members are released"
     },
     {
       "path": "core/events/src/volume_detector.cpp",
