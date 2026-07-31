@@ -163,25 +163,39 @@ struct InspectorSelection {
 };
 
 std::optional<InspectorSelection>
-resolve_inspector_selection(const fs::path& root) {
+resolve_inspector_selection(
+    const fs::path& root,
+    const std::string& session_id = {},
+    const std::string& instance_id = {},
+    const std::string& publication_id = {}) {
+    const bool has_explicit_selection =
+        !session_id.empty() || !instance_id.empty() || !publication_id.empty();
+    if (has_explicit_selection) {
+        if (!valid_inspector_identity(session_id) ||
+            !valid_inspector_identity(instance_id) ||
+            !valid_inspector_identity(publication_id)) {
+            return std::nullopt;
+        }
+        return InspectorSelection{session_id, instance_id, publication_id};
+    }
     auto capabilities =
         run_inspector_command(root, "Session.getCapabilities");
     if (!capabilities.succeeded())
         return std::nullopt;
-    auto session_id =
+    auto discovered_session_id =
         extract_string(capabilities.process.stdout_output, "sessionId");
-    auto instance_id =
+    auto discovered_instance_id =
         extract_string(capabilities.process.stdout_output, "instanceId");
-    auto publication_id =
+    auto discovered_publication_id =
         extract_string(capabilities.process.stdout_output, "publicationId");
-    if (!valid_inspector_identity(session_id) ||
-        !valid_inspector_identity(instance_id) ||
-        !valid_inspector_identity(publication_id))
+    if (!valid_inspector_identity(discovered_session_id) ||
+        !valid_inspector_identity(discovered_instance_id) ||
+        !valid_inspector_identity(discovered_publication_id))
         return std::nullopt;
     return InspectorSelection{
-        std::move(session_id),
-        std::move(instance_id),
-        std::move(publication_id)};
+        std::move(discovered_session_id),
+        std::move(discovered_instance_id),
+        std::move(discovered_publication_id)};
 }
 
 std::string inspector_tool_payload(InspectorCommandResult command) {
@@ -256,7 +270,7 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_inspect_performance","description":"Experimental source-checkout Performance.getMetrics client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_audio","description":"Experimental source-checkout Audio.getConfig client requiring a custom inspector fixture; normal launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_inspect_pending_requests","description":"Read the pull-based agent-request queue (.pulp-design-requests.json) for a design project: the not-yet-consumed free-text requests a human raised from the running design's send-to-agent affordance. Returns a JSON array of pending requests, each with id, text, design, screen, editmode_state, screenshot_path, created_at, and consumed. An empty or absent queue returns an empty array, not an error.","inputSchema":{"type":"object","properties":{"project_dir":{"type":"string","description":"Design project directory containing .pulp-design-requests.json (defaults to the enclosing Pulp project root)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_motion_start_trace","description":"Experimental source-checkout custom-fixture client for Motion.startTrace; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns trace_id plus the exact session_id, instance_id, and non-reusable publication_id required for follow-up mutations.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}}}}},)JSON";
+    out += R"JSON({"name":"pulp_motion_start_trace","description":"Experimental source-checkout custom-fixture client for Motion.startTrace; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns trace_id plus the exact session_id, instance_id, and non-reusable publication_id required for follow-up mutations.","inputSchema":{"type":"object","required":["view_name","metrics"],"properties":{"view_name":{"type":"string","description":"Human-readable trace name attached to all emitted events"},"fps":{"type":"integer","description":"Target sample rate in frames per second (default 15)"},"metrics":{"type":"array","description":"Metric probes. Each item is {kind:'geometry'|'scroll-geometry', name, node_id, properties?, space?, source?}.","items":{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["geometry","scroll-geometry","scrollGeometry"]},"name":{"type":"string"},"node_id":{"type":"string"},"properties":{"type":"array","items":{"type":"string"}},"space":{"type":"string"},"source":{"type":"string"}}}},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_stop_trace","description":"Experimental source-checkout custom-fixture client for Motion.stopTrace; normal Pulp launches provide no endpoint. Releases a fixture-owned trace on the exact publication selected by start.","inputSchema":{"type":"object","required":["trace_id","session_id","instance_id","publication_id"],"properties":{"trace_id":{"type":"integer","description":"trace_id returned by pulp_motion_start_trace"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_snapshot","description":"Experimental source-checkout custom-fixture client for Motion.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_motion_list_traces","description":"Experimental source-checkout custom-fixture client for Motion.listTraces; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -265,7 +279,7 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_motion_pause","description":"Experimental source-checkout custom-fixture client for Motion.pause on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_motion_start_trace"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_motion_start_trace"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_motion_start_trace"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_enable_cost","description":"Experimental source-checkout custom-fixture client for Motion.enableCost on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact authenticated session id"},"instance_id":{"type":"string","description":"Exact authenticated instance id"},"publication_id":{"type":"string","description":"Exact non-reusable publication id"}}}},)JSON";
     out += R"JSON({"name":"pulp_motion_disable_cost","description":"Experimental source-checkout custom-fixture client for Motion.disableCost on one exact session; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact authenticated session id"},"instance_id":{"type":"string","description":"Exact authenticated instance id"},"publication_id":{"type":"string","description":"Exact non-reusable publication id"}}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns the exact session_id, instance_id, and non-reusable publication_id required to stop it. The fixture must also be built with PULP_TRACING=ON. The host owns the trace destination.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns the exact session_id, instance_id, and non-reusable publication_id required to stop it. The fixture must also be built with PULP_TRACING=ON. The host owns the trace destination.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_trace_stop","description":"Experimental source-checkout custom-fixture client for Trace.stopSession on the exact publication selected by start; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
     out += R"JSON({"name":"pulp_trace_snapshot","description":"Experimental source-checkout custom-fixture client for Trace.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_trace_query","description":"Experimental source-checkout custom-fixture client for live Trace.query; normal Pulp launches provide no endpoint. Offline SQL over a .pftrace remains available through the CLI.","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"}}}},)JSON";
@@ -513,12 +527,16 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_params = "{}";
             if (name == "pulp_motion_start_trace") {
                 inspector_method = "Motion.startTrace";
-                // Forward the raw args sub-object as params verbatim
-                // — the inspector parses {view_name, fps, metrics}
-                // out of it. Empty {} would fail with "metrics array
-                // required" on the inspector side, which is the
-                // right answer for callers that omit metrics.
-                inspector_params = args_json;
+                const auto view_name = extract_string(args_json, "view_name");
+                const auto metrics = extract_raw(args_json, "metrics");
+                const auto fps = extract_raw(args_json, "fps");
+                inspector_params =
+                    "{\"view_name\":" + json_string(view_name) +
+                    ",\"metrics\":" +
+                    (metrics.empty() ? "null" : metrics);
+                if (!fps.empty())
+                    inspector_params += ",\"fps\":" + fps;
+                inspector_params += "}";
             } else if (name == "pulp_motion_stop_trace") {
                 inspector_method = "Motion.stopTrace";
                 auto trace_id_raw = extract_raw(args_json, "trace_id");
@@ -554,7 +572,8 @@ static std::string handle_request_raw(const std::string& json) {
                 auto publication_id =
                     extract_string(args_json, "publication_id");
                 if (name == "pulp_motion_start_trace") {
-                    auto selection = resolve_inspector_selection(root);
+                    auto selection = resolve_inspector_selection(
+                        root, session_id, instance_id, publication_id);
                     if (!selection) {
                         result = inspector_error_payload(
                             "Error: could not resolve a safe exact inspector "
@@ -603,10 +622,9 @@ static std::string handle_request_raw(const std::string& json) {
         // Perfetto tracing — inspector Trace.* wrappers (mirror the motion
         // block). These proxy the LIVE-session RPCs; the client-side CLI verbs
         // (doctor / open / fetch, and offline `query --trace`) have no
-        // inspector RPC and therefore no MCP tool. start/query/explain forward
-        // their args sub-object verbatim — the inspector parses the same keys
-        // the CLI's build_*_params emit ({categories,ring_mb},
-        // {sql|preset,format}, {question}).
+        // inspector RPC and therefore no MCP tool. query/explain forward their
+        // argument objects; start rebuilds only its protocol fields so MCP-only
+        // exact selectors are not exposed to the inspector domain.
         else if (name == "pulp_trace_start" || name == "pulp_trace_stop" ||
                  name == "pulp_trace_snapshot" || name == "pulp_trace_query" ||
                  name == "pulp_trace_explain") {
@@ -614,7 +632,17 @@ static std::string handle_request_raw(const std::string& json) {
             std::string inspector_params = "{}";
             if (name == "pulp_trace_start") {
                 inspector_method = "Trace.startSession";
-                inspector_params = args_json;
+                const auto categories = extract_raw(args_json, "categories");
+                const auto ring_mb = extract_raw(args_json, "ring_mb");
+                inspector_params = "{";
+                if (!categories.empty())
+                    inspector_params += "\"categories\":" + categories;
+                if (!ring_mb.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"ring_mb\":" + ring_mb;
+                }
+                inspector_params += "}";
             } else if (name == "pulp_trace_stop") {
                 inspector_method = "Trace.stopSession";
             } else if (name == "pulp_trace_snapshot") {
@@ -636,7 +664,8 @@ static std::string handle_request_raw(const std::string& json) {
                 auto publication_id =
                     extract_string(args_json, "publication_id");
                 if (name == "pulp_trace_start") {
-                    auto selection = resolve_inspector_selection(root);
+                    auto selection = resolve_inspector_selection(
+                        root, session_id, instance_id, publication_id);
                     if (!selection) {
                         result = inspector_error_payload(
                             "Error: could not resolve a safe exact inspector "
