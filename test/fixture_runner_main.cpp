@@ -52,11 +52,11 @@ std::string read_file(const std::string& path, bool& ok) {
     return buffer.str();
 }
 
-/// Parses the line-oriented `.expect` manifest: `<key> <value>` per line, `#`
+/// Parses a line-oriented `<key> <value>` file: one pair per line, `#`
 /// comments and blank lines ignored. Deliberately not JSON — the runner must
 /// stay dependency-free, and a flat text manifest diffs readably when a
 /// conformance failure lands in review.
-std::vector<Expectation> parse_expectations(std::string_view text) {
+std::vector<Expectation> parse_key_value_lines(std::string_view text) {
     std::vector<Expectation> parsed;
     std::size_t cursor = 0;
     while (cursor < text.size()) {
@@ -220,7 +220,7 @@ FixtureOutcome check_fixture(const std::string& corpus_root, const std::string& 
                                      " (run with --update to generate)");
         return outcome;
     }
-    const auto expected = parse_expectations(expect_text);
+    const auto expected = parse_key_value_lines(expect_text);
     for (const auto& [key, value] : outcome.observed)
         expect_equal(outcome.mismatches, expected, key, value);
 
@@ -243,8 +243,33 @@ FixtureOutcome check_fixture(const std::string& corpus_root, const std::string& 
     return outcome;
 }
 
+/// A manifest line is `<key> <value>`, so neither may contain whitespace or the
+/// file cannot be read back. Every value recorded today is an integer and every
+/// key is a generated concept id, but that is a property of today's vocabulary
+/// rather than a guarantee: a future concept id containing a space would
+/// otherwise write a manifest that silently fails to verify against the very
+/// document it came from. Fail loudly here instead.
+bool manifest_token_is_writable(const std::string& token) {
+    if (token.empty())
+        return false;
+    for (const auto character : token) {
+        if (character == ' ' || character == '\t' || character == '\n' || character == '\r')
+            return false;
+    }
+    return true;
+}
+
 bool write_manifest(const std::string& path,
                     const std::vector<std::pair<std::string, std::string>>& observed) {
+    for (const auto& [key, value] : observed) {
+        if (!manifest_token_is_writable(key) || !manifest_token_is_writable(value)) {
+            std::fprintf(stderr,
+                         "refusing to write unreadable manifest entry '%s' = '%s' "
+                         "(keys and values may not be empty or contain whitespace)\n",
+                         key.c_str(), value.c_str());
+            return false;
+        }
+    }
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     if (!stream.good())
         return false;
@@ -311,7 +336,7 @@ int main(int argc, char** argv) {
     // corpus defect — so the kind has to be declared, not guessed.
     std::vector<std::string> fixtures;
     std::vector<std::string> skipped;
-    for (const auto& entry : parse_expectations(index_text)) {
+    for (const auto& entry : parse_key_value_lines(index_text)) {
         if (entry.value.empty()) {
             std::fprintf(stderr, "corpus index entry missing a kind: %s\n", entry.key.c_str());
             return 1;
