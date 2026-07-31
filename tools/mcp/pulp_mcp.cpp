@@ -278,8 +278,8 @@ std::string pulp_mcp::server::tools_list_json() {
     out += R"JSON({"name":"pulp_trace_start","description":"Experimental source-checkout custom-fixture client for Trace.startSession; normal Pulp launches provide no endpoint. Resolves and pins one authenticated publication, then returns the exact session_id, instance_id, and non-reusable publication_id required to stop it. The fixture must also be built with PULP_TRACING=ON. The host owns the trace destination.","inputSchema":{"type":"object","properties":{"categories":{"type":"array","description":"Span categories to record (e.g. dsp, render, gpu, text, js, layout). Empty lets the inspector pick its default taxonomy.","items":{"type":"string"}},"ring_mb":{"type":"integer","minimum":1,"maximum":512,"description":"In-process ring size in mebibytes (default 80; range 1 through 512)"},"session_id":{"type":"string","description":"Optional exact session id; requires instance_id and publication_id"},"instance_id":{"type":"string","description":"Optional exact instance id; requires session_id and publication_id"},"publication_id":{"type":"string","description":"Optional exact non-reusable publication id; requires session_id and instance_id"}}}},)JSON";
     out += R"JSON({"name":"pulp_trace_stop","description":"Experimental source-checkout custom-fixture client for Trace.stopSession on the exact publication selected by start; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
     out += R"JSON({"name":"pulp_trace_snapshot","description":"Experimental source-checkout custom-fixture client for Trace.snapshot; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","properties":{}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_query","description":"Experimental source-checkout custom-fixture client for live Trace.query; normal Pulp launches provide no endpoint. Offline SQL over a .pftrace remains available through the CLI.","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"}}}},)JSON";
-    out += R"JSON({"name":"pulp_trace_explain","description":"Experimental source-checkout custom-fixture client for live Trace.explain; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["question"],"properties":{"question":{"type":"string","description":"Plain-English question to investigate, e.g. 'why is my plugin slow to open?'"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_query","description":"Experimental source-checkout custom-fixture client for live Trace.query on the exact publication selected by start; normal Pulp launches provide no endpoint. Offline SQL over a .pftrace remains available through the CLI.","inputSchema":{"type":"object","required":["session_id","instance_id","publication_id"],"properties":{"sql":{"type":"string","description":"SQL query string (omit when using preset)"},"preset":{"type":"string","description":"Named trace-stdlib preset (slowest-frames, xruns, dsp-hotspots, layout-vs-paint) instead of raw SQL"},"format":{"type":"string","enum":["json","table","csv"],"description":"Output format (default json)"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
+    out += R"JSON({"name":"pulp_trace_explain","description":"Experimental source-checkout custom-fixture client for live Trace.explain on the exact publication selected by start; normal Pulp launches provide no endpoint.","inputSchema":{"type":"object","required":["question","session_id","instance_id","publication_id"],"properties":{"question":{"type":"string","description":"Plain-English question to investigate, e.g. 'why is my plugin slow to open?'"},"session_id":{"type":"string","description":"Exact session_id returned by pulp_trace_start"},"instance_id":{"type":"string","description":"Exact instance_id returned by pulp_trace_start"},"publication_id":{"type":"string","description":"Non-reusable publication_id returned by pulp_trace_start"}}}},)JSON";
     out += R"JSON({"name":"pulp_minos","description":"Measure the minimum OS a built binary needs, read straight from the artifact (macOS deployment target / Linux glibc symbol version / Windows PE subsystem). Point it at any Mach-O / ELF / PE / static archive or a plugin bundle's inner binary. The floor of a binary is the MAX minimum among everything linked into it. The multi-repo consumer sweep (rebuild every downstream project and compare floors) is CLI-only: `pulp minos sweep`, because it clones and builds many repositories.","inputSchema":{"type":"object","required":["binary"],"properties":{"binary":{"type":"string","description":"Path to a built binary: a .dylib/.so/.dll, a .a static archive, an executable, or a plugin bundle's inner binary (e.g. Foo.vst3/Contents/MacOS/Foo)"}}}},)JSON";
     out += R"JSON({"name":"pulp_compat","description":"Report pulp-mcp / MCP protocol / project SDK versions plus per-tool min_sdk_version floors so clients can pre-filter their tool list. Use this once at startup to detect SDK skew.","inputSchema":{"type":"object","properties":{}}})JSON";
     out += R"JSON(]})JSON";
@@ -641,10 +641,28 @@ static std::string handle_request_raw(const std::string& json) {
                 inspector_method = "Trace.snapshot";
             } else if (name == "pulp_trace_query") {
                 inspector_method = "Trace.query";
-                inspector_params = args_json;
+                const auto sql = extract_string(args_json, "sql");
+                const auto preset = extract_string(args_json, "preset");
+                const auto format = extract_string(args_json, "format");
+                inspector_params = "{";
+                if (!sql.empty())
+                    inspector_params += "\"sql\":" + json_string(sql);
+                if (!preset.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"preset\":" + json_string(preset);
+                }
+                if (!format.empty()) {
+                    if (inspector_params.size() != 1)
+                        inspector_params += ",";
+                    inspector_params += "\"format\":" + json_string(format);
+                }
+                inspector_params += "}";
             } else if (name == "pulp_trace_explain") {
                 inspector_method = "Trace.explain";
-                inspector_params = args_json;
+                inspector_params =
+                    "{\"question\":" +
+                    json_string(extract_string(args_json, "question")) + "}";
             }
 
             auto root = find_project_root();
@@ -670,7 +688,9 @@ static std::string handle_request_raw(const std::string& json) {
                 }
                 const bool requires_selection =
                     name == "pulp_trace_start" ||
-                    name == "pulp_trace_stop";
+                    name == "pulp_trace_stop" ||
+                    name == "pulp_trace_query" ||
+                    name == "pulp_trace_explain";
                 if (result.empty() && requires_selection &&
                     (!valid_inspector_identity(session_id) ||
                      !valid_inspector_identity(instance_id) ||

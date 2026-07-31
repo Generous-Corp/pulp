@@ -240,7 +240,7 @@ REQUIRED_SECURITY_CONTRACTS = {
     "tools/mcp/pulp_mcp.cpp": (
         '"minimum":1,"maximum":512',
         "The host owns the trace destination.",
-        "resolve_inspector_selection(root)",
+        "resolve_inspector_selection(",
         '"required":["session_id","instance_id","publication_id"]',
         '"required":["trace_id","session_id","instance_id","publication_id"]',
     ),

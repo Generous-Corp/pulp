@@ -727,17 +727,35 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp trace: no inspector mapping for {sub:?}"
         )));
     };
-    if matches!(sub, Sub::Stop) &&
+    let requires_captured_publication =
+        matches!(sub, Sub::Stop | Sub::Query(_) | Sub::Explain { .. });
+    if requires_captured_publication &&
         explicit_selection
             .as_ref()
             .map_or(true, |selection| selection.publication_id.is_empty())
     {
-        return Err(CliError::BadUsage(
-            "pulp trace stop requires --session, --instance, and --publication \
-             from the exact \
-             stop command printed by `pulp trace start`"
-                .to_owned(),
-        ));
+        let message = match sub {
+            Sub::Stop => {
+                concat!(
+                    "pulp trace stop requires --session, --instance, and --publication",
+                    " from the exact command printed by `pulp trace start`"
+                )
+            }
+            Sub::Query(_) => {
+                concat!(
+                    "pulp trace query requires --session, --instance, and --publication",
+                    " from the exact command printed by `pulp trace start`"
+                )
+            }
+            Sub::Explain { .. } => {
+                concat!(
+                    "pulp trace explain requires --session, --instance, and --publication",
+                    " from the exact command printed by `pulp trace start`"
+                )
+            }
+            _ => unreachable!(),
+        };
+        return Err(CliError::BadUsage(message.to_owned()));
     }
     let discovered_selection;
     let selection = if matches!(sub, Sub::Start(_)) &&
@@ -1357,7 +1375,8 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     )?;
     writeln!(
         out,
-        "  pulp trace explain \"why is my plugin slow to open?\""
+        "  pulp trace explain \"why is my plugin slow to open?\" --session SESSION \
+         --instance INSTANCE --publication PUBLICATION"
     )?;
     Ok(())
 }
@@ -1963,10 +1982,44 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_live_followups_require_exact_selection() {
+        let talker = RecordingTalker::new(vec![]);
+        for sub in [
+            Sub::Query(QueryArgs {
+                sql: Some("select 1".to_owned()),
+                ..QueryArgs::default()
+            }),
+            Sub::Explain {
+                question: "why slow?".to_owned(),
+            },
+        ] {
+            let mut output = Vec::new();
+            let error = dispatch(
+                &sub,
+                &GlobalFlags::default(),
+                &talker,
+                &mut output,
+            )
+            .unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)), "{error}");
+        }
+        assert!(talker.calls.borrow().is_empty());
+    }
+
+    #[test]
     fn dispatch_query_preset_verb_routes_to_trace_query() {
         let t = RecordingTalker::new(vec!["[]"]);
         let mut buf: Vec<u8> = Vec::new();
-        let (sub, flags) = parse(&s(&["slowest-frames"])).unwrap();
+        let (sub, flags) = parse(&s(&[
+            "slowest-frames",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+            "--publication",
+            "publication-c",
+        ]))
+        .unwrap();
         dispatch(&sub, &flags, &t, &mut buf).unwrap();
         let calls = t.calls.borrow();
         assert_eq!(calls[0].1, "Trace.query");
@@ -1980,6 +2033,9 @@ mod tests {
         let flags = GlobalFlags {
             json: true,
             port: None,
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
             ..GlobalFlags::default()
         };
         let sub = Sub::Query(QueryArgs {
@@ -2002,7 +2058,13 @@ mod tests {
         let sub = Sub::Explain {
             question: "why slow to open?".to_owned(),
         };
-        dispatch(&sub, &GlobalFlags::default(), &t, &mut buf).unwrap();
+        let flags = GlobalFlags {
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
+            ..GlobalFlags::default()
+        };
+        dispatch(&sub, &flags, &t, &mut buf).unwrap();
         assert_eq!(t.calls.borrow()[0].1, "Trace.explain");
         let out = String::from_utf8(buf).unwrap();
         assert_eq!(out.trim(), "Root cause: font-atlas build.");

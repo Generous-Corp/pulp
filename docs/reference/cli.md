@@ -1350,14 +1350,14 @@ inspector session.
 pulp trace start --categories dsp,render --ring-mb 128
 # copy the exact stop command printed by start:
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
-pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
-pulp trace query --preset dsp-hotspots
-pulp trace slowest-frames
-pulp trace xruns
-pulp trace layout-vs-paint
+pulp trace query --preset dsp-hotspots --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace slowest-frames --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace xruns --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace layout-vs-paint --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp trace snapshot
-pulp trace explain "why is my plugin slow to open?"
+pulp trace explain "why is my plugin slow to open?" --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp trace doctor                                 # readiness: inspector + build + trace_processor
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1368,8 +1368,9 @@ Options:
 - `--port PORT` - optional filter for owner-private authenticated discovery;
   `$PULP_INSPECTOR_PORT` supplies the same explicit filter
 - `--session ID --instance ID --publication ID` - select one exact
-  authenticated publication; all three are required for `stop`. An unqualified
-  `start` resolves the selector before mutating and prints the pinned follow-up
+  authenticated publication; all three are required for `stop`, live `query`
+  (including preset verbs), and `explain`. An unqualified `start` resolves the
+  selector before mutating and prints the pinned follow-up
   command. Publication IDs are non-reusable across server restarts.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
