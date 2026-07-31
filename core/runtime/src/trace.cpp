@@ -132,7 +132,7 @@ std::optional<std::uint64_t> make_ownership_token() {
 }  // namespace
 
 TraceStartResult Tracing::start_exclusive(
-    const std::vector<std::string>& /*categories*/,
+    const std::vector<std::string>& categories,
     const std::string& out_path, std::uint32_t ring_kb) {
     ensure_initialized();
     std::lock_guard<std::mutex> lk(g_mu);
@@ -141,9 +141,20 @@ TraceStartResult Tracing::start_exclusive(
 
     perfetto::TraceConfig cfg;
     cfg.add_buffers()->set_size_kb(ring_kb);
-    cfg.add_data_sources()->mutable_config()->set_name("track_event");
-    // Selective category filtering lands with the inspector wire; for now all
-    // declared categories are enabled (Perfetto's track_event default).
+    auto* data_source_config =
+        cfg.add_data_sources()->mutable_config();
+    data_source_config->set_name("track_event");
+    if (!categories.empty()) {
+        // Perfetto enables unmatched categories by default. Disable the
+        // wildcard first, then let the requested exact names/patterns win at
+        // the higher-priority enabled-category step.
+        perfetto::protos::gen::TrackEventConfig track_event_config;
+        track_event_config.add_disabled_categories("*");
+        for (const auto& category : categories)
+            track_event_config.add_enabled_categories(category);
+        data_source_config->set_track_event_config_raw(
+            track_event_config.SerializeAsString());
+    }
 
     // Duration cap so a crashed host still auto-flushes a bounded trace.
     if (const char* s = std::getenv("PULP_TRACE_SECONDS"); s && *s) {

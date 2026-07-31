@@ -689,8 +689,8 @@ std::optional<std::string> first_non_loopback_ipv4() {
 
 } // namespace
 
-TEST_CASE("InspectorServer is reachable on loopback and nowhere else",
-          "[inspect][server][security]") {
+TEST_CASE("unsafe legacy inspector fixture is reachable only on loopback",
+          "[inspect][server][security][legacy]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      ("pulp-inspector-bind-test-" + std::to_string(socket_port_seed()));
     std::filesystem::create_directories(tmp);

@@ -158,3 +158,30 @@ TEST_CASE("runtime detach stops only its attach-owned capture",
     CHECK(Tracing::ownership_status(&*replacement.ownership).owned);
     REQUIRE(Tracing::stop_owned(*replacement.ownership).ok);
 }
+
+TEST_CASE("tracing honors explicit category selection",
+          "[tracing][categories]") {
+    if (!pulp::runtime::kTracingEnabled)
+        return;
+
+    const auto out = std::filesystem::temp_directory_path() /
+                     "pulp-trace-category-filter.pftrace";
+    std::error_code error;
+    std::filesystem::remove(out, error);
+
+    auto started = Tracing::start_exclusive(
+        {"render"}, out.string(), /*ring_kb=*/4096);
+    REQUIRE(started.status == pulp::runtime::TraceStartStatus::Started);
+    REQUIRE(started.ownership.has_value());
+    { PULP_TRACE_SCOPE_NAMED("render", "selected_render_event"); }
+    { PULP_TRACE_SCOPE_NAMED("dsp", "excluded_dsp_event"); }
+
+    const auto stopped = Tracing::stop_owned(*started.ownership);
+    REQUIRE(stopped.ok);
+    std::ifstream trace(out, std::ios::binary);
+    const std::string bytes{
+        std::istreambuf_iterator<char>(trace),
+        std::istreambuf_iterator<char>()};
+    CHECK(bytes.find("selected_render_event") != std::string::npos);
+    CHECK(bytes.find("excluded_dsp_event") == std::string::npos);
+}

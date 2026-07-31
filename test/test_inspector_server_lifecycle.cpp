@@ -116,6 +116,37 @@ private:
 
 } // namespace
 
+TEST_CASE("authenticated inspector server is reachable only on loopback",
+          "[inspect][server][security][authentication]") {
+    AuthenticatedFixture fixture;
+    const auto port = fixture.server.port();
+    REQUIRE(port > 0);
+
+    // Positive control: an unreachable server would make the external-address
+    // rejection vacuous.
+    Socket loopback;
+    REQUIRE(loopback.create(SocketType::TCP));
+    REQUIRE(loopback.connect("127.0.0.1", static_cast<std::uint16_t>(port)));
+
+#ifdef _WIN32
+    WARN("SKIPPED off-box reachability: no getifaddrs on Windows. The "
+         "production loopback control still ran.");
+#else
+    const auto external = first_non_loopback_ipv4();
+    if (!external) {
+        WARN("SKIPPED off-box reachability: this host has no non-loopback "
+             "IPv4 interface.");
+    } else {
+        Socket off_box;
+        REQUIRE(off_box.create(SocketType::TCP));
+        INFO("authenticated inspector must not listen on " << *external
+             << ':' << port);
+        CHECK_FALSE(off_box.connect(
+            *external, static_cast<std::uint16_t>(port)));
+    }
+#endif
+}
+
 TEST_CASE("server stop is reentrant from a request callback",
           "[inspect][client][teardown][reentrant]") {
     TemporaryDirectory temporary;
