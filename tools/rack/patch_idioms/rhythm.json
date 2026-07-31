@@ -1,0 +1,281 @@
+{
+  "family": "rhythm",
+  "$comment": [
+    "Patches whose subject is time. What separates these from the generative",
+    "family is that a listener could tap along: there is a pulse, and the",
+    "patch's interest is in what happens against it."
+  ],
+
+  "idioms": [
+    {
+      "slug": "bouncing-ball",
+      "names": ["bouncing ball"],
+      "implies": [
+        "accelerating rhythm", "speeds up then settles", "slows as it settles",
+        "ball dropping", "bouncing rhythm"
+      ],
+      "is": "A trigger whose repeats accelerate as a falling voltage shortens the gap between them, so the pulses crowd together the way a dropped ball's bounces do.",
+      "sounds_right_when": "the gaps between hits shorten steadily and then stop — not a steady roll, and not random.",
+      "source": "A classic function-generator patch; documented in Make Noise's Maths material",
+      "at_least": {"function_generator": 1},
+      "topology": [
+        {"id": "trigger-source", "from_module": "any", "from_port": "gate_out",
+         "to_module": "function_generator", "to_port": "gate_in",
+         "describe": "something has to start the bounce — this is the one the failed attempt was missing entirely"},
+        {"id": "self-retrigger", "from_module": "function_generator", "from_port": "cycle_out",
+         "to_module": "function_generator", "to_port": "gate_in", "same_module": true,
+         "describe": "the generator has to retrigger itself, or there is one bounce rather than a series"},
+        {"id": "shortening", "from_module": "any", "from_port": "cv_out",
+         "to_module": "function_generator", "to_port": "cv_in",
+         "describe": "a falling voltage has to shorten the generator's time, or the bounces are evenly spaced — which is a roll, not a ball"},
+        {"id": "audible", "from_module": "function_generator", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "the bounces have to open something, or nothing is heard"}
+      ],
+      "behaviour": {"rhythmic": true, "accelerating": true},
+      "common_mistakes": [
+        {"id": "no-trigger", "do": "cut", "requirement": "trigger-source",
+         "message": "nothing ever starts the bounce"},
+        {"id": "even-spacing", "do": "cut", "requirement": "shortening",
+         "message": "nothing shortens the interval, so this is an even roll rather than a ball"},
+        {"id": "single-bounce", "do": "cut", "requirement": "self-retrigger",
+         "message": "the generator never retriggers, so there is one bounce"}
+      ]
+    },
+
+    {
+      "slug": "euclidean-rhythm",
+      "names": ["euclidean", "euclidean rhythm"],
+      "implies": ["evenly spread hits", "world rhythm pattern", "spread n hits over m steps"],
+      "is": "A clock distributed as evenly as possible across a number of steps, so a small count of hits spreads into a rhythm that recurs across many traditions.",
+      "sounds_right_when": "the pattern repeats and feels spread rather than clumped.",
+      "source": "Toussaint's work on Euclidean rhythms, as adopted in modular",
+      "at_least": {"clock_modulator": 1},
+      "topology": [
+        {"id": "clocked", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "clock_modulator", "to_port": "clock_in",
+         "describe": "the generator has to be clocked"},
+        {"id": "hits-trigger", "from_module": "clock_modulator", "from_port": "gate_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "the hits have to trigger something"}
+      ],
+      "behaviour": {"keeps_going": true, "rhythmic": true},
+      "common_mistakes": [
+        {"id": "unclocked", "do": "cut", "requirement": "clocked",
+         "message": "nothing clocks the pattern"},
+        {"id": "silent-hits", "do": "cut", "requirement": "hits-trigger",
+         "message": "the hits trigger nothing"}
+      ]
+    },
+
+    {
+      "slug": "kick-drum",
+      "names": ["kick", "kick drum", "bass drum"],
+      "implies": ["thump", "four on the floor", "bass drum sound"],
+      "is": "A fast envelope sweeping an oscillator's pitch down while a second envelope closes the amplifier — pitch drop plus quick decay is what makes a kick.",
+      "sounds_right_when": "there is an audible pitch drop at the start and the tail is short.",
+      "source": "Standard drum-synthesis practice",
+      "at_least": {"envelope": 1, "audio_oscillator": 1},
+      "topology": [
+        {"id": "pitch-sweep", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "audio_oscillator", "to_port": "cv_in",
+         "describe": "an envelope has to sweep the pitch down — without it this is a beep, not a kick"},
+        {"id": "amp-shape", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "an envelope has to close the amplifier quickly"},
+        {"id": "triggered", "from_module": "any", "from_port": "gate_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "something has to trigger it"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "no-sweep", "do": "cut", "requirement": "pitch-sweep",
+         "message": "no pitch sweep, so this is a tone burst rather than a kick"},
+        {"id": "no-shape", "do": "cut", "requirement": "amp-shape",
+         "message": "nothing shapes the amplitude"},
+        {"id": "untriggered", "do": "cut", "requirement": "triggered",
+         "message": "nothing triggers the drum"}
+      ]
+    },
+
+    {
+      "slug": "snare-drum",
+      "names": ["snare", "snare drum"],
+      "implies": ["noise burst", "backbeat", "snare sound"],
+      "is": "Noise shaped by a fast envelope, usually with a tuned component underneath, so the hit has both body and rattle.",
+      "sounds_right_when": "there is broadband noise with a sharp attack and a short tail.",
+      "source": "Standard drum-synthesis practice",
+      "at_least": {"noise": 1},
+      "topology": [
+        {"id": "noise-path", "from_module": "noise", "from_port": "any_out",
+         "to_module": "amplifier", "to_port": "audio_in",
+         "describe": "noise has to reach an amplifier"},
+        {"id": "shaped", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "an envelope has to shape it, or the noise never stops"},
+        {"id": "triggered", "from_module": "any", "from_port": "gate_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "something has to trigger it"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "unshaped", "do": "cut", "requirement": "shaped",
+         "message": "the noise is never shaped, so it hisses continuously"},
+        {"id": "no-noise", "do": "cut", "requirement": "noise-path",
+         "message": "no noise reaches the amplifier"},
+        {"id": "untriggered", "do": "cut", "requirement": "triggered",
+         "message": "nothing triggers the drum"}
+      ]
+    },
+
+    {
+      "slug": "hi-hat",
+      "names": ["hi hat", "hihat", "hat"],
+      "implies": ["metallic tick", "closed hat", "cymbal"],
+      "is": "A bright noise source through a high-pass filter with a very short envelope.",
+      "sounds_right_when": "the hit is bright, thin and very short.",
+      "source": "Standard drum-synthesis practice",
+      "at_least": {"noise": 1, "filter": 1},
+      "topology": [
+        {"id": "brightened", "from_module": "noise", "from_port": "any_out",
+         "to_module": "filter", "to_port": "audio_in",
+         "describe": "the noise has to be filtered bright, or the hat sounds like a snare"},
+        {"id": "shaped", "from_module": "envelope", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "a short envelope has to shape it"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "unfiltered", "do": "cut", "requirement": "brightened",
+         "message": "the noise is never brightened"},
+        {"id": "unshaped", "do": "cut", "requirement": "shaped",
+         "message": "nothing shapes the hat, so it hisses continuously"}
+      ]
+    },
+
+    {
+      "slug": "swung-clock",
+      "names": ["swing", "shuffle", "swung clock"],
+      "implies": ["swung rhythm", "shuffled timing", "not straight timing"],
+      "is": "A clock whose alternate pulses are delayed, so the pattern lopes rather than marching.",
+      "sounds_right_when": "off-beats land late but consistently late.",
+      "source": "Standard practice",
+      "at_least": {"clock_modulator": 1},
+      "topology": [
+        {"id": "clocked", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "clock_modulator", "to_port": "clock_in",
+         "describe": "a clock has to reach the modulator"},
+        {"id": "drives", "from_module": "clock_modulator", "from_port": "gate_out",
+         "to_module": "any", "to_port": "clock_in",
+         "describe": "the swung clock has to drive something"}
+      ],
+      "behaviour": {"keeps_going": true, "rhythmic": true},
+      "common_mistakes": [
+        {"id": "unclocked", "do": "cut", "requirement": "clocked",
+         "message": "nothing clocks the swing"},
+        {"id": "drives-nothing", "do": "cut", "requirement": "drives",
+         "message": "the swung clock drives nothing"}
+      ]
+    },
+
+    {
+      "slug": "ratcheting",
+      "names": ["ratchet", "ratcheting"],
+      "implies": ["repeats on one step", "stutter", "burst on a step"],
+      "is": "A faster clock briefly gated into a sequence so one step repeats several times — a burst against a steady pattern.",
+      "sounds_right_when": "most steps are single and occasional steps burst.",
+      "source": "Standard sequencer practice",
+      "at_least": {"clock": 1, "switch": 1},
+      "topology": [
+        {"id": "fast-source", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "switch", "to_port": "any_in",
+         "describe": "a faster clock has to be available to switch in"},
+        {"id": "gated-in", "from_module": "switch", "from_port": "any_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "the switched clock has to trigger the voice"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "no-fast-clock", "do": "cut", "requirement": "fast-source",
+         "message": "there is no faster clock to ratchet with"},
+        {"id": "never-triggers", "do": "cut", "requirement": "gated-in",
+         "message": "the ratchet never reaches the voice"}
+      ]
+    },
+
+    {
+      "slug": "polymetric-sequence",
+      "names": ["polymeter", "polymetric"],
+      "implies": ["patterns of different lengths", "phasing patterns", "sequences that drift apart"],
+      "is": "Two sequences of different lengths sharing one clock, so they realign only after many bars.",
+      "sounds_right_when": "the parts stay in time but their relationship keeps changing.",
+      "source": "Standard practice; the modular relative of Reich's phasing",
+      "at_least": {"sequencer": 2},
+      "topology": [
+        {"id": "shared-clock", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "sequencer", "to_port": "clock_in",
+         "describe": "both sequences have to share a clock, or they drift rather than phase"},
+        {"id": "second-plays", "from_module": "sequencer", "from_port": "cv_out",
+         "to_module": "audio_oscillator", "to_port": "pitch_in",
+         "describe": "the sequences have to reach voices"}
+      ],
+      "behaviour": {"keeps_going": true, "rhythmic": true},
+      "common_mistakes": [
+        {"id": "unclocked", "do": "cut", "requirement": "shared-clock",
+         "message": "no shared clock, so the parts drift rather than phase"},
+        {"id": "unheard", "do": "cut", "requirement": "second-plays",
+         "message": "the sequences never reach a voice"}
+      ]
+    },
+
+    {
+      "slug": "trigger-burst",
+      "names": ["burst", "trigger burst", "roll"],
+      "implies": ["a burst of hits", "drum roll", "flurry"],
+      "is": "A cycling function generator gated on briefly, producing a finite run of triggers rather than a continuous clock.",
+      "sounds_right_when": "a defined number of hits fires and then stops.",
+      "source": "Standard function-generator practice",
+      "at_least": {"function_generator": 1},
+      "topology": [
+        {"id": "cycles", "from_module": "function_generator", "from_port": "cycle_out",
+         "to_module": "function_generator", "to_port": "gate_in", "same_module": true,
+         "describe": "the generator has to cycle to produce a run"},
+        {"id": "output", "from_module": "function_generator", "from_port": "cycle_out",
+         "to_module": "envelope", "to_port": "gate_in",
+         "describe": "the burst has to trigger something"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "no-cycle", "do": "cut", "requirement": "cycles",
+         "message": "the generator never cycles, so there is one hit"},
+        {"id": "silent", "do": "cut", "requirement": "output",
+         "message": "the burst triggers nothing"}
+      ]
+    },
+
+    {
+      "slug": "clock-multiplied-voice",
+      "names": ["clock multiplier", "double time"],
+      "implies": ["twice the speed", "faster subdivision", "multiplied clock"],
+      "is": "A clock multiplied to a faster subdivision so a part plays against the main pulse without changing tempo.",
+      "sounds_right_when": "the fast part stays locked to the slow one.",
+      "source": "Standard practice",
+      "at_least": {"clock_modulator": 1},
+      "topology": [
+        {"id": "in", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "clock_modulator", "to_port": "clock_in",
+         "describe": "the multiplier has to be fed the main clock"},
+        {"id": "out", "from_module": "clock_modulator", "from_port": "gate_out",
+         "to_module": "any", "to_port": "clock_in",
+         "describe": "the multiplied clock has to drive something"}
+      ],
+      "behaviour": {"keeps_going": true, "rhythmic": true},
+      "common_mistakes": [
+        {"id": "no-input", "do": "cut", "requirement": "in",
+         "message": "the multiplier has no clock"},
+        {"id": "no-output", "do": "cut", "requirement": "out",
+         "message": "the multiplied clock drives nothing"}
+      ]
+    }
+  ]
+}

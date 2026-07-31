@@ -1,0 +1,142 @@
+{
+  "$comment": [
+    "The vocabulary every idiom's topology is written in. One list, in one",
+    "place: sixty idiom files each naming module kinds in their own words would",
+    "be sixty chances to write 'envelope' where the checker expects 'Envelope",
+    "generator', and the failure would be a silently unmatched requirement --",
+    "that is, an idiom that passes because nothing could test it.",
+    "",
+    "`tags` are Rack's own canonical module tags, which the inventory carries",
+    "for every installed module including third-party ones. `ports` are the",
+    "port roles the cartographer assigns. An idiom refers to a role by name;",
+    "idiom_check.py resolves it here and nowhere else.",
+    "",
+    "A module matches a role if it carries ANY of the role's tags. A port",
+    "matches if its role is in `ports`, or if its silkscreen label matches one",
+    "of `labels` -- the label fallback exists because a module we have not",
+    "cartographed has no port roles at all, and refusing to check those patches",
+    "would quietly exempt exactly the modules most likely to be miswired."
+  ],
+
+  "roles": {
+    "oscillator": {
+      "tags": ["VCO", "Oscillator", "Low-frequency oscillator", "LFO"],
+      "is": "something that makes a repeating waveform"
+    },
+    "audio_oscillator": {
+      "tags": ["VCO", "Oscillator"],
+      "is": "an oscillator running fast enough to hear as pitch"
+    },
+    "lfo": {
+      "tags": ["Low-frequency oscillator", "LFO"],
+      "is": "an oscillator running below hearing, used to move something"
+    },
+    "filter": {
+      "tags": ["Filter", "Voltage-controlled filter", "VCF"],
+      "is": "something that removes part of the spectrum"
+    },
+    "amplifier": {
+      "tags": ["Voltage-controlled amplifier", "VCA"],
+      "is": "something that controls how loud a signal is"
+    },
+    "envelope": {
+      "tags": ["Envelope generator", "Function generator", "ADSR"],
+      "is": "a one-shot shape, triggered rather than free-running"
+    },
+    "function_generator": {
+      "tags": ["Function generator"],
+      "is": "an envelope that can also cycle, slew and respond to voltage"
+    },
+    "sequencer": {
+      "tags": ["Sequencer"],
+      "is": "something that steps through values in order"
+    },
+    "random": {
+      "tags": ["Random", "Noise", "Sample and hold"],
+      "is": "a source of values nobody chose"
+    },
+    "sample_and_hold": {
+      "tags": ["Sample and hold"],
+      "is": "something that takes a value on a trigger and holds it"
+    },
+    "noise": {
+      "tags": ["Noise"],
+      "is": "broadband noise, the raw material for random and for texture"
+    },
+    "clock": {
+      "tags": ["Clock generator", "Clock modulator", "Low-frequency oscillator", "LFO"],
+      "is": "a steady pulse everything else times against"
+    },
+    "clock_modulator": {
+      "tags": ["Clock modulator"],
+      "is": "something that divides, multiplies or shifts a clock"
+    },
+    "mixer": {
+      "tags": ["Mixer"],
+      "is": "something that sums signals"
+    },
+    "attenuator": {
+      "tags": ["Attenuator", "Attenuverter"],
+      "is": "something that scales a voltage, often through zero"
+    },
+    "multiple": {
+      "tags": ["Multiple"],
+      "is": "a splitter, so one signal can reach several places"
+    },
+    "slew": {
+      "tags": ["Slew limiter"],
+      "is": "something that slows how fast a voltage may change"
+    },
+    "waveshaper": {
+      "tags": ["Waveshaper", "Distortion"],
+      "is": "something that adds harmonics by bending the waveform"
+    },
+    "delay": {
+      "tags": ["Delay"],
+      "is": "something that repeats a signal later"
+    },
+    "reverb": {
+      "tags": ["Reverb"],
+      "is": "something that adds a space around a signal"
+    },
+    "effect": {
+      "tags": ["Effect", "Reverb", "Delay", "Chorus", "Flanger", "Phaser"],
+      "is": "something that processes audio for character rather than level"
+    },
+    "switch": {
+      "tags": ["Switch", "Sequential switch"],
+      "is": "something that routes one of several signals"
+    },
+    "logic": {
+      "tags": ["Logic"],
+      "is": "something that combines gates by rule"
+    },
+    "quantizer": {
+      "tags": ["Quantizer"],
+      "is": "something that snaps a voltage to a scale"
+    },
+    "output": {
+      "tags": ["External"],
+      "is": "the way out of the rack — an audio interface or recorder"
+    },
+    "any": {
+      "tags": [],
+      "is": "any module at all"
+    }
+  },
+
+  "ports": {
+    "audio_in":  {"ports": ["Audio"], "labels": ["IN", "L", "R", "INPUT", "IN1", "IN2"]},
+    "audio_out": {"ports": ["Audio"], "labels": ["OUT", "SAW", "TRI", "SIN", "SQR", "PLS", "LP", "HP", "BP", "MIX"]},
+    "pitch_in":  {"ports": ["Pitch"], "labels": ["V/OCT", "1V/OCT", "PITCH"]},
+    "gate_in":   {"ports": ["Gate", "Trigger"], "labels": ["GATE", "TRIG", "TRIGGER"]},
+    "gate_out":  {"ports": ["Gate", "Trigger"], "labels": ["GATE", "TRIG", "EOC", "EOR", "STEP"]},
+    "clock_in":  {"ports": ["Clock", "Trigger"], "labels": ["CLK", "CLOCK"]},
+    "clock_out": {"ports": ["Clock", "Gate", "Trigger"], "labels": ["CLK", "SQR", "PLS", "OUT", "TRIG"]},
+    "cv_in":     {"ports": ["Cv"], "labels": ["CV", "FM", "CUTOFF", "FREQ", "TIME", "RATE", "AMT", "LEVEL", "LVL", "IN"]},
+    "cv_out":    {"ports": ["Cv"], "labels": ["CV", "OUT", "ENV", "A", "B", "1", "2", "3"]},
+    "cycle_out": {"ports": ["Gate", "Trigger"], "labels": ["EOC", "EOR", "EOF"]},
+    "any_in":    {"ports": [], "labels": []},
+    "any_out":   {"ports": [], "labels": []}
+  }
+}

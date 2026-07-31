@@ -1,0 +1,389 @@
+{
+  "family": "generative",
+  "$comment": [
+    "Patches that play themselves. The defining property is that nobody is",
+    "holding a keyboard: the patch decides when the next event happens, and",
+    "usually what it is. This family is where 'it made a sound' is least",
+    "adequate as a check -- a krell that plays one note makes a sound.",
+    "",
+    "Sources are techniques, not text: the method each idiom describes is",
+    "documented in the manuals and books named, and stated here in our words."
+  ],
+  "idioms": [
+    {
+      "slug": "krell",
+      "names": [
+        "krell"
+      ],
+      "implies": [
+        "plays itself",
+        "self playing",
+        "each note chooses the next",
+        "random note lengths",
+        "generates its own rhythm"
+      ],
+      "is": "A random voltage sampled to set an envelope's time, with the envelope's end-of-cycle retriggering it — so the patch plays itself and each note chooses how long the next one waits.",
+      "sounds_right_when": "notes arrive at uneven, unpredictable intervals and never settle into a loop; the gaps vary as much as the notes.",
+      "source": "Todd Barton's Krell patch, after the Barrons' Forbidden Planet score",
+      "at_least": {
+        "random": 1,
+        "envelope": 1
+      },
+      "topology": [
+        {
+          "id": "random-sets-time",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "envelope",
+          "to_port": "cv_in",
+          "describe": "a random voltage has to reach the envelope's time input — without it every note is the same length, which is a sequence, not a krell"
+        },
+        {
+          "id": "retrigger-loop",
+          "from_module": "envelope",
+          "from_port": "cycle_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "same_module": true,
+          "describe": "the envelope's end-of-cycle has to retrigger it — without that loop nothing starts the next note and the patch plays once"
+        },
+        {
+          "id": "envelope-opens-something",
+          "from_module": "envelope",
+          "from_port": "cv_out",
+          "to_module": "amplifier",
+          "to_port": "cv_in",
+          "describe": "the envelope has to open an amplifier, or the notes it is shaping are never heard"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "varies_timing": true,
+        "unmetered": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-retrigger",
+          "do": "cut",
+          "requirement": "retrigger-loop",
+          "message": "the envelope never retriggers itself, so the patch plays a single note"
+        },
+        {
+          "id": "fixed-length",
+          "do": "cut",
+          "requirement": "random-sets-time",
+          "message": "nothing randomises the envelope's time, so every note is identical"
+        },
+        {
+          "id": "no-random",
+          "do": "drop_module",
+          "module": "random",
+          "message": "there is no random source at all"
+        }
+      ]
+    },
+    {
+      "slug": "turing-machine",
+      "names": [
+        "turing machine",
+        "looping shift register"
+      ],
+      "implies": [
+        "random loop that slowly changes",
+        "evolving sequence",
+        "shift register melody"
+      ],
+      "is": "A clocked shift register fed by noise, whose loop can be locked or allowed to mutate — a melody that repeats until you let it change.",
+      "sounds_right_when": "a phrase repeats recognisably, then alters by one note rather than becoming a new phrase.",
+      "source": "Music Thing Modular's Turing Machine; the technique is a clocked shift register",
+      "at_least": {
+        "random": 1,
+        "clock": 1
+      },
+      "topology": [
+        {
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "random",
+          "to_port": "clock_in",
+          "describe": "the register has to be clocked, or the sequence never advances"
+        },
+        {
+          "id": "drives-pitch",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the register's voltage has to reach a pitch input, or there is no melody to hear"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "rhythmic": true
+      },
+      "common_mistakes": [
+        {
+          "id": "unclocked",
+          "do": "cut",
+          "requirement": "clocked",
+          "message": "nothing clocks the register, so it holds one value forever"
+        },
+        {
+          "id": "not-pitched",
+          "do": "cut",
+          "requirement": "drives-pitch",
+          "message": "the sequence never reaches a pitch input, so nothing plays it"
+        }
+      ]
+    },
+    {
+      "slug": "sample-and-hold-melody",
+      "names": [
+        "sample and hold melody",
+        "random melody"
+      ],
+      "implies": [
+        "random notes",
+        "random pitches",
+        "stepped random"
+      ],
+      "is": "Noise sampled on a clock to produce a new pitch each step — the simplest way a rack invents a melody.",
+      "sounds_right_when": "each clock brings a new, unrelated pitch, held steady until the next one.",
+      "source": "Allen Strange's account of sample-and-hold as a source of stepped voltage",
+      "at_least": {
+        "sample_and_hold": 1
+      },
+      "topology": [
+        {
+          "id": "noise-in",
+          "from_module": "noise",
+          "from_port": "any_out",
+          "to_module": "sample_and_hold",
+          "to_port": "audio_in",
+          "describe": "noise has to feed the sample-and-hold, or it samples something predictable"
+        },
+        {
+          "id": "clocked",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "sample_and_hold",
+          "to_port": "clock_in",
+          "describe": "a clock has to tell it when to sample, or it never takes a new value"
+        },
+        {
+          "id": "to-pitch",
+          "from_module": "sample_and_hold",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "pitch_in",
+          "describe": "the held voltage has to reach a pitch input"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "rhythmic": true
+      },
+      "common_mistakes": [
+        {
+          "id": "unclocked",
+          "do": "cut",
+          "requirement": "clocked",
+          "message": "nothing clocks the sample-and-hold, so the pitch never changes"
+        },
+        {
+          "id": "no-source",
+          "do": "cut",
+          "requirement": "noise-in",
+          "message": "the sample-and-hold has nothing to sample"
+        }
+      ]
+    },
+    {
+      "slug": "rungler",
+      "names": [
+        "rungler",
+        "benjolin"
+      ],
+      "implies": [
+        "chaotic",
+        "chaos",
+        "unstable feedback",
+        "cross modulated oscillators"
+      ],
+      "is": "Two oscillators cross-modulating through a shift register, so the register's output steers the oscillators that are clocking it — stepped chaos that never repeats but is never random either.",
+      "sounds_right_when": "the pattern is clearly patterned and clearly unpredictable at the same time; small knob moves change its character completely.",
+      "source": "Rob Hordijk's Rungler and Benjolin designs",
+      "at_least": {
+        "audio_oscillator": 2,
+        "random": 1
+      },
+      "topology": [
+        {
+          "id": "osc-clocks-register",
+          "from_module": "audio_oscillator",
+          "from_port": "any_out",
+          "to_module": "random",
+          "to_port": "clock_in",
+          "describe": "an oscillator has to clock the register — that is what makes the chaos audio-rate rather than a slow random walk"
+        },
+        {
+          "id": "register-steers-osc",
+          "from_module": "random",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "any_in",
+          "describe": "the register has to modulate an oscillator back, or there is no feedback and no chaos"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "varies_timing": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-feedback",
+          "do": "cut",
+          "requirement": "register-steers-osc",
+          "message": "the register never feeds back, so this is a modulated oscillator, not a rungler"
+        },
+        {
+          "id": "not-clocked-by-audio",
+          "do": "cut",
+          "requirement": "osc-clocks-register",
+          "message": "nothing clocks the register from the audio path"
+        }
+      ]
+    },
+    {
+      "slug": "wandering-drone",
+      "names": [
+        "evolving drone",
+        "ambient drone",
+        "wandering drone"
+      ],
+      "implies": [
+        "drone that never repeats",
+        "slowly evolving",
+        "ambient bed",
+        "drone that keeps changing",
+        "endless pad",
+        "keeps changing and never repeats",
+        "never repeats",
+        "always different"
+      ],
+      "is": "A sustained voice with at least two modulators running at different, unrelated rates, so the timbre keeps moving and the patch never lands in the same place twice.",
+      "sounds_right_when": "it holds without stopping, and what you hear a minute in is audibly different from the start — not louder or quieter, but different in colour.",
+      "source": "Bjørn & Meyer's treatment of unsynchronised modulation in ambient patches",
+      "at_least": {
+        "lfo": 2,
+        "audio_oscillator": 1
+      },
+      "topology": [
+        {
+          "id": "voice-sounds",
+          "from_module": "audio_oscillator",
+          "from_port": "audio_out",
+          "to_module": "filter",
+          "to_port": "audio_in",
+          "describe": "the oscillator has to reach a filter, or there is nothing for the modulation to shape"
+        },
+        {
+          "id": "timbre-moves",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "filter",
+          "to_port": "cv_in",
+          "describe": "a modulator has to move the filter, or this is a tone rather than a drone that evolves"
+        },
+        {
+          "id": "second-motion",
+          "from_module": "lfo",
+          "from_port": "cv_out",
+          "to_module": "audio_oscillator",
+          "to_port": "cv_in",
+          "describe": "a second, unrelated modulator has to move something else — with only one, the patch repeats on that modulator's cycle"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "sustained": true,
+        "spectrally_varying": true
+      },
+      "common_mistakes": [
+        {
+          "id": "static-timbre",
+          "do": "cut",
+          "requirement": "timbre-moves",
+          "message": "nothing modulates the filter, so this is a tone, not an evolving drone"
+        },
+        {
+          "id": "single-modulator",
+          "do": "cut",
+          "requirement": "second-motion",
+          "message": "only one modulator, so the patch repeats exactly on its cycle"
+        },
+        {
+          "id": "no-voice",
+          "do": "cut",
+          "requirement": "voice-sounds",
+          "message": "the oscillator never reaches the filter"
+        }
+      ]
+    },
+    {
+      "slug": "generative-clock-divider",
+      "names": [
+        "polyrhythm",
+        "clock divider patch"
+      ],
+      "implies": [
+        "several rhythms at once",
+        "cross rhythm",
+        "different speeds from one clock"
+      ],
+      "is": "One clock divided several ways, each division triggering a different voice, so the parts drift in and out of phase without ever losing the pulse.",
+      "sounds_right_when": "the parts line up periodically rather than randomly, and the whole thing stays in time.",
+      "source": "Standard clock-division practice; Bjørn & Meyer",
+      "at_least": {
+        "clock_modulator": 1
+      },
+      "topology": [
+        {
+          "id": "clock-in",
+          "from_module": "clock",
+          "from_port": "clock_out",
+          "to_module": "clock_modulator",
+          "to_port": "clock_in",
+          "describe": "a clock has to reach the divider"
+        },
+        {
+          "id": "division-triggers",
+          "from_module": "clock_modulator",
+          "from_port": "gate_out",
+          "to_module": "envelope",
+          "to_port": "gate_in",
+          "describe": "a division has to trigger something, or the divider is dividing into silence"
+        }
+      ],
+      "behaviour": {
+        "keeps_going": true,
+        "rhythmic": true
+      },
+      "common_mistakes": [
+        {
+          "id": "no-clock",
+          "do": "cut",
+          "requirement": "clock-in",
+          "message": "the divider has no clock to divide"
+        },
+        {
+          "id": "divides-nothing",
+          "do": "cut",
+          "requirement": "division-triggers",
+          "message": "no division triggers anything"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,206 @@
+{
+  "family": "utility",
+  "$comment": [
+    "Patches that are infrastructure: they make other patches possible rather",
+    "than making a sound. They earn a place in the library because they are",
+    "what a person actually asks for when a patch nearly works -- 'send this",
+    "to two places', 'make it stay in key', 'get it out to the speakers'."
+  ],
+
+  "idioms": [
+    {
+      "slug": "signal-to-output",
+      "names": ["to the output", "out to speakers"],
+      "implies": ["make it audible", "hear it", "send it to the audio interface"],
+      "is": "Whatever the patch makes, arriving at the audio interface — the connection whose absence makes every other correct patch silent.",
+      "sounds_right_when": "there is sound at all.",
+      "source": "The first thing anyone forgets",
+      "at_least": {"output": 1},
+      "topology": [
+        {"id": "reaches-out", "from_module": "any", "from_port": "audio_out",
+         "to_module": "output", "to_port": "audio_in",
+         "describe": "something has to reach the audio output, or the patch is silent however correct it is"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "nothing-out", "do": "cut", "requirement": "reaches-out",
+         "message": "nothing reaches the audio output"}
+      ]
+    },
+
+    {
+      "slug": "one-source-many-places",
+      "names": ["multiple", "mult", "split the signal"],
+      "implies": ["send it to two places", "copy the signal", "same voltage everywhere"],
+      "is": "One signal split so several destinations receive exactly the same voltage, which is what keeps parts of a patch in agreement.",
+      "sounds_right_when": "the destinations move together rather than independently.",
+      "source": "Standard practice",
+      "at_least": {"multiple": 1},
+      "topology": [
+        {"id": "into-mult", "from_module": "any", "from_port": "any_out",
+         "to_module": "multiple", "to_port": "any_in",
+         "describe": "a signal has to reach the multiple"},
+        {"id": "out-of-mult", "from_module": "multiple", "from_port": "any_out",
+         "to_module": "any", "to_port": "any_in",
+         "describe": "the copies have to go somewhere"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "unused", "do": "cut", "requirement": "out-of-mult",
+         "message": "the multiple's copies go nowhere"},
+        {"id": "no-input", "do": "cut", "requirement": "into-mult",
+         "message": "the multiple has nothing to split"}
+      ]
+    },
+
+    {
+      "slug": "mixed-sources",
+      "names": ["mixer", "mix"],
+      "implies": ["combine several sounds", "sum them together", "balance the parts"],
+      "is": "Several signals summed to one path, so they share an output and can be balanced against each other.",
+      "sounds_right_when": "you hear all the parts, at chosen relative levels.",
+      "source": "Standard practice",
+      "at_least": {"mixer": 1},
+      "topology": [
+        {"id": "into-mixer", "from_module": "any", "from_port": "audio_out",
+         "to_module": "mixer", "to_port": "audio_in",
+         "describe": "sources have to reach the mixer"},
+        {"id": "mix-out", "from_module": "mixer", "from_port": "audio_out",
+         "to_module": "any", "to_port": "audio_in",
+         "describe": "the mix has to go somewhere"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "no-output", "do": "cut", "requirement": "mix-out",
+         "message": "the mix goes nowhere"},
+        {"id": "empty", "do": "cut", "requirement": "into-mixer",
+         "message": "nothing reaches the mixer"}
+      ]
+    },
+
+    {
+      "slug": "clock-distribution",
+      "names": ["clock distribution", "shared clock"],
+      "implies": ["everything in time", "one clock for everything", "keep it all in sync"],
+      "is": "One clock split to every timed part, so the patch stays in agreement about when now is.",
+      "sounds_right_when": "the parts stay locked rather than drifting.",
+      "source": "Standard practice",
+      "at_least": {"clock": 1, "multiple": 1},
+      "topology": [
+        {"id": "clock-split", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "multiple", "to_port": "any_in",
+         "describe": "the clock has to be split rather than reaching only one destination"},
+        {"id": "distributed", "from_module": "multiple", "from_port": "any_out",
+         "to_module": "any", "to_port": "clock_in",
+         "describe": "the copies have to reach the timed parts"}
+      ],
+      "behaviour": {"keeps_going": true, "rhythmic": true},
+      "common_mistakes": [
+        {"id": "unsplit", "do": "cut", "requirement": "clock-split",
+         "message": "the clock is never split"},
+        {"id": "undistributed", "do": "cut", "requirement": "distributed",
+         "message": "the clock copies reach nothing"}
+      ]
+    },
+
+    {
+      "slug": "sequential-switch-routing",
+      "names": ["sequential switch", "routed by step"],
+      "implies": ["send each note somewhere different", "rotate between voices", "alternate destinations"],
+      "is": "A clocked switch sending successive events to different destinations, so one source feeds several voices in turn.",
+      "sounds_right_when": "successive events clearly come from different places.",
+      "source": "Standard practice; the poor man's polyphony",
+      "at_least": {"switch": 1},
+      "topology": [
+        {"id": "clocked", "from_module": "clock", "from_port": "clock_out",
+         "to_module": "switch", "to_port": "clock_in",
+         "describe": "the switch has to be clocked, or it never rotates"},
+        {"id": "routes", "from_module": "switch", "from_port": "any_out",
+         "to_module": "any", "to_port": "any_in",
+         "describe": "the switch's outputs have to reach destinations"}
+      ],
+      "behaviour": {"rhythmic": true},
+      "common_mistakes": [
+        {"id": "unclocked", "do": "cut", "requirement": "clocked",
+         "message": "the switch is never clocked, so it never rotates"},
+        {"id": "routes-nowhere", "do": "cut", "requirement": "routes",
+         "message": "the switch routes to nothing"}
+      ]
+    },
+
+    {
+      "slug": "offset-and-scale",
+      "names": ["offset", "scale and offset"],
+      "implies": ["shift the voltage", "bring it into range", "add an offset"],
+      "is": "A voltage scaled and shifted so it lands in the range its destination expects, which is what makes a modulation source usable rather than merely present.",
+      "sounds_right_when": "the destination moves across its useful range rather than sitting at an extreme.",
+      "source": "Standard practice",
+      "at_least": {"attenuator": 1},
+      "topology": [
+        {"id": "into", "from_module": "any", "from_port": "cv_out",
+         "to_module": "attenuator", "to_port": "cv_in",
+         "describe": "the voltage has to reach the offset stage"},
+        {"id": "out", "from_module": "attenuator", "from_port": "cv_out",
+         "to_module": "any", "to_port": "cv_in",
+         "describe": "the shifted voltage has to reach its destination"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "bypassed", "do": "cut", "requirement": "out",
+         "message": "the offset voltage goes nowhere"},
+        {"id": "no-input", "do": "cut", "requirement": "into",
+         "message": "the offset stage has no input"}
+      ]
+    },
+
+    {
+      "slug": "gate-to-trigger",
+      "names": ["gate to trigger"],
+      "implies": ["convert a gate", "make a trigger from a gate", "edge detect"],
+      "is": "A sustained gate converted to a momentary trigger, so something that wants an edge gets one.",
+      "sounds_right_when": "the destination fires once per gate rather than staying open.",
+      "source": "Standard practice",
+      "at_least": {"logic": 1},
+      "topology": [
+        {"id": "gate-in", "from_module": "any", "from_port": "gate_out",
+         "to_module": "logic", "to_port": "gate_in",
+         "describe": "a gate has to reach the converter"},
+        {"id": "trigger-out", "from_module": "logic", "from_port": "gate_out",
+         "to_module": "any", "to_port": "gate_in",
+         "describe": "the trigger has to reach something"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "no-gate", "do": "cut", "requirement": "gate-in",
+         "message": "no gate reaches the converter"},
+        {"id": "unused", "do": "cut", "requirement": "trigger-out",
+         "message": "the trigger reaches nothing"}
+      ]
+    },
+
+    {
+      "slug": "stereo-spread",
+      "names": ["stereo", "stereo spread"],
+      "implies": ["wide", "left and right", "spread it across the field"],
+      "is": "Two related but not identical signals sent to left and right, so the image has width rather than a single centred point.",
+      "sounds_right_when": "the two sides differ enough to hear width, and still belong together.",
+      "source": "Standard practice",
+      "at_least": {"output": 1},
+      "topology": [
+        {"id": "left", "from_module": "any", "from_port": "audio_out",
+         "to_module": "output", "to_port": "audio_in",
+         "describe": "a signal has to reach the output"},
+        {"id": "differs", "from_module": "any", "from_port": "cv_out",
+         "to_module": "amplifier", "to_port": "cv_in",
+         "describe": "the two sides have to differ, or the image is mono however it is wired"}
+      ],
+      "behaviour": {},
+      "common_mistakes": [
+        {"id": "mono", "do": "cut", "requirement": "differs",
+         "message": "both sides carry the same thing, so the image is mono"},
+        {"id": "no-output", "do": "cut", "requirement": "left",
+         "message": "nothing reaches the output"}
+      ]
+    }
+  ]
+}
