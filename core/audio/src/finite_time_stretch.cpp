@@ -201,7 +201,9 @@ struct FiniteTimeStretchJob::Impl {
             return prepare_result;
         }
 
+#if defined(__cpp_exceptions)
         try {
+#endif
             input.assign(channels,
                          std::vector<double>(static_cast<std::size_t>(timeline_input_frames)));
             output.assign(channels,
@@ -216,6 +218,7 @@ struct FiniteTimeStretchJob::Impl {
                 input_planes.push_back(input[channel].data());
                 output_planes.push_back(output[channel].data());
             }
+#if defined(__cpp_exceptions)
         } catch (const std::bad_alloc&) {
             prepare_result = FiniteTimeStretchPrepareStatus::CapacityExceeded;
             return prepare_result;
@@ -223,6 +226,7 @@ struct FiniteTimeStretchJob::Impl {
             prepare_result = FiniteTimeStretchPrepareStatus::CapacityExceeded;
             return prepare_result;
         }
+#endif
 
         if (config.source->sample_rate != config.timeline_sample_rate) {
             if (PreparedSampleRateConversion::estimated_prepared_bytes() >
@@ -232,12 +236,16 @@ struct FiniteTimeStretchJob::Impl {
             }
             const auto cutoff = std::min(1.0, static_cast<double>(config.timeline_sample_rate) /
                                                   static_cast<double>(config.source->sample_rate));
+#if defined(__cpp_exceptions)
             try {
+#endif
                 converter_builder = std::make_unique<SampleRateConversionBuilder>(cutoff);
+#if defined(__cpp_exceptions)
             } catch (const std::bad_alloc&) {
                 prepare_result = FiniteTimeStretchPrepareStatus::CapacityExceeded;
                 return prepare_result;
             }
+#endif
             if (!converter_builder->valid()) {
                 prepare_result = FiniteTimeStretchPrepareStatus::SampleRateConverterPrepareFailed;
                 return prepare_result;
@@ -257,10 +265,13 @@ struct FiniteTimeStretchJob::Impl {
             prepare_result != FiniteTimeStretchPrepareStatus::Prepared)
             return FiniteTimeStretchStepStatus::Failed;
         if (current_stage == FiniteTimeStretchStage::PrepareSampleRateConverter) {
+#if defined(__cpp_exceptions)
             try {
+#endif
                 if (!converter_builder || !converter_builder->step())
                     return FiniteTimeStretchStepStatus::Progress;
                 converter = converter_builder->take();
+#if defined(__cpp_exceptions)
             } catch (const std::bad_alloc&) {
                 failure_result = FiniteTimeStretchFailure::AllocationFailed;
                 current_stage = FiniteTimeStretchStage::Failed;
@@ -270,6 +281,7 @@ struct FiniteTimeStretchJob::Impl {
                 current_stage = FiniteTimeStretchStage::Failed;
                 return FiniteTimeStretchStepStatus::Failed;
             }
+#endif
             converter_builder.reset();
             if (!converter) {
                 failure_result = FiniteTimeStretchFailure::ProcessorProtocolError;
@@ -325,8 +337,11 @@ struct FiniteTimeStretchJob::Impl {
             stretch_config.ratio_context = this;
             stretch_config.target_max_bytes = config.max_scratch_allocation_bytes;
             signal::FiniteStretchPrepareStatus status;
+#if defined(__cpp_exceptions)
             try {
+#endif
                 status = stretcher.prepare(stretch_config);
+#if defined(__cpp_exceptions)
             } catch (const std::bad_alloc&) {
                 failure_result = FiniteTimeStretchFailure::AllocationFailed;
                 current_stage = FiniteTimeStretchStage::Failed;
@@ -336,6 +351,7 @@ struct FiniteTimeStretchJob::Impl {
                 current_stage = FiniteTimeStretchStage::Failed;
                 return FiniteTimeStretchStepStatus::Failed;
             }
+#endif
             if (status != signal::FiniteStretchPrepareStatus::prepared) {
                 prepare_result =
                     status == signal::FiniteStretchPrepareStatus::processor_prepare_failed &&

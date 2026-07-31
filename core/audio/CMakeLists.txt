@@ -55,6 +55,7 @@ target_sources(pulp-audio PRIVATE
     src/streaming_sample_source.cpp
     src/zone_layer_select.cpp
     src/realtime_sample_recorder.cpp
+    src/realtime_time_stretch.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp
     src/sample_bank_materializer.cpp

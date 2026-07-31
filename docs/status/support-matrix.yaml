@@ -995,7 +995,7 @@ timeline_engine:
     notes: Immutable project snapshots, typed transactions, canonical persistence, undo/redo, release downgrade, takes/comps, track freeze, clip-level None/Resample/Stretch time-conform intent, and crash-consistent native journals.
   playback:
     status: experimental
-    notes: Immutable compiled programs, master transport, arrangement audio/note/automation rendering, sample-rate conversion, and external MIDI synchronization. Clip time-conform intent is persisted but not yet applied by playback.
+    notes: Immutable compiled programs, master transport, arrangement audio/note/automation rendering, sample-rate conversion, external MIDI synchronization, and bounded offline plus realtime application of clip-level None/Resample/Stretch time-conform intent.
   capture:
     status: experimental
     notes: Fixed-capacity audio/MIDI capture with control-side materialization and sealed recording commit; applications own device I/O and media publication.

@@ -38,9 +38,14 @@ drive the finite stretcher with an analysis-boundary tempo schedule, and publish
 only an immutable artifact with exactly the authored timeline frame count.
 Use the scalar double finite builder for deterministic offline compilation,
 then convert its exact result to the public float artifact in bounded blocks.
-Playback consumes that artifact 1:1; it never stretches or allocates in the
-audio callback. Keep source/tempo/algorithm semantic identity in the artifact
-cache key and document revision/program generation in separate provenance.
+Document-tempo playback consumes that artifact 1:1. For live host-tempo
+projection, prepare a complete `RealtimeStretchProgramRuntime` off the audio
+thread and stream the artifact through its preallocated low-latency processor;
+the audio callback may stretch but must never allocate, lock, or prepare DSP.
+The runtime publishes one fixed causal latency for all parallel audio and MIDI
+paths and resets coherently on transport/program epochs. Keep
+source/tempo/algorithm semantic identity in the artifact cache key and document
+revision/program generation in separate provenance.
 Compiler work-block size is scheduling only and must change neither key nor
 output. Never route `Stretch` through `Resample`, pad/trim a length mismatch, or
 fall back to `None`.

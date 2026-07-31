@@ -61,6 +61,16 @@ deliberately absent
 from cache identity and must not change output. This is offline compilation,
 not the separate live/realtime stretch lifecycle.
 
+Higher engine layers use the public audio-domain boundaries
+`FiniteTimeStretchJob` and `RealtimeTimeStretchProcessor`; they must not expose
+`pulp::signal` types through playback headers. The realtime facade is prepared
+on the control thread, reports its complete retained-state charge and fixed
+causal delay, and is allocation-free after successful preparation. Timeline
+live playback uses it only through a prepared `RealtimeStretchProgramRuntime`,
+with one compensated latency shared by Stretch, parallel non-Stretch audio,
+MIDI 1, and UMP output. Keep both audio implementation translation units in the
+native no-exception mirror and the WAM/WebCLAP portable dependency inventories.
+
 For reproducible offline artifacts, prefer `FiniteStretchBuilder64` from
 `finite_stretch_builder.hpp` over open-coding the stream loop. Keep the render
 double-precision through completion, then seal to float once. This uses the

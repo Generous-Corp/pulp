@@ -72,6 +72,10 @@ struct FiniteTimeStretchConfig {
 /// buffers. Each step() advances one converter/processor preparation unit,
 /// materializes or converts at most max_block_frames, or drives one finite
 /// stretcher work unit. The completed AudioFileData is immutable.
+/// In exception-enabled builds, allocation failures are reported through the
+/// status enums. In no-exception builds, checked capacity rejection remains
+/// recoverable but allocator OOM follows the platform allocator's termination
+/// policy.
 class FiniteTimeStretchJob {
   public:
     FiniteTimeStretchJob();

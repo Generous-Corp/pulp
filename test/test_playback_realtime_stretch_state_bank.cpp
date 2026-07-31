@@ -3,6 +3,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/playback/realtime_stretch_state_bank.hpp>
+#include <pulp/signal/realtime_pitch_time_geometry.hpp>
 
 #include <array>
 #include <cstdint>
@@ -15,7 +16,7 @@ namespace {
 
 RealtimeStretchStateSpec spec(std::uint64_t id, std::uint32_t channels = 2,
                               float max_time_ratio = 2.0f) {
-    return {{id}, channels, signal::PitchTimeQuality::low_latency, max_time_ratio};
+    return {{id}, channels, audio::RealtimeTimeStretchQuality::low_latency, max_time_ratio};
 }
 
 AudioRendererLimits limits() {
@@ -33,17 +34,36 @@ std::uint64_t retained_charge(const RealtimeStretchStateSpec& state,
                               std::uint32_t maximum_block_frames = 128,
                               std::uint64_t allocation_ceiling =
                                   std::numeric_limits<std::uint64_t>::max()) {
-    signal::RealtimePitchTimeConfig config;
-    config.mode = signal::PitchTimeMode::time_stretch;
+    audio::RealtimeTimeStretchConfig config;
     config.quality = state.quality;
     config.channels = static_cast<int>(state.channels);
     config.max_block = static_cast<int>(maximum_block_frames);
     config.max_time_ratio = state.max_time_ratio;
+    audio::RealtimeTimeStretchPreparedGeometry geometry;
+    REQUIRE(audio::checked_realtime_time_stretch_prepared_geometry(
+                config, allocation_ceiling, geometry)
+            == audio::RealtimeTimeStretchPrepareStatus::prepared);
+    return geometry.retained_bytes;
+}
+
+std::uint64_t minimum_signal_allocation_ceiling(
+    const signal::RealtimePitchTimeConfig& config) {
+    std::uint64_t low = 1;
+    std::uint64_t high = 16u * 1024u * 1024u;
     signal::RealtimePitchTimePreparedGeometry<float> geometry;
     REQUIRE(signal::checked_realtime_pitch_time_prepared_geometry(
-                config, 1.0, allocation_ceiling, geometry)
+                config, 1.0, high, geometry)
             == signal::PitchTimePrepareStatus::prepared);
-    return geometry.retained_bytes;
+    while (low < high) {
+        const auto middle = low + (high - low) / 2u;
+        const auto status = signal::checked_realtime_pitch_time_prepared_geometry(
+            config, 1.0, middle, geometry);
+        if (status == signal::PitchTimePrepareStatus::prepared)
+            high = middle;
+        else
+            low = middle + 1u;
+    }
+    return low;
 }
 
 } // namespace
@@ -91,7 +111,79 @@ TEST_CASE("realtime stretch bank admission is immutable and exactly bounded") {
     rejected = admit_realtime_stretch_state_bank(
         std::array{spec(10)}, 48'000.0, 128, allocation_limited);
     REQUIRE(rejected.code == RealtimeStretchStateBankError::ProcessorPrepareRejected);
-    REQUIRE(rejected.processor_status == signal::PitchTimePrepareStatus::unrepresentable_capacity);
+    REQUIRE(rejected.processor_status ==
+            audio::RealtimeTimeStretchPrepareStatus::unrepresentable_capacity);
+}
+
+TEST_CASE("audio stretch facade preserves the signal per-allocation ceiling") {
+    signal::RealtimePitchTimeConfig signal_config;
+    signal_config.mode = signal::PitchTimeMode::time_stretch;
+    signal_config.quality = signal::PitchTimeQuality::low_latency;
+    signal_config.channels = 2;
+    signal_config.max_block = 128;
+    signal_config.max_time_ratio = 2.0f;
+    const auto exact_ceiling = minimum_signal_allocation_ceiling(signal_config);
+
+    signal::RealtimePitchTimePreparedGeometry<float> signal_geometry;
+    REQUIRE(signal::checked_realtime_pitch_time_prepared_geometry(
+                signal_config, 1.0, exact_ceiling, signal_geometry)
+            == signal::PitchTimePrepareStatus::prepared);
+    const auto signal_retained_bytes = signal_geometry.retained_bytes;
+    REQUIRE(signal::checked_realtime_pitch_time_prepared_geometry(
+                signal_config, 1.0, exact_ceiling - 1u, signal_geometry)
+            == signal::PitchTimePrepareStatus::unrepresentable_capacity);
+
+    audio::RealtimeTimeStretchConfig audio_config;
+    audio_config.quality = audio::RealtimeTimeStretchQuality::low_latency;
+    audio_config.channels = 2;
+    audio_config.max_block = 128;
+    audio_config.max_time_ratio = 2.0f;
+    audio::RealtimeTimeStretchPreparedGeometry audio_geometry;
+    REQUIRE(audio::checked_realtime_time_stretch_prepared_geometry(
+                audio_config, exact_ceiling, audio_geometry)
+            == audio::RealtimeTimeStretchPrepareStatus::prepared);
+    REQUIRE(audio_geometry.retained_bytes > signal_retained_bytes);
+
+    audio::RealtimeTimeStretchProcessor processor;
+    REQUIRE(processor.prepare(48'000.0, audio_config, exact_ceiling) ==
+            audio::RealtimeTimeStretchPrepareStatus::prepared);
+}
+
+TEST_CASE("audio stretch facade reports precise invalid preparation status") {
+    audio::RealtimeTimeStretchConfig config;
+    config.quality = audio::RealtimeTimeStretchQuality::low_latency;
+    config.channels = 2;
+    config.max_block = 128;
+    config.max_time_ratio = 2.0f;
+    audio::RealtimeTimeStretchProcessor processor;
+
+    REQUIRE(processor.prepare(0.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::invalid_sample_rate);
+
+    config.channels = 0;
+    REQUIRE(processor.prepare(48'000.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::invalid_channel_count);
+    config.channels = 2;
+
+    config.max_block = 0;
+    REQUIRE(processor.prepare(48'000.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::invalid_max_block);
+    config.max_block = 128;
+
+    config.max_time_ratio = 0.5f;
+    REQUIRE(processor.prepare(48'000.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::invalid_max_time_ratio);
+    config.max_time_ratio = 2.0f;
+
+    config.fft_size = 300;
+    config.analysis_hop = 100;
+    REQUIRE(processor.prepare(48'000.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::invalid_spectral_geometry);
+    config.fft_size = 0;
+    config.analysis_hop = 0;
+
+    REQUIRE(processor.prepare(48'000.0, config, 1) ==
+            audio::RealtimeTimeStretchPrepareStatus::unrepresentable_capacity);
 }
 
 TEST_CASE("realtime stretch bank retained-byte accounting survives uint64 limits") {
@@ -147,8 +239,8 @@ TEST_CASE("prepared realtime stretch bank audio-thread operations allocate nothi
     std::array<float, 128> left{};
     std::array<float, 128> right{};
     const float* input[] = {left.data(), right.data()};
-    signal::PitchTimeStreamFeedStatus feed =
-        signal::PitchTimeStreamFeedStatus::invalid_request;
+    audio::RealtimeTimeStretchStreamFeedStatus feed =
+        audio::RealtimeTimeStretchStreamFeedStatus::invalid_request;
     std::size_t allocations = 1;
     {
         test::RtAllocationProbe probe;
@@ -166,6 +258,6 @@ TEST_CASE("prepared realtime stretch bank audio-thread operations allocate nothi
         bank.reset();
         allocations = probe.allocation_count();
     }
-    REQUIRE(feed == signal::PitchTimeStreamFeedStatus::accepted);
+    REQUIRE(feed == audio::RealtimeTimeStretchStreamFeedStatus::accepted);
     REQUIRE(allocations == 0);
 }

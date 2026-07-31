@@ -26,7 +26,6 @@ RealtimeStretchStateBankAdmission reject(RealtimeStretchStateBankError code,
 audio::RealtimeTimeStretchConfig processor_config(const RealtimeStretchStateSpec& spec,
                                                   std::uint32_t maximum_block_frames) noexcept {
     audio::RealtimeTimeStretchConfig config;
-    config.mode = audio::RealtimeTimeStretchMode::time_stretch;
     config.quality = spec.quality;
     config.channels = static_cast<int>(spec.channels);
     config.max_block = static_cast<int>(maximum_block_frames);
@@ -68,9 +67,9 @@ admit_realtime_stretch_state_bank(std::span<const RealtimeStretchStateSpec> spec
             spec.max_time_ratio > limits.realtime_stretch_max_time_ratio)
             return reject(RealtimeStretchStateBankError::TimeRatioLimitExceeded, spec.clip_id);
 
-        audio::RealtimeTimeStretchPreparedGeometry<float> geometry;
-        const auto status = audio::checked_realtime_time_stretch_prepared_geometry<float>(
-            processor_config(spec, maximum_block_frames), 1.0,
+        audio::RealtimeTimeStretchPreparedGeometry geometry;
+        const auto status = audio::checked_realtime_time_stretch_prepared_geometry(
+            processor_config(spec, maximum_block_frames),
             limits.max_realtime_stretch_allocation_bytes, geometry);
         if (status != audio::RealtimeTimeStretchPrepareStatus::prepared)
             return reject(RealtimeStretchStateBankError::ProcessorPrepareRejected, spec.clip_id, 0,

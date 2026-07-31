@@ -331,9 +331,12 @@ per-ABI entry point for it.** Go through the plugin's own state:
   grow for free.
   Musical `TimeConform::Resample` follows the same existing portable playback
   units: its stateless source-phase mapping and analytic tempo-ramp inverse add
-  no translation unit, allocation, thread, or web-specific adapter. `None` and
-  the not-yet-implemented `Stretch` remain on the native-rate path in both ABI
-  lanes.
+  no translation unit, allocation, thread, or web-specific adapter.
+  `TimeConform::Stretch` adds the finite artifact compiler and the prepared
+  realtime stream behind the audio-domain boundary; both audio translation
+  units belong in the WAM and WebCLAP portable dependency inventories. This
+  keeps persisted projects and playback compilation portable, but does not by
+  itself create a JavaScript authoring surface or a browser timeline host.
   These builds also share Timeline's persistent indexes: initial Track/Project
   construction and identity restoration bulk-build sorted balanced trees,
   while ordinary edits path-copy only the changed search paths. Do not replace

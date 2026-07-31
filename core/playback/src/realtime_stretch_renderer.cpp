@@ -240,9 +240,7 @@ struct RealtimeStretchProgramRuntime::Impl {
                     if (plan.status == audio::RealtimeTimeStretchStreamFinalizePlanStatus::ready) {
                         const auto status = clip.processor.finalize(plan.samples);
                         if (status ==
-                                audio::RealtimeTimeStretchStreamFinalizeStatus::invalid_mode ||
-                            status ==
-                                audio::RealtimeTimeStretchStreamFinalizeStatus::invalid_request)
+                            audio::RealtimeTimeStretchStreamFinalizeStatus::invalid_request)
                             return false;
                     } else if (plan.status !=
                                audio::RealtimeTimeStretchStreamFinalizePlanStatus::needs_drain) {
@@ -367,14 +365,13 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                     audio::RealtimeTimeStretchPrepareStatus::prepared};
 
         audio::RealtimeTimeStretchConfig geometry_config;
-        geometry_config.mode = audio::RealtimeTimeStretchMode::time_stretch;
         geometry_config.quality = audio::RealtimeTimeStretchQuality::low_latency;
         geometry_config.channels = 1;
         geometry_config.max_block = static_cast<int>(maximum_block_frames);
         geometry_config.max_time_ratio = candidate->maximum_ratio;
-        audio::RealtimeTimeStretchPreparedGeometry<float> geometry;
-        const auto geometry_status = audio::checked_realtime_time_stretch_prepared_geometry<float>(
-            geometry_config, 1.0, limits.max_realtime_stretch_allocation_bytes, geometry);
+        audio::RealtimeTimeStretchPreparedGeometry geometry;
+        const auto geometry_status = audio::checked_realtime_time_stretch_prepared_geometry(
+            geometry_config, limits.max_realtime_stretch_allocation_bytes, geometry);
         if (geometry_status != audio::RealtimeTimeStretchPrepareStatus::prepared)
             return {RealtimeStretchStateBankError::ProcessorPrepareRejected,
                     {},
