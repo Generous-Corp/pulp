@@ -71,8 +71,8 @@ public:
     /// Start the single process session if none is active. `categories` selects
     /// the enabled track-event categories (empty = all). `out_path` overrides
     /// the default temp path (also overridable via $PULP_TRACE_PATH).
-    /// `ring_kb` sizes the in-process ring (default 80 MB). Returns true if a
-    /// session is active on return (either newly started or already running).
+    /// `ring_kb` sizes the in-process ring (default 80 MB). Returns true only
+    /// when this call starts a new session; duplicate starts return false.
     static bool start(const std::vector<std::string>& categories = {},
                       const std::string& out_path = {},
                       std::uint32_t ring_kb = 80u * 1024u);

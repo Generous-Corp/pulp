@@ -1350,14 +1350,8 @@ inspector session.
 pulp trace start --categories dsp,render --ring-mb 128
 # copy the exact stop command printed by start:
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
-pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
-pulp trace query --preset dsp-hotspots --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace slowest-frames --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace xruns --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace layout-vs-paint --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20" --trace /tmp/x.pftrace
 pulp trace snapshot
-pulp trace explain "why is my plugin slow to open?" --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp trace doctor                                 # readiness: inspector + build + trace_processor
 pulp trace fetch                                  # download the pinned trace_processor (zero-install offline query)
 pulp trace open /tmp/x.pftrace                    # serve on loopback + open in the Perfetto UI
@@ -1368,10 +1362,10 @@ Options:
 - `--port PORT` - optional filter for owner-private authenticated discovery;
   `$PULP_INSPECTOR_PORT` supplies the same explicit filter
 - `--session ID --instance ID --publication ID` - select one exact
-  authenticated publication; all three are required for `stop`, live `query`
-  (including preset verbs), and `explain`. An unqualified `start` resolves the
-  selector before mutating and prints the pinned follow-up
-  command. Publication IDs are non-reusable across server restarts.
+  authenticated publication; all three are required for `stop` and for the
+  reserved live `query` / `explain` methods. An unqualified `start` resolves
+  the selector before mutating and prints the pinned follow-up command.
+  Publication IDs are non-reusable across server restarts.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:
@@ -1380,15 +1374,11 @@ Subcommands:
 |------------|------------------|-------------|
 | `start [--categories LIST] [--ring-mb 1..512]` | `Trace.startSession` | Begin a session recording the selected span categories into a bounded in-process ring. The host owns the flushed trace destination; remote clients cannot select a filesystem path. |
 | `stop` | `Trace.stopSession` | Flush the session and print the `.pftrace` path. |
-| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Run SQL over the live captured trace; JSON by default. |
+| `query "<sql>" [--format json\|table\|csv]` | `Trace.query` | Reserved live surface; currently fails with `capability_unavailable`. |
 | `query "<sql>" --trace FILE.pftrace` | `trace_processor` (offline) | Run SQL against a flushed `.pftrace` without a live session, via `trace_processor_shell` (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`; see `pulp trace fetch` / `doctor`). Returns trace_processor's native table; `--format`/`--preset` are live-path only. |
-| `query --preset <name>` | `Trace.query` | Run a named trace-stdlib preset. |
-| `slowest-frames` | `Trace.query` | L0 preset: frames over the vsync budget, worst first. |
-| `xruns` | `Trace.query` | L0 preset: audio xrun / deadline-miss events. |
-| `dsp-hotspots` | `Trace.query` | L0 preset: per-node DSP cost, most expensive first. |
-| `layout-vs-paint` | `Trace.query` | L0 preset: one-row-per-category frame cost split. |
+| `query --preset <name>` and named preset verbs | `Trace.query` | Reserved; currently fail with `capability_unavailable`. |
 | `snapshot` | `Trace.snapshot` | Print `{tracing_active, categories, ring_bytes, out_path}`. |
-| `explain "<question>"` | `Trace.explain` | One-shot narrated root cause + chain of evidence + fix. |
+| `explain "<question>"` | `Trace.explain` | Reserved; currently fails with `capability_unavailable`. Use the `trace-analysis` skill with a flushed `.pftrace`. |
 | `doctor` | client-side + `Trace.snapshot` | Readiness check. Uses the authenticated `Trace.snapshot` request as its inspector availability check, then combines it with `trace_processor` availability (`$PULP_TRACE_PROCESSOR` → pinned Pulp-fetched build → `$PATH`) and the inspector's `compiled_in` / `active` / `last_trace_path` to report `ready_to_capture` and `ready_to_query`. `--json` emits the flat readiness object. |
 | `fetch` | client-side | Download + SHA-256-verify the pinned `trace_processor_shell` (Perfetto v57.2) into `$PULP_HOME` so offline `query --trace` works zero-install. Idempotent (no-op when present). `--json` emits `{version, platform, path, already_present}`. |
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |

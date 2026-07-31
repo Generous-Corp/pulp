@@ -1244,7 +1244,7 @@ commands:
       - name: stop
         summary: Flush the session and print the `.pftrace` path via `Trace.stopSession`
       - name: query
-        summary: Run SQL over the captured trace via `Trace.query` (live) or offline against a `.pftrace` with `--trace`; JSON by default. Pass a SQL string or `--preset <name>`.
+        summary: Run SQL offline against a `.pftrace` with `--trace`. The live `Trace.query` path and presets are reserved and currently return `capability_unavailable`.
         args:
           - name: sql
             kind: positional
@@ -1253,7 +1253,7 @@ commands:
           - name: --preset
             kind: option
             required: false
-            description: Named trace-stdlib preset to run instead of raw SQL (live path only)
+            description: Reserved live preset; currently unavailable
           - name: --trace
             kind: option
             required: false
@@ -1261,19 +1261,19 @@ commands:
           - name: --format
             kind: option
             required: false
-            description: Output format json|table|csv (default json; live path only — offline returns the native table)
+            description: Reserved for the live path; offline queries return the native table
       - name: slowest-frames
-        summary: L0 preset (`Trace.query`) — frames over the vsync budget, worst first
+        summary: Reserved L0 preset; currently returns `capability_unavailable`
       - name: xruns
-        summary: L0 preset (`Trace.query`) — audio xrun / deadline-miss events
+        summary: Reserved L0 preset; currently returns `capability_unavailable`
       - name: dsp-hotspots
-        summary: L0 preset (`Trace.query`) — per-node DSP cost, most expensive first
+        summary: Reserved L0 preset; currently returns `capability_unavailable`
       - name: layout-vs-paint
-        summary: L0 preset (`Trace.query`) — one-row-per-category frame cost split
+        summary: Reserved L0 preset; currently returns `capability_unavailable`
       - name: snapshot
         summary: Print `{tracing_active, categories, ring_bytes, out_path}` via `Trace.snapshot`
       - name: explain
-        summary: One-shot narrated root cause + chain of evidence + fix via `Trace.explain`
+        summary: Reserved live surface; currently returns `capability_unavailable`. Use the trace-analysis skill with a flushed `.pftrace`.
         args:
           - name: question
             kind: positional

@@ -35,8 +35,8 @@ TEST_CASE("tracing session lifecycle", "[tracing]") {
 
     REQUIRE(Tracing::start(/*categories=*/{}, out.string(), /*ring_kb=*/4096));
     REQUIRE(Tracing::active());
-    // A second start is idempotent (one process session).
-    REQUIRE(Tracing::start());
+    // A second start cannot silently claim it applied a new configuration.
+    REQUIRE_FALSE(Tracing::start());
 
     std::thread a([] {
         for (int i = 0; i < 500; ++i) {

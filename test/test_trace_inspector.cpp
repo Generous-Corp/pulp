@@ -54,23 +54,24 @@ TEST_CASE("TraceInspector snapshot reports compile-time tracing state", "[tracin
     CHECK_FALSE(out.hasObjectMember("last_trace_path"));
 }
 
-TEST_CASE("TraceInspector query without a trace degrades honestly", "[tracing][inspect]") {
+TEST_CASE("TraceInspector rejects unavailable live query", "[tracing][inspect]") {
     TraceInspector insp;
-    auto out = result_of(insp.handle(request(methods::kTraceQuery,
-                                             R"({"preset":"slowest-frames","format":"json"})")));
-    REQUIRE(out.isObject());
-    CHECK_FALSE(out["available"].getBool());
-    // Points the caller somewhere useful rather than erroring.
-    CHECK(std::string(out["hint"].getString()).find("pulp trace start") != std::string::npos);
+    const auto response = insp.handle(request(
+        methods::kTraceQuery,
+        R"({"preset":"slowest-frames","format":"json"})"));
+    CHECK(response.is_error);
+    CHECK(response.error_code == "capability_unavailable");
+    CHECK(response.params_json.find("--trace") != std::string::npos);
 }
 
-TEST_CASE("TraceInspector explain always returns a prose explanation", "[tracing][inspect]") {
+TEST_CASE("TraceInspector rejects unavailable live explanation", "[tracing][inspect]") {
     TraceInspector insp;
-    auto out = result_of(insp.handle(request(methods::kTraceExplain,
-                                             R"({"question":"why is my plugin slow to open?"})")));
-    REQUIRE(out.isObject());
-    CHECK(std::string(out["question"].getString()) == "why is my plugin slow to open?");
-    CHECK_FALSE(std::string(out["explanation"].getString()).empty());
+    const auto response = insp.handle(request(
+        methods::kTraceExplain,
+        R"({"question":"why is my plugin slow to open?"})"));
+    CHECK(response.is_error);
+    CHECK(response.error_code == "capability_unavailable");
+    CHECK(response.params_json.find("not implemented") != std::string::npos);
 }
 
 TEST_CASE("TraceInspector keeps trace output under host authority",
@@ -115,6 +116,11 @@ TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[trac
     CHECK(started["ok"].getBool());
     CHECK(started["active"].getBool());
 
+    const auto duplicate_start =
+        insp.handle(request(methods::kTraceStartSession));
+    CHECK(duplicate_start.is_error);
+    CHECK(duplicate_start.error_code == "trace_already_active");
+
     // Emit a little so the trace is non-trivial.
     { PULP_TRACE_SCOPE_NAMED("render", "inspector_probe_frame"); }
 
@@ -128,6 +134,11 @@ TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[trac
     auto snap = result_of(insp.handle(request(methods::kTraceSnapshot)));
     CHECK(snap.hasObjectMember("last_trace_path"));
     CHECK_FALSE(insp.owns_method("Trace.nope"));
+
+    const auto duplicate_stop =
+        insp.handle(request(methods::kTraceStopSession));
+    CHECK(duplicate_stop.is_error);
+    CHECK(duplicate_stop.error_code == "no_active_trace");
 }
 
 #else
@@ -135,14 +146,14 @@ TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[trac
 TEST_CASE("TraceInspector says tracing is not compiled in when OFF", "[tracing][inspect]") {
     TraceInspector insp;
 
-    auto started = result_of(insp.handle(request(methods::kTraceStartSession)));
-    REQUIRE(started.isObject());
-    CHECK_FALSE(started["compiled_in"].getBool());
-    CHECK_FALSE(started["ok"].getBool());
-    CHECK(std::string(started["message"].getString()).find("-DPULP_TRACING=ON") != std::string::npos);
+    const auto started = insp.handle(request(methods::kTraceStartSession));
+    CHECK(started.is_error);
+    CHECK(started.error_code == "tracing_unavailable");
+    CHECK(started.params_json.find("-DPULP_TRACING=ON") != std::string::npos);
 
-    auto stopped = result_of(insp.handle(request(methods::kTraceStopSession)));
-    CHECK_FALSE(stopped["ok"].getBool());
+    const auto stopped = insp.handle(request(methods::kTraceStopSession));
+    CHECK(stopped.is_error);
+    CHECK(stopped.error_code == "tracing_unavailable");
 }
 
 #endif

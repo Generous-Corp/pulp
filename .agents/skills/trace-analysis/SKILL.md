@@ -43,12 +43,13 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 
 | Tier | Who | Entry | This skill's role |
 |---|---|---|---|
-| **L0** | novice, no agent | `pulp trace slowest-frames`, `--preset dsp-hotspots`/`xruns` | not needed — canned preset → plain table |
-| **L1** | novice, one-shot | `pulp trace explain "<q>"` · `pulp_trace_explain` · `/trace "<q>"` | **run this protocol autonomously**, return narrated root cause + evidence + fix |
-| **L2** | expert, iterative | `pulp trace query "<sql>"` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
+| **L0** | novice, no agent | Planned named presets | not available yet |
+| **L1** | novice, one-shot | A `.pftrace` plus a question | **run this protocol autonomously**, return narrated root cause + evidence + fix |
+| **L2** | expert, iterative | `pulp trace query "<sql>" --trace FILE` + this skill + `trace-sql` loaded | drive the full loop by hand on hard/multi-bottleneck cases |
 
-L0 needs no agent. L1 is the headline: you run the whole protocol and hand back
-prose. L2 is the same protocol, interactive, for cases the presets cannot crack.
+The live `Trace.query` / `Trace.explain` methods and named preset verbs are
+reserved and currently return `capability_unavailable`; do not treat them as
+successful analysis. L1 runs this workflow over real offline queries.
 
 ---
 
@@ -68,7 +69,7 @@ or tracing was compiled out. Normal launches create no endpoint; capture
 requires an explicitly wired custom fixture published through authenticated discovery.
 When more than one live session exists—or when a capture spans separate CLI
 invocations—pass the same `--session ID --instance ID --publication ID`
-selector to `doctor`, `start`, `stop`, and live queries. The non-reusable
+selector to `doctor`, `start`, and `stop`. The non-reusable
 publication ID pins the exact authenticated publication instead of allowing a
 replacement process that reuses the other IDs to inherit the operation.
 `ready_to_query:false` means no `trace_processor` (on
@@ -217,7 +218,7 @@ deterministic — no real-time hazard, works regardless of the DSP story.
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the editor ...
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace explain "why is my plugin slow to open?"
+# Investigate the printed .pftrace using the offline query loop below.
 ```
 
 A good answer reads like this:

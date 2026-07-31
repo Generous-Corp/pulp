@@ -80,39 +80,60 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
         ring_kb = static_cast<std::uint32_t>(ring_mb) * 1024u;
     }
 
+    if (Tracing::active()) {
+        return make_error(
+            req.id, "Trace.startSession: a tracing session is already active",
+            "trace_already_active");
+    }
+
     // An authenticated peer can control capture, not host filesystem paths.
     // Empty delegates the destination to host-owned trace configuration.
     const bool started = Tracing::start(categories, {}, ring_kb);
+    if (!started) {
+        return make_error(
+            req.id,
+            kTracingEnabled
+                ? "Trace.startSession: tracing could not be started"
+                : "Trace.startSession: tracing is not compiled into this "
+                  "build; rebuild with -DPULP_TRACING=ON",
+            kTracingEnabled ? "trace_start_failed" : "tracing_unavailable");
+    }
 
     auto out = choc::value::createObject("");
     out.addMember("compiled_in", choc::value::createBool(kTracingEnabled));
     out.addMember("active", choc::value::createBool(Tracing::active()));
-    if (!started && !kTracingEnabled) {
-        out.addMember("ok", choc::value::createBool(false));
-        out.addMember("message", choc::value::createString(
-            "Tracing is not compiled into this build. Rebuild with "
-            "-DPULP_TRACING=ON to capture a trace."));
-    } else {
-        out.addMember("ok", choc::value::createBool(started));
-    }
+    out.addMember("ok", choc::value::createBool(true));
     return make_response(req.id, choc::json::toString(out, false));
 }
 
 InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
+    if (!kTracingEnabled) {
+        return make_error(
+            req.id,
+            "Trace.stopSession: tracing is not compiled into this build; "
+            "rebuild with -DPULP_TRACING=ON",
+            "tracing_unavailable");
+    }
+    if (!Tracing::active()) {
+        return make_error(
+            req.id, "Trace.stopSession: no active tracing session",
+            "no_active_trace");
+    }
+
     const auto result = Tracing::stop();
-    if (result.ok)
-        last_trace_path_ = result.path;
+    if (!result.ok) {
+        return make_error(
+            req.id,
+            "Trace.stopSession: the active trace could not be written",
+            "trace_write_failed");
+    }
+    last_trace_path_ = result.path;
 
     auto out = choc::value::createObject("");
-    out.addMember("ok", choc::value::createBool(result.ok));
+    out.addMember("ok", choc::value::createBool(true));
     out.addMember("out_path", choc::value::createString(result.path));
     out.addMember("trace_bytes",
                   choc::value::createInt64(static_cast<int64_t>(result.trace_bytes)));
-    if (!result.ok)
-        out.addMember("message", choc::value::createString(
-            kTracingEnabled
-                ? "No active tracing session to stop."
-                : "Tracing is not compiled into this build (-DPULP_TRACING=ON)."));
     return make_response(req.id, choc::json::toString(out, false));
 }
 
@@ -126,49 +147,19 @@ InspectorMessage TraceInspector::snapshot(const InspectorMessage& req) {
 }
 
 InspectorMessage TraceInspector::query(const InspectorMessage& req) {
-    // Running SQL means shelling out to the pinned trace_processor over the
-    // flushed .pftrace — an offline step the `pulp trace` client owns, not the
-    // in-process inspector. So a query request points the caller at the trace
-    // file and defers to the trace-sql skill rather than executing here.
-    auto out = choc::value::createObject("");
-    out.addMember("available", choc::value::createBool(false));
-    out.addMember("trace_path", choc::value::createString(last_trace_path_));
-    out.addMember("hint", choc::value::createString(
-        last_trace_path_.empty()
-            ? "No trace captured yet — run `pulp trace start` then `pulp trace "
-              "stop` first."
-            : "Query the flushed .pftrace offline with trace_processor (see the "
-              "trace-sql skill)."));
-    return make_response(req.id, choc::json::toString(out, false));
+    return make_error(
+        req.id,
+        "Trace.query is unavailable in the live inspector; query a flushed "
+        ".pftrace with `pulp trace query \"<sql>\" --trace <file>`",
+        "capability_unavailable");
 }
 
 InspectorMessage TraceInspector::explain(const InspectorMessage& req) {
-    std::string question;
-    try {
-        auto params = choc::json::parse(req.params_json);
-        if (params.isObject() && params.hasObjectMember("question"))
-            question = std::string(params["question"].getString());
-    } catch (...) {
-        // A malformed explain request still gets the general guidance below.
-    }
-
-    const std::string explanation =
-        last_trace_path_.empty()
-            ? "No trace captured yet. Run `pulp trace start`, reproduce the slow "
-              "moment, then `pulp trace stop` — that writes a .pftrace you can "
-              "open in the Perfetto UI or query with the trace-sql skill."
-            : "A trace is at " + last_trace_path_ + ". The narrated-answer path "
-              "runs canned trace-sql queries over it; that query engine ships "
-              "next. For now open the .pftrace in the Perfetto UI or run the "
-              "trace-analysis skill's presets against it.";
-
-    auto out = choc::value::createObject("");
-    out.addMember("available", choc::value::createBool(false));
-    out.addMember("question", choc::value::createString(question));
-    out.addMember("explanation", choc::value::createString(explanation));
-    if (!last_trace_path_.empty())
-        out.addMember("trace_path", choc::value::createString(last_trace_path_));
-    return make_response(req.id, choc::json::toString(out, false));
+    return make_error(
+        req.id,
+        "Trace.explain is not implemented; capture a .pftrace and run the "
+        "trace-analysis workflow over offline trace queries",
+        "capability_unavailable");
 }
 
 } // namespace pulp::inspect

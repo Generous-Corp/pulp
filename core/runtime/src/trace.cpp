@@ -121,7 +121,7 @@ bool Tracing::start(const std::vector<std::string>& /*categories*/,
                     const std::string& out_path, std::uint32_t ring_kb) {
     ensure_initialized();
     std::lock_guard<std::mutex> lk(g_mu);
-    if (g_session) return true;  // already active — one process session
+    if (g_session) return false;  // reject duplicate configuration
 
     perfetto::TraceConfig cfg;
     cfg.add_buffers()->set_size_kb(ring_kb);
