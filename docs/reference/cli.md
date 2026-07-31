@@ -1248,13 +1248,13 @@ Remaining limitation:
 
 Authenticated low-level client for an explicitly enabled inspector session.
 Normal `pulp run` and plugin-format launches do not currently start an
-endpoint. The client reads owner-private ephemeral discovery records, requires
-an exact session when more than one is live, and proves possession of the
+endpoint. The client reads owner-private ephemeral discovery records, selects
+an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
 ```bash
 pulp inspect
-pulp inspect --session SESSION_ID --instance INSTANCE_ID
+pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
 pulp inspect --port 49152
 pulp inspect --command DOM.getDocument
 pulp inspect --command State.getParameters
@@ -1264,6 +1264,8 @@ Options:
 
 - `--session ID` - select the exact live session
 - `--instance ID` - disambiguate an exact instance when a session ID is shared
+- `--publication ID` - pin one non-reusable publication generation; requires
+  `--session` and `--instance`
 - `--host HOST` - filter discovery by loopback host
 - `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response
@@ -1296,34 +1298,35 @@ fixture that explicitly constructs and wires the inspector server.
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
 # copy the exact stop command printed by record:
-pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE
+pulp motion stop --trace-id 1 --session SESSION --instance INSTANCE --publication PUBLICATION
 pulp motion snapshot
 pulp motion list-traces
-pulp motion scrub 30 --session SESSION --instance INSTANCE
-pulp motion play --session SESSION --instance INSTANCE
-pulp motion pause --session SESSION --instance INSTANCE
-pulp motion cost enable --session SESSION --instance INSTANCE
-pulp motion cost disable --session SESSION --instance INSTANCE
+pulp motion scrub 30 --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion play --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion pause --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost enable --session SESSION --instance INSTANCE --publication PUBLICATION
+pulp motion cost disable --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 Options:
 
 - `--port PORT` - inspector port; defaults to owner-private authenticated discovery
-- `--session ID --instance ID` - select one exact authenticated session identity; both are required together
-  for stop, scrub, play, pause, and cost mutations
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for stop, scrub, play,
+  pause, and cost mutations
 - `--json` - emit JSON where the subcommand supports it
 
 Subcommands:
 
 | Subcommand | Inspector method | Description |
 |------------|------------------|-------------|
-| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact session, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
-| `stop [--trace-id N] --session ID --instance ID` | `Motion.stopTrace` | Release an active trace on the exact process selected by `record`; the pair is required. |
+| `record [--view NAME] [--out FILE] [--fps N] [--metrics SPEC]` | `Motion.startTrace` | Resolve one exact publication, start a trace against it, and print the trace id plus a pinned stop command. `--out` names the intended fixture path and prints sink guidance; the CLI does not write JSONL itself. |
+| `stop [--trace-id N] --session ID --instance ID --publication ID` | `Motion.stopTrace` | Release an active trace on the exact publication selected by `record`; the full selector is required. |
 | `snapshot` | `Motion.snapshot` | Print tracing, active-trace, emitted-event, and cost-attribution state. |
 | `list-traces` | `Motion.listTraces` | List inspector-owned trace ids. |
-| `scrub FRAME --session ID --instance ID` | `Motion.scrubTo` | Move the exact session's scrubber playhead to a frame. |
+| `scrub FRAME --session ID --instance ID --publication ID` | `Motion.scrubTo` | Move the exact publication's scrubber playhead to a frame. |
 | `play` / `pause` with exact selection | `Motion.play` / `Motion.pause` | Control fixture playback without rediscovering a replacement process. |
-| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact session. |
+| `cost enable` / `cost disable` with exact selection | `Motion.enableCost` / `Motion.disableCost` | Toggle the cost-attribution channel for the exact publication. |
 
 See [Motion Observability](../guides/motion-observability.md) for the full
 runtime trace, fixture replay, and cost-attribution workflow.
@@ -1346,7 +1349,7 @@ inspector session.
 ```bash
 pulp trace start --categories dsp,render --ring-mb 128
 # copy the exact stop command printed by start:
-pulp trace stop --session SESSION --instance INSTANCE  # → prints the .pftrace path
+pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION  # → prints the .pftrace path
 pulp trace query "SELECT name, dur FROM slice ORDER BY dur DESC LIMIT 20"
 pulp trace query "SELECT count(*) FROM slice" --trace /tmp/x.pftrace   # offline, no live session
 pulp trace query --preset dsp-hotspots
@@ -1364,9 +1367,10 @@ Options:
 
 - `--port PORT` - optional filter for owner-private authenticated discovery;
   `$PULP_INSPECTOR_PORT` supplies the same explicit filter
-- `--session ID --instance ID` - select one exact authenticated session
-  identity; both are required together for `stop`. An unqualified `start`
-  resolves the pair before mutating and prints the pinned follow-up command.
+- `--session ID --instance ID --publication ID` - select one exact
+  authenticated publication; all three are required for `stop`. An unqualified
+  `start` resolves the selector before mutating and prints the pinned follow-up
+  command. Publication IDs are non-reusable across server restarts.
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:

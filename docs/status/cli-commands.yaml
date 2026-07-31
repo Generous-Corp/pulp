@@ -1104,6 +1104,10 @@ commands:
         kind: option
         required: false
         description: Disambiguate an exact instance when a session ID is shared
+      - name: --publication
+        kind: option
+        required: false
+        description: Pin one non-reusable publication generation; requires --session and --instance
       - name: --host
         kind: option
         required: false
@@ -1138,6 +1142,10 @@ commands:
         kind: option
         required: false
         description: Exact authenticated instance id; must be paired with --session
+      - name: --publication
+        kind: option
+        required: false
+        description: Non-reusable publication id; required with --session and --instance for mutations
       - name: --port
         kind: option
         required: false
@@ -1209,6 +1217,10 @@ commands:
         kind: option
         required: false
         description: Exact authenticated instance id; must be paired with --session for live commands
+      - name: --publication
+        kind: option
+        required: false
+        description: Non-reusable publication id; required with --session and --instance for stop
       - name: --port
         kind: option
         required: false

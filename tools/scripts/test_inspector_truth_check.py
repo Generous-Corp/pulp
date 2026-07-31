@@ -37,19 +37,20 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "docs/reference/cli.md":
                 "unavailable in normal launches; explicitly wired; "
                 "remote clients cannot select a filesystem path; "
-                "select one exact authenticated session identity; "
-                "both are required together\n",
+                "select one exact; authenticated publication; "
+                "all three are required\n",
             "docs/status/cli-commands.yaml":
                 "owner-private authenticated discovery\n"
                 "Exact authenticated session id; must be paired with --instance\n"
-                "Exact authenticated instance id; must be paired with --session\n",
+                "Exact authenticated instance id; must be paired with --session\n"
+                "Non-reusable publication id\n",
             "experimental/pulp-rs/src/cmd/motion.rs":
                 "authenticated auto-discovery\n"
-                'a == "--session" || a == "--instance"\n'
+                'a == "--publication"\n'
                 "--session and --instance must be supplied together\n"
                 "talker.call_selected(\n"
                 "parse_session_selection(&capabilities)\n"
-                "pulp motion mutation requires --session and --instance\n"
+                "pulp motion mutation requires --session, --instance, and\n"
                 "pulp motion stop --trace-id {id}{}\n"
                 "selection_cli_suffix(\n"
                 "valid_session_identity(v)\n"
@@ -60,13 +61,13 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "authenticated auto-discovery\n"
                 "pulp trace start --out is unavailable\n"
                 "if !(1..=512).contains(&ring_mb)\n"
-                'a == "--session" || a == "--instance"\n'
+                'a == "--publication"\n'
                 "--session and --instance must be supplied together\n"
                 "talker.call_selected(\n"
                 'no_args("stop", &rest[1..])\n'
                 "explicit_selection.as_ref()\n"
                 "parse_session_selection(&capabilities)\n"
-                "pulp trace stop requires --session and --instance\n"
+                "pulp trace stop requires --session, --instance, and --publication\n"
                 "pulp trace stop{}\n"
                 "selection_cli_suffix(\n"
                 "valid_session_identity(v)\n",
@@ -77,7 +78,7 @@ class InspectorTruthCheckTests(unittest.TestCase):
             ".agents/skills/motion/SKILL.md":
                 "explicitly wired custom fixture; authenticated discovery; "
                 "nonce/HMAC; intentionally unavailable; "
-                "--session ID --instance ID\n",
+                "--session ID --instance ID --publication ID\n",
             ".agents/skills/trace-analysis/SKILL.md":
                 "explicitly wired custom fixture; authenticated discovery\n",
             ".agents/skills/cli-maintenance/SKILL.md":
@@ -88,8 +89,8 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 '"minimum":1,"maximum":512\n'
                 "The host owns the trace destination.\n"
                 "resolve_inspector_selection(root)\n"
-                '"required":["session_id","instance_id"]\n'
-                '"required":["trace_id","session_id","instance_id"]\n',
+                '"required":["session_id","instance_id","publication_id"]\n'
+                '"required":["trace_id","session_id","instance_id","publication_id"]\n',
             "CMakeLists.txt":
                 "if(PULP_ENABLE_INSPECTOR)\n"
                 "    add_subdirectory(inspect)\n"
@@ -127,7 +128,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED)\n"
                 "clear_extended_acl(descriptor)\n"
                 "owner_private_descriptor(fd, false)\n"
-                "open_owner_private(path, false)\n",
+                "open_owner_private(path, false)\n"
+                'value.addMember("publicationId"\n'
+                "current->publication_id != record.publication_id\n",
             "inspect/src/inspector_publication.hpp":
                 "heartbeat_interval > std::chrono::milliseconds::max() / 3\n"
                 "std::chrono::steady_clock::duration::max()\n"

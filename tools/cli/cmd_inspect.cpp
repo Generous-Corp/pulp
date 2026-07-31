@@ -3,6 +3,8 @@
 #include <pulp/inspect/client.hpp>
 #include <pulp/inspect/discovery.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <charconv>
 #include <fstream>
@@ -82,6 +84,22 @@ void print_error(const InspectorMessage& response) {
         std::cerr << response.error_data_json << "\n";
 }
 
+std::string attach_publication_id(
+    std::string response_json,
+    std::string_view publication_id) {
+    try {
+        auto value = choc::json::parse(response_json);
+        if (!value.isObject())
+            return response_json;
+        value.addMember(
+            "publicationId",
+            choc::value::createString(publication_id));
+        return choc::json::toString(value, false);
+    } catch (...) {
+        return response_json;
+    }
+}
+
 } // namespace
 
 int cmd_inspect(const std::vector<std::string>& args) {
@@ -89,6 +107,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     int port = 0;
     std::string session_id;
     std::string instance_id;
+    std::string publication_id;
     std::string command;
     std::string params = "{}";
     std::string output_file;
@@ -103,6 +122,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
                 << "Options:\n"
                 << "  --session ID      Select the exact live session\n"
                 << "  --instance ID     Select the exact instance within a session\n"
+                << "  --publication ID  Pin one non-reusable publication generation\n"
                 << "  --host HOST       Filter discovery by host (loopback only)\n"
                 << "  --port PORT       Filter discovery by port; never bypasses auth\n"
                 << "  --command METHOD  Send one command and print its result\n"
@@ -130,6 +150,10 @@ int cmd_inspect(const std::vector<std::string>& args) {
         } else if (arg == "--instance") {
             if (!require_arg_value(args, index, "--instance", instance_id))
                 return 2;
+        } else if (arg == "--publication") {
+            if (!require_arg_value(
+                    args, index, "--publication", publication_id))
+                return 2;
         } else if (arg == "--command") {
             if (!require_arg_value(args, index, "--command", command)) return 2;
         } else if (arg == "--params") {
@@ -153,6 +177,11 @@ int cmd_inspect(const std::vector<std::string>& args) {
         std::cerr << "Error: --params requires --command\n";
         return 2;
     }
+    if (!publication_id.empty() &&
+        (session_id.empty() || instance_id.empty())) {
+        std::cerr << "Error: --publication requires --session and --instance\n";
+        return 2;
+    }
     if (!host.empty() && host != "127.0.0.1" && host != "localhost") {
         std::cerr << "Error: inspector sessions are loopback-only\n";
         return 2;
@@ -170,17 +199,19 @@ int cmd_inspect(const std::vector<std::string>& args) {
         records.end());
     std::string selection_error;
     const auto selected = select_inspector_session(
-        records, session_id, instance_id, &selection_error);
+        records, session_id, instance_id, publication_id, &selection_error);
     if (!selected) {
         std::cerr << "Error: " << selection_error;
         if (!host.empty() || port != 0 || !session_id.empty() ||
-            !instance_id.empty()) {
+            !instance_id.empty() || !publication_id.empty()) {
             std::cerr << " (requested";
             if (!host.empty()) std::cerr << " host " << host;
             if (port != 0) std::cerr << " port " << port;
             if (!session_id.empty()) std::cerr << " session " << session_id;
             if (!instance_id.empty())
                 std::cerr << " instance " << instance_id;
+            if (!publication_id.empty())
+                std::cerr << " publication " << publication_id;
             std::cerr << ")";
         }
         std::cerr << "\n";
@@ -229,15 +260,20 @@ int cmd_inspect(const std::vector<std::string>& args) {
             print_error(response);
             return 1;
         }
+        auto response_json = response.params_json;
+        if (command == methods::kSessionGetCapabilities) {
+            response_json = attach_publication_id(
+                std::move(response_json), selected->publication_id);
+        }
         if (!output_file.empty()) {
             std::ofstream output(output_file, std::ios::trunc);
-            if (!output || !(output << response.params_json)) {
+            if (!output || !(output << response_json)) {
                 std::cerr << "Error: could not write " << output_file << "\n";
                 return 1;
             }
             std::cout << "Written to " << output_file << "\n";
         } else {
-            std::cout << response.params_json << "\n";
+            std::cout << response_json << "\n";
         }
         return 0;
     }

@@ -300,6 +300,8 @@ fn motion_stop_accepts_trace_id_arg() {
             "session-a",
             "--instance",
             "instance-b",
+            "--publication",
+            "publication-c",
             "--port",
             UNLIKELY_PORT,
         ])

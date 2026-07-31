@@ -45,17 +45,18 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Constructor/reachability | Authenticated test fixtures construct a least-privilege session; standalone still constructs only the visual overlay | Production standalone session owner and launcher activation |
 | Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | Bounded owning-thread RPC responds after application and cancels queued work during teardown | Production standalone attachment |
-| Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, exact instance selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | Production standalone activation |
-| CLI | Shared typed client performs authenticated session/instance discovery and acquires a same-connection controller lease for one-shot mutations | Profiles/list/capabilities/doctor stable JSON and installed MCP parity |
-| MCP | Source-tree shell wrapper; capture start resolves and pins one exact session, surfaces its identity, and stop requires that pair | Direct installed shared client |
+| Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | Production standalone activation |
+| CLI | Shared typed client performs authenticated publication discovery and acquires a same-connection controller lease for one-shot mutations | Profiles/list/capabilities/doctor stable JSON and installed MCP parity |
+| MCP | Source-tree shell wrapper; capture start resolves and pins one exact publication, surfaces its three-part selector, and stop requires that selector | Direct installed shared client |
 | Capture/telemetry | Standalone capture seam and value-channel sources exist | Live session attachment and independent bounded telemetry fan-out |
 | Shipping | The component gate removes inspector targets and CLI commands fail explicitly when disabled; ordinary-format symbol stripping is continuously checked | Per-target declaration, shipped-product manifest, and override proof |
 
 The production server binds loopback only and requires fresh, role-separated
 nonce/HMAC proofs from both client and server using an owner-private
 per-session credential. Discovery rejects expired or dead publishers,
-duplicate live publisher identities, insecure mode bits or extended ACLs,
-path escapes, and ambiguous selection. Newly created Darwin discovery objects
+duplicate live publisher identities, stale publication generations, insecure
+mode bits or extended ACLs, path escapes, and ambiguous selection. Newly
+created Darwin discovery objects
 discard inherited ACLs before any credential material is written; readers
 validate the opened object and fail closed on any remaining extended ACL.
 Capability dispatch is fail-closed before a domain handler runs. The old

@@ -281,10 +281,10 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     REQUIRE(records.size() == 2);
     std::string selection_error;
     CHECK_FALSE(select_inspector_session(
-        records, "shared-session", {}, &selection_error).has_value());
+        records, "shared-session", {}, {}, &selection_error).has_value());
     CHECK(selection_error.find("Multiple") != std::string::npos);
     const auto selected = select_inspector_session(
-        records, "shared-session", "instance-b", &selection_error);
+        records, "shared-session", "instance-b", {}, &selection_error);
     REQUIRE(selected.has_value());
     CHECK(selected->instance_id == "instance-b");
     CHECK(records[0].record_path != records[1].record_path);
@@ -305,6 +305,49 @@ TEST_CASE("discovery keeps duplicate session IDs instance-isolated",
     REQUIRE(remaining.size() == 1);
     CHECK(remaining.front().instance_id == "instance-b");
     CHECK(reader.read_credential(remaining.front()) == second_token);
+}
+
+TEST_CASE("discovery publication generation cannot rebind a stale selector",
+          "[inspect][discovery][identity][generation]") {
+    TemporaryDirectory temporary;
+    const auto first_token = generate_inspector_secret();
+    const auto second_token = generate_inspector_secret();
+    REQUIRE(first_token.has_value());
+    REQUIRE(second_token.has_value());
+
+    auto record = fixture_record("restarted-session");
+    record.instance_id = "reused-instance";
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    REQUIRE(publisher.publish(record, *first_token, 5s));
+    InspectorDiscoveryReader reader(temporary.path);
+    const auto first_records = reader.list();
+    REQUIRE(first_records.size() == 1);
+    const auto stale_record = first_records.front();
+    REQUIRE_FALSE(stale_record.publication_id.empty());
+
+    publisher.remove();
+    REQUIRE(publisher.publish(record, *second_token, 5s));
+    const auto current_records = reader.list();
+    REQUIRE(current_records.size() == 1);
+    REQUIRE(current_records.front().publication_id !=
+            stale_record.publication_id);
+
+    std::string selection_error;
+    CHECK_FALSE(select_inspector_session(
+        current_records,
+        record.session_id,
+        record.instance_id,
+        stale_record.publication_id,
+        &selection_error));
+    CHECK(selection_error.find("No live") != std::string::npos);
+    REQUIRE(select_inspector_session(
+        current_records,
+        record.session_id,
+        record.instance_id,
+        current_records.front().publication_id,
+        &selection_error));
+    CHECK_FALSE(reader.read_credential(stale_record).has_value());
+    CHECK(reader.read_credential(current_records.front()) == second_token);
 }
 
 TEST_CASE("discovery reserves a live session and instance identity",
@@ -600,10 +643,11 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
     auto records = reader.list();
     REQUIRE(records.size() == 2);
     std::string error;
-    CHECK_FALSE(select_inspector_session(records, "", {}, &error).has_value());
+    CHECK_FALSE(
+        select_inspector_session(records, "", {}, {}, &error).has_value());
     CHECK(error.find("Multiple") != std::string::npos);
     REQUIRE(select_inspector_session(
-        records, "second", {}, &error).has_value());
+        records, "second", {}, {}, &error).has_value());
 
 #ifndef _WIN32
     REQUIRE(::chmod(first.record()->credential_path.c_str(), 0644) == 0);
@@ -622,7 +666,8 @@ TEST_CASE("discovery rejects expired, insecure, and ambiguous records",
     records = reader.list();
     REQUIRE(records.size() == 1);
     CHECK(records.front().session_id == "second");
-    REQUIRE(select_inspector_session(records, "", {}, &error).has_value());
+    REQUIRE(
+        select_inspector_session(records, "", {}, {}, &error).has_value());
 
     std::filesystem::remove(first.record()->credential_path);
     records = reader.list();

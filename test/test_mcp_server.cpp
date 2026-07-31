@@ -962,7 +962,8 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         << "case \" $* \" in\n"
         << "  *' Session.getCapabilities '*) "
            "printf '{\"sessionId\":\"session-a\","
-           "\"instanceId\":\"instance-b\"}' ;;\n"
+           "\"instanceId\":\"instance-b\","
+           "\"publicationId\":\"publication-c\"}' ;;\n"
         << "  *) printf 'fake-inspector'; "
            "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done ;;\n"
         << "esac\n";
@@ -974,33 +975,36 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
     require_contains(
         trace_start,
         "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--command] [Trace.startSession]");
+        "[instance-b] [--publication] [publication-c] [--command] "
+        "[Trace.startSession]");
     require_contains(
         trace_start,
-        R"JSON(Exact selection: {\"session_id\":\"session-a\",\"instance_id\":\"instance-b\"})JSON");
+        R"JSON(Exact selection: {\"session_id\":\"session-a\",\"instance_id\":\"instance-b\",\"publication_id\":\"publication-c\"})JSON");
 
     const auto motion_stop = handle_request(tool_call(
         "63", "pulp_motion_stop_trace",
-        R"JSON({"trace_id":7,"session_id":"session-a","instance_id":"instance-b"})JSON"));
+        R"JSON({"trace_id":7,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
     require_contains(
         motion_stop,
         "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--command] [Motion.stopTrace]");
+        "[instance-b] [--publication] [publication-c] [--command] "
+        "[Motion.stopTrace]");
 
     const auto motion_play = handle_request(tool_call(
         "64", "pulp_motion_play",
-        R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
+        R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
     require_contains(
         motion_play,
         "fake-inspector [inspect] [--session] [session-a] [--instance] "
-        "[instance-b] [--command] [Motion.play]");
+        "[instance-b] [--publication] [publication-c] [--command] "
+        "[Motion.play]");
 
     const auto unpinned_stop = handle_request(tool_call(
         "65", "pulp_trace_stop"));
     require_contains(unpinned_stop, R"JSON("isError":true)JSON");
     require_contains(
         unpinned_stop,
-        "session_id and instance_id must be the exact safe identities");
+        "session_id, instance_id, and publication_id must be the exact safe identities");
 #endif
 }
 
@@ -2502,6 +2506,7 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
     }
     require_contains(src, "resolve_inspector_selection(root)");
     require_contains(src, "{\"--session\", session_id, \"--instance\", instance_id}");
+    require_contains(src, "{\"--publication\", publication_id}");
 }
 
 // Per-tool SDK feature detection (min_sdk_version).
@@ -2846,7 +2851,7 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
     REQUIRE(motion_stop != std::string::npos);
     const auto motion_stop_schema = tools.substr(motion_stop, 1200);
     require_contains(motion_stop_schema,
-                     R"JSON("required":["trace_id","session_id","instance_id"])JSON");
+                     R"JSON("required":["trace_id","session_id","instance_id","publication_id"])JSON");
     for (const char* tool : {
              "pulp_motion_play",
              "pulp_motion_pause",
@@ -2859,13 +2864,13 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
         REQUIRE(position != std::string::npos);
         require_contains(
             tools.substr(position, 900),
-            R"JSON("required":["session_id","instance_id"])JSON");
+            R"JSON("required":["session_id","instance_id","publication_id"])JSON");
     }
     const auto scrub = tools.find(R"JSON("name":"pulp_motion_scrub_to")JSON");
     REQUIRE(scrub != std::string::npos);
     require_contains(
         tools.substr(scrub, 1000),
-        R"JSON("required":["frame","session_id","instance_id"])JSON");
+        R"JSON("required":["frame","session_id","instance_id","publication_id"])JSON");
 
     // Param-less tools still need a description + an inputSchema object.
     const auto param_less_tools = {
@@ -2925,7 +2930,7 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools
                                            trace_stop) - trace_stop);
     require_contains(
         trace_stop_schema,
-        R"JSON("required":["session_id","instance_id"])JSON");
+        R"JSON("required":["session_id","instance_id","publication_id"])JSON");
 
     auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
                                           R"JSON({"sql":"select 1","format":"json"})JSON"));

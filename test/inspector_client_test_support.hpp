@@ -125,6 +125,8 @@ namespace {
         challenge.nonce_hex = std::string(params["nonce"].getString());
         challenge.session_id = std::string(params["sessionId"].getString());
         challenge.instance_id = std::string(params["instanceId"].getString());
+        challenge.publication_id =
+            std::string(params["publicationId"].getString());
         challenge.protocol_version =
             std::string(params["protocolVersion"].getString());
     } catch (...) {

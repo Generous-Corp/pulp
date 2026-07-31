@@ -17,6 +17,7 @@ namespace pulp::inspect {
 struct InspectorDiscoveryRecord {
     std::string session_id;
     std::string instance_id;
+    std::string publication_id;
     std::string plugin_id;
     std::string endpoint;
     std::string protocol_version = "1";
@@ -87,6 +88,7 @@ std::optional<InspectorDiscoveryRecord> select_inspector_session(
     std::span<const InspectorDiscoveryRecord> records,
     std::string_view session_id,
     std::string_view instance_id = {},
+    std::string_view publication_id = {},
     std::string* error = nullptr);
 
 } // namespace pulp::inspect
