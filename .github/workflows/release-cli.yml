@@ -472,14 +472,19 @@ jobs:
       # A normal post-contract tag carries these files itself. An old tag or an
       # explicit old source_ref may not. Manual dispatches always use the current
       # verifier and provenance stamper as compatibility helpers while retaining
-      # the selected source's product matrix; otherwise fetch helpers only when
-      # absent. The matrix floor makes a pre-contract source an explicit skip
-      # rather than an accidental pass.
+      # the selected source's product matrix. Keep those current helpers outside
+      # tracked source paths: provenance stamping must see the selected tag's
+      # tracked tree as clean. Otherwise fetch helpers only when absent. The
+      # matrix floor makes a pre-contract source an explicit skip rather than an
+      # accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
+          compat_dir=.release-backfill-helpers
+          rm -rf "$compat_dir"
+          mkdir -p "$compat_dir"
           for path in \
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
@@ -491,7 +496,7 @@ jobs:
                   || [ "$path" = tools/scripts/sdk_provenance.py ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
-              curl -fsSL "$url" -o "$path"
+              curl -fsSL "$url" -o "$compat_dir/${path##*/}"
               continue
             fi
             if [ ! -f "$path" ]; then
@@ -500,6 +505,19 @@ jobs:
               curl -fsSL "$url" -o "$path"
             fi
           done
+          if [ '${{ github.event_name }}' = 'workflow_dispatch' ]; then
+            cp tools/scripts/release_product_matrix.json \
+              "$compat_dir/release_product_matrix.json"
+            echo "PULP_RELEASE_CONTENT_VERIFIER=$compat_dir/release_artifact_contents.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_HELPER=$compat_dir/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+          else
+            echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
+              >> "$GITHUB_ENV"
+          fi
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
       # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
@@ -870,7 +888,7 @@ jobs:
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
           if [ -z "$SOURCE_REF" ]; then
-            python3 tools/scripts/sdk_provenance.py stamp \
+            python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
               --prefix sdk-staging \
               --build-dir build-sdk \
               --source-dir . \
@@ -931,7 +949,7 @@ jobs:
           if ([string]::IsNullOrEmpty($env:SOURCE_REF)) {
             $releaseTag = $env:RELEASE_TAG
             $sourceSha = (git rev-parse HEAD).Trim()
-            python tools/scripts/sdk_provenance.py stamp `
+            python $env:PULP_SDK_PROVENANCE_HELPER stamp `
               --prefix sdk-staging `
               --build-dir build `
               --source-dir . `
@@ -967,11 +985,11 @@ jobs:
             signature_args+=(--native-signatures)
           fi
           source_sha_args=()
-          if python3 tools/scripts/release_artifact_contents.py --help \
+          if python3 "$PULP_RELEASE_CONTENT_VERIFIER" --help \
               2>&1 | grep -q -- '--source-sha'; then
             source_sha_args+=(--source-sha "$(git rev-parse HEAD)")
           fi
-          python3 tools/scripts/release_artifact_contents.py . \
+          python3 "$PULP_RELEASE_CONTENT_VERIFIER" . \
             --platform "${{ matrix.platform }}" \
             --version "${RELEASE_TAG#v}" \
             "${source_sha_args[@]}" \
@@ -985,13 +1003,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_TAG.TrimStart('v')
-          $verifierHelp = python tools/scripts/release_artifact_contents.py --help 2>&1 |
+          $verifierHelp = python $env:PULP_RELEASE_CONTENT_VERIFIER --help 2>&1 |
             Out-String
           $sourceShaArgs = @()
           if ($verifierHelp.Contains('--source-sha')) {
             $sourceShaArgs = @('--source-sha', (git rev-parse HEAD).Trim())
           }
-          python tools/scripts/release_artifact_contents.py . `
+          python $env:PULP_RELEASE_CONTENT_VERIFIER . `
             --platform "${{ matrix.platform }}" `
             --version $version `
             @sourceShaArgs
