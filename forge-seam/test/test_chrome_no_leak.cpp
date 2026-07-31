@@ -5190,6 +5190,14 @@ TEST_CASE("hovering the mention list does not free the rows being walked",
     REQUIRE(m.is_open());
     REQUIRE(m.candidates().size() == 20);
 
+    // LAY THE TREE OUT FIRST. Without this the rows have no computed bounds,
+    // so nothing is ever "under" the pointer, no hover handler fires, and the
+    // sweep below proves nothing -- which is exactly why the first version of
+    // this test passed against the broken code.
+    (void)pulp::view::render_to_png(*view, 1280, 800, 1.0f,
+                                    pulp::view::ScreenshotBackend::skia);
+    REQUIRE(m.is_open());
+
     // Sweep a pointer across the whole window, which is what a mouse does and
     // what nothing here had ever done. Under Guard Malloc this reads freed
     // memory if a hover handler restructures the tree.
@@ -5200,6 +5208,11 @@ TEST_CASE("hovering the mention list does not free the rows being walked",
         }
     }
 
+    // NOTE: the fault this guards is only caught under Guard Malloc --
+    // DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib. Plain, the freed rows
+    // usually still read as plausible memory and the sweep completes. Verified
+    // by restoring the rebuild-in-hover: passes plain, FAILS under gmalloc.
+    //
     // Still coherent afterwards: the list survived being hovered, which is the
     // whole claim.
     CHECK(m.is_open());
