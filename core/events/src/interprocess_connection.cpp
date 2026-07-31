@@ -324,6 +324,14 @@ void InterprocessConnection::disconnect() {
         if (disconnected_callback) disconnected_callback();
     }
 
+    // A disconnect callback may synchronously establish a replacement
+    // connection. The callback runs while this lifecycle remains active so
+    // destruction on another thread cannot invalidate `this`; start the
+    // replacement reader under that same protection before releasing waiters.
+    if (runtime::AliveToken::is_alive(alive) &&
+        state_.load(std::memory_order_acquire) == IpcState::Connected) {
+        start_read_thread(true);
+    }
     finish_disconnect();
 }
 
@@ -440,12 +448,17 @@ void InterprocessConnection::set_frame_read_timeout(
         std::memory_order_relaxed);
 }
 
-void InterprocessConnection::start_read_thread() {
+void InterprocessConnection::start_read_thread(
+    bool allow_active_disconnect_owner) {
     const auto start_gate = std::make_shared<std::atomic<bool>>(false);
     const auto impl = impl_;
     const auto lifecycle = impl->lifecycle;
     std::unique_lock lifecycle_lock(lifecycle->mutex);
-    if (lifecycle->active ||
+    const bool owned_disconnect =
+        lifecycle->active &&
+        lifecycle->owner == std::this_thread::get_id();
+    if ((lifecycle->active &&
+         !(allow_active_disconnect_owner && owned_disconnect)) ||
         state_.load(std::memory_order_acquire) != IpcState::Connected) {
         return;
     }

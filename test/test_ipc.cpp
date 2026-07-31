@@ -1784,6 +1784,64 @@ TEST_CASE("IPC concurrent disconnect also tears down a callback reconnect",
     second_server.stop();
 }
 
+TEST_CASE("IPC disconnect callback reconnect starts the replacement reader",
+          "[events][ipc][socket][lifecycle][reentrant]") {
+    CapturingServer first_server;
+    CapturingServer second_server;
+    const auto first_port = start_socket_server_on_loopback(first_server);
+    const auto second_port = start_socket_server_on_loopback(second_server);
+    REQUIRE(first_port.has_value());
+    REQUIRE(second_port.has_value());
+
+    InterprocessConnection client;
+    std::mutex message_mutex;
+    std::condition_variable message_cv;
+    std::string received;
+    int callback_count = 0;
+    bool reconnected = false;
+    client.set_on_text_message([&](std::string_view message) {
+        std::lock_guard lock(message_mutex);
+        received.assign(message);
+        message_cv.notify_all();
+    });
+    client.set_on_disconnected([&] {
+        ++callback_count;
+        if (callback_count == 1) {
+            reconnected = client.connect(
+                "127.0.0.1:" + std::to_string(*second_port),
+                IpcTransport::Socket);
+        }
+    });
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*first_port),
+        IpcTransport::Socket));
+
+    client.disconnect();
+    REQUIRE(reconnected);
+    REQUIRE(client.is_connected());
+    {
+        std::unique_lock lock(second_server.mutex);
+        REQUIRE(second_server.cv.wait_for(
+            lock, std::chrono::seconds(2),
+            [&] { return second_server.accepted != nullptr; }));
+        REQUIRE(second_server.accepted->send_message("replacement"));
+    }
+    {
+        std::unique_lock lock(message_mutex);
+        CHECK(message_cv.wait_for(
+            lock, std::chrono::milliseconds(250),
+            [&] { return received == "replacement"; }));
+    }
+
+    client.disconnect();
+    if (first_server.accepted)
+        first_server.accepted->disconnect();
+    if (second_server.accepted)
+        second_server.accepted->disconnect();
+    first_server.stop();
+    second_server.stop();
+}
+
 TEST_CASE("IPC disconnect callback may destroy its own connection",
           "[events][ipc][socket][owner-lifetime][lifecycle]") {
     CapturingServer server;

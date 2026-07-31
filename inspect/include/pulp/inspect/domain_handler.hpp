@@ -42,11 +42,11 @@ public:
 
     /// Opt in to `Runtime.evaluate` / `Runtime.interrupt`. OFF by default:
     /// evaluate is arbitrary code execution in the plugin's JS context, and the
-    /// inspector transport is unauthenticated, so it must never be reachable
-    /// just because a debug console was wired. A host enables this only for a
-    /// trusted, dev / loopback session. `Runtime.getCapabilities` reflects the
-    /// flag via `canEvaluate`; read-only surfaces (logs, DOM, state) are
-    /// unaffected.
+    /// authenticated inspector transport does not make arbitrary evaluation
+    /// safe to expose merely because a debug console was wired. A host enables
+    /// this only for a trusted development session. `Runtime.getCapabilities`
+    /// reflects the flag via `canEvaluate`; read-only surfaces (logs, DOM,
+    /// state) are unaffected.
     void set_runtime_eval_enabled(bool enabled) { runtime_eval_enabled_ = enabled; }
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }

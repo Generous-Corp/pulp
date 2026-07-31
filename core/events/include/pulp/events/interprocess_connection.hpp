@@ -140,7 +140,7 @@ private:
     runtime::AliveToken alive_;
 
     void release_first_dispatch_gate();
-    void start_read_thread();
+    void start_read_thread(bool allow_active_disconnect_owner = false);
     void read_loop();
 };
 
