@@ -69,10 +69,21 @@ rejection will name the connection you left out.
    above zero. A VCA with neither is the most common way a patch makes no sound.
 3. **Anything gate-driven needs a gate source.** An envelope with nothing
    patched to its gate never fires.
-4. **Only use modules listed in the inventory**, spelled exactly as given. A
+4. **An input takes exactly ONE cable.** Rack keeps the last one patched and
+   silently drops the rest, so two cables into one jack is not a mix — it is
+   three quarters of your intent thrown away with no error. Outputs are the
+   opposite: one output may feed as many inputs as you like.
+
+   To combine two signals into one input, sum them through a mixer and patch
+   the mixer's output to that input. This is how a feedback loop is built: the
+   source and the returning signal both go to the mixer, and the mixer feeds
+   the delay. Patching both straight to the delay's input silently discards
+   one of them.
+
+5. **Only use modules listed in the inventory**, spelled exactly as given. A
    module the user does not have is dropped silently by Rack, and the patch
    opens as a partly empty rack with no error.
-5. Set `params` for anything that matters musically — a filter cutoff, an LFO
+6. Set `params` for anything that matters musically — a filter cutoff, an LFO
    rate. Leave the rest out and they take their defaults.
 
 ## Available modules

@@ -146,6 +146,20 @@ def main() -> int:
     else:
         print("  ok     an empty vocabulary is rejected")
 
+    # The rule the model kept breaking, and had never been told. The lint
+    # caught it after the fact, which costs a retry every time and teaches the
+    # model nothing -- five of the idioms in this library were themselves
+    # written in violation of it before the fixture started enforcing it.
+    contract = open(os.path.join(HERE, "prompt", "patch_contract.md")).read()
+    if "takes exactly ONE cable" not in contract:
+        print("  WRONG  the contract never states that an input takes one cable")
+        bad += 1
+    elif "mixer" not in contract.lower():
+        print("  WRONG  the contract states the rule without the remedy")
+        bad += 1
+    else:
+        print("  ok     the one-cable-per-input rule is stated, with the remedy")
+
     assembled = "prompt\n" + patch_vocabulary.render() + "\nend"
     problems = patch_vocabulary.guard(assembled)
     if problems:
