@@ -343,7 +343,18 @@ int main(int argc, char** argv) {
         }
         if (entry.key == "document") {
             fixtures.push_back(entry.value);
-        } else if (entry.key == "fragment" || entry.key == "payload") {
+        } else if (entry.key == "fragment" || entry.key == "payload" || entry.key == "ignore") {
+            // Still open the file. Reporting an entry as skipped while never
+            // touching it means renaming or deleting it degrades the index into
+            // a comment and the run stays green — the precise blindness this
+            // index exists to prevent.
+            bool present = false;
+            read_file(corpus_root + "/" + entry.value, present);
+            if (!present) {
+                std::fprintf(stderr, "corpus index lists a missing %s: %s\n", entry.key.c_str(),
+                             entry.value.c_str());
+                return 1;
+            }
             skipped.push_back(entry.key + " " + entry.value);
         } else {
             std::fprintf(stderr, "corpus index entry has unknown kind '%s': %s\n",

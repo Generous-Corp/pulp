@@ -15,6 +15,7 @@
 
 #include "test_cli_shellout_util.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -25,13 +26,18 @@ namespace fs = std::filesystem;
 
 namespace {
 
-fs::path runner_binary() {
-#if defined(PULP_FIXTURE_RUNNER_BINARY)
-    return fs::path(PULP_FIXTURE_RUNNER_BINARY);
-#else
-    return {};
+#if !defined(PULP_FIXTURE_RUNNER_BINARY)
+// Without the binary path every case below would early-SUCCEED and the whole
+// gate-contract suite would report green while testing nothing. Refuse to build
+// a suite that cannot run rather than ship a silent pass.
+#error "PULP_FIXTURE_RUNNER_BINARY must be defined; see test/cmake/timeline_tests.cmake"
 #endif
-}
+
+fs::path runner_binary() { return fs::path(PULP_FIXTURE_RUNNER_BINARY); }
+
+#if !defined(PULP_TIMELINE_CORPUS_DIR)
+#error "PULP_TIMELINE_CORPUS_DIR must be defined; see test/cmake/timeline_tests.cmake"
+#endif
 
 /// The smallest valid project envelope: one empty root sequence. Written
 /// literally rather than copied from the corpus so a corpus edit can never
@@ -91,15 +97,9 @@ pulp::platform::ProcessResult update(const TempCorpus& corpus) {
     return run_runner({"--corpus", corpus.root.string(), "--update"});
 }
 
-bool runner_available() { return !runner_binary().empty(); }
-
 } // namespace
 
 TEST_CASE("fixture runner verifies a generated corpus", "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     TempCorpus corpus;
 
     const auto generated = update(corpus);
@@ -114,10 +114,6 @@ TEST_CASE("fixture runner verifies a generated corpus", "[cli][fixture-runner]")
 
 TEST_CASE("fixture runner verifies a document whose name carries surrounding whitespace",
           "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     // A gate that raises a false failure on a legal document is as useless as one
     // that cannot fail at all. An authored name is arbitrary user text, and the
     // manifest is a whitespace-delimited text format, so recording the name made
@@ -138,11 +134,73 @@ TEST_CASE("fixture runner verifies a document whose name carries surrounding whi
     REQUIRE(result.exit_code == 0);
 }
 
-TEST_CASE("fixture runner rejects a corpus with no manifest", "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
+TEST_CASE("every file in the real corpus is listed in the index", "[cli][fixture-runner]") {
+    // corpus.index claims an explicit index turns an unreferenced fixture into a
+    // visible omission. Nothing in the portable runner can enforce that — it
+    // deliberately does not walk directories, because directory iteration is
+    // unreliable in the WASM and emulator lanes it exists to serve. So the sweep
+    // lives here, on the host, where std::filesystem is available. Without it the
+    // claim is prose asserting behaviour the code does not have, and a fixture
+    // added but never indexed is invisible to every gate.
+    const fs::path corpus(PULP_TIMELINE_CORPUS_DIR);
+    REQUIRE(fs::is_directory(corpus));
+
+    std::vector<std::string> indexed;
+    {
+        std::ifstream index(corpus / "corpus.index", std::ios::binary);
+        REQUIRE(index.good());
+        std::string line;
+        while (std::getline(index, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+                line.pop_back();
+            if (line.empty() || line.front() == '#')
+                continue;
+            const auto space = line.find(' ');
+            REQUIRE(space != std::string::npos);
+            indexed.push_back(line.substr(space + 1));
+        }
     }
+    REQUIRE_FALSE(indexed.empty());
+
+    std::vector<std::string> unlisted;
+    for (const auto& entry : fs::recursive_directory_iterator(corpus)) {
+        if (!entry.is_regular_file())
+            continue;
+        const auto relative = fs::relative(entry.path(), corpus).generic_string();
+        // Generated manifests are derived from their document, and the index
+        // itself is not a corpus member.
+        if (relative == "corpus.index" || relative.ends_with(".expect"))
+            continue;
+        if (std::find(indexed.begin(), indexed.end(), relative) == indexed.end())
+            unlisted.push_back(relative);
+    }
+
+    INFO("unlisted: " << [&] {
+        std::string joined;
+        for (const auto& path : unlisted)
+            joined += path + " ";
+        return joined;
+    }());
+    REQUIRE(unlisted.empty());
+}
+
+TEST_CASE("fixture runner rejects an index entry naming a missing file",
+          "[cli][fixture-runner]") {
+    // fragment and payload entries are declared but not validated. If nothing
+    // opened them, renaming or deleting one would degrade the index into a
+    // comment while the run stayed green — the exact blindness the index exists
+    // to prevent.
+    TempCorpus corpus;
+    REQUIRE(update(corpus).exit_code == 0);
+    corpus.append("corpus.index", "payload v1/does-not-exist.bin\n");
+
+    const auto result = check(corpus);
+    REQUIRE(result.exit_code == 1);
+    INFO("stderr=" << result.stderr_output);
+    REQUIRE(result.stderr_output.find("missing payload") != std::string::npos);
+}
+
+TEST_CASE("fixture runner rejects a corpus with no manifest", "[cli][fixture-runner]") {
     TempCorpus corpus;
 
     const auto result = check(corpus);
@@ -151,10 +209,6 @@ TEST_CASE("fixture runner rejects a corpus with no manifest", "[cli][fixture-run
 }
 
 TEST_CASE("fixture runner rejects a structural count that drifted", "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     TempCorpus corpus;
     REQUIRE(update(corpus).exit_code == 0);
 
@@ -175,10 +229,6 @@ TEST_CASE("fixture runner rejects a structural count that drifted", "[cli][fixtu
 
 TEST_CASE("fixture runner rejects a manifest entry with no observed value",
           "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     TempCorpus corpus;
     REQUIRE(update(corpus).exit_code == 0);
 
@@ -195,10 +245,6 @@ TEST_CASE("fixture runner rejects a manifest entry with no observed value",
 
 TEST_CASE("fixture runner rejects an index entry with an unknown kind",
           "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     TempCorpus corpus;
     REQUIRE(update(corpus).exit_code == 0);
     corpus.append("corpus.index", "bogus v1/minimal.json\n");
@@ -209,10 +255,6 @@ TEST_CASE("fixture runner rejects an index entry with an unknown kind",
 }
 
 TEST_CASE("fixture runner rejects an index entry with no kind", "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     TempCorpus corpus;
     REQUIRE(update(corpus).exit_code == 0);
     corpus.append("corpus.index", "v1/minimal.json\n");
@@ -224,10 +266,6 @@ TEST_CASE("fixture runner rejects an index entry with no kind", "[cli][fixture-r
 
 TEST_CASE("fixture runner reports a missing corpus rather than passing vacuously",
           "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     const auto result = run_runner({"--corpus", (fs::temp_directory_path() / "pulp-no-such-corpus")
                                                     .string()});
     REQUIRE(result.exit_code == 1);
@@ -235,10 +273,6 @@ TEST_CASE("fixture runner reports a missing corpus rather than passing vacuously
 }
 
 TEST_CASE("fixture runner treats a missing --corpus as a usage error", "[cli][fixture-runner]") {
-    if (!runner_available()) {
-        SUCCEED("pulp-fixture-runner not built");
-        return;
-    }
     // Exit 2 distinguishes "you invoked me wrong" from "the corpus is broken",
     // so a CI misconfiguration can never be read as a conformance failure.
     REQUIRE(run_runner({}).exit_code == 2);
