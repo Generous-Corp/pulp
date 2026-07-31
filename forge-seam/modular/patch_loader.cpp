@@ -3,13 +3,76 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 
 namespace forge_modular {
 
 namespace {
+
+/// Can RACK actually create this module on this machine?
+///
+/// The preview draws from the patch and from our own manifests. Rack can only
+/// create what its installed plugin BINARY contains, and on a machine running
+/// an older build those differ -- so a patch renders perfectly here and opens
+/// over there as a different rack, with modules silently missing. Reported as
+/// "the VCV Rack patch/models are DIFFERENT than what I see in Forge Modular",
+/// and nothing compared them.
+///
+/// Read straight from the installed plugin.json, cached per plugin: it is the
+/// same file Rack reads, so this cannot drift from what Rack will do.
+bool rack_can_create(const std::string& plugin, const std::string& model) {
+    if (plugin.empty() || model.empty()) return true;
+    // Core is compiled into Rack rather than installed, so it is always there.
+    if (plugin == "Core") return true;
+
+    static std::map<std::string, std::set<std::string>> cache;
+    static std::mutex lock;
+    std::lock_guard<std::mutex> held(lock);
+    auto it = cache.find(plugin);
+    if (it == cache.end()) {
+        std::set<std::string> models;
+        const char* home = std::getenv("HOME");
+        const std::filesystem::path base =
+            std::string(home ? home : ".") + "/Library/Application Support/Rack2";
+        std::error_code ec;
+        for (const auto& dir : std::filesystem::directory_iterator(base, ec)) {
+            if (!dir.is_directory() ||
+                dir.path().filename().string().rfind("plugins-", 0) != 0)
+                continue;
+            const auto manifest = dir.path() / plugin / "plugin.json";
+            if (!std::filesystem::exists(manifest, ec)) continue;
+            std::ifstream f(manifest);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            try {
+                const auto doc = choc::json::parse(ss.str());
+                if (doc.hasObjectMember("modules")) {
+                    const auto ms = doc["modules"];
+                    for (uint32_t i = 0; i < ms.size(); ++i)
+                        if (ms[i].hasObjectMember("slug"))
+                            models.insert(
+                                ms[i]["slug"].getWithDefault<std::string>(""));
+                }
+            } catch (...) {
+                // A manifest we cannot read is not evidence of absence.
+                models.clear();
+                break;
+            }
+        }
+        it = cache.emplace(plugin, std::move(models)).first;
+    }
+    // No manifest found at all means Rack is not installed here, or this is
+    // somebody else's machine's patch. Not knowing is not the same as knowing
+    // it is missing, so nothing is claimed.
+    if (it->second.empty()) return true;
+    return it->second.count(model) > 0;
+}
+
 
 /// The role a cable's colour encodes.
 ///
@@ -87,6 +150,7 @@ LoadedPatch load_patch(const std::string& path) {
         // cables below, and every module is treated as unplaced so its cables
         // dock at the panel edge instead of landing on invented positions.
         rm.placed = false;
+        rm.available = rack_can_create(rm.brand, rm.name);
         out.modules.push_back(std::move(rm));
     }
 

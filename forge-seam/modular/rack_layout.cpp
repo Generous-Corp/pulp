@@ -52,6 +52,7 @@ RackLayout layout_rack(const std::vector<RackModule>& modules,
         box.height = kPanelHeight * out.scale;
         box.placed = m.placed;
         box.has_artwork = m.has_artwork;
+        box.available = m.available;
         out.panels.push_back(box);
         x += box.width;   // butted, no gutter: that is what a rack does
     }

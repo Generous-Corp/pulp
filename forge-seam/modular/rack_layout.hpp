@@ -50,6 +50,15 @@ struct RackModule {
     bool placed = true;
     /// False when the module's own panel artwork is unavailable.
     bool has_artwork = true;
+    /// False when RACK cannot create this module: no plugin of that slug is
+    /// installed, or the installed one has no such model.
+    ///
+    /// The preview draws from the patch and from our own manifests; Rack can
+    /// only create what its installed plugin BINARY contains. On a machine
+    /// running an older build those differ, so a patch renders perfectly here
+    /// and opens over there as a different rack with modules silently
+    /// missing. Drawing it anyway is a confident lie about what you will get.
+    bool available = true;
     /// How the module is named in prose, when that differs from `name`.
     ///
     /// `name` stays the model slug because the panel artwork is filed under
@@ -73,6 +82,10 @@ struct PanelBox {
     float x = 0, y = 0, width = 0, height = 0;
     bool placed = true;
     bool has_artwork = true;
+    /// False when Rack cannot create this module here. Carried through to the
+    /// painting so the preview can say so rather than drawing a panel for
+    /// something that will not be in the rack you open.
+    bool available = true;
 };
 
 /// A laid-out jack, in view coordinates.

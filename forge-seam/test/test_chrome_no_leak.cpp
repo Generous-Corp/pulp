@@ -2411,6 +2411,69 @@ TEST_CASE("the editor fills the window the host gave it", "[seam][sizing]") {
     CHECK(down > 0.9);
 }
 
+TEST_CASE("a module Rack cannot create is not drawn as if it will be there",
+          "[rack][availability]") {
+    // The preview reads OUR manifests; Rack can only create what its installed
+    // plugin BINARY contains. On a machine running an older build those differ
+    // by eight modules, so a patch renders beautifully here and opens over
+    // there as a different rack with modules silently missing. Reported as
+    // "the VCV Rack patch/models are DIFFERENT than what I see in Forge
+    // Modular", and nothing in the project compared them.
+    HermeticProjects isolated;
+    const auto dir = std::filesystem::temp_directory_path() / "forge-avail-test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    auto write_patch = [&](const std::string& model) {
+        const auto p = dir / (model + ".vcv");
+        std::ofstream f(p);
+        f << R"({"version":"2.6.6","modules":[)"
+          << R"({"id":1,"plugin":"ForgeModular","model":")" << model
+          << R"(","pos":[0,0]},)"
+          << R"({"id":2,"plugin":"Core","model":"AudioInterface2","pos":[10,0]}],)"
+          << R"("cables":[{"id":1,"outputModuleId":1,"outputId":0,)"
+          << R"("inputModuleId":2,"inputId":0,"color":"#00b56e"}]})";
+        return p.string();
+    };
+
+    // A model the installed plugin genuinely has, and one it certainly does
+    // not. Both are drawn; only one of them will exist when Rack opens it.
+    const char* home = std::getenv("HOME");
+    const std::filesystem::path plugins =
+        std::string(home ? home : ".") + "/Library/Application Support/Rack2";
+    std::error_code ec;
+    if (!std::filesystem::exists(plugins, ec)) SKIP("no Rack install here");
+
+    const auto real = forge_modular::load_patch(write_patch("VCO"));
+    const auto fake = forge_modular::load_patch(write_patch("NOSUCHMODULE"));
+    REQUIRE(real.ok());
+    REQUIRE(fake.ok());
+    REQUIRE(real.modules.size() == 2);
+    REQUIRE(fake.modules.size() == 2);
+
+    // Core is compiled into Rack, so it is always there.
+    CHECK(real.modules[1].available);
+    CHECK(fake.modules[1].available);
+    CHECK(real.modules[0].available);
+    CHECK_FALSE(fake.modules[0].available);
+
+    // And the preview SAYS it, rather than drawing a panel for something that
+    // will not be in the rack you open.
+    auto render = [&](const forge_modular::LoadedPatch& p) {
+        forge_modular::RackPreview preview;
+        preview.set_rack(p.modules, p.connections);
+        return pulp::view::render_to_png(preview, 900, 420, 1.0f,
+                                         pulp::view::ScreenshotBackend::skia);
+    };
+    // The refusal is drawn in the alarm red, which nothing else on the stage
+    // uses. Counting it separates "said so" from "drew it anyway".
+    const auto said = count_pixels_near(render(fake), 0xF3, 0x37, 0x4B);
+    const auto quiet = count_pixels_near(render(real), 0xF3, 0x37, 0x4B);
+    INFO("alarm pixels: missing module " << said << ", present module " << quiet);
+    CHECK(said > quiet + 200);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("no control on Home paints like a control and does nothing",
           "[phase6][controls]") {
     // A control that highlights and does nothing is indistinguishable from a

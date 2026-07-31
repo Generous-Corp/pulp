@@ -230,6 +230,36 @@ void RackPreview::paint(Canvas& canvas) {
                          panel.y + panel.height - 12.0f * L.scale);
     }
 
+    // A module Rack cannot create says so, over whatever was drawn for it.
+    //
+    // The preview reads OUR manifests and can draw a beautiful panel for a
+    // module the installed plugin does not contain -- which then opens in Rack
+    // as a gap. Reported as "the VCV Rack patch/models are DIFFERENT than what
+    // I see in Forge Modular". A panel that will not be there has to look like
+    // one, or the preview is a confident lie about what you will get.
+    for (const auto& panel : L.panels) {
+        if (panel.available) continue;
+        canvas.save();
+        canvas.clip_rect(panel.x, panel.y, panel.width, panel.height);
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(0, 0, 0, 190));
+        canvas.fill_rect(panel.x, panel.y, panel.width, panel.height);
+        // Full alpha: a blended stroke is a different colour, and this mark
+        // has to be unmistakable both to a reader and to the test that pins it.
+        canvas.set_stroke_color(pulp::canvas::Color::rgba8(0xF3, 0x37, 0x4B));
+        canvas.set_line_width(2.5f);
+        canvas.stroke_rounded_rect(panel.x + 1.0f, panel.y + 1.0f,
+                                   panel.width - 2.0f, panel.height - 2.0f,
+                                   4.0f * L.scale);
+        canvas.set_font(forge::design::type::mono,
+                        std::max(9.0f, 10.0f * L.scale));
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(0xF3, 0x37, 0x4B));
+        canvas.set_text_align(pulp::canvas::TextAlign::center);
+        canvas.fill_text("NOT IN RACK", panel.x + panel.width / 2.0f,
+                         panel.y + panel.height / 2.0f);
+        canvas.set_text_align(pulp::canvas::TextAlign::left);
+        canvas.restore();
+    }
+
     // What each colour means, bottom right, and only for the roles this patch
     // actually uses. A legend listing four roles for a patch that has two says
     // something untrue about the rack in front of you.
