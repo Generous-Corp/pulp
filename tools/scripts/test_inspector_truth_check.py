@@ -48,6 +48,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 'a == "--session" || a == "--instance"\n'
                 "--session and --instance must be supplied together\n"
                 "talker.call_selected(\n"
+                "pulp motion stop --trace-id {id}{}\n"
+                "selection_cli_suffix(\n"
+                "valid_session_identity(v)\n"
                 'no_args("play", &rest[1..])\n'
                 'no_args("scrub", &args[1..])\n'
                 'no_args("cost", &args[1..])\n',
@@ -59,7 +62,10 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "--session and --instance must be supplied together\n"
                 "talker.call_selected(\n"
                 'no_args("stop", &rest[1..])\n'
-                "explicit_selection.as_ref()\n",
+                "explicit_selection.as_ref()\n"
+                "pulp trace stop{}\n"
+                "selection_cli_suffix(\n"
+                "valid_session_identity(v)\n",
             "experimental/pulp-rs/src/cmd/inspector.rs":
                 "must be an integer from 1 to 65535\n",
             ".claude/commands/trace.md":

@@ -155,9 +155,9 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
             let v = args.get(i).ok_or_else(|| {
                 CliError::BadUsage(format!("{a} requires a value"))
             })?;
-            if v.is_empty() {
+            if !crate::cmd::inspector::valid_session_identity(v) {
                 return Err(CliError::BadUsage(format!(
-                    "{a} requires a non-empty value"
+                    "{a} must contain only ASCII letters, digits, `-`, or `_`"
                 )));
             }
             if a == "--session" {
@@ -612,12 +612,12 @@ pub fn dispatch<T: InspectorTalker>(
             .map_err(io_err)?;
             writeln!(
                 out,
-                "# not write fixtures itself. Run `pulp motion stop` to",
+                "# not write fixtures itself. Use the exact stop command",
             )
             .map_err(io_err)?;
             writeln!(
                 out,
-                "# release the trace; use make_fixture_sink(path) in code",
+                "# printed below; use make_fixture_sink(path) in code",
             )
             .map_err(io_err)?;
             writeln!(
@@ -631,7 +631,7 @@ pub fn dispatch<T: InspectorTalker>(
     if flags.json {
         writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
     } else {
-        write_pretty(out, sub, &response).map_err(io_err)?;
+        write_pretty(out, sub, &response, flags).map_err(io_err)?;
     }
     Ok(())
 }
@@ -643,6 +643,7 @@ fn write_pretty(
     out: &mut impl Write,
     sub: &Sub,
     response: &str,
+    flags: &GlobalFlags,
 ) -> std::io::Result<()> {
     let trimmed = response.trim();
     match sub {
@@ -653,7 +654,11 @@ fn write_pretty(
                 writeln!(out, "trace started — trace_id={id}")?;
                 writeln!(
                     out,
-                    "  stop with: pulp motion stop --trace-id {id}"
+                    "  stop with: pulp motion stop --trace-id {id}{}",
+                    crate::cmd::inspector::selection_cli_suffix(
+                        flags.session_id.as_deref(),
+                        flags.instance_id.as_deref(),
+                    )
                 )?;
             } else {
                 writeln!(out, "{trimmed}")?;
@@ -823,6 +828,13 @@ mod tests {
         for args in [
             s(&["play", "--session", "session-a"]),
             s(&["play", "--instance", "instance-b"]),
+            s(&[
+                "play",
+                "--session",
+                "session a",
+                "--instance",
+                "instance-b",
+            ]),
         ] {
             let err = parse(&args).unwrap_err();
             assert!(matches!(err, CliError::BadUsage(_)));
@@ -1189,6 +1201,34 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("trace_id=3"), "{out}");
         assert!(out.contains("pulp motion stop --trace-id 3"), "{out}");
+    }
+
+    #[test]
+    fn dispatch_record_preserves_exact_selection_in_stop_hint() {
+        let talker = RecordingTalker::new(vec!["{\"trace_id\":3}"]);
+        let flags = GlobalFlags {
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            ..GlobalFlags::default()
+        };
+        let mut output = Vec::new();
+        dispatch(
+            &Sub::Record(RecordArgs {
+                view_name: "Card".to_owned(),
+                fps: Some(30),
+                out: None,
+                metrics: vec![],
+            }),
+            &flags,
+            &talker,
+            &mut output,
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(
+            "pulp motion stop --trace-id 3 --session session-a \
+             --instance instance-b"
+        ), "{output}");
     }
 
     #[test]
