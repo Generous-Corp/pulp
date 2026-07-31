@@ -227,7 +227,34 @@ void View::invalidate_subtree_caches_up() {
     }
 }
 
+namespace {
+
+// The simulate_* device description in the form the delivery verbs take. The
+// two structs stay separate because SimulatedPointer also carries the event
+// fields (`modifiers`, `button`) the verbs already take positionally, while
+// PointerAttributes is strictly the device.
+PointerAttributes to_attributes(const View::SimulatedPointer& p) {
+    return PointerAttributes{p.type, p.pressure, p.pointer_id};
+}
+
+// Stamp the device onto a MouseEvent bound for the gesture arbiter. The arbiter
+// is fed directly (not through the delivery verbs), so this is the only place
+// the recognizers' view of the pointer is set.
+void apply_pointer(MouseEvent& e, const View::SimulatedPointer& p) {
+    e.button = p.button;
+    e.modifiers = p.modifiers;
+    e.pointer_type = p.type;
+    e.pressure = p.pressure;
+    e.pointer_id = p.pointer_id;
+}
+
+}  // namespace
+
 void View::simulate_click(Point root_pos) {
+    simulate_click(root_pos, SimulatedPointer{});
+}
+
+void View::simulate_click(Point root_pos, const SimulatedPointer& pointer) {
     auto* target = hit_test(root_pos);
     // Record the synthetic input into the active motion fixture before
     // dispatch so replay sees the same target lookup the original recording
@@ -245,9 +272,9 @@ void View::simulate_click(Point root_pos) {
     MouseEvent down;
     down.position = root_pos;
     down.window_position = root_pos;
-    down.button = MouseButton::left;
     down.is_down = true;
     down.phase = MousePhase::press;
+    apply_pointer(down, pointer);
     const bool gesture_down = dispatch_gesture_pointer_event(down);
 
     MouseEvent up = down;
@@ -280,16 +307,26 @@ void View::simulate_click(Point root_pos) {
     }
     auto bounded_click = click_target ? click_target->on_click : std::function<void()>{};
 
-    if (!deliver_mouse_down(*this, target, root_pos, /*modifiers=*/0)) return;
+    const PointerAttributes attrs = to_attributes(pointer);
+    if (!deliver_mouse_down(*this, target, root_pos, pointer.modifiers,
+                            /*click_count=*/1, /*bubble=*/true, pointer.button,
+                            MouseDownHost{}, attrs))
+        return;
     MouseUpHost up_host;
     up_host.fire_click = [&bounded_click](const std::function<void()>&,
                                           const std::string&, uint16_t) {
         if (bounded_click) bounded_click();
     };
-    deliver_mouse_up(*this, target, root_pos, /*modifiers=*/0, /*click_count=*/1, up_host);
+    deliver_mouse_up(*this, target, root_pos, pointer.modifiers,
+                     /*click_count=*/1, up_host, pointer.button, attrs);
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {
+    simulate_drag(start, end, steps, SimulatedPointer{});
+}
+
+void View::simulate_drag(Point start, Point end, int steps,
+                         const SimulatedPointer& pointer) {
     auto* target = hit_test(start);
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
@@ -304,12 +341,14 @@ void View::simulate_drag(Point start, Point end, int steps) {
     }
     if (!target) return;
 
+    const PointerAttributes attrs = to_attributes(pointer);
+
     MouseEvent down;
     down.position = start;
     down.window_position = start;
-    down.button = MouseButton::left;
     down.is_down = true;
     down.phase = MousePhase::press;
+    apply_pointer(down, pointer);
     bool gesture_consumed =
         dispatch_gesture_pointer_event(down) && gesture_claimed_pointer();
 
@@ -321,17 +360,17 @@ void View::simulate_drag(Point start, Point end, int steps) {
             MouseEvent move;
             move.position = p;
             move.window_position = p;
-            move.button = MouseButton::left;
             move.is_down = true;
             move.phase = MousePhase::drag;
+            apply_pointer(move, pointer);
             dispatch_gesture_pointer_event(move);
         }
         MouseEvent up;
         up.position = end;
         up.window_position = end;
-        up.button = MouseButton::left;
         up.is_down = false;
         up.phase = MousePhase::release;
+        apply_pointer(up, pointer);
         dispatch_gesture_pointer_event(up);
         return;
     }
@@ -354,7 +393,8 @@ void View::simulate_drag(Point start, Point end, int steps) {
     //
     // Empty fire_click throughout: a release landing back on the press target
     // would otherwise read as a click, and a drag has never synthesized one.
-    deliver_mouse_down(*this, target, start, /*modifiers=*/0, /*click_count=*/1);
+    deliver_mouse_down(*this, target, start, pointer.modifiers, /*click_count=*/1,
+                       /*bubble=*/true, pointer.button, MouseDownHost{}, attrs);
     for (int i = 1; i <= steps; ++i) {
         float t = static_cast<float>(i) / steps;
         Point p = {start.x + (end.x - start.x) * t,
@@ -362,34 +402,36 @@ void View::simulate_drag(Point start, Point end, int steps) {
         MouseEvent move;
         move.position = p;
         move.window_position = p;
-        move.button = MouseButton::left;
         move.is_down = true;
         move.phase = MousePhase::drag;
+        apply_pointer(move, pointer);
         if (dispatch_gesture_pointer_event(move) && gesture_claimed_pointer()) {
             // A recognizer took the pointer partway through. The press was
             // already delivered, so stop the raw drag but CLOSE the bracket —
             // a control that opened a parameter gesture on press must see its
             // release or the host holds an automation touch open.
-            deliver_mouse_up(*this, target, p, /*modifiers=*/0, /*click_count=*/1,
-                             MouseUpHost{});
+            deliver_mouse_up(*this, target, p, pointer.modifiers,
+                             /*click_count=*/1, MouseUpHost{}, pointer.button,
+                             attrs);
             return;
         }
-        deliver_mouse_drag(*this, target, p, /*modifiers=*/0);
+        deliver_mouse_drag(*this, target, p, pointer.modifiers,
+                           /*click_count=*/1, pointer.button, attrs);
     }
     MouseEvent up;
     up.position = end;
     up.window_position = end;
-    up.button = MouseButton::left;
     up.is_down = false;
     up.phase = MousePhase::release;
+    apply_pointer(up, pointer);
     // The release is delivered unconditionally. Whether a recognizer claims on
     // this edge or was merely a candidate throughout, the press was delivered
     // and its bracket has to close exactly once. OR-ing a candidacy result into
     // the bail is what leaked it: a widget carrying a recognizer that never
     // recognized got its press and its drags and then no release at all.
     dispatch_gesture_pointer_event(up);
-    deliver_mouse_up(*this, target, end, /*modifiers=*/0, /*click_count=*/1,
-                     MouseUpHost{});
+    deliver_mouse_up(*this, target, end, pointer.modifiers, /*click_count=*/1,
+                     MouseUpHost{}, pointer.button, attrs);
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
