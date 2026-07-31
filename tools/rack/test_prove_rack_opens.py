@@ -198,6 +198,31 @@ def main():
         else:
             ok("a stub reporting exactly the patch's modules passes")
 
+    # A Rack that aborts at startup is not evidence about the patch. Blaming
+    # the patch for it is how a sweep called sixmix a mismatch for a crash
+    # that happened before Rack reached the file. The stub exits non-zero with
+    # a log that stops before "Initializing plugins", which is exactly the
+    # shape of the real CoreMIDI abort.
+    with tempfile.TemporaryDirectory(prefix="rack-proof-start-") as tmp2:
+        p = Path(tmp2) / "aborts.py"
+        p.write_text("#!/usr/bin/env python3\n"
+                     "import sys\nfrom pathlib import Path\n"
+                     "d = sys.argv[sys.argv.index('-u') + 1]\n"
+                     "Path(d, 'log.txt').write_text('Initializing audio\\n"
+                     "Initializing MIDI\\n')\n"
+                     "sys.exit(134)\n")
+        p.chmod(0o755)
+        rc, out = run(REAL, rack=str(p))
+        if rc == 0:
+            wrong("a Rack that aborted before reaching the patch PASSED")
+        elif "did not start" not in out:
+            wrong(f"a startup abort was not named as one:\n{out}")
+        elif "did not create" in out:
+            wrong("a startup abort was blamed on the patch's modules — the "
+                  "exact misreading this distinction exists to prevent")
+        else:
+            ok("a Rack that never started is not blamed on the patch")
+
     # No window session: Rack cannot start at all, and finding that out by
     # launching it means an abort and a crash report per patch. That is what
     # happened on a machine sitting at the login window -- report after report,

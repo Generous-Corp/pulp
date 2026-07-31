@@ -44,6 +44,15 @@ USER_DIR = Path.home() / "Library" / "Application Support" / "Rack2"
 BRAND = "Forge"
 
 
+class RackDidNotStart(RuntimeError):
+    """Rack aborted before it got as far as the patch.
+
+    Kept apart from every other failure because it is not evidence about any
+    patch: it is Rack failing to start. Blaming the patch for it is exactly
+    the mistake this checker exists to prevent, in the other direction.
+    """
+
+
 def console_owner():
     """Who owns the window session, or "root" when nobody is logged in.
 
@@ -102,14 +111,24 @@ def rack_creates(patch, plugin_dir):
     """
     with tempfile.TemporaryDirectory(prefix="rack-open-") as tmp:
         os.symlink(plugin_dir, Path(tmp) / plugin_dir.name)
-        subprocess.run([str(RACK), "-h", "-u", tmp, str(Path(patch).resolve())],
-                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=180)
+        r = subprocess.run([str(RACK), "-h", "-u", tmp, str(Path(patch).resolve())],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=180)
         log = (Path(tmp) / "log.txt").read_text(errors="replace")
         if os.environ.get("PROVE_RACK_KEEP_LOG"):
             Path(os.environ["PROVE_RACK_KEEP_LOG"],
                  Path(patch).stem + ".log").write_text(log)
     if "Loaded plugin ForgeModular" not in log:
+        # Rack initialises MIDI BEFORE plugins, and RtMidi's CoreMIDI backend
+        # throws when MIDIClientCreate is declined -- which happens sporadically
+        # when many Racks are started back to back. Rack does not catch it, so
+        # the process aborts having loaded nothing. Distinguished from every
+        # other failure because it says nothing whatever about the patch, and
+        # calling it a patch fault is how a sweep blamed sixmix for a crash.
+        if r.returncode != 0 and "Initializing plugins" not in log:
+            raise RackDidNotStart(
+                "Rack aborted during startup (CoreMIDI client creation is the "
+                f"usual cause; exit {r.returncode}) — it never reached the patch")
         raise RuntimeError("Rack never loaded the ForgeModular plugin — this run "
                            "proves nothing about the patch")
     created = Counter(
@@ -188,7 +207,12 @@ def main(argv):
             return got
 
         try:
-            got = ask_rack()
+            try:
+                got = ask_rack()
+            except RackDidNotStart as exc:
+                print(f"{patch.name:24} Rack did not start — retrying ({exc})")
+                flaky.append(patch.name)
+                got = ask_rack()
             if got != want:
                 second = ask_rack()
                 if second == want:
