@@ -493,11 +493,13 @@ jobs:
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
               tools/scripts/sdk_provenance.py \
+              tools/cmake/PulpSdkProvenance.cmake \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
                   || [ "$path" = tools/scripts/release_artifact_contents.py ] \
-                  || [ "$path" = tools/scripts/sdk_provenance.py ]; }; then
+                  || [ "$path" = tools/scripts/sdk_provenance.py ] \
+                  || [ "$path" = tools/cmake/PulpSdkProvenance.cmake ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
               compat_path="$compat_dir/${path##*/}"
@@ -527,12 +529,16 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=$compat_dir/tools/scripts/package_cli.py" \
               >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
+              >> "$GITHUB_ENV"
           else
             echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_HELPER=tools/scripts/sdk_provenance.py" \
               >> "$GITHUB_ENV"
             echo "PULP_RELEASE_PACKAGER=tools/scripts/package_cli.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
           fi
 
@@ -907,6 +913,12 @@ jobs:
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
           if [ -z "$SOURCE_REF" ]; then
+            # The current positive release marker must ship with the current
+            # fail-closed consumer validator. Historical tag copies recognize
+            # only development markers and reject an official SDK at
+            # find_package(Pulp) time.
+            install -m 0644 "$PULP_SDK_PROVENANCE_CMAKE" \
+              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
             python3 "$PULP_SDK_PROVENANCE_HELPER" stamp \
               --prefix sdk-staging \
               --build-dir build-sdk \
@@ -966,6 +978,8 @@ jobs:
         run: |
           cmake --install build --prefix sdk-staging --config Release
           if ([string]::IsNullOrEmpty($env:SOURCE_REF)) {
+            Copy-Item -Force $env:PULP_SDK_PROVENANCE_CMAKE `
+              sdk-staging/lib/cmake/Pulp/PulpSdkProvenance.cmake
             $releaseTag = $env:RELEASE_TAG
             $sourceSha = (git rev-parse HEAD).Trim()
             python $env:PULP_SDK_PROVENANCE_HELPER stamp `
