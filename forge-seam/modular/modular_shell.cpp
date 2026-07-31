@@ -180,9 +180,22 @@ void ForgeModularShell::set_artifact(Artifact a) {
     // the Build label -- so the chrome is told rather than left to disagree
     // with the tab the user just pressed.
     if (auto* c = chrome()) { c->refresh_copy(); c->refresh_composer_row(); }
-    // The depth tabs belong to patches; revealing them here is what makes
-    // switching artifact mid-session work at all.
-    if (depth_group_) depth_group_->set_visible(artifact_ == Artifact::patch);
+    // The depth tabs belong to patches, and it is the TABS that have to be
+    // revealed -- not the group around them.
+    //
+    // The group also holds Open in Rack, so it stays visible for a module
+    // build. Toggling only the group therefore did nothing useful: the tabs
+    // were created hidden when the accessory was built (artifact defaults to
+    // module), and switching to Patch re-showed a group that was already
+    // showing while every tab inside it stayed hidden. Terse/Standard/Learning
+    // was reachable in code, covered by tests, and had never once appeared on
+    // screen -- with Open in Rack sitting right beside it as proof the group
+    // was fine.
+    const bool patch_tabs = artifact_ == Artifact::patch;
+    if (depth_group_) depth_group_->set_visible(true);
+    for (auto* b : depth_tabs_)
+        if (b) b->set_visible(patch_tabs);
+    refresh_depth_tabs();
     // And the chat column: a module's spec beside a patch's wiring would be
     // two answers to one question.
     show_for_artifact();

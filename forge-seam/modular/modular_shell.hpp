@@ -121,6 +121,16 @@ public:
     /// can drive it without a window.
     MentionOverlay& mentions() { return mentions_; }
 
+    /// The Terse/Standard/Learning buttons, and whether their container shows.
+    /// Exposed so a test can ask whether a user can actually REACH the depth
+    /// control -- asking set_depth() what it does cannot see a hidden button.
+    const std::vector<pulp::view::TextButton*>& depth_tabs() const {
+        return depth_tabs_;
+    }
+    bool depth_group_visible() const {
+        return depth_group_ != nullptr && depth_group_->visible();
+    }
+
     /// Start following a generator log and pushing what it says into the chat.
     ///
     /// Forge's Build screen already has the transcript; this only supplies the

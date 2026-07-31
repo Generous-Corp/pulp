@@ -4922,3 +4922,43 @@ TEST_CASE("the heading names the artifact, and never eats a real title",
     shell.set_artifact(forge_modular::Artifact::module);
     CHECK(c->project_title() == named);
 }
+
+TEST_CASE("the depth tabs are actually on screen for a patch", "[rack][depth]") {
+    // Terse/Standard/Learning was reachable in code, had nine tests covering
+    // what set_depth does, and had never once appeared in the product. The
+    // tabs are created hidden (the artifact defaults to module) and switching
+    // to Patch re-showed the GROUP around them -- which was already showing,
+    // because Open in Rack lives in it too. Every existing test asserted
+    // behaviour through set_depth() and none asked whether a user could reach
+    // it.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    auto visible_tabs = [&] {
+        std::size_t n = 0;
+        for (auto* b : shell.depth_tabs())
+            if (b && b->visible()) ++n;
+        return n;
+    };
+
+    REQUIRE(shell.depth_tabs().size() == 3);   // terse, standard, learning
+
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK(visible_tabs() == 3);                // the assertion that was missing
+
+    // A module has one artifact and nothing to narrate at three depths, so the
+    // tabs go away -- but the group must stay, because Open in Rack is in it.
+    shell.set_artifact(forge_modular::Artifact::module);
+    CHECK(visible_tabs() == 0);
+    CHECK(shell.depth_group_visible());
+
+    // And back, because the failure was specifically a one-way door: built
+    // hidden, never revealed.
+    shell.set_artifact(forge_modular::Artifact::patch);
+    CHECK(visible_tabs() == 3);
+}

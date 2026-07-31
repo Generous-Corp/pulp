@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 63b40c2..00a0b4c 100644
+index 63b40c2..5c64c55 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -332,6 +332,24 @@ if(FORGE_HAS_PULP_HTTP_STREAMING)
@@ -27,7 +27,7 @@ index 63b40c2..00a0b4c 100644
  # Absolute paths so the list also resolves from a plugin subdirectory (a
  # subdir's relative source paths would otherwise anchor at that subdir).
  list(TRANSFORM FORGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
-@@ -645,6 +663,20 @@ if(FORGE_BUILD_TESTS)
+@@ -645,6 +663,25 @@ if(FORGE_BUILD_TESTS)
              forge_core Catch2::Catch2WithMain)
          catch_discover_tests(forge-test-chrome)
  
@@ -45,10 +45,15 @@ index 63b40c2..00a0b4c 100644
 +            catch_discover_tests(forge-test-chrome-no-leak)
 +        endif()
 +
++        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/shot_depth.cpp")
++            add_executable(forge-shot-depth test/shot_depth.cpp)
++            target_link_libraries(forge-shot-depth PRIVATE forge_core)
++        endif()
++
          add_executable(forge-test-audio-asset-coordinator
              test/test_audio_asset_coordinator.cpp)
          target_include_directories(forge-test-audio-asset-coordinator PRIVATE
-@@ -1573,6 +1605,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
+@@ -1573,6 +1610,14 @@ if(FORGE_BUILD_PLUGIN AND COMMAND pulp_add_plugin)
      # today; AU aumi is gated on a core adapter (see midi/CMakeLists.txt).
      add_subdirectory(midi)
  
