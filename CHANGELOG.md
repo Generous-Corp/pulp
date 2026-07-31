@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v07590"></a>
+## [0.765.1]
+
 ## [0.759.0] - 2026-07-28
 
 - release/version bump ([#6772](https://github.com/Generous-Corp/pulp/pull/6772))
