@@ -429,13 +429,24 @@ TEST_CASE("a loaded patch explains itself beyond the wiring", "[seam]") {
     }
     {
         std::ofstream f(dir / "demo.why.json");
-        f << R"({"1:0>2:0":"the saw is the raw material the filter shapes"})";
+        f << R"({"cables":{"1:0>2:0":{"why":)"
+          << R"("the saw is the raw material the filter shapes",)"
+          << R"("from_port":"SAW","to_port":"IN"}},)"
+          << R"("modules":{"1":"VCO 1","2":"VCF"}})";
     }
 
     const auto loaded = forge_modular::load_patch(vcv.string());
     REQUIRE(loaded.connections.size() == 1);
     CHECK(loaded.connections[0].why ==
           "the saw is the raw material the filter shapes");
+    // A .vcv stores port INDICES. Without the sidecar the app can only say
+    // "out0 → in1", which is true and teaches nothing.
+    CHECK(loaded.connections[0].from_port == "SAW");
+    CHECK(loaded.connections[0].to_port == "IN");
+    REQUIRE(loaded.modules.size() == 2);
+    CHECK(loaded.modules[0].display == "VCO 1");
+    // The slug stays put: the panel artwork is filed under it.
+    CHECK(loaded.modules[0].name == "VCO");
 
     // The negative control: the same patch with no sidecar must come back with
     // nothing to say, or the assertion above proves only that a string exists
@@ -444,6 +455,8 @@ TEST_CASE("a loaded patch explains itself beyond the wiring", "[seam]") {
     const auto bare = forge_modular::load_patch(vcv.string());
     REQUIRE(bare.connections.size() == 1);
     CHECK(bare.connections[0].why.empty());
+    CHECK(bare.connections[0].from_port == "out0");
+    CHECK(bare.modules[0].display.empty());
 
     std::filesystem::remove_all(dir);
 }

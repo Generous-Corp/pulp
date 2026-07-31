@@ -55,9 +55,13 @@ std::string PatchExplanation::port_label(const std::string& module_id,
                                          const std::string& port_id) const {
     for (const auto& m : modules_) {
         if (m.id != module_id) continue;
+        // `display` when the generator resolved a clearer name for prose --
+        // numbered when a patch holds two of the same model, so the sentence
+        // cannot claim a module is patched into itself.
+        const auto& shown = m.display.empty() ? m.name : m.display;
         for (const auto& p : m.ports)
-            if (p.id == port_id) return m.name + " " + p.name;
-        return m.name + " " + port_id;
+            if (p.id == port_id) return shown + " " + p.name;
+        return shown + " " + port_id;
     }
     return module_id + " " + port_id;
 }

@@ -337,6 +337,44 @@ def label(inv, m, disambig=None):
     return name
 
 
+def sidecar(patch: dict, inv: dict, why: dict | None = None) -> dict:
+    """Everything about a patch that the app cannot work out for itself.
+
+    A .vcv stores port INDICES, and Rack resolves them against the installed
+    module at load time. The app has no inventory, so on its own it can only
+    say "out0 → in1" -- true, and useless for learning. The generator does have
+    the inventory, and has already resolved every name to write its own
+    explanation, so it writes them down here rather than the app guessing.
+
+    Ports and modules are kept apart because the app composes them itself.
+    Duplicate models are numbered by the same `_disambiguate` the prose uses: a
+    cross-modulation patch whose two oscillators are both called "VCO" reads as
+    one oscillator modulating itself, which is a lie about a correct patch.
+    """
+    by_id = {m["id"]: m for m in patch.get("modules", [])}
+    dis = _disambiguate(patch, inv)
+    cables: dict[str, dict] = {}
+    for c in patch.get("cables", []):
+        src, dst = by_id.get(c.get("outputModuleId")), by_id.get(c.get("inputModuleId"))
+        if not src or not dst:
+            continue
+        oi, ii = c.get("outputId", 0), c.get("inputId", 0)
+        key = f"{c.get('outputModuleId')}:{oi}>{c.get('inputModuleId')}:{ii}"
+        rec = {
+            "from_port": port_name(inv, src["plugin"], src["model"], "out", oi),
+            "to_port": port_name(inv, dst["plugin"], dst["model"], "in", ii),
+        }
+        note = (why or {}).get(key)
+        if note:
+            rec["why"] = note
+        cables[key] = rec
+    return {
+        "cables": cables,
+        "modules": {str(m["id"]): label(inv, m, dis)
+                    for m in patch.get("modules", [])},
+    }
+
+
 def _disambiguate(patch, inv):
     """Number repeated models left to right, the order they sit in the rack."""
     seen = {}
@@ -1208,8 +1246,8 @@ def main(argv):
         # as a sidecar. Without this the app can only ever show a netlist: it
         # reads the patch back from disk, and everything not written here is
         # gone the moment this process exits.
-        if why:
-            json.dump(why, open(out[:-4] + ".why.json", "w"), indent=1)
+        json.dump(sidecar(patch, inv, why),
+                  open(out[:-4] + ".why.json", "w"), indent=1)
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
         print(explain(patch, inv, why))

@@ -50,6 +50,13 @@ struct RackModule {
     bool placed = true;
     /// False when the module's own panel artwork is unavailable.
     bool has_artwork = true;
+    /// How the module is named in prose, when that differs from `name`.
+    ///
+    /// `name` stays the model slug because the panel artwork is filed under
+    /// it. Prose wants "MULT 1" where two mults would otherwise both read
+    /// "MULT" -- a cross-modulation patch whose two oscillators share a name
+    /// reads as one oscillator modulating itself. Empty means the two agree.
+    std::string display;
 };
 
 /// A patch cable.

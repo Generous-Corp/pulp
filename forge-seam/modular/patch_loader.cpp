@@ -96,7 +96,11 @@ LoadedPatch load_patch(const std::string& path) {
     // the .vcv format and will not carry our prose. Absent for a patch a person
     // wired themselves, and for anything built before the sidecar existed --
     // the explanation degrades to the wiring, which is still true, just terser.
-    std::map<std::string, std::string> why;
+    struct CableNote {
+        std::string why, from, to;
+    };
+    std::map<std::string, CableNote> notes;
+    std::map<std::string, std::string> module_names;
     if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") {
         std::ifstream wf(path.substr(0, path.size() - 4) + ".why.json");
         if (wf) {
@@ -104,10 +108,30 @@ LoadedPatch load_patch(const std::string& path) {
             ws << wf.rdbuf();
             try {
                 const auto wroot = choc::json::parse(ws.str());
-                if (wroot.isObject()) {
+                if (wroot.isObject() && wroot.hasObjectMember("cables")) {
+                    const auto cs = wroot["cables"];
+                    for (uint32_t i = 0; i < cs.size(); ++i) {
+                        const auto m = cs.getObjectMemberAt(i);
+                        CableNote n;
+                        n.why = m.value["why"].getWithDefault<std::string>("");
+                        n.from = m.value["from_port"].getWithDefault<std::string>("");
+                        n.to = m.value["to_port"].getWithDefault<std::string>("");
+                        notes[m.name] = std::move(n);
+                    }
+                    if (wroot.hasObjectMember("modules")) {
+                        const auto ms = wroot["modules"];
+                        for (uint32_t i = 0; i < ms.size(); ++i) {
+                            const auto m = ms.getObjectMemberAt(i);
+                            module_names[m.name] =
+                                m.value.getWithDefault<std::string>("");
+                        }
+                    }
+                } else if (wroot.isObject()) {
+                    // The first sidecars were a flat key->reason map. They
+                    // still load; they just cannot name a port.
                     for (uint32_t i = 0; i < wroot.size(); ++i) {
                         const auto m = wroot.getObjectMemberAt(i);
-                        why[m.name] = m.value.getWithDefault<std::string>("");
+                        notes[m.name].why = m.value.getWithDefault<std::string>("");
                     }
                 }
             } catch (...) {
@@ -115,6 +139,12 @@ LoadedPatch load_patch(const std::string& path) {
                 // the artifact; the prose is the commentary on it.
             }
         }
+    }
+
+    for (auto& m : out.modules) {
+        if (const auto it = module_names.find(m.id);
+            it != module_names.end() && !it->second.empty())
+            m.display = it->second;
     }
 
     const auto cables = root["cables"];
@@ -141,7 +171,16 @@ LoadedPatch load_patch(const std::string& path) {
                          std::to_string(c["outputId"].getWithDefault<int64_t>(0)) + ">" +
                          std::to_string(to_id) + ":" +
                          std::to_string(c["inputId"].getWithDefault<int64_t>(0));
-        if (const auto it = why.find(key); it != why.end()) conn.why = it->second;
+        if (const auto it = notes.find(key); it != notes.end()) {
+            conn.why = it->second.why;
+            // Real silkscreen names in place of the indices the .vcv stores.
+            // Showing "out0 → in1" is honest but teaches nothing; inventing a
+            // plausible name would teach something false. The generator
+            // resolved these against the installed modules, so they are
+            // neither guessed nor made up.
+            if (!it->second.from.empty()) conn.from_port = it->second.from;
+            if (!it->second.to.empty()) conn.to_port = it->second.to;
+        }
         out.connections.push_back(conn);
 
         // Register the ports the cables actually use, so the explanation can
