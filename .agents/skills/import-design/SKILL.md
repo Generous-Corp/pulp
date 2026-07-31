@@ -4735,6 +4735,21 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **A slow `pulp-import-design` run is usually the scratch sweep, not the
+  import.** `make_scratch_dir` (`tools/import-design/envelope_merge.cpp`)
+  removes stale scratch siblings before every run by walking the temp root, so
+  its cost tracks how many entries the *machine* has in `$TMPDIR` — not the size
+  of the design. The name is now matched before any `stat`, which keeps the
+  syscalls proportional to Pulp's own dirs, but the `readdir` still covers the
+  whole shared root. On a box that had reached ~148k temp entries the `.fig`
+  lane took 117-140s while the decode itself was 136ms, and the Catch2 case —
+  which spawns the CLI once per SECTION against a 30s per-invocation timeout —
+  failed as `exit_code -1` in a different section on each run. Before blaming a
+  decoder, time the Node subtool directly (`node tools/import-design/
+  fig_decode.mjs outline <file>`) and compare. Any test that drives the CLI
+  repeatedly should take a private temp root (`ScopedTempRoot` in
+  `test_import_design_tool.cpp`) rather than a larger timeout.
+
 - **Sub-pixel geometry survives end-to-end, through TWO former rounding
   layers.** Concentric compositions (knob body ellipse + value-ring arc)
   are aligned only at fractional coordinates: "A Channel FX" solves the

@@ -104,6 +104,28 @@ without opening a window.
   `test/test_headless_surface.cpp` (`[headless-surface][image]` /
   `[headless-surface][svg]`), which asserts the asset's own pixels, since
   asserting the draw call returned true is exactly what missed it.
+- **`SkPathBuilder::setFillType()` does nothing — pass the fill type to the
+  CONSTRUCTOR.** The pinned bundle's headers and its compiled `libskia.a`
+  disagree on `SkPathBuilder`'s member layout. `setFillType` and `fillType()`
+  are defined *inline in the header*, so they touch `fFillType` at the offset
+  the header computes (measured: byte 400), while `snapshot`/`detach` are
+  compiled inside the library and read the offset it computes (byte 96). The
+  setter is therefore accepted, the builder's own getter agrees with it, and the
+  produced `SkPath` still comes out `kWinding` — every even-odd fill renders as
+  a solid nonzero one with nothing logged. Use `SkPathBuilder b(fillType)` (or
+  `SkPath::makeFillType` on an already-built path); both are library-compiled
+  and write the field the library reads. `SkPath::setFillType` is a different
+  method and is unaffected. The library object is the *smaller* of the two (it
+  touches 115 bytes against the header's 424), so this drops writes rather than
+  overrunning memory — but treat **any** header-inline `SkPathBuilder` accessor
+  that touches a member (`fillType`, `setIsVolatile`, `isEmpty`) as unreliable
+  until the bundle's headers and libraries are re-cut from one revision.
+  `external/skia-build/VERSION.md` notes the macOS slices come from a separate
+  `chrome/m151-minos13` re-cut while `include/` is the shared drop, which is the
+  likely origin. To re-measure after a Skia bump: construct at one fixed address
+  via placement new (two `SkPathBuilder`s at different addresses differ at byte
+  0 because `STArray` holds a pointer into its own inline buffer, which
+  confounds a naive diff).
 - **Skia raster FALLS BACK to CoreGraphics when libs are absent.** In a CPU-only
   build, `render_to_png(..., ScreenshotBackend::skia)` produces **byte-identical
   output to CoreGraphics** (silent fallback). So a "Skia re-render" proves

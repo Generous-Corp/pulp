@@ -839,18 +839,8 @@ void SkiaCanvas::stroke_path(const Point2D* points, size_t count) {
 // FillRule::evenodd and as a disc under FillRule::nonzero — the same split
 // fill_current_path() has always honored. Degenerate input (null, or fewer
 // than three points — no enclosed area) draws nothing, matching
-// CgCanvas::fill_path.
-//
-// The fill type is passed to SkPathBuilder's CONSTRUCTOR, never to
-// `setFillType()`. In the pinned Skia bundle those two are not equivalent:
-// `setFillType` is an inline header method that assigns `fFillType` at the
-// offset the HEADER computes, while everything that reads it back
-// (`snapshot`/`detach`) is compiled inside `libskia.a` and looks at the offset
-// the LIBRARY computes. The two disagree, so a `setFillType` call is accepted,
-// changes nothing the library can see, and every even-odd fill silently
-// renders as a solid nonzero one. The constructor is library-compiled and
-// therefore writes the field the library reads. Same for `SkPath::makeFillType`
-// on an already-built path. See the raster proofs in test_skia_surface.cpp.
+// CgCanvas::fill_path. The rule goes to SkPathBuilder's CONSTRUCTOR — the inline
+// `setFillType` is a no-op against the pinned libskia.a (`skia-gpu-build` skill).
 void SkiaCanvas::fill_path(const Point2D* points, size_t count, FillRule rule) {
     GUARD_CANVAS;
     if (!points || count < 3) return;
