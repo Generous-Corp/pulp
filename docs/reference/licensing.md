@@ -156,6 +156,7 @@ through explicit opt-in local configuration, and are intentionally absent from
 | Name | License | Purpose | Distribution |
 |------|---------|---------|--------------|
 | **AAX SDK** | Separately licensed by Avid | Optional AAX plugin format support | Developer obtains it independently and points `PULP_AAX_SDK_DIR` at an out-of-tree SDK copy |
+| **Ableton Link** | GPLv2+ or proprietary by arrangement with Ableton | Optional desktop session tempo, beat, phase, and start/stop synchronization | Developer obtains [`Ableton/link`](https://github.com/Ableton/link) independently under suitable rights, keeps it out-of-tree, points `PULP_ABLETON_LINK_SDK_DIR` at it, and sets `PULP_ENABLE_ABLETON_LINK=ON`. Never bundled. |
 | **ARA SDK** | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains it independently (`https://github.com/Celemony/ARA_SDK`), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
 | **ASIO SDK** | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains it independently; never bundled or exported by Pulp |
 

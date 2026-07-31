@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::signal;
@@ -46,7 +47,7 @@ DiodeClipperT<double> make_clipper(DiodeModel model = DiodeModel::silicon,
 /// Coherent DFT magnitude at harmonic `k` of a tone whose period divides the
 /// analysis window exactly.
 double harmonic_magnitude(const std::vector<double>& x, double fundamental_hz, int k) {
-    const double w = 2.0 * M_PI * k * fundamental_hz / kSr;
+    const double w = 2.0 * std::numbers::pi * k * fundamental_hz / kSr;
     double re = 0.0, im = 0.0;
     for (std::size_t n = 0; n < x.size(); ++n) {
         re += x[n] * std::cos(w * static_cast<double>(n));
@@ -98,7 +99,7 @@ TEST_CASE("2 a matched pair makes odd harmonics; a single diode makes even ones"
         clipper.reset();
         std::vector<double> out;
         out.reserve(period * periods);
-        const double w = 2.0 * M_PI * tone_hz / kSr;
+        const double w = 2.0 * std::numbers::pi * tone_hz / kSr;
         // Amplitude well past the silicon knee (~0.6 V).
         const double amp = units::db_to_linear(24.0) * 0.5;
         for (int n = 0; n < settle + period * periods; ++n) {
@@ -177,7 +178,7 @@ TEST_CASE("4 the in-loop knee tracks drive while the to-ground knee does not",
         clipper.reset();
 
         const double amp = 0.1 * units::db_to_linear(drive_db);
-        const double w = 2.0 * M_PI * 1000.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 1000.0 / kSr;
         double peak = 0.0;
         for (int n = 0; n < 4800; ++n) {
             const double y = clipper.process(amp * std::sin(w * n));
@@ -241,7 +242,7 @@ TEST_CASE("4 the in-loop knee is frequency-dependent and the to-ground knee is n
         // A whole number of periods fills the analysis window at both probe
         // frequencies, so the DFT is leakage-free.
         const int len = static_cast<int>(kSr / 25.0);  // 25 Hz resolution
-        const double w = 2.0 * M_PI * tone_hz / kSr;
+        const double w = 2.0 * std::numbers::pi * tone_hz / kSr;
         std::vector<double> out;
         out.reserve(static_cast<std::size_t>(len));
         for (int n = 0; n < 4800 + len; ++n) {
@@ -315,7 +316,7 @@ TEST_CASE("6 in-loop gain never exceeds the linear gain and only falls",
         // the stage gain is legitimately lower than Rf/Rin — at 1 kHz it is
         // 6.34 rather than 10.85 — so a "does it reach the linear gain" check
         // there would be measuring the capacitor, not the loop bound.
-        const double w = 2.0 * M_PI * 100.0 / kSr;
+        const double w = 2.0 * std::numbers::pi * 100.0 / kSr;
         double peak = 0.0;
         for (int n = 0; n < 4800; ++n) {
             const double y = clipper.process(amp * std::sin(w * n));
@@ -360,7 +361,7 @@ TEST_CASE("6 in-loop small-signal response rolls off above the feedback corner",
         out.reserve(frames);
         for (int n = 0; n < settle + frames; ++n) {
             const double y =
-                clipper.process(amplitude * std::sin(2.0 * M_PI * tone_hz * n / kSr));
+                clipper.process(amplitude * std::sin(2.0 * std::numbers::pi * tone_hz * n / kSr));
             if (n >= settle) out.push_back(y);
         }
         return harmonic_magnitude(out, tone_hz, 1) / amplitude;
@@ -413,7 +414,8 @@ TEST_CASE("6 in-loop gain stays bounded over the reachable drive and frequency r
                     double peak = 0.0;
                     const int frames = static_cast<int>(sr / 4.0);
                     for (int n = 0; n < frames; ++n) {
-                        const double x = amplitude * std::sin(2.0 * M_PI * tone_hz * n / sr);
+                        const double x =
+                            amplitude * std::sin(2.0 * std::numbers::pi * tone_hz * n / sr);
                         const double y = clipper.process(x);
                         REQUIRE(std::isfinite(y));
                         REQUIRE(clipper.last_iteration_count() <=
@@ -438,7 +440,7 @@ TEST_CASE("the clipper solves damp their stiff mode at 8 kHz",
     const auto render_peak = [](auto& clipper, double amplitude) {
         double peak = 0.0;
         for (int n = 0; n < 8000; ++n) {
-            const double x = amplitude * std::sin(2.0 * M_PI * 440.0 * n / sr);
+            const double x = amplitude * std::sin(2.0 * std::numbers::pi * 440.0 * n / sr);
             const double y = clipper.process(x);
             REQUIRE(std::isfinite(y));
             REQUIRE(clipper.last_iteration_count() <=
@@ -479,9 +481,9 @@ TEST_CASE("7 render, reset, re-render is bit-identical", "[distortion][determini
         out.reserve(static_cast<std::size_t>(n));
         for (int i = 0; i < n; ++i) {
             const double t = i / kSr;
-            const double x = 0.4 * std::sin(2.0 * M_PI * 220.0 * t) +
-                             0.3 * std::sin(2.0 * M_PI * 660.0 * t) +
-                             0.2 * std::sin(2.0 * M_PI * 1470.0 * t);
+            const double x = 0.4 * std::sin(2.0 * std::numbers::pi * 220.0 * t) +
+                             0.3 * std::sin(2.0 * std::numbers::pi * 660.0 * t) +
+                             0.2 * std::sin(2.0 * std::numbers::pi * 1470.0 * t);
             out.push_back(stage.process(x));
         }
         return out;
@@ -567,7 +569,7 @@ TEST_CASE("10 the tone stack's corners land where they are configured",
 
         // Coherent DFT at the corner over a whole number of periods.
         const int len = 48000;
-        const double w = 2.0 * M_PI * corner / kSr;
+        const double w = 2.0 * std::numbers::pi * corner / kSr;
         double re = 0.0, im = 0.0;
         for (int n = 0; n < 4800; ++n) tone.process_post(std::sin(w * n));  // settle
         for (int n = 0; n < len; ++n) {
@@ -593,7 +595,7 @@ TEST_CASE("10 a flat pre-emphasis shelf is exactly flat", "[distortion][tone-sta
     tone.reset();
 
     for (int n = 0; n < 4800; ++n) {
-        const double x = std::sin(2.0 * M_PI * 3000.0 * n / kSr);
+        const double x = std::sin(2.0 * std::numbers::pi * 3000.0 * n / kSr);
         REQUIRE_THAT(tone.process_pre(x), WithinAbs(x, 1e-9));
     }
 }
@@ -607,7 +609,7 @@ TEST_CASE("10 tone mix crossfades against bypass", "[distortion][tone-stack]") {
     // 6 kHz is 8 samples per cycle, one of which lands exactly on the crest.
     // At 8 kHz there are 6 and none of them do, so peak tracking would
     // under-read by sin(60°) = −1.25 dB and look like a gain error.
-    const double w = 2.0 * M_PI * 6000.0 / kSr;  // well above the corner
+    const double w = 2.0 * std::numbers::pi * 6000.0 / kSr; // well above the corner
     const auto settled_peak = [&](double mix) {
         tone.set_tone_mix(mix);
         tone.reset();
@@ -636,7 +638,7 @@ TEST_CASE("the float and double instantiations agree", "[distortion]") {
     f.reset();
     d.reset();
 
-    const double w = 2.0 * M_PI * 440.0 / kSr;
+    const double w = 2.0 * std::numbers::pi * 440.0 / kSr;
     for (int n = 0; n < 24000; ++n) {
         const double x = 2.0 * std::sin(w * n);
         REQUIRE_THAT(static_cast<double>(f.process(static_cast<float>(x))),
@@ -665,7 +667,7 @@ TEST_CASE("The clipper family rejects non-finite controls and audio without pois
         require_allocates_no_memory([&] { REQUIRE(poisoned.process(nan) == 0.0); });
 
         for (int n = 0; n < 1024; ++n) {
-            const double x = 0.8 * std::sin(2.0 * M_PI * 997.0 * n / kSr);
+            const double x = 0.8 * std::sin(2.0 * std::numbers::pi * 997.0 * n / kSr);
             REQUIRE(poisoned.process(x) == fresh.process(x));
         }
     }
@@ -690,7 +692,7 @@ TEST_CASE("The clipper family rejects non-finite controls and audio without pois
         require_allocates_no_memory([&] { REQUIRE(poisoned.process(nan) == 0.0); });
 
         for (int n = 0; n < 1024; ++n) {
-            const double x = 0.3 * std::sin(2.0 * M_PI * 431.0 * n / kSr);
+            const double x = 0.3 * std::sin(2.0 * std::numbers::pi * 431.0 * n / kSr);
             REQUIRE(poisoned.process(x) == fresh.process(x));
         }
     }
@@ -719,7 +721,7 @@ TEST_CASE("The clipper family rejects non-finite controls and audio without pois
         // The second rejected sample resets the same complete tone-stack state
         // that the reference starts from.
         for (int n = 0; n < 1024; ++n) {
-            const double x = 0.4 * std::sin(2.0 * M_PI * 613.0 * n / kSr);
+            const double x = 0.4 * std::sin(2.0 * std::numbers::pi * 613.0 * n / kSr);
             REQUIRE(poisoned.process_pre(x) == fresh.process_pre(x));
             REQUIRE(poisoned.process_post(x) == fresh.process_post(x));
         }
@@ -797,7 +799,7 @@ TEST_CASE("The clipper solve stays bounded at full scale on every model",
                 double loop_peak = 0.0;
                 const int frames = static_cast<int>(sr / 10.0);
                 for (int n = 0; n < frames; ++n) {
-                    const double x = std::sin(2.0 * M_PI * 440.0 * n / sr);
+                    const double x = std::sin(2.0 * std::numbers::pi * 440.0 * n / sr);
                     const double g = ground.process(x);
                     const double l = loop.process(x);
                     REQUIRE(std::isfinite(g));

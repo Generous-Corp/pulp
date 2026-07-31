@@ -47,6 +47,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <vector>
 
 using namespace pulp::host;
@@ -146,7 +147,7 @@ std::vector<float> sine(int n, double freq_hz, float amp = 1.0f) {
     std::vector<float> v(static_cast<std::size_t>(n), 0.0f);
     for (int k = 0; k < n; ++k) {
         v[static_cast<std::size_t>(k)] =
-            amp * static_cast<float>(std::sin(2.0 * M_PI * freq_hz * k / kSr));
+            amp * static_cast<float>(std::sin(2.0 * std::numbers::pi * freq_hz * k / kSr));
     }
     return v;
 }
@@ -190,7 +191,7 @@ std::vector<float> settle(pulp::format::Processor& proc, const std::vector<float
 //     fraction of one cycle — and it counts harmonics as signal.
 float gain_db_at(pulp::format::Processor& proc, double freq_hz, int settle_blocks = 16,
                  double measure_cycles = 16.0) {
-    const double step = 2.0 * M_PI * freq_hz / kSr;
+    const double step = 2.0 * std::numbers::pi * freq_hz / kSr;
     double phase = 0.0;
     std::vector<float> tone(static_cast<std::size_t>(kFrames), 0.0f);
 
@@ -1278,9 +1279,11 @@ TEST_CASE("Forge CV: auto-wah (env_follower → filter_cv) centroid tracks input
         std::vector<float> v(static_cast<std::size_t>(n), 0.0f);
         for (int k = 0; k < n; ++k) {
             const double t = static_cast<double>(k) / kSr;
-            v[static_cast<std::size_t>(k)] = amp * static_cast<float>(
-                (std::sin(2 * M_PI * 200 * t) + std::sin(2 * M_PI * 1200 * t) +
-                 std::sin(2 * M_PI * 4000 * t)) / 3.0);
+            v[static_cast<std::size_t>(k)] =
+                amp * static_cast<float>((std::sin(2 * std::numbers::pi * 200 * t) +
+                                          std::sin(2 * std::numbers::pi * 1200 * t) +
+                                          std::sin(2 * std::numbers::pi * 4000 * t)) /
+                                         3.0);
         }
         return v;
     };

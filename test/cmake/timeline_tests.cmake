@@ -64,6 +64,23 @@ pulp_add_test_suite(pulp-test-standalone-recording
 pulp_add_test_suite(pulp-test-playback-external-sync
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
+pulp_add_test_suite(pulp-test-playback-tempo-sync
+    SOURCES test_playback_tempo_sync.cpp
+    LIBRARIES pulp::playback)
+
+# The SDK-present lane is always visible in ctest. A stock build returns 77 and
+# is reported as SKIPPED with the exact opt-in knobs; an SDK-enabled build links
+# and executes the real adapter instead of silently omitting the test.
+add_executable(pulp-test-ableton-link-sdk test_ableton_link_sdk.cpp)
+if(TARGET pulp::ableton-link)
+    target_link_libraries(pulp-test-ableton-link-sdk PRIVATE pulp::ableton-link)
+else()
+    target_link_libraries(pulp-test-ableton-link-sdk PRIVATE pulp::playback)
+endif()
+add_test(NAME playback-ableton-link-sdk-present COMMAND pulp-test-ableton-link-sdk)
+set_tests_properties(playback-ableton-link-sdk-present PROPERTIES
+    LABELS "playback;vendor-sdk"
+    SKIP_RETURN_CODE 77)
 pulp_add_test_suite(pulp-test-playback-program
     SOURCES test_playback_program.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

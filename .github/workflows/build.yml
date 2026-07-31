@@ -118,6 +118,9 @@ jobs:
           #    policy when local is idle.
           WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
+          # Empty for anything that is not a pull request; for a PR it is the
+          # head's owner/repo, which is how the block below detects a fork.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           # BUSY threshold for macOS overflow. With one local runner,
           # BUSY >= 1 would overflow as soon as any job is in flight.
           # Default 2 means "local is fully saturated AND new work is
@@ -163,6 +166,11 @@ jobs:
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
+          # A pull request whose head lives in another repository. Empty
+          # PR_HEAD_REPO means this is not a pull request at all.
+          _pr_head_repo = (os.environ.get("PR_HEAD_REPO") or "").strip()
+          _this_repo = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
+          IS_FORK_PR = bool(_pr_head_repo) and _pr_head_repo != _this_repo
           # Events whose only job is to publish the GitHub-hosted Linux/Windows
           # caches. The macOS leg is excluded from their matrix: it runs on the
           # self-hosted Macs that serve the one required check in this repo, and
@@ -388,6 +396,26 @@ jobs:
           local_macos_selector = (
               os.environ.get("LOCAL_MACOS_RUNS_ON_JSON") or ""
           ).strip()
+          # Never route a fork's code onto the self-hosted Macs. Those hosts
+          # carry the Developer ID signing keychain and the notary key, and
+          # PULP_LOCAL_MACOS_RUNS_ON_JSON is a repo *variable* — variables,
+          # unlike secrets, do resolve for fork runs, so without this a single
+          # "Approve and run" click executes contributor code on them.
+          #
+          # Blanking both selectors is deliberate rather than skipping the leg:
+          # the resolver's github-hosted fallback (macos-15) still runs, so a
+          # fork PR gets a real macOS signal on a clean throwaway runner
+          # instead of a required check that never posts.
+          if IS_FORK_PR:
+              if local_macos_selector or overflow_macos_selector:
+                  print(
+                      "resolve-provider: fork pull request "
+                      f"({_pr_head_repo}) — self-hosted macOS selectors ignored; "
+                      "routing to the github-hosted fallback",
+                      file=sys.stderr,
+                  )
+              local_macos_selector = ""
+              overflow_macos_selector = ""
           try:
               overflow_threshold = int(
                   (os.environ.get("LOCAL_MAC_OVERFLOW_THRESHOLD") or "2").strip()
@@ -523,7 +551,21 @@ jobs:
           # better coverage than the PR head. `push` keeps it for Windows
           # ccache warming, and workflow_dispatch keeps it for explicit reruns.
           # PR heads keep macOS (self-hosted) and Linux for fast signal.
-          if EVENT_NAME != "pull_request":
+          # Windows is billed at 2x and gates nothing — no Windows context appears
+          # in main's required checks, so the queue never waits for it. Running it
+          # per merge group was ~90% of billable Actions spend for zero merge
+          # signal, and with max_entries_to_build=2 it ran twice per cycle. The
+          # note above already identifies the cost ("starve the required ubuntu
+          # check that the merge queue waits on"); this is the conclusion.
+          #
+          # Coverage moves to cross-platform-check.yml, which already builds and
+          # tests Windows nightly AND whose tracking-issues job find-or-creates a
+          # per-platform issue on failure, reopens a closed one, and auto-closes on
+          # recovery. Catch-and-file, without blocking a merge.
+          #
+          # workflow_dispatch is kept so a Windows-touching change can be verified
+          # on demand rather than waiting for the nightly.
+          if EVENT_NAME not in ("pull_request", "merge_group"):
               include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
@@ -661,36 +703,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: |
-          # chrome/m144 Skia exposes fontconfig symbols
-          # (`FcInitLoadConfigAndFonts` et al.) that earlier Skia releases
-          # hid. Without the dev package,
-          # `pkg_check_modules(FONTCONFIG fontconfig)` in
-          # core/canvas/CMakeLists.txt comes up empty and the Linux link
-          # step fails. Mirrors the matching fix in release-cli.yml.
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libdbus-1-dev \
-            libdrm-dev \
-            libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libjack-jackd2-dev \
-            libx11-dev \
-            libxext-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libxrandr-dev \
-            libxrender-dev \
-            libxss-dev \
-            libxtst-dev \
-            libwayland-dev \
-            wayland-protocols \
-            ccache
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache
 
       # ── Namespace cache ─────────────────────────────────────────────────
       # Namespace cache volumes persist across runs on the same workspace,
@@ -1210,6 +1225,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -1227,6 +1243,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DPULP_BUILD_TESTS=OFF `
             -DPULP_ENABLE_AUDIO_PROBES=OFF `
+            -DPULP_ENABLE_INSPECTOR=OFF `
             -DPULP_BUILD_WEBVIEW=ON
         shell: pwsh
 
@@ -1277,6 +1294,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -1339,6 +1357,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true

@@ -799,6 +799,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
 - Prove an importer change didn't silently regress a design that already imported correctly. → `tools/import-validation/golden_regression.py`
   - ⚠ **Cannot see:** Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
+- Measure whether the offline/native HTML importer is converging on Chromium without changing canonical import output. → `tools/import-validation/importer_differential_lab.py analyze-corpus`
+  - ⚠ **Cannot see:** Development-only and advisory. Chromium remains authoritative, production native promotion is disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
 - An import "looks off" and you need the NODE and the exact pixel delta, not a score. → `tools/import-design/layout_parity.py`
   - ⚠ **Cannot see:** BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
 - An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?". → `tools/import-design/material_audit.mjs`
@@ -1536,6 +1538,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | Skill | Purpose |
 |-------|---------|
 | `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
+| `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
 | `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
 | `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
 | `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |

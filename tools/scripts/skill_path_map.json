@@ -14,6 +14,18 @@
         "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
       }
     },
+    "ableton-link": {
+      "paths": [
+        "core/playback/adapters/include/pulp/playback/ableton_link.hpp",
+        "core/playback/include/pulp/playback/tempo_sync.hpp",
+        "core/playback/adapters/ableton_link.cpp",
+        "core/playback/src/tempo_sync.cpp",
+        "test/test_ableton_link_sdk.cpp",
+        "test/test_playback_tempo_sync.cpp",
+        "tools/cmake/PulpAbletonLink.cmake",
+        ".agents/skills/ableton-link/**"
+      ]
+    },
     "android": {
       "paths": [
         "core/render/platform/android/**",

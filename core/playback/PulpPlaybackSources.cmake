@@ -25,6 +25,7 @@ function(pulp_resolve_playback_sources root output)
         sequence_dirty_lowering.cpp
         sequence_preflight.cpp
         stable_renderer_shell.cpp
+        tempo_sync.cpp
         track_automation_compiler.cpp
         track_automation_program.cpp
         track_automation_renderer.cpp

@@ -3,6 +3,15 @@ name: Vellum freeze
 on:
   pull_request:
   merge_group:
+  # Manual re-run. This check is REQUIRED, and without a dispatch trigger the
+  # only way to recover a wedged or cancelled run is to push a commit purely to
+  # fire `synchronize` — which rewrites the very history under review.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +24,11 @@ jobs:
       - name: Check out the proposed merge tree
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          # On pull_request/merge_group the default checkout already IS the
+          # proposed merge tree. A dispatch defaults to the branch it was fired
+          # from, so name the PR's merge ref explicitly — otherwise the
+          # inventory steps below would validate main rather than the PR.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || '' }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -25,8 +39,29 @@ jobs:
           PR_SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
           MERGE_BASE: ${{ github.event.merge_group.base_sha }}
           MERGE_HEAD: ${{ github.event.merge_group.head_sha }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            # Reconstruct what the pull_request event would have supplied: base
+            # is the PR's base sha, head is the merge commit already checked out
+            # above, source_head is the PR branch tip.
+            pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DISPATCH_PR")"
+            state="$(printf '%s' "$pr_json" | jq -r .state)"
+            if [ "$state" != "open" ]; then
+              echo "PR #$DISPATCH_PR is $state — refs/pull/N/merge is only meaningful while open" >&2
+              exit 1
+            fi
+            base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+            source_head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
+            git fetch --no-tags origin "$base"
+            {
+              echo "base=$base"
+              echo "head=$(git rev-parse HEAD)"
+              echo "source_head=$source_head"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             {
               echo "base=$PR_BASE"
               echo "head=$GITHUB_SHA"

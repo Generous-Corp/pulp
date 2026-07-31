@@ -62,7 +62,7 @@ concurrency:
 jobs:
   iwyu:
     name: IWYU (Linux, Clang) — advisory
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_IWYU_RUNS_ON_JSON || '"ubuntu-24.04"') }}
     # Advisory period — do NOT block PR merges until the false-positive
     # rate is low enough for required-check enforcement.
     continue-on-error: true
@@ -90,14 +90,12 @@ jobs:
         # on 24.04), which is new enough for our C++20 use. If the
         # distro version lags we can switch to building from source —
         # flagged here for future maintainers.
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: iwyu clang llvm lld
+
+      - name: Verify IWYU tooling
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            iwyu clang llvm lld \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
           include-what-you-use --version || true
           which iwyu_tool.py || which iwyu_tool || true
 

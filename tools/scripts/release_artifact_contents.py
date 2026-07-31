@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -24,6 +25,25 @@ from pathlib import Path, PurePosixPath
 
 
 DEFAULT_MATRIX_PATH = Path(__file__).with_name("release_product_matrix.json")
+LEGACY_CLI_BINARY_STEMS = frozenset({"pulp", "pulp-cpp", "pulp-mcp"})
+IMPORT_DESIGN_CLI_FLOOR = "0.764.0"
+PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS = LEGACY_CLI_BINARY_STEMS | {
+    "pulp-import-design"
+}
+PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS = frozenset(
+    {
+        "browser_capture/browser_process.mjs",
+        "browser_capture/capture.mjs",
+        "browser_capture/health.mjs",
+        "browser_capture/lifecycle.mjs",
+        "browser_capture/network_dependencies.mjs",
+        "browser_capture/renderers.mjs",
+        "browser_capture/security.mjs",
+        "browser_capture/semantics.mjs",
+        "browser_capture/settle.mjs",
+        "browser_capture/tokens.mjs",
+    }
+)
 
 
 class ContentError(RuntimeError):
@@ -40,7 +60,11 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 @dataclass(frozen=True)
 class ProductMatrix:
     contract_floor: str
+    sdk_provenance_floor: str
     platforms: tuple[str, ...]
+    cli_contract_declared: bool
+    cli_binary_stems: frozenset[str]
+    common_cli_members: frozenset[str]
     pulp_library_stems: frozenset[str]
     platform_library_stems: dict[str, frozenset[str]]
     common_sdk_members: frozenset[str]
@@ -50,9 +74,31 @@ class ProductMatrix:
     def load(cls, path: Path) -> ProductMatrix:
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
+            cli_contract_declared = (
+                "cli_binary_stems" in doc and "common_cli_members" in doc
+            )
+            if ("cli_binary_stems" in doc) != ("common_cli_members" in doc):
+                raise ContentError(
+                    f"invalid release product matrix {path}: "
+                    "CLI contract fields must be declared together"
+                )
             matrix = cls(
                 contract_floor=str(doc["contract_floor"]),
+                # Historical product matrices predate positive SDK provenance.
+                # An absent key therefore means "no release covered by this
+                # historical matrix requires the marker", not malformed data.
+                sdk_provenance_floor=str(
+                    doc.get("sdk_provenance_floor", "999999.0.0")
+                ),
                 platforms=tuple(doc["platforms"]),
+                cli_contract_declared=cli_contract_declared,
+                # Matrices versioned before the import-design CLI payload did
+                # not declare CLI members. Their release version selects the
+                # exact historical contract during a backfill.
+                cli_binary_stems=frozenset(
+                    doc.get("cli_binary_stems", LEGACY_CLI_BINARY_STEMS)
+                ),
+                common_cli_members=frozenset(doc.get("common_cli_members", ())),
                 pulp_library_stems=frozenset(doc["pulp_library_stems"]),
                 platform_library_stems={
                     key: frozenset(value)
@@ -63,9 +109,14 @@ class ProductMatrix:
             )
         except (KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
             raise ContentError(f"invalid release product matrix {path}: {exc}") from exc
-        if not matrix.platforms or not matrix.pulp_library_stems:
+        if (
+            not matrix.platforms
+            or not matrix.cli_binary_stems
+            or not matrix.pulp_library_stems
+        ):
             raise ContentError(f"invalid release product matrix {path}: empty contract")
         version_tuple(matrix.contract_floor)
+        version_tuple(matrix.sdk_provenance_floor)
         return matrix
 
 
@@ -177,11 +228,62 @@ def sdk_asset_name(platform: str) -> str:
     return f"pulp-sdk-{platform}.tar.gz"
 
 
-def cli_members(platform: str) -> frozenset[str]:
+def cli_binary_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    suffix = ".exe" if platform.startswith("windows-") else ""
+    stems, _resources = effective_cli_contract(matrix, version)
+    return frozenset(f"{stem}{suffix}" for stem in stems)
+
+
+def effective_cli_contract(
+    matrix: ProductMatrix, version: str | None
+) -> tuple[frozenset[str], frozenset[str]]:
+    # The declarative matrix follows current main, while backfills validate the
+    # payload that the requested tag could actually package.
+    if version is not None:
+        requested = version_tuple(version)
+        import_design_floor = version_tuple(IMPORT_DESIGN_CLI_FLOOR)
+        if requested < import_design_floor:
+            return LEGACY_CLI_BINARY_STEMS, frozenset()
+        if requested == import_design_floor:
+            return (
+                frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
+                PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+            )
+    if matrix.cli_contract_declared:
+        return matrix.cli_binary_stems, matrix.common_cli_members
+    if version is not None:
+        return (
+            frozenset(PRE_DECLARATIVE_IMPORT_DESIGN_CLI_BINARY_STEMS),
+            PRE_DECLARATIVE_IMPORT_DESIGN_COMMON_CLI_MEMBERS,
+        )
+    return LEGACY_CLI_BINARY_STEMS, frozenset()
+
+
+def cli_runtime_member(platform: str) -> str:
     if platform.startswith("windows-"):
-        return frozenset({"pulp.exe", "pulp-cpp.exe", "pulp-mcp.exe", "wgpu_native.dll"})
-    runtime = "libwgpu_native.dylib" if platform.startswith("darwin-") else "libwgpu_native.so"
-    return frozenset({"pulp", "pulp-cpp", "pulp-mcp", runtime})
+        return "wgpu_native.dll"
+    return (
+        "libwgpu_native.dylib"
+        if platform.startswith("darwin-")
+        else "libwgpu_native.so"
+    )
+
+
+def cli_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
+    _binaries, resources = effective_cli_contract(matrix, version)
+    return (
+        cli_binary_members(platform, matrix, version)
+        | resources
+        | frozenset({cli_runtime_member(platform)})
+    )
 
 
 def sdk_binary_members(platform: str) -> frozenset[str]:
@@ -213,7 +315,11 @@ def expected_pulp_libraries(platform: str, matrix: ProductMatrix) -> frozenset[s
     return frozenset(expected)
 
 
-def required_sdk_members(platform: str, matrix: ProductMatrix = DEFAULT_MATRIX) -> frozenset[str]:
+def required_sdk_members(
+    platform: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+    version: str | None = None,
+) -> frozenset[str]:
     required = set(matrix.common_sdk_members)
     required.update(sdk_binary_members(platform))
     required.update(
@@ -236,6 +342,11 @@ def required_sdk_members(platform: str, matrix: ProductMatrix = DEFAULT_MATRIX) 
     )
     if platform.startswith("darwin-"):
         required.update(matrix.darwin_sdk_members)
+    if (
+        version is not None
+        and version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor)
+    ):
+        required.add("pulp-sdk/sdk-provenance.json")
     return frozenset(required)
 
 
@@ -266,9 +377,14 @@ def require_executable(archive: Archive, names: frozenset[str]) -> None:
         raise ContentError(f"{archive.path.name}: non-executable shipped binary(s): {bad}")
 
 
-def verify_cli_archive(path: Path, platform: str) -> None:
+def verify_cli_archive(
+    path: Path,
+    platform: str,
+    version: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+) -> None:
     with Archive(path) as archive:
-        expected = cli_members(platform)
+        expected = cli_members(platform, matrix, version)
         actual = set(archive.members)
         missing = sorted(expected - actual)
         unexpected = sorted(actual - expected)
@@ -278,15 +394,21 @@ def verify_cli_archive(path: Path, platform: str) -> None:
                 f"unexpected={unexpected}"
             )
         if not platform.startswith("windows-"):
-            require_executable(archive, expected - {next(n for n in expected if n.startswith("libwgpu_"))})
+            require_executable(
+                archive, cli_binary_members(platform, matrix, version)
+            )
 
 
 def verify_sdk_archive(
-    path: Path, platform: str, version: str, matrix: ProductMatrix = DEFAULT_MATRIX
+    path: Path,
+    platform: str,
+    version: str,
+    source_sha: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
 ) -> None:
     with Archive(path) as archive:
         names = set(archive.members)
-        required = required_sdk_members(platform, matrix)
+        required = required_sdk_members(platform, matrix, version)
         missing = sorted(required - names)
         if missing:
             raise ContentError(f"{path.name}: missing SDK product(s): {missing}")
@@ -309,6 +431,53 @@ def verify_sdk_archive(
             raise ContentError(
                 f"{path.name}: version.txt is {archived_version!r}, expected {version!r}"
             )
+        if version_tuple(version) >= version_tuple(matrix.sdk_provenance_floor):
+            provenance_member = "pulp-sdk/sdk-provenance.json"
+            if (
+                archive.preserves_modes
+                and archive.members[provenance_member].mode & 0o004 == 0
+            ):
+                raise ContentError(
+                    f"{path.name}: {provenance_member} is not world-readable"
+                )
+            try:
+                provenance = json.loads(
+                    archive.read(provenance_member).decode("utf-8")
+                )
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ContentError(
+                    f"{path.name}: sdk-provenance.json is invalid: {exc}"
+                ) from exc
+            expected = {
+                "schema": "pulp.sdk-provenance.v1",
+                "kind": "release",
+                "profile": "official-release",
+                "distribution_eligible": True,
+                "sdk_version": version,
+                "source_git_ref": f"v{version}",
+                "source_git_sha": source_sha,
+                "source_git_dirty": False,
+                "platform": platform,
+                "build_type": "Release",
+                "features": {"audio_probes": False, "inspector": False},
+            }
+            mismatches = {
+                key: (provenance.get(key), value)
+                for key, value in expected.items()
+                if provenance.get(key) != value
+            }
+            marker_source_sha = provenance.get("source_git_sha")
+            if not isinstance(marker_source_sha, str) or not re.fullmatch(
+                r"[0-9a-f]{40}", marker_source_sha
+            ):
+                mismatches["source_git_sha"] = (
+                    marker_source_sha,
+                    "40 lowercase hex characters",
+                )
+            if mismatches:
+                raise ContentError(
+                    f"{path.name}: unsafe SDK provenance contract: {mismatches}"
+                )
         if not platform.startswith("windows-"):
             require_executable(archive, sdk_binary_members(platform))
 
@@ -324,14 +493,20 @@ def verify_sdk_archive(
                 raise ContentError(f"{path.name}: stale Apple-only SDK products: {apple_only[:10]}")
 
 
-def verify_native_macos_signatures(asset_dir: Path, platform: str) -> None:
+def verify_native_macos_signatures(
+    asset_dir: Path,
+    platform: str,
+    version: str,
+    matrix: ProductMatrix = DEFAULT_MATRIX,
+) -> None:
     if not platform.startswith("darwin-"):
         return
     if sys.platform != "darwin":
         raise ContentError("--native-signatures for Darwin archives requires a macOS runner")
 
     targets = {
-        cli_asset_name(platform): cli_members(platform),
+        cli_asset_name(platform): cli_binary_members(platform, matrix, version)
+        | frozenset({cli_runtime_member(platform)}),
         sdk_asset_name(platform): sdk_binary_members(platform)
         | frozenset({"pulp-sdk/lib/libwgpu_native.dylib"}),
     }
@@ -361,6 +536,7 @@ def verify_platform(
     asset_dir: Path,
     platform: str,
     version: str,
+    source_sha: str,
     *,
     native_signatures: bool,
     matrix: ProductMatrix = DEFAULT_MATRIX,
@@ -372,10 +548,10 @@ def verify_platform(
     for path in (cli, sdk):
         if not path.is_file():
             raise ContentError(f"missing release archive: {path.name}")
-    verify_cli_archive(cli, platform)
-    verify_sdk_archive(sdk, platform, version, matrix)
+    verify_cli_archive(cli, platform, version, matrix)
+    verify_sdk_archive(sdk, platform, version, source_sha, matrix)
     if native_signatures:
-        verify_native_macos_signatures(asset_dir, platform)
+        verify_native_macos_signatures(asset_dir, platform, version, matrix)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -385,6 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--platform", choices=PLATFORMS)
     group.add_argument("--all-platforms", action="store_true")
     parser.add_argument("--version", required=True, help="Release version without the leading v")
+    parser.add_argument(
+        "--source-sha", required=True, help="Exact 40-character release-tag commit"
+    )
     parser.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX_PATH)
     parser.add_argument("--native-signatures", action="store_true")
     return parser
@@ -407,6 +586,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.asset_dir,
                 platform,
                 args.version,
+                args.source_sha,
                 native_signatures=args.native_signatures,
                 matrix=matrix,
             )

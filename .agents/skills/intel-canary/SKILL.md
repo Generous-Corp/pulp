@@ -19,6 +19,26 @@ Pulp ships macOS arm64 as `usable` and macOS x86_64 / universal as
 silently regressing. The full design, tiering, and the honest catch/miss list
 live in `docs/guides/intel-support.md` — read it first.
 
+## The Tier-1 Rosetta lane measures logic, not speed
+
+`intel-portability.yml` runs x86_64 binaries under Rosetta on an arm64 runner, at
+roughly a third of native speed. Anything asserting a wall-clock budget therefore
+reports the emulator.
+
+That lane went red for seven consecutive runs on exactly three of 16,314 tests,
+all timing-bound: `heritage-performance` (labels `performance quality-lab`), a
+`CompiledTempoMap` randomized-map **Timeout**, and `process-deadline-selftest`.
+None was an x86_64 defect.
+
+The cause was a drifted exclusion list: `build.yml` excludes
+`performance|bench|quality-lab` on PR runs, this lane excluded only
+`validation|slow`. When adding a timing-sensitive label or a deadline test, update
+both — and remember `--repeat until-pass:2` only absorbs a *single* flake, so a
+consistently slow test fails twice and reds the lane.
+
+A red here is advisory and blocks nothing, which is precisely why it can sit red
+for days while burning ~52 minutes of hosted macOS per triggering PR.
+
 ## What this skill covers
 
 - `tools/scripts/intel_canary_lint.py` — the Tier-0 static lint (5 classes).

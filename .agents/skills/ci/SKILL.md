@@ -520,6 +520,48 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   back-off in the CI pool (tartci auto-yield) and Shipyard (host-health dispatch
   gate + infra-vs-code classification) consume this same `host_vitals` state.
 
+## Fork PRs are structurally kept off the local Macs
+
+`build.yml`'s resolver blanks both self-hosted macOS selectors when a pull
+request's head lives in another repository, so the leg falls through to
+GitHub-hosted `macos-15`. The reason it must be structural rather than a habit:
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is a repo **variable**, and variables — unlike
+secrets — *do* resolve for fork runs, so an "Approve and run" click would
+otherwise dispatch contributor code onto the Studios that hold the signing
+keychain and notary key.
+
+Consequences worth knowing:
+
+- A fork PR still gets a macOS result (clean hosted runner), but the required
+  `macos` check is posted by the local lane, so it **cannot merge on its own**.
+  That is intended — adopt the commits onto an in-repo `contrib/*` branch and
+  ship that (see the `contrib-intake` skill).
+- If a fork PR's macOS leg unexpectedly shows a self-hosted runner, the guard has
+  regressed — `tools/scripts/test_fork_pr_runner_routing.py` (ctest
+  `fork-pr-runner-routing`) exists to catch that, and runs the resolver the
+  workflow actually embeds rather than a copy of its logic.
+- Same-repo PRs, pushes, and `workflow_dispatch` are unaffected.
+## Re-running a wedged required check
+
+`macos` and `Enforce version & skill sync` can be re-dispatched
+(`ghapp workflow run <workflow> --ref <branch>`). The two Vellum gates now can
+too — they take a `pr_number` input:
+
+```sh
+ghapp workflow run vellum-freeze-check.yml  --ref main -f pr_number=<N>
+ghapp workflow run vellum-trusted-gate.yml  --ref main -f pr_number=<N>
+```
+
+Before that they declared only `pull_request(_target)` and `merge_group`, so a
+wedged or cancelled run left a required check with no path back except pushing a
+commit to fire `synchronize` — which rewrites the history under review to fix a
+CI problem.
+
+Both refuse a closed PR: the trusted gate posts a commit status, and putting a
+fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
+checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
+it was fired from, and the inventory steps would then validate `main` instead of
+the PR.
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
@@ -564,6 +606,108 @@ A run being `cancelled` on `main` is different and usually benign: coverage
 sets `cancel-in-progress: false`, and GitHub queues only ONE run per group, so
 a burst of merges replaces the queued run and only the latest head runs.
 
+## An advisory lane can be red for days and still cost you merges
+
+A red advisory check blocks nothing, so nobody acts on it — while it keeps
+consuming the hosted-runner pool the *required* checks queue behind. The Tier-1
+Rosetta lane sat red for seven consecutive runs at ~52 minutes of hosted macOS per
+triggering PR, and the visible symptom was required checks waiting ~16 minutes for
+a machine.
+
+So when merges are slow, audit what advisory work is running and whether it is
+even producing signal:
+
+```sh
+gh run list --repo Generous-Corp/pulp --workflow <name>.yml --limit 10 \
+  --json conclusion,createdAt --jq '.[]|"\(.createdAt[11:16]) \(.conclusion)"'
+```
+
+An all-red history means the lane is spending capacity to tell you nothing.
+
+Related trap: ctest label-exclusion lists drift between lanes. `build.yml` excludes
+`validation|slow|windows-pr-quarantine|performance|bench|quality-lab` on PR runs;
+the Rosetta lane excluded only `validation|slow`, which let wall-clock-budget tests
+run under an emulator at a third of native speed. When adding a timing-sensitive
+test or label, update every lane's `-LE`.
+## Moving ADVISORY work is what shortens the required path
+
+The instinct when merges are slow is to speed up the required checks. On Pulp the
+required checks are mostly fast — they are *waiting*. Measured on one PR: three
+required checks each sat ~16 minutes to do under 2 minutes of work, while advisory
+lanes held the hosted pool.
+
+So the lever is relocating advisory load, not optimising required jobs:
+
+```
+UndefinedBehaviorSanitizer (macOS)   81.6m wait + 75.4m run   advisory
+x86_64 Rosetta                       43.3m wait + 51.7m run   advisory
+Linux (x64)                          74.8m wait + 26.1m run   advisory
+GCC compile (core, Linux)            63.2m wait + 11.3m run   advisory
+Build + prove (wclap)                22.3m wait + 16.5m run   REQUIRED
+```
+
+**Route advisory lanes, never required ones, to home hardware.** `runs-on` has no
+automatic fallback: once a variable points at a self-hosted pool, a power or ISP
+outage makes jobs queue indefinitely rather than error. On an advisory lane that is
+a slow check; on a required one it strands every merge, including for external
+contributors.
+
+Pattern for adding a routable lane — ship the plumbing inert, flip later:
+
+```yaml
+runs-on: ${{ fromJSON(vars.PULP_LOCAL_X_RUNS_ON_JSON || '"ubuntu-24.04"') }}
+```
+
+Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in the
+same change, or the hourly topology check reports an unset lane as having no route
+at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
+it.
+## Windows is nightly-only, and that is deliberate
+
+Windows does not run on `pull_request` **or** `merge_group`. It runs on `schedule`
+and `workflow_dispatch`.
+
+Why: Windows is the single largest consumer of hosted runner *time* and **gates
+nothing** — no Windows context appears in `main`'s required checks, so the merge
+queue never waits for it. It was occupying the hosted pool the *required* checks
+queue behind, and with `max_entries_to_build=2` it ran twice per cycle.
+
+The argument is **minutes, not dollars** — the org's own July 2026 usage, which
+corrects an earlier claim here that Windows was "~90% of billable spend":
+
+| SKU | minutes | share of minutes | share of cost |
+|---|---|---|---|
+| Windows | 94,548 | 37% | 17% |
+| Linux | 88,646 | 35% | 9% |
+| macOS 3-core | 66,033 | 26% | **73%** |
+
+macOS dominates *cost* (it bills at ~10x Linux per minute), Windows dominates
+*occupancy*. Moving Windows off the per-merge path buys queue throughput, not a
+smaller invoice — and the macOS gate is the thing to protect, precisely because
+it is both the expensive lane and the only required one.
+
+Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
+and its `tracking-issues` job find-or-creates a per-platform issue on failure,
+reopens a closed one, and auto-closes on recovery. So a Windows regression becomes
+a filed work item, not a queue tax.
+
+Need Windows on a specific branch before the nightly:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+**Before "fixing" this by putting Windows back on merge_group**, note the trade was
+explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
+capacity. Revisit only if Windows parity becomes an active workstream rather than a
+background one.
+
+Related, and rejected on measurement: moving the Ubuntu preamble jobs off the Macs.
+`pulp-preamble-m5` and `pulp-studio-02` do also carry the `pulp-build` gate label,
+so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, and
+the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
+a slot for a build's duration. Relocating them pushes four more jobs into the
+contended hosted pool to reclaim half a minute.
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains
@@ -656,7 +800,8 @@ uses, or the golden warms a cache the real jobs never touch.
   `tools/scripts/scheduled_workflow_fork_guard_check.py` runs in `gates.sh`, the
   pre-push hook, and `workflow-lint.yml`, so a new scheduled workflow missing the
   guard fails the PR. Add the guard when you add the workflow.
-- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Two distinct guard layers exist and they catch different things: `test_codecov_components.py` / `test_codecov_config.py` (PR-gate) guard the **codecov.yml mapping** (a subsystem matching no component → invisible); `coverage-upload-watchdog.yml` (hourly, main) guards the **outcome** — "main had a *successful* Coverage run in the last N hours." The watchdog exists because the dashboard degrades silently when fresh complete uploads stop arriving, from causes the config gate can't see: coverage runs cancelled by `stale-run-reaper.yml` when a CI dispatch throttle makes them queue past the cutoff (the 2026-06-28 incident — 8 consecutive main Coverage runs cancelled), an `llvm-cov -object`-set regression (a `libpulp-*.a` drops out → a whole subsystem vanishes while `lines-valid` stays > 0, which `verify_cobertura_xml.py`'s `lines-valid > 0` check cannot catch), or Codecov's `after_n_builds` waiting forever on a missing per-OS leg. When triaging a coverage-surface complaint: first check `gh run list --workflow coverage.yml --branch main` for recent **successful** runs (cancelled ≠ uploaded); only then suspect codecov.yml. Note the config gate is **advisory** (not in branch protection), so a fleet-auto-merged PR can land config drift despite a red gate — the watchdog is the main-branch backstop.
+- **Codecov "total lines/files dropped" is usually upload starvation, not config drift.** Three guard layers catch different failures: `test_codecov_components.py` / `test_codecov_config.py` guard the **codecov.yml mapping**; semantic verifiers plus `.github/actions/upload-codecov-report` reject missing/empty inputs and emit a receipt only after Codecov transport succeeds; `coverage-upload-watchdog.yml` treats main as fresh only when one run has both Linux and macOS receipts. This catches a native build that never produced XML, a transport failure hidden behind an otherwise-successful workflow, cancellation before upload, or `after_n_builds` waiting on a missing leg. The in-repo `Diff coverage required` job remains the merge boundary, so a Codecov outage is visible without becoming a third-party required check. When triaging, inspect recent `coverage.yml` runs for the two receipt artifacts before changing `codecov.yml`.
+- **Native Linux apt dependencies have one owner.** Workflows that compile native Pulp use `.github/actions/install-linux-build-deps`, backed by `tools/ci/install_linux_build_deps.py` and capability profiles in `tools/ci/linux_build_deps.json`. Toolchains and lane-specific utilities are explicit `extra-packages`; do not add a workflow-named profile. `linux_build_deps_workflows.json` enumerates adopters and intentional direct-apt exclusions, and `test_install_linux_build_deps.py` fails workflow-lint when a new apt workflow is unclassified or an adopter copies canonical packages. Add a shared native dependency to the manifest once; add a one-lane tool at that lane's action call.
 - **`web-plugins.yml` is the headless-browser web lane (advisory).** It builds
   Pulp's WAMv2 (Emscripten) and WebCLAP (wasi-sdk) web plugin formats on a Linux
   GitHub-hosted runner and runs every web validation, including the browser
@@ -938,6 +1083,16 @@ uses, or the golden warms a cache the real jobs never touch.
   `release-dry-run.yml`, `sign-and-release.yml`, `release-cli-local.sh`, and
   checkout-backed SDK configure paths aligned when touching release CMake
   flags.
+- **Official release SDKs carry positive provenance.** Starting at the
+  `sdk_provenance_floor` in `tools/scripts/release_product_matrix.json`,
+  `release-cli.yml` stamps `sdk-provenance.json` only after proving the clean
+  source checkout, exact `v<version>` tag commit, Release build, platform, and
+  disabled audio-probe/inspector features. The downloaded-asset finalizer binds
+  every marker back to that exact tag SHA and archive platform before publish.
+  Keep the marker stamp, `PulpSdkProvenance.cmake` fail-closed consumer cache,
+  archive verifier, and Forge preflight in lockstep. A manual marker-era
+  `source_ref` substitution is forbidden; evaluate its floor from the trusted
+  default-branch matrix before checking out the operator-selected ref.
 - **The install-consumer smoke must compile against the installed prefix, not
   the source tree.** When an exported SDK target gains or exposes public
   headers, add representative `include/pulp/...` existence checks and include
@@ -957,6 +1112,12 @@ uses, or the golden warms a cache the real jobs never touch.
   `PULP_SDK_TARGETS` is assembled or consumed, keep the canonical literal
   `set` / `list(APPEND)` / `install(TARGETS ...)` forms or extend the
   fail-closed parser and its negative controls together.
+- **The release archive matrix must match every packaged CLI product.**
+  `cli_binary_stems` lists the shipped executables and `common_cli_members`
+  lists non-executable resources such as the import-design browser-capture
+  runtime. Keep those fields aligned with `package_cli.py` and
+  `tools/import-design/browser_capture/runtime_manifest.txt`; the verifier
+  rejects both missing and unexpected archive members.
 - **`sign-and-release.yml` does NOT wait on the release any more — do not add the
   poll back.** It used to poll `gh release view "$TAG"` until release-cli created
   the release, so it could attach `appcast.xml`. That poll ran on the macOS
@@ -4339,7 +4500,7 @@ would make CI flakier than it needs to be.
 `.github/workflows/coverage.yml`'s major jobs include:
 
 - `resolve-runners` — shared-helper resolver (`tools/scripts/resolve_runs_on.py`) that picks per-OS runs-on labels in priority order: workflow_dispatch input → `PULP_COVERAGE_<OS>_RUNS_ON_JSON` repo variable → hard-coded default (`ubuntu-latest` / `macos-latest` / `windows-latest`). Coverage deliberately does not read `PULP_NAMESPACE_BUILD_*`; use dedicated ephemeral coverage labels such as `pulp-coverage-vm-macos`, never the warm macOS gate labels or shared build-pilot labels. Change runner for one OS by setting the repo variable — no workflow edit required.
-- `coverage` — event-conditional matrix over {macos} on PRs and {linux, macos, windows} on push-to-main / workflow_dispatch. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and pushes to Codecov with exactly one per-OS flag (`os-linux`, `os-macos`, `os-windows`). The Linux leg also installs `coverage.py >= 7.10`, runs `tools/scripts/run_python_coverage.py` for `tools/scripts/**`, `tools/deps/**`, and `tools/local-ci/**`, uploads the Python HTML + summary + Cobertura artifacts, and includes `build-coverage/python/coverage.python.xml` in the same Codecov upload. The macOS leg additionally runs `tools/scripts/run_swift_coverage.py`, stages `build-coverage/apple/coverage.apple.lcov`, uploads the Apple summary artifact, and includes that LCOV in the same Codecov upload when present. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs, not from a multi-flag CSV on the upload step. Has `fail-fast: false` on the matrix — a flake on any one OS never cancels the others and never blocks a merge.
+- `coverage` — event-conditional matrix over {macos} on PRs and {linux, macos, windows} on push-to-main / workflow_dispatch. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and sends one explicit, semantically verified per-OS report set through `upload-codecov-report` with flag `os-linux`, `os-macos`, or `os-windows`. The Linux report set includes Python tooling coverage; the macOS set includes Swift LCOV when that lane is in scope. Successful Codecov transport emits a per-OS receipt artifact; the main watchdog requires Linux and macOS receipts. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs. Has `fail-fast: false` on the matrix — a flake on any one OS never cancels the others, while the in-repo diff gate remains authoritative.
 - `android-kotlin-coverage` — Gradle/JaCoCo coverage for `android/app/src/main/kotlin/**`, uploaded to Codecov from the canonical Coverage workflow on push-to-main / workflow_dispatch so main snapshots keep Android JVM coverage fresh without spending a PR runner.
 - `pulp-react-coverage` — Vitest/Cobertura coverage for `packages/pulp-react/**` on push-to-main and workflow_dispatch. PR upload remains in `pulp-react-build.yml`; main upload is centralized here so side coverage cannot advance Codecov when native Coverage for the same SHA was cancelled before upload.
 - `coverage-diff-gate` — downloads all three OS Cobertura artifacts (`coverage-cobertura-${sha}` for Linux, `coverage-cobertura-macos-${sha}`, `coverage-cobertura-windows-${sha}`), merges them with `tools/scripts/merge_cobertura.py` (taking `max(hits)` per `(filename, line)`), then runs `diff-cover --fail-under=75` against `origin/<base>` on the merged XML. Hard-fails the PR when the global diff-coverage floor is missed. The job still renders and upserts the diff-coverage PR comment via `tools/scripts/coverage_diff_comment.py` even on failure, and it also runs the per-tier gate (`tools/scripts/coverage_tier_check.py`) in advisory mode against the same merged XML.
@@ -5375,11 +5536,12 @@ Both coverage watchdogs historically keyed off "a `conclusion==success` coverage
 run on main." That proxy is blinded once a budget/timeout hit is made non-fatal: the run
 concludes `success` but its C++ Cobertura upload was skipped, so coverage silently stops
 while CI stays green (the 2-week silent-degradation class these watchdogs exist to catch).
-`coverage-upload-watchdog.yml` now requires a `coverage-cobertura-*` **artifact** on the
-run before counting it as fresh coverage (checked via the actions API — `actions: read`,
-no Codecov token). So a persistently over-budget leg raises the stalled-uploads issue
-within the window instead of hiding. If you ever make a coverage leg non-fatal, make sure
-its silent-drop is still detectable by artifact presence — do not trust run conclusion alone.
+`coverage-upload-watchdog.yml` now requires both
+`codecov-upload-linux-*` and `codecov-upload-macos-*` receipt artifacts on one run before
+counting it as fresh coverage (checked via the actions API — `actions: read`, no Codecov
+token). The shared upload action creates a receipt only after local file validation and
+successful Codecov transport. A persistently over-budget, build-broken, or transport-broken
+leg therefore raises the stalled-uploads issue instead of hiding behind run conclusion.
 
 ## MSVC-only breaks pass every blocking gate
 

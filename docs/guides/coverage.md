@@ -499,6 +499,27 @@ architectures —
 (`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
 the cross-OS union at the flag layer.
 
+All Codecov call sites use
+`.github/actions/upload-codecov-report`. The action accepts only an
+explicit comma-separated report list, rejects missing or empty files
+before invoking Codecov, disables report discovery, and asks the
+Codecov action to surface transport errors. Codecov remains a reporting
+sink rather than the merge boundary: transport failure is visible but
+does not override the in-repo `Diff coverage required` gate. A receipt
+artifact is emitted only when the Codecov action completes successfully.
+The main-branch upload watchdog requires both Linux and macOS receipts;
+a successful workflow run with only one native OS upload is not treated
+as a fresh complete snapshot. Windows, Android/Kotlin, and React receipts
+remain advisory.
+
+Linux build prerequisites are resolved through
+`tools/ci/linux_build_deps.json` and installed by the shared
+`install-linux-build-deps` action. Capability profiles own the common
+native and WebView package sets, while compiler and lane-specific tools
+remain explicit action inputs. The workflow contract test enumerates
+every adopter and every direct-apt exclusion, so a new native workflow
+cannot create another private copy of the package list unnoticed.
+
 Android/Kotlin coverage runs alongside that matrix in the same Coverage
 workflow. It emits JaCoCo XML from Gradle and uploads that XML directly
 to Codecov so the `android` component sees JVM-only Kotlin coverage
