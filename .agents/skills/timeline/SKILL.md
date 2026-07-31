@@ -363,6 +363,16 @@ artifact is needed. Never modify canonical project JSON text directly.
   document actually changed. The manifest is checked in **both** directions — an
   entry declared but not observed fails too, because a document that *lost* an
   entity would otherwise pass with every observed value still matching.
+- **`test/fixtures/timeline/` is exhaustively indexed: every file must appear in
+  `corpus.index`, and a host-side sweep enforces it.** Adding a fixture without an
+  index line reddens that sweep on a file your diff never mentions. Two
+  consequences worth knowing before you merge anything touching that tree. First,
+  a `.expect` manifest is *excluded* from the sweep, so an unindexed fixture with a
+  manifest is dead weight no gate can see. Second, and the one that actually bites:
+  **any branch cut before the index existed cannot index its own fixture**, so the
+  breakage appears only when the two branches meet on main — neither PR's CI can
+  see it alone. Check `corpus.index` covers the tree before merging a
+  fixture-adding branch.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency
