@@ -50,7 +50,18 @@ for part in "${PARTS[@]}"; do
   fi
   mkdir -p "$DEST/$(dirname "$part")"
   if [ -d "$SRC/$part" ]; then
-    rsync -a --delete \
+    # --delete everywhere EXCEPT the module pack. The pack is where generated
+    # work lands -- patches/ and the generated module sources -- and deleting
+    # whatever the source tree lacks destroys precisely that. It did: a module
+    # built from the app opened in Rack once, and the next toolchain reinstall
+    # removed its .vcv, after which Open in Rack reported a file that was not
+    # there. rsync -a also stamps the directory with the SOURCE's mtime, which
+    # is what made the deletion look like it had never happened.
+    delete_flag="--delete"
+    if [ "$part" = "examples/forge-modular" ]; then
+      delete_flag=""
+    fi
+    rsync -a $delete_flag \
       --exclude __pycache__ --exclude '*.pyc' \
       --exclude build --exclude '*.o' \
       "$SRC/$part/" "$DEST/$part/"

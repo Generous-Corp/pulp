@@ -753,6 +753,108 @@ def _build_gate() -> str | None:
     return GATE_BIN if r.returncode == 0 else None
 
 
+# Devices that exist to carry audio somewhere else -- screen sharing, remote
+# desktop, loopback routing. Picking one means a patch that "works" and that
+# nobody in the room can hear. The system default is often one of these on a
+# machine being driven remotely, which is exactly when a silent patch is
+# hardest to diagnose.
+VIRTUAL_OUTPUTS = ("jump desktop", "loopback", "blackhole", "soundflower",
+                   "zoom", "teams", "krisp", "aggregate", "multi-output")
+
+
+def default_output_device() -> str | None:
+    """A device a person would actually hear, by name.
+
+    Rack does not choose one for a patch it loads, so a generated patch opens
+    with its AUDIO module reading "No device" and makes no sound however good
+    the wiring is.
+
+    The system default is preferred, but skipped when it is a virtual sink:
+    on this machine the default was "Jump Desktop Audio" while the speakers
+    were what the listener wanted. A built-in output is the fallback because it
+    is the one device that is always really there.
+    """
+    override = os.environ.get("FORGE_RACK_AUDIO_DEVICE")
+    if override:
+        return override
+    import subprocess
+    try:
+        out = subprocess.run(["system_profiler", "SPAudioDataType"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except Exception:
+        return None
+    name, default, outputs = None, None, []
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.endswith(":") and not stripped.startswith("Default"):
+            candidate = stripped[:-1].strip()
+            if candidate and candidate not in ("Audio", "Devices"):
+                name = candidate
+        if "Default Output Device: Yes" in stripped and name:
+            default = name
+        if "Output Channels" in stripped and name and name not in outputs:
+            outputs.append(name)
+
+    def usable(n: str | None) -> bool:
+        return bool(n) and not any(v in n.lower() for v in VIRTUAL_OUTPUTS)
+
+    # Built-in speakers first. They are the one output that is definitely
+    # attached to the person at the machine -- a monitor's speakers or a
+    # remote-desktop sink can both be "default" while nobody hears anything.
+    # Guessing picked a monitor here when the listener wanted the Mac's own
+    # speakers, so the built-in wins and FORGE_RACK_AUDIO_DEVICE overrides
+    # everything for anyone whose setup differs.
+    for candidate in outputs:
+        if usable(candidate) and "speaker" in candidate.lower():
+            return candidate
+    if usable(default):
+        return default
+    for candidate in outputs:
+        if usable(candidate):
+            return candidate
+    return default
+
+
+def configure_audio(patch: dict) -> str | None:
+    """Point the patch's audio interface at the default output device.
+
+    Returns the device chosen, or None. Rack's driver ids are its own, so the
+    id is read from Rack's autosave rather than guessed -- a wrong driver is
+    indistinguishable from no driver, and both are silence.
+    """
+    device = default_output_device()
+    if not device:
+        return None
+    driver = 5   # CoreAudio on macOS Rack 2; confirmed against Rack's autosave
+    auto = os.path.expanduser(
+        "~/Library/Application Support/Rack2/autosave/patch.json")
+    try:
+        with open(auto) as f:
+            for m in json.load(f).get("modules", []):
+                d = m.get("data", {}).get("audio")
+                if isinstance(d, dict) and "driver" in d:
+                    driver = d["driver"]
+                    break
+    except Exception:
+        pass
+
+    touched = None
+    for m in patch.get("modules", []):
+        if m.get("plugin") != "Core" or not m.get("model", "").startswith("Audio"):
+            continue
+        data = m.setdefault("data", {})
+        data["audio"] = {
+            "driver": driver,
+            "deviceName": device,
+            "sampleRate": 44100,
+            "blockSize": 256,
+            "inputOffset": 0,
+            "outputOffset": 0,
+        }
+        touched = device
+    return touched
+
+
 def sounds(patch: dict) -> tuple[bool, str]:
     """Does this patch actually make a sound? Returns (ok, report).
 
@@ -826,6 +928,15 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 print(f"    {e}", flush=True)
             ctx = "The patch was rejected:\n" + "\n".join(errs)
             continue
+
+        # Point the audio interface somewhere audible BEFORE gating, so the
+        # thing measured is the thing that will be opened. Without it Rack
+        # loads the patch with "No device" selected and it is silent however
+        # good the wiring is -- which reads as a broken generator rather than
+        # an unset preference.
+        device = configure_audio(patch)
+        if device:
+            print(f"  audio out: {device}", flush=True)
 
         ok, report = sounds(patch)
         if ok:

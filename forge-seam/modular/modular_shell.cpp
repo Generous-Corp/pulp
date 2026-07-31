@@ -569,14 +569,23 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // the first one's stage -- reported after seeing one composer hold two
     // different module requests. Only opening an existing project should show
     // its old conversation.
+    // EVERY build starts its own clock and its own card. The run clock was set
+    // once when the editor opened, so a second build showed the time since the
+    // app launched -- "asking the model · 5m 27s elapsed" beside a Thinking
+    // chip reading 25s, two numbers for the same thing disagreeing.
+    run_started_ = std::chrono::steady_clock::now();
+    stage_started_ = run_started_;
+    reported_outcome_ = BuildOutcome::running;
+    reported_stage_ = -2;
+    c->set_status_note({});
+    c->set_status_activity({});
+    c->set_active_stage(-1);
+
+    // A prompt typed on Home starts a NEW project, so the transcript goes too.
+    // A follow-up refines the project already open and keeps its conversation;
+    // only the clock and the card restart.
     if (c->mode() == forge::ForgeChrome::Mode::Home) {
         c->begin_new_session();
-        c->set_status_note({});
-        c->set_status_activity({});
-        c->set_active_stage(-1);
-        reported_outcome_ = BuildOutcome::running;
-        reported_stage_ = -2;
-    reported_stage_ = -2;
         open_patch_.clear();
     }
 
@@ -649,6 +658,14 @@ std::string ForgeModularShell::artifact_path() const {
         const auto last = path.find_last_not_of(" \t\r\n");
         path = path.substr(first, last - first + 1);
         if (path.size() > 4 && path.substr(path.size() - 4) == ".vcv") return path;
+    }
+
+    // Nothing in this session's log. A project reopened from the shelf has no
+    // build behind it, and offering no way into Rack for work that already
+    // exists is the wrong answer -- the artifact is on disk either way.
+    if (!open_patch_.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(open_patch_, ec)) return open_patch_;
     }
     return {};
 }

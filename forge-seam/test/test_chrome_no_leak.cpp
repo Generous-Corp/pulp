@@ -2162,3 +2162,60 @@ TEST_CASE("a finished patch shows itself and can be opened", "[phase7][artifact]
 
     std::filesystem::remove(log);
 }
+
+TEST_CASE("every build starts its own clock and its own card",
+          "[phase7][stage]") {
+    // Reported from a screenshot: a new module started from Home showed
+    // "asking the model · 5m 27s elapsed" beside a Thinking chip reading 25s
+    // -- two numbers for the same thing disagreeing, because the run clock was
+    // set once when the editor opened rather than when a build began.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr; pc.max_buffer_size = kFrames;
+    pc.input_channels = 1; pc.output_channels = 2;
+    shell.prepare(pc);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+
+    const auto log = std::filesystem::temp_directory_path() / "fm-clock2.log";
+    std::filesystem::remove(log);
+    shell.watch_build_log(log.string());
+
+    // First build finishes and leaves a verdict on the card.
+    chrome->submit_prompt("a 4 HP attenuverter",
+                          forge::ForgeChrome::PromptOrigin::home);
+    { std::ofstream f(log); f << "  asking the model\n  installed -> /tmp/a.vcvplugin\n"; }
+    shell.on_poll();
+    REQUIRE(shell.build_outcome() == forge_modular::BuildOutcome::done);
+    const int after_first = chrome->chat_line_count();
+    CHECK(after_first > 0);
+
+    // A second build from Home clears the transcript AND resets the card, so
+    // the new run cannot inherit the old one's verdict or its elapsed time.
+    // The log is truncated too, as a real run does.
+    std::filesystem::remove(log);
+    chrome->enter_home();
+    chrome->submit_prompt("a 3 HP clock divider",
+                          forge::ForgeChrome::PromptOrigin::home);
+    CHECK(chrome->chat_line_count() < after_first);   // fresh transcript
+    CHECK(chrome->status_note_text().empty());        // no carried-over note
+
+    // A follow-up keeps the conversation but still restarts the card, because
+    // it is a new run even though it is the same project.
+    { std::ofstream f(log); f << "  asking the model\n  installed -> /tmp/b.vcvplugin\n"; }
+    shell.on_poll();
+    const int before_followup = chrome->chat_line_count();
+    chrome->submit_prompt("make it 6 HP",
+                          forge::ForgeChrome::PromptOrigin::project);
+    CHECK(chrome->chat_line_count() >= before_followup);   // conversation kept
+    CHECK(chrome->status_note_text().empty());             // card still reset
+
+    std::filesystem::remove(log);
+}

@@ -1,5 +1,5 @@
 diff --git a/include/forge/chrome.hpp b/include/forge/chrome.hpp
-index 0863f43..7d5094d 100644
+index 0863f43..df17139 100644
 --- a/include/forge/chrome.hpp
 +++ b/include/forge/chrome.hpp
 @@ -640,6 +640,47 @@ public:
@@ -50,7 +50,7 @@ index 0863f43..7d5094d 100644
      // The text of every agent line shown on the chat rail, in order (tests:
      // assert the user-facing rail stays calm — no raw parser/gate reject text).
      const std::vector<std::string>& agent_lines() const { return agent_lines_; }
-@@ -696,6 +737,33 @@ public:
+@@ -696,6 +737,34 @@ public:
      float chamber_progress() const;
      std::string chamber_header_text() const;
      int active_chip() const { return active_chip_; }
@@ -81,10 +81,11 @@ index 0863f43..7d5094d 100644
 +    void set_status_activity(const std::string& text);
 +    void set_status_note(const std::string& text);
 +    std::string status_activity_text() const;
++    std::string status_note_text() const { return status_detail_text(); }
      int macro_knob_count() const { return macro_knob_count_; }
      bool materialized() const { return materialized_; }
      bool has_project() const { return has_project_; }
-@@ -712,6 +780,16 @@ public:
+@@ -712,6 +781,16 @@ public:
      std::string first_tile_badge_text() const;
      bool delete_affordance_visible() const;
      const std::string& project_title() const { return project_title_; }
@@ -101,7 +102,7 @@ index 0863f43..7d5094d 100644
      // The FIRST shelf tile — the live build's (tests: drive its hover reveal
      // without coordinates).
      pulp::view::View* shelf_tile() { return shelf_tile_; }
-@@ -722,6 +800,14 @@ public:
+@@ -722,6 +801,14 @@ public:
      // The Home prompt box and the Build rail's follow-up box (tests: pin that
      // their copy is the hosting shell's kind, not effect wording everywhere).
      pulp::view::TextEditor* prompt_input() { return prompt_input_; }
@@ -116,7 +117,7 @@ index 0863f43..7d5094d 100644
      pulp::view::TextEditor* followup_input() { return followup_input_; }
      std::vector<std::string> followup_suggestions() const;
      // The hover tooltip's text, or "" when it is not showing. A clamped chip
-@@ -1133,6 +1219,8 @@ private:
+@@ -1133,6 +1220,8 @@ private:
  
      bool materialized_ = false;
      int chat_line_count_ = 0;
@@ -125,7 +126,7 @@ index 0863f43..7d5094d 100644
      std::vector<std::string> agent_lines_;  // agent rail text, for introspection
  
      // The ordered build-session transcript. A `user` turn is a prompt bubble;
-@@ -1171,6 +1259,7 @@ private:
+@@ -1171,6 +1260,7 @@ private:
  
      // Non-owning pointers into the built tree (valid while the root lives).
      pulp::view::View* root_ = nullptr;
