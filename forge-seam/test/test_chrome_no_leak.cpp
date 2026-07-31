@@ -293,6 +293,54 @@ std::size_t count_pixels_near(const std::vector<std::uint8_t>& png,
     return hits;
 }
 
+/// How far the drawing actually reaches, as a fraction of the canvas.
+///
+/// Ink, not bounds: a view's bounds are whatever they were set to, so they
+/// prove nothing about whether anything was drawn out there. Anything
+/// noticeably different from the colour of the far corner counts.
+std::pair<double, double> ink_extent(const std::vector<std::uint8_t>& png) {
+    if (png.empty()) return {0.0, 0.0};
+    auto* data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    auto* src = CGImageSourceCreateWithData(data, nullptr);
+    double fx = 0, fy = 0;
+    if (src && CGImageSourceGetCount(src) > 0) {
+        auto* img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        if (img) {
+            const std::size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+            std::vector<std::uint8_t> rgba(w * h * 4, 0);
+            auto* cs = CGColorSpaceCreateDeviceRGB();
+            auto* ctx = CGBitmapContextCreate(rgba.data(), w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast);
+            if (ctx) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+                auto at = [&](std::size_t x, std::size_t y) {
+                    const std::size_t i = (y * w + x) * 4;
+                    return std::array<int, 3>{rgba[i], rgba[i + 1], rgba[i + 2]};
+                };
+                const auto corner = at(w - 2, h - 2);
+                std::size_t right = 0, bottom = 0;
+                for (std::size_t y = 0; y < h; y += 3)
+                    for (std::size_t x = 0; x < w; x += 3) {
+                        const auto p = at(x, y);
+                        if (std::abs(p[0] - corner[0]) + std::abs(p[1] - corner[1])
+                            + std::abs(p[2] - corner[2]) > 24) {
+                            right = std::max(right, x);
+                            bottom = std::max(bottom, y);
+                        }
+                    }
+                fx = double(right) / double(w);
+                fy = double(bottom) / double(h);
+                CGContextRelease(ctx);
+            }
+            CGColorSpaceRelease(cs);
+            CGImageRelease(img);
+        }
+    }
+    if (src) CFRelease(src);
+    CFRelease(data);
+    return {fx, fy};
+}
+
 /// Every word the explanation actually puts on screen.
 ///
 /// Depth has to be measured here rather than on one cable's string: a role's
@@ -2329,6 +2377,38 @@ TEST_CASE("polling while the log is being written does not corrupt the heap",
     // Surviving IS the assertion; the rest says it did real work.
     CHECK(shell.explanation() != nullptr);
     CHECK(shell.rack_preview() != nullptr);
+}
+
+TEST_CASE("the editor fills the window the host gave it", "[seam][sizing]") {
+    // In REAPER the plugin drew its editor in the top-left of a much larger
+    // window and left the rest empty grey -- reported as "the plugin has a
+    // lot of white space in VCV Rack, is this intentional?". It is not.
+    //
+    // A host sizes the pane; the editor has to fill it. Measured as INK: the
+    // rightmost and lowest painted pixel, against the canvas it was given.
+    // Asserting the view's bounds would prove nothing, because the bounds are
+    // whatever they were set to -- the question is what got drawn inside them.
+    HermeticProjects isolated;
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // Deliberately bigger than the 1280x800 design, which is what a host does
+    // when it remembers a window somebody stretched.
+    constexpr int kW = 1800, kH = 1100;
+    const auto png = pulp::view::render_to_png(*view, kW, kH, 1.0f,
+                                               pulp::view::ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    const auto [across, down] = ink_extent(png);
+    INFO("drawing reaches " << int(across * 100) << "% across and "
+         << int(down * 100) << "% down a " << kW << "x" << kH << " window");
+    // A rounded corner or a margin is fine. Half the window left blank is the
+    // defect that was reported.
+    CHECK(across > 0.9);
+    CHECK(down > 0.9);
 }
 
 TEST_CASE("no control on Home paints like a control and does nothing",

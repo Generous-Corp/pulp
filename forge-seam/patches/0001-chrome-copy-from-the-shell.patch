@@ -443,7 +443,7 @@ index c8101e1..ff2b01a 100644
  
      // One descriptor per bound macro of the ACTIVE build, current values.
 diff --git a/src/chrome.cpp b/src/chrome.cpp
-index 1c3814e..6fd6c4a 100644
+index 1c3814e..8c26fe3 100644
 --- a/src/chrome.cpp
 +++ b/src/chrome.cpp
 @@ -1151,44 +1151,81 @@ private:
@@ -568,7 +568,28 @@ index 1c3814e..6fd6c4a 100644
  }
  
  ForgeChrome::~ForgeChrome() {
-@@ -1476,6 +1513,14 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
+@@ -1420,7 +1457,19 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
+         };
+     root_ = root.get();
+     root->set_background_color(kAppBg);
+-    size(*root, static_cast<float>(kDesignWidth), static_cast<float>(kDesignHeight));
++    // FILL the pane the host gave us, rather than laying out at the design
++    // size inside it. A fixed size meant that a host window larger than
++    // 1280x800 -- which is what REAPER gives you the moment somebody stretches
++    // it once, since it remembers -- drew the editor in the top-left corner
++    // and left the rest empty grey. Reported as "the plugin has a lot of white
++    // space in VCV Rack, is this intentional?".
++    //
++    // The design size remains what the plugin ASKS for (view_size) and what
++    // the baselines render at, so at exactly 1280x800 this is the same layout
++    // it always was -- which is why the no-leak guard stays byte-identical.
++    root->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
++    root->flex().dim_height = {100, pulp::view::DimensionUnit::percent};
++    root->flex().flex_shrink = 0;
+ 
+     // A build restored from host state carries its own display name; without
+     // it the shelf/header would fall back to the default-build title.
+@@ -1476,6 +1525,14 @@ std::unique_ptr<pulp::view::View> ForgeChrome::build() {
      settings_surface_->build(*root);  // above the confirm sheet
      audio_assets_surface_->build(*root);  // capability-aware asset authoring
      build_publish_sheet(*root);   // marketplace authoring is the topmost sheet
@@ -583,7 +604,7 @@ index 1c3814e..6fd6c4a 100644
      restore_open_state();
      // A terminal turn may predate this editor instance. Its transaction state
      // is shell-owned, so rematerialize the actions just as we rematerialize the
-@@ -1683,7 +1728,7 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1683,7 +1740,7 @@ void ForgeChrome::build_title_bar(View& parent) {
      player_title_ = title.get();
      title->flex().flex_shrink = 0;
      identity->add_child(std::move(title));
@@ -592,7 +613,7 @@ index 1c3814e..6fd6c4a 100644
                            kFaint, 0.8f);
      shell_kind_badge_ = tag.get();
      tag->set_border(kLine, 1, 5);
-@@ -1766,6 +1811,12 @@ void ForgeChrome::build_title_bar(View& parent) {
+@@ -1766,6 +1823,12 @@ void ForgeChrome::build_title_bar(View& parent) {
      size(*init, 52, 24);
      init->on_click = [this]() { save_player_state(); };
      utilities->add_child(std::move(init));
@@ -605,7 +626,7 @@ index 1c3814e..6fd6c4a 100644
      bar->add_child(std::move(utilities));
  
      parent.add_child(std::move(bar));
-@@ -1881,8 +1932,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1881,8 +1944,7 @@ void ForgeChrome::build_home(View& parent) {
  
      hero->add_child(make_spacer());
  
@@ -615,7 +636,7 @@ index 1c3814e..6fd6c4a 100644
                                kFontMono, 11, 400,
                                kMuted, 1.76f);
      home_eyebrow_ = eyebrow.get();
-@@ -1890,13 +1940,27 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1890,13 +1952,27 @@ void ForgeChrome::build_home(View& parent) {
      eyebrow->flex().flex_shrink = 0;
      hero->add_child(std::move(eyebrow));
  
@@ -644,7 +665,7 @@ index 1c3814e..6fd6c4a 100644
      // Prompt card: a writing row above the composer toolbar. The card has no
      // authored height — it is exactly as tall as the prompt, the attachment
      // strip, and the toolbar need, so it opens compact and grows around the
-@@ -1946,7 +2010,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1946,7 +2022,7 @@ void ForgeChrome::build_home(View& parent) {
          kHomePromptTextWidth, design::geometry::composer_max_text_lines,
          design::geometry::composer_text_line_height);
      prompt_input_ = input.get();
@@ -653,7 +674,7 @@ index 1c3814e..6fd6c4a 100644
      input->set_font_family(kFontDisplay);
      // The HTML is Jost 16/24 in a 642 px content box. Pulp's native Jost
      // shaping is fractionally wider, so a half-point optical compensation
-@@ -1993,6 +2057,29 @@ void ForgeChrome::build_home(View& parent) {
+@@ -1993,6 +2069,29 @@ void ForgeChrome::build_home(View& parent) {
      actions->flex().align_items = FlexAlign::center;
      actions->flex().margin_top = 10;
      actions->flex().flex_shrink = 0;
@@ -683,7 +704,7 @@ index 1c3814e..6fd6c4a 100644
      auto attach = std::make_unique<TextButton>();
      home_attach_button_ = attach.get();
      attach->set_style(TextButton::Style::ghost);
-@@ -2047,6 +2134,7 @@ void ForgeChrome::build_home(View& parent) {
+@@ -2047,6 +2146,7 @@ void ForgeChrome::build_home(View& parent) {
      };
      actions->add_child(std::move(send));
      box->add_child(std::move(actions));
@@ -691,7 +712,7 @@ index 1c3814e..6fd6c4a 100644
  
      // The composer lives in a fixed-height slot and is centred in it, so the
      // hero's eyebrow and headline hold their authored positions while the card
-@@ -3069,6 +3157,11 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3069,6 +3169,11 @@ void ForgeChrome::build_chat_rail(View& parent) {
  
      auto col = make_box(FlexDirection::column);
      chat_col_ = col.get();
@@ -703,7 +724,7 @@ index 1c3814e..6fd6c4a 100644
      col->flex().dim_width = {100, DimensionUnit::percent};
      col->flex().padding_left = kChatColumnInset;
      col->flex().padding_right = kChatColumnInset;
-@@ -3401,7 +3494,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
+@@ -3401,7 +3506,7 @@ void ForgeChrome::build_chat_rail(View& parent) {
      follow->add_child(std::move(attachment_error));
      auto input = std::make_unique<TextEditor>();
      followup_input_ = input.get();
@@ -712,7 +733,7 @@ index 1c3814e..6fd6c4a 100644
      input->set_font_family(kFontDisplay);
      input->set_font_size(14);
      input->set_background_color(kRaised);
-@@ -3611,6 +3704,13 @@ void ForgeChrome::build_stage(View& parent) {
+@@ -3611,6 +3716,13 @@ void ForgeChrome::build_stage(View& parent) {
      scripted->set_visible(false);
      stage->add_child(std::move(scripted));
  
@@ -726,7 +747,7 @@ index 1c3814e..6fd6c4a 100644
      viewport->add_child(std::move(stage));
      viewport->set_content_size(
          {static_cast<float>(kDesignWidth), static_cast<float>(kDesignHeight)});
-@@ -4268,7 +4368,7 @@ void ForgeChrome::apply_build_view() {
+@@ -4268,7 +4380,7 @@ void ForgeChrome::apply_build_view() {
      if (followup_input_) {
          followup_input_->placeholder =
              code ? "Describe an edit to the live source"
@@ -735,7 +756,7 @@ index 1c3814e..6fd6c4a 100644
      }
      if (designer_pane_) designer_pane_->set_visible(design);
      if (code_tab_button_) {
-@@ -4327,6 +4427,91 @@ void ForgeChrome::enter_home() {
+@@ -4327,6 +4439,91 @@ void ForgeChrome::enter_home() {
      apply_modes();
  }
  
@@ -827,7 +848,7 @@ index 1c3814e..6fd6c4a 100644
  void ForgeChrome::enter_build() {
      // The shell's generated source is worker-owned until the exact terminal
      // event has been reduced. Build can become the visible destination now,
-@@ -5726,7 +5911,7 @@ void ForgeChrome::on_project_restored() {
+@@ -5726,7 +5923,7 @@ void ForgeChrome::on_project_restored() {
          // An empty host payload is a real reset to the hand-fed default build,
          // not merely a source change. Drop the departed project's identity and
          // conversation before rematerializing the default DSP.
@@ -836,7 +857,7 @@ index 1c3814e..6fd6c4a 100644
          clear_chat_rail();
      }
      refresh_shelf();
-@@ -5859,7 +6044,7 @@ void ForgeChrome::confirm_delete_project() {
+@@ -5859,7 +6056,7 @@ void ForgeChrome::confirm_delete_project() {
      // The deleted default tile stays gone; saved entries keep showing.
      default_tile_alive_ = false;
      // Back to this kind's default build's name, for a fresh start.
@@ -845,7 +866,7 @@ index 1c3814e..6fd6c4a 100644
      enter_home();
  }
  
-@@ -5920,6 +6105,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -5920,6 +6117,16 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
      // reduced, so it owns the mutation transaction for that whole interval.
      if (marketplace_open_worker_.joinable()) return false;
      const std::string text = trim_copy(prompt);
@@ -862,7 +883,7 @@ index 1c3814e..6fd6c4a 100644
      std::optional<RecoverableTurn> pending_replay;
      bool replaying_pending_submission = false;
      const RecoverableTurn* pending_submission =
-@@ -6189,6 +6384,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
+@@ -6189,6 +6396,10 @@ bool ForgeChrome::submit_prompt_impl(const std::string& prompt,
  }
  
  void ForgeChrome::poll() {
@@ -873,7 +894,7 @@ index 1c3814e..6fd6c4a 100644
      // Publication callbacks may arrive on arbitrary provider threads. They
      // write only to a shared mailbox; the host's UI-thread tick owns every
      // ForgeChrome and widget mutation.
-@@ -6379,7 +6578,7 @@ void ForgeChrome::schedule_poll() {
+@@ -6379,7 +6590,7 @@ void ForgeChrome::schedule_poll() {
              if (!alive->load(std::memory_order_acquire)) return;
              poll_armed_ = false;
              poll();
@@ -882,7 +903,7 @@ index 1c3814e..6fd6c4a 100644
                  !pending_open_entry_id_.empty() ||
                  code_autosave_pending_) {
                  schedule_poll();
-@@ -6771,11 +6970,32 @@ void ForgeChrome::reset_chips() {
+@@ -6771,11 +6982,32 @@ void ForgeChrome::reset_chips() {
  // status card. Used when the shelf opens a DIFFERENT entry: the rail must show
  // the newly-opened build's conversation, not the previous one's.
  void ForgeChrome::clear_chat_rail() {
@@ -916,7 +937,7 @@ index 1c3814e..6fd6c4a 100644
          }
      }
      transcript_.clear();
-@@ -8630,6 +8850,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
+@@ -8630,6 +8862,19 @@ void ForgeChrome::refresh_marketplace_category_styles() {
      }
  }
  
@@ -936,7 +957,7 @@ index 1c3814e..6fd6c4a 100644
  void ForgeChrome::rebuild_marketplace_cards(
      const std::vector<const MarketplaceListing*>& listings,
      bool reference_catalog) {
-@@ -9000,9 +9233,11 @@ void ForgeChrome::refresh_shelf() {
+@@ -9000,9 +9245,11 @@ void ForgeChrome::refresh_shelf() {
          // too weak to explain why the default build is already making sound.
          tile->set_border(model.in_slot ? kAccentDim : kLine,
                           model.in_slot ? 2 : 1, 14);
@@ -951,7 +972,7 @@ index 1c3814e..6fd6c4a 100644
          tile->set_overflow(View::Overflow::hidden);
          tile->flex().flex_shrink = 0;
  
-@@ -9012,6 +9247,10 @@ void ForgeChrome::refresh_shelf() {
+@@ -9012,6 +9259,10 @@ void ForgeChrome::refresh_shelf() {
          art->flex().padding_left = 10;
          art->flex().padding_bottom = 10;
          art->flex().justify_content = FlexJustify::end_;
@@ -962,7 +983,7 @@ index 1c3814e..6fd6c4a 100644
          art->set_background_gradient_radial(
              model.generated ? 0.72f : 0.28f, 0.24f, 0.90f,
              {model.generated ? design::color::violet : design::color::indigo,
-@@ -9019,7 +9258,7 @@ void ForgeChrome::refresh_shelf() {
+@@ -9019,7 +9270,7 @@ void ForgeChrome::refresh_shelf() {
                               : Color::rgba8(0x10, 0x16, 0x2E)},
              {0.0f, 1.0f});
          auto format = make_label(
