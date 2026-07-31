@@ -1269,6 +1269,90 @@ TEST_CASE("IPC message callback may destroy its own connection",
     server.stop();
 }
 
+TEST_CASE("IPC read callback destruction coordinates with external disconnect",
+          "[events][ipc][socket][crash][owner-lifetime][concurrency]") {
+    InterprocessConnectionServer server;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::unique_ptr<InterprocessConnection> accepted;
+    bool ready = false;
+    bool callback_entered = false;
+    bool release_callback = false;
+    bool destroyed = false;
+
+    server.on_client_connected = [&](std::unique_ptr<InterprocessConnection> conn) {
+        conn->set_on_message([&](const void*, size_t) {
+            {
+                std::unique_lock lock(mutex);
+                callback_entered = true;
+                cv.notify_all();
+                cv.wait(lock, [&] { return release_callback; });
+            }
+            accepted.reset();
+            {
+                std::lock_guard lock(mutex);
+                destroyed = true;
+            }
+            cv.notify_all();
+        });
+        {
+            std::lock_guard lock(mutex);
+            accepted = std::move(conn);
+            ready = true;
+        }
+        cv.notify_all();
+    };
+
+    const auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+    InterprocessConnection client;
+    REQUIRE(client.connect(
+        "127.0.0.1:" + std::to_string(*port),
+        IpcTransport::Socket));
+    InterprocessConnection* raw = nullptr;
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return ready;
+        }));
+        raw = accepted.get();
+    }
+
+    REQUIRE(client.send_message("destroy-during-external-disconnect"));
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return callback_entered;
+        }));
+    }
+
+    std::atomic<bool> disconnect_returned{false};
+    std::thread disconnect_thread([&] {
+        raw->disconnect();
+        disconnect_returned.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_FALSE(disconnect_returned.load(std::memory_order_acquire));
+    {
+        std::lock_guard lock(mutex);
+        release_callback = true;
+    }
+    cv.notify_all();
+    disconnect_thread.join();
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return destroyed;
+        }));
+        CHECK_FALSE(accepted);
+    }
+    CHECK(disconnect_returned.load(std::memory_order_acquire));
+
+    client.disconnect();
+    server.stop();
+}
+
 TEST_CASE("IPC socket server virtual callback accepts empty frames",
           "[events][ipc][socket][issue-642]") {
     CapturingServer server;

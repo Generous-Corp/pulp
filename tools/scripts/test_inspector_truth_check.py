@@ -117,6 +117,16 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 "const auto challenge_timeout = remaining()\n"
                 "const auto authentication_timeout = remaining()\n"
                 "impl_->wait_for_response(1, remaining())\n",
+            "core/events/include/pulp/events/interprocess_connection.hpp":
+                "std::shared_ptr<Impl> impl_\n",
+            "core/events/src/interprocess_connection.cpp":
+                "bool read_running = false\n"
+                "const auto impl = impl_\n"
+                "return !lifecycle->read_running\n"
+                "read_thread.detach()\n"
+                "if (!runtime::AliveToken::is_alive(alive))\n",
+            "test/test_ipc.cpp":
+                "IPC read callback destruction coordinates with external disconnect\n",
         }
         for relative, text in files.items():
             path = root / relative

@@ -127,9 +127,8 @@ public:
 
 private:
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
     std::atomic<IpcState> state_{IpcState::Disconnected};
-    std::thread read_thread_;
     std::atomic<bool> running_{false};
     std::atomic<std::size_t> max_message_bytes_{64u * 1024u * 1024u};
     std::atomic<std::int64_t> write_timeout_ms_{0};

@@ -23,6 +23,7 @@ struct DisconnectLifecycle {
     std::mutex mutex;
     std::condition_variable cv;
     bool active = false;
+    bool read_running = false;
     std::thread::id owner;
     std::thread::id read_thread_id;
 };
@@ -122,7 +123,8 @@ struct InterprocessConnection::Impl {
 
 // ── InterprocessConnection ──────────────────────────────────────────────
 
-InterprocessConnection::InterprocessConnection() : impl_(std::make_unique<Impl>()) {}
+InterprocessConnection::InterprocessConnection()
+    : impl_(std::make_shared<Impl>()) {}
 InterprocessConnection::~InterprocessConnection() { disconnect(); }
 
 void InterprocessConnection::set_on_connected(std::function<void()> callback) {
@@ -263,7 +265,8 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
 
 void InterprocessConnection::disconnect() {
     const auto caller = std::this_thread::get_id();
-    const auto lifecycle = impl_->lifecycle;
+    const auto impl = impl_;
+    const auto lifecycle = impl->lifecycle;
     {
         std::unique_lock lifecycle_lock(lifecycle->mutex);
         while (lifecycle->active) {
@@ -290,24 +293,24 @@ void InterprocessConnection::disconnect() {
     const auto alive = alive_.capture();
     const bool was_connected = state_.exchange(IpcState::Disconnected) == IpcState::Connected;
     running_.store(false);
-    impl_->interrupt_blocking_io();
-    if (read_thread_.joinable()) {
-        if (read_thread_.get_id() == std::this_thread::get_id())
-            read_thread_.detach();
-        else
-            read_thread_.join();
-    }
+    impl->interrupt_blocking_io();
     {
-        // A joined thread ID may be reused immediately. Keep the reentrant
-        // read-thread exemption only while that read thread can still exist.
-        std::lock_guard lifecycle_lock(lifecycle->mutex);
-        lifecycle->read_thread_id = {};
+        std::unique_lock lifecycle_lock(lifecycle->mutex);
+        if (lifecycle->read_thread_id != caller) {
+            lifecycle->cv.wait(lifecycle_lock, [&lifecycle] {
+                return !lifecycle->read_running;
+            });
+        }
     }
-    std::unique_lock write_lock(impl_->write_mutex);
-    impl_->close();
+    std::unique_lock write_lock(impl->write_mutex);
+    impl->close();
     write_lock.unlock();
 
     if (was_connected) {
+        if (!runtime::AliveToken::is_alive(alive)) {
+            finish_disconnect();
+            return;
+        }
         connection_lost();
         if (!runtime::AliveToken::is_alive(alive)) {
             finish_disconnect();
@@ -438,18 +441,29 @@ void InterprocessConnection::set_frame_read_timeout(
 }
 
 void InterprocessConnection::start_read_thread() {
-    running_.store(true);
     const auto start_gate = std::make_shared<std::atomic<bool>>(false);
-    read_thread_ = std::thread([this, start_gate]() {
+    const auto impl = impl_;
+    const auto lifecycle = impl->lifecycle;
+    std::unique_lock lifecycle_lock(lifecycle->mutex);
+    if (lifecycle->active ||
+        state_.load(std::memory_order_acquire) != IpcState::Connected) {
+        return;
+    }
+    running_.store(true);
+    std::thread read_thread([this, impl, lifecycle, start_gate]() {
         while (!start_gate->load(std::memory_order_acquire))
             std::this_thread::yield();
         read_loop();
+        {
+            std::lock_guard lifecycle_lock(lifecycle->mutex);
+            lifecycle->read_running = false;
+            lifecycle->read_thread_id = {};
+        }
+        lifecycle->cv.notify_all();
     });
-    {
-        const auto lifecycle = impl_->lifecycle;
-        std::lock_guard lifecycle_lock(lifecycle->mutex);
-        lifecycle->read_thread_id = read_thread_.get_id();
-    }
+    lifecycle->read_running = true;
+    lifecycle->read_thread_id = read_thread.get_id();
+    read_thread.detach();
     start_gate->store(true, std::memory_order_release);
 }
 
