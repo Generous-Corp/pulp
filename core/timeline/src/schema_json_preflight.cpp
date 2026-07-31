@@ -498,6 +498,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"regions"},
             detail::JsonSpanMember{"scenes"},
+            detail::JsonSpanMember{"track_order"},
             detail::JsonSpanMember{"tracks"},
         };
         // These indices are positional into `requested`, which is in canonical
@@ -557,7 +558,15 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
             return false;
         }
-        if (!requested[9].found) {
+        const auto requires_track_order =
+            detail::sequence_schema_policy.requires_track_order(version);
+        if (requires_track_order != requested[9].found ||
+            (requested[9].found && !has_shape(requested[9].span, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/track_order");
+            return false;
+        }
+        if (!requested[10].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
@@ -597,7 +606,22 @@ class StructuralScanner {
                                                   data_path + "/scenes/" + std::to_string(index));
                             }))
             return false;
-        const auto tracks = requested[9].span;
+        // The order names existing tracks, so it can never legitimately hold more
+        // entries than a sequence may hold tracks. The count is local rather than
+        // shared with counts_.tracks: charging both arrays to one quota would
+        // halve how many tracks a document may actually carry.
+        std::size_t order_entries = 0;
+        if (requested[9].found &&
+            !governed_array(requested[9].span, order_entries, limits_.max_tracks,
+                            data_path + "/track_order", [&](Span entry, std::size_t index) {
+                                if (has_shape(entry, StringShape))
+                                    return true;
+                                set_error(PersistenceErrorCode::InvalidSchema, entry.begin, 0, 0,
+                                          data_path + "/track_order/" + std::to_string(index));
+                                return false;
+                            }))
+            return false;
+        const auto tracks = requested[10].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,

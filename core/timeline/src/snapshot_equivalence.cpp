@@ -90,6 +90,9 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             left_sequence.scenes().size() != right_sequence.scenes().size() ||
             !std::equal(left_sequence.scenes().begin(), left_sequence.scenes().end(),
                         right_sequence.scenes().begin()) ||
+            left_sequence.track_order().size() != right_sequence.track_order().size() ||
+            !std::equal(left_sequence.track_order().begin(), left_sequence.track_order().end(),
+                        right_sequence.track_order().begin()) ||
             !std::equal(left_sequence.markers().begin(), left_sequence.markers().end(),
                         right_sequence.markers().begin(), same_marker) ||
             !std::equal(left_sequence.regions().begin(), left_sequence.regions().end(),

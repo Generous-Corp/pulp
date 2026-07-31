@@ -563,7 +563,7 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.sequence": Object.freeze({
     schemaType: "pulp.timeline.sequence",
     domain: "Document",
-    version: 5,
+    version: 6,
     fields: Object.freeze([
       Object.freeze({ name: "absolute_duration", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "chord_scale_lane", kind: "Array", jsType: "array", required: true }),
@@ -574,6 +574,7 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "regions", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "scenes", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "track_order", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "tracks", kind: "Array", jsType: "array", required: true }),
     ]),
   }),

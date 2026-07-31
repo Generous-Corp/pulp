@@ -1778,6 +1778,13 @@
         },
         {
           "kind": "Array",
+          "name": "track-order",
+          "required": true,
+          "schema_field": "track_order",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
           "name": "tracks",
           "required": true,
           "schema_field": "tracks",
@@ -1786,7 +1793,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 5
+      "version": 6
     },
     {
       "domain": "Document",

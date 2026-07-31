@@ -90,6 +90,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"name", SchemaValueKind::String},
         {"regions", SchemaValueKind::Array},
         {"scenes", SchemaValueKind::Array},
+        {"track_order", SchemaValueKind::Array},
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField chord_scale_event_fields[] = {

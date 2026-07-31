@@ -331,6 +331,13 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFix
                                   rebuilt.error().related_item);
         tracks.push_back(std::move(rebuilt).value());
     }
+    // Authored order names the same identities the track list does, so it is
+    // remapped alongside them. Dropping it would silently reset the arrangement
+    // to identity order every time a sequence is copied or imported.
+    std::vector<ItemId> track_order;
+    track_order.reserve(sequence.track_order().size());
+    for (const auto& id : sequence.track_order())
+        track_order.push_back(*table.find(id));
     std::vector<SequenceMarker> markers(sequence.markers().begin(), sequence.markers().end());
     for (auto& marker : markers)
         marker.id = *table.find(marker.id);
@@ -362,6 +369,7 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, RemapIdFix
         .chord_scale_lane = sequence.chord_scale_lane(),
         .groove = sequence.groove(),
         .scenes = std::move(scenes),
+        .track_order = std::move(track_order),
     });
 }
 
