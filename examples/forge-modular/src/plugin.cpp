@@ -12,6 +12,7 @@ extern "C" __attribute__((visibility("default")))
 void init(rack::plugin::Plugin* p) {
     pluginInstance = p;
     // Signal order, which is also how they appear in the Module Browser.
+    // BEGIN generated model registrations
     p->addModel(modelVCO);
     p->addModel(modelVCF);
     p->addModel(modelVCA);
@@ -20,20 +21,26 @@ void init(rack::plugin::Plugin* p) {
     p->addModel(modelEUCLID);
     p->addModel(modelSEQ);
     p->addModel(modelMIX);
-    p->addModel(modelCARTOG);
     p->addModel(modelATT);
     p->addModel(modelMULT);
-    p->addModel(modelDUALATN);
     p->addModel(modelATTEN);
-    p->addModel(modelMORPHLFO);
-    p->addModel(modelFOURPOLE);
-    p->addModel(modelSTEPS);
-    p->addModel(modelKICK);
-    p->addModel(modelSANDH);
-    p->addModel(modelFOLD);
-    p->addModel(modelDUALAD);
-    p->addModel(modelTANGLE);
-    p->addModel(modelSIXMIX);
-    p->addModel(modelOFFSETLY);
+    p->addModel(modelCARTOG);
+    p->addModel(modelDIV);
     p->addModel(modelDIVIDELY);
+    p->addModel(modelDUALAD);
+    p->addModel(modelDUALATN);
+    p->addModel(modelFOLD);
+    p->addModel(modelFOLDR);
+    p->addModel(modelFOURPOLE);
+    p->addModel(modelKICK);
+    p->addModel(modelLPGATE);
+    p->addModel(modelMORPHLFO);
+    p->addModel(modelOFFSETLY);
+    p->addModel(modelSANDH);
+    p->addModel(modelSIXMIX);
+    p->addModel(modelSLEWRF);
+    p->addModel(modelSTEPS);
+    p->addModel(modelSTRANGE);
+    p->addModel(modelTANGLE);
+    // END generated model registrations
 }

@@ -881,6 +881,65 @@ def main(argv):
         with open(p, "w") as f:
             f.write(emit_cpp(man))
         print(f"cpp: -> src/generated_modules.hpp")
+
+        # plugin.hpp's extern block must name every module the manifest does.
+        # It was hand-maintained and drifted -- 24 declarations against a
+        # 29-module manifest -- so the build failed on the five undeclared
+        # ones, and Rack refuses the WHOLE plugin over a single manifest/binary
+        # mismatch: "Manifest contains module DIV but it is not defined in
+        # plugin" takes all 29 with it. Derived from the manifest now, between
+        # markers, so the rest of the header stays hand-written.
+        hpp = os.path.join(root, "src", "plugin.hpp")
+        if os.path.exists(hpp):
+            begin = "// BEGIN generated model declarations"
+            end = "// END generated model declarations"
+            decls = "\n".join(
+                f"extern rack::plugin::Model* model{m['slug']};"
+                for m in man["modules"])
+            block = f"{begin}\n{decls}\n{end}"
+            text = open(hpp).read()
+            if begin in text and end in text:
+                head = text[:text.index(begin)]
+                tail = text[text.index(end) + len(end):]
+                text = head + block + tail
+            else:
+                # First run: replace whatever extern lines are there with the
+                # marked block, so this is idempotent from here on.
+                lines = [ln for ln in text.splitlines()
+                         if not ln.startswith("extern rack::plugin::Model*")]
+                text = "\n".join(lines).rstrip() + "\n\n" + block + "\n"
+            with open(hpp, "w") as f:
+                f.write(text)
+            print(f"hpp: {len(man['modules'])} declaration(s) -> src/plugin.hpp")
+
+        # And plugin.cpp's registrations, for the same reason: it carried 25
+        # addModel calls against a 29-module manifest, so four modules were
+        # declared and compiled but never registered -- which is the exact
+        # shape of "Manifest contains module DIV but it is not defined in
+        # plugin". Manifest, declarations and registrations are now one derived
+        # set; drift between them is not representable.
+        cpp = os.path.join(root, "src", "plugin.cpp")
+        if os.path.exists(cpp):
+            begin = "    // BEGIN generated model registrations"
+            end = "    // END generated model registrations"
+            adds = "\n".join(f"    p->addModel(model{m['slug']});"
+                              for m in man["modules"])
+            block = f"{begin}\n{adds}\n{end}"
+            text = open(cpp).read()
+            if begin in text and end in text:
+                head = text[:text.index(begin)]
+                tail = text[text.index(end) + len(end):]
+                text = head + block + tail
+            else:
+                lines = [ln for ln in text.splitlines()
+                         if "p->addModel(" not in ln]
+                # Put the block back inside init(), before its closing brace.
+                joined = "\n".join(lines)
+                close = joined.rindex("}")
+                text = joined[:close] + block + "\n" + joined[close:]
+            with open(cpp, "w") as f:
+                f.write(text)
+            print(f"cpp: {len(man['modules'])} registration(s) -> src/plugin.cpp")
     return rc
 
 

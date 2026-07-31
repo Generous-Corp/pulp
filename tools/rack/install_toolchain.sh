@@ -57,14 +57,30 @@ for part in "${PARTS[@]}"; do
     # removed its .vcv, after which Open in Rack reported a file that was not
     # there. rsync -a also stamps the directory with the SOURCE's mtime, which
     # is what made the deletion look like it had never happened.
-    delete_flag="--delete"
+    # The module pack holds GENERATED state, and it has to stay internally
+    # consistent: plugin.json, modules/*.json and src/generated_modules.hpp
+    # describe each other, and patches/ names what they define. Rack refuses to
+    # load the WHOLE plugin over one mismatch --
+    #   "Manifest contains module DIV but it is not defined in plugin"
+    # takes all 29 modules with it.
+    #
+    # A first attempt only dropped --delete, which was worse than useless: the
+    # generated manifests survived while the generated SOURCE was overwritten
+    # from the tree, which is precisely how that mismatch was created. So the
+    # generated set is left alone entirely, and only the parts a toolchain
+    # update genuinely needs to refresh are synced.
+    # An exclude FILE rather than an array: macOS ships bash 3.2, where an
+    # empty array expanded under `set -u` is an unbound variable and aborts the
+    # install.
+    exclude_file="$(mktemp)"
+    printf '%s\n' __pycache__ '*.pyc' build '*.o' > "$exclude_file"
     if [ "$part" = "examples/forge-modular" ]; then
-      delete_flag=""
+      printf '%s\n' 'modules/' 'patches/' 'plugin.json' \
+        'src/generated_modules.hpp' 'src/*.cpp' 'res/' >> "$exclude_file"
     fi
-    rsync -a $delete_flag \
-      --exclude __pycache__ --exclude '*.pyc' \
-      --exclude build --exclude '*.o' \
+    rsync -a --delete --exclude-from="$exclude_file" \
       "$SRC/$part/" "$DEST/$part/"
+    rm -f "$exclude_file"
   else
     cp "$SRC/$part" "$DEST/$part"
   fi
