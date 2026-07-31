@@ -282,6 +282,22 @@ int lower_semantic_controls(const fs::path& path,
         // move nothing.
         control.attributes["binding"] = param;
         control.attributes["pulpParamKey"] = param;
+        // A param key alone gets the control into the binding MANIFEST but not
+        // into the emitted C++. `collect_resolved_binding_plan` admits a helper
+        // route only when the node ALSO carries a route id and a stable anchor:
+        // the emitted helper finds its widget by anchor and claims it by route
+        // id, so without both there is nothing to find and nothing to claim.
+        // The manifest then lists bindings that no generated code applies --
+        // which reads as wired and moves nothing.
+        //
+        // Keyed on the macro plus the candidate index rather than the macro
+        // alone: a meter may legitimately share a macro with the control that
+        // drives it, and two routes with one anchor make the emitted lookup
+        // ambiguous, which the generated code treats as no match at all.
+        const auto anchor = "capture:" + param + ":" + std::to_string(i);
+        control.stable_anchor_id = anchor;
+        control.anchor_strategy = "path";
+        control.attributes["pulpRouteId"] = anchor;
         // The body of this control is the captured bitmap beneath it, so it
         // carries no background of its own and would otherwise fail the
         // has-a-body test that selects the value-only skin -- and be painted
