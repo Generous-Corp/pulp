@@ -118,6 +118,29 @@ Start with IWYU: it is the cheapest of the three, so a mistake costs the least.
 Check capacity first — `ssh macpro /usr/local/sbin/macpro-governor.sh status` — and
 remember the pool is two slots, so three routed lanes plus `Linux (x64)` will queue
 against each other before they queue against GitHub.
+## Windows runs nightly, not per merge
+
+Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
+Windows context appears in `main`'s required checks, so the merge queue never waits
+for it. Measured across 12 runs it was roughly **90% of billable Actions spend**,
+and with `max_entries_to_build=2` each merge cycle ran it twice.
+
+It now runs on `schedule` and `workflow_dispatch` only. Coverage did not move to
+nobody: `cross-platform-check.yml` already builds and tests Windows nightly, and its
+`tracking-issues` job find-or-creates a per-platform issue on failure, reopens a
+closed one, and auto-closes it on recovery. So a Windows regression is caught,
+filed as a work item, and picked up deliberately — instead of consuming queue
+capacity that the required checks are waiting behind.
+
+Need Windows on a specific change before the nightly? Dispatch it:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
+exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
+active workstream rather than a background one.
 ## The FetchContent cache had to point at a real path
 
 `build.yml` restored and saved three FetchContent paths and none of them ever

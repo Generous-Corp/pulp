@@ -662,6 +662,52 @@ Declare it in `tools/scripts/runner_topology.json` **with `unset_fallback`** in 
 same change, or the hourly topology check reports an unset lane as having no route
 at all. Flip one variable at a time and watch a full cycle; rollback is unsetting
 it.
+## Windows is nightly-only, and that is deliberate
+
+Windows does not run on `pull_request` **or** `merge_group`. It runs on `schedule`
+and `workflow_dispatch`.
+
+Why: Windows is the single largest consumer of hosted runner *time* and **gates
+nothing** — no Windows context appears in `main`'s required checks, so the merge
+queue never waits for it. It was occupying the hosted pool the *required* checks
+queue behind, and with `max_entries_to_build=2` it ran twice per cycle.
+
+The argument is **minutes, not dollars** — the org's own July 2026 usage, which
+corrects an earlier claim here that Windows was "~90% of billable spend":
+
+| SKU | minutes | share of minutes | share of cost |
+|---|---|---|---|
+| Windows | 94,548 | 37% | 17% |
+| Linux | 88,646 | 35% | 9% |
+| macOS 3-core | 66,033 | 26% | **73%** |
+
+macOS dominates *cost* (it bills at ~10x Linux per minute), Windows dominates
+*occupancy*. Moving Windows off the per-merge path buys queue throughput, not a
+smaller invoice — and the macOS gate is the thing to protect, precisely because
+it is both the expensive lane and the only required one.
+
+Coverage lives in `cross-platform-check.yml`: it builds and tests Windows nightly,
+and its `tracking-issues` job find-or-creates a per-platform issue on failure,
+reopens a closed one, and auto-closes on recovery. So a Windows regression becomes
+a filed work item, not a queue tax.
+
+Need Windows on a specific branch before the nightly:
+
+```sh
+ghapp workflow run build.yml --ref <branch>
+```
+
+**Before "fixing" this by putting Windows back on merge_group**, note the trade was
+explicit: up to ~24 h of latency on a Windows regression, bought with merge-queue
+capacity. Revisit only if Windows parity becomes an active workstream rather than a
+background one.
+
+Related, and rejected on measurement: moving the Ubuntu preamble jobs off the Macs.
+`pulp-preamble-m5` and `pulp-studio-02` do also carry the `pulp-build` gate label,
+so the starvation mechanism is real — but it is ~0.6 min of Mac time per run, and
+the `linux`/`windows` alias jobs are `needs: build`, not pollers, so they never hold
+a slot for a build's duration. Relocating them pushes four more jobs into the
+contended hosted pool to reclaim half a minute.
 ## A cache that looks configured can be saving nothing
 
 `actions/cache` reports success whether or not the path it was handed contains

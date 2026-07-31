@@ -551,7 +551,21 @@ jobs:
           # better coverage than the PR head. `push` keeps it for Windows
           # ccache warming, and workflow_dispatch keeps it for explicit reruns.
           # PR heads keep macOS (self-hosted) and Linux for fast signal.
-          if EVENT_NAME != "pull_request":
+          # Windows is billed at 2x and gates nothing — no Windows context appears
+          # in main's required checks, so the queue never waits for it. Running it
+          # per merge group was ~90% of billable Actions spend for zero merge
+          # signal, and with max_entries_to_build=2 it ran twice per cycle. The
+          # note above already identifies the cost ("starve the required ubuntu
+          # check that the merge queue waits on"); this is the conclusion.
+          #
+          # Coverage moves to cross-platform-check.yml, which already builds and
+          # tests Windows nightly AND whose tracking-issues job find-or-creates a
+          # per-platform issue on failure, reopens a closed one, and auto-closes on
+          # recovery. Catch-and-file, without blocking a merge.
+          #
+          # workflow_dispatch is kept so a Windows-touching change can be verified
+          # on demand rather than waiting for the nightly.
+          if EVENT_NAME not in ("pull_request", "merge_group"):
               include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
@@ -1238,6 +1252,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -1305,6 +1320,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -1367,6 +1383,7 @@ jobs:
       needs.classify.outputs.native_build_required == 'true'
       && github.event_name != 'push'
       && github.event_name != 'pull_request'
+      && github.event_name != 'merge_group'
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
