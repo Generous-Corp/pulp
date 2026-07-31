@@ -1466,6 +1466,44 @@ TEST_CASE("depth rewrites the explanation, and hover lights the cable",
     CHECK(std::filesystem::file_size(shot) > 20000);
 }
 
+TEST_CASE("the explanation is grouped by what each cable carries", "[rack]") {
+    // A flat list of a dozen cables is a netlist. Grouped, the same dozen say
+    // how the patch is organised before a line of it is read -- which is the
+    // difference between showing someone a patch and teaching them one.
+    forge_modular::PatchExplanation ex;
+    ex.set_connections(sample_patch(), sample_rack());
+    ex.set_bounds({0, 0, 820, 300});
+
+    // Headings are the children that are not cable rows.
+    std::set<const pulp::view::View*> cable_rows;
+    for (std::size_t i = 0; i < sample_patch().size(); ++i)
+        cable_rows.insert(ex.row_for(i));
+
+    std::vector<std::string> headings;
+    for (int i = 0; i < ex.child_count(); ++i) {
+        const auto* child = ex.child_at(i);
+        if (cable_rows.count(child)) continue;
+        std::string text;
+        for (int c = 0; c < child->child_count(); ++c)
+            if (auto* l = dynamic_cast<const pulp::view::Label*>(child->child_at(c)))
+                text += (text.empty() ? "" : " ") + l->text();
+        headings.push_back(text);
+    }
+
+    // The sample is two audio cables and one modulation cable. The counts are
+    // part of the heading because "3 CABLES" describes the patch's shape at a
+    // glance; a heading without one would pass a weaker version of this test.
+    REQUIRE(headings.size() == 2);
+    CHECK(headings[0] == "AUDIO 2 CABLES");
+    CHECK(headings[1] == "MODULATION 1 CABLE");
+
+    // Signal order, not alphabetical and not the order the model happened to
+    // emit: what you hear, then what picks the notes, then time, then motion.
+    // And no heading for a role the patch does not use -- an empty PITCH &
+    // GATE heading would claim the patch has something it has not.
+    for (const auto& h : headings) CHECK(h.find("PITCH") == std::string::npos);
+}
+
 TEST_CASE("explanation lines do not overlap", "[rack][render]") {
     forge_modular::PatchExplanation ex;
     ex.set_connections(sample_patch(), sample_rack());
@@ -1479,7 +1517,14 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
     // The regression this closes: wrapped lines drew on top of each other, so
     // the explanation was unreadable in every render before this. Assert the
     // geometry, because the render only shows it to a human who looks.
-    REQUIRE(ex.child_count() == 3);
+    //
+    // One child per cable, plus one heading per role present -- derived from
+    // the fixture rather than written down, so adding a cable to the sample
+    // does not silently turn this into a weaker test.
+    std::set<forge_modular::SignalRole> roles;
+    for (const auto& c : sample_patch()) roles.insert(c.role);
+    REQUIRE(ex.child_count() ==
+            static_cast<int>(sample_patch().size() + roles.size()));
     float previous_bottom = -1.0f;
     for (int r = 0; r < ex.child_count(); ++r) {
         auto* row = ex.child_at(r);
@@ -1494,12 +1539,22 @@ TEST_CASE("explanation lines do not overlap", "[rack][render]") {
         // -- so each wrapped line sat on top of the one above it. A point of
         // rounding between the height and the advance is invisible; half a
         // line is not.
+    }
+
+    // Wrapped lines advance by close to a full line. Asserted over the CABLE
+    // rows only: a role heading is two labels side by side, which is a
+    // different shape on purpose and would fail an assertion written for a
+    // stack of lines.
+    for (std::size_t i = 0; i < sample_patch().size(); ++i) {
+        const auto* row = ex.row_for(i);
+        REQUIRE(row != nullptr);
         float previous_top = -1000.0f;
         for (int c = 0; c < row->child_count(); ++c) {
-            auto* lbl = dynamic_cast<pulp::view::Label*>(row->child_at(c));
+            auto* lbl = dynamic_cast<const pulp::view::Label*>(row->child_at(c));
             if (!lbl) continue;                  // the role dot
             const auto lb = lbl->bounds();
-            INFO("  line at " << lb.y << " height " << lb.height);
+            INFO("  cable " << i << " line at " << lb.y
+                            << " height " << lb.height);
             CHECK(lb.height >= 17.0f);           // a full line, not a squeezed one
             if (previous_top > -999.0f) CHECK(lb.y - previous_top >= 16.0f);
             previous_top = lb.y;

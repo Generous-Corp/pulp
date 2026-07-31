@@ -134,7 +134,54 @@ void PatchExplanation::rebuild() {
     flex().direction = FlexDirection::column;
     flex().gap = 6;
 
-    for (std::size_t i = 0; i < connections_.size(); ++i) {
+    // Grouped by what each cable carries, in signal order: what you hear, then
+    // what decides the notes, then what keeps time, then what moves. A flat
+    // list of a dozen cables is a netlist; grouped, the same dozen say how the
+    // patch is organised before a single line is read.
+    rows_.assign(connections_.size(), nullptr);
+    struct Group {
+        SignalRole role;
+        const char* title;
+    };
+    static constexpr Group kGroups[] = {
+        {SignalRole::audio, "AUDIO"},
+        {SignalRole::pitch, "PITCH & GATE"},
+        {SignalRole::clock, "CLOCK"},
+        {SignalRole::mod,   "MODULATION"},
+    };
+
+    for (const auto& group : kGroups) {
+        std::vector<std::size_t> members;
+        for (std::size_t i = 0; i < connections_.size(); ++i)
+            if (connections_[i].role == group.role) members.push_back(i);
+        if (members.empty()) continue;   // an absent role is not a heading
+
+        auto header = std::make_unique<View>();
+        header->flex().direction = FlexDirection::row;
+        header->flex().dim_width = {100, pulp::view::DimensionUnit::percent};
+        header->flex().flex_shrink = 0;
+        header->flex().padding_top = 10;
+        header->flex().padding_bottom = 2;
+
+        auto title = std::make_unique<Label>(group.title);
+        title->set_font_family(forge::design::type::mono);
+        title->set_font_size(10.5f);
+        title->set_text_color(color::text_muted);
+        title->flex().flex_grow = 1;
+        header->add_child(std::move(title));
+
+        // The count, because "3 CABLES" tells you the shape of the patch
+        // before you read a word of it.
+        auto count = std::make_unique<Label>(
+            std::to_string(members.size()) +
+            (members.size() == 1 ? " CABLE" : " CABLES"));
+        count->set_font_family(forge::design::type::mono);
+        count->set_font_size(10.5f);
+        count->set_text_color(color::text_faint);
+        header->add_child(std::move(count));
+        add_child(std::move(header));
+
+        for (const std::size_t i : members) {
         // Built exactly like a Forge chat bubble: a column with a bounded
         // width, holding a label that is also 100% wide and does not shrink.
         // That is the shape soft-wrap measures correctly. A row with a
@@ -183,8 +230,9 @@ void PatchExplanation::rebuild() {
             row->add_child(std::move(label));
         }
 
-        rows_.push_back(row.get());
+        rows_[i] = row.get();
         add_child(std::move(row));
+        }
     }
     request_repaint();
 }

@@ -34,6 +34,16 @@ public:
     void set_connections(std::vector<Connection> connections,
                          std::vector<RackModule> modules);
     void set_depth(ExplainDepth depth);
+
+    /// The row drawn for one connection, or null if there is none.
+    ///
+    /// Exposed for tests: the view also holds role HEADINGS, which are a row of
+    /// two labels side by side and so break any assertion written for a stack
+    /// of wrapped lines. A test that means "the cable rows" should say so
+    /// rather than walking every child and hoping.
+    const pulp::view::View* row_for(std::size_t connection) const {
+        return connection < rows_.size() ? rows_[connection] : nullptr;
+    }
     ExplainDepth depth() const { return depth_; }
 
     /// What one line reads as at the current depth. Pure, so the wording is
