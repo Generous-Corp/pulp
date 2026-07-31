@@ -32,6 +32,7 @@ function(pulp_resolve_timeline_sources root output)
         transaction_sequence_internal.cpp
         transaction_note_internal.cpp
         transaction_take_internal.cpp
+        transaction_track_internal.cpp
         transaction_track_state_internal.cpp
         transaction_reduction_support.cpp
         undo.cpp
