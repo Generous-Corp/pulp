@@ -255,6 +255,59 @@ def check_silence_mechanism() -> int:
     return bad
 
 
+def check_preview_matches_rack() -> int:
+    """What Forge Modular draws must be what Rack will actually show.
+
+    The preview reads the pack's manifests -- 30 modules, panels and all --
+    while Rack can only create what its installed plugin BINARY contains. On a
+    machine running an older build those differ by eight modules, so a patch
+    renders perfectly in the app and opens in Rack as a different rack, with
+    modules silently missing. Reported as "the VCV Rack patch/models are
+    different than what I see in Forge Modular", and nothing in the project
+    compared them.
+    """
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    bad = 0
+
+    # A patch of a module that IS installed must verify clean...
+    installed = sorted(P.inventory().get("ForgeModular", {}).get("modules", {}))
+    if not installed:
+        print("  --     no ForgeModular plugin installed; cannot compare")
+        return 0
+    import tempfile, json as _json
+    with tempfile.TemporaryDirectory() as tmp:
+        good = os.path.join(tmp, "good.vcv")
+        _json.dump({"version": "2.6.6", "modules": [
+            {"id": 1, "plugin": "ForgeModular", "model": installed[0],
+             "pos": [0, 0]}], "cables": []}, open(good, "w"))
+        r = subprocess.run([sys.executable, "patch.py", "verify", good],
+                           cwd=here, capture_output=True, text=True)
+        if r.returncode != 0 or "agree" not in r.stdout:
+            print(f"  WRONG  a patch of an INSTALLED module did not verify: "
+                  f"{r.stdout.strip()[:200]}")
+            bad += 1
+
+        # ...and one naming a module the plugin does not have must not.
+        gone = os.path.join(tmp, "gone.vcv")
+        _json.dump({"version": "2.6.6", "modules": [
+            {"id": 1, "plugin": "ForgeModular", "model": "NOSUCHMODULE",
+             "pos": [0, 0]}], "cables": []}, open(gone, "w"))
+        r = subprocess.run([sys.executable, "patch.py", "verify", gone],
+                           cwd=here, capture_output=True, text=True)
+        if r.returncode == 0:
+            print("  WRONG  a module Rack cannot create was reported as fine — "
+                  "the preview and the rack would disagree in silence")
+            bad += 1
+        elif "will drop it" not in r.stdout:
+            print(f"  WRONG  it failed without saying Rack would drop it: "
+                  f"{r.stdout.strip()[:200]}")
+            bad += 1
+    if not bad:
+        print("  ok     the preview is compared against what Rack can create")
+    return bad
+
+
 def check_model_failure() -> int:
     """A failed model call has to SAY something.
 
@@ -313,6 +366,7 @@ def main():
     bad += check_role_colors(inv)
     bad += check_model_failure()
     bad += check_silence_mechanism()
+    bad += check_preview_matches_rack()
     print(f"\n{len(CASES) + 4 - bad}/{len(CASES) + 4} correct")
     return 1 if bad else 0
 

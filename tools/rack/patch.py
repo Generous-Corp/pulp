@@ -5,6 +5,7 @@
     patch.py explain <file.vcv>           # signal flow, in readable form
     patch.py lint    <file.vcv>           # would Rack actually load this?
     patch.py diff    <a.vcv> <b.vcv>      # what changed, structurally
+    patch.py verify  <file.vcv>           # will Rack show what the app drew?
 
 A patch is JSON: modules carry a plugin slug, a model slug, a position and
 param values; cables join an output port on one module to an input port on
@@ -1593,6 +1594,31 @@ def main(argv):
         print(f"  built {len(patch.get('modules', []))} modules, "
               f"{len(patch.get('cables', []))} cables → {out}\n")
         print(explain(patch, inv, why))
+        return 0
+
+    if cmd == "verify" and len(argv) > 2:
+        patch = json.load(open(argv[2]))
+        rows, missing = [], []
+        for m in patch.get("modules", []):
+            plug, model = m.get("plugin"), m.get("model")
+            entry = inv.get(plug, {}).get("modules", {}).get(model)
+            shown = label(inv, m) if entry else model
+            rows.append((plug, model, shown, entry is not None))
+            if entry is None:
+                missing.append(f"{plug}/{model}")
+        width = max((len(f"{p}/{m}") for p, m, _, _ in rows), default=10)
+        print(f"  {'module':<{width}}  {'Rack shows':<16}  in Rack?")
+        for plug, model, shown, ok in rows:
+            print(f"  {plug + '/' + model:<{width}}  {shown:<16}  "
+                  f"{'yes' if ok else 'NO — Rack will drop it'}")
+        if missing:
+            print(f"\n  {len(missing)} module(s) this machine's Rack cannot "
+                  f"create: {', '.join(missing)}")
+            print("  Forge Modular draws them from the pack's manifests, so the "
+                  "preview\n  and the rack you open will NOT match.")
+            return 1
+        print("\n  every module in this patch exists in the installed Rack "
+              "plugin,\n  so the preview and the opened rack agree")
         return 0
 
     if cmd == "diff" and len(argv) > 3:

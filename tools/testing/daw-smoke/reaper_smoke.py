@@ -143,8 +143,26 @@ def load_config() -> dict:
     return cfg
 
 
-def kill_reaper() -> None:
-    subprocess.run(["pkill", "-9", "-x", "REAPER"], capture_output=True)
+def kill_reaper(only_pid: int | None = None) -> None:
+    """Stop the REAPER this harness started -- and ONLY that one.
+
+    `pkill -x REAPER` killed every REAPER on the machine, including the one
+    the person at the keyboard was working in. On a shared machine that is
+    somebody's session and unsaved work, not a test fixture. Reported as
+    "REAPER keeps restarting"; it was being killed and relaunched underneath
+    them.
+    """
+    if only_pid is not None:
+        subprocess.run(["kill", "-9", str(only_pid)], capture_output=True)
+        return
+    if os.environ.get("PULP_DAW_SMOKE_KILL_ALL") == "1":
+        # The old behaviour, for a dedicated CI box with nobody at it.
+        subprocess.run(["pkill", "-9", "-x", "REAPER"], capture_output=True)
+        return
+    # Nothing to do: without a pid there is no REAPER this harness owns, and
+    # killing one it did not start is not its business.
+    log("not killing REAPER: this harness only stops the instance it started "
+        "(set PULP_DAW_SMOKE_KILL_ALL=1 on a machine with nobody at it)")
 
 
 class ReaperSession:
@@ -184,11 +202,60 @@ class ReaperSession:
                     "vstpath64=" + str(self.scan_dir),
                     "clap_path_macos-x86_64=" + str(self.scan_dir),
                 ])
-        (self.portable / "reaper.ini").write_text(
-            "[REAPER]\nsplashscreen=0\nvstpath=" + str(self.scan_dir)
-            + "\nclap_path=" + str(self.scan_dir) + "\n"
-            + "\n".join(arch_lines) + "\n"
-        )
+        # Seed the portable config FROM the real one, rather than starting
+        # from nothing.
+        #
+        # The throwaway config is deliberate: it is what keeps a run from
+        # polluting somebody's REAPER install. But an EMPTY one makes REAPER
+        # come up as a fresh install every single launch -- licence prompt,
+        # first-run preferences, and the audio-hardware setup dialog, over and
+        # over. That is what this did to the person whose machine it ran on,
+        # and this harness ships in Pulp, so it would have done it to everyone
+        # who ran it.
+        #
+        # Their settings are COPIED, never written back: the licence, the audio
+        # device, every preference they have chosen. Only the plugin-scan paths
+        # are overridden, which is the one thing this run legitimately needs to
+        # differ.
+        real_dir = Path(os.path.expanduser("~/Library/Application Support/REAPER"))
+        for extra in ("reaper-license.rk", "reaper-license.txt",
+                      "reaper-menu.ini", "reaper-fxfolders.ini"):
+            src = real_dir / extra
+            if src.exists():
+                try:
+                    shutil.copy2(src, self.portable / extra)
+                except Exception:
+                    pass
+
+        ours = {"vstpath": str(self.scan_dir), "clap_path": str(self.scan_dir),
+                "splashscreen": "0"}
+        for line in arch_lines:
+            key, _, value = line.partition("=")
+            ours[key] = value
+
+        base = ""
+        real_ini = real_dir / "reaper.ini"
+        if real_ini.exists():
+            try:
+                base = real_ini.read_text(errors="replace")
+            except Exception:
+                base = ""
+        if base:
+            kept = [ln for ln in base.splitlines()
+                    if ln.split("=", 1)[0].strip() not in ours]
+            out, inserted = [], False
+            for ln in kept:
+                out.append(ln)
+                if not inserted and ln.strip().lower() == "[reaper]":
+                    out.extend(f"{k}={v}" for k, v in ours.items())
+                    inserted = True
+            if not inserted:
+                out = ["[REAPER]"] + [f"{k}={v}" for k, v in ours.items()] + out
+            text = "\n".join(out) + "\n"
+        else:
+            text = "[REAPER]\n" + "\n".join(f"{k}={v}" for k, v in ours.items()) + "\n"
+        (self.portable / "reaper.ini").write_text(text)
+
         if self.args.format in ("vst3", "clap"):
             shutil.copytree(plugin, self.scan_dir / plugin.name)
         else:  # au — no custom-path scan; install to the real folder, uninstall on exit.
@@ -413,47 +480,46 @@ def _floating_editor_bounds(plugin_name: str) -> tuple[int, int, int, int] | Non
     return None
 
 
-def _editor_is_really_in_front(x: int, y: int, w: int, h: int) -> bool:
-    """Is the plugin's editor the thing actually under the pointer?
+def _dismiss_own_screenshot_ui() -> None:
+    """Put away the Screenshot window this harness's own captures leave behind.
 
-    Frontmost-process is NOT enough, and believing it did real harm: REAPER
-    reported itself frontmost while its FX window sat buried under a remote-
-    desktop session and a terminal full of live agent sessions, so the clicks
-    and the typed prompt went into those instead. On a shared machine that is
+    `screencapture` leaves the Screenshot app running with a floating window,
+    and that window then sits OVER the plugin editor -- so a run that failed
+    and grabbed a screenshot armed the obstruction that blocked the next run.
+    The harness cleans up after itself rather than learning to ignore a window
+    that is genuinely in the way.
+    """
+    subprocess.run(["osascript", "-e", 'tell application "Screenshot" to quit'],
+                   capture_output=True)
+    time.sleep(0.6)
+
+
+def _editor_is_really_in_front(uidriver: str, x: int, y: int,
+                               w: int, h: int, owner: str = "REAPER") -> bool:
+    """Is the plugin's editor what a click at these points would actually hit?
+
+    Asked of the WINDOW SERVER, which knows, rather than inferred from pixels
+    or from which process calls itself frontmost. Believing "frontmost" did
+    real harm: REAPER reported itself frontmost while its editor sat under a
+    remote-desktop session and a terminal full of live agent sessions, so the
+    clicks and the typed prompt went into those. On a shared machine that is
     not a failed test; it is typing into somebody's work.
 
-    So the pixels are checked. Forge's editor is a dark surface with a mint
-    accent, and neither appears in a terminal or on a desktop. Sampled over
-    the area the clicks would land in, not at one point, because one point can
-    be a dark pixel in anything.
+    A pixel heuristic replaced it first and was worse in the other direction:
+    it refused a perfectly visible editor because the rack's panels are
+    lighter than the surface it was looking for. Guessing in either direction
+    is avoidable when the exact question can be asked.
     """
-    shot = "/tmp/pulp-daw-smoke-front.png"
-    subprocess.run(["screencapture", "-x", "-o", shot], check=False)
-    try:
-        from PIL import Image
-        im = Image.open(shot).convert("RGB")
-    except Exception as e:                      # no PIL, no capture, no proof
-        log(f"cannot confirm the editor is in front ({e}) — refusing to click blind")
-        return False
-
-    # screencapture is in device pixels; the window box is in points.
-    factor = 2 if im.width > w * 1.5 else 1
-    hits = total = 0
-    for fx in (0.3, 0.5, 0.73, 0.9):
-        for fy in (0.3, 0.45, 0.53, 0.7):
-            px, py = int((x + w * fx) * factor), int((y + h * fy) * factor)
-            if not (0 <= px < im.width and 0 <= py < im.height):
-                continue
-            total += 1
-            r, g, b = im.getpixel((px, py))
-            mint = g > 150 and b > 120 and r < 120
-            dark_surface = r < 45 and g < 55 and b < 60
-            if mint or dark_surface:
-                hits += 1
-    if total == 0:
-        return False
-    log(f"editor visible at {hits}/{total} sampled points")
-    return hits >= max(1, total - 2)
+    for fx, fy in ((0.567, 0.345), (0.52, 0.48), (0.73, 0.53)):
+        px, py = int(x + w * fx), int(y + h * fy)
+        r = subprocess.run([uidriver, "at", str(px), str(py)],
+                           capture_output=True, text=True)
+        who = r.stdout.strip()
+        if who != owner:
+            log(f"the window at {px},{py} belongs to {who or 'nothing'}, "
+                f"not {owner}")
+            return False
+    return True
 
 
 def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
@@ -530,13 +596,15 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
              f'perform action "AXRaise" of window 1 whose name contains '
              f'"{args.plugin_name}"')
         time.sleep(1.0)
-        front = _osa('tell application "System Events" to get name of first '
-                     'process whose frontmost is true')
-        if "REAPER" not in front:
-            log(f"could not bring REAPER forward (frontmost is {front!r}) — "
-                f"refusing to click into another window — INCONCLUSIVE")
-            return EXIT_INCONCLUSIVE
-        if not _editor_is_really_in_front(x, y, w, h):
+        # No frontmost-process check. It is the wrong question -- REAPER
+        # called itself frontmost while its editor sat under a remote-desktop
+        # session -- and it is unreliable besides: System Events answers
+        # "missing value" when the asking process lacks automation rights,
+        # which reads as "could not bring it forward" for a window that is
+        # perfectly well forward. The window server is asked instead, about
+        # the actual points that will be clicked.
+        _dismiss_own_screenshot_ui()
+        if not _editor_is_really_in_front(str(uidriver), x, y, w, h):
             log("REAPER says it is frontmost, but the editor is not what is on "
                 "screen where the clicks would land — something else is over "
                 "it. Refusing to click: on a shared machine that types into "
@@ -568,6 +636,7 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         if not started:
             subprocess.run(["screencapture", "-x", "-o",
                             "/tmp/forge-reaper-nofire.png"], check=False)
+            _dismiss_own_screenshot_ui()
             log("a screenshot of what was on screen is at "
                 "/tmp/forge-reaper-nofire.png")
             log("the Build click did not start a generation inside the host: "

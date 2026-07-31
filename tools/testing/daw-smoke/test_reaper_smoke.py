@@ -403,44 +403,123 @@ class FormatIsAsked(unittest.TestCase):
 
 
 class RefusesToClickBlind(unittest.TestCase):
-    """It must not click when the editor is not what is on screen.
+    """It must not click when the editor is not what a click would hit.
 
     REAPER reported itself frontmost while its FX window sat under a remote-
     desktop session and a terminal full of live agent sessions. The clicks and
-    the typed prompt went into those. Frontmost-process is not proof, and on a
-    shared machine a wrong click is not a failed test -- it is typing into
-    somebody's work.
+    the typed prompt went into those. Frontmost-process is not the same
+    question as "what is at this point", and on a shared machine a wrong click
+    is not a failed test -- it is typing into somebody's work.
     """
 
-    def _screen(self, colour):
-        from PIL import Image
-        img = Image.new("RGB", (2000, 2000), colour)
-        img.save("/tmp/pulp-daw-smoke-front.png")
+    def _driver(self, answers):
+        """A stub uidriver that reports who owns each queried point."""
+        calls = iter(answers)
 
-    def test_a_desktop_full_of_other_windows_is_refused(self):
-        try:
-            self._screen((210, 210, 215))       # a bright, non-Forge screen
-        except ImportError:
-            self.skipTest("no PIL")
-        with mock.patch.object(rs.subprocess, "run"):
-            self.assertFalse(rs._editor_is_really_in_front(0, 0, 800, 600))
+        def run(cmd, **kw):
+            return mock.Mock(stdout=next(calls) + "\n", returncode=0)
+        return run
+
+    def test_something_over_the_editor_is_refused(self):
+        with mock.patch.object(rs.subprocess, "run",
+                               side_effect=self._driver(["Terminal"])):
+            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
 
     def test_the_editor_itself_is_accepted(self):
-        try:
-            self._screen((26, 30, 36))          # Forge's dark surface
-        except ImportError:
-            self.skipTest("no PIL")
-        with mock.patch.object(rs.subprocess, "run"):
-            self.assertTrue(rs._editor_is_really_in_front(0, 0, 800, 600))
+        with mock.patch.object(rs.subprocess, "run",
+                               side_effect=self._driver(["REAPER"] * 3)):
+            self.assertTrue(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
 
-    def test_no_capture_means_no_click(self):
-        # Unable to look is not permission to proceed.
-        try:
-            os.remove("/tmp/pulp-daw-smoke-front.png")
-        except FileNotFoundError:
-            pass
-        with mock.patch.object(rs.subprocess, "run"):
-            self.assertFalse(rs._editor_is_really_in_front(0, 0, 800, 600))
+    def test_every_click_point_is_checked_not_just_the_first(self):
+        # The prompt field and Build are in different places; one of them
+        # being clear says nothing about the other.
+        with mock.patch.object(rs.subprocess, "run",
+                               side_effect=self._driver(["REAPER", "REAPER",
+                                                         "Jump Desktop"])):
+            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
+
+    def test_a_point_owned_by_nothing_is_refused(self):
+        with mock.patch.object(rs.subprocess, "run",
+                               side_effect=self._driver([""])):
+            self.assertFalse(rs._editor_is_really_in_front("ud", 0, 0, 800, 600))
+
+
+class DoesNotWreckSomebodysReaper(unittest.TestCase):
+    """This harness ships in Pulp. It must be safe on a machine someone uses.
+
+    Two faults did real damage before these existed. It launched REAPER with an
+    EMPTY portable config, so every run came up as a fresh install -- licence
+    prompt, first-run preferences, audio-hardware setup, again and again. And
+    it ran `pkill -x REAPER`, killing the session the person at the keyboard
+    was working in, which read to them as REAPER restarting by itself.
+    """
+
+    def _session(self, home):
+        import argparse
+        s = rs.ReaperSession.__new__(rs.ReaperSession)
+        s.args = argparse.Namespace(format="clap", plugin_path=str(home),
+                                    plugin_name="X", mode="editor-open")
+        s.portable = pathlib.Path(home) / "portable"
+        s.scan_dir = pathlib.Path(home) / "scan"
+        s.portable.mkdir(parents=True)
+        s.scan_dir.mkdir(parents=True)
+        s.au_installed = None
+        return s
+
+    def test_the_users_settings_are_carried_not_discarded(self):
+        with tempfile.TemporaryDirectory() as home:
+            real = pathlib.Path(home) / "Library/Application Support/REAPER"
+            real.mkdir(parents=True)
+            (real / "reaper.ini").write_text(
+                "[REAPER]\naudioconfig=coreaudio\naudio_device=Built-in\n"
+                "vstpath=/somewhere/of/theirs\n[moreprefs]\nfoo=bar\n")
+            (real / "reaper-license.rk").write_text("LICENCE")
+            plugin = pathlib.Path(home) / "Thing.clap"
+            plugin.mkdir()
+            s = self._session(home)
+            s.args.plugin_path = str(plugin)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                rs.ReaperSession.place_plugin(s)
+            ini = (s.portable / "reaper.ini").read_text()
+
+            # Their audio device and their other preferences survive, so
+            # REAPER does not ask for them again.
+            self.assertIn("audioconfig=coreaudio", ini)
+            self.assertIn("audio_device=Built-in", ini)
+            self.assertIn("foo=bar", ini)
+            # Their licence travels, so it does not prompt for one.
+            self.assertTrue((s.portable / "reaper-license.rk").exists())
+            # Only the scan paths are ours.
+            self.assertIn(str(s.scan_dir), ini)
+            self.assertNotIn("/somewhere/of/theirs", ini)
+            # And their real config is never written to.
+            self.assertEqual((real / "reaper.ini").read_text().count("[REAPER]"), 1)
+            self.assertNotIn(str(s.scan_dir), (real / "reaper.ini").read_text())
+
+    def test_it_still_works_with_no_reaper_config_at_all(self):
+        with tempfile.TemporaryDirectory() as home:
+            plugin = pathlib.Path(home) / "Thing.clap"
+            plugin.mkdir()
+            s = self._session(home)
+            s.args.plugin_path = str(plugin)
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                rs.ReaperSession.place_plugin(s)
+            ini = (s.portable / "reaper.ini").read_text()
+            self.assertIn("[REAPER]", ini)
+            self.assertIn(str(s.scan_dir), ini)
+
+    def test_it_does_not_kill_a_reaper_it_did_not_start(self):
+        with mock.patch.object(rs.subprocess, "run") as run:
+            rs.kill_reaper()
+        for call in run.call_args_list:
+            self.assertNotIn("pkill", call.args[0],
+                             "killed every REAPER, including somebody's session")
+
+    def test_it_does_kill_the_one_it_started(self):
+        with mock.patch.object(rs.subprocess, "run") as run:
+            rs.kill_reaper(only_pid=4321)
+        self.assertTrue(any("4321" in " ".join(c.args[0])
+                            for c in run.call_args_list))
 
 
 if __name__ == "__main__":

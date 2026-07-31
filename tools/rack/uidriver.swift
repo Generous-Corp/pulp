@@ -2,6 +2,7 @@
 //
 //   uidriver click <x> <y>     one left click at a GLOBAL screen point
 //   uidriver type  <text>      that text, into whatever has focus
+//   uidriver at    <x> <y>     which app owns the topmost window at that point
 //
 // drive_app.py presses the app's own Build button rather than calling into it,
 // because "the button works" and "the code behind the button works" are
@@ -96,6 +97,33 @@ extension Array {
     }
 }
 
+/// Which application owns the topmost on-screen window containing a point.
+///
+/// The exact question, asked of the window server, instead of guessing from
+/// pixels. "Is REAPER frontmost" is not the same question and answering it
+/// cost real harm: REAPER reported itself frontmost while its editor sat
+/// under a remote-desktop session, and the clicks went into that.
+func ownerAt(x: Double, y: Double) -> String {
+    let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID)
+            as? [[String: Any]] else { return "" }
+    // The list is front-to-back, so the first window containing the point is
+    // the one a click would reach.
+    for w in list {
+        guard let b = w[kCGWindowBounds as String] as? [String: Any],
+              let wx = b["X"] as? Double, let wy = b["Y"] as? Double,
+              let ww = b["Width"] as? Double, let wh = b["Height"] as? Double
+        else { continue }
+        // Menu-bar-height slivers and other zero-ish layers are not what a
+        // click lands on.
+        if ww < 40 || wh < 40 { continue }
+        if x >= wx && x < wx + ww && y >= wy && y < wy + wh {
+            return (w[kCGWindowOwnerName as String] as? String) ?? ""
+        }
+    }
+    return ""
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else {
     fail("usage: uidriver click <x> <y> | uidriver type <text>")
@@ -113,6 +141,11 @@ case "type":
     requireAccessibility()
     // Everything after the verb, so an unquoted prompt still arrives whole.
     type(args.dropFirst().joined(separator: " "))
+case "at":
+    guard args.count >= 3, let x = Double(args[1]), let y = Double(args[2]) else {
+        fail("usage: uidriver at <x> <y>")
+    }
+    print(ownerAt(x: x, y: y))
 default:
-    fail("unknown command \(command) — expected click or type")
+    fail("unknown command \(command) — expected click, type or at")
 }
