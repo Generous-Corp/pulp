@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::inspect {
@@ -17,6 +18,61 @@ using pulp::runtime::kTracingEnabled;
 constexpr std::int64_t kMinTraceRingMb = 1;
 constexpr std::int64_t kMaxTraceRingMb = 512;
 }  // namespace
+
+class TraceInspector::PublicationLease final
+    : public InspectorPublicationLease {
+public:
+    PublicationLease(
+        TraceInspector& inspector,
+        TracePublicationOwner owner)
+        : inspector_(&inspector), owner_(std::move(owner)) {}
+
+    ~PublicationLease() override {
+        inspector_->release_publication(owner_);
+    }
+
+private:
+    TraceInspector* inspector_;
+    TracePublicationOwner owner_;
+};
+
+TraceInspector::~TraceInspector() {
+    std::lock_guard lock(mutex_);
+    if (ownership_)
+        (void)Tracing::stop_owned(*ownership_);
+}
+
+std::unique_ptr<InspectorPublicationLease>
+TraceInspector::bind_publication(
+    const InspectorDiscoveryRecord& record) {
+    if (record.session_id.empty() || record.instance_id.empty() ||
+        record.publication_id.empty()) {
+        return nullptr;
+    }
+    TracePublicationOwner owner{
+        record.session_id,
+        record.instance_id,
+        record.publication_id,
+    };
+    std::lock_guard lock(mutex_);
+    if (owner_.complete())
+        return nullptr;
+    auto lease = std::make_unique<PublicationLease>(*this, owner);
+    owner_ = std::move(owner);
+    last_trace_path_.clear();
+    return lease;
+}
+
+void TraceInspector::release_publication(
+    const TracePublicationOwner& owner) noexcept {
+    std::lock_guard lock(mutex_);
+    if (owner_ != owner)
+        return;
+    if (ownership_)
+        (void)Tracing::stop_owned(*ownership_);
+    ownership_.reset();
+    owner_ = {};
+}
 
 bool TraceInspector::owns_method(const std::string& method) {
     return method == methods::kTraceStartSession
@@ -80,24 +136,52 @@ InspectorMessage TraceInspector::start_session(const InspectorMessage& req) {
         ring_kb = static_cast<std::uint32_t>(ring_mb) * 1024u;
     }
 
-    if (Tracing::active()) {
+    if (!kTracingEnabled) {
         return make_error(
-            req.id, "Trace.startSession: a tracing session is already active",
-            "trace_already_active");
+            req.id,
+            "Trace.startSession: tracing is not compiled into this build; "
+            "rebuild with -DPULP_TRACING=ON",
+            "tracing_unavailable");
     }
 
     // An authenticated peer can control capture, not host filesystem paths.
     // Empty delegates the destination to host-owned trace configuration.
-    const bool started = Tracing::start(categories, {}, ring_kb);
-    if (!started) {
+    std::lock_guard lock(mutex_);
+    if (!owner_.complete()) {
         return make_error(
             req.id,
-            kTracingEnabled
-                ? "Trace.startSession: tracing could not be started"
-                : "Trace.startSession: tracing is not compiled into this "
-                  "build; rebuild with -DPULP_TRACING=ON",
-            kTracingEnabled ? "trace_start_failed" : "tracing_unavailable");
+            "Trace.startSession: trace control is not bound to an active "
+            "inspector publication",
+            "trace_owner_unbound");
     }
+    auto started = Tracing::start_exclusive(categories, {}, ring_kb);
+    if (started.status == pulp::runtime::TraceStartStatus::Unavailable) {
+        return make_error(
+            req.id,
+            "Trace.startSession: tracing could not be started",
+            "trace_start_failed");
+    }
+    if (started.status == pulp::runtime::TraceStartStatus::AlreadyActive) {
+        if (!Tracing::ownership_status(
+                 ownership_ ? &*ownership_ : nullptr).owned) {
+            return make_error(
+                req.id,
+                "Trace.startSession: another controller owns the "
+                "active capture",
+                "trace_owned_by_another_controller");
+        }
+        return make_error(
+            req.id, "Trace.startSession: a tracing session is already active",
+            "trace_already_active");
+    }
+    if (!started.ownership) {
+        return make_error(
+            req.id,
+            "Trace.startSession: tracing started without an ownership "
+            "capability",
+            "trace_start_failed");
+    }
+    ownership_ = std::move(started.ownership);
 
     auto out = choc::value::createObject("");
     out.addMember("compiled_in", choc::value::createBool(kTracingEnabled));
@@ -114,13 +198,31 @@ InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
             "rebuild with -DPULP_TRACING=ON",
             "tracing_unavailable");
     }
+    std::lock_guard lock(mutex_);
     if (!Tracing::active()) {
+        ownership_.reset();
         return make_error(
             req.id, "Trace.stopSession: no active tracing session",
             "no_active_trace");
     }
+    if (!owner_.complete()) {
+        return make_error(
+            req.id,
+            "Trace.stopSession: trace control is not bound to an active "
+            "inspector publication",
+            "trace_owner_unbound");
+    }
+    if (!Tracing::ownership_status(
+             ownership_ ? &*ownership_ : nullptr).owned) {
+        ownership_.reset();
+        return make_error(
+            req.id,
+            "Trace.stopSession: another controller owns the active capture",
+            "trace_owned_by_another_controller");
+    }
 
-    const auto result = Tracing::stop();
+    const auto result = Tracing::stop_owned(*ownership_);
+    ownership_.reset();
     if (!result.ok) {
         return make_error(
             req.id,
@@ -138,9 +240,16 @@ InspectorMessage TraceInspector::stop_session(const InspectorMessage& req) {
 }
 
 InspectorMessage TraceInspector::snapshot(const InspectorMessage& req) {
+    std::lock_guard lock(mutex_);
+    const auto ownership = Tracing::ownership_status(
+        ownership_ ? &*ownership_ : nullptr);
     auto out = choc::value::createObject("");
     out.addMember("compiled_in", choc::value::createBool(kTracingEnabled));
-    out.addMember("active", choc::value::createBool(Tracing::active()));
+    out.addMember("active", choc::value::createBool(ownership.active));
+    out.addMember(
+        "trace_control_available",
+        choc::value::createBool(
+            owner_.complete() && (!ownership.active || ownership.owned)));
     if (!last_trace_path_.empty())
         out.addMember("last_trace_path", choc::value::createString(last_trace_path_));
     return make_response(req.id, choc::json::toString(out, false));

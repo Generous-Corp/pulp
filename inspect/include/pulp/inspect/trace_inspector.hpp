@@ -3,23 +3,52 @@
 // CLI can start / stop / inspect a Perfetto session over the inspector wire.
 //
 // Session state lives in pulp::runtime::Tracing (a process singleton — a DAW
-// hosts one session per process, not per plugin instance), so this bridge holds
-// no session; it only remembers the last flushed trace path for snapshot.
+// hosts one session per process, not per plugin instance). Each bridge is bound
+// to one exact inspector publication generation so one plugin instance cannot
+// stop a capture owned by another.
 // Query and explain are reserved protocol methods that fail explicitly until
 // an analysis backend exists. Safe to construct and call in any build config:
 // with PULP_TRACING=OFF lifecycle requests return protocol errors.
 #pragma once
 
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/publication_binding.hpp>
+#include <pulp/runtime/trace_session.hpp>
 
+#include <cstdint>
+#include <mutex>
+#include <optional>
 #include <string>
 
 namespace pulp::inspect {
 
+struct TracePublicationOwner {
+    std::string session_id;
+    std::string instance_id;
+    std::string publication_id;
+
+    bool complete() const {
+        return !session_id.empty() && !instance_id.empty() &&
+               !publication_id.empty();
+    }
+
+    friend bool operator==(const TracePublicationOwner&,
+                           const TracePublicationOwner&) = default;
+};
+
 /// Handles Trace.* protocol requests by driving pulp::runtime::Tracing.
-class TraceInspector {
+class TraceInspector : public InspectorPublicationBinding {
 public:
     TraceInspector() = default;
+    ~TraceInspector();
+
+    TraceInspector(const TraceInspector&) = delete;
+    TraceInspector& operator=(const TraceInspector&) = delete;
+    TraceInspector(TraceInspector&&) = delete;
+    TraceInspector& operator=(TraceInspector&&) = delete;
+
+    std::unique_ptr<InspectorPublicationLease> bind_publication(
+        const InspectorDiscoveryRecord& record) override;
 
     /// Handle a Trace.* request. Returns a response message.
     InspectorMessage handle(const InspectorMessage& req);
@@ -29,6 +58,14 @@ public:
     static bool owns_method(const std::string& method);
 
 private:
+    class PublicationLease;
+    void release_publication(
+        const TracePublicationOwner& owner) noexcept;
+
+    TracePublicationOwner owner_;
+    std::optional<pulp::runtime::TraceOwnership> ownership_;
+    std::mutex mutex_;
+
     // The last .pftrace flushed by stopSession, so snapshot can report it.
     std::string last_trace_path_;
 

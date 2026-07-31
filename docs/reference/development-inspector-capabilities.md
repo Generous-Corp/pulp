@@ -28,6 +28,7 @@ trip.
 | `logs.read` | yes | yes | Capture component exists; no normal runtime endpoint |
 | `capture.image` | yes | yes | Protocol methods exist; live host capture returns unavailable |
 | `trace.control` | no | yes | Domain components exist; no normal runtime endpoint |
+| `trace.session.control` | no | yes | Process-global Trace sessions require a publication-scoped binding |
 | `state.write` | no | yes | Authenticated dispatch and response-after-main-thread-apply primitive are implemented; standalone attachment lands in Phase 2 |
 | `test.input` | no | yes | Reserved capability; typed MIDI/transport methods are not implemented |
 | `authoring.tweaks` | no | yes | Partial domain component; filesystem and editor-launch methods are classified unavailable and runtime dispatch enforces that classification |

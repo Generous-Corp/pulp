@@ -3,6 +3,10 @@
 
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/publication_binding.hpp>
+
+#include <memory>
+#include <utility>
 
 namespace pulp::view { class View; class ScriptInspectorBridge; }
 namespace pulp::render { class RenderPassManager; class DirtyTracker; }
@@ -21,7 +25,7 @@ class TweakStore;
 /// Handles inspector protocol requests by delegating to the appropriate
 /// inspector component. All data sources are optional — missing sources
 /// return error responses for their domain's methods.
-class DomainHandler {
+class DomainHandler : public InspectorDomainPublicationBindings {
 public:
     DomainHandler() = default;
 
@@ -51,10 +55,17 @@ public:
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }
     void set_motion_scrubber(MotionScrubber* scrubber) { motion_scrubber_ = scrubber; }
-    /// Wire the Perfetto tracing bridge so `Trace.*` (the `pulp trace` CLI)
-    /// can drive the process-global session. Optional: unset → Trace methods
-    /// return a targeted "no trace inspector attached" error.
-    void set_trace_inspector(TraceInspector* trace) { trace_ = trace; }
+    /// Wire and retain the Perfetto tracing bridge used by both `Trace.*`
+    /// dispatch and the server's publication-scoped ownership lease.
+    void set_trace_inspector(std::shared_ptr<TraceInspector> trace);
+    /// Source-compatible dispatch-only wiring. A server exposing
+    /// `trace.session.control` rejects startup until shared ownership is supplied.
+    void set_trace_inspector(TraceInspector* trace) {
+        trace_binding_.reset();
+        trace_ = trace;
+    }
+    std::vector<InspectorPublicationBindingRegistration>
+    publication_bindings() const override;
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
     void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
 
@@ -89,6 +100,7 @@ private:
     MotionInspector* motion_ = nullptr;
     MotionScrubber* motion_scrubber_ = nullptr;
     TraceInspector* trace_ = nullptr;
+    std::shared_ptr<TraceInspector> trace_binding_;
     render::RenderPassManager* rpm_ = nullptr;
     render::DirtyTracker* dirty_ = nullptr;
     TweakStore* tweak_store_ = nullptr;

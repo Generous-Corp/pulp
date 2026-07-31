@@ -128,6 +128,7 @@ REQUIRED_CLAIMS = {
         "remote clients cannot select a filesystem path",
         "select one exact",
         "authenticated publication; all three are required",
+        "trace_control_available",
     ),
     "docs/reference/development-inspector-capabilities.md": (
         "owner-private ephemeral record/token files",
@@ -158,6 +159,7 @@ REQUIRED_CLAIMS = {
         "Exact authenticated session id; must be paired with --instance",
         "Exact authenticated instance id; must be paired with --session",
         "Non-reusable publication id",
+        "trace_control_available",
     ),
 }
 
@@ -169,12 +171,21 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
     "inspect/CMakeLists.txt": (
         "if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)",
-        "add_library(pulp-inspect-discovery-support src/discovery_paths.cpp)",
+        "src/discovery_common.cpp",
+        "src/discovery_paths.cpp",
+        "src/discovery_security.cpp",
         "pulp::inspect-discovery-support",
-        "add_library(pulp-inspect-publication src/discovery.cpp)",
-        "PULP_INSPECT_READER_ONLY=1",
-        "PULP_INSPECT_PUBLISHER_ONLY=1",
+        "pulp-inspect-discovery-support PRIVATE Advapi32",
+        "add_library(pulp-inspect-discovery src/discovery_reader.cpp)",
+        "add_library(pulp-inspect-publication",
+        "src/discovery_publisher.cpp",
+        "src/discovery_security_write.cpp",
         "pulp::inspect-publication",
+        "src/trace_inspector.cpp",
+    ),
+    "tools/cmake/PulpInstallRules.cmake": (
+        "inspect/include/pulp/inspect/publication_binding.hpp",
+        "inspect/include/pulp/inspect/trace_inspector.hpp",
     ),
     "tools/cli/CMakeLists.txt": (
         "cmd_inspect_unavailable.cpp",
@@ -186,102 +197,57 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
 }
 
-REQUIRED_SECURITY_CONTRACTS = {
-    "inspect/src/discovery.cpp": (
-        "info.kp_proc.p_stat == SZOMB",
-        "without a supported start-time identity fail closed",
-        "record && read_credential(*record).has_value()",
-        "std::numeric_limits<std::int64_t>::max() - now",
-        "acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED)",
-        "clear_extended_acl(descriptor)",
-        "owner_private_descriptor(fd, false)",
-        "open_owner_private(path, false)",
-        'value.addMember("publicationId"',
-        "current->publication_id != record.publication_id",
+REQUIRED_SECURITY_TESTS = {
+    "test/test_inspector_discovery.cpp": (
+        "discovery publishes owner-private ephemeral credentials and cleans up",
+        "discovery publication generation cannot rebind a stale selector",
+        "discovery rejects a stale record after process id reuse",
+        "discovery rejects a zombie publisher on macOS",
+        "discovery rejects expired, insecure, and ambiguous records",
     ),
-    "inspect/src/inspector_publication.hpp": (
-        "heartbeat_interval > std::chrono::milliseconds::max() / 3",
-        "std::chrono::steady_clock::duration::max()",
-        "std::chrono::steady_clock::time_point::max() - interval",
-        "!publisher_->refresh(ttl_)",
+    "test/test_trace_inspector.cpp": (
+        "TraceInspector bounds the capture ring",
+        "TraceInspector enforces process-global publication ownership",
+        "TraceInspector stale ownership cannot stop a replacement capture",
+        "trace-capable server validates its domain-owned controller",
+        "ungranted trace availability does not require a publication binding",
     ),
-    "inspect/src/trace_inspector.cpp": (
-        "out_path is unavailable over the inspector",
-        "ring_mb < kMinTraceRingMb || ring_mb > kMaxTraceRingMb",
-        "Tracing::start(categories, {}, ring_kb)",
+    "test/test_inspector_client.cpp": (
+        "server rejects deeply nested JSON before authentication",
+        "mutual authentication rejects reflection and gates early events",
+        "response timeout fences may-have-applied requests",
     ),
-    "experimental/pulp-rs/src/cmd/trace.rs": (
-        "pulp trace start --out is unavailable",
-        "if !(1..=512).contains(&ring_mb)",
-        'a == "--publication"',
-        "--session and --instance must be supplied together",
-        "talker.call_selected(",
-        'no_args("stop", &rest[1..])',
-        "explicit_selection.as_ref()",
-        "parse_session_selection(&capabilities)",
-        "pulp trace stop requires --session, --instance, and --publication",
-        "pulp trace stop{}",
-        "selection_cli_suffix(",
-        "valid_session_identity(v)",
-    ),
-    "experimental/pulp-rs/src/cmd/motion.rs": (
-        'a == "--publication"',
-        "--session and --instance must be supplied together",
-        "talker.call_selected(",
-        "parse_session_selection(&capabilities)",
-        "pulp motion mutation requires --session, --instance, and",
-        "pulp motion stop --trace-id {id}{}",
-        "selection_cli_suffix(",
-        "valid_session_identity(v)",
-        'no_args("play", &rest[1..])',
-        'no_args("scrub", &args[1..])',
-        'no_args("cost", &args[1..])',
-    ),
-    "tools/mcp/pulp_mcp.cpp": (
-        '"minimum":1,"maximum":512',
-        "The host owns the trace destination.",
-        "resolve_inspector_selection(",
-        '"required":["session_id","instance_id","publication_id"]',
-        '"required":["trace_id","session_id","instance_id","publication_id"]',
-    ),
-    "core/runtime/src/socket.cpp": (
-        "FIONBIO",
-        "O_NONBLOCK",
-        "WSAPoll",
-        "::poll(&descriptor, 1, wait_ms)",
-        "SO_ERROR",
-        "restore_blocking()",
-    ),
-    "inspect/src/client.cpp": (
-        "events::IpcTransport::Socket,\n                                   bounded_timeout",
-        "const auto challenge_timeout = remaining()",
-        "const auto authentication_timeout = remaining()",
-        "impl_->wait_for_response(1, remaining())",
-    ),
-    "inspect/src/inspector_server.cpp": (
-        "SensitiveTokenWiper config_token_wiper(config.token)",
-        "config_token_wiper.disarm()",
-    ),
-    "core/events/include/pulp/events/interprocess_connection.hpp": (
-        "std::shared_ptr<Impl> impl_",
-    ),
-    "core/events/src/interprocess_connection.cpp": (
-        "std::unordered_set<std::thread::id> read_thread_ids",
-        "const auto impl = impl_",
-        "readers_to_wait_for == 0",
-        "read_thread.detach()",
-        "if (!runtime::AliveToken::is_alive(alive))",
+    "test/test_inspector_server_lifecycle.cpp": (
+        "callback stop cancels a concurrent authenticated restart",
+        "session restart serializes publication with heartbeat refresh",
+        "publication binding exceptions cannot escape server lifecycle",
+        "publication retirement hides visibility before releasing its binding",
     ),
     "test/test_ipc.cpp": (
         "IPC read callback destruction coordinates with external disconnect",
+        "IPC socket write timeout includes writer admission",
+        "IPC timeout disconnect serializes with explicit teardown",
     ),
     "experimental/pulp-rs/src/cmd/inspector.rs": (
-        "must be an integer from 1 to 65535",
+        "exact_selection_default_preserves_compatibility_but_fails_closed",
+        "capabilities_selection_requires_safe_complete_identity",
+    ),
+    "experimental/pulp-rs/src/cmd/trace_dispatch_tests.rs": (
+        "dispatch_stop_requires_exact_selection_before_calling_inspector",
+        "dispatch_live_followups_require_exact_selection",
+    ),
+    "experimental/pulp-rs/src/cmd/motion_tests.rs": (
+        "dispatch_stateful_followups_require_exact_selection_before_calling_inspector",
     ),
 }
 
-
-def check_root(root: pathlib.Path) -> list[str]:
+def check_root(
+    root: pathlib.Path,
+    *,
+    required_claims=REQUIRED_CLAIMS,
+    required_build_contracts=REQUIRED_BUILD_CONTRACTS,
+    required_security_tests=REQUIRED_SECURITY_TESTS,
+) -> list[str]:
     errors: list[str] = []
     definitions = (
         root / "inspect/include/pulp/inspect/capability_definitions.inc"
@@ -344,13 +310,13 @@ def check_root(root: pathlib.Path) -> list[str]:
             if claim in text:
                 errors.append(f"{relative_path} retains stale claim: {claim}")
 
-    for relative_path, claims in REQUIRED_CLAIMS.items():
+    for relative_path, claims in required_claims.items():
         text = (root / relative_path).read_text(encoding="utf-8")
         for claim in claims:
             if claim not in text:
                 errors.append(f"{relative_path} omits required claim: {claim}")
 
-    for relative_path, contracts in REQUIRED_BUILD_CONTRACTS.items():
+    for relative_path, contracts in required_build_contracts.items():
         text = (root / relative_path).read_text(encoding="utf-8")
         for contract in contracts:
             if contract not in text:
@@ -358,12 +324,12 @@ def check_root(root: pathlib.Path) -> list[str]:
                     f"{relative_path} omits inspector build contract: {contract}"
                 )
 
-    for relative_path, contracts in REQUIRED_SECURITY_CONTRACTS.items():
+    for relative_path, test_names in required_security_tests.items():
         text = (root / relative_path).read_text(encoding="utf-8")
-        for contract in contracts:
-            if contract not in text:
+        for test_name in test_names:
+            if test_name not in text:
                 errors.append(
-                    f"{relative_path} omits inspector security contract: {contract}"
+                    f"{relative_path} omits inspector security test: {test_name}"
                 )
 
     reader_header = (

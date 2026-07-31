@@ -4,6 +4,7 @@
 
 #include <pulp/inspect/discovery_publisher.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/publication_binding.hpp>
 #include <pulp/inspect/session.hpp>
 #include <pulp/events/interprocess_connection.hpp>
 
@@ -31,6 +32,9 @@ struct InspectorServerConfig {
         std::chrono::seconds(10);
     std::size_t max_message_bytes = 1024u * 1024u;
     std::size_t max_clients = 16;
+    // Appended to preserve positional initialization of the original fields.
+    // The composition root supplies all publication-scoped domain bindings.
+    InspectorDomainPublicationBindings* domain_bindings = nullptr;
 };
 
 /// TCP server exposing the inspector protocol to external tools.

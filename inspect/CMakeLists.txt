@@ -12,7 +12,10 @@ target_include_directories(pulp-inspect-protocol
 )
 target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
 
-add_library(pulp-inspect-discovery-support src/discovery_paths.cpp)
+add_library(pulp-inspect-discovery-support
+    src/discovery_common.cpp
+    src/discovery_paths.cpp
+    src/discovery_security.cpp)
 add_library(pulp::inspect-discovery-support
     ALIAS pulp-inspect-discovery-support)
 target_include_directories(pulp-inspect-discovery-support
@@ -21,11 +24,13 @@ target_include_directories(pulp-inspect-discovery-support
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-discovery-support
     PRIVATE pulp::runtime)
+if(WIN32)
+    target_link_libraries(
+        pulp-inspect-discovery-support PRIVATE Advapi32)
+endif()
 
-add_library(pulp-inspect-discovery src/discovery.cpp)
+add_library(pulp-inspect-discovery src/discovery_reader.cpp)
 add_library(pulp::inspect-discovery ALIAS pulp-inspect-discovery)
-target_compile_definitions(pulp-inspect-discovery
-    PRIVATE PULP_INSPECT_READER_ONLY=1)
 target_include_directories(pulp-inspect-discovery
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -34,14 +39,10 @@ target_link_libraries(pulp-inspect-discovery
     PUBLIC
         pulp::inspect-protocol
         pulp::inspect-discovery-support)
-if(WIN32)
-    target_link_libraries(pulp-inspect-discovery PRIVATE Advapi32)
-endif()
-
-add_library(pulp-inspect-publication src/discovery.cpp)
+add_library(pulp-inspect-publication
+    src/discovery_publisher.cpp
+    src/discovery_security_write.cpp)
 add_library(pulp::inspect-publication ALIAS pulp-inspect-publication)
-target_compile_definitions(pulp-inspect-publication
-    PRIVATE PULP_INSPECT_PUBLISHER_ONLY=1)
 target_include_directories(pulp-inspect-publication
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -68,7 +69,8 @@ add_library(pulp-inspect-runtime
     src/inspector_connected_client.hpp
     src/inspector_publication.hpp
     src/inspector_server.cpp
-    src/main_thread_rpc.cpp)
+    src/main_thread_rpc.cpp
+    src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
 target_include_directories(pulp-inspect-runtime
     PUBLIC
@@ -115,7 +117,6 @@ target_sources(pulp-inspect PRIVATE
     src/source_jump.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
-    src/trace_inspector.cpp
     src/agent_request_queue.cpp
 )
 

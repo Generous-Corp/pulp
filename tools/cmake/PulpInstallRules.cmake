@@ -292,7 +292,9 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/publication_binding.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/session.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/tweak_store.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
 endif()

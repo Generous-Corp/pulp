@@ -14,26 +14,145 @@ pub(crate) struct SessionSelection {
     pub publication_id: String,
 }
 
+/// Inspector transport abstraction shared by live command families.
+pub trait InspectorTalker {
+    /// Send one request using automatic authenticated discovery.
+    fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String>;
+
+    /// Send one request to an exact publication identity.
+    fn call_selected(
+        &self,
+        port: u16,
+        _session_id: &str,
+        _instance_id: &str,
+        _publication_id: &str,
+        method: &str,
+        params_json: &str,
+    ) -> Result<String> {
+        let _ = (port, method, params_json);
+        Err(CliError::Other(
+            "exact inspector publication routing is unsupported by this transport".to_owned(),
+        ))
+    }
+}
+
+pub(crate) enum PublicationSelectionPolicy<'a> {
+    Preserve,
+    RequireExact(&'a str),
+    DiscoverExact { command_name: &'a str },
+}
+
+pub(crate) fn explicit_selection(
+    session_id: Option<&str>,
+    instance_id: Option<&str>,
+    publication_id: Option<&str>,
+) -> Option<SessionSelection> {
+    match (session_id, instance_id) {
+        (Some(session_id), Some(instance_id)) => Some(SessionSelection {
+            session_id: session_id.to_owned(),
+            instance_id: instance_id.to_owned(),
+            publication_id: publication_id.unwrap_or_default().to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn call_through<T: InspectorTalker>(
+    talker: &T,
+    port: u16,
+    selection: Option<&SessionSelection>,
+    method: &str,
+    params_json: &str,
+) -> Result<String> {
+    match selection {
+        Some(selection) => talker.call_selected(
+            port,
+            &selection.session_id,
+            &selection.instance_id,
+            &selection.publication_id,
+            method,
+            params_json,
+        ),
+        None => talker.call(port, method, params_json),
+    }
+}
+
+pub(crate) fn resolve_publication_selection<T: InspectorTalker>(
+    talker: &T,
+    port: u16,
+    explicit: Option<SessionSelection>,
+    policy: PublicationSelectionPolicy<'_>,
+) -> Result<Option<SessionSelection>> {
+    let exact = explicit
+        .as_ref()
+        .is_some_and(|selection| !selection.publication_id.is_empty());
+    match policy {
+        PublicationSelectionPolicy::Preserve => Ok(explicit),
+        PublicationSelectionPolicy::RequireExact(message) => {
+            if exact {
+                Ok(explicit)
+            } else {
+                Err(CliError::BadUsage(message.to_owned()))
+            }
+        }
+        PublicationSelectionPolicy::DiscoverExact { command_name } => {
+            if exact {
+                return Ok(explicit);
+            }
+            let capabilities = call_through(
+                talker,
+                port,
+                explicit.as_ref(),
+                "Session.getCapabilities",
+                "{}",
+            )?;
+            exact_selection_from_capabilities(explicit.as_ref(), &capabilities, command_name)
+                .map(Some)
+        }
+    }
+}
+
+pub(crate) fn exact_selection_from_capabilities(
+    requested: Option<&SessionSelection>,
+    response: &str,
+    command_name: &str,
+) -> Result<SessionSelection> {
+    let selection = parse_session_selection(response).ok_or_else(|| {
+        CliError::Other(format!(
+            "pulp {command_name}: Session.getCapabilities did not \
+             return a safe sessionId, instanceId, and publicationId"
+        ))
+    })?;
+    if requested.is_some_and(|requested| {
+        requested.session_id != selection.session_id
+            || requested.instance_id != selection.instance_id
+    }) {
+        return Err(CliError::Other(format!(
+            "pulp {command_name}: Session.getCapabilities returned a \
+             different session or instance than requested"
+        )));
+    }
+    Ok(selection)
+}
+
 /// Whether one discovery identity component matches the publisher grammar.
 pub(crate) fn valid_session_identity(value: &str) -> bool {
-    !value.is_empty() &&
-        value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
-        })
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 /// Extract the exact discovery identity returned by
 /// `Session.getCapabilities`.
-pub(crate) fn parse_session_selection(
-    response: &str,
-) -> Option<SessionSelection> {
+pub(crate) fn parse_session_selection(response: &str) -> Option<SessionSelection> {
     let value: serde_json::Value = serde_json::from_str(response).ok()?;
     let session_id = value.get("sessionId")?.as_str()?;
     let instance_id = value.get("instanceId")?.as_str()?;
     let publication_id = value.get("publicationId")?.as_str()?;
-    if !valid_session_identity(session_id) ||
-        !valid_session_identity(instance_id) ||
-        !valid_session_identity(publication_id)
+    if !valid_session_identity(session_id)
+        || !valid_session_identity(instance_id)
+        || !valid_session_identity(publication_id)
     {
         return None;
     }
@@ -71,8 +190,7 @@ pub(crate) fn attach_session_selection(
         "publicationId".to_owned(),
         serde_json::Value::String(selection.publication_id.clone()),
     );
-    serde_json::to_string(&value)
-        .unwrap_or_else(|_| response.trim_end().to_owned())
+    serde_json::to_string(&value).unwrap_or_else(|_| response.trim_end().to_owned())
 }
 
 /// Render an exact-publication selector for a copyable follow-up command.
@@ -126,9 +244,7 @@ pub(crate) fn call_selected(
             .arg("--instance")
             .arg(&selection.instance_id);
         if !selection.publication_id.is_empty() {
-            command
-                .arg("--publication")
-                .arg(&selection.publication_id);
+            command.arg("--publication").arg(&selection.publication_id);
         }
     }
     let output = command
@@ -199,6 +315,34 @@ fn resolve_binary() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    struct CallOnlyTalker;
+
+    impl InspectorTalker for CallOnlyTalker {
+        fn call(&self, port: u16, method: &str, params_json: &str) -> Result<String> {
+            Ok(format!("{port}:{method}:{params_json}"))
+        }
+    }
+
+    #[test]
+    fn exact_selection_default_preserves_compatibility_but_fails_closed() {
+        let error = CallOnlyTalker
+            .call_selected(
+                1234,
+                "session",
+                "instance",
+                "publication",
+                "Trace.snapshot",
+                "{}",
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("exact inspector publication routing is unsupported"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn explicit_port_wins_and_missing_filter_auto_discovers() {
         assert_eq!(resolve_port(Some(1234), Some("0")).unwrap(), 1234);
@@ -226,26 +370,13 @@ mod tests {
     #[test]
     fn selection_suffix_is_copyable_only_for_a_complete_selector() {
         assert_eq!(
-            selection_cli_suffix(
-                Some("session-a"),
-                Some("instance-b"),
-                Some("publication-c"),
-            ),
+            selection_cli_suffix(Some("session-a"), Some("instance-b"), Some("publication-c"),),
             " --session session-a --instance instance-b \
              --publication publication-c"
         );
-        assert!(
-            selection_cli_suffix(Some("session-a"), None, None).is_empty()
-        );
-        assert!(
-            selection_cli_suffix(None, Some("instance-b"), None).is_empty()
-        );
-        assert!(selection_cli_suffix(
-            Some("session-a"),
-            Some("instance-b"),
-            None,
-        )
-        .is_empty());
+        assert!(selection_cli_suffix(Some("session-a"), None, None).is_empty());
+        assert!(selection_cli_suffix(None, Some("instance-b"), None).is_empty());
+        assert!(selection_cli_suffix(Some("session-a"), Some("instance-b"), None,).is_empty());
     }
 
     #[test]
@@ -264,13 +395,11 @@ mod tests {
             r#"{"sessionId":"session a","instanceId":"instance-b","publicationId":"publication-c"}"#
         )
         .is_none());
-        assert!(parse_session_selection(
-            r#"{"sessionId":"session-a","instanceId":"instance-b"}"#
-        )
-        .is_none());
         assert!(
-            parse_session_selection(r#"{"sessionId":"session-a"}"#).is_none()
+            parse_session_selection(r#"{"sessionId":"session-a","instanceId":"instance-b"}"#)
+                .is_none()
         );
+        assert!(parse_session_selection(r#"{"sessionId":"session-a"}"#).is_none());
     }
 
     #[test]
@@ -280,9 +409,10 @@ mod tests {
             instance_id: "instance-b".to_owned(),
             publication_id: "publication-c".to_owned(),
         };
-        let value: serde_json::Value = serde_json::from_str(
-            &attach_session_selection(r#"{"trace_id":3}"#, Some(&selection)),
-        )
+        let value: serde_json::Value = serde_json::from_str(&attach_session_selection(
+            r#"{"trace_id":3}"#,
+            Some(&selection),
+        ))
         .unwrap();
         assert_eq!(value["trace_id"], 3);
         assert_eq!(value["sessionId"], "session-a");
