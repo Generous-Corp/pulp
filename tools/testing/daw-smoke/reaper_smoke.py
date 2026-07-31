@@ -287,7 +287,8 @@ class ReaperSession:
         floating. The script writes an `FX_SHOWN`/`FX_NOT_FOUND` handshake to
         `status`; a mode with a longer scripted drive continues in its own lua and
         signals completion separately."""
-        kill_reaper()
+        # Nothing of ours is running yet, and somebody else's REAPER is not
+        # this harness's to close.
         with open(self.reaper_out, "w") as out:
             warm = subprocess.Popen(
                 [str(self.reaper), "-cfgfile", str(self.portable / "reaper.ini")],
@@ -316,7 +317,8 @@ class ReaperSession:
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
-        warm.terminate(); time.sleep(2); warm.kill(); kill_reaper(); time.sleep(2)
+        warm.terminate(); time.sleep(2); warm.kill()
+        kill_reaper(only_pid=warm.pid); time.sleep(2)
 
         with open(self.reaper_out, "a") as out:
             self.proc = subprocess.Popen(
@@ -349,9 +351,10 @@ class ReaperSession:
         try:
             if self.proc is not None:
                 self.proc.terminate(); time.sleep(2); self.proc.kill()
+                kill_reaper(only_pid=self.proc.pid)
+                self.proc = None
         except Exception:  # noqa: BLE001
             pass
-        kill_reaper()
 
     def cleanup(self) -> None:
         self.terminate()
