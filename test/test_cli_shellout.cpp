@@ -1592,12 +1592,12 @@ TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
 
     REQUIRE_FALSE(missing.timed_out);
     REQUIRE(missing.exit_code == 1);
-    REQUIRE(missing.stderr_output.find("no running Pulp inspector found") != std::string::npos);
-    REQUIRE(missing.stderr_output.find("specify --port") != std::string::npos);
+    REQUIRE(missing.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
     REQUIRE(missing.stdout_output.find("Connecting to") == std::string::npos);
 }
 
-TEST_CASE("pulp inspect explicit port failure does not require a server",
+TEST_CASE("pulp inspect explicit port filters discovery without bypassing authentication",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) {
         SUCCEED("skipped: pulp not built");
@@ -1609,6 +1609,12 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     auto base = unique_temp_dir("pulp-inspect-explicit-port");
     fs::create_directories(base);
+#if defined(_WIN32)
+    ScopedEnvVar temp_dir("TEMP");
+#else
+    ScopedEnvVar temp_dir("TMPDIR");
+#endif
+    temp_dir.set(base.string());
     auto output = base / "inspect-response.json";
 
     auto r = run_pulp({"inspect", "--host", "127.0.0.1", "--port", "1", "--command",
@@ -1619,8 +1625,11 @@ TEST_CASE("pulp inspect explicit port failure does not require a server",
 
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 1);
-    REQUIRE(r.stdout_output.find("Connecting to 127.0.0.1:1") != std::string::npos);
-    REQUIRE(r.stderr_output.find("could not connect to 127.0.0.1:1") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Connecting to") == std::string::npos);
+    REQUIRE(r.stderr_output.find("No live inspector sessions were discovered") !=
+            std::string::npos);
+    REQUIRE(r.stderr_output.find("requested host 127.0.0.1 port 1") !=
+            std::string::npos);
     REQUIRE_FALSE(wrote_output);
 }
 
