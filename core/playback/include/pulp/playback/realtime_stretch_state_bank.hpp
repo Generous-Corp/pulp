@@ -1,7 +1,7 @@
 #pragma once
 
+#include <pulp/audio/realtime_time_stretch.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
-#include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/timeline/model.hpp>
 
 #include <compare>
@@ -17,7 +17,7 @@ class PlaybackProgram;
 struct RealtimeStretchStateSpec {
     timeline::ItemId clip_id;
     std::uint32_t channels = 0;
-    signal::PitchTimeQuality quality = signal::PitchTimeQuality::low_latency;
+    audio::RealtimeTimeStretchQuality quality = audio::RealtimeTimeStretchQuality::low_latency;
     float max_time_ratio = 1.0f;
     constexpr auto operator<=>(const RealtimeStretchStateSpec&) const = default;
 };
@@ -41,7 +41,8 @@ struct RealtimeStretchStateBankAdmission {
     std::uint64_t actual = 0;
     std::uint64_t limit = 0;
     std::uint64_t reserved_state_bytes = 0;
-    signal::PitchTimePrepareStatus processor_status = signal::PitchTimePrepareStatus::prepared;
+    audio::RealtimeTimeStretchPrepareStatus processor_status =
+        audio::RealtimeTimeStretchPrepareStatus::prepared;
 
     constexpr explicit operator bool() const noexcept {
         return code == RealtimeStretchStateBankError::None;
@@ -87,9 +88,9 @@ class RealtimeStretchStateBank {
                                               std::uint32_t maximum_block_frames,
                                               const AudioRendererLimits& limits);
 
-    signal::RealtimePitchTimeProcessor* state_for_epoch(timeline::ItemId clip_id,
-                                                        std::uint64_t playback_epoch) noexcept;
-    const signal::RealtimePitchTimeProcessor* find(timeline::ItemId clip_id) const noexcept;
+    audio::RealtimeTimeStretchProcessor* state_for_epoch(timeline::ItemId clip_id,
+                                                         std::uint64_t playback_epoch) noexcept;
+    const audio::RealtimeTimeStretchProcessor* find(timeline::ItemId clip_id) const noexcept;
     void reset() noexcept;
 
     std::size_t size() const noexcept {

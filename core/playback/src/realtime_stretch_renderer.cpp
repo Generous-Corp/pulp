@@ -109,7 +109,7 @@ struct RealtimeStretchProgramRuntime::Impl {
     struct ClipLane {
         timeline::ItemId id;
         const AudioClipRendererProgram* clip = nullptr;
-        signal::RealtimePitchTimeProcessor processor;
+        audio::RealtimeTimeStretchProcessor processor;
         std::vector<float> fifo;
         std::uint32_t fifo_capacity = 0;
         std::uint32_t fifo_read = 0;
@@ -170,8 +170,8 @@ struct RealtimeStretchProgramRuntime::Impl {
         std::vector<float> output_scratch;
         std::vector<float> audio_delay;
         std::vector<float> mixer_delay;
-        std::array<const float*, signal::kRealtimePitchTimeMaximumChannels> input_ptrs{};
-        std::array<float*, signal::kRealtimePitchTimeMaximumChannels> output_ptrs{};
+        std::array<const float*, audio::kRealtimeTimeStretchMaximumChannels> input_ptrs{};
+        std::array<float*, audio::kRealtimeTimeStretchMaximumChannels> output_ptrs{};
         std::uint32_t delay_cursor = 0;
         std::uint64_t elapsed_output_frames = 0;
         bool poisoned = false;
@@ -232,17 +232,20 @@ struct RealtimeStretchProgramRuntime::Impl {
                         return false;
                     const auto plan =
                         clip.processor.plan_finalize(static_cast<int>(maximum_block_frames));
-                    if (plan.status == signal::PitchTimeStreamFinalizePlanStatus::complete) {
+                    if (plan.status ==
+                        audio::RealtimeTimeStretchStreamFinalizePlanStatus::complete) {
                         complete = true;
                         break;
                     }
-                    if (plan.status == signal::PitchTimeStreamFinalizePlanStatus::ready) {
+                    if (plan.status == audio::RealtimeTimeStretchStreamFinalizePlanStatus::ready) {
                         const auto status = clip.processor.finalize(plan.samples);
-                        if (status == signal::PitchTimeStreamFinalizeStatus::invalid_mode ||
-                            status == signal::PitchTimeStreamFinalizeStatus::invalid_request)
+                        if (status ==
+                                audio::RealtimeTimeStretchStreamFinalizeStatus::invalid_mode ||
+                            status ==
+                                audio::RealtimeTimeStretchStreamFinalizeStatus::invalid_request)
                             return false;
                     } else if (plan.status !=
-                               signal::PitchTimeStreamFinalizePlanStatus::needs_drain) {
+                               audio::RealtimeTimeStretchStreamFinalizePlanStatus::needs_drain) {
                         return false;
                     }
                 }
@@ -332,7 +335,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                 0,
                 0,
                 0,
-                signal::PitchTimePrepareStatus::prepared};
+                audio::RealtimeTimeStretchPrepareStatus::prepared};
     if (output_channels == 0 || output_channels > limits.max_channels)
         return {RealtimeStretchStateBankError::ChannelLimitExceeded,
                 {},
@@ -349,7 +352,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
 #else
     if (force_allocation_failure)
         return {RealtimeStretchStateBankError::AllocationFailed, {}, 0, 0, 0,
-                signal::PitchTimePrepareStatus::prepared};
+                audio::RealtimeTimeStretchPrepareStatus::prepared};
 #endif
         auto candidate = std::make_unique<Impl>();
         candidate->generation = program.generation();
@@ -361,18 +364,18 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
         if (!add_charge(sizeof(Impl), limits.max_realtime_stretch_state_bytes,
                         candidate->reserved_bytes))
             return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                    signal::PitchTimePrepareStatus::prepared};
+                    audio::RealtimeTimeStretchPrepareStatus::prepared};
 
-        signal::RealtimePitchTimeConfig geometry_config;
-        geometry_config.mode = signal::PitchTimeMode::time_stretch;
-        geometry_config.quality = signal::PitchTimeQuality::low_latency;
+        audio::RealtimeTimeStretchConfig geometry_config;
+        geometry_config.mode = audio::RealtimeTimeStretchMode::time_stretch;
+        geometry_config.quality = audio::RealtimeTimeStretchQuality::low_latency;
         geometry_config.channels = 1;
         geometry_config.max_block = static_cast<int>(maximum_block_frames);
         geometry_config.max_time_ratio = candidate->maximum_ratio;
-        signal::RealtimePitchTimePreparedGeometry<float> geometry;
-        const auto geometry_status = signal::checked_realtime_pitch_time_prepared_geometry<float>(
+        audio::RealtimeTimeStretchPreparedGeometry<float> geometry;
+        const auto geometry_status = audio::checked_realtime_time_stretch_prepared_geometry<float>(
             geometry_config, 1.0, limits.max_realtime_stretch_allocation_bytes, geometry);
-        if (geometry_status != signal::PitchTimePrepareStatus::prepared)
+        if (geometry_status != audio::RealtimeTimeStretchPrepareStatus::prepared)
             return {RealtimeStretchStateBankError::ProcessorPrepareRejected,
                     {},
                     0,
@@ -393,14 +396,14 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                 for (const auto& clip : audio->clips()) {
                     if (!live_stretch(clip))
                         continue;
-                    signal::RealtimePitchTimeConfig config = geometry_config;
+                    audio::RealtimeTimeStretchConfig config = geometry_config;
                     config.channels = static_cast<int>(clip.audio->num_channels());
                     Impl::ClipLane clip_lane;
                     clip_lane.id = clip.id;
                     clip_lane.clip = &clip;
                     const auto status = clip_lane.processor.prepare(
                         sample_rate, config, limits.max_realtime_stretch_allocation_bytes);
-                    if (status != signal::PitchTimePrepareStatus::prepared)
+                    if (status != audio::RealtimeTimeStretchPrepareStatus::prepared)
                         return {RealtimeStretchStateBankError::ProcessorPrepareRejected,
                                 clip.id,
                                 0,
@@ -414,14 +417,14 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                 (std::numeric_limits<std::uint64_t>::max() - sizeof(Impl::TrackLane)) /
                     sizeof(Impl::ClipLane))
                 return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                        signal::PitchTimePrepareStatus::prepared};
+                        audio::RealtimeTimeStretchPrepareStatus::prepared};
             const auto metadata_bytes =
                 static_cast<std::uint64_t>(sizeof(Impl::TrackLane)) +
                 static_cast<std::uint64_t>(lane.clips.capacity()) * sizeof(Impl::ClipLane);
             if (!add_charge(metadata_bytes, limits.max_realtime_stretch_state_bytes,
                             candidate->reserved_bytes))
                 return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                        signal::PitchTimePrepareStatus::prepared};
+                        audio::RealtimeTimeStretchPrepareStatus::prepared};
             if (!lane.clips.empty()) {
                 has_realtime_stretch = true;
                 const auto fifo_capacity64 =
@@ -433,7 +436,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                             0,
                             0,
                             0,
-                            signal::PitchTimePrepareStatus::prepared};
+                            audio::RealtimeTimeStretchPrepareStatus::prepared};
                 const auto fifo_capacity = static_cast<std::uint32_t>(fifo_capacity64);
                 const auto scratch_elements =
                     static_cast<std::size_t>(limits.max_channels) * maximum_block_frames;
@@ -453,7 +456,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                         !add_charge(fifo_bytes, limits.max_realtime_stretch_state_bytes,
                                     candidate->reserved_bytes))
                         return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                                signal::PitchTimePrepareStatus::prepared};
+                                audio::RealtimeTimeStretchPrepareStatus::prepared};
                 }
                 const auto scratch_bytes = checked_bytes(scratch_elements);
                 const auto delay_bytes = checked_bytes(delay_elements);
@@ -462,7 +465,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                     scratch_bytes > std::numeric_limits<std::uint64_t>::max() / 2u ||
                     delay_bytes > std::numeric_limits<std::uint64_t>::max() / 2u)
                     return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                            signal::PitchTimePrepareStatus::prepared};
+                            audio::RealtimeTimeStretchPrepareStatus::prepared};
                 if (!add_charge(scratch_bytes, limits.max_realtime_stretch_state_bytes,
                                 candidate->reserved_bytes) ||
                     !add_charge(scratch_bytes, limits.max_realtime_stretch_state_bytes,
@@ -472,7 +475,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
                     !add_charge(delay_bytes, limits.max_realtime_stretch_state_bytes,
                                 candidate->reserved_bytes))
                     return {RealtimeStretchStateBankError::StateBytesExceeded, {}, 0, 0, 0,
-                            signal::PitchTimePrepareStatus::prepared};
+                            audio::RealtimeTimeStretchPrepareStatus::prepared};
             }
             candidate->tracks.push_back(std::move(lane));
         }
@@ -490,7 +493,7 @@ RealtimeStretchStateBankAdmission RealtimeStretchProgramRuntime::prepare(
 #if defined(__cpp_exceptions)
     } catch (...) {
         return {RealtimeStretchStateBankError::AllocationFailed, {}, 0, 0, 0,
-                signal::PitchTimePrepareStatus::prepared};
+                audio::RealtimeTimeStretchPrepareStatus::prepared};
     }
 #endif
 }
@@ -719,12 +722,13 @@ RealtimeStretchRenderCode RealtimeStretchProgramRuntime::process_track(
                             artifact_sample(*clip_lane.clip, channel, lane->next_document_input);
                     }
                     const auto status = clip_lane.processor.feed(lane->input_ptrs.data(), 1);
-                    if (status != signal::PitchTimeStreamFeedStatus::accepted)
-                        return impl_->poison(*lane, output,
-                                             status ==
-                                                     signal::PitchTimeStreamFeedStatus::backpressure
-                                                 ? RealtimeStretchRenderCode::Backpressure
-                                                 : RealtimeStretchRenderCode::StateRequired);
+                    if (status != audio::RealtimeTimeStretchStreamFeedStatus::accepted) {
+                        const auto code =
+                            status == audio::RealtimeTimeStretchStreamFeedStatus::backpressure
+                                ? RealtimeStretchRenderCode::Backpressure
+                                : RealtimeStretchRenderCode::StateRequired;
+                        return impl_->poison(*lane, output, code);
+                    }
                 }
                 lane->next_document_input += 1.0L;
                 lane->pending_host_output = 0.0L;
