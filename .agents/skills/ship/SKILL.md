@@ -1228,6 +1228,13 @@ so a build that only works on the build machine never ships. Identities are the
 the ambiguous name). `examples/super-convolver/package.sh` is a thin wrapper —
 copy it for a new plugin. Intended to graduate into `pulp ship package --combined`.
 
+Standalone component packages must set `BundleIsRelocatable=false` in their
+`pkgbuild --component-plist`. Without that metadata, PackageKit searches for a
+matching bundle identifier and may redirect the payload onto an older copy in
+`~/Applications` instead of the declared `/Applications` destination. The
+combined-installer script emits one non-relocatable component plist per app;
+preserve that contract whenever its staging or `pkgbuild` invocation changes.
+
 ### Packaging a MULTI-plugin product, and packaging from OUTSIDE the Pulp tree
 
 Two facts that are easy to guess wrong, and both were verified by reading the

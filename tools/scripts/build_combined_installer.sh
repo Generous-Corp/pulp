@@ -162,9 +162,28 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   deep_sign "$p" "$ent"
   id="$(echo "$t" | tr ' A-Z' '-a-z' | tr -cd 'a-z0-9-')"
   r="$STAGE/root-$id"; mkdir -p "$r/Applications"; cp -R "$p" "$r/Applications/"
+  # Keep PackageKit from redirecting this payload onto a matching bundle that
+  # happens to exist elsewhere, such as an older copy in ~/Applications.
+  component_plist="$STAGE/$id-components.plist"
+  app_rel="Applications/$(basename "$p")"
+  cat > "$component_plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <dict>
+    <key>BundleHasStrictIdentifier</key><true/>
+    <key>BundleIsRelocatable</key><false/>
+    <key>BundleIsVersionChecked</key><true/>
+    <key>BundleOverwriteAction</key><string>upgrade</string>
+    <key>RootRelativeBundlePath</key><string>$(xml_escape "$app_rel")</string>
+  </dict>
+</array>
+</plist>
+PLIST
   f="$(basename "$p").pkg"
   pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
-    --install-location / "$STAGE/comp/$f" >/dev/null
+    --install-location / --component-plist "$component_plist" "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
 done

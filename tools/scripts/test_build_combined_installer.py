@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import tempfile
 import unittest
@@ -20,12 +21,18 @@ class CombinedInstallerTest(unittest.TestCase):
         path.write_text("#!/bin/bash\nset -euo pipefail\n" + body)
         path.chmod(0o755)
 
-    def _run_installer(self, plugins: list[tuple[str, str]]) -> str:
+    def _run_installer(
+        self,
+        plugins: list[tuple[str, str]],
+        apps: list[str] | None = None,
+    ) -> str:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             fake_bin = tmp / "bin"
             fake_bin.mkdir()
             capture = tmp / "distribution.xml"
+            pkgbuild_capture = tmp / "pkgbuild.txt"
+            component_capture = tmp / "component.plist"
             output = tmp / "out"
 
             self._write_tool(fake_bin, "codesign", "exit 0\n")
@@ -39,7 +46,14 @@ class CombinedInstallerTest(unittest.TestCase):
             self._write_tool(
                 fake_bin,
                 "pkgbuild",
-                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
+                'last=""\ncomponent_plist=""\nwant_component_plist=0\n'
+                'for arg in "$@"; do\n'
+                '  if [[ "$want_component_plist" == 1 ]]; then component_plist="$arg"; want_component_plist=0; fi\n'
+                '  [[ "$arg" == "--component-plist" ]] && want_component_plist=1\n'
+                '  last="$arg"\n'
+                'done\n'
+                'printf "%s\\n" "$*" >> "$CAPTURE_PKGBUILD"\n'
+                'if [[ -n "$component_plist" ]]; then cp "$component_plist" "$CAPTURE_COMPONENT_PLIST"; fi\n'
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
             self._write_tool(
@@ -75,12 +89,18 @@ class CombinedInstallerTest(unittest.TestCase):
                 bundle = tmp / f"{plugin_name}.{suffix}"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--plugin", kind, str(bundle)))
+            for app_name in apps or []:
+                bundle = tmp / f"{app_name}.app"
+                (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                args.extend(("--app", app_name, str(bundle)))
 
             env = {
                 "PATH": f"{fake_bin}:/usr/bin:/bin",
                 "HOME": str(tmp),
                 "TMPDIR": str(tmp),
                 "CAPTURE_XML": str(capture),
+                "CAPTURE_PKGBUILD": str(pkgbuild_capture),
+                "CAPTURE_COMPONENT_PLIST": str(component_capture),
                 "PULP_SKIP_SIGNING_PREFLIGHT": "1",
             }
             completed = subprocess.run(
@@ -100,6 +120,10 @@ class CombinedInstallerTest(unittest.TestCase):
             self.assertTrue(
                 capture.is_file(),
                 msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
+            self.pkgbuild_commands = pkgbuild_capture.read_text()
+            self.component_plist = (
+                component_capture.read_text() if component_capture.is_file() else ""
             )
             return capture.read_text()
 
@@ -135,6 +159,19 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIn('choice id="plugin-1-au"', xml)
         self.assertIn('title="Foo-Bar"', xml)
         self.assertIn('title="Foo Bar"', xml)
+
+    def test_standalone_apps_cannot_relocate_to_an_existing_user_copy(self) -> None:
+        xml = self._run_installer([], apps=["Fixture App"])
+
+        self.assertIn('choice id="fixture-app"', xml)
+        self.assertIn("--component-plist", self.pkgbuild_commands)
+        components = plistlib.loads(self.component_plist.encode())
+        self.assertEqual(len(components), 1)
+        self.assertIs(components[0]["BundleIsRelocatable"], False)
+        self.assertEqual(
+            components[0]["RootRelativeBundlePath"],
+            "Applications/Fixture App.app",
+        )
 
 
 if __name__ == "__main__":
