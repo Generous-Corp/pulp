@@ -44,9 +44,10 @@
 //!
 //! # Authenticated discovery (off-by-default ergonomics)
 //!
-//! An explicit `--port` or `PULP_INSPECTOR_PORT` is used as a discovery
-//! filter. The C++ client performs authenticated ephemeral discovery and the
-//! real protocol connection is the only connection opened. If no session is available it
+//! `--session ID --instance ID` selects one exact identity. An explicit
+//! `--port` or `PULP_INSPECTOR_PORT` is an additional discovery filter. The
+//! C++ client performs authenticated ephemeral discovery and the real protocol
+//! connection is the only connection opened. If no session is available it
 //! prints a clear explanation that live capture requires an explicitly owned
 //! source-checkout host which constructs `InspectorServer`, wires
 //! `DomainHandler`, and publishes authenticated discovery. Normal Pulp hosts do
@@ -145,6 +146,10 @@ pub struct GlobalFlags {
     /// Optional explicit port. Falls back to `$PULP_INSPECTOR_PORT`;
     /// zero means authenticated auto-discovery.
     pub port: Option<u16>,
+    /// Exact session identity forwarded as `pulp inspect --session`.
+    pub session_id: Option<String>,
+    /// Exact instance identity forwarded as `pulp inspect --instance`.
+    pub instance_id: Option<String>,
 }
 
 /// `pulp trace start` flag set.
@@ -209,10 +214,30 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
                 ));
             }
             globals.port = Some(port);
+        } else if a == "--session" || a == "--instance" {
+            i += 1;
+            let v = args.get(i).ok_or_else(|| {
+                CliError::BadUsage(format!("{a} requires a value"))
+            })?;
+            if v.is_empty() {
+                return Err(CliError::BadUsage(format!(
+                    "{a} requires a non-empty value"
+                )));
+            }
+            if a == "--session" {
+                globals.session_id = Some(v.clone());
+            } else {
+                globals.instance_id = Some(v.clone());
+            }
         } else {
             rest.push(a.clone());
         }
         i += 1;
+    }
+    if globals.session_id.is_some() != globals.instance_id.is_some() {
+        return Err(CliError::BadUsage(
+            "--session and --instance must be supplied together".to_owned(),
+        ));
     }
 
     let Some(verb) = rest.first() else {
@@ -222,19 +247,33 @@ pub fn parse(args: &[String]) -> Result<(Sub, GlobalFlags)> {
     match verb.as_str() {
         "help" | "--help" | "-h" => Ok((Sub::Help, globals)),
         "start" => parse_start(&rest[1..]).map(|s| (s, globals)),
-        "stop" => Ok((Sub::Stop, globals)),
+        "stop" => no_args("stop", &rest[1..])
+            .map(|()| (Sub::Stop, globals)),
         "query" => parse_query(&rest[1..]).map(|s| (s, globals)),
-        "snapshot" => Ok((Sub::Snapshot, globals)),
+        "snapshot" => no_args("snapshot", &rest[1..])
+            .map(|()| (Sub::Snapshot, globals)),
         "explain" => parse_explain(&rest[1..]).map(|s| (s, globals)),
-        "doctor" => Ok((Sub::Doctor, globals)),
-        "fetch" => Ok((Sub::Fetch, globals)),
+        "doctor" => no_args("doctor", &rest[1..])
+            .map(|()| (Sub::Doctor, globals)),
+        "fetch" => no_args("fetch", &rest[1..])
+            .map(|()| (Sub::Fetch, globals)),
         "open" => parse_open(&rest[1..]).map(|s| (s, globals)),
         // L0 preset verbs — sugar for `query --preset <verb>`.
         "slowest-frames" | "xruns" | "dsp-hotspots" | "layout-vs-paint" => {
-            Ok((preset_sub(verb), globals))
+            no_args(verb, &rest[1..])
+                .map(|()| (preset_sub(verb), globals))
         }
         _ => Err(CliError::UnknownSubcommand),
     }
+}
+
+fn no_args(verb: &str, args: &[String]) -> Result<()> {
+    if let Some(argument) = args.first() {
+        return Err(CliError::BadUsage(format!(
+            "pulp trace {verb}: unexpected argument `{argument}`"
+        )));
+    }
+    Ok(())
 }
 
 /// Build a [`Sub::Query`] for a named preset verb.
@@ -641,8 +680,26 @@ pub fn dispatch<T: InspectorTalker>(
         }
     }
     let port = resolve_port(flags)?;
+    let explicit_selection = match (
+        flags.session_id.as_deref(),
+        flags.instance_id.as_deref(),
+    ) {
+        (Some(session_id), Some(instance_id)) => {
+            Some(crate::cmd::inspector::SessionSelection {
+                session_id: session_id.to_owned(),
+                instance_id: instance_id.to_owned(),
+            })
+        }
+        _ => None,
+    };
     if matches!(sub, Sub::Doctor) {
-        return run_doctor(port, flags.json, talker, out);
+        return run_doctor(
+            port,
+            explicit_selection.as_ref(),
+            flags.json,
+            talker,
+            out,
+        );
     }
     let Some((method, params)) = to_inspector_call(sub) else {
         // The `Help` arm above already returned. This stays here so
@@ -652,7 +709,16 @@ pub fn dispatch<T: InspectorTalker>(
             "pulp trace: no inspector mapping for {sub:?}"
         )));
     };
-    let response = talker.call(port, method, &params)?;
+    let response = match explicit_selection.as_ref() {
+        Some(selection) => talker.call_selected(
+            port,
+            &selection.session_id,
+            &selection.instance_id,
+            method,
+            &params,
+        )?,
+        None => talker.call(port, method, &params)?,
+    };
 
     if flags.json {
         writeln!(out, "{}", response.trim_end()).map_err(io_err)?;
@@ -858,18 +924,32 @@ pub fn resolve_trace_processor() -> TraceProcessorStatus {
 /// Only writer failures ([`CliError::Io`]). An unreachable inspector or a
 /// missing `trace_processor` is reported *in* the doctor output, not as an
 /// error — surfacing that is the whole point of a doctor.
-pub fn run_doctor<T: InspectorTalker>(
+pub(crate) fn run_doctor<T: InspectorTalker>(
     port: u16,
+    explicit_selection: Option<&crate::cmd::inspector::SessionSelection>,
     json: bool,
     talker: &T,
     out: &mut impl Write,
 ) -> Result<()> {
-    let capabilities_response =
-        talker.call(port, "Session.getCapabilities", "{}");
-    let selection = capabilities_response
-        .as_deref()
-        .ok()
-        .and_then(parse_session_selection);
+    let capabilities_response = match explicit_selection {
+        Some(selection) => talker.call_selected(
+            port,
+            &selection.session_id,
+            &selection.instance_id,
+            "Session.getCapabilities",
+            "{}",
+        ),
+        None => talker.call(port, "Session.getCapabilities", "{}"),
+    };
+    let discovered_selection = if explicit_selection.is_none() {
+        capabilities_response
+            .as_deref()
+            .ok()
+            .and_then(parse_session_selection)
+    } else {
+        None
+    };
+    let selection = explicit_selection.or(discovered_selection.as_ref());
     let controls = selection.as_ref().and_then(|_| {
         capabilities_response
             .as_deref()
@@ -888,7 +968,10 @@ pub fn run_doctor<T: InspectorTalker>(
             "Session.getCapabilities did not return a sessionId and instanceId"
                 .to_owned(),
         )),
-        None => talker.call(port, "Trace.snapshot", "{}"),
+        None => Err(CliError::Other(
+            "an exact session identity is required before Trace.snapshot"
+                .to_owned(),
+        )),
     };
     let reachable =
         capabilities_response.is_ok() || snapshot_response.is_ok();
@@ -1180,7 +1263,11 @@ fn print_help(out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "  --json                        Print the raw inspector JSON response")?;
     writeln!(
         out,
-        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)\n"
+        "  --port N                      Filter authenticated discovery by port (or use $PULP_INSPECTOR_PORT)"
+    )?;
+    writeln!(
+        out,
+        "  --session ID --instance ID   Select one exact authenticated session identity\n"
     )?;
     writeln!(
         out,
@@ -1247,6 +1334,42 @@ mod tests {
     fn parse_port_rejects_zero() {
         let err = parse(&s(&["--port", "0", "snapshot"])).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    #[test]
+    fn parse_exact_session_selection_requires_a_pair() {
+        let (_sub, flags) = parse(&s(&[
+            "snapshot",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+        ]))
+        .unwrap();
+        assert_eq!(flags.session_id.as_deref(), Some("session-a"));
+        assert_eq!(flags.instance_id.as_deref(), Some("instance-b"));
+
+        for args in [
+            s(&["snapshot", "--session", "session-a"]),
+            s(&["snapshot", "--instance", "instance-b"]),
+        ] {
+            let error = parse(&args).unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)));
+        }
+    }
+
+    #[test]
+    fn parse_zero_argument_live_verbs_reject_trailing_arguments() {
+        for verb in [
+            "stop",
+            "snapshot",
+            "doctor",
+            "fetch",
+            "slowest-frames",
+        ] {
+            let error = parse(&s(&[verb, "extra"])).unwrap_err();
+            assert!(matches!(error, CliError::BadUsage(_)), "{verb}");
+        }
     }
 
     #[test]
@@ -1599,6 +1722,28 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_live_command_uses_exact_session_selection() {
+        let talker = RecordingTalker::new(vec!["{}"]);
+        let mut output = Vec::new();
+        let (sub, flags) = parse(&s(&[
+            "snapshot",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+        ]))
+        .unwrap();
+        dispatch(&sub, &flags, &talker, &mut output).unwrap();
+        assert_eq!(
+            &*talker.selections.borrow(),
+            &[Some(crate::cmd::inspector::SessionSelection {
+                session_id: "session-a".to_owned(),
+                instance_id: "instance-b".to_owned(),
+            })]
+        );
+    }
+
+    #[test]
     fn dispatch_stop_prints_pftrace_path() {
         let t = RecordingTalker::new(vec![
             "{\"out_path\":\"/tmp/pulp-42.pftrace\"}",
@@ -1628,6 +1773,7 @@ mod tests {
         let flags = GlobalFlags {
             json: true,
             port: None,
+            ..GlobalFlags::default()
         };
         let sub = Sub::Query(QueryArgs {
             sql: Some("SELECT name FROM slice".to_owned()),
@@ -1967,7 +2113,11 @@ mod tests {
             "{}",
         ]);
         let mut buf: Vec<u8> = Vec::new();
-        let flags = GlobalFlags { json: false, port: Some(1) };
+        let flags = GlobalFlags {
+            json: false,
+            port: Some(1),
+            ..GlobalFlags::default()
+        };
         dispatch(&Sub::Doctor, &flags, &t, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pulp trace doctor"), "{out}");
@@ -1988,6 +2138,33 @@ mod tests {
                     instance_id: "instance-b".to_owned(),
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn dispatch_doctor_keeps_explicit_selection_for_both_probes() {
+        let talker = RecordingTalker::new(vec![
+            "{\"sessionId\":\"session-a\",\"instanceId\":\"instance-b\",\
+             \"effective\":[\"session.control\",\"trace.control\"]}",
+            "{}",
+        ]);
+        let mut output = Vec::new();
+        let (sub, flags) = parse(&s(&[
+            "doctor",
+            "--session",
+            "session-a",
+            "--instance",
+            "instance-b",
+        ]))
+        .unwrap();
+        dispatch(&sub, &flags, &talker, &mut output).unwrap();
+        let expected = Some(crate::cmd::inspector::SessionSelection {
+            session_id: "session-a".to_owned(),
+            instance_id: "instance-b".to_owned(),
+        });
+        assert_eq!(
+            &*talker.selections.borrow(),
+            &[expected.clone(), expected]
         );
     }
 
@@ -2016,6 +2193,7 @@ mod tests {
         let mut output = Vec::new();
         run_doctor(
             9200,
+            None,
             false,
             &SnapshotDeniedTalker,
             &mut output,
@@ -2034,7 +2212,7 @@ mod tests {
             "{\"compiled_in\":true,\"active\":true}",
         ]);
         let mut output = Vec::new();
-        run_doctor(9200, true, &talker, &mut output).unwrap();
+        run_doctor(9200, None, true, &talker, &mut output).unwrap();
 
         let value: serde_json::Value =
             serde_json::from_slice(&output).unwrap();
@@ -2067,8 +2245,18 @@ mod tests {
         }
 
         let mut output = Vec::new();
-        run_doctor(9200, true, &CapabilitiesDeniedTalker, &mut output)
-            .unwrap();
+        let selection = crate::cmd::inspector::SessionSelection {
+            session_id: "session-a".to_owned(),
+            instance_id: "instance-b".to_owned(),
+        };
+        run_doctor(
+            9200,
+            Some(&selection),
+            true,
+            &CapabilitiesDeniedTalker,
+            &mut output,
+        )
+        .unwrap();
         let value: serde_json::Value =
             serde_json::from_slice(&output).unwrap();
         assert_eq!(value["inspector_reachable"], true);

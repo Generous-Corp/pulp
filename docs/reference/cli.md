@@ -1359,6 +1359,8 @@ Options:
 
 - `--port PORT` - optional filter for owner-private authenticated discovery;
   `$PULP_INSPECTOR_PORT` supplies the same explicit filter
+- `--session ID --instance ID` - select one exact authenticated session
+  identity; both are required together for every live `Trace.*` command
 - `--json` - emit the raw inspector JSON response instead of the pretty form
 
 Subcommands:

@@ -1201,6 +1201,14 @@ commands:
     status: experimental
     summary: Agent-facing wrappers around the inspector `Trace.*` Perfetto-tracing protocol. Requires a running inspector with the tracing server enabled, then starts/stops a session, runs SQL over the captured `.pftrace`, runs L0 preset queries, and asks for a one-shot narrated root cause from a terminal.
     args:
+      - name: --session
+        kind: option
+        required: false
+        description: Exact authenticated session id; must be paired with --instance for live commands
+      - name: --instance
+        kind: option
+        required: false
+        description: Exact authenticated instance id; must be paired with --session for live commands
       - name: --port
         kind: option
         required: false
