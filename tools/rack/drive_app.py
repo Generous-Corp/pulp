@@ -58,6 +58,8 @@ TARGETS = {
     "build":        (0.73, 0.53),
     "random":       (0.34, 0.53),
     "ask":          (0.65, 0.53),
+    # Open in Rack sits in the Build title bar, right of the depth tabs.
+    "open_in_rack": (0.905, 0.068),
     "followup":     (0.20, 0.90),
     "followup_go":  (0.31, 0.95),
 }
@@ -266,6 +268,33 @@ def main(argv: list[str]) -> int:
 
     if cmd == "status":
         return verdict()
+
+    if cmd == "open":
+        # Click Open in Rack and prove Rack actually loaded it, from Rack's own
+        # log rather than from the button appearing to work.
+        focus()
+        rack_log = os.path.expanduser(
+            "~/Library/Application Support/Rack2/log.txt")
+        before = ""
+        if os.path.exists(rack_log):
+            with open(rack_log, errors="replace") as f:
+                before = f.read()
+        click("open_in_rack")
+        for _ in range(40):
+            time.sleep(2)
+            if not os.path.exists(rack_log):
+                continue
+            with open(rack_log, errors="replace") as f:
+                now = f.read()
+            fresh = now[len(before):] if now.startswith(before) else now
+            if "Loading patch" in fresh:
+                for ln in fresh.splitlines():
+                    if "Loading patch" in ln or "Loaded plugin ForgeModular" in ln:
+                        print("  " + ln.strip())
+                print("PASS: Rack opened the artifact")
+                return 0
+        print("FAIL: Rack never reported loading a patch after the click")
+        return 1
 
     if cmd == "random":
         focus()

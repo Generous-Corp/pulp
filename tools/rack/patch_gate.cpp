@@ -81,6 +81,20 @@ std::vector<long> ints_for(const std::string& blob, const std::string& key) {
     return out;
 }
 
+/// The same, for values that are not whole numbers. A param stored as 0.05
+/// read through strtol becomes 0 -- the difference between a slow LFO and a
+/// stopped one.
+std::vector<double> doubles_for(const std::string& blob, const std::string& key) {
+    std::vector<double> out;
+    const std::string pat = "\"" + key + "\"";
+    for (size_t i = blob.find(pat); i != std::string::npos; i = blob.find(pat, i + 1)) {
+        size_t c = blob.find(':', i + pat.size());
+        if (c == std::string::npos) break;
+        out.push_back(std::strtod(blob.c_str() + c + 1, nullptr));
+    }
+    return out;
+}
+
 /// The `modules` and `cables` arrays, split into one blob per element.
 std::vector<std::string> elements(const std::string& doc, const std::string& array) {
     std::vector<std::string> out;
@@ -139,6 +153,10 @@ struct Node {
     long id = 0;
     std::string plugin, model;
     rack::engine::Module* mod = nullptr;   // null for Core, which has no library
+    /// The knob positions the PATCH stores, by param id. Rack applies these on
+    /// load; measuring with defaults instead measures a different patch than
+    /// the one that will be opened.
+    std::map<long, double> params;
 };
 
 struct Cable {
@@ -163,6 +181,12 @@ int main(int argc, char** argv) {
         auto mo = strings_for(e, "model");
         if (ids.empty() || pl.empty() || mo.empty()) continue;
         n.id = ids[0]; n.plugin = pl[0]; n.model = mo[0];
+        // "params": [ {"id": 0, "value": 0.05}, ... ]
+        for (const std::string& pe : elements(e, "params")) {
+            auto pid = ints_for(pe, "id");
+            auto pv = doubles_for(pe, "value");
+            if (!pid.empty() && !pv.empty()) n.params[pid[0]] = pv[0];
+        }
         if (n.plugin != "Core") {
             rack::plugin::Plugin* pl = load_plugin(n.plugin, dir);
             rack::plugin::Model* m = find_model(pl, n.model);
@@ -207,9 +231,19 @@ int main(int argc, char** argv) {
     }
     for (Node& n : nodes) {
         if (!n.mod) continue;
-        for (int p = 0; p < n.mod->getNumParams(); ++p)
-            if (auto* q = n.mod->getParamQuantity(p))
-                n.mod->params[p].setValue(q->getDefaultValue());
+        for (int p = 0; p < n.mod->getNumParams(); ++p) {
+            auto* q = n.mod->getParamQuantity(p);
+            if (!q) continue;
+            // The patch's own value when it has one, the default otherwise --
+            // which is exactly what Rack does on load. Using defaults for
+            // everything measured a patch nobody would ever open: a mixer
+            // level stored at zero reads as silence in Rack while the gate,
+            // with that same fader at its default, hears the drone perfectly.
+            const auto it = n.params.find(p);
+            n.mod->params[p].setValue(it != n.params.end()
+                                          ? static_cast<float>(it->second)
+                                          : q->getDefaultValue());
+        }
     }
 
     // What reaches the audio interface is the thing that matters.
