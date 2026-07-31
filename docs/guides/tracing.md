@@ -32,6 +32,11 @@ plus a CLI/MCP surface, not a vendor API.
 | **L1** | Novice, **one-shot** | `pulp trace explain "<question>"` · MCP `pulp_trace_explain` · `/trace "<question>"` | **The headline.** An agent loads the `trace-analysis` skill, runs the full investigation autonomously, and returns a plain-English **root cause + chain of evidence + a concrete fix** — never raw SQL. |
 | **L2** | Expert, **iterative** | `pulp trace query "<sql>"` with the `trace-analysis` + `trace-sql` skills loaded | The full hypothesis→query→drill-down loop for hard, multi-bottleneck cases. |
 
+Live L0/L1/L2 follow-ups reuse the exact `--session`, `--instance`, and
+`--publication` selector printed by `pulp trace start`; the short names in the
+table omit those repeated flags only for readability. Offline `query --trace`
+does not need a live selector.
+
 The L0 preset names map **1:1** onto the trace-stdlib SQL views shipped with the
 `trace-sql` skill (`slowest-frames → pulp_slowest_frames`, `xruns →
 pulp_xruns`, `dsp-hotspots → pulp_dsp_node_cost`, `layout-vs-paint →
@@ -42,7 +47,7 @@ pulp_layout_vs_paint`) — one definition, three surfaces.
 ```
 1. Capture   → pulp trace start --categories dsp   (or accept a given --trace FILE.pftrace)
              → reproduce → pulp trace stop  → /tmp/pulp-<ts>.pftrace
-2. Ask       → pulp trace explain "why is my plugin using so much CPU?"
+2. Ask       → pulp trace explain "why is my plugin using so much CPU?" --session SESSION --instance INSTANCE --publication PUBLICATION
 3. Agent     → loads the trace-analysis skill and runs its protocol autonomously:
                forms a hypothesis, queries via the trace-sql stdlib, checks
                wall-time vs CPU-time, follows blockers across threads, verifies
@@ -214,7 +219,7 @@ promise.
 pulp trace start --categories render,gpu,text,js,layout
 # ... open the plugin editor (or launch the standalone app) ...
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace explain "why is my plugin slow to open?"
+pulp trace explain "why is my plugin slow to open?" --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 One-shot, main-thread startup laid out on a timeline: Dawn/Graphite device
@@ -240,13 +245,13 @@ A representative L1 answer:
 ### Use case 2 — "Find the slowest frames / why does the UI stutter when I move a knob?"
 
 ```bash
-pulp trace slowest-frames                              # L0 preset: frames over budget, worst first
+pulp trace slowest-frames --session SESSION --instance INSTANCE --publication PUBLICATION
 # then, to explain a hitch during an interaction:
 pulp trace start --categories render,layout,canvas,text,js,gpu
 pulp motion record --view Knob --out knob.jsonl        # motion trace_id joins in
 # ... sweep the knob ...
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace query --preset layout-vs-paint              # or: explain "why did those frames blow the budget?"
+pulp trace query --preset layout-vs-paint --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 The fat slices are `TextShaper::prepare` firing every frame — the knob's value
@@ -264,7 +269,7 @@ one-row-per-stage cost split.
 pulp trace start --categories dsp,dsp.node
 # ... offline-render a fixed MIDI/audio clip through the plugin ...
 pulp trace stop --session SESSION --instance INSTANCE --publication PUBLICATION
-pulp trace explain "why is my plugin using so much CPU?"
+pulp trace explain "why is my plugin using so much CPU?" --session SESSION --instance INSTANCE --publication PUBLICATION
 ```
 
 `AudioProcessLoadMeasurer` reports a calm ~40% average, but the flamegraph shows

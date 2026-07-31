@@ -315,6 +315,8 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
 bool InspectorSession::begin_dispatch() {
     const auto caller = std::this_thread::get_id();
     std::unique_lock lock(dispatch_mutex_);
+    if (!dispatch_accepting_)
+        return false;
     if (dispatch_active_ && dispatch_owner_ == caller) {
         ++dispatch_recursion_;
         return true;

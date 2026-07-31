@@ -923,8 +923,26 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         trace_start,
         R"JSON(Exact selection: {\"session_id\":\"session-a\",\"instance_id\":\"instance-b\",\"publication_id\":\"publication-c\"})JSON");
 
+    const auto trace_query = handle_request(tool_call(
+        "63", "pulp_trace_query",
+        R"JSON({"sql":"select 1","session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
+    require_contains(
+        trace_query,
+        "fake-inspector [inspect] [--session] [session-a] [--instance] "
+        "[instance-b] [--publication] [publication-c] [--command] "
+        "[Trace.query]");
+
+    const auto trace_explain = handle_request(tool_call(
+        "64", "pulp_trace_explain",
+        R"JSON({"question":"why slow?","session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
+    require_contains(
+        trace_explain,
+        "fake-inspector [inspect] [--session] [session-a] [--instance] "
+        "[instance-b] [--publication] [publication-c] [--command] "
+        "[Trace.explain]");
+
     const auto exact_motion_start = handle_request(tool_call(
-        "63", "pulp_motion_start_trace",
+        "65", "pulp_motion_start_trace",
         R"JSON({"view_name":"Card","metrics":[],"session_id":"session-explicit","instance_id":"instance-explicit","publication_id":"publication-explicit"})JSON"));
     require_contains(
         exact_motion_start,
@@ -933,7 +951,7 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         "[Motion.startTrace]");
 
     const auto motion_stop = handle_request(tool_call(
-        "64", "pulp_motion_stop_trace",
+        "66", "pulp_motion_stop_trace",
         R"JSON({"trace_id":7,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
     require_contains(
         motion_stop,
@@ -942,7 +960,7 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         "[Motion.stopTrace]");
 
     const auto motion_play = handle_request(tool_call(
-        "65", "pulp_motion_play",
+        "67", "pulp_motion_play",
         R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
     require_contains(
         motion_play,
@@ -951,7 +969,7 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
         "[Motion.play]");
 
     const auto unpinned_stop = handle_request(tool_call(
-        "66", "pulp_trace_stop"));
+        "68", "pulp_trace_stop"));
     require_contains(unpinned_stop, R"JSON("isError":true)JSON");
     require_contains(
         unpinned_stop,
@@ -2936,7 +2954,7 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools
 TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas", "[mcp][tools][trace]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":98,"method":"tools/list"})JSON");
 
-    // pulp_trace_explain is the only trace tool with a required param.
+    // Explain requires a question in addition to the exact capture selector.
     {
         std::string name_key = R"JSON("name":"pulp_trace_explain")JSON";
         auto pos = tools.find(name_key);
@@ -2949,6 +2967,15 @@ TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas", "[mcp][tool
         REQUIRE(req_end != std::string::npos);
         auto required_window = window.substr(req_pos, req_end - req_pos + 1);
         REQUIRE(required_window.find(R"JSON("question")JSON") != std::string::npos);
+    }
+    for (const char* tool : {"pulp_trace_query", "pulp_trace_explain"}) {
+        const auto position =
+            tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
+        REQUIRE(position != std::string::npos);
+        const auto schema = tools.substr(position, 1600);
+        require_contains(
+            schema,
+            R"JSON("session_id","instance_id","publication_id")JSON");
     }
 
     // Every trace tool needs a description + an inputSchema object.

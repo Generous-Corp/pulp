@@ -374,6 +374,28 @@ TEST_CASE("InspectorSession cancels queued dispatch during teardown",
     CHECK_FALSE(active_response.is_error);
 }
 
+TEST_CASE("InspectorSession rejects recursive dispatch after suspension",
+          "[inspect][session][dispatch][reentrant][teardown]") {
+    InspectorSession* session_ptr = nullptr;
+    pulp::inspect::InspectorMessage nested_response;
+    InspectorSession session(
+        {"session-cancel-recursive", "instance-1", "fixture"},
+        policy(InspectorProfile::Develop),
+        [&](const auto& request) {
+            session_ptr->suspend_dispatches();
+            nested_response = session_ptr->handle(
+                "nested", make_request(2, "State.getParameters"));
+            return make_response(request.id, R"({"outer":true})");
+        });
+    session_ptr = &session;
+
+    const auto outer =
+        session.handle("outer", make_request(1, "State.getParameters"));
+    CHECK_FALSE(outer.is_error);
+    CHECK(nested_response.is_error);
+    CHECK(nested_response.error_code == "dispatch_cancelled");
+}
+
 TEST_CASE("controller lease handoff waits for an admitted mutation",
           "[inspect][session][lease][concurrency]") {
     auto now = std::chrono::steady_clock::time_point{};
