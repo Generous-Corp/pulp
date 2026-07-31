@@ -402,5 +402,46 @@ class FormatIsAsked(unittest.TestCase):
                          f"the three formats must ask for three things: {seen}")
 
 
+class RefusesToClickBlind(unittest.TestCase):
+    """It must not click when the editor is not what is on screen.
+
+    REAPER reported itself frontmost while its FX window sat under a remote-
+    desktop session and a terminal full of live agent sessions. The clicks and
+    the typed prompt went into those. Frontmost-process is not proof, and on a
+    shared machine a wrong click is not a failed test -- it is typing into
+    somebody's work.
+    """
+
+    def _screen(self, colour):
+        from PIL import Image
+        img = Image.new("RGB", (2000, 2000), colour)
+        img.save("/tmp/pulp-daw-smoke-front.png")
+
+    def test_a_desktop_full_of_other_windows_is_refused(self):
+        try:
+            self._screen((210, 210, 215))       # a bright, non-Forge screen
+        except ImportError:
+            self.skipTest("no PIL")
+        with mock.patch.object(rs.subprocess, "run"):
+            self.assertFalse(rs._editor_is_really_in_front(0, 0, 800, 600))
+
+    def test_the_editor_itself_is_accepted(self):
+        try:
+            self._screen((26, 30, 36))          # Forge's dark surface
+        except ImportError:
+            self.skipTest("no PIL")
+        with mock.patch.object(rs.subprocess, "run"):
+            self.assertTrue(rs._editor_is_really_in_front(0, 0, 800, 600))
+
+    def test_no_capture_means_no_click(self):
+        # Unable to look is not permission to proceed.
+        try:
+            os.remove("/tmp/pulp-daw-smoke-front.png")
+        except FileNotFoundError:
+            pass
+        with mock.patch.object(rs.subprocess, "run"):
+            self.assertFalse(rs._editor_is_really_in_front(0, 0, 800, 600))
+
+
 if __name__ == "__main__":
     unittest.main()

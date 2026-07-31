@@ -413,6 +413,49 @@ def _floating_editor_bounds(plugin_name: str) -> tuple[int, int, int, int] | Non
     return None
 
 
+def _editor_is_really_in_front(x: int, y: int, w: int, h: int) -> bool:
+    """Is the plugin's editor the thing actually under the pointer?
+
+    Frontmost-process is NOT enough, and believing it did real harm: REAPER
+    reported itself frontmost while its FX window sat buried under a remote-
+    desktop session and a terminal full of live agent sessions, so the clicks
+    and the typed prompt went into those instead. On a shared machine that is
+    not a failed test; it is typing into somebody's work.
+
+    So the pixels are checked. Forge's editor is a dark surface with a mint
+    accent, and neither appears in a terminal or on a desktop. Sampled over
+    the area the clicks would land in, not at one point, because one point can
+    be a dark pixel in anything.
+    """
+    shot = "/tmp/pulp-daw-smoke-front.png"
+    subprocess.run(["screencapture", "-x", "-o", shot], check=False)
+    try:
+        from PIL import Image
+        im = Image.open(shot).convert("RGB")
+    except Exception as e:                      # no PIL, no capture, no proof
+        log(f"cannot confirm the editor is in front ({e}) — refusing to click blind")
+        return False
+
+    # screencapture is in device pixels; the window box is in points.
+    factor = 2 if im.width > w * 1.5 else 1
+    hits = total = 0
+    for fx in (0.3, 0.5, 0.73, 0.9):
+        for fy in (0.3, 0.45, 0.53, 0.7):
+            px, py = int((x + w * fx) * factor), int((y + h * fy) * factor)
+            if not (0 <= px < im.width and 0 <= py < im.height):
+                continue
+            total += 1
+            r, g, b = im.getpixel((px, py))
+            mint = g > 150 and b > 120 and r < 120
+            dark_surface = r < 45 and g < 55 and b < 60
+            if mint or dark_surface:
+                hits += 1
+    if total == 0:
+        return False
+    log(f"editor visible at {hits}/{total} sampled points")
+    return hits >= max(1, total - 2)
+
+
 def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
     """Generate a patch from INSIDE the host, by pressing the editor's Build.
 
@@ -475,6 +518,31 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         x, y, w, h = box
         log(f"editor window at {x},{y} {w}x{h}")
 
+        # FOCUS FIRST, and fail if it cannot be had. Typing into a window that
+        # is not key goes nowhere, Build then refuses an empty prompt, and the
+        # run sits waiting for a generation that was never asked for -- which
+        # is exactly how the first attempt produced no verdict at all. The
+        # standalone driver has refused to click unfocused since two false
+        # readings cost more than the bugs did; this had not learned it yet.
+        _osa('tell application "REAPER" to activate')
+        time.sleep(1.0)
+        _osa(f'tell application "System Events" to tell process "REAPER" to '
+             f'perform action "AXRaise" of window 1 whose name contains '
+             f'"{args.plugin_name}"')
+        time.sleep(1.0)
+        front = _osa('tell application "System Events" to get name of first '
+                     'process whose frontmost is true')
+        if "REAPER" not in front:
+            log(f"could not bring REAPER forward (frontmost is {front!r}) — "
+                f"refusing to click into another window — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        if not _editor_is_really_in_front(x, y, w, h):
+            log("REAPER says it is frontmost, but the editor is not what is on "
+                "screen where the clicks would land — something else is over "
+                "it. Refusing to click: on a shared machine that types into "
+                "somebody's work. INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+
         # The same fractions the standalone driver uses; the editor is the
         # same view at the same design size whichever shell is around it.
         def click(fx: float, fy: float) -> None:
@@ -488,6 +556,24 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         subprocess.run([str(uidriver), "type", prompt], check=False)
         time.sleep(0.8)
         click(0.73, 0.53)                         # Build
+
+        # Did the press START anything? Say plainly that the click missed,
+        # rather than waiting out the cap and calling it inconclusive.
+        started = False
+        for _ in range(30):
+            time.sleep(1)
+            if plugin_log.exists() and plugin_log.stat().st_size > before:
+                started = True
+                break
+        if not started:
+            subprocess.run(["screencapture", "-x", "-o",
+                            "/tmp/forge-reaper-nofire.png"], check=False)
+            log("a screenshot of what was on screen is at "
+                "/tmp/forge-reaper-nofire.png")
+            log("the Build click did not start a generation inside the host: "
+                "the prompt was typed and the button was pressed, so the click "
+                "landed somewhere that is not Build — FAIL")
+            return EXIT_FAIL
 
         # Wait for the generation the way a person would: until the plugin's
         # log says it finished, or the cap runs out.
