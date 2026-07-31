@@ -2084,6 +2084,11 @@
             "required": false
           },
           {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--host",
             "kind": "option",
             "required": false
@@ -2496,7 +2501,17 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
-            "name": "--host",
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
             "kind": "option",
             "required": false
           },
@@ -3732,6 +3747,21 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--session",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--instance",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--publication",
+            "kind": "option",
+            "required": false
+          },
+          {
             "name": "--port",
             "kind": "option",
             "required": false
@@ -3748,11 +3778,6 @@
             "arguments": [
               {
                 "name": "--categories",
-                "kind": "option",
-                "required": false
-              },
-              {
-                "name": "--out",
                 "kind": "option",
                 "required": false
               },

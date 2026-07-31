@@ -809,21 +809,30 @@ fn write_pretty(
     let trimmed = response.trim();
     match sub {
         Sub::Start(_) => {
+            if extract_bool(trimmed, "ok") == Some(false) {
+                writeln!(out, "tracing did not start")?;
+                if let Some(message) = extract_str(trimmed, "message") {
+                    writeln!(out, "  {message}")?;
+                } else {
+                    writeln!(out, "  raw: {trimmed}")?;
+                }
+                return Ok(());
+            }
             if let Some(path) = extract_str(trimmed, "out_path") {
                 writeln!(out, "tracing started — writing to {path}")?;
-                writeln!(
-                    out,
-                    "  stop with: pulp trace stop{}",
-                    crate::cmd::inspector::selection_cli_suffix(
-                        selection.map(|value| value.session_id.as_str()),
-                        selection.map(|value| value.instance_id.as_str()),
-                        selection.map(|value| value.publication_id.as_str()),
-                    )
-                )?;
             } else {
                 writeln!(out, "tracing started")?;
                 writeln!(out, "  raw: {trimmed}")?;
             }
+            writeln!(
+                out,
+                "  stop with: pulp trace stop{}",
+                crate::cmd::inspector::selection_cli_suffix(
+                    selection.map(|value| value.session_id.as_str()),
+                    selection.map(|value| value.instance_id.as_str()),
+                    selection.map(|value| value.publication_id.as_str()),
+                )
+            )?;
         }
         Sub::Stop => {
             // The headline of `stop` is the `.pftrace` path — pull it
@@ -1822,7 +1831,7 @@ mod tests {
     #[test]
     fn dispatch_start_preserves_exact_selection_in_stop_hint() {
         let talker = RecordingTalker::new(vec![
-            "{\"out_path\":\"/tmp/pulp-9.pftrace\"}",
+            "{\"compiled_in\":true,\"active\":true,\"ok\":true}",
         ]);
         let flags = GlobalFlags {
             session_id: Some("session-a".to_owned()),
@@ -1843,6 +1852,32 @@ mod tests {
             "pulp trace stop --session session-a --instance instance-b \
              --publication publication-c"
         ), "{output}");
+    }
+
+    #[test]
+    fn dispatch_start_failure_does_not_print_a_stop_command() {
+        let talker = RecordingTalker::new(vec![
+            "{\"compiled_in\":false,\"active\":false,\"ok\":false,\
+             \"message\":\"Tracing is not compiled in\"}",
+        ]);
+        let flags = GlobalFlags {
+            session_id: Some("session-a".to_owned()),
+            instance_id: Some("instance-b".to_owned()),
+            publication_id: Some("publication-c".to_owned()),
+            ..GlobalFlags::default()
+        };
+        let mut output = Vec::new();
+        dispatch(
+            &Sub::Start(StartArgs::default()),
+            &flags,
+            &talker,
+            &mut output,
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("tracing did not start"), "{output}");
+        assert!(output.contains("Tracing is not compiled in"), "{output}");
+        assert!(!output.contains("pulp trace stop"), "{output}");
     }
 
     #[test]
