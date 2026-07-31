@@ -471,10 +471,10 @@ jobs:
 
       # A normal post-contract tag carries these files itself. An old tag or an
       # explicit old source_ref may not. Manual dispatches always use the current
-      # verifier as the compatibility engine while retaining the selected
-      # source's matrix; otherwise fetch helpers only when absent. The matrix
-      # floor makes a pre-contract source an explicit skip rather than an
-      # accidental pass.
+      # verifier and provenance stamper as compatibility helpers while retaining
+      # the selected source's product matrix; otherwise fetch helpers only when
+      # absent. The matrix floor makes a pre-contract source an explicit skip
+      # rather than an accidental pass.
       - name: Ensure release-content verifier helpers exist
         shell: bash
         run: |
@@ -484,9 +484,11 @@ jobs:
               tools/scripts/release_artifact_contents.py \
               tools/scripts/release_product_matrix.json \
               tools/scripts/resign_macos_release_tree.py \
+              tools/scripts/sdk_provenance.py \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
-                && [ "$path" = tools/scripts/release_artifact_contents.py ]; then
+                && { [ "$path" = tools/scripts/release_artifact_contents.py ] \
+                  || [ "$path" = tools/scripts/sdk_provenance.py ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
               curl -fsSL "$url" -o "$path"
@@ -867,7 +869,7 @@ jobs:
           # build-sdk on macOS is a symlink to build (CLI was built with
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
-          if [ -f tools/scripts/sdk_provenance.py ] && [ -z "$SOURCE_REF" ]; then
+          if [ -z "$SOURCE_REF" ]; then
             python3 tools/scripts/sdk_provenance.py stamp \
               --prefix sdk-staging \
               --build-dir build-sdk \
@@ -926,8 +928,7 @@ jobs:
           SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           cmake --install build --prefix sdk-staging --config Release
-          if ((Test-Path tools/scripts/sdk_provenance.py) -and
-              [string]::IsNullOrEmpty($env:SOURCE_REF)) {
+          if ([string]::IsNullOrEmpty($env:SOURCE_REF)) {
             $releaseTag = $env:RELEASE_TAG
             $sourceSha = (git rev-parse HEAD).Trim()
             python tools/scripts/sdk_provenance.py stamp `

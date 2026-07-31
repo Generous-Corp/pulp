@@ -617,7 +617,9 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
         self.assertIn("path.write_text(text", run_block)
         self.assertNotIn("package_analyzer_descriptors.cpp", run_block)
 
-    def test_manual_dispatch_uses_current_verifier_with_selected_matrix(self) -> None:
+    def test_manual_dispatch_uses_current_verifier_and_stamper_with_selected_matrix(
+        self,
+    ) -> None:
         run_block = self._find_step_run(
             "Ensure release-content verifier helpers exist"
         )
@@ -630,9 +632,25 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             run_block,
         )
         self.assertIn(
+            "[ \"$path\" = tools/scripts/sdk_provenance.py ]",
+            run_block,
+        )
+        self.assertIn("tools/scripts/release_product_matrix.json", run_block)
+        self.assertIn(
             "Overlaying current backfill compatibility engine",
             run_block,
         )
+
+    def test_official_sdk_stamp_cannot_silently_skip_a_missing_helper(self) -> None:
+        unix_block = self._find_step_run("Build SDK tarball (Unix)")
+        windows_block = self._find_step_run("Build SDK tarball (Windows)")
+        self.assertIn('if [ -z "$SOURCE_REF" ]; then', unix_block)
+        self.assertNotIn("-f tools/scripts/sdk_provenance.py", unix_block)
+        self.assertIn(
+            "if ([string]::IsNullOrEmpty($env:SOURCE_REF))",
+            windows_block,
+        )
+        self.assertNotIn("Test-Path tools/scripts/sdk_provenance.py", windows_block)
 
 
 class SingleOwnerReleasePublication(unittest.TestCase):
