@@ -30,11 +30,10 @@ on:
       source_ref:
         description: |
           Git ref to BUILD from. Leave blank to build from `version` (the
-          tag itself, normal backfill). Set to `main` only when you want
-          to publish current `main` content under the `version` label —
-          ill-advised unless you understand the risk. Added in #1962 so
-          backfilling a broken release can run the FIXED workflow from
-          `main` while still checking out the broken TAG's source code.
+          tag itself, normal backfill). Historical tags before the SDK
+          provenance floor may set this for emergency repair. Marker-era
+          releases reject source substitution because their positive marker
+          binds the release label to the exact tag commit.
         required: false
         default: ''
       make_latest:
@@ -109,6 +108,49 @@ jobs:
       # repo. Always resolve from the DEFAULT branch's copy, never the tag's: a
       # backfill of an old tag must use today's routing, not whatever routing
       # existed when that tag was cut.
+      # Evaluate marker-era policy before the operator-selected source_ref is
+      # checked out. Otherwise that ref could supply an older matrix that omits
+      # sdk_provenance_floor and thereby disable its own guard.
+      - uses: actions/checkout@v5
+        with:
+          # This first checkout is a trusted policy bootstrap. The source build
+          # checkout below may use an operator-selected ref, but only after the
+          # default branch has decided whether that substitution is permitted.
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Reject marker-era source substitution
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${GITHUB_REPOSITORY}/contents/tools/scripts/release_product_matrix.json?ref=${DEFAULT_BRANCH}" \
+            >"$authoritative_matrix"
+          python3 - "$authoritative_matrix" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          def version(value):
+              return tuple(int(part) for part in value.removeprefix("v").split("."))
+
+          matrix = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          floor = matrix["sdk_provenance_floor"]
+          if version(os.environ["RELEASE_VERSION"]) >= version(floor):
+              raise SystemExit(
+                  "marker-era releases cannot substitute source_ref for the release tag"
+              )
+          print("pre-marker repair: source_ref substitution remains permitted")
+          PY
+
       - uses: actions/checkout@v5
         with:
           lfs: false
@@ -324,6 +366,8 @@ jobs:
       - name: Overlay latest release-pipeline files (workflow_dispatch backfill)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref == '' }}
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         # Pull the current `main` copies of files that gate release-cli's
         # success but live in the source tree rather than the workflow
         # itself. Without this, a backfill against a tag created BEFORE
@@ -353,7 +397,29 @@ jobs:
         # tail-link block below so the tag keeps its own source list.
         run: |
           set -euo pipefail
-          repo='${{ github.repository }}'
+          matrix_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/tools/scripts/release_product_matrix.json"
+          matrix_file="${RUNNER_TEMP}/release-product-matrix.json"
+          curl -fsSL "$matrix_url" -o "$matrix_file"
+          release_era="$(python3 - "$RELEASE_VERSION" "$matrix_file" <<'PY'
+          import json
+          import sys
+
+          def version(value):
+              return tuple(int(part) for part in value.removeprefix("v").split("."))
+
+          with open(sys.argv[2], encoding="utf-8") as handle:
+              matrix = json.load(handle)
+          print(
+              "marker-era"
+              if version(sys.argv[1]) >= version(matrix["sdk_provenance_floor"])
+              else "legacy"
+          )
+          PY
+          )"
+          if [[ "$release_era" == "marker-era" ]]; then
+            echo "Marker-era release ${RELEASE_VERSION}: refusing current-main source overlays"
+            exit 0
+          fi
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               tools/scripts/package_cli.py \
@@ -362,7 +428,7 @@ jobs:
               core/canvas/CMakeLists.txt \
               tools/deps/manifest.json \
               ; do
-            url="https://raw.githubusercontent.com/${repo}/main/${path}"
+            url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/${path}"
             echo "Overlaying ${path} from ${url}"
             curl -fsSL "$url" -o "$path"
             wc -c "$path"
@@ -584,6 +650,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF \
             $REQUIRE_GPU \
             $EXTRA_ARCH \
             ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
@@ -760,6 +827,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_ENABLE_AUDIO_PROBES=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF \
             $REQUIRE_GPU \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
@@ -791,12 +859,23 @@ jobs:
         if: runner.os != 'Windows'
         env:
           MATRIX_PLATFORM: ${{ matrix.platform }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           # build-sdk on Linux is the WebView=ON build (separate dir to
           # avoid re-linking the CLI binary against libwebkit2gtk).
           # build-sdk on macOS is a symlink to build (CLI was built with
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
+          if [ -f tools/scripts/sdk_provenance.py ] && [ -z "$SOURCE_REF" ]; then
+            python3 tools/scripts/sdk_provenance.py stamp \
+              --prefix sdk-staging \
+              --build-dir build-sdk \
+              --source-dir . \
+              --release-tag "$RELEASE_TAG" \
+              --source-sha "$(git rev-parse HEAD)" \
+              --platform "${{ matrix.platform }}"
+          fi
           test -f sdk-staging/lib/libpulp-view.a
           test -f sdk-staging/lib/libpulp-view-core.a
           # CMake rewrites install RPATHs while copying executables into the SDK.
@@ -842,8 +921,26 @@ jobs:
 
       - name: Build SDK tarball (Windows)
         if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           cmake --install build --prefix sdk-staging --config Release
+          if ((Test-Path tools/scripts/sdk_provenance.py) -and
+              [string]::IsNullOrEmpty($env:SOURCE_REF)) {
+            $releaseTag = $env:RELEASE_TAG
+            $sourceSha = (git rev-parse HEAD).Trim()
+            python tools/scripts/sdk_provenance.py stamp `
+              --prefix sdk-staging `
+              --build-dir build `
+              --source-dir . `
+              --release-tag $releaseTag `
+              --source-sha $sourceSha `
+              --platform '${{ matrix.platform }}'
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Failed to stamp official SDK provenance'
+            }
+          }
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
@@ -868,9 +965,15 @@ jobs:
           if [[ "$MATRIX_PLATFORM" == darwin-* ]]; then
             signature_args+=(--native-signatures)
           fi
+          source_sha_args=()
+          if python3 tools/scripts/release_artifact_contents.py --help \
+              2>&1 | grep -q -- '--source-sha'; then
+            source_sha_args+=(--source-sha "$(git rev-parse HEAD)")
+          fi
           python3 tools/scripts/release_artifact_contents.py . \
             --platform "${{ matrix.platform }}" \
             --version "${RELEASE_TAG#v}" \
+            "${source_sha_args[@]}" \
             "${signature_args[@]}"
 
       - name: Verify release archive product matrix (Windows)
@@ -881,9 +984,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_TAG.TrimStart('v')
+          $verifierHelp = python tools/scripts/release_artifact_contents.py --help 2>&1 |
+            Out-String
+          $sourceShaArgs = @()
+          if ($verifierHelp.Contains('--source-sha')) {
+            $sourceShaArgs = @('--source-sha', (git rev-parse HEAD).Trim())
+          }
           python tools/scripts/release_artifact_contents.py . `
             --platform "${{ matrix.platform }}" `
-            --version $version
+            --version $version `
+            @sourceShaArgs
 
       # Carry the floor from the exact checkout that produced each macOS
       # artifact. A workflow_dispatch backfill may build an old tag while the
@@ -1361,7 +1471,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
-          SOURCE_REF: ${{ inputs.source_ref || '' }}
         run: |
           set -euo pipefail
           state=$(gh release view "${TAG}" --repo "${REPO}" --json isDraft --jq .isDraft 2>/dev/null || echo "missing")
@@ -1430,6 +1539,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
           # A manual dispatch is usually an OLD-tag backfill, so it must opt in
           # before it may claim the latest-release pointer.
           ALLOW_LATEST: ${{ github.event_name != 'workflow_dispatch' || inputs.make_latest }}
@@ -1483,8 +1594,36 @@ jobs:
             git show "${matrix_ref}:${matrix}" > "$RUNNER_TEMP/release_product_matrix.json"
             matrix="$RUNNER_TEMP/release_product_matrix.json"
           fi
+          # The selected tag/source matrix remains authoritative for historical
+          # artifact membership, but it must not choose whether its own SDKs need
+          # positive provenance. Import only that policy boundary from the trusted
+          # current default branch and fail hard if it is unavailable.
+          authoritative_matrix="$RUNNER_TEMP/authoritative-release-product-matrix.json"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${REPO}/contents/tools/scripts/release_product_matrix.json?ref=${DEFAULT_BRANCH}" \
+            >"$authoritative_matrix"
+          publication_matrix="$RUNNER_TEMP/publication-release-product-matrix.json"
+          python3 - "$matrix" "$authoritative_matrix" "$publication_matrix" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          selected_path, authoritative_path, output_path = map(Path, sys.argv[1:])
+          selected = json.loads(selected_path.read_text(encoding="utf-8"))
+          authoritative = json.loads(
+              authoritative_path.read_text(encoding="utf-8")
+          )
+          selected["sdk_provenance_floor"] = authoritative["sdk_provenance_floor"]
+          output_path.write_text(
+              json.dumps(selected, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
           python3 tools/scripts/release_artifact_contents.py release-assets \
-            --all-platforms --version "${TAG#v}" --matrix "$matrix"
+            --all-platforms --version "${TAG#v}" \
+            --source-sha "$(git rev-parse "${TAG}^{commit}")" \
+            --matrix "$publication_matrix"
 
           checksum_args=()
           for asset in "${required_assets[@]}"; do

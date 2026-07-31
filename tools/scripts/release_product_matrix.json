@@ -1,5 +1,6 @@
 {
   "contract_floor": "0.759.1",
+  "sdk_provenance_floor": "0.764.0",
   "platforms": [
     "darwin-arm64",
     "darwin-x64",

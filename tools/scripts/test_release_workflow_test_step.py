@@ -212,6 +212,92 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
+    def test_cli_and_sdk_build_disable_inspector(self) -> None:
+        self.assertGreaterEqual(
+            self.text.count("-DPULP_ENABLE_INSPECTOR=OFF"),
+            2,
+            "release-cli.yml must keep the inspector disabled for both the "
+            "CLI and SDK release configure steps.",
+        )
+
+    def test_sdk_archives_are_stamped_from_the_selected_prefix(self) -> None:
+        self.assertEqual(
+            self.text.count("tools/scripts/sdk_provenance.py stamp"),
+            2,
+            "Unix and Windows SDK archive paths must both stamp provenance.",
+        )
+        self.assertIn("--prefix sdk-staging", self.text)
+        self.assertIn("--build-dir build-sdk", self.text)
+
+    def test_sdk_stamp_passes_release_tag_through_the_environment(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn('--release-tag "$RELEASE_TAG"', unix_block)
+        self.assertNotIn('--release-tag "${{', unix_block)
+        self.assertIn("$releaseTag = $env:RELEASE_TAG", windows_block)
+        self.assertNotIn("$releaseTag = '${{", windows_block)
+
+    def test_historical_source_substitution_skips_exact_tag_stamping(self) -> None:
+        unix_start = self.text.index("- name: Build SDK tarball (Unix)")
+        windows_start = self.text.index("- name: Build SDK tarball (Windows)")
+        verify_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:verify_start]
+        self.assertIn("SOURCE_REF: ${{ inputs.source_ref || '' }}", unix_block)
+        self.assertIn('[ -z "$SOURCE_REF" ]', unix_block)
+        self.assertIn("SOURCE_REF: ${{ inputs.source_ref || '' }}", windows_block)
+        self.assertIn(
+            "[string]::IsNullOrEmpty($env:SOURCE_REF)",
+            windows_block,
+        )
+
+    def test_pre_floor_verifiers_do_not_receive_unknown_source_sha_flag(self) -> None:
+        unix_start = self.text.index(
+            "- name: Verify release archive product matrix (Unix)"
+        )
+        windows_start = self.text.index(
+            "- name: Verify release archive product matrix (Windows)"
+        )
+        floor_start = self.text.index("- name: Record macOS release floor")
+        unix_block = self.text[unix_start:windows_start]
+        windows_block = self.text[windows_start:floor_start]
+        self.assertIn(
+            "release_artifact_contents.py --help",
+            unix_block,
+        )
+        self.assertIn("grep -q -- '--source-sha'", unix_block)
+        self.assertIn('"${source_sha_args[@]}"', unix_block)
+        self.assertIn(
+            "release_artifact_contents.py --help",
+            windows_block,
+        )
+        self.assertIn("$verifierHelp.Contains('--source-sha')", windows_block)
+        self.assertIn("@sourceShaArgs", windows_block)
+
+    def test_marker_era_source_substitution_is_rejected_before_build(self) -> None:
+        self.assertIn("Reject marker-era source substitution", self.text)
+        self.assertIn("sdk_provenance_floor", self.text)
+        self.assertIn("cannot substitute source_ref", self.text)
+        guard = self.text.index("- name: Reject marker-era source substitution")
+        checkout = self.text.index("- uses: actions/checkout@v5", guard)
+        self.assertLess(
+            guard,
+            checkout,
+            "The marker-era source_ref guard must run before the selected ref "
+            "can replace the working tree.",
+        )
+        guard_block = self.text[guard:checkout]
+        self.assertIn("github.event.repository.default_branch", guard_block)
+        self.assertIn("application/vnd.github.raw+json", guard_block)
+        self.assertIn("authoritative-release-product-matrix.json", guard_block)
+
 
 class BuildWorkflowReleaseGate(unittest.TestCase):
     """build.yml release-path PR gate must match release-cli.yml invariants."""
@@ -246,6 +332,7 @@ class BuildWorkflowReleaseGate(unittest.TestCase):
     def test_windows_release_gate_disables_audio_probes(self) -> None:
         run_block = self._find_step_run("Configure (matches release-cli.yml)")
         self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", run_block)
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=OFF", run_block)
 
 
 class ReleasePathPrGateMacosRouting(unittest.TestCase):
@@ -444,6 +531,40 @@ class ReleaseCliBackfillOverlay(unittest.TestCase):
             "checked-out tag can predate the release-pipeline fixes.",
         )
 
+    def test_marker_era_backfill_refuses_current_main_source_overlays(self) -> None:
+        step_block = self._find_step_block(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        run_block = self._find_step_run(
+            "Overlay latest release-pipeline files (workflow_dispatch backfill)"
+        )
+        self.assertIn("sdk_provenance_floor", run_block)
+        self.assertIn("refusing current-main source overlays", run_block)
+        self.assertIn("RELEASE_VERSION: ${{ inputs.version }}", step_block)
+        self.assertNotIn("release_version='${{ inputs.version }}'", run_block)
+        self.assertNotIn("${repo}", run_block)
+        self.assertIn(
+            'curl -fsSL "$matrix_url" -o "$matrix_file"',
+            run_block,
+        )
+        self.assertIn(
+            'release_era="$(python3 - "$RELEASE_VERSION" "$matrix_file"',
+            run_block,
+        )
+        self.assertIn('if [[ "$release_era" == "marker-era" ]]', run_block)
+        self.assertNotIn(
+            'if curl -fsSL "$matrix_url" | python3',
+            run_block,
+            "Matrix download or parsing failures must abort instead of selecting "
+            "the legacy overlay path.",
+        )
+        refusal = run_block.index("refusing current-main source overlays")
+        first_overlay = run_block.index("tools/scripts/fetch_skia_for_release.py")
+        self.assertLess(
+            refusal,
+            first_overlay,
+            "The marker-era guard must run before any source file is overlaid.",
+        )
     def test_linux_dependency_action_is_available_before_use(self) -> None:
         ensure_name = "Ensure shared Linux dependency action exists"
         install_name = "Install Linux dependencies"
@@ -603,6 +724,30 @@ class SingleOwnerReleasePublication(unittest.TestCase):
         self.assertLess(self.text.index(generate), self.text.index(publish))
         self.assertLess(self.text.index(verify), self.text.index(publish))
         self.assertLess(self.text.index(upload), self.text.index(publish))
+
+    def test_release_finalizer_uses_authoritative_provenance_floor(self) -> None:
+        steps = self.workflow["jobs"]["release"]["steps"]
+        finalizer = next(
+            step
+            for step in steps
+            if step.get("name") == "Verify assets, generate SHA256SUMS, publish"
+        )
+        self.assertEqual(
+            finalizer["env"]["DEFAULT_BRANCH"],
+            "${{ github.event.repository.default_branch }}",
+        )
+        run_block = finalizer["run"]
+        self.assertIn(
+            "authoritative-release-product-matrix.json",
+            run_block,
+        )
+        self.assertIn(
+            'selected["sdk_provenance_floor"] = '
+            'authoritative["sdk_provenance_floor"]',
+            run_block,
+        )
+        self.assertIn('--matrix "$publication_matrix"', run_block)
+        self.assertNotIn('--matrix "$matrix"', run_block)
 
     def test_every_user_facing_asset_is_required_before_publish(self) -> None:
         for asset in self.REQUIRED_RELEASE_ASSETS:
