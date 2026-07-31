@@ -93,6 +93,18 @@ def _decode_path(value: bytes) -> str:
         raise FreezeError("Vellum-owned paths must be valid UTF-8") from exc
 
 
+def merge_base(base_branch: str, head: str, repo: pathlib.Path = ROOT) -> str:
+    """The fork point of ``head`` from ``base_branch``.
+
+    CI compares the base commit against the *merge result*, so a file that only
+    ever changed on the base branch is not part of the comparison. A raw
+    ``base_branch..head`` diff instead reports every such file as a deletion,
+    which trips the append-only rule on change events the branch never touched.
+    Diffing from the fork point reproduces the comparison CI actually performs.
+    """
+    return _git(repo, "merge-base", base_branch, head).decode("utf-8").strip()
+
+
 def changed_entries(base: str, head: str, repo: pathlib.Path = ROOT) -> list[DiffEntry]:
     raw = _git(repo, "diff", "--name-status", "-z", "-M", "--no-ext-diff", base, head)
     fields = raw.split(b"\0")
@@ -1214,8 +1226,16 @@ def _write_outputs(path: pathlib.Path, *, required: bool, output: pathlib.Path) 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=pathlib.Path, default=ROOT)
-    parser.add_argument("--base", required=True)
-    parser.add_argument("--head", required=True)
+    parser.add_argument(
+        "--base",
+        help="commit to compare from; defaults to the fork point from --base-branch",
+    )
+    parser.add_argument("--head", default="HEAD")
+    parser.add_argument(
+        "--base-branch",
+        default="origin/main",
+        help="branch --base is derived from when --base is omitted",
+    )
     parser.add_argument("--source-head")
     parser.add_argument(
         "--verify-authority",
@@ -1228,8 +1248,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         repo = args.repo.resolve()
-        entries = changed_entries(args.base, args.head, repo)
-        base_map = _json_at(repo, args.base, MAP_PATH)
+        base = args.base or merge_base(args.base_branch, args.head, repo)
+        entries = changed_entries(base, args.head, repo)
+        base_map = _json_at(repo, base, MAP_PATH)
         head_map = _json_at(repo, args.head, MAP_PATH)
         if head_map is None:
             raise FreezeError(f"{args.head}:{MAP_PATH} is required")
@@ -1265,7 +1286,7 @@ def main(argv: list[str] | None = None) -> int:
             verify_framework_backports(events, token)
             verify_authority_counterpart(
                 repo=repo,
-                base=args.base,
+                base=base,
                 head=args.head,
                 manifest=manifest,
                 events=events,
@@ -1275,7 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
                 app_jwt=app_jwt,
             )
         outbox = build_outbox(
-            base=args.base,
+            base=base,
             head=args.head,
             source_head=args.source_head or args.head,
             affected=affected,

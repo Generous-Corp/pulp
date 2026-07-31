@@ -4235,9 +4235,14 @@ diagnostic names each uncovered slice, the changed paths behind it, and the
 
 ```sh
 python3 tools/scripts/vellum_freeze_check.py \
-  --base origin/main --head HEAD --source-head HEAD \
-  --output /tmp/vellum-outbox.json
+  --source-head HEAD --output /tmp/vellum-outbox.json
 ```
+
+`--base` defaults to the fork point (`git merge-base origin/main HEAD`), which
+is the comparison CI performs. Passing `--base origin/main` instead diffs
+against the base-branch *tip*, so every change event that landed on `main`
+after you forked reads as a deletion — the checker then fails where the gate
+passes. Override `--base` only to reproduce a specific CI comparison.
 
 This boundary is deliberate infrastructure, not ceremony — it keeps Pulp changes
 to extracted components ingestible by `Generous-Corp/vellum`. Do not "green it
@@ -4252,9 +4257,15 @@ resolution artifact, never a content problem. The trusted gate evaluates the
 base-branch *tip*, so diffing it against the raw branch head reports every file
 that landed on `main` after you forked as *deleted by your PR* — and an outbox
 event someone else added then trips `Vellum outbox events are append-only;
-modify/delete/rename is forbidden` against an author who deleted nothing. Merge
-`main` into the branch and it clears. A genuinely conflicted PR has no merge ref
-and is reported as such, rather than as a freeze violation.
+modify/delete/rename is forbidden` against an author who deleted nothing. A
+genuinely conflicted PR has no merge ref and is reported as such, rather than as
+a freeze violation.
+
+**Do not merge `main` into the branch to clear it.** That was the workaround
+before the gate evaluated the merge result; it no longer fixes anything, and
+each merge rewrites the head, cancels in-flight validation and starts another
+full lane — against a `main` that moves hourly it never converges. If the two
+jobs still disagree, re-run the trusted gate rather than moving the branch.
 
 The `pull_request_target` + `statuses: write` shape on the trusted gate is
 intentional and safe as written: it checks out `base.sha` with
