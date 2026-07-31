@@ -4673,3 +4673,120 @@ TEST_CASE("Ask lights the cable it is answering about", "[rack][ask]") {
     CHECK_FALSE(preview->highlight().has_value());
     CHECK_FALSE(shell.explanation()->hovered().has_value());
 }
+
+/// A HOME with a Rack install we control.
+///
+/// Availability is answered by reading the plugin manifests under the real
+/// $HOME, which would make this test say different things on different
+/// machines -- and pass on the one machine where the module happens to be
+/// installed. A fabricated home makes the answer a property of the code.
+struct FakeRackHome {
+    explicit FakeRackHome(const char* brand, std::vector<std::string> slugs) {
+        const char* was = std::getenv("HOME");
+        previous = was ? was : "";
+        dir = std::filesystem::temp_directory_path() / "forge-fake-home";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        const auto plug = dir / "Library" / "Application Support" / "Rack2" /
+                          "plugins-mac-arm64" / brand;
+        std::filesystem::create_directories(plug, ec);
+        std::ofstream f(plug / "plugin.json");
+        f << R"({"slug":")" << brand << R"(","modules":[)";
+        for (std::size_t i = 0; i < slugs.size(); ++i)
+            f << (i ? "," : "") << R"({"slug":")" << slugs[i] << R"(","name":")"
+              << slugs[i] << R"("})";
+        f << "]}";
+        f.close();
+        ::setenv("HOME", dir.string().c_str(), 1);
+    }
+    ~FakeRackHome() {
+        if (previous.empty()) ::unsetenv("HOME");
+        else ::setenv("HOME", previous.c_str(), 1);
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+    std::filesystem::path dir;
+    std::string previous;
+};
+
+TEST_CASE("Open in Rack refuses a patch this Rack cannot create",
+          "[rack][open]") {
+    // Rack blocks on a modal error dialog -- even started headless -- when a
+    // patch names a module its installed plugin does not have. Proven against
+    // the real Rack 2.6.6: the stack sits in osdialog_message under
+    // patch::Manager::load and never returns. What the user sees is Rack
+    // opening with nothing in it, which is exactly the report that started
+    // this.
+    //
+    // The preview already knew: it draws those modules struck out. Handing
+    // Rack the patch anyway is having the information and using it for
+    // nothing.
+    HermeticProjects isolated;
+    // A brand nothing else uses: availability is cached per plugin for the
+    // life of the process, so a name shared with another case would answer
+    // from whatever that case looked up first.
+    FakeRackHome home("ForgeGateProbe", {"PRESENT"});
+
+    const auto dir = std::filesystem::temp_directory_path() / "forge-open-refuse";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+
+    auto write_patch = [&](const char* stem, const char* model) {
+        const auto p = dir / (std::string(stem) + ".vcv");
+        std::ofstream f(p);
+        f << R"({"version":"2.6.6","modules":[{"id":1,"plugin":"ForgeGateProbe")"
+          << R"(,"model":")" << model << R"(","pos":[0,0]}],"cables":[]})";
+        return p;
+    };
+    const auto absent = write_patch("absent", "ABSENT");
+    const auto present = write_patch("present", "PRESENT");
+
+    auto point_at = [&](const std::filesystem::path& patch) {
+        const auto log = dir / "build.log";
+        {
+            std::ofstream f(log);
+            f << "  open it with:  \"/Applications/VCV Rack 2 Free.app/Contents"
+                 "/MacOS/Rack\" " << patch.string() << "\n";
+        }
+        return log.string();
+    };
+
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    shell.watch_build_log(point_at(absent));
+    shell.on_poll();
+    // Without this the build monitor is still "running" and open_in_rack
+    // refuses for that reason instead -- a green test that never reached the
+    // gate it was written for. It did, the first time this was written.
+    REQUIRE(shell.build_outcome() != forge_modular::BuildOutcome::running);
+    REQUIRE(shell.artifact_path() == absent.string());
+
+    const auto why = shell.open_in_rack();
+    INFO("message was: " << why);
+    CHECK_FALSE(why.empty());                        // it says why
+    CHECK(why.find("ABSENT") != std::string::npos);  // and names the module
+
+    // The assertion that carries the weight. A refusal that still launches is
+    // the bug with an apology attached: Rack is already sitting on its dialog
+    // by the time the sentence is read. `launched()` records every command the
+    // shell decided to run, so this is the decision itself, not a guess.
+    CHECK(shell.launched().empty());
+
+    // And the gate is about THIS patch, not about refusing everything: a patch
+    // whose modules all exist is still handed over. Without this, deleting the
+    // launch entirely would pass every check above.
+    shell.watch_build_log(point_at(present));
+    shell.on_poll();
+    REQUIRE(shell.artifact_path() == present.string());
+    const auto ok_why = shell.open_in_rack();
+    INFO("second message was: " << ok_why);
+    CHECK(shell.launched().size() == 1);
+
+    std::filesystem::remove_all(dir, ec);
+}

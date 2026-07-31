@@ -895,6 +895,42 @@ std::string ForgeModularShell::open_in_rack() {
     if (!std::filesystem::exists(path, ec))
         return "the generator named a file that is not there: " + path;
 
+    // Rack BLOCKS on a modal error dialog -- even started headless -- when a
+    // patch names a module its installed plugin does not contain. Not a
+    // warning, not a gap in the rack: the application comes up, puts a dialog
+    // nobody asked for in front of an empty rack, and waits. From inside a DAW
+    // that dialog can arrive BEHIND the host, so the visible result of pressing
+    // this button is Rack opening with nothing in it and never finishing.
+    //
+    // The preview already draws these modules struck out, because it reads our
+    // manifests while Rack can only create what its installed plugin BINARY
+    // contains, and on a machine running an older build the two differ. Drawing
+    // the warning and then handing Rack the patch anyway is having the
+    // information and using it for nothing.
+    //
+    // Checked against the file being handed over rather than against whatever
+    // the preview happens to be showing, because those are two different
+    // claims and only one of them is about to be opened.
+    {
+        std::vector<std::string> missing;
+        for (const auto& m : load_patch(path).modules) {
+            if (m.available) continue;
+            const auto& shown = m.display.empty() ? m.name : m.display;
+            if (std::find(missing.begin(), missing.end(), shown) == missing.end())
+                missing.push_back(shown);
+        }
+        if (!missing.empty()) {
+            std::string names;
+            for (std::size_t i = 0; i < missing.size() && i < 4; ++i)
+                names += (i ? ", " : "") + missing[i];
+            if (missing.size() > 4)
+                names += " and " + std::to_string(missing.size() - 4) + " more";
+            return "the VCV Rack on this machine has no " + names +
+                   " \u2014 it would open on an error dialog with an empty "
+                   "rack. Install the current Forge Modular plugin first.";
+        }
+    }
+
     const auto rack = look_for_rack();
 
     auto launch = [this, path, &rack] {
