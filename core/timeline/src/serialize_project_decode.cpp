@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "clip_schema_policy.hpp"
 #include "chord_scale_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
@@ -371,12 +372,16 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
     if (!clip_increment)
         return fail<Clip>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                           clip_increment.actual, limits.max_clips);
-    auto data = data_for(value, "pulp.timeline.clip", path);
-    if (!data)
-        return fail<Clip>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto range = required(*data.value(), "time_range", path + "/data");
-    auto content_value = required(*data.value(), "content", path + "/data");
+    auto structural = data_for_versions(value, detail::clip_schema_policy.type_name,
+                                        detail::clip_schema_policy.oldest_readable_version,
+                                        detail::clip_schema_policy.current_version, path);
+    if (!structural)
+        return fail<Clip>(structural.error().code, structural.error().path,
+                          structural.error().byte_offset);
+    const auto* data = structural.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto range = required(*data, "time_range", path + "/data");
+    auto content_value = required(*data, "content", path + "/data");
     if (!id || !range || !content_value)
         return fail<Clip>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
@@ -391,9 +396,9 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
     if (!content)
         return runtime::Result<Clip, PersistenceError>(runtime::Err(content.error()));
     ClipPlaybackProperties playback;
-    const auto* gain = data.value()->find("gain_linear_bits");
-    const auto* fade_in = data.value()->find("fade_in_duration");
-    const auto* fade_out = data.value()->find("fade_out_duration");
+    const auto* gain = data->find("gain_linear_bits");
+    const auto* fade_in = data->find("fade_in_duration");
+    const auto* fade_out = data->find("fade_out_duration");
     const bool has_any_playback = gain || fade_in || fade_out;
     if (has_any_playback && (!gain || !fade_in || !fade_out))
         return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data");
@@ -409,6 +414,22 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
         playback = {std::bit_cast<float>(static_cast<std::uint32_t>(decoded_gain.value())),
                     decoded_fade_in.value(), decoded_fade_out.value()};
     }
+    TimeConform time_conform = TimeConform::None;
+    const auto* conform = data->find("time_conform");
+    if (detail::clip_schema_policy.requires_time_conform(structural.value().version)) {
+        if (!conform)
+            return fail<Clip>(PersistenceErrorCode::MissingField, path + "/data/time_conform");
+        if (conform->kind != JsonValue::Kind::String)
+            return fail<Clip>(PersistenceErrorCode::UnexpectedType, path + "/data/time_conform");
+        if (conform->scalar == "resample")
+            time_conform = TimeConform::Resample;
+        else if (conform->scalar == "stretch")
+            time_conform = TimeConform::Stretch;
+        else if (conform->scalar != "none")
+            return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_conform");
+    } else if (conform) {
+        return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_conform");
+    }
     runtime::Result<Clip, ModelError> created(runtime::Err(ModelError{}));
     if (kind.value() == "musical") {
         auto start = required(*range.value(), "start_ticks", path + "/data/time_range");
@@ -422,7 +443,8 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
         if (!decoded_start || !decoded_duration)
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path);
         created = Clip::create({decoded_id.value()}, {decoded_start.value()},
-                               {decoded_duration.value()}, std::move(content).value(), playback);
+                               {decoded_duration.value()}, std::move(content).value(), playback,
+                               time_conform);
     } else if (kind.value() == "absolute") {
         auto start = required(*range.value(), "start_sample", path + "/data/time_range");
         auto count = required(*range.value(), "sample_count", path + "/data/time_range");
@@ -438,7 +460,7 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
             return fail<Clip>(PersistenceErrorCode::InvalidNumber, path);
         created = Clip::create_absolute({decoded_id.value()}, {decoded_start.value()},
                                         decoded_count.value(), decoded_rate.value(),
-                                        std::move(content).value(), playback);
+                                        std::move(content).value(), playback, time_conform);
     } else {
         return fail<Clip>(PersistenceErrorCode::InvalidSchema, path + "/data/time_range/kind");
     }

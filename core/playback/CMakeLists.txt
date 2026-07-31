@@ -52,6 +52,8 @@ endif()
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
         ${_PULP_PLAYBACK_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../audio/src/finite_time_stretch.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../audio/src/realtime_time_stretch.cpp
     )
     target_compile_features(timeline-program-threadless-no-exceptions-check PRIVATE cxx_std_20)
     target_include_directories(timeline-program-threadless-no-exceptions-check PRIVATE

@@ -88,6 +88,13 @@ timebase::BarPosition bar_at_tick(timebase::TickPosition tick, timebase::TickPos
 
 } // namespace
 
+TransportError detail::advance_playback_epoch(std::uint64_t& epoch) noexcept {
+    if (epoch == std::numeric_limits<std::uint64_t>::max())
+        return TransportError::PlaybackEpochExhausted;
+    ++epoch;
+    return TransportError::None;
+}
+
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
     if (transport.tempo_map == nullptr || transport.frame_count == 0 ||
         transport.frame_count >
@@ -103,6 +110,18 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
         const auto& range = transport.ranges[index];
         if (range.frame_count == 0 || range.sample_offset != expected_offset)
             return false;
+        if (index == 0) {
+            if (range.playback_epoch != transport.playback_epoch)
+                return false;
+        } else {
+            const auto previous_epoch = transport.ranges[index - 1].playback_epoch;
+            const bool same_epoch = range.playback_epoch == previous_epoch;
+            const bool next_epoch =
+                previous_epoch != std::numeric_limits<std::uint64_t>::max() &&
+                range.playback_epoch == previous_epoch + 1;
+            if (!same_epoch && (!transport.scrubbing || !range.discontinuity || !next_epoch))
+                return false;
+        }
         if (range.has_precise_host_ticks &&
             (!range.host_beat_mapping || !std::isfinite(range.host_tick_start) ||
              !std::isfinite(range.host_tick_end) ||
@@ -187,6 +206,7 @@ struct MasterTransport::RangeProjection {
     double host_tick_start = 0.0;
     double host_tick_end = 0.0;
     bool has_precise_host_ticks = false;
+    std::uint64_t playback_epoch = 0;
     std::uint64_t loop_pass_index = 0;
 };
 
@@ -242,6 +262,7 @@ void MasterTransport::append_projected_range(const RangeProjection& projection,
     range.host_tick_start = projection.host_tick_start;
     range.host_tick_end = projection.host_tick_end;
     range.has_precise_host_ticks = projection.has_precise_host_ticks;
+    range.playback_epoch = projection.playback_epoch;
     range.loop_pass_index = projection.loop_pass_index;
     monotonic_ = range.monotonic_end;
     timeline_tick_ = range.timeline_tick_end;
@@ -252,6 +273,7 @@ void MasterTransport::append_projected_range(const RangeProjection& projection,
 void MasterTransport::finish_projected_block(const DesiredState& desired,
                                              const BlockProjection& projection,
                                              TransportSnapshot& snapshot) noexcept {
+    snapshot.playback_epoch = snapshot.ranges[0].playback_epoch;
     snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
     previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
     previous_playing_ = projection.playing;
@@ -267,6 +289,8 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
     if (config.tempo_sync_source != nullptr &&
         (!std::isfinite(config.tempo_sync_quantum_beats) || config.tempo_sync_quantum_beats <= 0.0))
         return TransportError::InvalidTempoSyncConfig;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
     tempo_map_ = &tempo_map;
     tempo_sync_source_ = config.tempo_sync_source;
     tempo_sync_quantum_beats_ = config.tempo_sync_quantum_beats;
@@ -445,6 +469,8 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
         return TransportError::NotPrepared;
     if (frame_count == 0 || frame_count > max_buffer_size_)
         return TransportError::InvalidFrameCount;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
 
     const auto desired = desired_.read();
 
@@ -453,6 +479,25 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     // later, more explicit intent, so it is applied afterwards and wins.
     const bool scrub_entered = desired.scrubbing && !previous_scrubbing_;
     const bool scrub_exited = !desired.scrubbing && previous_scrubbing_;
+    const bool scrub_generation_changed =
+        desired.scrub_generation != applied_scrub_generation_;
+    const bool seeked = desired.seek_generation != applied_seek_generation_;
+    const bool advancing = desired.scrubbing || desired.playing;
+    const bool transport_started = advancing && (first_block_ || !previous_playing_);
+    const bool loop_changed = desired.loop != previous_loop_;
+    const bool block_epoch_change =
+        seeked || transport_started || scrub_entered || scrub_exited || loop_changed;
+    const bool scrub_anchor_change =
+        desired.scrubbing && !scrub_entered && !(seeked && desired.scrubbing) &&
+        has_applied_scrub_position_ &&
+        (scrub_generation_changed || desired.scrub_position != applied_scrub_position_) &&
+        (scrub_generation_changed || scrub_window_remaining_ == 0 ||
+         frame_count > scrub_window_remaining_);
+    const auto required_epochs =
+        static_cast<std::uint64_t>(block_epoch_change) +
+        static_cast<std::uint64_t>(scrub_anchor_change);
+    if (required_epochs > std::numeric_limits<std::uint64_t>::max() - playback_epoch_)
+        return TransportError::PlaybackEpochExhausted;
     if (scrub_exited) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
         tempo_cursor_.seek(timeline_sample_);
@@ -463,12 +508,11 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
 
     // A fresh drag abandons the window in flight; moving an existing drag does
     // not, which is what keeps the anchor latched to window boundaries.
-    if (desired.scrub_generation != applied_scrub_generation_) {
+    if (scrub_generation_changed) {
         applied_scrub_generation_ = desired.scrub_generation;
         scrub_window_remaining_ = 0;
     }
 
-    const bool seeked = desired.seek_generation != applied_seek_generation_;
     if (seeked) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.position);
         tempo_cursor_.seek(timeline_sample_);
@@ -481,7 +525,14 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     }
 
     // Scrubbing moves the playhead whether or not the musical transport rolls.
-    const bool advancing = desired.scrubbing || desired.playing;
+    if (block_epoch_change)
+        (void)detail::advance_playback_epoch(playback_epoch_);
+    if (scrub_entered || (seeked && desired.scrubbing)) {
+        applied_scrub_position_ = desired.scrub_position;
+        has_applied_scrub_position_ = true;
+    } else if (scrub_exited) {
+        has_applied_scrub_position_ = false;
+    }
 
     BlockProjection projection;
     projection.frame_count = frame_count;
@@ -490,15 +541,15 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     projection.transport_changed =
         !first_block_ &&
         (advancing != previous_playing_ || desired.loop.enabled != previous_loop_.enabled);
-    projection.transport_started = advancing && (first_block_ || !previous_playing_);
+    projection.transport_started = transport_started;
     // Entering and leaving scrub are hard repositions. The window restarts in
     // between are not: they recur many times a second, and a per-grain state
     // reset would wipe consumer state that the plain discontinuity already
     // describes correctly.
-    projection.reset_requested =
-        seeked || scrub_entered || scrub_exited || desired.loop != previous_loop_;
+    projection.reset_requested = seeked || scrub_entered || scrub_exited || loop_changed;
     if (seeked || projection.transport_started || scrub_entered || scrub_exited ||
-        desired.loop != previous_loop_ || !advancing || desired.scrubbing || !desired.loop.enabled)
+        loop_changed ||
+        !advancing || desired.scrubbing || !desired.loop.enabled)
         loop_pass_index_ = 0;
     begin_projected_block(desired, projection, timeline_tick_, snapshot);
 
@@ -511,6 +562,7 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
         range.timeline_tick_start = timeline_tick_;
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
         range.discontinuity = discontinuity;
+        range.playback_epoch = playback_epoch_;
         range.loop_pass_index =
             advancing && !desired.scrubbing && desired.loop.enabled ? loop_pass_index_ : 0;
         auto end_sample = timeline_sample_;
@@ -534,6 +586,14 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     // discontinuity, and split the block. Consumers that already release notes
     // and reset readers on a wrap therefore need no scrub-specific handling.
     auto start_scrub_window = [&]() {
+        const bool anchor_changed =
+            has_applied_scrub_position_ &&
+            (desired.scrub_position != applied_scrub_position_ ||
+             (scrub_generation_changed && !scrub_entered && !(seeked && desired.scrubbing)));
+        if (anchor_changed)
+            (void)detail::advance_playback_epoch(playback_epoch_);
+        applied_scrub_position_ = desired.scrub_position;
+        has_applied_scrub_position_ = true;
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
         tempo_cursor_.seek(timeline_sample_);
         timeline_tick_ = desired.scrub_position;
@@ -613,6 +673,8 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         return TransportError::NotPrepared;
     if (frame_count == 0 || frame_count > max_buffer_size_)
         return TransportError::InvalidFrameCount;
+    if (playback_epoch_exhausted_)
+        return TransportError::PlaybackEpochExhausted;
     if (tempo_sync_source_ == nullptr || !std::isfinite(tempo_sync_quantum_beats_) ||
         tempo_sync_quantum_beats_ <= 0.0)
         return TransportError::InvalidTempoSyncConfig;
@@ -659,6 +721,13 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         !beats_nearly_equal(source_beat_start, expected_tempo_sync_beat_, continuity_tolerance);
     const bool loop_changed = !first_block_ && desired.loop != previous_loop_;
     const bool transport_started = block_playing && (first_block_ || !previous_playing_);
+    const bool playback_epoch_changed =
+        explicit_seek || inferred_jump || transport_started || loop_changed;
+    if (playback_epoch_changed &&
+        detail::advance_playback_epoch(playback_epoch_) != TransportError::None) {
+        playback_epoch_exhausted_ = true;
+        return TransportError::PlaybackEpochExhausted;
+    }
     if (!block_playing || explicit_seek || inferred_jump || transport_started || loop_changed)
         loop_pass_index_ = 0;
 
@@ -726,6 +795,7 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
         range.host_tick_end = (block_playing ? beat_end : beat_start) *
                               static_cast<double>(timebase::kTicksPerQuarter);
         range.has_precise_host_ticks = true;
+        range.playback_epoch = playback_epoch_;
         range.loop_pass_index = block_playing && desired.loop.enabled ? loop_pass_index_ : 0;
         append_projected_range(range, snapshot);
     };
@@ -766,6 +836,8 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
 }
 
 void MasterTransport::reset() noexcept {
+    if (detail::advance_playback_epoch(playback_epoch_) != TransportError::None)
+        playback_epoch_exhausted_ = true;
     tempo_map_ = nullptr;
     tempo_cursor_ = {};
     tempo_sync_source_ = nullptr;
@@ -788,6 +860,8 @@ void MasterTransport::reset() noexcept {
     loop_pass_index_ = 0;
     scrub_window_remaining_ = 0;
     previous_scrubbing_ = false;
+    has_applied_scrub_position_ = false;
+    applied_scrub_position_ = {};
     previous_playing_ = false;
     previous_meter_ = {};
     previous_loop_ = {};

@@ -51,6 +51,22 @@ class SpectralEnvelopeShifterT {
 public:
     SpectralEnvelopeShifterT() = default;
 
+    static bool checked_retained_bytes(int fft_size, std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        const auto bins = static_cast<std::uint64_t>(fft_size / 2 + 1);
+        std::uint64_t fft_bytes = 0;
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<SampleType>(bins) || !charge.add<SampleType>(bins)
+            || !charge.add<SampleType>(bins)
+            || !charge.add<std::complex<SampleType>>(static_cast<std::uint64_t>(fft_size))
+            || !checked_fft_retained_bytes<SampleType>(static_cast<std::uint64_t>(fft_size),
+                                                       target_max_bytes, fft_bytes)
+            || !charge.add_retained_bytes(fft_bytes))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
+
     /// RT contract: prepare() allocates FFT and scratch/envelope storage and is
     /// not audio-thread safe. After prepare(), num_bins(), order(), and
     /// process_group() are allocation-free for the prepared FFT size; the frame

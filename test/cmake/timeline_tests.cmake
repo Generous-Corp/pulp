@@ -43,7 +43,7 @@ pulp_add_test_suite(pulp-test-playback-production
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
-    SOURCES test_playback_transport.cpp
+    SOURCES test_playback_transport.cpp test_playback_transport_epoch.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
@@ -118,6 +118,9 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
 pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp
         test_playback_audio_renderer_conversion.cpp
+        test_playback_offline_stretch.cpp
+        test_playback_stretch_lifecycle.cpp
+        test_playback_realtime_stretch_state_bank.cpp
         test_playback_track_freeze.cpp
         test_playback_track_mixer.cpp
         harness/rt_allocation_probe.cpp
@@ -253,6 +256,7 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         test_timeline_graph_binding_publication.cpp
         test_host_transport_projector.cpp
         test_sequence_processor.cpp
+        test_sequence_stretch_alignment.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}

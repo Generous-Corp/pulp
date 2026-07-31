@@ -23,6 +23,8 @@
 /// transparently at any ratio. Deterministic (seeded xorshift); no
 /// allocation after prepare().
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -39,6 +41,16 @@ namespace pulp::signal {
 template <typename SampleType = float>
 class NoiseMorpherT {
 public:
+    static bool checked_retained_bytes(int num_bins, std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        const auto bins = static_cast<std::uint64_t>(num_bins);
+        if (!charge.add<SampleType>(bins) || !charge.add<SampleType>(bins))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
+
     void prepare(int num_bins, std::uint64_t seed = 0x9e3779b97f4a7c15ull) {
         num_bins_ = num_bins;
         seed_ = seed ? seed : 0x9e3779b97f4a7c15ull;

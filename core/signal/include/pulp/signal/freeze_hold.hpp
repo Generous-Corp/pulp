@@ -25,6 +25,8 @@
 /// the spectral domain. Deterministic (xorshift PRNG seeded at prepare);
 /// no allocation or locks after prepare().
 
+#include <pulp/signal/checked_allocation.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -48,6 +50,30 @@ public:
         /// Random-walk step bound (radians/frame) for de-looping.
         float phase_jitter = 0.015f;
     };
+
+    static bool checked_retained_bytes(const Config& config,
+                                       std::uint64_t target_max_bytes,
+                                       std::uint64_t& bytes) noexcept {
+        const auto bins = static_cast<std::uint64_t>(config.fft_size / 2 + 1);
+        const auto channels = static_cast<std::uint64_t>(config.channels);
+        const auto depth = static_cast<std::uint64_t>(config.capture_frames);
+        std::uint64_t channel_bins = 0;
+        std::uint64_t capture_bins = 0;
+        std::uint64_t channel_capture_bins = 0;
+        if (!checked_capacity_product(channels, bins, UINT64_MAX, channel_bins)
+            || !checked_capacity_product(depth, bins, UINT64_MAX, capture_bins)
+            || !checked_capacity_product(channels, capture_bins, UINT64_MAX,
+                                         channel_capture_bins))
+            return false;
+        CheckedRetainedByteCharge charge(target_max_bytes);
+        if (!charge.add<SampleType>(channel_capture_bins)
+            || !charge.add<double>(capture_bins)
+            || !charge.add<SampleType>(channel_bins)
+            || !charge.add<double>(channel_bins) || !charge.add<double>(bins))
+            return false;
+        bytes = charge.total();
+        return true;
+    }
 
     /// RT contract: prepare() allocates capture/hold storage and is not
     /// audio-thread safe. After prepare(), reset(), set_frozen(), accessors,

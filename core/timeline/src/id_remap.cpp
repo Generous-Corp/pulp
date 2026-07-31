@@ -193,10 +193,11 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
         return fail<Clip>(content_error->code, content_error->item, content_error->related_item);
     if (clip.time_anchor() == ClipTimeAnchor::Musical)
         return Clip::create(*table.find(clip.id()), clip.start(), clip.duration(),
-                            std::move(content), clip.playback_properties());
+                            std::move(content), clip.playback_properties(), clip.time_conform());
     return Clip::create_absolute(*table.find(clip.id()), clip.absolute_start(),
                                  clip.absolute_duration_samples(), clip.absolute_sample_rate(),
-                                 std::move(content), clip.playback_properties());
+                                 std::move(content), clip.playback_properties(),
+                                 clip.time_conform());
 }
 
 void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator& allocator,

@@ -73,6 +73,7 @@ enum class ModelErrorCode : std::uint8_t {
     SequenceReferenceCycle,
     SequenceNestingTooDeep,
     InvalidTrackMixer,
+    InvalidTimeConform,
 };
 
 /// Model failure with the offending and, when relevant, conflicting identity.
@@ -152,6 +153,15 @@ struct SequenceRef {
 
 /// Time domain in which a clip's placement remains anchored.
 enum class ClipTimeAnchor : std::uint8_t { Musical, Absolute };
+
+/// Authored policy for adapting a musical media clip when its duration and
+/// source duration differ. Non-default intent is invalid for absolute clips
+/// and non-media content. Playback support is provided separately.
+enum class TimeConform : std::uint8_t {
+    None,
+    Resample,
+    Stretch,
+};
 
 /// Musical clip placement in canonical ticks.
 struct MusicalTimeRange {
@@ -384,18 +394,22 @@ class Clip {
   public:
     /// Creates a musical clip in canonical ticks.
     ///
-    /// Validates identity, positive duration, content, and playback controls.
+    /// Validates identity, positive duration, content, playback controls, and
+    /// that non-default time-conform intent is attached only to media content.
     static runtime::Result<Clip, ModelError> create(ItemId id, timebase::TickPosition start,
                                                     timebase::TickDuration duration,
                                                     ClipContent content,
-                                                    ClipPlaybackProperties playback = {});
+                                                    ClipPlaybackProperties playback = {},
+                                                    TimeConform time_conform = TimeConform::None);
     /// Creates an absolute clip in samples at `sample_rate`.
     ///
     /// Validates identity, positive duration, rate, content, and playback controls.
+    /// Absolute clips accept only TimeConform::None.
     static runtime::Result<Clip, ModelError>
     create_absolute(ItemId id, timebase::SamplePosition start, std::uint64_t sample_count,
                     timebase::RationalRate sample_rate, ClipContent content,
-                    ClipPlaybackProperties playback = {});
+                    ClipPlaybackProperties playback = {},
+                    TimeConform time_conform = TimeConform::None);
 
     /// Returns the stable clip identity.
     ItemId id() const noexcept;
@@ -426,8 +440,13 @@ class Clip {
     /// Returns a snapshot with validated replacement gain and fades.
     runtime::Result<Clip, ModelError>
     with_playback_properties(ClipPlaybackProperties playback) const;
+    /// Returns a snapshot with validated time-conform intent. Non-default intent
+    /// requires a musical MediaRef clip.
+    runtime::Result<Clip, ModelError> with_time_conform(TimeConform time_conform) const;
     /// Returns the authored gain and fade controls.
     ClipPlaybackProperties playback_properties() const noexcept;
+    /// Returns the authored intent. None preserves legacy behavior.
+    TimeConform time_conform() const noexcept;
 
   private:
     struct Data;

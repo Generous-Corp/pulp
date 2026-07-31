@@ -3,9 +3,12 @@
 #include "audio_renderer_internal.hpp"
 #include "budgeted_stable_merge.hpp"
 #include "clip_content_role.hpp"
+#include "program_compiler_helpers.hpp"
+#include "program_validator.hpp"
 #include "sequence_compile_bookkeeping.hpp"
 #include "sequence_content_lowerer.hpp"
 #include "track_automation_compiler.hpp"
+#include "track_audio_program_compiler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,47 +19,6 @@
 #include <variant>
 
 namespace pulp::playback {
-namespace {
-
-// Where the `index`-th of `count` ratchet repeats begins within a note of
-// `duration` ticks. Distributing the remainder as `(remainder * index) / count`
-// keeps every boundary exact in integer ticks and the repeats within one tick of
-// equal length, so a ratcheted note never drifts off its own end.
-constexpr std::int64_t ratchet_boundary(std::int64_t duration, std::int64_t index,
-                                        std::int64_t count) noexcept {
-    const auto quotient = duration / count;
-    const auto remainder = duration % count;
-    return quotient * index + (remainder * index) / count;
-}
-
-// Binds the track's authored constants to the lanes that automate them. A lane
-// is matched by which control it names, not by position, so lane ordering in the
-// document never decides which fader moves.
-TrackMixerProgram resolve_track_mixer(const timeline::Track& track,
-                                      const TrackAutomationProgram* automation) {
-    TrackMixerProgram mixer;
-    mixer.gain_linear = track.mixer().gain_linear;
-    mixer.pan = track.mixer().pan;
-    if (!automation)
-        return mixer;
-    for (const auto& program : automation->programs()) {
-        const auto* target = std::get_if<timeline::TrackMixerTarget>(&program->target());
-        if (!target)
-            continue;
-        switch (target->parameter) {
-        case timeline::TrackMixerParameter::Gain:
-            mixer.gain_automation = program.get();
-            break;
-        case timeline::TrackMixerParameter::Pan:
-            mixer.pan_automation = program.get();
-            break;
-        }
-    }
-    return mixer;
-}
-
-} // namespace
-
 struct PlaybackProgramCompilerCore;
 
 class ProgramCompilerTask final : public CompileTask {
@@ -113,7 +75,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<CompiledNoteModifier> note_modifier_merge_buffer_;
     detail::BudgetedStableMergeState note_modifier_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
-    detail::AudioSampleRateConverterCache sample_rate_converters_;
+    detail::TrackAudioProgramCompiler audio_compiler_;
     std::vector<timeline::ItemId> current_audio_ids_;
     std::vector<timeline::ItemId> audio_id_merge_buffer_;
     detail::BudgetedStableMergeState audio_id_merge_;
@@ -130,9 +92,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
     detail::BudgetedStableMergeState track_merge_;
-    std::size_t validation_track_ = 0;
-    std::size_t validation_clip_ = 0;
-    std::size_t validation_note_ = 0;
+    detail::ProgramValidator validator_;
 };
 
 struct PlaybackProgramCompilerCore
@@ -164,6 +124,14 @@ struct PlaybackProgramCompilerCore
         if (!accepted)
             dispatch_rejected();
         return accepted;
+    }
+
+    bool publish_if_latest(std::uint64_t revision, std::shared_ptr<const PlaybackProgram> program) {
+        std::lock_guard lock(mutex);
+        if (status.latest_submitted_revision != revision)
+            return false;
+        store.publish(std::move(program));
+        return true;
     }
 
     void dispatch_rejected() {
@@ -223,6 +191,7 @@ struct PlaybackProgramCompilerCore
     bool task_scheduled = false;
     bool accepting = true;
     const bool bound;
+    OfflineStretchArtifactCache offline_stretch_cache;
 };
 
 void ProgramCompilerTask::begin_track_automation() {
@@ -319,7 +288,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     clip.conversion_artifact->sample_rate_converter();
                 if (sample_rate_converter) {
                     const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
-                    auto seeded = sample_rate_converters_.seed(
+                    auto seeded = audio_compiler_.converters().seed(
                         source_rate, request_->tempo_map->sample_rate(), sample_rate_converter,
                         clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
@@ -328,7 +297,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 }
                 const auto& host_rate_converter = clip.conversion_artifact->host_rate_converter();
                 if (host_rate_converter) {
-                    auto seeded = sample_rate_converters_.seed_host(
+                    auto seeded = audio_compiler_.converters().seed_host(
                         clip.audio, clip.source_start, clip.source_frame_count, host_rate_converter,
                         clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
@@ -362,6 +331,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 !sequence_bookkeeping_.generated_layout_matches(**old, *sequence_flattener_)) {
                 dirty = true;
                 generated_layout_dirty_ = true;
+            }
+            // Offline Stretch artifacts are reusable, but their publication provenance is
+            // generation-specific. Recompile the owning track so a cache hit can attach the
+            // current revision/generation instead of reusing stale immutable provenance.
+            if (!dirty && detail::TrackAudioProgramCompiler::requires_generation_refresh(**old)) {
+                dirty = true;
+                old = nullptr;
             }
             if (!dirty) {
                 if (const auto error = sequence_bookkeeping_.charge_reused(
@@ -425,26 +401,19 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
-                    auto prepared = detail::prepare_track_freeze_sample_rate_converter(
+                    const auto status = audio_compiler_.step_track_freeze(
                         track, *request_->project, *request_->tempo_map, *request_->audio_assets,
-                        request_->audio_limits, sample_rate_converters_);
-                    if (!prepared)
-                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
-                                     request_->document_revision, prepared.error().code});
-                    if (!*prepared) {
-                        ++work;
-                        continue;
-                    }
-                    auto compiled = detail::compile_track_freeze_program_cached(
-                        track, *request_->project, *request_->tempo_map, *request_->audio_assets,
-                        request_->audio_limits, sample_rate_converters_);
-                    if (!compiled)
-                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
-                                     request_->document_revision, compiled.error().code});
-                    ++total_audio_clips_;
-                    current_audio_clips_.push_back(std::move(compiled).value());
-                    clip_index_ = 1;
+                        request_->audio_limits);
                     ++work;
+                    if (status == detail::TrackAudioClipCompileStatus::Failed) {
+                        const auto error = audio_compiler_.error().renderer;
+                        return fail({CompileErrorCode::AudioProgramInvalid, error.item,
+                                     request_->document_revision, error.code});
+                    }
+                    if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
+                    ++total_audio_clips_;
+                    current_audio_clips_.push_back(audio_compiler_.take());
+                    clip_index_ = 1;
                     continue;
                 }
                 stage_ = Stage::CompileTrackTakeComp;
@@ -475,25 +444,22 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
-                    auto prepared = detail::prepare_audio_clip_sample_rate_converters(
+                    const auto status = audio_compiler_.step(
                         clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
-                        request_->audio_limits, sample_rate_converters_);
-                    if (!prepared)
-                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
-                                     request_->document_revision, prepared.error().code});
-                    if (!*prepared) {
-                        ++work;
-                        continue;
+                        request_->audio_limits, lowered_clip.source_frame_offset,
+                        request_->document_revision, generation_, core_->offline_stretch_cache);
+                    ++work;
+                    if (status == detail::TrackAudioClipCompileStatus::Failed) {
+                        const auto detail = audio_compiler_.error();
+                        const auto code = detail.offline == OfflineStretchErrorCode::None
+                                              ? CompileErrorCode::AudioProgramInvalid
+                                              : CompileErrorCode::OfflineStretchFailed;
+                        return fail({code, detail.renderer.item, request_->document_revision,
+                                     detail.renderer.code, detail.offline});
                     }
-                    auto compiled = detail::compile_audio_clip_program_cached(
-                        clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
-                        request_->audio_limits, sample_rate_converters_,
-                        lowered_clip.source_frame_offset);
-                    if (!compiled)
-                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
-                                     request_->document_revision, compiled.error().code});
+                    if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
                     ++total_audio_clips_;
-                    current_audio_clips_.push_back(std::move(compiled).value());
+                    current_audio_clips_.push_back(audio_compiler_.take());
                     current_audio_ids_.push_back(clip.id());
                 }
                 current_clip_ids_.push_back(clip.id());
@@ -525,8 +491,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             const std::int64_t repeats = modifier == nullptr ? 1 : modifier->ratchet_count;
             const auto event_count = static_cast<std::size_t>(repeats) * 2u;
             if (event_count > request_->maximum_note_events_per_track ||
-                current_note_events_.size() >
-                    request_->maximum_note_events_per_track - event_count)
+                current_note_events_.size() > request_->maximum_note_events_per_track - event_count)
                 return fail({CompileErrorCode::NoteProgramCapacityExceeded, note.id,
                              request_->document_revision});
             if (modifier != nullptr) {
@@ -537,12 +502,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 // The last subdivision lands on the note's own end so a ratchet
                 // never drifts away from the authored duration.
                 const auto span_start =
-                    note.start.value + ratchet_boundary(note.duration.value, repeat, repeats);
+                    note.start.value +
+                    detail::ratchet_boundary(note.duration.value, repeat, repeats);
                 const auto span_end =
                     repeat + 1 == repeats
                         ? note_end.value
                         : note.start.value +
-                              ratchet_boundary(note.duration.value, repeat + 1, repeats);
+                              detail::ratchet_boundary(note.duration.value, repeat + 1, repeats);
                 const auto start_tick = clip.start() + timebase::TickDuration{span_start};
                 const auto end_tick = clip.start() + timebase::TickDuration{span_end};
                 const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
@@ -605,26 +571,19 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail({CompileErrorCode::AudioProgramInvalid, current_take_lane_->id(),
                              request_->document_revision,
                              AudioRendererErrorCode::CapacityExceeded});
-            auto prepared = detail::prepare_take_comp_segment_sample_rate_converter(
+            const auto status = audio_compiler_.step_take_comp(
                 *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
-                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
-            if (!prepared)
-                return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
-                             request_->document_revision, prepared.error().code});
-            if (!*prepared) {
-                ++work;
-                continue;
+                *request_->audio_assets, request_->audio_limits);
+            ++work;
+            if (status == detail::TrackAudioClipCompileStatus::Failed) {
+                const auto error = audio_compiler_.error().renderer;
+                return fail({CompileErrorCode::AudioProgramInvalid, error.item,
+                             request_->document_revision, error.code});
             }
-            auto compiled = detail::compile_take_comp_segment_program_cached(
-                *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
-                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
-            if (!compiled)
-                return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
-                             request_->document_revision, compiled.error().code});
+            if (status != detail::TrackAudioClipCompileStatus::Complete) continue;
             ++total_audio_clips_;
             ++take_comp_index_;
-            current_audio_clips_.push_back(std::move(compiled).value());
-            ++work;
+            current_audio_clips_.push_back(audio_compiler_.take());
             continue;
         }
         if (stage_ == Stage::SortTrackNotes) {
@@ -732,7 +691,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     new AudioTrackRendererProgram(track.id(), std::move(current_audio_clips_)));
             }
             auto automation_program = std::move(current_automation_.program);
-            const auto mixer = resolve_track_mixer(track, automation_program.get());
+            const auto mixer = detail::resolve_track_mixer(track, automation_program.get());
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
                 std::move(current_note_events_), std::move(current_note_modifiers_),
@@ -776,46 +735,15 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::Validate) {
-            if (validation_track_ == tracks_.size()) {
+            const auto validation = validator_.step(
+                tracks_, request_->project->id(), request_->document_revision, generation_);
+            if (validation.status == detail::ProgramValidationStatus::Complete) {
                 stage_ = Stage::Publish;
                 continue;
             }
-            const auto& track = tracks_[validation_track_];
-            if (validation_clip_ == 0 &&
-                (!track->id().valid() || track->generation() == 0 ||
-                 (validation_track_ && tracks_[validation_track_ - 1]->id() == track->id())))
-                return fail(
-                    {CompileErrorCode::InvalidStructure, track->id(), request_->document_revision});
-            const auto clips = track->ordered_clip_ids();
-            if (validation_clip_ < clips.size()) {
-                const auto id = clips[validation_clip_++];
-                ++work;
-                if (!id.valid())
-                    return fail(
-                        {CompileErrorCode::InvalidStructure, id, request_->document_revision});
-                continue;
-            }
-            const auto notes = track->arrangement_note_events();
-            if (validation_note_ < notes.size()) {
-                const auto& event = notes[validation_note_];
-                const bool malformed =
-                    !event.clip_id.valid() || !event.note_id.valid() || event.pitch > 127 ||
-                    event.channel > 15 ||
-                    static_cast<unsigned>(event.kind) >
-                        static_cast<unsigned>(NoteProgramEventKind::On) ||
-                    (validation_note_ != 0 &&
-                     note_program_event_less(event, notes[validation_note_ - 1]));
-                ++validation_note_;
-                ++work;
-                if (malformed)
-                    return fail({CompileErrorCode::InvalidStructure, event.note_id,
-                                 request_->document_revision});
-            } else {
-                validation_clip_ = 0;
-                validation_note_ = 0;
-                ++validation_track_;
-                ++work;
-            }
+            if (validation.status == detail::ProgramValidationStatus::Failed)
+                return fail(validation.error);
+            ++work;
             continue;
         }
         auto program = std::shared_ptr<const PlaybackProgram>(
@@ -823,7 +751,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                 request_->sequence_id, request_->tempo_map, request_->audio_assets,
                                 request_->audio_limits, request_->automation_limits,
                                 request_->project->next_item_id(), std::move(tracks_)));
-        core_->store.publish(std::move(program));
+        if (!core_->publish_if_latest(request_->document_revision, std::move(program)))
+            return fail({CompileErrorCode::StaleRevision, {}, request_->document_revision});
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
     }

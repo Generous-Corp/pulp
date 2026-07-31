@@ -1,5 +1,6 @@
 add_library(pulp-sequence
     src/host_transport_projector.cpp
+    src/midi_latency_queue.cpp
     src/sequence_processor.cpp
 )
 add_library(pulp::sequence ALIAS pulp-sequence)

@@ -25,13 +25,38 @@ For MediaRef clips, prepare a `DecodedAudioAssetPool` off the audio thread. Use
 `DecodedAudioAssetPool::decode_wav()` for bounded in-memory WAV bytes, then pass
 the immutable pool in `ProgramCompileRequest::audio_assets`. The existing
 compiler incrementally lowers media clips into each `TrackProgram`; do not build
-a second playback-program model. The renderer uses bounded stateless linear SRC so
-source audio runs at its native wall-clock rate after sample-rate conversion.
-A musically anchored clip changes placement and timeline extent through the
-tempo map but does not imply warp or time-stretch.
+a second playback-program model. `TimeConform::None` uses the existing bounded
+native-rate source mapping after sample-rate conversion. `TimeConform::Resample`
+uses bounded stateless varispeed: map each
+rendered musical tick to the same fraction of the referenced source range and
+derive the effective source step for anti-aliasing. Use the compiled tempo map's
+analytic fractional sample-to-tick inverse for ordinary playback and precise
+host ticks for host beat mapping; sample-fraction interpolation across a tempo
+ramp is not musical phase. `TimeConform::Stretch` is compiled off the audio
+thread: slice the source, fixed-SRC it into the compiled timeline-rate domain,
+drive the finite stretcher with an analysis-boundary tempo schedule, and publish
+only an immutable artifact with exactly the authored timeline frame count.
+Use the scalar double finite builder for deterministic offline compilation,
+then convert its exact result to the public float artifact in bounded blocks.
+Document-tempo playback consumes that artifact 1:1. For live host-tempo
+projection, prepare a complete `RealtimeStretchProgramRuntime` off the audio
+thread and stream the artifact through its preallocated low-latency processor;
+the audio callback may stretch but must never allocate, lock, or prepare DSP.
+The runtime publishes one fixed causal latency for all parallel audio and MIDI
+paths and resets coherently on transport/program epochs. Keep
+source/tempo/algorithm semantic identity in the artifact cache key and document
+revision/program generation in separate provenance.
+Compiler work-block size is scheduling only and must change neither key nor
+output. Never route `Stretch` through `Resample`, pad/trim a length mismatch, or
+fall back to `None`.
 Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
+When sequence lowering flattens a complete nested media clip, preserve its
+authored `TimeConform` value. Reject a nested source window that trims a
+`Resample` or `Stretch` clip with `NestedSequenceUnsupported`; advancing a raw
+source-frame offset is valid only for unconformed media and would corrupt the
+authored phase until playback owns a conform-aware source-range mapping.
 
 When host beat mapping intentionally makes musical material follow the host
 tempo, keep absolute clips, take-comp segments, and frozen artifacts on
