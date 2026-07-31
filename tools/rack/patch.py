@@ -1157,8 +1157,14 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
             parts.append("\n\n## Your previous attempt was REJECTED. Fix it.\n\n"
                          "Return both blocks again, corrected. Do not explain.\n\n"
                          "```\n" + ctx + "\n```")
+        # The enriched environment matters here, not only for finding claude:
+        # claude runs its own plugin hooks with node, and a non-interactive SSH
+        # session has no Homebrew on PATH. The hook dies naming node, which
+        # looks nothing like "the PATH is short".
+        import toolpaths
         r = subprocess.run([claude, "-p", "\n".join(parts)],
-                           capture_output=True, text=True, timeout=600)
+                           capture_output=True, text=True, timeout=600,
+                           env=toolpaths.tool_env())
         if r.returncode != 0:
             raise SystemExit(f"model call failed: {r.stderr[:400]}")
         pj = re.search(r"```(?:json patch|json)\s*\n(.*?)```", r.stdout, re.S)
