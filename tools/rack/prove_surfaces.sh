@@ -100,7 +100,13 @@ if [ "$ONLY" = "all" ] || [ "$ONLY" = "app" ]; then
         out="$(cd "$HERE" && cap 1500 python3 drive_app.py patch \
               "a classic subtractive voice with a filter envelope" 2>&1)"
         printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
-        if printf '%s' "$out" | grep -q "^PASS"; then
+        if printf '%s' "$out" | grep -q "^SKIP:"; then
+            # Not a failure of the app: the driver reads the screen to know
+            # which pane it is on, and an SSH session has no Screen Recording
+            # permission. Reported as the skip it is.
+            none "the app cannot be driven from here — no Screen Recording
+        permission. Run this from a Terminal window ON this machine."
+        elif printf '%s' "$out" | grep -q "^PASS"; then
             ok "the app built a patch when Build was pressed"
         else
             bad "driving the app did not reach a pass"

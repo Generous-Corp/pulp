@@ -210,8 +210,27 @@ def type_text(text: str) -> None:
     time.sleep(0.6)
 
 
+class NoScreenAccess(RuntimeError):
+    """Screen Recording is not granted to whatever is running this.
+
+    Kept apart from every other failure because it says nothing about the app.
+    `screencapture` exits non-zero rather than producing a blank image, and an
+    SSH session never has the permission -- so driving the app from one fails
+    here, at the first probe, and reads as the app being broken. It is not: the
+    same run passes from a Terminal window on that machine.
+    """
+
+
 def shot(path: str) -> str:
-    subprocess.run(["screencapture", "-x", "-o", path], check=True)
+    r = subprocess.run(["screencapture", "-x", "-o", path],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise NoScreenAccess(
+            "screencapture failed (exit %d). This driver decides which screen "
+            "the app is on by sampling pixels, so it needs Screen Recording "
+            "permission -- which an SSH session does not have. Run this from a "
+            "Terminal window ON that machine, or grant Screen Recording to "
+            "whatever runs it." % r.returncode)
     return path
 
 
@@ -435,4 +454,11 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except NoScreenAccess as exc:
+        # Exit 3, matching every other "this cannot be measured here" in these
+        # tools. A permission gap reported as a failure sends someone to debug
+        # a working app.
+        print(f"SKIP: {exc}")
+        sys.exit(3)
