@@ -4993,3 +4993,28 @@ TEST_CASE("a module we did not make is drawn from its own artwork",
     // none, because it looks right.
     CHECK_FALSE(preview.has_artwork_for("NoSuchPluginAnywhere", "GHOST"));
 }
+
+TEST_CASE("our modules draw their knobs, at the sizes they declare",
+          "[rack][artwork]") {
+    // A panel SVG is a BACKGROUND. Rack composites every knob over it as a
+    // separate widget, so drawing only the background showed labels with
+    // nothing under them -- FREQ, FINE and PW floating over blank plate.
+    // Vendor panels happen to have a knob well painted in, so ours looked
+    // uniquely broken beside them.
+    forge_modular::RackPreview preview;
+    preview.set_panel_directory(
+        "/Volumes/Workshop/Code/pulp-modular-rack/examples/forge-modular/res");
+
+    // The VCO declares FREQ (KnobLarge), FINE, PW (Knob) and FM (Trimpot).
+    const auto [count, widest] = preview.knob_summary("VCO");
+    CHECK(count == 4);
+
+    // The assertion that carries the weight: sizes are READ, not assumed.
+    // Drawing every control at one diameter looks plausible and is wrong about
+    // every trimpot on every panel -- and nothing about the picture says so.
+    CHECK(widest == Catch::Approx(18.3f));     // KnobLarge, not the 12.2 default
+
+    // A model we do not ship resolves to no knobs rather than to some other
+    // module's.
+    CHECK(preview.knob_summary("NoSuchModelAnywhere").first == 0);
+}

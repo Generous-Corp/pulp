@@ -1,5 +1,7 @@
 #include "forge/rack_preview.hpp"
 
+#include <choc/text/choc_JSON.h>
+
 #include <forge/design_tokens.hpp>
 
 #include <algorithm>
@@ -271,6 +273,97 @@ const std::string& RackPreview::vendor_svg(const std::string& plugin,
     return vendor_cache_.emplace(key, std::move(text)).first->second;
 }
 
+const std::vector<RackPreview::KnobSpec>&
+RackPreview::module_knobs(const std::string& model) const {
+    static const std::vector<KnobSpec> kNone;
+    const auto it = knob_cache_.find(model);
+    if (it != knob_cache_.end()) return it->second;
+
+    // The manifest the panel was emitted from, beside the artwork it emitted.
+    // Reading it rather than the panel's hidden components group, because that
+    // group records WHERE each control is and not WHICH it is -- and a trimpot
+    // drawn at knob size is a worse lie than no knob at all.
+    std::vector<KnobSpec> out;
+    if (!panel_dir_.empty()) {
+        std::string slug = model;
+        for (auto& ch : slug) ch = static_cast<char>(std::tolower(ch));
+        const auto path = std::filesystem::path(panel_dir_).parent_path() /
+                          "modules" / (slug + ".json");
+        std::ifstream f(path);
+        if (f) {
+            std::stringstream ss;
+            ss << f.rdbuf();
+            try {
+                const auto doc = choc::json::parse(ss.str());
+                if (doc.hasObjectMember("modules")) {
+                    const auto mods = doc["modules"];
+                    for (uint32_t i = 0; i < mods.size(); ++i) {
+                        const auto m = mods[i];
+                        if (!m.hasObjectMember("params")) continue;
+                        const auto ps = m["params"];
+                        for (uint32_t j = 0; j < ps.size(); ++j) {
+                            const auto q = ps[j];
+                            const auto kind =
+                                q["kind"].getWithDefault<std::string>("Knob");
+                            // Diameters as components.py draws them. A kind we
+                            // do not know is skipped rather than guessed: a
+                            // switch or a slider drawn as a knob is wrong in a
+                            // way a reader cannot see.
+                            float d = 0.0f;
+                            if (kind == "KnobLarge")      d = 18.3f;
+                            else if (kind == "Knob")      d = 12.2f;
+                            else if (kind == "KnobSmall") d = 8.64f;
+                            else if (kind == "Trimpot")   d = 5.76f;
+                            if (d <= 0.0f) continue;
+                            out.push_back({
+                                static_cast<float>(
+                                    q["x_mm"].getWithDefault<double>(0.0)),
+                                static_cast<float>(
+                                    q["y_mm"].getWithDefault<double>(0.0)),
+                                d});
+                        }
+                    }
+                }
+            } catch (...) {
+                // A manifest we cannot read means no knobs drawn, not a crash
+                // and not a wrong panel.
+                out.clear();
+            }
+        }
+    }
+    return knob_cache_.emplace(model, std::move(out)).first->second;
+}
+
+void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                             const RackModule& mod, float scale) const {
+    static const std::string kOurs = "ForgeModular";
+    if (mod.brand != kOurs) return;   // a vendor's knobs are in their artwork
+    const auto& knobs = module_knobs(mod.name);
+    if (knobs.empty()) return;
+
+    // A panel is 380 unscaled points tall and PANEL_H_MM millimetres, which is
+    // exactly 75 points to the inch. The same constant gives 15 points per HP,
+    // so widths agree with the layout without a second conversion.
+    const float ppmm = 75.0f / 25.4f * scale;
+    for (const auto& k : knobs) {
+        const float cx = panel.x + k.x_mm * ppmm;
+        const float cy = panel.y + k.y_mm * ppmm;
+        const float r = k.diameter_mm * ppmm / 2.0f;
+        if (!(r > 0.5f)) continue;    // below this it is a smudge, not a knob
+        // The same shape components.py draws: a rim the knob sinks into, a
+        // body, and an indicator running from the centre outward. A dot on the
+        // rim vanishes at this size, and a knob whose position cannot be read
+        // is the one thing a panel cannot afford.
+        canvas.set_fill_color(from_rgb(0x151A21, 1.0f));
+        canvas.fill_circle(cx, cy, r);
+        canvas.set_fill_color(from_rgb(0x232A35, 1.0f));
+        canvas.fill_circle(cx, cy, r * 0.92f);
+        canvas.set_stroke_color(from_rgb(0x3FD9A4, 1.0f));
+        canvas.set_line_width(std::max(1.0f, r * 0.13f));
+        canvas.stroke_line(cx, cy - r * 0.28f, cx, cy - r * 0.80f);
+    }
+}
+
 const RackModule* RackPreview::find(const std::string& id) const {
     for (const auto& m : modules_)
         if (m.id == id) return &m;
@@ -401,7 +494,22 @@ void RackPreview::paint(Canvas& canvas) {
         // the cable pass draws a socket where each lead lands, or the cable
         // arrives on a blank slab and the module reads as unconnected.
         if (!artwork) plain_faces.insert(panel.id);
-        if (artwork) continue;
+        if (artwork) {
+            // Knobs, on top of the face -- which is where Rack puts them.
+            //
+            // A panel SVG is a BACKGROUND. Rack composites every knob, jack
+            // and light over it as a separate widget, so a preview that draws
+            // only the background shows a module's labels with nothing under
+            // them: FREQ, FINE and PW floating over blank plate. Vendor panels
+            // happen to have a knob well painted in and so looked right, which
+            // is why ours looked uniquely broken beside them.
+            //
+            // Positions and sizes come from the module's own manifest, the
+            // same file the panel was emitted from, so a knob lands exactly
+            // where Rack will draw one rather than where we guess.
+            draw_knobs(canvas, panel, *mod_for_panel, L.scale);
+            continue;
+        }
 
         // No artwork for this one. Drawn as a HATCHED face at its true width
         // rather than a plain rectangle, because a plain rectangle is exactly

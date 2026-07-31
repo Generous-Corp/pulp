@@ -44,6 +44,17 @@ public:
     /// Is there artwork for this module, ours or the vendor's? Exposed so a
     /// test can ask whether a panel will be DRAWN rather than infer it from
     /// pixels -- a blank slab and a dark panel look alike in a comparison.
+    /// How many knobs one of OUR modules declares, and how wide the widest
+    /// is in millimetres. Exposed so a test can assert that the manifest is
+    /// being read and its SIZES honoured -- a preview that drew every control
+    /// at one size would look plausible and be wrong about every trimpot.
+    std::pair<std::size_t, float> knob_summary(const std::string& model) const {
+        const auto& k = module_knobs(model);
+        float widest = 0.0f;
+        for (const auto& one : k) widest = std::max(widest, one.diameter_mm);
+        return {k.size(), widest};
+    }
+
     bool has_artwork_for(const std::string& plugin,
                          const std::string& model) const {
         static const std::string kOurs = "ForgeModular";
@@ -119,6 +130,15 @@ private:
 
     /// Read `<dir>/<slug>.svg`, preferring the light face Rack shows.
     static std::string read_panel(const std::string& dir, const std::string& slug);
+    /// One knob, in panel millimetres, as the module's manifest declares it.
+    struct KnobSpec { float x_mm = 0, y_mm = 0, diameter_mm = 0; };
+    /// The knobs of one of OUR modules, cached per model.
+    const std::vector<KnobSpec>& module_knobs(const std::string& model) const;
+    /// Paint them over the panel, which is where Rack composites its own.
+    void draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel,
+                    const RackModule& mod, float scale) const;
+    mutable std::map<std::string, std::vector<KnobSpec>> knob_cache_;
+
     /// Artwork for somebody else's module, from wherever Rack keeps it.
     const std::string& vendor_svg(const std::string& plugin,
                                   const std::string& model) const;
