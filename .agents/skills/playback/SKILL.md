@@ -898,6 +898,14 @@ is that a module *is* in the artifact, say so with `pulp_assert_link_floor`'s
 closure. `StepSequencer_CLAP` does link `playback`, by the chain above and only
 by it; it does not link `timeline_editor` at all.
 
+Read it as an upper bound *for one configuration*, too. `playback` is reached in
+all of them because `core/playback` is always built, but a module behind an
+option is genuinely absent when that option is off, and a debt entry naming it
+is then a false statement rather than a tightening opportunity. Guard such an
+entry on the condition that builds the module — see the `timeline` skill's
+"A debt entry is a claim about a configuration" for the rule and the two-sided
+proof it requires.
+
 That interface hands out `UiPlayhead` **by value**, and the reason is specific to
 this module: `TransportSnapshot` borrows `const CompiledTempoMap*` from the
 compiled program. That is correct for a block renderer, which consumes the

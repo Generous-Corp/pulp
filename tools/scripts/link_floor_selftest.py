@@ -198,6 +198,38 @@ CASES: list[tuple[str, str, bool, str]] = [
         "required module 'zeta' is in neither tier 'fixture' nor",
     ),
     (
+        # Debt is CMake code, so an entry whose edge only exists in some
+        # configurations is appended under the condition that decides whether
+        # the module is BUILT. With the condition true the recorded edge is
+        # absorbed exactly as an unconditional entry would be.
+        "conditional_debt_absorbs_when_condition_holds",
+        case(tier("beta", "gamma")
+             + "set(FIXTURE_BUILDS_ALPHA ON)\n"
+             + "if(FIXTURE_BUILDS_ALPHA)\n"
+             + "    list(APPEND PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        True,
+        PASS,
+    ),
+    (
+        # The other side of the same entry, and the one that separates a
+        # conditional debt list from a rubber stamp: with the condition false the
+        # entry is simply absent, and absence forgives nothing. `alpha` is still
+        # reached, so the closure is still over the bound and the configure still
+        # fails. A guard whose condition is wrong therefore fails in one of the
+        # two configurations rather than permitting whatever it finds.
+        "conditional_debt_omission_is_not_forgiveness",
+        case(tier("beta", "gamma")
+             + "set(FIXTURE_BUILDS_ALPHA OFF)\n"
+             + "if(FIXTURE_BUILDS_ALPHA)\n"
+             + "    list(APPEND PULP_LINK_FLOOR_DEBT_probe alpha)\n"
+             + "endif()\n"
+             + "pulp_assert_link_floor(probe TIER fixture)\n"),
+        False,
+        "pulp/alpha is outside tier 'fixture'",
+    ),
+    (
         "require_may_name_a_debt_entry",
         case(tier("beta", "gamma")
              + "set(PULP_LINK_FLOOR_DEBT_probe alpha)\n"

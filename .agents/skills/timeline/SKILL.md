@@ -1270,8 +1270,37 @@ permission list. Pair the two whenever the criterion is about what the artifact
 *contains*: the upper bound stops the editing stack leaking in, the lower bound
 stops the claim being satisfied by the module quietly disappearing.
 
+**A debt entry is a claim about a configuration.** The check walks the link graph
+of the build being configured, so `PULP_LINK_FLOOR_DEBT_<target>` is measured
+against that build too. An entry naming a module the configuration does not
+*build* is rejected as "no longer linked" — and the obvious repair, deleting it,
+is wrong: it only moves the failure to the configuration that does build it.
+`render` is the live case. `core/render` is added only under `PULP_ENABLE_GPU`,
+so `PULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=ON` failed the configure outright
+while `GPU=ON` needed the entry. Guard such an entry on the condition that
+decides whether the module is built, never on a restatement of the edge:
+
+```cmake
+if(PULP_ENABLE_GPU)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
+endif()
+```
+
+That keeps the entry refutable from both sides — condition true and the module
+unreached still fails "no longer linked"; condition false and the module reached
+still fails "outside tier" — so a wrong guard fails in one of the two
+configurations instead of permitting whatever it finds. Guarding on a single edge
+instead (`if(TARGET pulp-render)`, or whichever `target_link_libraries` you
+happen to find) makes the entry unfalsifiable from one side, and there is usually
+more than one edge: `render` arrives both directly from `pulp_add_plugin` under
+`PULP_HAS_SKIA` and through the view stack. **Changing a debt list means
+configuring both polarities of its condition** — that pair is the acceptance
+test, and no single configure can stand in for it. `host` is conditional the same
+way (`core/host` is skipped on iOS).
+
 **What `StepSequencer_CLAP` actually proves today.** Measured on a macOS
-configure, it reaches eighteen modules, and `timeline_editor` is not among them —
+configure with `PULP_ENABLE_GPU=ON`, it reaches eighteen modules — seventeen with
+GPU off, `render` being the difference — and `timeline_editor` is not among them —
 `pulp-timeline-editor` is a live target in that same configure and this plugin
 does not link it. `timeline` it reaches only through
 `pulp-view -> … -> pulp-host -> pulp-playback -> pulp-timeline`, with no

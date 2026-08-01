@@ -612,8 +612,8 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
 # reached this point is already its verdict — and a verdict is worth nothing
 # without evidence the checker can still say no. The selftest configures fixture
 # projects with known graphs and asserts both the verdict and the reason given;
-# --mutate then weakens the checker itself nine ways and requires each weakening
-# to be caught, so a green run cannot be the walk failing to arrive.
+# --mutate then weakens the checker itself eleven ways and requires each
+# weakening to be caught, so a green run cannot be the walk failing to arrive.
 #
 # Note what the configure-time verdict does and does not cover: the assertion on
 # a plugin lives in that plugin's CMakeLists, so it is evaluated only where

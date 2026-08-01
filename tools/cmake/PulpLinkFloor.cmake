@@ -96,9 +96,11 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 #         -> pulp-host -> pulp-playback -> pulp-timeline
 #     which is the only reason this plugin reaches pulp-timeline at all: the
 #     sequencer's own code carries no pulp/timeline include and no timeline
-#     link. view, host, playback, timeline, render and canvas all arrive this
-#     way, so cutting the one unconditional link would delete six entries at
-#     once.
+#     link. view, host, playback, timeline and canvas all arrive this way, so
+#     cutting the one unconditional link would delete five entries at once.
+#     `render` is NOT among them: it is also linked directly by pulp_add_plugin
+#     (tools/cmake/PulpUtils.cmake, under PULP_HAS_SKIA), which is the edge the
+#     closure report names, so cutting the view link alone leaves it reached.
 #
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
@@ -109,8 +111,47 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas events graph host native-components playback render
+    canvas events graph native-components playback
     sample_bank_manifest signal state timeline view)
+
+# Entries whose edge only exists in some configurations.
+#
+# The closure this file measures is the closure of the build being configured
+# (see the header), so a debt list is a claim about a configuration too. An
+# unconditional entry naming a module that this configuration does not build is
+# not a tightening opportunity — it is a false statement the checker correctly
+# rejects, and deleting it only moves the rejection to the other configuration.
+#
+# The condition to guard an entry with is the one that decides whether the
+# module is BUILT, never a restatement of the edge itself. That keeps the entry
+# a claim the checker can still refute from both sides, which is the whole
+# point of writing it down:
+#
+#   condition true, module not reached  -> "no longer linked" (the edge was cut)
+#   condition false, module reached     -> "outside tier"     (the edge escaped)
+#
+# so a guard that is wrong in either direction fails in one of the two
+# configurations rather than quietly permitting whatever it finds.
+#
+#   render — core/render is added only under PULP_ENABLE_GPU (CMakeLists.txt),
+#     so a GPU=OFF build has no such target for any consumer to reach. Note the
+#     condition is the module's existence and NOT any one edge: two independent
+#     links carry it, `pulp_add_plugin`'s own per-format
+#     `target_link_libraries(${target} PRIVATE pulp::render)` under PULP_HAS_SKIA
+#     (tools/cmake/PulpUtils.cmake, the direct edge and the one the closure
+#     report names) and core/view's `if(TARGET pulp-render)` block. Guarding on
+#     either edge would make the entry unfalsifiable from one side; guarding on
+#     PULP_ENABLE_GPU leaves both edges answerable to it.
+#   host   — core/host is skipped on iOS (App Store policy disallows dlopen of
+#     third-party plugins), so the pulp-view-core -> pulp-host hop that carries
+#     this plugin into the hosting stack does not exist there. Reached in every
+#     other configuration, including the GPU=OFF ones.
+if(PULP_ENABLE_GPU)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
+endif()
+if(NOT IOS)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP host)
+endif()
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 
@@ -332,6 +373,7 @@ function(pulp_assert_link_floor target)
 
     set(_failures "")
     set(_over FALSE)
+    set(_stale FALSE)
     foreach(_module IN LISTS _modules)
         if(_module IN_LIST _allowed OR _module IN_LIST _debt)
             continue()
@@ -353,13 +395,16 @@ function(pulp_assert_link_floor target)
         list(APPEND _failures
             "  pulp/${_module} is outside tier '${PALF_TIER}', reached by ${_chain}")
     endforeach()
+    # A debt problem is not an over-reach and must not be given the over-reach
+    # remedy: telling someone to cut a link or widen a tier when the actual
+    # complaint is a declaration that no longer matches the build sends them at
+    # the wrong file. Tracked separately so each failure gets its own advice.
     foreach(_entry IN LISTS _debt)
         if(_entry IN_LIST _allowed)
-            set(_over TRUE)
             list(APPEND _failures
                 "  debt entry '${_entry}' is already inside tier '${PALF_TIER}'; delete it")
         elseif(NOT _entry IN_LIST _modules)
-            set(_over TRUE)
+            set(_stale TRUE)
             list(APPEND _failures
                 "  debt entry '${_entry}' is no longer linked. Delete it to tighten the bound")
         endif()
@@ -398,6 +443,17 @@ function(pulp_assert_link_floor target)
                 "tools/cmake/PulpLinkFloor.cmake for every target that claims it, or "
                 "record the edge in PULP_LINK_FLOOR_DEBT_${target} with the reason it "
                 "exists. ")
+        endif()
+        if(_stale)
+            string(APPEND _remedy
+                "A debt entry names an edge this configuration does not have. If the "
+                "edge was cut, delete the entry and the bound tightens with no other "
+                "edit. If instead the module is simply not BUILT here -- an option or a "
+                "platform excludes it, as core/render is excluded by "
+                "PULP_ENABLE_GPU=OFF -- deleting the entry only moves the failure to "
+                "the configuration that does build it. Guard the entry on that same "
+                "condition in tools/cmake/PulpLinkFloor.cmake instead, so it stays a "
+                "claim both configurations can refute. ")
         endif()
         if(_missing)
             string(APPEND _remedy
