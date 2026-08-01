@@ -228,7 +228,19 @@ class ReaperSession:
                     pass
 
         ours = {"vstpath": str(self.scan_dir), "clap_path": str(self.scan_dir),
-                "splashscreen": "0"}
+                "splashscreen": "0",
+                # Never reopen the user's last project.
+                #
+                # Seeding from the real reaper.ini carries `lastproject` with
+                # it, so this "isolated" REAPER opened somebody's actual
+                # session — and because that session referenced a plugin the
+                # smoke had not installed, REAPER came up on a modal "Project
+                # Load Warning" and sat there. The scripted insert never ran
+                # and the smoke reported INCONCLUSIVE, which named neither the
+                # dialog nor the project. Worse, it put a stranger's work on
+                # screen on a machine somebody was using.
+                "lastproject": "",
+                "loadlastproj": "0"}
         for line in arch_lines:
             key, _, value = line.partition("=")
             ours[key] = value
@@ -241,8 +253,19 @@ class ReaperSession:
             except Exception:
                 base = ""
         if base:
-            kept = [ln for ln in base.splitlines()
-                    if ln.split("=", 1)[0].strip() not in ours]
+            # `[Recent]` is the user's recent-project list. It is not needed to
+            # run a smoke, and copying it puts their filenames into a temp dir
+            # and into REAPER's menus for the run.
+            kept, section = [], ""
+            for ln in base.splitlines():
+                stripped = ln.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    section = stripped.lower()
+                if section == "[recent]" and not stripped.startswith("["):
+                    continue
+                if ln.split("=", 1)[0].strip() in ours:
+                    continue
+                kept.append(ln)
             out, inserted = [], False
             for ln in kept:
                 out.append(ln)
@@ -259,6 +282,21 @@ class ReaperSession:
         if self.args.format in ("vst3", "clap"):
             shutil.copytree(plugin, self.scan_dir / plugin.name)
         else:  # au — no custom-path scan; install to the real folder, uninstall on exit.
+            # An AU is found through the system's AudioComponent registry, and
+            # that registry is not visible to a process outside a GUI login
+            # session. Over SSH the component is installed, correct and
+            # completely invisible: `auval -a` lists nothing, REAPER's scan
+            # finds nothing, and the run ends INCONCLUSIVE — which reads as
+            # flakiness and sends the next person looking for a scan bug that
+            # is not there. VST3 and CLAP are unaffected because they are
+            # scanned from a directory.
+            if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+                log("AU cannot be proven from this session: the AudioComponent "
+                    "registry is not visible outside a GUI login session, so "
+                    "the component is installed and unfindable. Run this from "
+                    "a Terminal on the machine itself. (VST3 and CLAP do work "
+                    "over SSH — they are scanned from a directory.)")
+                return EXIT_SKIP
             comp = Path(os.path.expanduser("~/Library/Audio/Plug-Ins/Components")) / plugin.name
             comp.parent.mkdir(parents=True, exist_ok=True)
             if comp.exists():

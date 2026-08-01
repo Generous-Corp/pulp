@@ -18,6 +18,7 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 import pathlib
@@ -494,3 +495,54 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_seeded_config_never_reopens_the_users_project(tmp_path, monkeypatch):
+    """The smoke must not open somebody's session, or list their filenames.
+
+    Seeding the portable config from the real reaper.ini is deliberate — it is
+    what carries the licence and the chosen audio device, so a run does not
+    put a first-run wizard on screen. But it also carried `lastproject`, so an
+    "isolated" REAPER opened the user's actual project; that project referenced
+    a plugin the smoke had not installed, REAPER came up on a modal Project
+    Load Warning, the scripted insert never ran, and the smoke reported
+    INCONCLUSIVE while naming neither the dialog nor the project.
+    """
+    real = tmp_path / "REAPER"
+    real.mkdir()
+    (real / "reaper.ini").write_text(
+        "[REAPER]\n"
+        "lastproject=/Users/someone/Desktop/Private Session.RPP\n"
+        "loadlastproj=1\n"
+        "audiodevice=CoreAudio\n"
+        "[Recent]\n"
+        "recent01=/Users/someone/Desktop/Another Private.RPP\n"
+        "recent02=/Users/someone/Music/Unreleased.RPP\n"
+        "[MoreStuff]\n"
+        "keepme=1\n")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace(
+        "~/Library/Application Support/REAPER", str(real)).replace(
+        "~", str(tmp_path)))
+
+    plugin = tmp_path / "Thing.vst3"
+    plugin.mkdir()
+    args = argparse.Namespace(plugin_path=str(plugin), format="vst3")
+    session = rs.ReaperSession.__new__(rs.ReaperSession)
+    session.args = args
+    session.portable = tmp_path / "portable"
+    session.portable.mkdir()
+    session.scan_dir = tmp_path / "scan"
+    session.scan_dir.mkdir()
+    session.au_installed = None
+    assert session.place_plugin() is None
+
+    ini = (session.portable / "reaper.ini").read_text()
+    # The two that matter.
+    assert "Private Session.RPP" not in ini, "it would reopen the user's project"
+    assert "Unreleased.RPP" not in ini, "it copied the user's recent-project list"
+    assert "loadlastproj=0" in ini
+    # And the settings that are the whole reason for seeding must survive, or
+    # the fix trades a modal project warning for a first-run wizard.
+    assert "audiodevice=CoreAudio" in ini
+    assert "keepme=1" in ini
+    assert str(session.scan_dir) in ini
