@@ -55,7 +55,7 @@ Track plain_track(ItemId id, std::string name) {
 // clip carrying two notes, an automation lane carrying two points, and a take
 // lane carrying one take.
 Track authored_track() {
-    auto notes = value_of(NoteContent::create(
+    auto notes = value_of(MidiContent::create(
         {{kFirstNote, {0}, {kTicksPerQuarter / 2}, 12'000, 60, 0},
          {kSecondNote, {kTicksPerQuarter / 2}, {kTicksPerQuarter / 2}, 24'000, 64, 0}}));
     auto clip =

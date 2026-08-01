@@ -136,6 +136,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "clip";
     case ItemKind::Note:
         return "note";
+    case ItemKind::MidiLane:
+        return "midi_lane";
+    case ItemKind::MidiLanePoint:
+        return "midi_lane_point";
     case ItemKind::DevicePlacement:
         return "device_placement";
     case ItemKind::AutomationLane:
@@ -332,9 +336,44 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
                            context.writer.character('}');
                 });
             },
-            [&](const NoteContent& note_content) {
-                return write_envelope(context, "pulp.timeline.content.notes", 2, [&] {
-                    if (!context.writer.append("{\"modifier_seed\":") ||
+            [&](const MidiContent& note_content) {
+                return write_envelope(context, "pulp.timeline.content.notes", 3, [&] {
+                    if (!context.writer.append("{\"lanes\":["))
+                        return false;
+                    for (std::size_t lane_index = 0; lane_index < note_content.lanes().size();
+                         ++lane_index) {
+                        const auto& lane = note_content.lanes()[lane_index];
+                        if ((lane_index != 0 && !context.writer.character(',')) ||
+                            !context.writer.append("{\"bank\":") ||
+                            !context.writer.u64(lane.address.bank) ||
+                            !context.writer.append(",\"channel\":") ||
+                            !context.writer.u64(lane.address.channel) ||
+                            !context.writer.append(",\"group\":") ||
+                            !context.writer.u64(lane.address.group) ||
+                            !context.writer.append(",\"id\":") ||
+                            !context.writer.u64(lane.id.value, true) ||
+                            !context.writer.append(",\"index\":") ||
+                            !context.writer.u64(lane.address.index) ||
+                            !context.writer.append(",\"points\":["))
+                            return false;
+                        for (std::size_t point_index = 0; point_index < lane.points.size();
+                             ++point_index) {
+                            const auto& point = lane.points[point_index];
+                            if ((point_index != 0 && !context.writer.character(',')) ||
+                                !context.writer.append("{\"id\":") ||
+                                !context.writer.u64(point.id.value, true) ||
+                                !context.writer.append(",\"position_ticks\":") ||
+                                !context.writer.i64(point.position.value, true) ||
+                                !context.writer.append(",\"value\":") ||
+                                !context.writer.u64(point.value) || !context.writer.character('}'))
+                                return false;
+                        }
+                        if (!context.writer.append("],\"status\":") ||
+                            !context.writer.u64(lane.address.status) ||
+                            !context.writer.character('}'))
+                            return false;
+                    }
+                    if (!context.writer.append("],\"modifier_seed\":") ||
                         !context.writer.u64(note_content.modifier_seed(), true) ||
                         !context.writer.append(",\"modifiers\":["))
                         return false;

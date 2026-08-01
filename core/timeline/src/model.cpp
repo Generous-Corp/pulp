@@ -220,19 +220,25 @@ runtime::Result<ItemId, ModelError> ItemIdAllocator::allocate() noexcept {
     return runtime::Result<ItemId, ModelError>(runtime::Ok(id));
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes) {
-    return create(std::move(notes), {}, 0);
+runtime::Result<MidiContent, ModelError> MidiContent::create(std::vector<NoteEvent> notes) {
+    return create(std::move(notes), {}, 0, {});
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes,
+runtime::Result<MidiContent, ModelError> MidiContent::create(std::vector<NoteEvent> notes,
                                                              std::vector<NoteModifier> modifiers,
                                                              std::uint64_t modifier_seed) {
+    return create(std::move(notes), std::move(modifiers), modifier_seed, {});
+}
+
+runtime::Result<MidiContent, ModelError>
+MidiContent::create(std::vector<NoteEvent> notes, std::vector<NoteModifier> modifiers,
+                    std::uint64_t modifier_seed, std::vector<MidiExpressionLane> lanes) {
     for (const auto& note : notes) {
         if (!note.id.valid())
-            return fail<NoteContent>(ModelErrorCode::InvalidItemId, note.id);
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, note.id);
         if (!positive_range(note.start.value, note.duration.value) || note.pitch > 127 ||
             note.channel > 15)
-            return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
+            return fail<MidiContent>(ModelErrorCode::InvalidNote, note.id);
     }
     std::vector<ItemId> note_ids;
     note_ids.reserve(notes.size());
@@ -241,35 +247,86 @@ runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEve
     std::sort(note_ids.begin(), note_ids.end());
     if (const auto duplicate = std::adjacent_find(note_ids.begin(), note_ids.end());
         duplicate != note_ids.end())
-        return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
     std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
         return std::pair(lhs.start.value, lhs.id.value) < std::pair(rhs.start.value, rhs.id.value);
     });
     for (const auto& modifier : modifiers) {
         if (!modifier.note_id.valid())
-            return fail<NoteContent>(ModelErrorCode::InvalidItemId, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, modifier.note_id);
         // A neutral entry describes a note that already plays that way, so
         // admitting it would give one document two byte encodings.
         if (!note_modifier_well_formed(modifier) || note_modifier_is_neutral(modifier))
-            return fail<NoteContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
         if (!std::binary_search(note_ids.begin(), note_ids.end(), modifier.note_id))
-            return fail<NoteContent>(ModelErrorCode::MissingItem, modifier.note_id);
+            return fail<MidiContent>(ModelErrorCode::MissingItem, modifier.note_id);
     }
     if (const auto duplicate =
             first_duplicate(modifiers, [](const NoteModifier& entry) { return entry.note_id; }))
-        return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
     std::sort(modifiers.begin(), modifiers.end(),
               [](const NoteModifier& lhs, const NoteModifier& rhs) {
                   return lhs.note_id.value < rhs.note_id.value;
               });
+    // Lane and point identities share the document's one ItemId space with the
+    // notes above them, so `owned` accumulates all three: an identity reused
+    // between a note and a lane point would make a later remap ambiguous about
+    // which object it just renamed.
+    auto owned = std::move(note_ids);
+    for (const auto& lane : lanes) {
+        if (!lane.id.valid())
+            return fail<MidiContent>(ModelErrorCode::InvalidItemId, lane.id);
+        if (!midi_lane_address_well_formed(lane.address))
+            return fail<MidiContent>(ModelErrorCode::InvalidMidiLane, lane.id);
+        owned.push_back(lane.id);
+        for (const auto& point : lane.points) {
+            if (!point.id.valid())
+                return fail<MidiContent>(ModelErrorCode::InvalidItemId, point.id);
+            if (point.position.value < 0)
+                return fail<MidiContent>(ModelErrorCode::InvalidMidiLane, point.id);
+            owned.push_back(point.id);
+        }
+    }
+    std::sort(owned.begin(), owned.end());
+    if (const auto duplicate = std::adjacent_find(owned.begin(), owned.end());
+        duplicate != owned.end())
+        return fail<MidiContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+    for (auto& lane : lanes)
+        std::sort(lane.points.begin(), lane.points.end(),
+                  [](const MidiLanePoint& lhs, const MidiLanePoint& rhs) {
+                      return std::pair(lhs.position.value, lhs.id.value) <
+                             std::pair(rhs.position.value, rhs.id.value);
+                  });
+    std::sort(lanes.begin(), lanes.end(),
+              [](const MidiExpressionLane& lhs, const MidiExpressionLane& rhs) {
+                  return std::pair(lhs.address, lhs.id.value) <
+                         std::pair(rhs.address, rhs.id.value);
+              });
+    // Addresses are compared after the sort, so the duplicate reported is the
+    // second lane claiming a stream rather than whichever was supplied later.
+    for (std::size_t index = 1; index < lanes.size(); ++index)
+        if (lanes[index].address == lanes[index - 1].address)
+            return fail<MidiContent>(ModelErrorCode::DuplicateMidiLaneAddress, lanes[index].id,
+                                     lanes[index - 1].id);
     auto data = std::make_shared<Data>();
     data->notes = std::move(notes);
     data->modifiers = std::move(modifiers);
     data->modifier_seed = modifier_seed;
-    return runtime::Result<NoteContent, ModelError>(runtime::Ok(NoteContent(std::move(data))));
+    data->lanes = std::move(lanes);
+    return runtime::Result<MidiContent, ModelError>(runtime::Ok(MidiContent(std::move(data))));
 }
 
-const NoteModifier* NoteContent::modifier_for(ItemId note_id) const noexcept {
+const MidiExpressionLane* MidiContent::lane_for(const MidiLaneAddress& address) const noexcept {
+    const auto& lanes = data_->lanes;
+    const auto found = std::lower_bound(lanes.begin(), lanes.end(), address,
+                                        [](const MidiExpressionLane& lane,
+                                           const MidiLaneAddress& wanted) {
+                                            return lane.address < wanted;
+                                        });
+    return found != lanes.end() && found->address == address ? &*found : nullptr;
+}
+
+const NoteModifier* MidiContent::modifier_for(ItemId note_id) const noexcept {
     const auto& modifiers = data_->modifiers;
     const auto found = std::lower_bound(modifiers.begin(), modifiers.end(), note_id.value,
                                         [](const NoteModifier& entry, std::uint64_t wanted) {
@@ -278,17 +335,17 @@ const NoteModifier* NoteContent::modifier_for(ItemId note_id) const noexcept {
     return found != modifiers.end() && found->note_id == note_id ? &*found : nullptr;
 }
 
-runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent note) const {
+runtime::Result<MidiContent, ModelError> MidiContent::replace_note(NoteEvent note) const {
     if (!note.id.valid() || note.duration.value <= 0 || note.pitch > 127 || note.channel > 15)
-        return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
+        return fail<MidiContent>(ModelErrorCode::InvalidNote, note.id);
     auto replacement = data_->notes;
     const auto found =
         std::find_if(replacement.begin(), replacement.end(),
                      [&](const NoteEvent& candidate) { return candidate.id == note.id; });
     if (found == replacement.end() || found->id != note.id)
-        return fail<NoteContent>(ModelErrorCode::MissingItem, note.id);
+        return fail<MidiContent>(ModelErrorCode::MissingItem, note.id);
     *found = note;
-    return create(std::move(replacement), data_->modifiers, data_->modifier_seed);
+    return create(std::move(replacement), data_->modifiers, data_->modifier_seed, data_->lanes);
 }
 
 runtime::Result<OpaqueContent, ModelError>
@@ -377,11 +434,12 @@ detail::ProjectStateAccess::restore_identities(Project project,
         const auto valid_shape = [&] {
             // Parent is canonical and, except for lane/scene-owned children,
             // recomputable from the item's own coordinates. An AutomationPoint,
-            // Take, or Slot carries its automation lane, take lane, or scene only
-            // in parent_id; ownership below validates it without circularly
-            // re-deriving it from (sequence, track, clip).
+            // Take, MidiLanePoint, or Slot carries its automation lane, take
+            // lane, expression lane, or scene only in parent_id; ownership below
+            // validates it without circularly re-deriving it from
+            // (sequence, track, clip).
             if (location.kind != ItemKind::AutomationPoint && location.kind != ItemKind::Take &&
-                location.kind != ItemKind::Slot &&
+                location.kind != ItemKind::MidiLanePoint && location.kind != ItemKind::Slot &&
                 location.parent_id != immediate_parent_id(location.kind, project.id(),
                                                           location.sequence_id, location.track_id,
                                                           location.clip_id))
@@ -414,12 +472,23 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.sequence_id != entry.item && location.track_id != entry.item &&
                        location.clip_id == entry.item;
             case ItemKind::Note:
+            case ItemKind::MidiLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.clip_id.valid() && location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        entry.item != location.clip_id;
+            case ItemKind::MidiLanePoint:
+                // parent_id is the owning expression lane (validated below); the
+                // clip stays a coordinate because a lane never outlives its clip.
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.clip_id.valid() && location.parent_id.valid() &&
+                       location.sequence_id != location.track_id &&
+                       location.sequence_id != location.clip_id &&
+                       location.track_id != location.clip_id &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       entry.item != location.clip_id && entry.item != location.parent_id;
             case ItemKind::DevicePlacement:
             case ItemKind::AutomationLane:
             case ItemKind::TakeLane:
@@ -465,7 +534,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
             }
-            case ItemKind::Note: {
+            case ItemKind::Note:
+            case ItemKind::MidiLane: {
                 const auto* clip = find_entry(location.parent_id);
                 if (!clip || clip->location.kind != ItemKind::Clip ||
                     clip->location.parent_id != location.track_id ||
@@ -501,6 +571,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
                 const auto* track = find_entry(lane->location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
+            }
+            case ItemKind::MidiLanePoint: {
+                const auto* lane = find_entry(location.parent_id);
+                return lane && lane->location.kind == ItemKind::MidiLane &&
+                       lane->location.sequence_id == location.sequence_id &&
+                       lane->location.track_id == location.track_id &&
+                       lane->location.clip_id == location.clip_id;
             }
             }
             return false;

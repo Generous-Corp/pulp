@@ -46,7 +46,7 @@ Project make_checkpoint(const CompiledTempoMap& map) {
     const auto note_start = tick_at_sample(map, 5);
     const auto note_end = tick_at_sample(map, 19);
     auto notes =
-        take(NoteContent::create({{{22}, note_start, note_end - note_start, 0x8000, 64, 2}}));
+        take(MidiContent::create({{{22}, note_start, note_end - note_start, 0x8000, 64, 2}}));
     auto note_clip = take(
         Clip::create({21}, {0}, TickDuration{tick_at_sample(map, 32).value}, std::move(notes)));
     auto note_track = take(Track::create({20}, "notes", {std::move(note_clip)}));
@@ -201,7 +201,7 @@ TEST_CASE("journal replay reproduces byte-identical audio and MIDI golden stream
     const auto* replayed_audio = replayed->find_sequence({2})->find_track({10})->find_clip({11});
     REQUIRE(replayed_audio->playback_properties() == audible);
     const auto* replayed_notes = replayed->find_sequence({2})->find_track({20})->find_clip({21});
-    REQUIRE(std::get<NoteContent>(replayed_notes->content()).notes()[0].velocity == 0x6000);
+    REQUIRE(std::get<MidiContent>(replayed_notes->content()).notes()[0].velocity == 0x6000);
 
     constexpr std::array schedule{3u, 7u, 5u, 9u, 8u};
     const auto assets = make_audio_pool();

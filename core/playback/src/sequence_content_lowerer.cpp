@@ -302,14 +302,14 @@ class SequenceContentLowerer::Impl {
             0,
             {},
         };
-        if (!std::holds_alternative<timeline::NoteContent>(child.content()))
+        if (!std::holds_alternative<timeline::MidiContent>(child.content()))
             return finish_pending_leaf();
         return {};
     }
 
     StepResult step_pending_leaf() {
         auto& pending = *pending_leaf_;
-        const auto& notes = std::get<timeline::NoteContent>(pending.child.content()).notes();
+        const auto& notes = std::get<timeline::MidiContent>(pending.child.content()).notes();
         if (pending.note_index == notes.size())
             return finish_pending_leaf();
         const auto& note = notes[pending.note_index++];
@@ -350,7 +350,7 @@ class SequenceContentLowerer::Impl {
         pending_leaf_.reset();
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
-        if (const auto* notes = std::get_if<timeline::NoteContent>(&content)) {
+        if (const auto* notes = std::get_if<timeline::MidiContent>(&content)) {
             // A nested note clip keeps its modifiers and its authored seed.
             // Rebuilding with the notes alone would leave the notes sounding
             // unconditionally inside a SequenceRef while they honour their
@@ -373,7 +373,17 @@ class SequenceContentLowerer::Impl {
                 if (retained(modifier.note_id))
                     modifiers.push_back(modifier);
             const auto seed = notes->modifier_seed();
-            auto rebuilt = timeline::NoteContent::create(std::move(pending.clipped_notes),
+            // Trimming a nested clip has no defined answer for a controller
+            // lane yet: a point before the retained window can still be the
+            // value that is sounding inside it, so neither dropping nor
+            // carrying it is correct. The named refusal says which decision is
+            // missing; silently rebuilding without the lanes would lower a clip
+            // whose controllers stopped existing.
+            if (!notes->lanes().empty())
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::TrimmedMidiLaneUnsupported,
+                                                  pending.child.id()}};
+            auto rebuilt = timeline::MidiContent::create(std::move(pending.clipped_notes),
                                                          std::move(modifiers), seed);
             if (!rebuilt)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,

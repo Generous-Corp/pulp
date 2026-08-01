@@ -354,6 +354,92 @@ tscon <session-id> /dest:console     # session stays Active, RDP client detaches
 Pair with auto-logon so a session exists after reboot, and run long builds under
 Task Scheduler (S4U) — an SSH drop otherwise kills `cmake`/MSBuild mid-build.
 
+## A capture with NO render spans — read this before investigating
+
+A trace containing `layout_children` and `wm_mousemove` but **no** `frame`,
+`paint`, `gpu_acquire`, `gpu_submit` or `gpu_present` is the single most
+misleading result this harness produces. It looks like a broken capture or a
+frame-time regression and is usually neither. Work the ladder in order; each
+step is seconds, and step 1 explains most cases.
+
+### 1. Which host did the plug-in actually get?
+
+The five render spans live on the **GPU** paint path. A plug-in that does not
+ask for a GPU editor never enters it, paints correctly on CPU raster, and emits
+none of them — by design, on every platform.
+
+The adapter logs its decision at editor attach:
+
+```
+[plugin-gpu-host] adapter mode=autoui use_gpu=false wants_gpu=false
+                  scripted=false requires_gpu_host=false …
+VST3 editor: attached (536x230, mode=autoui, gpu=false)
+```
+
+`decide_gpu_host()` (`core/format/include/pulp/format/gpu_host_select.hpp`, no
+platform guards — this is cross-platform) computes:
+
+```cpp
+d.wants_gpu = scripted || view_wants;      // view_wants = requires_gpu_host()
+d.use_gpu   = d.wants_gpu && !env_off;
+```
+
+So `mode=autoui` with `wants_gpu=false` means the editor is neither scripted nor
+declares `requires_gpu_host()`. **That is a complete explanation for zero render
+spans.** Do not go looking for a fallback, a broken adapter or a regression: a
+CPU-raster editor is not a degraded GPU editor, and its frame times are not
+comparable to a GPU capture's. `mode=` is the first thing to read.
+
+On Windows the CPU branch is explicit — `handle_wm_paint()` calls
+`render_frame()` only `if (gpu_surface_ && skia_surface_)`, else
+`raster_render_rgba()`, which carries no instrumentation and is labelled in
+source as "the VM proof path".
+
+### 2. Which host + platform emits which spans?
+
+Coverage is **not uniform**, and only the Windows plug-in editor has the full
+set. Verified by span-site inspection:
+
+| host | `frame` / `paint` | `gpu_acquire` |
+|---|---|---|
+| Windows plug-in editor (`plugin_view_host_win.cpp`) | yes | yes (shared `PluginFrameRenderer`) |
+| Linux plug-in editor (`plugin_view_host_linux.cpp`) | **no** | yes (shared renderer) |
+| macOS plug-in editor (`plugin_view_host_mac.mm`) | **no** | **no** — it has its own `render_frame()` and no `PULP_TRACE` sites |
+| macOS standalone app (`window_host_mac.mm`) | yes | no |
+
+`gpu_submit` comes from `core/render/src/skia_surface*.cpp` and `gpu_present`
+from `gpu_surface_dawn.cpp`, i.e. the render layer rather than the host, so they
+can appear where the host-level spans do not.
+
+The practical consequence: **do not read a missing `frame` span on a macOS
+plug-in editor as a regression** — that host has never emitted one. Instrument
+the host before measuring it, or measure the standalone app instead.
+
+### 3. Read the plug-in's log before theorising
+
+On Windows Pulp's log sink is `OutputDebugStringA`, which nothing captures by
+default — so `[plugin-gpu-host]`, GPU-init failures and the CPU-fallback
+diagnostic are all invisible unless you attach a listener FIRST.
+
+There is no need for Sysinternals: a `DBWIN` listener is ~40 lines. Create the
+`DBWIN_BUFFER` file mapping plus the `DBWIN_BUFFER_READY` / `DBWIN_DATA_READY`
+events, then loop `SetEvent(ready)` → `WaitForSingleObject(data)` → read the pid
+from the first 4 bytes and the message after it. Start it **before** the host
+process and it captures everything from plug-in load onward. This is what turns
+"no spans, cause unknown" into one line of fact.
+
+On macOS the same information comes from `log stream` — see the `ios` skill for
+a working predicate that includes `[plugin-gpu-host]`.
+
+### 4. Only then suspect the capture
+
+If `mode=scripted`/`custom` with `use_gpu=true` and the spans are still missing,
+the earlier Windows blockers and the flush-lifetime notes above apply.
+
+Related but different: the section below concerns `gpu_render_time`, an opt-in
+timing COUNTER. Missing `gpu_render_time` and missing render SPANS have
+unrelated causes; do not treat one as evidence about the other.
+
 ## GPU render time is now OPT-IN (WAH-13)
 
 `SkiaSurface::gpu_render_timing_available()` reporting false is no longer

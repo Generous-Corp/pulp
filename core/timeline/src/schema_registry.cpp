@@ -438,12 +438,15 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"frame_count", SchemaValueKind::U64String},
                                {"source_start", SchemaValueKind::I64String}}));
     auto notes = builtin("pulp.timeline.content.notes", SchemaDomain::Content,
-                         {{"modifier_seed", SchemaValueKind::U64String},
+                         {{"lanes", SchemaValueKind::Array},
+                          {"modifier_seed", SchemaValueKind::U64String},
                           {"modifiers", SchemaValueKind::Array},
                           {"notes", SchemaValueKind::Array}},
-                         2);
+                         3);
     notes.upgrades.push_back({1, 2, {}, detail::migrate_note_content_v1_to_v2});
+    notes.upgrades.push_back({2, 3, {}, detail::migrate_note_content_v2_to_v3});
     notes.downgrades.push_back({2, 1, {}, detail::migrate_note_content_v2_to_v1});
+    notes.downgrades.push_back({3, 2, {}, detail::migrate_note_content_v3_to_v2});
     schemas.push_back(std::move(notes));
     schemas.push_back(builtin("pulp.timeline.content.sequence_ref", SchemaDomain::Content,
                               {{"sequence_id", SchemaValueKind::U64String},

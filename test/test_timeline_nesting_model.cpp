@@ -231,7 +231,7 @@ TEST_CASE("Eager divergence carries exact ids and undo removes the clone") {
                                      mapped_note->second, 40'000, 50'000}}));
     REQUIRE(edited);
     const auto& source_note =
-        std::get<NoteContent>(edited->project.find_sequence({10})->tracks()[0].clips()[0].content())
+        std::get<MidiContent>(edited->project.find_sequence({10})->tracks()[0].clips()[0].content())
             .notes()[0];
     REQUIRE(source_note.velocity == 40'000);
 

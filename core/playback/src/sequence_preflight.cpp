@@ -23,7 +23,7 @@ collect_reachable_asset_ids(const timeline::Project& project, const timeline::Se
         std::visit(timeline::ClipContentCases{
                        [](const timeline::EmptyContent&) {},
                        [&](const timeline::MediaRef& media) { add_media(media); },
-                       [](const timeline::NoteContent&) {},
+                       [](const timeline::MidiContent&) {},
                        [](const timeline::RegisteredContent&) {},
                        [](const timeline::OpaqueContent&) {},
                        [](const timeline::SequenceRef&) {},

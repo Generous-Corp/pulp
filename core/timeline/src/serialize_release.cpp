@@ -191,6 +191,13 @@ class ReleaseRewriter {
         if (kind == "project" || kind == "asset" || kind == "sequence" || kind == "track" ||
             kind == "clip" || kind == "note")
             return true;
+        // Expression-lane identities exist only in note content from the
+        // version that introduced lanes, and no release map targets it. The
+        // content downgrade refuses such a document first; refusing here too
+        // keeps the identity index from being the one surface that leaks a
+        // lane into a release that cannot describe it.
+        if (kind == "midi_lane" || kind == "midi_lane_point")
+            return false;
         if (kind == "device_placement")
             return release_.find(SchemaDomain::Document, "pulp.timeline.device_placement") !=
                    nullptr;

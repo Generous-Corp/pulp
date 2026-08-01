@@ -103,7 +103,7 @@ TEST_CASE("Clip edits check only changed identities against attached automation"
     REQUIRE(colliding_clip.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(colliding_clip.error().item == ItemId{41});
 
-    const auto notes = take(NoteContent::create(
+    const auto notes = take(MidiContent::create(
         {{{32}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{1}}}));
     auto colliding_note = original.insert_clip(take(Clip::create(
         {50}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, notes)));

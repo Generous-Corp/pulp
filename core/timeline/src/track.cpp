@@ -43,7 +43,7 @@ std::vector<ItemId> non_automation_ids(ItemId track_id, std::span<const DevicePl
         ids.push_back(device.id);
     for (const auto& clip : clips) {
         ids.push_back(clip.id());
-        if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+        if (const auto* notes = std::get_if<MidiContent>(&clip.content()))
             for (const auto& note : notes->notes())
                 ids.push_back(note.id);
     }
@@ -63,7 +63,7 @@ automation_identity_collision(const Clip& clip,
                               std::span<const ItemId> automation_owned_ids) noexcept {
     if (std::binary_search(automation_owned_ids.begin(), automation_owned_ids.end(), clip.id()))
         return clip.id();
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+    if (const auto* notes = std::get_if<MidiContent>(&clip.content()))
         for (const auto& note : notes->notes())
             if (std::binary_search(automation_owned_ids.begin(), automation_owned_ids.end(),
                                    note.id))
@@ -113,7 +113,7 @@ std::optional<ItemId> take_identity_collision(const Clip& clip,
                                               std::span<const ItemId> take_owned_ids) noexcept {
     if (std::binary_search(take_owned_ids.begin(), take_owned_ids.end(), clip.id()))
         return clip.id();
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+    if (const auto* notes = std::get_if<MidiContent>(&clip.content()))
         for (const auto& note : notes->notes())
             if (std::binary_search(take_owned_ids.begin(), take_owned_ids.end(), note.id))
                 return note.id;

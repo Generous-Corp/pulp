@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.766.0
+    VERSION 0.766.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -322,6 +322,7 @@ add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/timebase)
 add_subdirectory(core/timeline)
+add_subdirectory(core/timeline_editor)
 add_subdirectory(core/playback)
 add_subdirectory(core/events)
 add_subdirectory(core/sample_bank_manifest)

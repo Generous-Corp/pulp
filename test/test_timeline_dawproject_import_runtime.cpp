@@ -28,7 +28,7 @@ TEST_CASE("DAWproject decimal parsing is independent of the host numeric locale"
     const auto& clip = result.value().sequences()[0].tracks()[0].clips()[0];
     REQUIRE(clip.start().value == kBeat / 2);
     REQUIRE(clip.duration().value == 3 * kBeat / 2);
-    REQUIRE(std::get<NoteContent>(clip.content()).notes()[0].velocity == 32768);
+    REQUIRE(std::get<MidiContent>(clip.content()).notes()[0].velocity == 32768);
 }
 
 TEST_CASE("DAWproject imported arrangement plays identically across block schedules") {

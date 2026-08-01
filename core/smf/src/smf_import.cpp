@@ -326,7 +326,7 @@ runtime::Result<std::optional<Clip>, SmfError> Importer::build_track_clip(std::s
         note.id = ids_.take();
         note.start = timebase::TickPosition{note.start.value - first_start};
     }
-    auto content = NoteContent::create(std::move(notes));
+    auto content = MidiContent::create(std::move(notes));
     if (!content) {
         SmfError error = smf_error(SmfErrorCode::ModelRejected, "note content was rejected");
         error.model_error = content.error();

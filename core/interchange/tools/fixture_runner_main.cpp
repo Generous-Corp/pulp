@@ -3,7 +3,10 @@
 // One binary validates the whole corpus with no Catch2 and no desktop
 // dependencies, so the same executable runs under desktop ctest, on an Android
 // emulator via `adb push`, and compiled to WASM. It links only pulp::timeline
-// and pulp::interchange, both of which sit on the portable floor.
+// and pulp::interchange, both of which sit on the portable floor. The runner
+// lives inside core/interchange rather than beside the corpus so that claim is
+// checked rather than asserted: the interchange dependency floor gate scans
+// this file, so reaching for a view, host, or format header fails CI.
 //
 // A corpus entry is a document plus a sibling `.expect` manifest stating what
 // the document is: its schema envelope version, identity, structural counts,
@@ -138,6 +141,8 @@ void collect_summary(std::vector<std::pair<std::string, std::string>>& out,
     out.emplace_back("counts.take_lanes", to_text(counts.take_lanes));
     out.emplace_back("counts.takes", to_text(counts.takes));
     out.emplace_back("counts.take_comp_segments", to_text(counts.take_comp_segments));
+    out.emplace_back("counts.midi_lanes", to_text(counts.midi_lanes));
+    out.emplace_back("counts.midi_lane_points", to_text(counts.midi_lane_points));
 }
 
 /// Records every concept the census found, keyed by its stable generated id so

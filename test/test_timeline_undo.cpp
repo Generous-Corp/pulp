@@ -251,6 +251,79 @@ TEST_CASE("Timeline gesture grouping undoes the full change and writers never co
     REQUIRE(velocity(*session->snapshot()) == 3000);
 }
 
+TEST_CASE("Timeline cancel closes the gesture so one undo reverts the whole drag") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto group = writer.allocate_undo_group_id();
+    auto begin = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(session->submit(writer, std::move(begin)));
+    auto update = session_transaction(writer, session->revision(),
+                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+    update.undo_group = group;
+    update.gesture_phase = GesturePhase::Update;
+    REQUIRE(session->submit(writer, std::move(update)));
+    auto cancel = session_transaction(writer, session->revision(),
+                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 3000, 4000}});
+    cancel.undo_group = group;
+    cancel.gesture_phase = GesturePhase::Cancel;
+    REQUIRE(session->submit(writer, std::move(cancel)));
+
+    // A cancel arrives after its edits have applied, so closing is all the session
+    // does; the revert is the caller's existing single undo over the closed group.
+    REQUIRE(velocity(*session->snapshot()) == 4000);
+    REQUIRE(session->can_undo());
+    REQUIRE(session->undo(writer));
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+}
+
+TEST_CASE("Timeline cancel clears the open gesture so a later begin is admitted") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto first_group = writer.allocate_undo_group_id();
+    auto begin = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = first_group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(session->submit(writer, std::move(begin)));
+    auto cancel = session_transaction(writer, session->revision(),
+                                      {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    cancel.undo_group = first_group;
+    cancel.gesture_phase = GesturePhase::Cancel;
+    REQUIRE(session->submit(writer, std::move(cancel)));
+
+    const auto second_group = writer.allocate_undo_group_id();
+    auto next = session_transaction(writer, session->revision(),
+                                    {SetNoteVelocity{{3}, {4}, {5}, {6}, 2500, 3000}});
+    next.undo_group = second_group;
+    next.gesture_phase = GesturePhase::Begin;
+    REQUIRE(session->submit(writer, std::move(next)));
+}
+
+TEST_CASE("Timeline cancel without a matching open gesture is rejected") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto group = writer.allocate_undo_group_id();
+    auto stray = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    stray.undo_group = group;
+    stray.gesture_phase = GesturePhase::Cancel;
+    auto no_open_gesture = session->submit(writer, std::move(stray));
+    REQUIRE_FALSE(no_open_gesture);
+    REQUIRE(no_open_gesture.error().code == ConflictCode::GestureState);
+
+    auto begin = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(session->submit(writer, std::move(begin)));
+    auto wrong_group = session_transaction(writer, session->revision(),
+                                           {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 2500}});
+    wrong_group.undo_group = writer.allocate_undo_group_id();
+    wrong_group.gesture_phase = GesturePhase::Cancel;
+    auto mismatched = session->submit(writer, std::move(wrong_group));
+    REQUIRE_FALSE(mismatched);
+    REQUIRE(mismatched.error().code == ConflictCode::GestureState);
+}
+
 TEST_CASE("Timeline redo reactivates identities created by an insert") {
     auto session = std::move(DocumentSession::create(make_project())).value();
     auto writer = std::move(session->register_writer()).value();

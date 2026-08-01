@@ -162,7 +162,7 @@ materialize_midi_capture(std::span<const CapturedMidiEvent> events,
             raw.channel,
         });
     }
-    auto content = timeline::NoteContent::create(std::move(notes));
+    auto content = timeline::MidiContent::create(std::move(notes));
     if (!content)
         return Result(runtime::Err(MidiCaptureMaterializationError::InvalidNotes));
     return Result(runtime::Ok(MaterializedMidiCapture{

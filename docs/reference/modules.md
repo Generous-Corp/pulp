@@ -891,13 +891,18 @@ bound both domains.
 before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
 overloads distinguish owned IDs from external media-asset references and accept
 an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
-before allocator state changes. `NoteContent` is a flat POD array sorted by
+before allocator state changes. `MidiContent` is a flat POD array sorted by
 `(start, ItemId)`, alongside a sparse companion array of per-note playback
 modifiers sorted by note ID and an authored seed. A modifier carries a
 probability, a loop-pass condition, and a ratchet count; notes that play
 unconditionally and once carry no entry. Evaluation is a pure function of the
 seed, the note identity, and the loop-pass index, so an identical document and
-transport trace always reproduces the same sounding decisions.
+transport trace always reproduces the same sounding decisions. The same content
+carries the clip's controller and expression lanes, one lane per addressed
+stream, ordered by address with each lane's points ordered by
+`(position, ItemId)`; a lane address is the MIDI wire's own group, channel,
+status nibble, controller bank, and controller index, and a point value is the
+32-bit channel-voice data width. Clips authoring no controllers carry no lanes.
 Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
@@ -1150,6 +1155,61 @@ so every consumer of the audio module already has it in their link closure; the
 separate target exists for consumers that want manifest handling alone.
 
 **Depends on:** `pulp::runtime`
+
+
+## timeline_editor
+
+Interfaces for building a timeline editor over the document model. Header-only.
+
+The module exists so an editor view can show a moving playhead, let a user hear
+what they are editing, and hand out the edits a gesture produced — without
+linking playback. `SequencerUiHost` is that entire coupling: a view holds one,
+and whoever owns audio implements it. A plugin that draws a piano roll over its
+own engine implements it itself and never acquires a transport.
+
+Two properties make the split hold, and both are enforced rather than asserted.
+Everything crosses the interface by value, so a playhead reading a view is
+holding cannot be invalidated when the engine adopts a different compiled
+program — it goes stale, never dangling, and `UiPlayhead::program_generation`
+is how a view tells the difference. And the vocabulary is document-side:
+positions are `timebase` ticks, subjects are `timeline::ItemId`s. Nothing here
+describes how audio is produced.
+`tools/scripts/timeline_engine_dependency_floor_check.py` holds the module to
+that closure over both its includes and its CMake links.
+
+**Link:** `pulp::timeline-editor` · **Include prefix:** `<pulp/timeline_editor/...>`
+
+```cpp
+#include <pulp/timeline_editor/sequencer_ui_host.hpp>
+
+using namespace pulp::timeline_editor;
+
+// A view repaints its ruler from a value it owns outright.
+const UiPlayhead reading = host.playhead();
+if (reading.moving())
+    draw_playhead_at(reading.position);
+
+// Clicking a note asks to hear it, in document terms only.
+AuditionRequest request;
+request.track = track_id;
+request.pitch = 60;  // pitch, velocity, channel as timeline::NoteEvent spells them
+const AuditionResult result = host.begin_audition(request);
+if (result.handle.valid())
+    host.end_audition(result.handle);  // on mouse-up
+```
+
+Edit intents are the editor's own vocabulary, so intent submission lives on
+`SequencerUiHostT<Intent>`, a thin templated shim over the same interface. The
+non-template base carries the two duties that do not depend on how edits are
+expressed.
+
+`ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
+which keeps what a view emitted, so an editor is testable with no audio and no
+mocking framework. It is also a legitimate deployment: an editor embedded in a
+tool that only writes files gets a stopped playhead and `Unsupported`
+auditions, and stays fully usable.
+
+**Depends on:** `pulp::timeline`, `pulp::timebase`
 
 
 ## playback

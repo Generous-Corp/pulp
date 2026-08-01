@@ -49,7 +49,7 @@ Project project_with(ClipContent content = EmptyContent{}) {
 Project mixed_project() {
     auto media = take(Clip::create({4}, {0}, {10}, MediaRef{{2}, {25}, 10}));
     auto note_content =
-        take(NoteContent::create({{{7}, {4}, {2}, 0x8000, 64, 1}, {{6}, {1}, {2}, 0xffff, 60, 0}}));
+        take(MidiContent::create({{{7}, {4}, {2}, 0x8000, 64, 1}, {{6}, {1}, {2}, 0xffff, 60, 0}}));
     auto notes = take(Clip::create({5}, {20}, {10}, std::move(note_content)));
     auto musical_track = take(Track::create({3}, "musical", {notes, media}));
     auto musical_sequence = take(Sequence::create({8}, "root", TickDuration{100}, {musical_track}));

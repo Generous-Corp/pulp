@@ -92,7 +92,7 @@ artifact is needed. Never modify canonical project JSON text directly.
   the authored frame count, then plays it 1:1. A missing, over-capacity, or
   length-mismatched Stretch artifact fails compilation; it never degrades to
   native-rate playback.
-- `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
+- `MidiContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
 - `SequenceRef` makes a musical clip a non-owning placement of another
   sequence. Its source window begins at `source_start`; project construction
@@ -390,10 +390,18 @@ artifact is needed. Never modify canonical project JSON text directly.
   breakage appears only when the two branches meet on main — neither PR's CI can
   see it alone. Check `corpus.index` covers the tree before merging a
   fixture-adding branch.
+- A new `ProjectSnapshotCounts` field is asserted by the corpus only if it is
+  also emitted by `collect_summary()` in `test/fixture_runner_main.cpp`, which
+  lists the counts one by one and is not generated. Add the count and skip that
+  list and every manifest regenerates clean while the new entity goes uncounted
+  in every fixture — the corpus reports green on a document whose new structure
+  it never looked at.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency
-  edge worth knowing before adding one.
+  edge worth knowing before adding one. That call is also why the runner binary
+  is owned by `core/interchange/CMakeLists.txt` rather than by the test tree —
+  see the placement convention below.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
@@ -446,6 +454,67 @@ noise there. And note that `-fno-exceptions` makes a bare `std::get` on a
 mismatched alternative call `std::terminate` rather than throw, so a fallthrough
 `std::get` is a process abort, not a caught error — that is why the encoder is a
 visit and not a chain ending in `std::get<OpaqueContent>`.
+
+### MIDI content stores the wire's numbers, and cannot reach `core/midi` to name them
+
+`MidiContent` carries notes, their deterministic modifiers, and the clip's
+controller/expression lanes. It is tempting — and specs sometimes ask — to type
+a lane's controller family against `core/midi`'s UMP/MPE/RPN declarations so the
+document model and the wire cannot disagree. **`core/timeline` cannot include
+`pulp/midi/*` at all.** `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py` gives `timeline` the
+floor `{timeline, timebase, platform, runtime}`; `midi` belongs to `playback`'s
+floor, one layer up. The check scans every include under `core/timeline/` and
+fails the build gate, so this is discovered late if it is discovered by
+compiling.
+
+The resolution is not a parallel enum either — it is to store the wire's own
+numeric domain and name nothing. `MidiLaneAddress` is five raw bytes (UMP group,
+channel, status nibble, controller bank, controller index) and a lane point's
+value is the full 32-bit channel-voice width that 7-bit and 14-bit MIDI 1.0
+values scale into. `NoteEvent` set this precedent already with bare `pitch` /
+`channel` / `velocity` integers. Only bounds the wire itself imposes are
+validated here (group, channel, and status are 4-bit fields); *which* addresses
+carry meaning is a playback question and does not belong in the document model.
+
+The per-stream layout is also load-bearing rather than incidental. Lanes are
+sorted by `(address, id)` and each lane's points by `(position, id)`, because
+the question asked on every seek is "what did this one stream last say at or
+before `t`" — two binary searches against that layout, versus a scan over every
+event of every stream if lanes were flattened into one interleaved list.
+Flattening them is the change that quietly makes seeking O(n).
+
+### A new owned identity has to be added to *two* walks, and neither one checks the other
+
+`id_remap.cpp` enumerates what a clip owns **twice, independently**:
+
+- `allocate_clip_owned()` — a hand-written walk that issues the destination
+  identities. This is the one a clip-level copy depends on.
+- `visit_clip_owned_identities()` (`owned_identity_traversal.hpp`) — the
+  canonical traversal, reached through `append_clip_ids()` / `owned_sequence_ids()`.
+  It feeds preflight's duplicate check, the identity index that `Project::create`
+  and serialization build, and the size check in the carried-id
+  `remap_ids(Sequence, carried_ids, fixups)` overload.
+
+Nothing structurally ties them together, so adding a kind to one and missing the
+other fails in a different place than you would guess, and each failure mode is
+quiet in its own way. Miss the allocation walk and a copy loses the new objects.
+Miss the traversal and the copy looks correct while the new identities never
+reach preflight's duplicate check or the identity index — and a carried-id
+transfer then fails with `InvalidIdentityTransition` naming a size mismatch,
+nowhere near the kind that caused it. A test that copies a clip proves only the
+first walk; replaying one walk's table through the other's size check is what
+covers both.
+
+Two more places a new `ItemKind` must land, neither of which the compiler will
+point at: `restore_identities()` in `model.cpp` recomputes `parent_id` from
+`(sequence, track, clip)` for every kind **except** an explicit
+`AutomationPoint / Take / Slot` list, so any kind whose parent is a *lane* has to
+join that list or every document carrying it fails to deserialize with
+`ModelRejected` at `/data/identities` — an error that names no kind at all. And
+`item_kind_name()` / the decode parser are two hand-maintained tables that must
+gain the same spelling; the encoder's `switch` is exhaustive and will complain,
+but the decoder's `if`-chain silently returns a failure for the unknown name.
 
 ## Editing contracts
 
@@ -679,6 +748,31 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 `test_timeline_command_persistence.cpp` (which asserts one decoded command per
 alternative, in variant order).
 
+### Device neutrality is enforced by the module graph, not by discipline
+
+`EditIntent` (`edit_intent.hpp`) lives in `core/timeline` **because** that module's
+dependency floor is `{timeline, timebase, platform, runtime}` — it cannot link
+`view`, so the header physically cannot name a pointer type. That placement is the
+guarantee. Moving intents "up" into an editor module that *can* see `view` would
+turn a structural impossibility back into a convention people have to remember,
+which is how the touch-retrofit bug class returns.
+
+The corollary for anyone extending this: a front-end resolves device differences
+**before** it builds an intent, and hands the kernel only resolved scalars. Hit
+tolerance is the worked example — `HitMetrics` lives in `core/view` and projects a
+pointer type onto one number; the kernel takes the number and never learns what
+produced it.
+
+Two things not to do here:
+
+- **Do not add a fourth `GesturePhase`.** There are already three
+  (`core/timeline/command.hpp`, `core/view/input_events.hpp`,
+  `core/state/sequencer_state_channel.hpp`). Intents reuse the `command.hpp` one.
+  A second spelling of an existing concept is a defect, not a feature.
+- **Do not add a verb that lowers to zero commands.** Select, marquee and
+  zoom-to-range are deliberately absent: they are view state, and routing them
+  through the document channel puts transient selection into undo history.
+
 ## Schema codegen & drift gate
 
 ### Bumping a schema version touches two hand-written validators the codegen never reaches
@@ -758,6 +852,21 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
 
+**A tool that claims to be portable belongs under `core/`, not under `test/`,
+even when its inputs live in `test/`.** `pulp-fixture-runner` is the worked
+example: its source is `core/interchange/tools/fixture_runner_main.cpp` while its
+corpus stays at `test/fixtures/timeline/`, and `test/cmake/timeline_tests.cmake`
+holds only the two ctest registrations. Two things break if such a tool lives in
+`test/`. First, `add_subdirectory(test)` is gated on
+`PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS`, so the binary cannot be
+configured at all on the mobile lanes it exists to serve. Second — and this is
+the one that stays silent — `timeline_engine_dependency_floor_check.py` walks
+`core/<module>/` and nothing else, so a `#include <pulp/view/…>` added to a
+runner under `test/` passes every gate while the file's own comment still claims
+a portable floor. Relocating into an owning module puts the file inside the
+existing scan with no new `MODULE_FLOORS` row. Pick the module at the *top* of
+what the tool links (interchange, not timeline, since it calls `census()`).
+
 `schema_drift_check.py` is generic — it takes `--artifact` and `--emit-cmd` and
 byte-compares. A new generated artifact anywhere in the repo reuses it as-is
 rather than growing its own gate; `core/interchange` registers three drift ctests
@@ -770,6 +879,35 @@ iterates `MODULE_FLOORS` generically, so a new entry gets include-scan and
 link-scan coverage plus selftest proof without touching the selftest. Adding an
 entry is not the same as widening `timeline`'s own floor — a module that sits
 *above* timeline gets its own row and must not appear in timeline's set.
+
+Three things bite when adding a row:
+
+- **`verify()` reports `missing required engine module` when a row names a
+  directory that does not exist.** A row and its target therefore land in the
+  same change, always — you cannot declare a floor ahead of the code it
+  constrains. That is the intended discipline, not an obstacle to work around:
+  it is what stops a floor from being written around a violation that already
+  shipped.
+- **Allow both spellings of the module's own name.** The row key is the
+  directory (`timeline_editor`), but `LINK_RE` reads a CMake alias verbatim, so
+  `pulp::timeline-editor` yields the token `timeline-editor`. A row carrying
+  only the underscore spelling reads a helper target's self-link as an
+  outside-floor violation.
+- **The generic selftest loop proves detection using `pulp/render`, which is in
+  no floor at all.** When a row's defining rule is that it cannot reach a module
+  that *is* in the table — `timeline_editor` and playback — assert that pair by
+  name too, or the rule survives someone widening the other row.
+
+A new `core/<module>` directory also drifts `codecov.yml`, whose flags and
+components mirror `core/*`. Add the flag and the component alongside the target;
+`tools/scripts/gates.sh` catches the omission before CI does.
+
+**A new rung takes a new row — never widen an existing one.** `timeline_editor`
+carries no `view` and no `canvas`, which is correct for the editor kernel and
+will look like a gap the first time a view lands beside it. It is not. Widening
+that row to admit `view` makes every consumer of the kernel pay for `core/view`,
+which is the exact coupling the rung split exists to prevent. A view target gets
+its own directory and its own row, sitting above this one.
 
 ### Derived surfaces are projections of the manifest, not the registry
 

@@ -679,7 +679,7 @@ TEST_CASE("host-tempo reconstruction uses the effective rate when slowed audio s
 
 TEST_CASE("one bounded compiler pass publishes note and audio payloads for a mixed track") {
     const auto map = map_120();
-    auto notes = take(NoteContent::create({{{101}, {0}, {kTicksPerQuarter / 4}, 0x8000, 64, 1}}));
+    auto notes = take(MidiContent::create({{{101}, {0}, {kTicksPerQuarter / 4}, 0x8000, 64, 1}}));
     auto note_clip = take(Clip::create({100}, {0}, {kTicksPerQuarter}, std::move(notes)));
     auto audio_clip =
         musical_media_clip(102, 2 * kTicksPerQuarter, kTicksPerQuarter, 3, 128,

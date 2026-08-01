@@ -20,12 +20,17 @@ class CombinedInstallerTest(unittest.TestCase):
         path.write_text("#!/bin/bash\nset -euo pipefail\n" + body)
         path.chmod(0o755)
 
-    def _run_installer(self, plugins: list[tuple[str, str]]) -> str:
+    def _run_installer(
+        self,
+        plugins: list[tuple[str, str]],
+        apps: list[tuple[str, str]] | None = None,
+    ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             fake_bin = tmp / "bin"
             fake_bin.mkdir()
             capture = tmp / "distribution.xml"
+            relocation_capture = tmp / "app-relocation.txt"
             output = tmp / "out"
 
             self._write_tool(fake_bin, "codesign", "exit 0\n")
@@ -39,7 +44,35 @@ class CombinedInstallerTest(unittest.TestCase):
             self._write_tool(
                 fake_bin,
                 "pkgbuild",
-                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
+                'last=""\nanalyze=0\ncomponent_plist=""\nwant_component_plist=0\n'
+                'for arg in "$@"; do\n'
+                '  if [[ "$want_component_plist" == 1 ]]; then component_plist="$arg"; want_component_plist=0; fi\n'
+                '  [[ "$arg" == "--analyze" ]] && analyze=1\n'
+                '  [[ "$arg" == "--component-plist" ]] && want_component_plist=1\n'
+                '  last="$arg"\n'
+                'done\n'
+                'if [[ "$analyze" == 1 ]]; then\n'
+                '  cat > "$last" <<\'PLIST\'\n'
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0"><array><dict>\n'
+                '<key>BundleIsRelocatable</key><true/>\n'
+                '<key>RootRelativeBundlePath</key><string>Applications/Fixture.app</string>\n'
+                '</dict><dict>\n'
+                '<key>BundleIsRelocatable</key><true/>\n'
+                '<key>RootRelativeBundlePath</key>'
+                '<string>Applications/Fixture.app/Contents/Helpers/Helper.app</string>\n'
+                '</dict></array></plist>\n'
+                'PLIST\n'
+                '  exit 0\n'
+                'fi\n'
+                'if [[ -n "$component_plist" ]]; then\n'
+                '  /usr/libexec/PlistBuddy -c "Print :0:BundleIsRelocatable" '
+                '"$component_plist" >> "$CAPTURE_APP_RELOCATION"\n'
+                '  /usr/libexec/PlistBuddy -c "Print :1:BundleIsRelocatable" '
+                '"$component_plist" >> "$CAPTURE_APP_RELOCATION"\n'
+                'fi\n'
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
             self._write_tool(
@@ -75,12 +108,17 @@ class CombinedInstallerTest(unittest.TestCase):
                 bundle = tmp / f"{plugin_name}.{suffix}"
                 (bundle / "Contents" / "MacOS").mkdir(parents=True)
                 args.extend(("--plugin", kind, str(bundle)))
+            for title, app_name in apps or []:
+                bundle = tmp / f"{app_name}.app"
+                (bundle / "Contents" / "MacOS").mkdir(parents=True)
+                args.extend(("--app", title, str(bundle)))
 
             env = {
                 "PATH": f"{fake_bin}:/usr/bin:/bin",
                 "HOME": str(tmp),
                 "TMPDIR": str(tmp),
                 "CAPTURE_XML": str(capture),
+                "CAPTURE_APP_RELOCATION": str(relocation_capture),
                 "PULP_SKIP_SIGNING_PREFLIGHT": "1",
             }
             completed = subprocess.run(
@@ -101,10 +139,15 @@ class CombinedInstallerTest(unittest.TestCase):
                 capture.is_file(),
                 msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
-            return capture.read_text()
+            relocation = (
+                relocation_capture.read_text()
+                if relocation_capture.is_file()
+                else ""
+            )
+            return capture.read_text(), relocation
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
-        xml = self._run_installer(
+        xml, _ = self._run_installer(
             [("Kick", "au"), ("Kick", "clap"),
              ("Snare", "au"), ("Snare", "clap")]
         )
@@ -122,19 +165,27 @@ class CombinedInstallerTest(unittest.TestCase):
         self.assertIn('<line choice="plugin-1-au"/>', xml)
 
     def test_single_plugin_keeps_a_flat_format_outline(self) -> None:
-        xml = self._run_installer([("Kick", "au"), ("Kick", "clap")])
+        xml, _ = self._run_installer([("Kick", "au"), ("Kick", "clap")])
 
         self.assertNotIn('choice="plugin-0">', xml)
         self.assertIn('<line choice="plugin-0-au"/>', xml)
         self.assertIn('<line choice="plugin-0-clap"/>', xml)
 
     def test_distinct_names_with_the_same_lossy_slug_do_not_collide(self) -> None:
-        xml = self._run_installer([("Foo-Bar", "au"), ("Foo Bar", "au")])
+        xml, _ = self._run_installer([("Foo-Bar", "au"), ("Foo Bar", "au")])
 
         self.assertIn('choice id="plugin-0-au"', xml)
         self.assertIn('choice id="plugin-1-au"', xml)
         self.assertIn('title="Foo-Bar"', xml)
         self.assertIn('title="Foo Bar"', xml)
+
+    def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
+        xml, relocation = self._run_installer(
+            [], [("Fixture standalone", "Fixture")]
+        )
+
+        self.assertIn("Fixture.app.pkg", xml)
+        self.assertEqual(relocation.splitlines(), ["false", "false"])
 
 
 if __name__ == "__main__":
