@@ -491,27 +491,41 @@ before `t`" — two binary searches against that layout, versus a scan over ever
 event of every stream if lanes were flattened into one interleaved list.
 Flattening them is the change that quietly makes seeking O(n).
 
-### A new owned identity has to be added to *two* walks, and neither one checks the other
+### A new owned identity is added to the traversal, and nowhere else
 
-`id_remap.cpp` enumerates what a clip owns **twice, independently**:
+`id_remap.cpp` enumerates what a clip, a track, and a sequence own **only**
+through `owned_identity_traversal.hpp`. Both passes each level runs go through
+it: `owned_ids()` collects for preflight's validity/duplicate check, and
+`allocate_owned_subtree()` issues the destination identities. The same traversal
+also feeds the identity index that `Project::create` and serialization build,
+and the size check in the carried-id `remap_ids(Sequence, carried_ids, fixups)`
+overload. So a kind added to the traversal reaches every one of those at once,
+and the compiler is not what keeps them in step — *not restating the list* is.
 
-- `allocate_clip_owned()` — a hand-written walk that issues the destination
-  identities. This is the one a clip-level copy depends on.
-- `visit_clip_owned_identities()` (`owned_identity_traversal.hpp`) — the
-  canonical traversal, reached through `append_clip_ids()` / `owned_sequence_ids()`.
-  It feeds preflight's duplicate check, the identity index that `Project::create`
-  and serialization build, and the size check in the carried-id
-  `remap_ids(Sequence, carried_ids, fixups)` overload.
+Do not hand-write an owned-set walk at a call site, even when the level you are
+adding to already has an obvious loop. Both ways of getting it wrong are quiet
+and land far from the cause: an allocation walk that misses a kind returns a
+copy without those objects, and a collection walk that misses one lets the new
+identities skip validation entirely and then fails a later carried-id transfer
+with `InvalidIdentityTransition` naming a **size mismatch**, which names no kind
+at all.
 
-Nothing structurally ties them together, so adding a kind to one and missing the
-other fails in a different place than you would guess, and each failure mode is
-quiet in its own way. Miss the allocation walk and a copy loses the new objects.
-Miss the traversal and the copy looks correct while the new identities never
-reach preflight's duplicate check or the identity index — and a carried-id
-transfer then fails with `InvalidIdentityTransition` naming a size mismatch,
-nowhere near the kind that caused it. A test that copies a clip proves only the
-first walk; replaying one walk's table through the other's size check is what
-covers both.
+Three cases pin this down, one per level, and each asserts a hand-counted
+identity total — a distinctness or agreement check alone passes when a walk
+silently emits fewer identities:
+`Copying a clip issues fresh identities for its lanes and points` and
+`A sequence copy and its carried-id transfer agree on the whole owned set`
+(`test_timeline_midi_content.cpp`), and
+`A track copy issues a fresh identity for every kind a track owns`
+(`test_timeline_take_comp.cpp`), which carries every kind a track can own at
+once because a per-kind case passes while a sibling kind goes missing.
+
+One sharp edge remains: `rebuild_*()` dereferences `table.find(id)` for every id
+it rewrites, assuming the allocation walk covered it. A kind dropped from the
+traversal therefore reaches an empty-optional dereference — undefined behaviour,
+not a checked error. In practice the garbage id it reads is refused by the next
+`create()` and the remap fails, which is what the cases above observe, but the
+diagnostic points at the rebuilt object and never at the walk.
 
 Two more places a new `ItemKind` must land, neither of which the compiler will
 point at: `restore_identities()` in `model.cpp` recomputes `parent_id` from
