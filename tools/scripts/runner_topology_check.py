@@ -82,6 +82,8 @@ class Lane:
     # What the consuming workflow's `|| <default>` supplies when the variable
     # is unset. None means the workflow has no fallback, so unset = no route.
     unset_fallback: Any = None
+    require_explicit_value: bool = False
+    dispatch_only: bool = False
 
     @property
     def is_self_hosted(self) -> bool:
@@ -100,12 +102,19 @@ class Runner:
 
 
 @dataclass
+class RoutingControl:
+    expect: str
+    unset_fallback: str | None = None
+
+
+@dataclass
 class Contract:
     lanes: list[Lane]
     github_hosted_labels: set[str]
     sentinels: set[str]
     must_remain_unset: list[str]
     must_remain_unset_why: str
+    routing_controls: dict[str, RoutingControl]
     lookback_hours: int
     runs_per_workflow: int
 
@@ -132,17 +141,29 @@ def load_contract(path: Path) -> Contract:
             severity=raw.get("severity", "advisory"),
             hosts=raw.get("hosts", []) or [],
             unset_fallback=raw.get("unset_fallback"),
+            require_explicit_value=bool(raw.get("require_explicit_value", False)),
+            dispatch_only=bool(raw.get("dispatch_only", False)),
         )
         for raw in data.get("lanes", [])
     ]
     unset = data.get("must_remain_unset", {}) or {}
     evidence = data.get("service_evidence", {}) or {}
+    controls = {}
+    for name, raw in (data.get("routing_controls", {}) or {}).items():
+        if isinstance(raw, str):
+            controls[name] = RoutingControl(expect=raw)
+        else:
+            controls[name] = RoutingControl(
+                expect=raw["expect"],
+                unset_fallback=raw.get("unset_fallback"),
+            )
     return Contract(
         lanes=lanes,
         github_hosted_labels=set(data.get("github_hosted_labels", [])),
         sentinels=set(data.get("sentinels", [])),
         must_remain_unset=list(unset.get("variables", [])),
         must_remain_unset_why=unset.get("why", ""),
+        routing_controls=controls,
         lookback_hours=int(evidence.get("lookback_hours", 168)),
         runs_per_workflow=int(evidence.get("runs_per_workflow", 20)),
     )
@@ -230,6 +251,8 @@ def fetch_served_label_sets(
     lookback_hours: int,
     workflows: list[str],
     runs_per_workflow: int,
+    *,
+    manual_only: bool = False,
 ) -> list[set[str]]:
     """Label sets a consuming workflow actually dispatched jobs to.
 
@@ -242,10 +265,11 @@ def fetch_served_label_sets(
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     served: list[set[str]] = []
     for wf in workflows:
+        event_filter = "&event=workflow_dispatch" if manual_only else ""
         try:
             runs = _api([
                 f"repos/{repo}/actions/workflows/{wf}/runs"
-                f"?per_page={min(runs_per_workflow, 100)}",
+                f"?per_page={min(runs_per_workflow, 100)}{event_filter}",
             ])
         except subprocess.CalledProcessError:
             continue
@@ -360,6 +384,19 @@ def check(
                 f"{contract.must_remain_unset_why}",
             ))
 
+    # Non-selector controls can still invalidate selector behavior. Keep their
+    # exact live values reviewed beside the lanes they influence.
+    for name, control in contract.routing_controls.items():
+        actual = variables.get(name)
+        effective = actual if actual is not None else control.unset_fallback
+        if effective != control.expect:
+            findings.append(Finding(
+                ERROR, "control-drift", name,
+                f"live value {actual!r} (effective {effective!r}) != "
+                f"contracted {control.expect!r}. "
+                "Reconcile the routing control and topology contract together.",
+            ))
+
     # A live routing variable nobody declared — a lane added blind.
     for name in sorted(variables):
         if not name.endswith("_RUNS_ON_JSON"):
@@ -389,6 +426,14 @@ def _check_lane(
     findings: list[Finding] = []
 
     if lane.variable not in variables:
+        if lane.require_explicit_value:
+            findings.append(Finding(
+                _level_for(lane), "unset", lane.variable,
+                "contract requires an explicit value, but the variable is not "
+                f"set. Unset would activate {lane.unset_fallback!r}. "
+                f"Purpose: {lane.purpose}",
+            ))
+            return findings
         # Unset is not automatically broken. A workflow usually supplies its own
         # `|| <default>` when the variable is empty (GitHub treats unset and
         # empty identically), so the lane still routes — to the fallback. The
@@ -415,6 +460,12 @@ def _check_lane(
     # "fail at dispatch." A standing error for an intended state is worse than
     # no check, because it teaches everyone to skim past this report.
     if actual_raw in contract.sentinels:
+        if actual_raw != lane.expect:
+            findings.append(Finding(
+                ERROR, "drift", lane.variable,
+                f"live sentinel {actual_raw!r} != contracted "
+                f"{lane.expect!r}. Reconcile both together.",
+            ))
         return findings
 
     try:
@@ -424,6 +475,23 @@ def _check_lane(
             ERROR, "malformed", lane.variable,
             f"value {actual_raw!r} is not valid JSON; `fromJSON()` in the "
             "workflow will fail at dispatch.",
+        ))
+        return findings
+
+    # Sentinel contracts are representation-sensitive. The workflow compares
+    # the raw value before `fromJSON`; JSON-quoted `"local-only"` is therefore
+    # a runner selector, not the off switch, even though json.loads produces
+    # the same Python string. A different real selector is ordinary drift and
+    # must continue through black-hole adjudication below.
+    if (
+        isinstance(lane.expect, str)
+        and lane.expect in contract.sentinels
+        and actual == lane.expect
+    ):
+        findings.append(Finding(
+            ERROR, "sentinel-encoding", lane.variable,
+            f"contracted sentinel {lane.expect!r} must be stored as that exact "
+            f"bare value; live raw value is {actual_raw!r}.",
         ))
         return findings
 
@@ -490,6 +558,22 @@ def _check_target(
             f"{labels_str} is satisfied only by OFFLINE runners "
             f"({', '.join(sorted(r.name for r in matches))}). The host may be "
             "asleep; jobs queue until it returns.",
+        ))
+        return findings
+
+    if lane.dispatch_only:
+        if has_service_evidence(target, evidence(lane)):
+            findings.append(Finding(
+                OK, "dispatch-only-idle", lane.variable,
+                f"{labels_str} has no live runner, but a matching manual job "
+                "was served within the lookback window.",
+            ))
+            return findings
+        findings.append(Finding(
+            _level_for(lane), "dispatch-only-unverified", lane.variable,
+            f"{labels_str} has no live runner. This lane is operator-dispatched, "
+            f"but no matching job was served in the last "
+            f"{contract.lookback_hours}h; verify its provisioner before dispatch.",
         ))
         return findings
 
@@ -604,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
                 return []
             return fetch_served_label_sets(
                 args.repo, contract.lookback_hours, consumers,
-                contract.runs_per_workflow)
+                contract.runs_per_workflow, manual_only=lane.dispatch_only)
 
     findings = check(contract, runners, variables, evidence)
 

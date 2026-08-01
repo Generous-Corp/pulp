@@ -493,6 +493,14 @@ trimmed nested lane-bearing clip still reports the trim code.
 
 ## Validation
 
+Configuring a fresh build dir for these suites needs
+`-DPULP_ENABLE_DESIGN_IMPORT=ON` **passed explicitly** whenever the cache has
+ever held OFF: `PULP_BUILD_TESTS=ON` hard-requires it, and a cached OFF survives
+a reconfigure that does not name the option, so the configure fails on an option
+combination unrelated to anything you changed. Passing it every reconfigure is
+cheaper than recognising the error a second time. (The `ci` skill covers the
+other half of this option — the OFF-side link break the release lane guards.)
+
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
 `pulp-test-playback-track-automation-renderer`, `pulp-test-playback-program`,
@@ -714,6 +722,62 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
 
+## Publishing a program across a realm boundary
+
+`PlaybackProgram` is `shared_ptr`-woven and cannot leave the process that built
+it. `pulp/playback/program_wire.hpp` is the crossing form: one contiguous,
+self-describing byte range that carries indices where the program carries
+pointers. Reach for it whenever a consumer does not share the producer's heap —
+a Worker publishing to an AudioWorklet, or a helper process — and never try to
+hand the program itself over some serialization of pointers.
+
+Things worth knowing before changing it:
+
+- **Decode allocates nothing.** Records are native-layout, eight-byte-multiple,
+  eight-byte-aligned structs, so `decode_program_wire` hands back typed spans
+  borrowed straight out of the buffer. That is why the format asserts
+  little-endian at compile time and rejects a misaligned base address instead of
+  falling back to a copy. Adding a field that is not a fixed-size scalar — a
+  string, a variable-length blob — breaks that property; give it its own
+  section with its own `(first, count)` ranges instead.
+- **The encoder refuses rather than drops.** A track with an audio renderer
+  program, or a mixer control pointing at a lane the track does not own, is a
+  typed error and not a silently thinner payload. Preserve that when widening
+  what the wire covers: a lossy encode is indistinguishable downstream from a
+  program that was authored that way.
+- **Deliberate exclusions, and why.** Decoded audio (bulk, already content-hash
+  addressed — a generation wire that inlined it would republish gigabytes per
+  edit), the audio clip programs (derived, and carrying derived-cache pointers),
+  `AudioRendererLimits` (mostly offline-stretch and converter budgets governing
+  the compiler's host), and `AutomationProgram`'s instance token (a
+  producer-process-local counter that a consuming realm has no token space to
+  compare against). Excluding the token is also what makes one document encode
+  to exactly one byte range.
+- **`producer_epoch` is what replaces the token across the boundary, and it is
+  not optional.** The token's in-process job is to stop an equal-generation
+  replacement from masquerading as the active program — `AutomationCursor`
+  decides `Unchanged` on the lane key *and* the token together. Across a realm
+  that guard cannot be the token, so the wire carries a producer epoch instead
+  and a consumer decides on `(producer_epoch, generation)`. Neither half is
+  sufficient alone: `generation` is minted per store and **restarts at 1**, so a
+  producer that is torn down and recreated looks non-monotonic to a surviving
+  consumer and would be refused forever on generation alone; and two producers
+  of one document both minting generation 1 would look like one publication
+  without the epoch. A zero epoch is refused at both ends rather than acting as
+  a wildcard.
+- **Version growth is additive by section, not by version bump.** An unknown
+  section marked `kProgramWireSectionOptional` is skipped; an unknown section
+  without it is rejected. Bump `min_reader_version` only when an older reader
+  would *misread* the bytes, not when it would merely miss data.
+- **The byte golden is the guard that matters.** An encoder and a decoder that
+  are wrong in the same direction still round-trip; only the pinned digest in
+  `test/test_playback_program_wire.cpp` catches a reordered field. If you change
+  the layout on purpose, re-pin it in the same change and say so.
+- The tempo map travels as its editable `TempoPoint`s, because
+  `CompiledTempoMap`'s segments are private and derived. `encode_program_wire`
+  therefore takes the points and refuses any that did not compile the program's
+  map — `CompiledTempoMap::matches()` is what keeps the two honest.
+
 ## A refusal of something authorable costs a written reason
 
 `tools/scripts/negative_capability_check.py` (ctest
@@ -843,6 +907,16 @@ Never widen the UI-facing seam by passing a `TransportSnapshot` — project the
 fields a view needs into values, as `UiPlayhead` does. `UiPlayhead::program_generation`
 is what lets a view tell a stale reading from a live one without holding anything
 a program swap can invalidate.
+
+A value type both rungs genuinely need goes in `core/timebase`, never duplicated
+into each. `timebase` is the whole of what the two floors have in common beyond
+`platform`/`runtime`, so it is the only home that does not require widening a
+row. `LoopRegion` is the worked example: `playback::LoopRegion` is an alias of
+`timebase::LoopRegion` beside the existing `MeterSignature` one, and
+`UiPlayhead::loop` names the same type — a loop set on the transport reaches an
+editor reading with nothing to convert. Do not read this as licence to share the
+*readings* themselves: `TransportPlayhead` and `UiPlayhead` stay separate
+because their fields differ in kind, not merely in spelling.
 
 ### Position leaves the transport in two directions, one SeqLock each
 

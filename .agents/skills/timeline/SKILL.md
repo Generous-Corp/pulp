@@ -1183,6 +1183,28 @@ that row to admit `view` makes every consumer of the kernel pay for `core/view`,
 which is the exact coupling the rung split exists to prevent. A view target gets
 its own directory and its own row, sitting above this one.
 
+**A type two rungs both need goes in their floors' intersection, not in either
+rung.** `playback` and `timeline_editor` exclude each other, and `timebase` is
+in both rows — so it is where a shared value type lives, and moving one there is
+legal with no floor change at all. `timebase::LoopRegion` is the worked case: the
+editor's `UiLoopRegion` and playback's `LoopRegion` had been the same three
+fields in the same order. Check `MODULE_FLOORS` for the intersection before
+placing anything; if the rows do not admit the home you want, the placement
+argument is wrong and widening a row is not the repair.
+
+The same reasoning bounds what may *not* move down. A converter between two
+rungs' types names both, so it belongs above both — not in either rung, and not
+in `timebase`, which may name neither. Until an engine above both exists there is
+no legal home for one, and adding it anywhere reachable would mean widening a row.
+
+`UiPlayhead` speaks the editor's nouns rather than mirroring the transport's:
+`UiTransportState` in place of `is_playing`/`scrubbing`, and `continuity_epoch`
+in place of `playback_epoch` — the rung's floor excludes `playback`, and a host
+backed by a scripted value or a plugin's own engine has a continuity guarantee
+without having a playback epoch. `continuity_epoch` is what a view checks before
+smoothing motion between two readings; `program_generation` cannot substitute,
+because a loop wrap breaks continuity without recompiling anything.
+
 ### The floor has two directions and they need different instruments
 
 `timeline_engine_dependency_floor_check.py` is outbound: for each engine module,
@@ -1612,6 +1634,15 @@ audio/MIDI byte stream with both the committed snapshot and pinned fixture.
 Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
 timeline translation units do not include or link `pulp::format`, `pulp::host`,
 or `pulp::view`.
+
+`test/cmake/timeline_tests.cmake` is the manifest that registers the
+`pulp-test-playback-*` suites alongside the document-model ones, so a new
+playback-side suite is added there rather than in a new manifest — including
+`pulp-test-playback-program-wire`, which covers the flat program wire the web
+lane publishes generations over (`pulp/playback/program_wire.hpp`; the format's
+own rules live in the `playback` skill). Sharing the manifest does not make the
+program wire part of the document schema: it encodes a *compiled* program, and
+a document-model change reaches it only through the compiler.
 
 `test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
 runtime tests. That shared CMake inventory does not make profile JSON, capture

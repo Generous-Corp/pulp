@@ -61,6 +61,7 @@ add_executable(pulp-cli
     cmd_macos.cpp
     cmd_ci_host.cpp
     cmd_overflow.cpp
+    overflow_selector.cpp
     cmd_design.cpp
     cmd_design_subcommands.cpp
     cmd_doctor.cpp

@@ -42,6 +42,12 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 pulp_add_test_suite(pulp-test-sequencer-ui-host
     SOURCES test_sequencer_ui_host.cpp test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
+# Names both rungs at once, which neither rung may do for itself. The link list
+# is the point: standing above the transport and the editor is what makes "both
+# describe a loop with one type" a statement the build checks, rather than a
+# claim two headers make separately and can drift apart on.
+pulp_add_test_suite(pulp-test-timebase-loop-region
+    LIBRARIES pulp::playback pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
         test_playback_buffered_content_source.cpp
@@ -80,6 +86,9 @@ pulp_add_test_suite(pulp-test-standalone-recording
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::standalone pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-program-wire
+    SOURCES test_playback_program_wire.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-playback-external-sync
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
