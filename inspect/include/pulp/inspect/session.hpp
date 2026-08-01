@@ -1,14 +1,16 @@
 #pragma once
 
+#include <pulp/inspect/audit.hpp>
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/test_input.hpp>
 
 #include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -31,10 +33,12 @@ struct InspectorPolicyConfig {
 /// set exposes nothing, and runtime.eval additionally requires its separate
 /// acknowledgement.
 class InspectorAccessPolicy {
-public:
+  public:
     explicit InspectorAccessPolicy(InspectorPolicyConfig config = {});
 
-    InspectorProfile profile() const { return profile_; }
+    InspectorProfile profile() const {
+        return profile_;
+    }
     std::span<const InspectorCapability> available_capabilities() const {
         return available_;
     }
@@ -50,7 +54,7 @@ public:
     std::optional<InspectorMessage> authorize(const InspectorMessage& request,
                                               bool owns_controller_lease) const;
 
-private:
+  private:
     InspectorProfile profile_ = InspectorProfile::Off;
     std::vector<InspectorCapability> available_;
     std::vector<InspectorCapability> effective_;
@@ -63,10 +67,17 @@ enum class ControllerLeaseResult {
     InvalidOwner,
 };
 
+struct InspectorControllerScopeEnd {
+    std::string session_id;
+    std::string instance_id;
+    std::string client_id;
+    TestInputReleaseReason reason = TestInputReleaseReason::ControllerReleased;
+};
+
 /// One-controller lease for mutating inspector operations. The injected clock
 /// keeps expiry deterministic in tests and avoids wall-clock jumps.
 class InspectorControllerLease {
-public:
+  public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     explicit InspectorControllerLease(
@@ -82,12 +93,23 @@ public:
     std::optional<std::string> owner();
     std::chrono::milliseconds remaining();
 
-private:
+  private:
     friend class InspectorSession;
 
+  public:
+    struct EndedScope {
+        std::string owner;
+        TestInputReleaseReason reason;
+    };
+
+  private:
     void expire_if_needed();
     bool begin_operation(std::string_view owner);
     void end_operation(std::string_view owner);
+    bool release_with_reason(std::string_view owner, TestInputReleaseReason reason);
+    void terminate();
+    std::vector<EndedScope> take_ended_scopes();
+    void finish_scope(TestInputReleaseReason reason);
 
     std::chrono::milliseconds ttl_;
     Clock clock_;
@@ -95,6 +117,8 @@ private:
     std::chrono::steady_clock::time_point expires_at_{};
     std::size_t active_operations_ = 0;
     bool release_pending_ = false;
+    TestInputReleaseReason pending_reason_ = TestInputReleaseReason::ControllerReleased;
+    std::vector<EndedScope> ended_scopes_;
 };
 
 struct InspectorSessionInfo {
@@ -109,23 +133,24 @@ struct InspectorSessionInfo {
 /// lease, then serializes authorized domain requests before delegating to the
 /// attached handler. Session control remains available while a handler runs.
 class InspectorSession {
-public:
-    using RequestHandler =
-        std::function<InspectorMessage(const InspectorMessage& request)>;
+  public:
+    using RequestHandler = std::function<InspectorMessage(const InspectorMessage& request)>;
+    using ControllerScopeEndHandler = std::function<void(const InspectorControllerScopeEnd& event)>;
 
-    InspectorSession(InspectorSessionInfo info,
-                     InspectorPolicyConfig policy,
-                     RequestHandler handler,
-                     std::chrono::milliseconds lease_ttl =
-                         std::chrono::seconds(15),
-                     InspectorControllerLease::Clock clock =
-                         [] { return std::chrono::steady_clock::now(); });
+    InspectorSession(
+        InspectorSessionInfo info, InspectorPolicyConfig policy, RequestHandler handler,
+        std::chrono::milliseconds lease_ttl = std::chrono::seconds(15),
+        InspectorControllerLease::Clock clock = [] { return std::chrono::steady_clock::now(); });
 
-    InspectorMessage handle(std::string_view client_id,
-                            const InspectorMessage& request);
+    InspectorMessage handle(std::string_view client_id, const InspectorMessage& request);
     /// Install the generation-scoped main-thread handoff used for domain
     /// requests. Session control methods remain synchronous on their caller.
     void set_main_thread_rpc(std::shared_ptr<InspectorMainThreadRpc> rpc);
+    /// Install the host cleanup hook for controller-scoped test input. The
+    /// callback runs outside session locks and must transfer work to the host's
+    /// owning thread when the caller is not already on it.
+    void set_controller_scope_end_handler(ControllerScopeEndHandler handler);
+    void set_audit_log(std::shared_ptr<InspectorAuditLog> audit_log);
     void disconnect(std::string_view client_id);
     /// Cancel queued domain handlers and reject new ones during server teardown.
     /// The handler already executing on the dispatch owner may finish.
@@ -135,10 +160,14 @@ public:
     /// Snapshot whether new domain dispatches are currently admitted.
     bool dispatches_accepting() const;
 
-    const InspectorSessionInfo& info() const { return info_; }
-    const InspectorAccessPolicy& policy() const { return policy_; }
+    const InspectorSessionInfo& info() const {
+        return info_;
+    }
+    const InspectorAccessPolicy& policy() const {
+        return policy_;
+    }
 
-private:
+  private:
     class State;
     InspectorMessage handle_session_method(std::string_view client_id,
                                            const InspectorMessage& request);
