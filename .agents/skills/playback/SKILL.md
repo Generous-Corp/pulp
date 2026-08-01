@@ -635,6 +635,28 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
 declared set, so reaching for a format, host, or view type fails the gate even
 when the build would have linked.
 
+**The link axis is transitive, and playback is the module that shows why.** The
+check follows what a linked library itself links, to a fixed point, so a row
+cannot stay green by depending on a module that breaches it. `core/playback`
+links `pulp::audio`, which links `pulp::state`, `pulp::signal` and
+`pulp::sample-bank-manifest` PUBLIC and, through `pulp::state`, `pulp::events`
+PRIVATE — four modules the row never named. Those are recorded in
+`LINK_CLOSURE_DEBT`, deliberately *not* folded into `MODULE_FLOORS`: a floor row
+also governs which headers the module's sources may include, so widening the row
+would have granted `core/playback` the right to `#include <pulp/state/...>` as a
+side effect of writing down a link fact. An entry there is a debt, not a
+permission — cut the underlying link and delete the entry, and the gate tightens
+with no other edit.
+
+The PUBLIC/PRIVATE split survives the trip and matters for a
+pay-for-what-you-use claim: `state`, `signal` and `sample-bank-manifest` arrive
+PUBLIC, so their include directories propagate and a playback consumer genuinely
+can reach `<pulp/state/...>` today; `events` is PRIVATE and link-only; and
+`signal` is an INTERFACE library, so paying for it costs headers rather than
+object code. Whether playback *should* reach the state store is an open design
+question the debt list does not answer — it exists so the gate can police
+whatever answer is reached.
+
 The table holds every engine-adjacent module, not just playback, and the selftest
 is generic over it. Adding a module there is how a new `core/` target gets the
 same enforcement; it does not widen anyone else's floor.
