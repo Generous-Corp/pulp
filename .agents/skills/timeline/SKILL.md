@@ -393,7 +393,9 @@ artifact is needed. Never modify canonical project JSON text directly.
 - The census the runner records is `pulp::interchange::census()`, which lives in
   `core/interchange`, **not** `core/timeline`. Anything reaching for it takes an
   interchange dependency; that is on the portable floor, but it is a dependency
-  edge worth knowing before adding one.
+  edge worth knowing before adding one. That call is also why the runner binary
+  is owned by `core/interchange/CMakeLists.txt` rather than by the test tree —
+  see the placement convention below.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
@@ -656,6 +658,31 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 `test_timeline_command_persistence.cpp` (which asserts one decoded command per
 alternative, in variant order).
 
+### Device neutrality is enforced by the module graph, not by discipline
+
+`EditIntent` (`edit_intent.hpp`) lives in `core/timeline` **because** that module's
+dependency floor is `{timeline, timebase, platform, runtime}` — it cannot link
+`view`, so the header physically cannot name a pointer type. That placement is the
+guarantee. Moving intents "up" into an editor module that *can* see `view` would
+turn a structural impossibility back into a convention people have to remember,
+which is how the touch-retrofit bug class returns.
+
+The corollary for anyone extending this: a front-end resolves device differences
+**before** it builds an intent, and hands the kernel only resolved scalars. Hit
+tolerance is the worked example — `HitMetrics` lives in `core/view` and projects a
+pointer type onto one number; the kernel takes the number and never learns what
+produced it.
+
+Two things not to do here:
+
+- **Do not add a fourth `GesturePhase`.** There are already three
+  (`core/timeline/command.hpp`, `core/view/input_events.hpp`,
+  `core/state/sequencer_state_channel.hpp`). Intents reuse the `command.hpp` one.
+  A second spelling of an existing concept is a defect, not a feature.
+- **Do not add a verb that lowers to zero commands.** Select, marquee and
+  zoom-to-range are deliberately absent: they are view state, and routing them
+  through the document channel puts transient selection into undo history.
+
 ## Schema codegen & drift gate
 
 ### Bumping a schema version touches two hand-written validators the codegen never reaches
@@ -719,6 +746,21 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
 
+**A tool that claims to be portable belongs under `core/`, not under `test/`,
+even when its inputs live in `test/`.** `pulp-fixture-runner` is the worked
+example: its source is `core/interchange/tools/fixture_runner_main.cpp` while its
+corpus stays at `test/fixtures/timeline/`, and `test/cmake/timeline_tests.cmake`
+holds only the two ctest registrations. Two things break if such a tool lives in
+`test/`. First, `add_subdirectory(test)` is gated on
+`PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS`, so the binary cannot be
+configured at all on the mobile lanes it exists to serve. Second — and this is
+the one that stays silent — `timeline_engine_dependency_floor_check.py` walks
+`core/<module>/` and nothing else, so a `#include <pulp/view/…>` added to a
+runner under `test/` passes every gate while the file's own comment still claims
+a portable floor. Relocating into an owning module puts the file inside the
+existing scan with no new `MODULE_FLOORS` row. Pick the module at the *top* of
+what the tool links (interchange, not timeline, since it calls `census()`).
+
 `schema_drift_check.py` is generic — it takes `--artifact` and `--emit-cmd` and
 byte-compares. A new generated artifact anywhere in the repo reuses it as-is
 rather than growing its own gate; `core/interchange` registers three drift ctests
@@ -731,6 +773,35 @@ iterates `MODULE_FLOORS` generically, so a new entry gets include-scan and
 link-scan coverage plus selftest proof without touching the selftest. Adding an
 entry is not the same as widening `timeline`'s own floor — a module that sits
 *above* timeline gets its own row and must not appear in timeline's set.
+
+Three things bite when adding a row:
+
+- **`verify()` reports `missing required engine module` when a row names a
+  directory that does not exist.** A row and its target therefore land in the
+  same change, always — you cannot declare a floor ahead of the code it
+  constrains. That is the intended discipline, not an obstacle to work around:
+  it is what stops a floor from being written around a violation that already
+  shipped.
+- **Allow both spellings of the module's own name.** The row key is the
+  directory (`timeline_editor`), but `LINK_RE` reads a CMake alias verbatim, so
+  `pulp::timeline-editor` yields the token `timeline-editor`. A row carrying
+  only the underscore spelling reads a helper target's self-link as an
+  outside-floor violation.
+- **The generic selftest loop proves detection using `pulp/render`, which is in
+  no floor at all.** When a row's defining rule is that it cannot reach a module
+  that *is* in the table — `timeline_editor` and playback — assert that pair by
+  name too, or the rule survives someone widening the other row.
+
+A new `core/<module>` directory also drifts `codecov.yml`, whose flags and
+components mirror `core/*`. Add the flag and the component alongside the target;
+`tools/scripts/gates.sh` catches the omission before CI does.
+
+**A new rung takes a new row — never widen an existing one.** `timeline_editor`
+carries no `view` and no `canvas`, which is correct for the editor kernel and
+will look like a gap the first time a view lands beside it. It is not. Widening
+that row to admit `view` makes every consumer of the kernel pay for `core/view`,
+which is the exact coupling the rung split exists to prevent. A view target gets
+its own directory and its own row, sitting above this one.
 
 ### Derived surfaces are projections of the manifest, not the registry
 

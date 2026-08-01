@@ -20,6 +20,12 @@ modules:
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline
 
+  - name: timeline_editor
+    summary: The editor rung's interfaces starting with SequencerUiHost the whole coupling a timeline view has toward playback carrying value-copied playhead readings audition requests and emitted intents in document vocabulary only
+    status: experimental
+    dependencies: [timeline, timebase]
+    docs: reference/modules.md#timeline_editor
+
   - name: interchange
     summary: Format-neutral interchange capability tables loss manifests and the export plan/run seam that refuses any concept a writer cannot represent unless the caller accepts it by name
     status: experimental

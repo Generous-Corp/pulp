@@ -1,11 +1,11 @@
 #pragma once
 
-// Windows: include system headers before any namespace block to prevent
-// CHOC/QuickJS intrinsic declarations from polluting our namespace.
-// Without this, _InterlockedIncrement etc. get declared in pulp::view::
-// and conflict with winbase.h's expectations.
+// Windows: system headers before any namespace block, or CHOC/QuickJS
+// intrinsics (_InterlockedIncrement etc.) get declared in pulp::view:: and
+// conflict with winbase.h. win32_sane.hpp, never raw <windows.h> — it pre-sets
+// NOMINMAX, else min/max break widgets.hpp's std::max below (MSVC C2589).
 #if defined(_WIN32)
-#include <windows.h>
+#include <pulp/platform/win32_sane.hpp>
 #endif
 
 #include <pulp/view/script_engine.hpp>

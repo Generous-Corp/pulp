@@ -318,6 +318,21 @@ Two other capture-shaping facts worth knowing before you blame a query:
   used to be untagged, so closing and reopening an editor inside the window let
   the FIRST session's timer stop the SECOND one — a capture that looks
   mysteriously truncated mid-gesture. A stale timer is now a no-op.
+- **Zero rows for `frame`/`gpu_*` can mean the host never emitted them.** A
+  query over render spans returning nothing is not automatically a bad query or
+  a bad capture: an editor that is neither scripted nor declares
+  `requires_gpu_host()` runs on CPU raster and emits none of them, and
+  host-level `frame`/`paint` exist only on the Windows plug-in editor and the
+  macOS standalone host. Check the shape of what you DID capture before
+  rewriting SQL —
+
+  ```sql
+  select name, count(*) from slice group by name order by 2 desc;
+  ```
+
+  A result of only `layout_children` + `wm_mousemove` is the signature. The
+  `trace-analysis` skill has the coverage matrix and the `[plugin-gpu-host]
+  … mode=` line that names the host you actually got.
 
 ## GPU render time is now OPT-IN (WAH-13)
 

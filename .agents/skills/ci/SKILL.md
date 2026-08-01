@@ -5570,6 +5570,30 @@ It runs diff-scoped in `gates.sh` and its self-tests run in
 `version-skill-check.yml`. It checks duplicates only — declaration ORDER needs
 the struct definition and would guess wrong through macros and templates.
 
+**A second member of the same family: raw `<windows.h>` in a public header.**
+It defines `min`/`max` as macros, so any later `std::max(...)` fails to parse
+with MSVC `C2589`/`C2059` — reported at the *victim* header, not the culprit.
+`widget_bridge.hpp` shipped a raw include and broke consumer plug-in builds
+against the installed SDK.
+
+What makes this class nastier than the designator one is that it is **latent**.
+`<windows.h>` has an include guard, so whichever header reaches it FIRST decides
+whether `NOMINMAX` was set for the whole translation unit. The same raw include
+compiles fine for months and then breaks when include order shifts somewhere
+else entirely. Two gates miss it for different reasons: `macos` never sees
+`<windows.h>`, and Pulp's own Windows lane builds the LIBRARY rather than a
+downstream consumer of the installed headers — so only someone building a
+plug-in against a `cmake --install`ed SDK hits it.
+
+`tools/scripts/win32_include_lint.py` guards `core/*/include` whole-tree in
+`gates.sh`. Always use `pulp/platform/win32_sane.hpp`, which pre-sets `NOMINMAX`
+and `WIN32_LEAN_AND_MEAN`. Sources are deliberately out of scope: a `.cpp` that
+leaks breaks only itself, immediately; a header exports the hazard.
+
+**`gates.sh` diffs COMMITTED state.** Running it with the change still in the
+working tree reports "no mapped paths touched" and passes, then `shipyard pr`
+fails skill-sync on the same change seconds later. Commit first, then gate.
+
 The general lesson for this skill: when a change is Windows-affecting, a green
 `macos` gate is not evidence it builds. Compile it somewhere with MSVC. The
 retained REAPER VM (see the `hosting` skill and the consumer repo's

@@ -4,7 +4,10 @@ Pulp versions three surfaces independently:
 
 - **SDK / CLI** — `CMakeLists.txt` `project(... VERSION x.y.z)`.
   Cascades to `PULP_SDK_VERSION` in generated headers and to the
-  CLI binary's `pulp --version`.
+  CLI binary's `pulp --version`. The source-only combined-installer recipe is
+  also mapped to this surface: SDK consumers execute it from a detached Pulp
+  checkout at the SDK provenance SHA, so a recipe fix needs a new SDK tag even
+  though the script is not installed in the SDK prefix yet.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
 - **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by
@@ -59,11 +62,21 @@ the self-tests for the compiler-asymmetry lints:
 |---|---|
 | `intel_canary_lint.py` | arm64-only code that drops the SSE/scalar fallback |
 | `designated_initializer_lint.py` | duplicate designators in one aggregate — legal to Clang, `C7560` on MSVC |
+| `win32_include_lint.py` | raw `<windows.h>` in an installed header — leaks the `min`/`max` macros, `C2589` on MSVC |
 
-`gates.sh` runs `designated_initializer_lint.py` diff-scoped before a push. Both
-are canaries, not substitutes for building on the target: they check what a
-regex can check without a compiler, which for designated initializers means
-duplicates but not declaration order.
+`gates.sh` runs `designated_initializer_lint.py` diff-scoped and
+`win32_include_lint.py` over `core/*/include` before a push. All are canaries,
+not substitutes for building on the target: they check what a regex can check
+without a compiler, which for designated initializers means duplicates but not
+declaration order.
+
+`win32_include_lint.py` covers a case neither the `macos` gate nor Pulp's own
+Windows lane can see. `<windows.h>` has an include guard, so the first header to
+reach it decides `NOMINMAX` for the whole translation unit — a raw include is
+latent and breaks a consumer only when it wins that race. The Windows lane
+builds the library, not a plug-in against the `cmake --install`ed headers, so
+the failure lands on downstream consumers. Use
+`pulp/platform/win32_sane.hpp`.
 
 ## The scripts
 

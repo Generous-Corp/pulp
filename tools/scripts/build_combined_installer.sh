@@ -162,8 +162,26 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   deep_sign "$p" "$ent"
   id="$(echo "$t" | tr ' A-Z' '-a-z' | tr -cd 'a-z0-9-')"
   r="$STAGE/root-$id"; mkdir -p "$r/Applications"; cp -R "$p" "$r/Applications/"
+  # pkgbuild otherwise marks app bundles relocatable. On a development machine
+  # where Launch Services already knows another copy of the same bundle ID,
+  # Installer then overwrites that build-tree copy instead of installing the
+  # selected app in /Applications. Pin every staged app to its package path.
+  component_plist="$STAGE/$id-components.plist"
+  pkgbuild --analyze --root "$r" "$component_plist" >/dev/null
+  component_index=0
+  while /usr/libexec/PlistBuddy -c "Print :$component_index" \
+      "$component_plist" >/dev/null 2>&1; do
+    /usr/libexec/PlistBuddy -c \
+      "Set :$component_index:BundleIsRelocatable false" "$component_plist"
+    component_index=$((component_index + 1))
+  done
+  [[ "$component_index" -gt 0 ]] || {
+    echo "error: pkgbuild found no app bundles under $r" >&2
+    exit 2
+  }
   f="$(basename "$p").pkg"
-  pkgbuild --root "$r" --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
+  pkgbuild --root "$r" --component-plist "$component_plist" \
+    --identifier "com.pulp.$NAME.$id.pkg" --version "$VERSION" \
     --install-location / "$STAGE/comp/$f" >/dev/null
   add_ref "$id" "$t" "$t" "$f"
   CHOICES="$CHOICES<line choice=\"$id\"/>"   # apps sit at the top level
