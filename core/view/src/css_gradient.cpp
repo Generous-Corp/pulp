@@ -375,7 +375,7 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         if (colors.empty()) return false;
         // The band a repeating conic tiles runs from 0 to its LAST stop, and
         // the shader wants that band expressed as 0..1. `repeating-conic-
-        // gradient(#fff 0deg 2deg, #000 2deg 12deg)` therefore spans 12/360 of
+        // gradient(#fff 0deg 2deg, #000 2deg 12deg)` therefore spans 12/360 of  docs-noise-lint: skip #000 is a CSS colour in an example
         // a turn with its stops rescaled onto it -- which is also why a band
         // that already covers a full turn simply degrades to a plain conic.
         float sweep_turns = 1.0f;
