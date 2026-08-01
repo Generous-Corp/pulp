@@ -164,6 +164,17 @@ png_dimensions(const std::vector<std::uint8_t>& png) {
 
 } // namespace
 
+std::optional<std::string>
+standalone_runtime_eval_realm_denial(const view::ScriptedUiSession* scripted_ui) {
+    if (!scripted_ui)
+        return std::nullopt;
+    const auto effectful = scripted_ui->granted_capabilities().first_effectful();
+    if (!effectful)
+        return std::nullopt;
+    return "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '" +
+        std::string(view::capability_name(*effectful)) + "'";
+}
+
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
                                                public inspect::InspectorCaptureSource,
                                                public inspect::InspectorTestInputSource {
@@ -186,6 +197,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                std::find(custom.begin(), custom.end(),
                          inspect::InspectorCapability::TelemetryStream) !=
                    custom.end())),
+          runtime_eval_requested_(runtime_eval_enabled),
           session_id_(std::move(session_id)),
           instance_id_(std::move(instance_id)), executable_(executable_path()), state_(app.state()),
           telemetry_(inspect::ValueChannelTelemetryBroker::Config{},
@@ -220,6 +232,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                        return domains_.handle(request);
                    }) {
         session_.set_audit_log(audit_log_);
+        domains_.set_runtime_eval_enabled(runtime_eval_requested_);
         telemetry_.set_event_sink(
             [this](std::string_view client_id,
                    const inspect::InspectorMessage& event,
@@ -526,6 +539,9 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
     void refresh_value_channel_sources(bool force) {
+        // Scripted-UI replacement is independent of value-channel generation.
+        // Re-evaluate live-realm authority on every pump before an early return.
+        refresh_scripted_sources();
         const auto generation = processor_.supports_editor_reload()
             ? processor_.editor_reload_generation()
             : 0;
@@ -577,7 +593,6 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 }
             }
         });
-        refresh_scripted_sources();
         if (attachment_ready) {
             value_channel_generation_ = generation;
             failed_value_channel_generation_.reset();
@@ -601,6 +616,14 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         log_subscription_ = 0;
         log_subscription_generation_ = generation;
         bridge_.visit_scripted_ui([this](view::ScriptedUiSession* current) {
+            if (runtime_eval_requested_) {
+                if (auto denial = standalone_runtime_eval_realm_denial(current))
+                    domains_.set_runtime_eval_denied(std::move(*denial));
+                else
+                    domains_.set_runtime_eval_enabled(true);
+            } else {
+                domains_.set_runtime_eval_enabled(false);
+            }
             if (current)
                 log_subscription_ = current->add_log_callback(console_.callback());
         });
@@ -636,6 +659,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::InspectorOverlay* overlay_ = nullptr;
     inspect::InspectorProfile profile_ = inspect::InspectorProfile::Off;
     bool telemetry_enabled_ = false;
+    bool runtime_eval_requested_ = false;
     std::string session_id_;
     std::string instance_id_;
     std::filesystem::path executable_;
@@ -813,6 +837,12 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
         runtime::log_error(
             "Standalone: runtime evaluation requires the develop or custom inspector profile");
         return nullptr;
+    }
+    if (runtime_eval_enabled) {
+        if (auto denial = standalone_runtime_eval_realm_denial(bridge.scripted_ui())) {
+            runtime::log_error("Standalone: {}", *denial);
+            return nullptr;
+        }
     }
     auto overlay = std::make_shared<inspect::InspectorOverlay>(root);
     inspect::install_inspector_hooks(*overlay);

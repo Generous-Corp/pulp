@@ -71,8 +71,13 @@ InspectorMessage DomainHandler::handle_console(const InspectorMessage& req) {
 
 InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
     if (req.method == methods::kRuntimeEvaluate) {
-        if (!runtime_eval_enabled_)
-            return make_error(req.id, "Runtime.evaluate disabled (host has not opted into runtime eval)");
+        if (!runtime_eval_enabled_) {
+            return make_error(
+                req.id,
+                runtime_eval_denial_.empty()
+                    ? "Runtime.evaluate disabled (host has not opted into runtime eval)"
+                    : runtime_eval_denial_);
+        }
         if (!script_inspector_)
             return make_error(req.id, "Runtime.evaluate unavailable: no scripted-UI engine attached");
         std::string code;
@@ -114,6 +119,9 @@ InspectorMessage DomainHandler::handle_runtime(const InspectorMessage& req) {
         // a client must not attempt eval when the host hasn't enabled it.
         obj.addMember("canEvaluate", choc::value::createBool(caps.can_evaluate && runtime_eval_enabled_));
         obj.addMember("canInterrupt", choc::value::createBool(caps.can_interrupt && runtime_eval_enabled_));
+        if (!runtime_eval_denial_.empty())
+            obj.addMember("evaluateDeniedReason",
+                          choc::value::createString(runtime_eval_denial_));
         // Honest: mainline QuickJS has no source-line debug protocol, so these
         // stay false. A future debugger-enabled engine backend flips them.
         obj.addMember("canBreak", choc::value::createBool(caps.can_break));

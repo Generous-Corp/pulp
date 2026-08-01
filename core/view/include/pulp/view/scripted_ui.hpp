@@ -27,6 +27,10 @@ struct ScriptedUiOptions {
     std::filesystem::path script_path;
     std::filesystem::path theme_path;
     std::vector<std::filesystem::path> asset_roots;
+    /// Native bridge APIs granted to this realm. Trusted/local scripted UIs
+    /// retain the historical all-capabilities default; protected hosts pass an
+    /// explicit empty or reviewed set.
+    CapabilitySet granted_capabilities = CapabilitySet::all();
     bool enable_hot_reload = false;
     bool enable_theme_reload = true;
     /// Compatibility adapter for stable, non-reloadable processors. Converted
@@ -72,6 +76,12 @@ public:
     std::uint64_t add_log_callback(LogCallback callback);
     void remove_log_callback(std::uint64_t token);
     WidgetBridge* bridge() const { return bridge_.get(); }
+    /// Actual effectful API grants installed in the live bridge, or the grants
+    /// that will be installed before the first successful load. Returned by
+    /// value so inspector policy cannot mutate the realm.
+    CapabilitySet granted_capabilities() const noexcept {
+        return bridge_ ? bridge_->granted_capabilities() : granted_capabilities_;
+    }
 
     /// The runtime-inspector bridge for this session's JS engine. Always
     /// present (even before load()); it tracks the live engine across hot
@@ -129,6 +139,7 @@ private:
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
     std::vector<std::filesystem::path> asset_roots_;
+    CapabilitySet granted_capabilities_ = CapabilitySet::all();
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
     ValueChannelAccess value_channel_access_;

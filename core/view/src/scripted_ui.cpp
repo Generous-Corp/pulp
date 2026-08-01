@@ -38,6 +38,7 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
     , theme_path_(options.theme_path.empty() ? script_path_.parent_path() / "theme.json"
                                              : std::move(options.theme_path))
     , asset_roots_(std::move(options.asset_roots))
+    , granted_capabilities_(options.granted_capabilities)
     , hot_reload_enabled_(options.enable_hot_reload)
     , theme_reload_enabled_(options.enable_theme_reload)
     , value_channel_access_(
@@ -233,7 +234,8 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
             probe_store.add_parameter(param);
             probe_store.set_value(param.id, store_.get_value(param.id));
         }
-        auto probe_bridge = std::make_unique<WidgetBridge>(*probe_engine, probe_root, probe_store);
+        auto probe_bridge = std::make_unique<WidgetBridge>(
+            *probe_engine, probe_root, probe_store, nullptr, granted_capabilities_);
         probe_bridge->set_asset_roots(asset_roots_);
         probe_bridge->set_script_base_dir(script_path_.parent_path());
         probe_bridge->load_script(code);
@@ -263,8 +265,8 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
 
         root_.set_theme(theme_for_reload);
         auto next_engine = make_engine(engine_log_callback());
-        auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root_, store_,
-                                                          gpu_surface_);
+        auto next_bridge = std::make_unique<WidgetBridge>(
+            *next_engine, root_, store_, gpu_surface_, granted_capabilities_);
         // Re-attach on every reload without retaining a processor generation.
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);

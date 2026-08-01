@@ -17,6 +17,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -172,8 +173,9 @@ std::vector<std::uint8_t> inspector_test_png() {
 }
 class InspectorProcessor : public TestProcessor {
 public:
-    InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
-        : store_(store), script_(std::move(script)) {
+    InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script,
+                       CapabilitySet capabilities = CapabilitySet::all())
+        : store_(store), script_(std::move(script)), capabilities_(capabilities) {
         gain_reduction_ = channels_.declare_meter("gain_reduction", "dB", 0.0f);
     }
     PluginDescriptor descriptor() const override {
@@ -187,15 +189,9 @@ public:
     int latency_samples() const override { return 128; }
     std::unique_ptr<View> create_view() override {
         auto root = std::make_unique<View>();
-        if (scripted_)
-            ++retired_scripted_sessions;
-        scripted_ = std::make_unique<ScriptedUiSession>(
-            *root, store_, ScriptedUiOptions{.script_path = script_});
-        std::string error;
-        if (!scripted_->load(&error)) {
-            scripted_.reset();
+        root_ = root.get();
+        if (!replace_scripted_ui(capabilities_))
             return nullptr;
-        }
         return root;
     }
     ScriptedUiSession* active_scripted_ui() override { return scripted_.get(); }
@@ -204,6 +200,22 @@ public:
     }
     pulp::view::ValueChannelSet* value_channels() override {
         return &channels_;
+    }
+    bool replace_scripted_ui(CapabilitySet capabilities) {
+        capabilities_ = capabilities;
+        if (!root_)
+            return false;
+        auto replacement = std::make_unique<ScriptedUiSession>(
+            *root_, store_, ScriptedUiOptions{
+                .script_path = script_,
+                .granted_capabilities = capabilities_});
+        std::string error;
+        if (!replacement->load(&error))
+            return false;
+        if (scripted_)
+            ++retired_scripted_sessions;
+        scripted_ = std::move(replacement);
+        return true;
     }
     void publish_gain_reduction(float rms, float peak) {
         REQUIRE(gain_reduction_ != nullptr);
@@ -219,6 +231,8 @@ public:
 private:
     pulp::state::StateStore& store_;
     std::filesystem::path script_;
+    CapabilitySet capabilities_ = CapabilitySet::all();
+    View* root_ = nullptr;
     pulp::view::ValueChannelSet channels_;
     pulp::view::MeterSource* gain_reduction_ = nullptr;
     std::unique_ptr<ScriptedUiSession> scripted_;
@@ -387,6 +401,158 @@ TEST_CASE("Standalone inspector runtime evaluation requires an active controller
     auto develop = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "develop", {}, true);
     REQUIRE(develop != nullptr);
+}
+
+TEST_CASE("Standalone inspector runtime evaluation rejects every effectful live-realm grant",
+          "[standalone][inspect][runtime-eval][capabilities][negative]") {
+    const auto suffix = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto temp = std::filesystem::temp_directory_path()
+        / ("pulp-standalone-inspector-eval-grants-" + suffix);
+    const auto script = temp / "ui.js";
+    std::filesystem::create_directories(temp);
+    {
+        std::ofstream source(script);
+        source << "createLabel('v', 'safe fixture', '');";
+    }
+
+    constexpr std::array effectful{
+        ReloadCapability::Exec,
+        ReloadCapability::Clipboard,
+        ReloadCapability::Filesystem,
+        ReloadCapability::Storage,
+        ReloadCapability::Ai,
+        ReloadCapability::RuntimeImport,
+        ReloadCapability::Network,
+    };
+    for (const auto capability : effectful) {
+        DYNAMIC_SECTION("grant=" << capability_name(capability)) {
+            StandaloneApp app(null_processor_factory);
+            CapabilitySet granted;
+            granted.grant(capability);
+            InspectorProcessor processor(app.state(), script, granted);
+            ViewBridge bridge(processor, app.state());
+            REQUIRE(bridge.open());
+            REQUIRE(processor.active_scripted_ui()->granted_capabilities().has(capability));
+            REQUIRE(processor.active_scripted_ui()->bridge()
+                        ->granted_capabilities().has(capability));
+
+            const auto expected =
+                "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '" +
+                std::string(capability_name(capability)) + "'";
+            REQUIRE(standalone_runtime_eval_realm_denial(
+                        processor.active_scripted_ui()) == expected);
+
+            StubWindowHost window;
+            REQUIRE(StandaloneInspectorRuntime::create(
+                        app, processor, bridge, *bridge.view(), window,
+                        "develop", {}, true) == nullptr);
+            // The refusal observes the actual realm; it never mutates its grant
+            // set or masks the corresponding native API registration.
+            REQUIRE(processor.active_scripted_ui()->bridge()
+                        ->granted_capabilities().has(capability));
+            bridge.close();
+        }
+    }
+
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(temp, cleanup_error);
+}
+
+TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refuses unsafe rebind",
+          "[standalone][inspect][runtime-eval][capabilities][reload]") {
+    const auto suffix = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto temp = std::filesystem::temp_directory_path()
+        / ("pulp-standalone-inspector-eval-rebind-" + suffix);
+    const auto runtime_dir = temp / "runtime";
+    const auto script = temp / "ui.js";
+    std::filesystem::create_directories(temp);
+    {
+        std::ofstream source(script);
+        source << "globalThis.fixtureVersion = 1; createLabel('v', 'safe', '');";
+    }
+    ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
+    runtime_env.set(runtime_dir.string());
+
+    StandaloneApp app(null_processor_factory);
+    CapabilitySet safe;
+    InspectorProcessor processor(app.state(), script, safe);
+    ViewBridge bridge(processor, app.state());
+    REQUIRE(bridge.open());
+    REQUIRE(processor.active_scripted_ui()->granted_capabilities().empty());
+    StubWindowHost window;
+    QueuedMainThreadBackend dispatcher;
+    REQUIRE(dispatcher.valid());
+    auto runtime = StandaloneInspectorRuntime::create(
+        app, processor, bridge, *bridge.view(), window, "develop", {}, true);
+    REQUIRE(runtime != nullptr);
+    runtime->pump();
+
+    pulp::inspect::InspectorDiscoveryReader reader(runtime_dir);
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    pulp::inspect::InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    const auto request = [&](std::string method, std::string params) {
+        return request_with_dispatch(client, dispatcher,
+                                     std::move(method), std::move(params));
+    };
+    REQUIRE_FALSE(request("Session.acquireController", "{}").is_error);
+
+    auto capabilities = request("Runtime.getCapabilities", "{}");
+    REQUIRE_FALSE(capabilities.is_error);
+    REQUIRE(choc::json::parse(capabilities.params_json)
+                ["canEvaluate"].getWithDefault(false));
+    auto evaluated = request("Runtime.evaluate", R"({"code":"fixtureVersion + 1"})");
+    REQUIRE_FALSE(evaluated.is_error);
+    REQUIRE(choc::json::parse(evaluated.params_json)
+                ["result"].getWithDefault<std::int64_t>(0) == 2);
+
+    {
+        std::ofstream source(script);
+        source << "globalThis.fixtureVersion = 2; createLabel('v', 'reloaded', '');";
+    }
+    std::string reload_error;
+    REQUIRE(processor.active_scripted_ui()->reload(&reload_error));
+    REQUIRE(processor.active_scripted_ui()->granted_capabilities().empty());
+    REQUIRE(processor.active_scripted_ui()->bridge()
+                ->granted_capabilities().empty());
+    evaluated = request("Runtime.evaluate", R"({"code":"fixtureVersion + 1"})");
+    REQUIRE_FALSE(evaluated.is_error);
+    REQUIRE(choc::json::parse(evaluated.params_json)
+                ["result"].getWithDefault<std::int64_t>(0) == 3);
+
+    CapabilitySet unsafe;
+    unsafe.grant(ReloadCapability::Exec);
+    REQUIRE(processor.replace_scripted_ui(unsafe));
+    runtime->pump();
+    capabilities = request("Runtime.getCapabilities", "{}");
+    REQUIRE_FALSE(capabilities.is_error);
+    const auto unsafe_caps = choc::json::parse(capabilities.params_json);
+    REQUIRE_FALSE(unsafe_caps["canEvaluate"].getWithDefault(true));
+    const std::string denial =
+        "Runtime.evaluate denied: live scripted-UI realm grants effectful capability 'exec'";
+    REQUIRE(unsafe_caps["evaluateDeniedReason"].toString() == denial);
+    const auto denied = request("Runtime.evaluate", R"({"code":"1 + 1"})");
+    REQUIRE(denied.is_error);
+    REQUIRE(denied.params_json.find(denial) != std::string::npos);
+    REQUIRE(processor.active_scripted_ui()->bridge()
+                ->granted_capabilities().has(ReloadCapability::Exec));
+
+    REQUIRE(processor.replace_scripted_ui(safe));
+    runtime->pump();
+    capabilities = request("Runtime.getCapabilities", "{}");
+    REQUIRE(choc::json::parse(capabilities.params_json)
+                ["canEvaluate"].getWithDefault(false));
+    REQUIRE_FALSE(request("Runtime.evaluate", R"({"code":"6 * 7"})").is_error);
+
+    client.disconnect();
+    runtime->stop();
+    runtime.reset();
+    bridge.close();
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(temp, cleanup_error);
 }
 
 TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",

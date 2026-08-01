@@ -88,6 +88,24 @@ Build presence, host wiring, profile allowance, and current enablement are
 separate facts. `Session.getCapabilities` reports the available and effective
 sets for an authenticated session; no client should infer one from another.
 
+### Live-realm runtime evaluation boundary
+
+`runtime.eval` is refused when the attached `ScriptedUiSession` has any
+effectful `ReloadCapability`: `exec`, `clipboard`, `filesystem`, `storage`,
+`ai`, `runtime_import`, or `network`. The inspector reads the immutable grant
+set installed in the live `WidgetBridge`; it does not mask names in
+`globalThis`, because hiding names inside the same reachable realm is not a
+security boundary. `Runtime.getCapabilities` reports `canEvaluate:false` and
+an exact `evaluateDeniedReason` after an unsafe session is attached.
+
+The framework-owned `build_editor_ui` path retains its historical
+`CapabilitySet::all()` posture and therefore rejects `--inspect-runtime-eval`.
+A production host or custom processor that needs evaluation must explicitly
+construct `ScriptedUiSession` with an empty
+`ScriptedUiOptions::granted_capabilities` set. That reviewed set is retained
+across hot reloads and checked again whenever the standalone host binds a
+replacement scripted-UI session.
+
 ## Typed test input and authoring boundary
 
 `test.input` is deliberately narrow. `Test.injectMidi` accepts only `note_on`
