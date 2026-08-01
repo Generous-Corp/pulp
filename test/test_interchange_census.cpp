@@ -331,6 +331,216 @@ TEST_CASE("a census records a clip's controller streams so an export cannot drop
     REQUIRE_FALSE(plain_census.contains(Concept::ClipMidiExpressionLane));
 }
 
+TEST_CASE("a census names authored state that changes no sound but survives a round trip",
+          "[interchange]") {
+    // Four constructs a document can author, that serialize, and that no
+    // concept named -- so an export reported a clean bill while dropping them.
+    // Each is asserted by VALUE and each is checked against a document that
+    // does NOT author it, so none of these rows can be a constant.
+    SECTION("a record-armed track") {
+        auto clip = take_value(Clip::create({5}, {0}, {100},
+                                            take_value(MidiContent::create(
+                                                {{{8}, {20}, {10}, 0x8000, 64, 1}}))));
+        auto armed = take_value(Track::create({6}, "armed", {clip})).with_record_armed(true);
+        auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {armed}));
+        const Project project = take_value(
+            Project::create(ProjectInput{{1}, "armed", 100, {2}, {}, {sequence}}));
+        const ConceptCensus counted = census(project);
+        REQUIRE(counted.count(Concept::TrackRecordArm) == 1);
+        REQUIRE(counted.owners(Concept::TrackRecordArm).size() == 1);
+        REQUIRE(counted.owners(Concept::TrackRecordArm)[0] == ItemId{6});
+        REQUIRE(concept_detectable_in_model(Concept::TrackRecordArm));
+
+        auto disarmed = take_value(Track::create({6}, "disarmed", {clip}));
+        auto plain_sequence =
+            take_value(Sequence::create({2}, "root", TickDuration{1'000}, {disarmed}));
+        const Project plain = take_value(
+            Project::create(ProjectInput{{1}, "plain", 100, {2}, {}, {plain_sequence}}));
+        REQUIRE_FALSE(census(plain).contains(Concept::TrackRecordArm));
+    }
+
+    SECTION("an asset carrying loop points and an alternate representation") {
+        MediaAsset media = asset({2}, AssetStoragePolicy::External, 'b');
+        AudioLoopInfo loop;
+        loop.one_shot = false;
+        loop.root_note = std::uint8_t{60};
+        media.loop_info = loop;
+        AssetRepresentation proxy;
+        proxy.role = "proxy";
+        proxy.content_hash = content_hash('c');
+        media.representations.push_back(proxy);
+
+        auto clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{2}, {0}, 1'000}));
+        auto track = take_value(Track::create({6}, "media", {clip}));
+        auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000}, {track}));
+        const Project project = take_value(Project::create(
+            ProjectInput{{1}, "looped", 100, {3}, {media}, {sequence}}));
+
+        const ConceptCensus counted = census(project);
+        REQUIRE(counted.count(Concept::AssetLoopInfo) == 1);
+        REQUIRE(counted.owners(Concept::AssetLoopInfo)[0] == ItemId{2});
+        REQUIRE(counted.count(Concept::AssetAlternateRepresentation) == 1);
+        REQUIRE(counted.owners(Concept::AssetAlternateRepresentation)[0] == ItemId{2});
+        REQUIRE(concept_detectable_in_model(Concept::AssetLoopInfo));
+        REQUIRE(concept_detectable_in_model(Concept::AssetAlternateRepresentation));
+
+        // The same asset with neither must record neither, so a plain media
+        // document is not told it lost something it never had.
+        const MediaAsset bare = asset({2}, AssetStoragePolicy::External, 'b');
+        const Project plain = take_value(Project::create(
+            ProjectInput{{1}, "bare", 100, {3}, {bare}, {sequence}}));
+        const ConceptCensus plain_census = census(plain);
+        REQUIRE_FALSE(plain_census.contains(Concept::AssetLoopInfo));
+        REQUIRE_FALSE(plain_census.contains(Concept::AssetAlternateRepresentation));
+    }
+}
+
+TEST_CASE("a census names a time-conform policy and a nested clip's start offset",
+          "[interchange]") {
+    SECTION("a stretched media clip is no longer exported as lossless") {
+        // The sharpest case in this change. DAWproject declares clip.media and
+        // clip.musical FULL on export, so before this concept existed a
+        // time-conformed clip produced an empty loss set and a manifest that
+        // said "lossless": true, while the policy was never written. Re-import
+        // yielded TimeConform::None -- the wrong length or the wrong pitch.
+        MediaAsset media = asset({2}, AssetStoragePolicy::External, 'd');
+        auto plain = take_value(Clip::create({4}, {0}, {100}, MediaRef{{2}, {0}, 1'000}));
+        auto conformed = take_value(plain.with_time_conform(TimeConform::Stretch));
+        auto track = take_value(Track::create({6}, "media", {conformed}));
+        auto sequence = take_value(Sequence::create({3}, "root", TickDuration{1'000}, {track}));
+        const Project project = take_value(Project::create(
+            ProjectInput{{1}, "stretched", 100, {3}, {media}, {sequence}}));
+
+        const ConceptCensus counted = census(project);
+        REQUIRE(counted.count(Concept::ClipTimeConform) == 1);
+        REQUIRE(counted.owners(Concept::ClipTimeConform)[0] == ItemId{4});
+        REQUIRE(concept_detectable_in_model(Concept::ClipTimeConform));
+
+        // TimeConform::None is the default and must record nothing, or every
+        // media clip in the corpus would claim a policy it never authored.
+        auto plain_track = take_value(Track::create({6}, "media", {plain}));
+        auto plain_seq = take_value(Sequence::create({3}, "root", TickDuration{1'000},
+                                                     {plain_track}));
+        const Project unconformed = take_value(Project::create(
+            ProjectInput{{1}, "plain", 100, {3}, {media}, {plain_seq}}));
+        REQUIRE_FALSE(census(unconformed).contains(Concept::ClipTimeConform));
+    }
+
+    SECTION("a nested sequence entered partway through") {
+        // The media case earned clip.media-window for this exact shape; the
+        // nested case had no equivalent, so the offset vanished silently.
+        auto inner_clip = take_value(Clip::create({7}, {0}, {100},
+                                                  take_value(MidiContent::create(
+                                                      {{{8}, {20}, {10}, 0x8000, 64, 1}}))));
+        auto inner_track = take_value(Track::create({6}, "inner", {inner_clip}));
+        auto inner = take_value(Sequence::create({3}, "inner", TickDuration{400}, {inner_track}));
+
+        auto windowed = take_value(Clip::create({9}, {0}, {100}, SequenceRef{{3}, {48}}));
+        auto outer_track = take_value(Track::create({10}, "outer", {windowed}));
+        auto outer = take_value(Sequence::create({2}, "root", TickDuration{400}, {outer_track}));
+        const Project project = take_value(Project::create(
+            ProjectInput{{1}, "windowed", 100, {2}, {}, {outer, inner}}));
+
+        const ConceptCensus counted = census(project);
+        REQUIRE(counted.count(Concept::SequenceNested) == 1);
+        REQUIRE(counted.count(Concept::ClipSequenceWindow) == 1);
+        REQUIRE(counted.owners(Concept::ClipSequenceWindow)[0] == ItemId{9});
+        REQUIRE(concept_detectable_in_model(Concept::ClipSequenceWindow));
+
+        // Entering at the beginning is not a window.
+        auto whole = take_value(Clip::create({9}, {0}, {100}, SequenceRef{{3}, {0}}));
+        auto whole_track = take_value(Track::create({10}, "outer", {whole}));
+        auto whole_outer = take_value(Sequence::create({2}, "root", TickDuration{400},
+                                                       {whole_track}));
+        const Project unwindowed = take_value(Project::create(
+            ProjectInput{{1}, "whole", 100, {2}, {}, {whole_outer, inner}}));
+        const ConceptCensus plain_census = census(unwindowed);
+        REQUIRE(plain_census.count(Concept::SequenceNested) == 1);
+        REQUIRE_FALSE(plain_census.contains(Concept::ClipSequenceWindow));
+    }
+}
+
+TEST_CASE("a census records authored track order only when it differs from identity order",
+          "[interchange]") {
+    // Authored order is carried BESIDE tracks(), and a sequence with no
+    // recorded order presents identity order. So the concept is the
+    // DIFFERENCE: recording it whenever an order exists would name every
+    // document in the corpus and tell a reader nothing.
+    auto make = [](ItemId id, const char* name) {
+        auto clip = take_value(Clip::create({static_cast<std::uint64_t>(id.value + 100)}, {0}, {100},
+                                            take_value(MidiContent::create(
+                                                {{{static_cast<std::uint64_t>(id.value + 200)},
+                                                  {20}, {10}, 0x8000, 64, 1}}))));
+        return take_value(Track::create(id, name, {clip}));
+    };
+    auto natural = take_value(
+        Sequence::create({2}, "root", TickDuration{1'000}, {make({6}, "a"), make({7}, "b")}));
+    const Project unordered = take_value(
+        Project::create(ProjectInput{{1}, "natural", 1'000, {2}, {}, {natural}}));
+    REQUIRE_FALSE(census(unordered).contains(Concept::TrackAuthoredOrder));
+
+    // move_track rewrites authored order and nothing else, which is exactly
+    // the distinction under test.
+    auto reordered = take_value(natural.move_track({7}, ItemId{6}));
+    const Project moved = take_value(
+        Project::create(ProjectInput{{1}, "reordered", 1'000, {2}, {}, {reordered}}));
+    const ConceptCensus counted = census(moved);
+    REQUIRE(counted.count(Concept::TrackAuthoredOrder) == 1);
+    REQUIRE(counted.owners(Concept::TrackAuthoredOrder)[0] == ItemId{2});
+    REQUIRE(concept_detectable_in_model(Concept::TrackAuthoredOrder));
+}
+
+TEST_CASE("a census names a track whose live content is a take rather than its arrangement",
+          "[interchange]") {
+    // The lowerer CLEARS the arrangement when a live take lane is selected, so
+    // the arrangement is not what the track plays -- while both writers walk
+    // track.clips() unconditionally. Before this concept existed the manifest
+    // said only that "alternate takes are omitted", which implies the primary
+    // content survived. It did not: the exported file plays other material.
+    auto clip = take_value(Clip::create({5}, {0}, {100},
+                                        take_value(MidiContent::create(
+                                            {{{8}, {20}, {10}, 0x8000, 64, 1}}))));
+    auto recording = take_value(
+        Take::create({13}, MediaRef{{20}, {0}, 100}, {0}, RationalRate{48'000, 1}));
+    auto lane = take_value(TakeLane::create({12}, "recording", {recording},
+                                            {{.take_id = {13}, .range = {{0}, 50, {48'000, 1}}}}));
+
+    auto selected = take_value(Track::create(TrackInput{.id = {6},
+                                                        .name = "takes",
+                                                        .clips = {clip},
+                                                        .take_lanes = {lane},
+                                                        .active_take_lane_id = {12}}));
+    REQUIRE(selected.active_take_lane_id().valid());
+    auto sequence =
+        take_value(Sequence::create({2}, "root", TickDuration{1'000}, {selected}));
+    const Project live_take = take_value(Project::create(
+        ProjectInput{{1}, "takes", 100, {2}, {asset({20}, AssetStoragePolicy::External, 'e')},
+                     {sequence}}));
+
+    const ConceptCensus counted = census(live_take);
+    REQUIRE(counted.count(Concept::TakeActiveLane) == 1);
+    REQUIRE(counted.owners(Concept::TakeActiveLane).size() == 1);
+    REQUIRE(counted.owners(Concept::TakeActiveLane)[0] == ItemId{6});
+    REQUIRE(concept_detectable_in_model(Concept::TakeActiveLane));
+    // The alternates are still named too -- the selection is a SECOND loss
+    // beside them, not a replacement for them.
+    REQUIRE(counted.count(Concept::TakeLane) == 1);
+
+    // A track with no selection plays its arrangement, so nothing is named and
+    // the row cannot be a constant that fires on every track holding takes.
+    auto unselected = take_value(Track::create(TrackInput{
+        .id = {6}, .name = "arranged", .clips = {clip}, .take_lanes = {lane}}));
+    REQUIRE_FALSE(unselected.active_take_lane_id().valid());
+    auto plain_seq =
+        take_value(Sequence::create({2}, "root", TickDuration{1'000}, {unselected}));
+    const Project arranged = take_value(Project::create(
+        ProjectInput{{1}, "arranged", 100, {2},
+                     {asset({20}, AssetStoragePolicy::External, 'e')}, {plain_seq}}));
+    const ConceptCensus plain = census(arranged);
+    REQUIRE_FALSE(plain.contains(Concept::TakeActiveLane));
+    REQUIRE(plain.count(Concept::TakeLane) == 1);
+}
+
 TEST_CASE("a census records track mixer state and the lanes that automate it",
           "[interchange]") {
     // Without this the export loss manifest for a mixed session would claim

@@ -73,6 +73,34 @@
       "level": "none",
       "refusal": "per-clip controller and expression streams"
     },
+    "track.record-arm": {
+      "level": "none",
+      "refusal": "record-armed tracks"
+    },
+    "track.authored-order": {
+      "level": "none",
+      "refusal": "authored top-to-bottom track order"
+    },
+    "asset.loop-info": {
+      "level": "none",
+      "refusal": "media loop points"
+    },
+    "asset.alternate-representation": {
+      "level": "none",
+      "refusal": "alternate asset representations"
+    },
+    "clip.time-conform": {
+      "level": "none",
+      "refusal": "clip time-conform policy"
+    },
+    "clip.sequence-window": {
+      "level": "none",
+      "refusal": "nested sequences starting at an offset"
+    },
+    "take.active-lane": {
+      "level": "none",
+      "refusal": "tracks playing a take lane rather than their arrangement"
+    },
     "clip.fades": {
       "level": "none",
       "refusal": "per-clip fades"
@@ -178,7 +206,7 @@
     "take.lane": {
       "level": "drop",
       "loss_class": "dropped",
-      "loss": "the writer does not inspect take lanes, so alternate takes are omitted"
+      "loss": "the writer does not inspect take lanes, so alternate takes are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like"
     },
     "take.comp": {
       "level": "drop",
@@ -214,6 +242,41 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"
+    },
+    "track.record-arm": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits arrangement content only, so record arm is not carried and the reopened session arms nothing"
+    },
+    "track.authored-order": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits tracks in the document's identity order, so an authored top-to-bottom order is lost"
+    },
+    "asset.loop-info": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits a single locator per asset and no loop metadata, so authored loop points are dropped"
+    },
+    "asset.alternate-representation": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits one representation per asset, so alternate access paths and their roles are dropped"
+    },
+    "clip.time-conform": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits a clip's placed range without its time-conform policy, so a re-imported clip conforms by neither resampling nor stretching and plays at the wrong length or pitch"
+    },
+    "clip.sequence-window": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer flattens nested sequences, so a nested clip's start offset into its sequence is dropped with the nesting"
+    },
+    "take.active-lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds"
     },
     "automation.device-param": {
       "level": "drop",

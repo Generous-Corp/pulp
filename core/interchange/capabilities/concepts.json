@@ -83,6 +83,13 @@
     { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." },
     { "id": "clip.media-window", "detect": "model", "summary": "A media clip that plays a source subrange rather than the referenced asset's complete frame range." },
     { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." },
-    { "id": "clip.midi-expression-lane", "detect": "model", "summary": "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note." }
+    { "id": "clip.midi-expression-lane", "detect": "model", "summary": "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note." },
+    { "id": "track.record-arm", "detect": "model", "summary": "A track the author armed for recording, which selects where newly recorded material lands." },
+    { "id": "track.authored-order", "detect": "model", "summary": "A top-to-bottom track order the author set, differing from the identity order the document stores tracks in." },
+    { "id": "asset.loop-info", "detect": "model", "summary": "Loop points and their tempo context carried on a media asset, so a sampler repeats the region the author chose." },
+    { "id": "asset.alternate-representation", "detect": "model", "summary": "An alternate access path for the same asset content hash, carrying its own role, locators, and storage policy." },
+    { "id": "clip.time-conform", "detect": "model", "summary": "A clip's authored policy for reconciling its placed duration against its source duration -- resample or stretch rather than neither -- which decides how long the clip plays and at what pitch." },
+    { "id": "clip.sequence-window", "detect": "model", "summary": "A nested-sequence clip that starts at an offset into the referenced sequence rather than at that sequence's beginning." },
+    { "id": "take.active-lane", "detect": "model", "summary": "A track whose live content is a take lane's comp rather than its arrangement clips, so the arrangement is not what the track plays." }
   ]
 }

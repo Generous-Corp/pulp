@@ -125,6 +125,13 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
+        {ImportLevel::None, "", "record-armed tracks"}, // track.record-arm
+        {ImportLevel::None, "", "authored top-to-bottom track order"}, // track.authored-order
+        {ImportLevel::None, "", "media loop points"}, // asset.loop-info
+        {ImportLevel::None, "", "alternate asset representations"}, // asset.alternate-representation
+        {ImportLevel::None, "", "clip time-conform policy"}, // clip.time-conform
+        {ImportLevel::None, "", "nested sequences starting at an offset"}, // clip.sequence-window
+        {ImportLevel::None, "", "tracks playing a take lane rather than their arrangement"}, // take.active-lane
     },
     // smf
     {
@@ -179,6 +186,13 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
         {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
+        {ImportLevel::None, "", "record-armed tracks"}, // track.record-arm
+        {ImportLevel::None, "", "authored top-to-bottom track order"}, // track.authored-order
+        {ImportLevel::None, "", "media loop points"}, // asset.loop-info
+        {ImportLevel::None, "", "alternate asset representations"}, // asset.alternate-representation
+        {ImportLevel::None, "", "clip time-conform policy"}, // clip.time-conform
+        {ImportLevel::None, "", "nested sequences starting at an offset"}, // clip.sequence-window
+        {ImportLevel::None, "", "tracks playing a take lane rather than their arrangement"}, // take.active-lane
     },
 };
 
@@ -215,7 +229,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "devices are identity-only in the document; DAWproject requires a device type to place one"}, // device.placement
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for device.payload"}, // device.payload
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for effect.timewarp"}, // effect.timewarp
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not inspect take lanes, so alternate takes are omitted"}, // take.lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not inspect take lanes, so alternate takes are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like"}, // take.lane
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not flatten comp selections, so comp segment choices are omitted"}, // take.comp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped"}, // track.freeze
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // asset.sealed-hash
@@ -236,6 +250,13 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"}, // clip.midi-expression-lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits arrangement content only, so record arm is not carried and the reopened session arms nothing"}, // track.record-arm
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits tracks in the document's identity order, so an authored top-to-bottom order is lost"}, // track.authored-order
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits a single locator per asset and no loop metadata, so authored loop points are dropped"}, // asset.loop-info
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits one representation per asset, so alternate access paths and their roles are dropped"}, // asset.alternate-representation
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits a clip's placed range without its time-conform policy, so a re-imported clip conforms by neither resampling nor stretching and plays at the wrong length or pitch"}, // clip.time-conform
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer flattens nested sequences, so a nested clip's start offset into its sequence is dropped with the nesting"}, // clip.sequence-window
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds"}, // take.active-lane
     },
     // smf
     {
@@ -269,7 +290,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "device chains have no Standard MIDI File representation and are omitted"}, // device.placement
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for device.payload"}, // device.payload
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for effect.timewarp"}, // effect.timewarp
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "takes and comp lanes have no Standard MIDI File representation and are omitted"}, // take.lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "takes and comp lanes have no Standard MIDI File representation and are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like"}, // take.lane
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "take comp selections have no Standard MIDI File representation and are omitted"}, // take.comp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "frozen audio renders have no Standard MIDI File representation and are omitted"}, // track.freeze
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files do not carry Pulp media identity hashes"}, // asset.sealed-hash
@@ -290,6 +311,13 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"}, // clip.fade-shape
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"}, // clip.midi-expression-lane
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files describe playback rather than session state, so a record-armed track is written unarmed"}, // track.record-arm
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "a Standard MIDI File's track order is the chunk order the writer emits, so an authored top-to-bottom order is not preserved beside it"}, // track.authored-order
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files carry no media asset, so authored loop points have nothing to attach to"}, // asset.loop-info
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files carry no media asset, so alternate representations and their roles have nothing to attach to"}, // asset.alternate-representation
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files carry no media clip, so a time-conform policy has nothing to apply to"}, // clip.time-conform
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "only the root sequence is written, so a nested clip's start offset into its sequence is omitted with the nesting"}, // clip.sequence-window
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds"}, // take.active-lane
     },
 };
 } // namespace detail

@@ -39,6 +39,13 @@
     "clip.media": { "level": "none", "refusal": "media clips" },
     "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
     "clip.midi-expression-lane": { "level": "none", "refusal": "per-clip controller and expression streams" },
+    "track.record-arm": { "level": "none", "refusal": "record-armed tracks" },
+    "track.authored-order": { "level": "none", "refusal": "authored top-to-bottom track order" },
+    "asset.loop-info": { "level": "none", "refusal": "media loop points" },
+    "asset.alternate-representation": { "level": "none", "refusal": "alternate asset representations" },
+    "clip.time-conform": { "level": "none", "refusal": "clip time-conform policy" },
+    "clip.sequence-window": { "level": "none", "refusal": "nested sequences starting at an offset" },
+    "take.active-lane": { "level": "none", "refusal": "tracks playing a take lane rather than their arrangement" },
     "tempo.ramp": { "level": "none", "refusal": "continuous tempo ramps" },
     "marker": { "level": "none", "refusal": "arrangement markers" },
     "automation.device-param": { "level": "none", "refusal": "automation lanes" },
@@ -87,6 +94,41 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"
+    },
+    "track.record-arm": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files describe playback rather than session state, so a record-armed track is written unarmed"
+    },
+    "track.authored-order": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "a Standard MIDI File's track order is the chunk order the writer emits, so an authored top-to-bottom order is not preserved beside it"
+    },
+    "asset.loop-info": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files carry no media asset, so authored loop points have nothing to attach to"
+    },
+    "asset.alternate-representation": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files carry no media asset, so alternate representations and their roles have nothing to attach to"
+    },
+    "clip.time-conform": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Standard MIDI Files carry no media clip, so a time-conform policy has nothing to apply to"
+    },
+    "clip.sequence-window": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "only the root sequence is written, so a nested clip's start offset into its sequence is omitted with the nesting"
+    },
+    "take.active-lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds"
     },
     "clip.launch": {
       "level": "drop",
@@ -180,7 +222,7 @@
     "take.lane": {
       "level": "drop",
       "loss_class": "dropped",
-      "loss": "takes and comp lanes have no Standard MIDI File representation and are omitted"
+      "loss": "takes and comp lanes have no Standard MIDI File representation and are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like"
     },
     "take.comp": {
       "level": "drop",

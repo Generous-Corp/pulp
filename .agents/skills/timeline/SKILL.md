@@ -1726,6 +1726,37 @@ one. What is genuinely broken without any row at all is a concept that does not
 *exist*: `LossManifest` is keyed by `Concept`, so a construct with no id cannot
 appear in a manifest at any level, and the export reports a clean bill.
 
+### A concept for authored ORDER must record the difference, not the presence
+
+`Sequence::track_order()` is carried **beside** `tracks()`, never as a permutation of it, and the
+header is explicit that *"a sequence constructed without a recorded order presents the identity order
+of `tracks()` here."* So the span is **always non-empty**, and a census predicate of
+`if (!order.empty())` names every document in the corpus while telling a reader nothing — the concept
+becomes noise and the loss manifest becomes less useful, not more.
+
+The correct predicate compares authored order against the identity order of `tracks()` and records
+only the **difference**. Mutating it to record presence instead is a control worth keeping in mind:
+it fails not only the targeted assertion but the census's own invariant test *"a census records what
+a document uses, and only that"* — eight assertions across two cases. **Any field with a
+non-empty default needs this treatment**; the ones that read naturally as "does it exist" are the
+ones that quietly become constants.
+
+### Two instruments, and only one can see an unnamed construct
+
+When asking "is the loss manifest honest?", the direction of the check decides what it can find:
+
+- **Vocabulary-first** — *every `detect: model` concept is recorded by some census path.* Catches a
+  walker that invented a format-only concept. Measured: **0 findings**, 40/40 recorded.
+- **Model-first** — *every authored field in `timeline_schema.json` has a concept that can name it.*
+  Catches authored state the vocabulary never named. Measured: **5 findings**, including the
+  expression-lane defect itself.
+
+**The vocabulary-first check is structurally blind to the second class**, because a concept that does
+not exist cannot be reported as unrecorded — and `LossManifest` is keyed by `Concept`, so state with
+no id cannot appear in a manifest at any level. When adding a model field, ask the model-first
+question; the schema manifest is machine-readable, so it is a short script, but **control it against
+a known-missing concept first** — "finds nothing" is what a broken detector says about every input.
+
 ### A capability table declares the ADAPTER, not the FORMAT
 
 `smf.json` describes Pulp's bounded Standard MIDI File subset — its reader and

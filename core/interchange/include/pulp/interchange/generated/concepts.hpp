@@ -62,9 +62,16 @@ enum class Concept : std::uint16_t {
     ClipMediaWindow = 48,
     ClipFadeShape = 49,
     ClipMidiExpressionLane = 50,
+    TrackRecordArm = 51,
+    TrackAuthoredOrder = 52,
+    AssetLoopInfo = 53,
+    AssetAlternateRepresentation = 54,
+    ClipTimeConform = 55,
+    ClipSequenceWindow = 56,
+    TakeActiveLane = 57,
 };
 
-inline constexpr std::size_t kConceptCount = 51;
+inline constexpr std::size_t kConceptCount = 58;
 
 namespace detail {
 struct ConceptRecord {
@@ -125,6 +132,13 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"clip.media-window", "A media clip that plays a source subrange rather than the referenced asset's complete frame range.", true},
     {"clip.fade-shape", "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like.", true},
     {"clip.midi-expression-lane", "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note.", true},
+    {"track.record-arm", "A track the author armed for recording, which selects where newly recorded material lands.", true},
+    {"track.authored-order", "A top-to-bottom track order the author set, differing from the identity order the document stores tracks in.", true},
+    {"asset.loop-info", "Loop points and their tempo context carried on a media asset, so a sampler repeats the region the author chose.", true},
+    {"asset.alternate-representation", "An alternate access path for the same asset content hash, carrying its own role, locators, and storage policy.", true},
+    {"clip.time-conform", "A clip's authored policy for reconciling its placed duration against its source duration -- resample or stretch rather than neither -- which decides how long the clip plays and at what pitch.", true},
+    {"clip.sequence-window", "A nested-sequence clip that starts at an offset into the referenced sequence rather than at that sequence's beginning.", true},
+    {"take.active-lane", "A track whose live content is a take lane's comp rather than its arrangement clips, so the arrangement is not what the track plays.", true},
 };
 } // namespace detail
 

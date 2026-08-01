@@ -70,6 +70,13 @@ is not a reason to add a model feature.
 | `clip.media-window` | yes | A media clip that plays a source subrange rather than the referenced asset's complete frame range. |
 | `clip.fade-shape` | yes | A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like. |
 | `clip.midi-expression-lane` | yes | A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note. |
+| `track.record-arm` | yes | A track the author armed for recording, which selects where newly recorded material lands. |
+| `track.authored-order` | yes | A top-to-bottom track order the author set, differing from the identity order the document stores tracks in. |
+| `asset.loop-info` | yes | Loop points and their tempo context carried on a media asset, so a sampler repeats the region the author chose. |
+| `asset.alternate-representation` | yes | An alternate access path for the same asset content hash, carrying its own role, locators, and storage policy. |
+| `clip.time-conform` | yes | A clip's authored policy for reconciling its placed duration against its source duration -- resample or stretch rather than neither -- which decides how long the clip plays and at what pitch. |
+| `clip.sequence-window` | yes | A nested-sequence clip that starts at an offset into the referenced sequence rather than at that sequence's beginning. |
+| `take.active-lane` | yes | A track whose live content is a take lane's comp rather than its arrangement clips, so the arrangement is not what the track plays. |
 
 ## DAWproject
 
@@ -130,6 +137,13 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
 | `clip.midi-expression-lane` | none | per-clip controller and expression streams |
+| `track.record-arm` | none | record-armed tracks |
+| `track.authored-order` | none | authored top-to-bottom track order |
+| `asset.loop-info` | none | media loop points |
+| `asset.alternate-representation` | none | alternate asset representations |
+| `clip.time-conform` | none | clip time-conform policy |
+| `clip.sequence-window` | none | nested sequences starting at an offset |
+| `take.active-lane` | none | tracks playing a take lane rather than their arrangement |
 
 ### Export
 
@@ -165,7 +179,7 @@ Format id `dawproject`. Writer registered: yes.
 | `device.placement` | drop |  | dropped | devices are identity-only in the document; DAWproject requires a device type to place one |
 | `device.payload` | drop | | dropped | not declared |
 | `effect.timewarp` | drop | | dropped | not declared |
-| `take.lane` | drop |  | dropped | the writer does not inspect take lanes, so alternate takes are omitted |
+| `take.lane` | drop |  | dropped | the writer does not inspect take lanes, so alternate takes are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like |
 | `take.comp` | drop |  | dropped | the writer does not flatten comp selections, so comp segment choices are omitted |
 | `track.freeze` | drop |  | dropped | DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped |
 | `asset.sealed-hash` | full |  |  |  |
@@ -186,6 +200,13 @@ Format id `dawproject`. Writer registered: yes.
 | `clip.media-window` | drop |  | dropped | the writer references the complete media asset, so a nonzero source start or partial frame count is dropped |
 | `clip.fade-shape` | drop |  | dropped | the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped |
 | `clip.midi-expression-lane` | drop |  | dropped | the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted |
+| `track.record-arm` | drop |  | dropped | the writer emits arrangement content only, so record arm is not carried and the reopened session arms nothing |
+| `track.authored-order` | drop |  | dropped | the writer emits tracks in the document's identity order, so an authored top-to-bottom order is lost |
+| `asset.loop-info` | drop |  | dropped | the writer emits a single locator per asset and no loop metadata, so authored loop points are dropped |
+| `asset.alternate-representation` | drop |  | dropped | the writer emits one representation per asset, so alternate access paths and their roles are dropped |
+| `clip.time-conform` | drop |  | dropped | the writer emits a clip's placed range without its time-conform policy, so a re-imported clip conforms by neither resampling nor stretching and plays at the wrong length or pitch |
+| `clip.sequence-window` | drop |  | dropped | the writer flattens nested sequences, so a nested clip's start offset into its sequence is dropped with the nesting |
+| `take.active-lane` | drop |  | dropped | the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds |
 
 ## Standard MIDI File
 
@@ -246,6 +267,13 @@ Format id `smf`. Writer registered: yes.
 | `clip.media-window` | none | not declared |
 | `clip.fade-shape` | none | not declared |
 | `clip.midi-expression-lane` | none | per-clip controller and expression streams |
+| `track.record-arm` | none | record-armed tracks |
+| `track.authored-order` | none | authored top-to-bottom track order |
+| `asset.loop-info` | none | media loop points |
+| `asset.alternate-representation` | none | alternate asset representations |
+| `clip.time-conform` | none | clip time-conform policy |
+| `clip.sequence-window` | none | nested sequences starting at an offset |
+| `take.active-lane` | none | tracks playing a take lane rather than their arrangement |
 
 ### Export
 
@@ -281,7 +309,7 @@ Format id `smf`. Writer registered: yes.
 | `device.placement` | drop |  | dropped | device chains have no Standard MIDI File representation and are omitted |
 | `device.payload` | drop | | dropped | not declared |
 | `effect.timewarp` | drop | | dropped | not declared |
-| `take.lane` | drop |  | dropped | takes and comp lanes have no Standard MIDI File representation and are omitted |
+| `take.lane` | drop |  | dropped | takes and comp lanes have no Standard MIDI File representation and are omitted; a track playing a take lane exports its arrangement clips, which is not what the document sounds like |
 | `take.comp` | drop |  | dropped | take comp selections have no Standard MIDI File representation and are omitted |
 | `track.freeze` | drop |  | dropped | frozen audio renders have no Standard MIDI File representation and are omitted |
 | `asset.sealed-hash` | drop |  | dropped | Standard MIDI Files do not carry Pulp media identity hashes |
@@ -302,6 +330,13 @@ Format id `smf`. Writer registered: yes.
 | `clip.media-window` | drop | | dropped | not declared |
 | `clip.fade-shape` | drop |  | dropped | Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped |
 | `clip.midi-expression-lane` | drop |  | dropped | Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it |
+| `track.record-arm` | drop |  | dropped | Standard MIDI Files describe playback rather than session state, so a record-armed track is written unarmed |
+| `track.authored-order` | drop |  | dropped | a Standard MIDI File's track order is the chunk order the writer emits, so an authored top-to-bottom order is not preserved beside it |
+| `asset.loop-info` | drop |  | dropped | Standard MIDI Files carry no media asset, so authored loop points have nothing to attach to |
+| `asset.alternate-representation` | drop |  | dropped | Standard MIDI Files carry no media asset, so alternate representations and their roles have nothing to attach to |
+| `clip.time-conform` | drop |  | dropped | Standard MIDI Files carry no media clip, so a time-conform policy has nothing to apply to |
+| `clip.sequence-window` | drop |  | dropped | only the root sequence is written, so a nested clip's start offset into its sequence is omitted with the nesting |
+| `take.active-lane` | drop |  | dropped | the writer walks the arrangement, so a track playing a take lane exports its arrangement clips instead of the take that sounds |
 
 ## Adding a format
 

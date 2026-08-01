@@ -4,6 +4,7 @@
 #include <pulp/timeline/automation_lane.hpp>
 
 #include <algorithm>
+#include <span>
 #include <cstdint>
 #include <cmath>
 #include <variant>
@@ -70,11 +71,27 @@ void record_clip(ConceptCensus& out, const timeline::Project& project,
                 out.record(Concept::ContentRegistered, id, limits);
             },
             [&](const timeline::OpaqueContent&) { out.record(Concept::ContentOpaque, id, limits); },
-            [&](const timeline::SequenceRef&) {
+            [&](const timeline::SequenceRef& nested) {
                 out.record(Concept::SequenceNested, id, limits);
+                // The media case earned `clip.media-window` for exactly this
+                // shape; the nested case had no equivalent, so a clip starting
+                // partway into its sequence re-imported at tick 0 -- different
+                // music, with nothing in the manifest to say so.
+                if (nested.source_start.value != 0)
+                    out.record(Concept::ClipSequenceWindow, id, limits);
             },
         },
         clip.content());
+
+    // Time conform decides how long a media clip plays and at what pitch. The
+    // vocabulary's nearest neighbours, `clip.warp` and `effect.timewarp`, are
+    // BOTH `detect: format` -- i.e. the vocabulary asserted the model could not
+    // express this. It can, and they are a different construct anyway: a warp
+    // map is a set of markers, this is a scalar policy. Until now a stretched
+    // media clip exported to a format declaring `clip.media` full and got a
+    // manifest that affirmatively said "lossless": true.
+    if (clip.time_conform() != timeline::TimeConform::None)
+        out.record(Concept::ClipTimeConform, id, limits);
 
     const timeline::ClipPlaybackProperties playback = clip.playback_properties();
     if (playback.gain_linear != 1.0f)
@@ -125,6 +142,15 @@ void record_track(ConceptCensus& out, const timeline::Project& project,
                    lane.target());
     }
 
+    // When a track selects a live take lane the lowerer CLEARS the arrangement
+    // and compiles the comp instead, so the arrangement is not what the track
+    // plays. Both writers walk track.clips() unconditionally, so an export
+    // silently substitutes material the document does not sound like. Naming
+    // the selection is what lets a manifest point at that rather than at the
+    // alternates.
+    if (track.active_take_lane_id().valid())
+        out.record(Concept::TakeActiveLane, id, limits);
+
     for (const timeline::TakeLane& lane : track.take_lanes()) {
         out.record(Concept::TakeLane, lane.id(), limits);
         if (!lane.comp_segments().empty())
@@ -133,6 +159,13 @@ void record_track(ConceptCensus& out, const timeline::Project& project,
 
     if (track.freeze().has_value())
         out.record(Concept::TrackFreeze, id, limits);
+    // Record arm selects where new material lands. A format that drops it
+    // reopens the session pointed at a different track, which is a change to
+    // what the next take does rather than to what the document sounds like --
+    // invisible on playback and therefore exactly the kind of loss a manifest
+    // exists to state.
+    if (track.record_armed())
+        out.record(Concept::TrackRecordArm, id, limits);
 }
 
 } // namespace
@@ -186,6 +219,15 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
                        ? Concept::AssetReferencedMedia
                        : Concept::AssetEmbeddedMedia,
                    asset.id, limits);
+        // Loop points decide what a sampler repeats, and an alternate
+        // representation is a second way to reach the same bytes. Both are
+        // authored, both survive a round trip, and a format carrying only the
+        // primary locator drops them -- so both need naming or the manifest
+        // reports a clean bill over an asset that no longer loops.
+        if (asset.loop_info.has_value())
+            out.record(Concept::AssetLoopInfo, asset.id, limits);
+        for (std::size_t index = 0; index < asset.representations.size(); ++index)
+            out.record(Concept::AssetAlternateRepresentation, asset.id, limits);
     }
 
     for (const timeline::Sequence& sequence : project.sequences()) {
@@ -196,6 +238,18 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
             out.record(Concept::ContextChordScale, sequence.id(), limits);
         if (!sequence.groove().is_canonical_default())
             out.record(Concept::ContextGroove, sequence.id(), limits);
+        // Authored order is carried BESIDE tracks(), never as a permutation of
+        // it, and a sequence with no recorded order presents identity order
+        // here. So the concept is the DIFFERENCE, not the presence: recording
+        // it unconditionally would name every document and say nothing.
+        const std::span<const timeline::Track> tracks = sequence.tracks();
+        const std::span<const ItemId> order = sequence.track_order();
+        const bool reordered =
+            order.size() != tracks.size() ||
+            !std::equal(order.begin(), order.end(), tracks.begin(), tracks.end(),
+                        [](ItemId lhs, const timeline::Track& rhs) { return lhs == rhs.id(); });
+        if (reordered)
+            out.record(Concept::TrackAuthoredOrder, sequence.id(), limits);
         // Markers and regions share one concept: its vocabulary entry is "a
         // named point or range on the timeline", so a span is the same concept
         // as a point rather than a second atom. Both are named locations a
