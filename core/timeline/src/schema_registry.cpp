@@ -498,10 +498,17 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement_velocity", SchemaValueKind::U32},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    // The modifier arrays are optional at the current version because a command
+    // schema has no migration edges to walk: decode gates on exact version
+    // equality, so raising the version would reject every envelope already
+    // written. An omitted array keeps meaning what it meant before the field
+    // existed.
     schemas.push_back(builtin("pulp.timeline.command.replace_note_content", SchemaDomain::Command,
                               {{"clip_id", SchemaValueKind::U64String},
                                {"expected", SchemaValueKind::Array},
+                               {"expected_modifiers", SchemaValueKind::Array, false},
                                {"replacement", SchemaValueKind::Array},
+                               {"replacement_modifiers", SchemaValueKind::Array, false},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_clip_playback_properties",

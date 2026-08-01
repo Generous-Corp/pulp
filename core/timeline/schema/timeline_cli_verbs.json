@@ -1000,9 +1000,23 @@
         },
         {
           "kind": "Array",
+          "name": "expected-modifiers",
+          "required": false,
+          "schema_field": "expected_modifiers",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
           "name": "replacement",
           "required": true,
           "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "replacement-modifiers",
+          "required": false,
+          "schema_field": "replacement_modifiers",
           "value_type": "json"
         },
         {
