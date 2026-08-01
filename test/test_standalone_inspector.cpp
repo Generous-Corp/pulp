@@ -416,7 +416,6 @@ TEST_CASE("Standalone local inspector owns only the in-window overlay",
     std::filesystem::remove_all(runtime_dir, error);
     ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
     runtime_env.set(runtime_dir.string());
-
     StandaloneApp app(null_processor_factory);
     TestProcessor processor;
     pulp::state::StateStore store;
@@ -438,6 +437,31 @@ TEST_CASE("Standalone local inspector owns only the in-window overlay",
     REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
     runtime->stop();
     REQUIRE(runtime->try_finish_retirement());
+}
+
+TEST_CASE("Standalone inspector runtime evaluation requires an active controller profile",
+          "[standalone][inspect][runtime-eval][negative]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "off", {}, true) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "observe", {}, true) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"session.control", "runtime.eval"}) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"runtime.eval"}, true) == nullptr);
+
+    auto develop = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "develop", {}, true);
+    REQUIRE(develop != nullptr);
 }
 
 TEST_CASE("Standalone inspector uses the portable screenshot backend without host readback",

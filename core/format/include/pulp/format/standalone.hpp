@@ -80,6 +80,9 @@ struct StandaloneConfig {
     // types when inspector support is compiled out.
     std::string inspector_profile;
     std::vector<std::string> inspector_capabilities;
+    // Separate high-risk acknowledgement for arbitrary evaluation in the live
+    // scripted UI realm. No profile or persisted setting implies this bit.
+    bool inspector_runtime_eval = false;
 
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()

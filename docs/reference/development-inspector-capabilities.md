@@ -41,11 +41,15 @@ trip.
 | `test.input` | no | yes | `Test.injectMidi` accepts bounded note-on/off events and `Test.setTransport` applies coherent standalone play/position/tempo updates through the normal host path |
 | `authoring.tweaks` | no | yes | Transient tweaks, highlight, bypass, lock, live constants, editor URL templates, and repaint flashing stay in this capability; filesystem and editor-launch methods remain unavailable |
 | `telemetry.stream` | no | yes | The standalone owner claims the value-channel telemetry sidecars only when this capability is effective, then provides bounded contextual snapshots and per-client targeted subscriptions |
-| `runtime.eval` | no | no | High-risk separate opt-in; no standalone profile enables it |
+| `runtime.eval` | no | no | High-risk separate opt-in; `--inspect-runtime-eval` is required in addition to a controller-capable develop/custom selection |
 | `unavailable` | no | no | Filesystem-backed tweak/fixture operations and editor launch are classified unavailable for the future policy |
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. These are
 enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
+The launcher can add it only through the literal `--inspect-runtime-eval`
+acknowledgement; custom also has to name `runtime.eval` and `session.control`.
+The acknowledgement is one-run state and is not part of standalone persisted
+preferences.
 
 ## Checked implementation matrix
 

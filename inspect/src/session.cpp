@@ -120,10 +120,16 @@ InspectorAccessPolicy::InspectorAccessPolicy(InspectorPolicyConfig config)
     const auto requested = profile_ == InspectorProfile::Custom
         ? std::span<const InspectorCapability>(config.custom_capabilities)
         : profile_capabilities(profile_);
+    const bool runtime_eval_requested = config.runtime_eval_enabled &&
+        (profile_ == InspectorProfile::Develop ||
+         (profile_ == InspectorProfile::Custom &&
+          contains(requested, InspectorCapability::RuntimeEval)));
     const bool can_acquire_controller =
         contains(available_, InspectorCapability::SessionControl) &&
         contains(requested, InspectorCapability::SessionControl);
     for (const auto capability : requested) {
+        if (capability == InspectorCapability::RuntimeEval)
+            continue;
         if (!contains(available_, capability))
             continue;
         if (capability != InspectorCapability::SessionControl &&
@@ -132,6 +138,10 @@ InspectorAccessPolicy::InspectorAccessPolicy(InspectorPolicyConfig config)
             continue;
         }
         append_unique(effective_, capability);
+    }
+    if (runtime_eval_requested && can_acquire_controller &&
+        contains(available_, InspectorCapability::RuntimeEval)) {
+        append_unique(effective_, InspectorCapability::RuntimeEval);
     }
 }
 

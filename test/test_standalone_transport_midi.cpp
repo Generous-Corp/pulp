@@ -418,6 +418,7 @@ TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationP
     original.time_sig_denominator = 8;
     original.transport_playing = false;
     original.transport_recording = true;
+    original.inspector_runtime_eval = true;
 
     REQUIRE(StandaloneApp::save_persisted_config(app_name, original));
 
@@ -433,6 +434,7 @@ TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationP
     REQUIRE(loaded.time_sig_denominator == original.time_sig_denominator);
     REQUIRE(loaded.transport_playing == original.transport_playing);
     REQUIRE(loaded.transport_recording == original.transport_recording);
+    REQUIRE_FALSE(loaded.inspector_runtime_eval);
 
     // Empty app_name is the "persistence disabled" sentinel — the helpers
     // must return false / defaults so callers can opt out cleanly.
