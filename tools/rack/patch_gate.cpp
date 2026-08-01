@@ -302,8 +302,23 @@ int main(int argc, char** argv) {
                 std::snprintf(b, sizeof b, " out%d=%.3f", o, n.mod->outputs[o].getVoltage());
                 line += b;
             }
-            std::printf("        %-18s ch=%d%s\n", n.model.c_str(),
-                        n.mod->getNumOutputs() ? n.mod->outputs[0].channels : -1, line.c_str());
+            // Params too, and not as decoration. A VCA reading 0.000 with a
+            // live envelope on its CV is not an untriggered envelope -- it is
+            // a level knob at zero, because the knob MULTIPLIES the CV rather
+            // than adding to it. Without the params in the trace the only
+            // reading left is "its CV never rose", which is the advice this
+            // gate gave, and the model spent five attempts re-triggering an
+            // envelope that had been firing the whole time.
+            std::string pline;
+            for (int q = 0; q < n.mod->getNumParams(); ++q) {
+                char b[64];
+                std::snprintf(b, sizeof b, " p%d=%.3f", q,
+                              n.mod->params[q].getValue());
+                pline += b;
+            }
+            std::printf("        %-18s ch=%d%s%s%s\n", n.model.c_str(),
+                        n.mod->getNumOutputs() ? n.mod->outputs[0].channels : -1,
+                        line.c_str(), pline.empty() ? "" : "  |", pline.c_str());
         }
     }
 

@@ -1458,11 +1458,17 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                "\n\nRead the per-module activity above and find the FIRST "
                "module in the chain whose output is 0.000 — that is where the "
                "signal stops, and everything after it is silent as a "
-               "consequence rather than a cause. An output of exactly 0.000 "
-               "from a VCA or a low-pass gate means its CV never rose, so "
-               "whatever should open it is never triggered; an envelope at "
-               "0.000 was never gated; a sequencer stuck on one value is "
-               "never clocked. Give that module the thing that starts it, "
+               "consequence rather than a cause.\n\n"
+               "Each module's params are in the trace after the | as pN=value. "
+               "CHECK THEM FIRST for the module that reads 0.000, because a "
+               "level, gain or amount knob MULTIPLIES its CV rather than "
+               "adding to it: a VCA with p0=0.000 is silent however hard its "
+               "envelope fires, and no amount of re-triggering will change "
+               "that. If a gain-like param is 0, raise it.\n\n"
+               "Only if the params are sane is it a missing trigger: a VCA "
+               "whose CV input reads 0 was never opened, an envelope at 0.000 "
+               "was never gated, a sequencer stuck on one value is never "
+               "clocked. Then give that module the thing that starts it, "
                "rather than adding more modules after it.")
     raise SystemExit(f"gave up after {retries + 1} attempts")
 
