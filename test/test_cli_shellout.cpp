@@ -1607,6 +1607,7 @@ TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shel
     REQUIRE(enable_flag_value.stderr_output.find("--to requires a value") != std::string::npos);
 }
 
+#if PULP_TEST_INSPECTOR_ENABLED
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) {
@@ -1732,6 +1733,33 @@ TEST_CASE("pulp inspect rejects invalid arguments before networking",
     REQUIRE(unknown.stderr_output.find("unknown inspect argument") != std::string::npos);
     REQUIRE(unknown.stdout_output.find("Connecting to") == std::string::npos);
 }
+#else
+TEST_CASE("pulp inspect fails explicitly when the inspector component is disabled",
+          "[cli][shellout][inspect]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const std::string diagnostic =
+        "this Pulp SDK was built without the optional development inspector component "
+        "(PULP_ENABLE_INSPECTOR=OFF)";
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"inspect", "--help"},
+             {"inspect"},
+             {"inspect", "--port"},
+         }) {
+        auto result = run_pulp(args, 10000);
+        REQUIRE_FALSE(result.timed_out);
+        REQUIRE(result.exit_code == 1);
+        REQUIRE(result.stderr_output.find(diagnostic) != std::string::npos);
+        REQUIRE(result.stdout_output.empty());
+    }
+}
+#endif
 
 TEST_CASE("pulp create scaffolds a no-build app project with Android files",
           "[cli][shellout][create][issue-643]") {
