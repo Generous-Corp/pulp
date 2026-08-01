@@ -45,6 +45,21 @@ quantizer's beat/frame arithmetic.
 - Keep `TransportQuantizer`'s public behavior stable. Generic beat/frame/grid
   arithmetic belongs in `<pulp/timebase/quantize.hpp>` and the format wrapper
   delegates to it.
+- `LoopRegion` (`<pulp/timebase/loop_region.hpp>`) is two document positions plus
+  whether they are in force, and it lives here rather than beside a consumer
+  because that is the whole of it. `playback::LoopRegion` is an alias of it and
+  `timeline_editor::UiPlayhead::loop` names it directly, so the rung that runs
+  the transport and the rung that draws the ruler cannot drift apart. `enabled`
+  gates wrapping, not existence: a disabled loop keeps its bounds so a view goes
+  on drawing the region and re-enabling returns the user to it.
+- **A value type both the transport rung and the editor rung need belongs here,
+  and this module is the only place it can go.** `playback`'s floor and
+  `timeline_editor`'s floor exclude each other; `timebase` is in both, so it is
+  their entire intersection apart from `platform`/`runtime`. Reaching for a
+  shared home anywhere else means widening a floor row, which is the thing the
+  ladder exists to prevent. Before adding one, confirm the intersection still
+  holds in `MODULE_FLOORS` (`timeline_engine_dependency_floor_check.py`) rather
+  than assuming it.
 
 ## Swing
 

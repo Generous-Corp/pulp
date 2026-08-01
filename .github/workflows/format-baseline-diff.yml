@@ -19,6 +19,7 @@ on:
       - 'test/fixtures/format-baseline/**'
       - 'tools/scripts/format_baseline_*'
       - '.github/workflows/format-baseline-diff.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,13 +49,13 @@ jobs:
         run: |
           python3 tools/scripts/resolve_advisory_macos_runner.py \
             --configured-json "$CONFIGURED_JSON" \
-            --fallback-json '"macos-15"'
+            --fallback-json '"macos-15"' \
+            --event-name "${{ github.event_name }}"
 
   baseline-diff:
-    # Self-hosted macOS runner — required because auval is macOS-only
-    # and pluginval / clap-validator are easiest to pin there. Linux /
-    # Windows runners would only cover a subset of validators and would
-    # fragment the baseline.
+    # macOS is required because auval is platform-specific. Pull requests stay
+    # hosted; an isolated private advisory selector is dispatch-only until an
+    # organization runner group enforces trusted-workflow access.
     needs: resolve-advisory-macos
     # The resolver rejects the required pulp-build* and pulp-preamble* pools.
     runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
@@ -63,6 +64,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install pinned pluginval
+        run: |
+          set -euo pipefail
+          PLUGINVAL_VERSION="1.0.4"
+          PLUGINVAL_SHA256="3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f"
+          PLUGINVAL_URL="https://github.com/Tracktion/pluginval/releases/download/v${PLUGINVAL_VERSION}/pluginval_macOS.zip"
+          curl -fsSL "$PLUGINVAL_URL" -o "$RUNNER_TEMP/pluginval.zip"
+          echo "$PLUGINVAL_SHA256  $RUNNER_TEMP/pluginval.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/pluginval.zip" -d "$RUNNER_TEMP/pluginval-dist"
+          PLUGINVAL_BIN="$RUNNER_TEMP/pluginval-dist/pluginval.app/Contents/MacOS/pluginval"
+          if [ ! -x "$PLUGINVAL_BIN" ]; then
+            echo "::error::Pinned pluginval archive did not contain the expected binary"
+            find "$RUNNER_TEMP/pluginval-dist" -type f | head -20
+            exit 1
+          fi
+          # Keep the executable inside its signed .app bundle. Copying it out
+          # breaks the bundle context and macOS amfid may kill it with exit 137.
+          echo "$(dirname "$PLUGINVAL_BIN")" >> "$GITHUB_PATH"
+
+      - name: Install pinned clap-validator
+        run: |
+          set -euo pipefail
+          CV_VERSION="0.3.2"
+          CV_SHA256="3750f3729adfd8489f2b29019f7f2ed65ba71bf9d5049735f6a2ca0fccb18ffd"
+          CV_ARCHIVE="$RUNNER_TEMP/clap-validator.tar.gz"
+          CV_URL="https://github.com/free-audio/clap-validator/releases/download/${CV_VERSION}/clap-validator-${CV_VERSION}-macos-universal.tar.gz"
+          curl -fsSL "$CV_URL" -o "$CV_ARCHIVE"
+          echo "$CV_SHA256  $CV_ARCHIVE" | shasum -a 256 -c -
+          tar -xzf "$CV_ARCHIVE" -C "$RUNNER_TEMP" --strip-components=1
+          mkdir -p "$RUNNER_TEMP/pulp-bin"
+          mv "$RUNNER_TEMP/clap-validator" "$RUNNER_TEMP/pulp-bin/clap-validator"
+          chmod +x "$RUNNER_TEMP/pulp-bin/clap-validator"
+          echo "$RUNNER_TEMP/pulp-bin" >> "$GITHUB_PATH"
 
       - name: Check validator availability
         id: validators
@@ -79,6 +114,14 @@ jobs:
             echo "clap_validator=$have_clap_validator"
           } >> "$GITHUB_OUTPUT"
           echo "Validator availability: auval=$have_auval pluginval=$have_pluginval clap-validator=$have_clap_validator"
+          if [ "$have_pluginval" -ne 1 ]; then
+            echo "::error::pluginval is required for the blocking VST3 baseline"
+            exit 1
+          fi
+          if [ "$have_clap_validator" -ne 1 ]; then
+            echo "::error::clap-validator is required for the blocking CLAP baseline"
+            exit 1
+          fi
 
       - name: Fetch external SDKs required for AU / VST3
         # The AU and VST3 format targets are conditionally created
@@ -165,43 +208,6 @@ jobs:
           # `pulp doctor --au-cache`.
           killall -9 AudioComponentRegistrar 2>/dev/null || true
           sleep 5
-
-      - name: Install clap-validator
-        # GHA macOS runners don't ship clap-validator. Download a
-        # pinned prebuilt binary from the GitHub release. Pin is a
-        # tagged release; bump deliberately if the validator's
-        # behavior changes (and re-capture the baseline at the same
-        # commit).
-        #
-        # 2026-05-18: the upstream asset name carries the version and
-        # uses `macos-universal`, not `macos-aarch64` —
-        # `clap-validator-0.3.2-macos-universal.tar.gz`. The previous
-        # `clap-validator-macos-aarch64.tar.gz` URL 404'd silently and
-        # the validator never installed, so every PR's baseline-diff
-        # job exited 1 with "All validator(s) failed — no captured
-        # output." Pinning the correct asset name fixes that.
-        run: |
-          CV_VERSION="0.3.2"
-          CV_URL="https://github.com/free-audio/clap-validator/releases/download/${CV_VERSION}/clap-validator-${CV_VERSION}-macos-universal.tar.gz"
-          if curl -fsSL -o /tmp/cv.tar.gz "$CV_URL"; then
-            # The universal archive's upstream build packs the binary as
-            # `binaries/clap-validator` (verified against
-            # free-audio/clap-validator's release workflow:
-            # `tar -caf "$ARCHIVE_NAME.tar.gz" binaries/clap-validator`).
-            # Extraction yields /tmp/binaries/clap-validator — NOT
-            # /tmp/clap-validator. Use --strip-components=1 and install
-            # into a repo-local bin dir so self-hosted runners do not need
-            # passwordless sudo for /usr/local/bin.
-            mkdir -p "$RUNNER_TEMP/pulp-bin"
-            tar -xzf /tmp/cv.tar.gz -C /tmp --strip-components=1
-            mv /tmp/clap-validator "$RUNNER_TEMP/pulp-bin/clap-validator"
-            chmod +x "$RUNNER_TEMP/pulp-bin/clap-validator"
-            echo "$RUNNER_TEMP/pulp-bin" >> "$GITHUB_PATH"
-            export PATH="$RUNNER_TEMP/pulp-bin:$PATH"
-            clap-validator --version || echo "::warning::clap-validator installed but --version failed"
-          else
-            echo "::warning::clap-validator download failed — CLAP lane will skip"
-          fi
 
       - name: Run baseline diff
         run: |

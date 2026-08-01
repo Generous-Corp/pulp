@@ -2111,3 +2111,20 @@ expected-node inventory. Keep the missing-node negative control: removing a
 registry entry must fail instead of emitting a shorter, superficially valid
 document. SDK installs carry the checked projection at
 `share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
+
+Treat that JSON as a published v1 contract, not a regenerable implementation
+detail:
+
+- Preserve existing realization mode keys, axis tokens, axis numeric values,
+  and type IDs. Additive realizations may introduce new identities, but changing
+  an existing one requires an explicit schema migration.
+- Axis declarations name construction dimensions; the concrete `realizations`
+  list is the authoritative supported finite subset, not an implied Cartesian
+  product. Keep it aligned with the registrations the consumer can instantiate.
+- Computed realization modes and type IDs must be owned strings. A descriptor
+  built from factory-generated IDs cannot retain `string_view`s into temporary
+  nodes.
+- A realization-specific baked contract must describe effective DSP behavior
+  after construction-time constraints. For example, a through-zero flanger
+  whose fixed offset clamps modulation depth exports that offset as its maximum
+  depth instead of advertising values the DSP collapses.

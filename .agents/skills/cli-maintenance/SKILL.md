@@ -1370,7 +1370,7 @@ When this is the right tool vs. `shipyard rescue`:
 | Var | Purpose |
 |-----|---------|
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Selector when local has capacity |
-| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Selector when local is saturated (overflow target; despite the historical name, this is the generic overflow var) |
+| `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Generic selector when local is saturated; bare `local-only` disables overflow |
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | BUSY count that trips overflow |
 
 Surfaces:
@@ -1381,15 +1381,13 @@ Surfaces:
 - `pulp overflow enable [--to <selector>]` — set the overflow target.
   Default `--to "macos-15"` for free GH-hosted; pass
   `--to '"namespace-profile-generouscorp-macos"'` for paid Namespace.
-- `pulp overflow disable` — delete the overflow var. Note this only
-  changes future dispatches; in-flight cloud runs keep running.
+- `pulp overflow disable` — write the bare `local-only` sentinel. Note this
+  only changes future dispatches; in-flight cloud runs keep running.
 - `pulp overflow threshold [N]` — get (no arg) or set the BUSY count.
 
-The variable is named `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` for
-historical reasons (Plan B in `planning/2026-05-13-namespace-overflow-
-implementation.md` originally targeted Namespace exclusively). It now
-holds the overflow target regardless of provider — rename tracked as a
-future cleanup.
+Unset and empty overflow values restore `build.yml`'s GitHub-hosted
+`macos-15` default; they do not disable overflow. Namespace-specific selectors
+remain separate break-glass variables for explicit operator routing.
 
 ## `pulp upgrade --check-only`
 

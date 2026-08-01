@@ -5,6 +5,7 @@
     ".github/workflows/build.yml": 1,
     ".github/workflows/coverage.yml": 1,
     ".github/workflows/cross-platform-check.yml": 2,
+    ".github/workflows/examples-validation.yml": 1,
     ".github/workflows/gcc-compile-gate.yml": 1,
     ".github/workflows/header-self-contained.yml": 1,
     ".github/workflows/install-consumer-smoke.yml": 1,

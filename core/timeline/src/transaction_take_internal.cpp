@@ -1,12 +1,14 @@
 #include "transaction_take_internal.hpp"
 
 #include "media_reference_validation.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <algorithm>
 #include <array>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace pulp::timeline::detail {
@@ -379,13 +381,7 @@ reduce_set_take_comp(const Project& project, const SetTakeComp& set,
 } // namespace
 
 bool is_take_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertTakeLane>(command) ||
-           std::holds_alternative<RemoveTakeLane>(command) ||
-           std::holds_alternative<SetRecordArm>(command) ||
-           std::holds_alternative<InsertTake>(command) ||
-           std::holds_alternative<RemoveTake>(command) ||
-           std::holds_alternative<SetActiveTakeLane>(command) ||
-           std::holds_alternative<SetTakeComp>(command);
+    return std::visit([]<typename T>(const T&) { return is_take_command_type<T>; }, command);
 }
 
 runtime::Result<TakeCommandReduction, TransactionError>
