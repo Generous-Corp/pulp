@@ -7,6 +7,7 @@
 
 #include "inspector_connected_client.hpp"
 #include "inspector_publication.hpp"
+#include "inspector_server_test_access.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -22,6 +23,7 @@ namespace {
 
 constexpr std::size_t kMaxJsonNestingDepth = 64;
 constexpr std::size_t kMinimumMessageBytes = 1024;
+std::atomic<std::size_t> active_cleanup_workers{0};
 
 class SensitiveTokenWiper {
 public:
@@ -74,6 +76,14 @@ bool json_nesting_is_bounded(std::string_view text) {
 
 } // namespace
 
+namespace detail {
+
+std::size_t active_inspector_cleanup_workers_for_testing() noexcept {
+    return active_cleanup_workers.load(std::memory_order_acquire);
+}
+
+} // namespace detail
+
 // ── Server implementation using InterprocessConnectionServer ────────────
 
 class InspectorServer::Impl
@@ -87,6 +97,7 @@ public:
     std::mutex clients_mutex;
     std::condition_variable cleanup_cv;
     std::thread cleanup_thread;
+    std::atomic<bool> cleanup_thread_claimed{false};
     bool stopping_cleanup = false;
     bool stopping_callbacks = true;
     std::size_t active_callbacks = 0;
@@ -145,9 +156,7 @@ public:
         std::shared_ptr<Impl> impl;
     };
 
-    Impl() {
-        cleanup_thread = std::thread([this]() { cleanup_loop(); });
-    }
+    Impl() = default;
 
     void initialize() {
         const std::weak_ptr<Impl> weak_self = shared_from_this();
@@ -156,6 +165,11 @@ public:
                 if (const auto self = weak_self.lock())
                     self->accept_client(std::move(conn));
             };
+        // Start the strong-self worker last: if installing a callback throws,
+        // no running closure can strand an otherwise unreachable Impl cycle.
+        const auto cleanup_owner = shared_from_this();
+        cleanup_thread = std::thread(
+            [cleanup_owner] { cleanup_owner->cleanup_loop(); });
     }
 
     void accept_client(
@@ -275,11 +289,41 @@ public:
             stopping_cleanup = true;
         }
         cleanup_cv.notify_one();
-        if (cleanup_thread.joinable())
+        bool expected = false;
+        if (!cleanup_thread_claimed.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            return;
+        }
+        if (!cleanup_thread.joinable())
+            return;
+        bool cannot_join =
+            cleanup_thread.get_id() == std::this_thread::get_id();
+        if (!cannot_join) {
+            std::shared_ptr<InspectorMainThreadRpc> rpc;
+            {
+                std::lock_guard lifecycle_lock(lifecycle_mutex);
+                rpc = main_thread_rpc;
+            }
+            cannot_join = rpc && rpc->executing_on_current_thread();
+        }
+        if (cannot_join) {
+            // The worker closure retains Impl until cleanup_loop exits. This is
+            // an object-lifetime fence, not permission to unload a dynamic
+            // module containing this code before the worker count reaches zero.
+            cleanup_thread.detach();
+        } else {
             cleanup_thread.join();
+        }
     }
 
     void cleanup_loop() {
+        active_cleanup_workers.fetch_add(1, std::memory_order_acq_rel);
+        struct WorkerGuard {
+            ~WorkerGuard() {
+                active_cleanup_workers.fetch_sub(
+                    1, std::memory_order_acq_rel);
+            }
+        } worker_guard;
         std::unique_lock lock(clients_mutex);
         while (true) {
             cleanup_cv.wait_for(lock, std::chrono::milliseconds(50), [this] {
