@@ -30,6 +30,10 @@ struct TrackContentPlan {
 struct LoweredClip {
     timeline::Clip clip;
     double source_frame_offset = 0.0;
+    // The sequence context read by this leaf. Invalid means the compile root.
+    timeline::ItemId context_sequence_id;
+    // Owner-sequence tick corresponding to `clip.start()` after flattening.
+    timebase::TickPosition context_start;
 };
 
 class SequenceContentLowerer {

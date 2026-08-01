@@ -123,12 +123,15 @@ artifact is needed. Never modify canonical project JSON text directly.
   `SetClipSequenceRef`. Pass two command IDs allocated from the session
   `WriterToken`; the helper consumes item IDs from `Project::next_item_id`
   before publication but never synthesizes writer-scoped IDs.
-- For incremental compilation, build and retain one snapshot-scoped
-  `CompileInvalidationIndex` from the project, root sequence, and context
-  registry, then call `resolve_dirty_tracks()`; it maps direct edits, child
-  dirtiness, and nested context readers to the root tracks that must be
-  recompiled and fails closed on a stale structure token, root, or registry
-  generation.
+- For incremental compilation, construct `ProgramCompileRequest::invalidation`
+  from the shared context registry and exact `CommitResult`; `submit()`
+  builds and resolves the snapshot-scoped index against that same request. It
+  maps direct edits, child dirtiness, built-in MIDI groove reads, and nested
+  context readers to root tracks. The input pins that result's snapshot,
+  revision, exact predecessor snapshot, and an immutable registry copy. If the
+  predecessor is not the currently published project, sparse reuse is refused
+  and the cumulative target snapshot is rebuilt in full. A later registry
+  generation also forces a full compile without fabricating a document revision.
 - `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
   and positions are unique within a curve; values are finite; curvature is in
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
@@ -758,6 +761,13 @@ changing the swing setting never re-assigns notes to different steps. A test for
 that has to pick a position swing carries across a step boundary; most positions
 land in the same step under either order and a test using one of those passes
 whichever way the code is written.
+
+Playback applies this context to built-in MIDI at compile time. The owning
+sequence's groove moves onset and release by one shared delta, scales velocity
+at the original onset, and is inherited unchanged by ratchets. Nested MIDI reads
+the child groove exactly once rather than composing it with the parent. A
+trimmed nested MIDI leaf with authored groove is currently refused because the
+source-window chase rule for displaced notes is intentionally undefined.
 
 ### Downgrade refusals: refuse on *authored* data, not just audible data
 
