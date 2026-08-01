@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -32,6 +33,23 @@ InspectorMessage midi_request(std::int64_t id) {
         id, std::string(methods::kTestInjectMidi),
         R"({"kind":"note_on","channel":1,"note":60,"velocity":100,"secret":"not-dispatched"})");
 }
+
+class SynchronizedFakeClock {
+public:
+    std::chrono::steady_clock::time_point now() const {
+        std::lock_guard lock(mutex_);
+        return now_;
+    }
+
+    void advance(std::chrono::milliseconds amount) {
+        std::lock_guard lock(mutex_);
+        now_ += amount;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::chrono::steady_clock::time_point now_{};
+};
 
 } // namespace
 
@@ -119,13 +137,13 @@ TEST_CASE("test input rejection records the host outcome without payload data",
 
 TEST_CASE("controller scope cleanup identifies release, disconnect, expiry, and teardown",
           "[inspect][session][test-input][lifecycle]") {
-    auto now = std::chrono::steady_clock::time_point{};
+    SynchronizedFakeClock clock;
     InspectorSession session(
         {"session-life", "instance-life", "fixture"}, test_input_policy(InspectorProfile::Develop),
         [](const InspectorMessage& request) {
             return make_response(request.id, R"({"accepted":true})");
         },
-        100ms, [&] { return now; });
+        100ms, [&] { return clock.now(); });
     std::vector<InspectorControllerScopeEnd> ended;
     session.set_controller_scope_end_handler(
         [&](const InspectorControllerScopeEnd& event) { ended.push_back(event); });
@@ -149,7 +167,9 @@ TEST_CASE("controller scope cleanup identifies release, disconnect, expiry, and 
                       .handle("expired-owner",
                               make_request(4, std::string(methods::kSessionAcquireController)))
                       .is_error);
-    now += 101ms;
+    clock.advance(101ms);
+    // Any session request wakes the expiry worker after advancing an injected
+    // clock, making fake-time expiry deterministic without racing the worker.
     const auto expired = session.handle("expired-owner", midi_request(5));
     REQUIRE(expired.is_error);
     CHECK(expired.error_code == "controller_lease_required");
@@ -173,6 +193,71 @@ TEST_CASE("controller scope cleanup identifies release, disconnect, expiry, and 
         CHECK(event.session_id == "session-life");
         CHECK(event.instance_id == "instance-life");
     }
+}
+
+TEST_CASE("expiry callback may destroy its InspectorSession",
+          "[inspect][session][test-input][expiry][lifetime]") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool callback_completed = false;
+    TestInputReleaseReason callback_reason =
+        TestInputReleaseReason::ControllerReleased;
+    std::unique_ptr<InspectorSession> session;
+    session = std::make_unique<InspectorSession>(
+        InspectorSessionInfo{"session-self-destroy", "instance-self-destroy", "fixture"},
+        test_input_policy(InspectorProfile::Develop),
+        [](const InspectorMessage& request) {
+            return make_response(request.id, R"({"accepted":true})");
+        },
+        20ms);
+    session->set_controller_scope_end_handler(
+        [&](const InspectorControllerScopeEnd& event) {
+            session.reset();
+            {
+                std::lock_guard lock(mutex);
+                callback_reason = event.reason;
+                callback_completed = true;
+            }
+            cv.notify_all();
+        });
+    REQUIRE_FALSE(
+        session
+            ->handle("self-destroy-owner",
+                     make_request(1, std::string(methods::kSessionAcquireController)))
+            .is_error);
+
+    std::unique_lock lock(mutex);
+    REQUIRE(cv.wait_for(lock, 1s, [&] { return callback_completed; }));
+    CHECK_FALSE(session);
+    CHECK(callback_reason == TestInputReleaseReason::ControllerExpired);
+}
+
+TEST_CASE("InspectorSession destruction cleans up an active controller scope",
+          "[inspect][session][test-input][teardown][lifetime]") {
+    std::vector<InspectorControllerScopeEnd> ended;
+    {
+        InspectorSession session(
+            {"session-destructor", "instance-destructor", "fixture"},
+            test_input_policy(InspectorProfile::Develop),
+            [](const InspectorMessage& request) {
+                return make_response(request.id, R"({"accepted":true})");
+            });
+        session.set_controller_scope_end_handler(
+            [&](const InspectorControllerScopeEnd& event) {
+                ended.push_back(event);
+            });
+        REQUIRE_FALSE(
+            session
+                .handle("destructor-owner",
+                        make_request(1, std::string(methods::kSessionAcquireController)))
+                .is_error);
+    }
+
+    REQUIRE(ended.size() == 1);
+    CHECK(ended[0].session_id == "session-destructor");
+    CHECK(ended[0].instance_id == "instance-destructor");
+    CHECK(ended[0].client_id == "destructor-owner");
+    CHECK(ended[0].reason == TestInputReleaseReason::SessionTeardown);
 }
 
 TEST_CASE("controller lease expiry wakes cleanup without another request",
