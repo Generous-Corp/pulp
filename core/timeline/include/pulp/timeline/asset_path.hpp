@@ -53,13 +53,19 @@ inline bool package_relative_path_is_lexically_safe(std::string_view path) noexc
             equals_ascii_case_insensitive(base, "CONIN$") ||
             equals_ascii_case_insensitive(base, "CONOUT$"))
             return false;
-        if (base.size() == 4 &&
-            ((ascii_upper(base[0]) == 'C' && ascii_upper(base[1]) == 'O' &&
-              ascii_upper(base[2]) == 'M') ||
-             (ascii_upper(base[0]) == 'L' && ascii_upper(base[1]) == 'P' &&
-              ascii_upper(base[2]) == 'T')) &&
-            base[3] >= '1' && base[3] <= '9')
-            return false;
+        if (base.size() >= 4 && ((ascii_upper(base[0]) == 'C' && ascii_upper(base[1]) == 'O' &&
+                                  ascii_upper(base[2]) == 'M') ||
+                                 (ascii_upper(base[0]) == 'L' && ascii_upper(base[1]) == 'P' &&
+                                  ascii_upper(base[2]) == 'T'))) {
+            const bool ascii_device_digit = base.size() == 4 && base[3] >= '1' && base[3] <= '9';
+            const bool superscript_device_digit = base.size() == 5 &&
+                                                  static_cast<unsigned char>(base[3]) == 0xc2 &&
+                                                  (static_cast<unsigned char>(base[4]) == 0xb9 ||
+                                                   static_cast<unsigned char>(base[4]) == 0xb2 ||
+                                                   static_cast<unsigned char>(base[4]) == 0xb3);
+            if (ascii_device_digit || superscript_device_digit)
+                return false;
+        }
         return true;
     };
 

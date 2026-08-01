@@ -493,8 +493,9 @@ TEST_CASE("Atomic project-package publisher refuses unsafe paths and publication
     auto publisher = AtomicPublisher::create(destination);
     REQUIRE(publisher);
     REQUIRE_FALSE(publisher.value().write("../escape", "bad"));
-    for (const auto path : {"media/file:stream", "NUL", "con.txt", "aux ", "COM1.wav",
-                            "folder/trailing.", "folder//value", "folder/value?"}) {
+    for (const auto path :
+         {"media/file:stream", "NUL", "con.txt", "aux ", "COM1.wav", "COM\xc2\xb9.wav",
+          "lpt\xc2\xb2.txt", "folder/trailing.", "folder//value", "folder/value?"}) {
         INFO("unsafe portable package path: " << path);
         REQUIRE_FALSE(publisher.value().write(path, "bad"));
     }
