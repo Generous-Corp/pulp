@@ -121,7 +121,7 @@ std::optional<inspect::InspectorProfile> parse_profile(std::string_view profile)
 }
 
 std::vector<inspect::InspectorCapability>
-standalone_capabilities(bool compositor_capture) {
+standalone_capabilities(bool compositor_capture, bool runtime_eval_enabled) {
     using C = inspect::InspectorCapability;
     std::vector<inspect::InspectorCapability> result{
         C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
@@ -129,12 +129,16 @@ standalone_capabilities(bool compositor_capture) {
         C::AuthoringTweaks, C::TelemetryStream};
     if (compositor_capture)
         result.push_back(C::CaptureImage);
+    if (runtime_eval_enabled)
+        result.push_back(C::RuntimeEval);
     return result;
 }
 
 bool standalone_capability_available(inspect::InspectorCapability capability,
-                                     bool compositor_capture) {
-    const auto available = standalone_capabilities(compositor_capture);
+                                     bool compositor_capture,
+                                     bool runtime_eval_enabled) {
+    const auto available = standalone_capabilities(compositor_capture,
+                                                   runtime_eval_enabled);
     return std::find(available.begin(), available.end(), capability) != available.end();
 }
 
@@ -173,7 +177,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     Impl(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
          view::WindowHost& window, inspect::InspectorOverlay* overlay,
          inspect::InspectorProfile profile, std::vector<inspect::InspectorCapability> custom,
-         std::string session_id, std::string instance_id)
+         bool runtime_eval_enabled, std::string session_id, std::string instance_id)
         : app_(app), processor_(processor), bridge_(bridge), root_(root), window_(window),
           overlay_(overlay), profile_(profile),
           telemetry_enabled_(
@@ -204,7 +208,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
               [] { return events::MainThreadDispatcher::is_main_thread(); })),
           session_(inspect::InspectorSessionInfo{session_id_, instance_id_,
                                                  processor.descriptor().bundle_id, "1"},
-                   make_policy(profile, std::move(custom), window.supports_compositor_capture()),
+                   make_policy(profile, std::move(custom), window.supports_compositor_capture(),
+                               runtime_eval_enabled),
                    [this](const inspect::InspectorRequestContext& context,
                           const inspect::InspectorMessage& request) {
                        refresh_live_state();
@@ -612,11 +617,14 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     static inspect::InspectorPolicyConfig
     make_policy(inspect::InspectorProfile profile,
                 std::vector<inspect::InspectorCapability> custom,
-                bool compositor_capture) {
+                bool compositor_capture,
+                bool runtime_eval_enabled) {
         inspect::InspectorPolicyConfig policy;
         policy.profile = profile;
         policy.custom_capabilities = std::move(custom);
-        policy.available_capabilities = standalone_capabilities(compositor_capture);
+        policy.available_capabilities = standalone_capabilities(
+            compositor_capture, runtime_eval_enabled);
+        policy.runtime_eval_enabled = runtime_eval_enabled;
         return policy;
     }
 
@@ -794,10 +802,18 @@ std::unique_ptr<StandaloneInspectorRuntime>
 StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, ViewBridge& bridge,
                                    view::View& root, view::WindowHost& window,
                                    std::string profile,
-                                   std::vector<std::string> custom_capabilities) {
+                                   std::vector<std::string> custom_capabilities,
+                                   bool runtime_eval_enabled) {
     const auto parsed_profile = parse_profile(profile);
     if (!parsed_profile)
         return nullptr;
+    if (runtime_eval_enabled &&
+        *parsed_profile != inspect::InspectorProfile::Develop &&
+        *parsed_profile != inspect::InspectorProfile::Custom) {
+        runtime::log_error(
+            "Standalone: runtime evaluation requires the develop or custom inspector profile");
+        return nullptr;
+    }
     auto overlay = std::make_shared<inspect::InspectorOverlay>(root);
     inspect::install_inspector_hooks(*overlay);
     if (*parsed_profile == inspect::InspectorProfile::Off) {
@@ -831,7 +847,8 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
             const auto capability = inspect::capability_from_id(id);
             if (!capability || !inspect::capability_is_grantable(*capability) ||
                 !standalone_capability_available(
-                    *capability, window.supports_compositor_capture())) {
+                    *capability, window.supports_compositor_capture(),
+                    runtime_eval_enabled)) {
                 runtime::log_error("Standalone: invalid custom inspector capability '{}'", id);
                 return nullptr;
             }
@@ -866,7 +883,8 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
     }
     auto impl =
         std::make_shared<Impl>(app, processor, bridge, root, window, overlay.get(), *parsed_profile,
-                               std::move(custom), std::move(*session_id), std::move(*instance_id));
+                               std::move(custom), runtime_eval_enabled,
+                               std::move(*session_id), std::move(*instance_id));
     return std::unique_ptr<StandaloneInspectorRuntime>(
         new StandaloneInspectorRuntime(std::move(overlay), std::move(impl),
                                        std::move(*token), root, window));

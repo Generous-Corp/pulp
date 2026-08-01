@@ -1450,6 +1450,11 @@ orders in lockstep.
 - `--watch` — re-launch the binary on file changes via the existing
   `watch_loop` plumbing. Composes with the headless flags so dev
   loops can render PNGs on every save.
+- `--inspect-runtime-eval` — a literal, high-risk acknowledgement for
+  `runtime.eval`, forwarded as argv and `PULP_INSPECT_RUNTIME_EVAL=1`. It
+  requires `--inspect=develop`, or a custom profile that also names
+  `runtime.eval` and `session.control`. Never infer it from a profile, an
+  all-capabilities shorthand, or persisted standalone preferences.
 - `--audio-inspector` — open the live Audio Inspector. Forwarded as
   `--audio-inspector` and `PULP_AUDIO_INSPECTOR=1`.
 - `--audio-probe-json <path>` — write live probe metrics JSON and exit.

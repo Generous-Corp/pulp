@@ -76,7 +76,8 @@ class StandaloneInspectorRuntime {
     static std::unique_ptr<StandaloneInspectorRuntime>
     create(StandaloneApp& app, Processor& processor, ViewBridge& bridge, view::View& root,
            view::WindowHost& window, std::string profile,
-           std::vector<std::string> custom_capabilities);
+           std::vector<std::string> custom_capabilities,
+           bool runtime_eval_enabled = false);
 
     ~StandaloneInspectorRuntime();
     StandaloneInspectorRuntime(const StandaloneInspectorRuntime&) = delete;

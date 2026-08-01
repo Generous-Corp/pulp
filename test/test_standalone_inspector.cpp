@@ -364,6 +364,31 @@ TEST_CASE("Standalone inspector off mode publishes no endpoint or artifact",
     REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
 }
 
+TEST_CASE("Standalone inspector runtime evaluation requires an active controller profile",
+          "[standalone][inspect][runtime-eval][negative]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "off", {}, true) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "observe", {}, true) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"session.control", "runtime.eval"}) == nullptr);
+    REQUIRE(StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "custom",
+        {"runtime.eval"}, true) == nullptr);
+
+    auto develop = StandaloneInspectorRuntime::create(
+        app, processor, bridge, root, window, "develop", {}, true);
+    REQUIRE(develop != nullptr);
+}
+
 TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",
           "[standalone][inspect][capabilities][negative]") {
     StandaloneApp app(null_processor_factory);

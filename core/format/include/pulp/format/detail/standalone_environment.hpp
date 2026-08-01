@@ -60,6 +60,8 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
             remaining.remove_prefix(comma + 1);
         }
     }
+    if (standalone_env_truthy("PULP_INSPECT_RUNTIME_EVAL"))
+        config.inspector_runtime_eval = true;
 
     if (standalone_env_truthy("PULP_HEADLESS")
         || standalone_env_truthy("PULP_TEST_MODE")

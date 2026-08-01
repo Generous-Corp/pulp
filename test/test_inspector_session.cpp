@@ -361,6 +361,39 @@ TEST_CASE("custom policy is an exact allow-list and runtime eval is separately g
     CHECK(lease_required->error_code == "controller_lease_required");
     CHECK_FALSE(acknowledged.authorize(
         make_request(2, "Runtime.evaluate"), true).has_value());
+
+    config.custom_capabilities = {
+        InspectorCapability::SessionControl,
+        InspectorCapability::StateRead,
+    };
+    InspectorAccessPolicy omitted_from_custom(config);
+    CHECK(omitted_from_custom.is_available(InspectorCapability::RuntimeEval));
+    CHECK_FALSE(omitted_from_custom.is_granted(InspectorCapability::RuntimeEval));
+
+    config.custom_capabilities = {InspectorCapability::RuntimeEval};
+    InspectorAccessPolicy no_controller(config);
+    CHECK(no_controller.is_available(InspectorCapability::RuntimeEval));
+    CHECK_FALSE(no_controller.is_granted(InspectorCapability::RuntimeEval));
+}
+
+TEST_CASE("develop policy grants runtime eval only after the separate acknowledgement",
+          "[inspect][session][policy][runtime-eval]") {
+    InspectorPolicyConfig config;
+    config.profile = InspectorProfile::Develop;
+    config.available_capabilities = fixture_capabilities();
+
+    InspectorAccessPolicy ordinary_develop(config);
+    CHECK_FALSE(ordinary_develop.is_available(InspectorCapability::RuntimeEval));
+    CHECK_FALSE(ordinary_develop.is_granted(InspectorCapability::RuntimeEval));
+
+    config.runtime_eval_enabled = true;
+    InspectorAccessPolicy acknowledged(config);
+    CHECK(acknowledged.is_available(InspectorCapability::RuntimeEval));
+    CHECK(acknowledged.is_granted(InspectorCapability::RuntimeEval));
+    auto lease_required = acknowledged.authorize(
+        make_request(1, "Runtime.evaluate"), false);
+    REQUIRE(lease_required.has_value());
+    CHECK(lease_required->error_code == "controller_lease_required");
 }
 
 TEST_CASE("lease-requiring capabilities need effective session control",

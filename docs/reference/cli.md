@@ -310,12 +310,18 @@ even when the protocol/client SDK components are present.
   nonempty capability set; the capability option is repeatable. A custom set
   containing `state.write`, `test.input`, or `authoring.tweaks` must also contain
   `session.control`, because mutations require a controller lease.
+- `--inspect-runtime-eval` is the separate high-risk acknowledgement for
+  arbitrary JavaScript evaluation in the live UI realm. It requires
+  `--inspect=develop`, or `--inspect=custom` with both `runtime.eval` and
+  `session.control`. No profile or saved developer preference implies it.
 - `--inspect=off` is the default and starts no listener or discovery artifact.
 
 The active session binds only to loopback, publishes an owner-private ephemeral
 record and credential, and displays an `INSPECT <profile>` badge in the live
 window. `PULP_INSPECT_PROFILE` and comma-separated
 `PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+The explicit evaluation acknowledgement is forwarded as
+`PULP_INSPECT_RUNTIME_EVAL=1` and is never persisted.
 Plugin scanning, validation, and an ordinary `pulp run` never activate it.
 The standalone runtime supports in-place scripted-UI hot reload. A processor
 that replaces its entire editor at runtime fails inspector startup closed

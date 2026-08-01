@@ -2752,6 +2752,8 @@ TEST_CASE("pulp run --help advertises the headless/screenshot/frames/watch flags
     REQUIRE(r.stdout_output.find("--inspect") != std::string::npos);
     REQUIRE(r.stdout_output.find("--inspect-capability") != std::string::npos);
     REQUIRE(r.stdout_output.find("GPU-enabled desktop build") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--inspect-runtime-eval") != std::string::npos);
+    REQUIRE(r.stdout_output.find("HIGH RISK") != std::string::npos);
     // Live Audio Inspector discoverability (the human + agent launch paths).
     REQUIRE(r.stdout_output.find("--audio-inspector") != std::string::npos);
     REQUIRE(r.stdout_output.find("--audio-probe-json") != std::string::npos);

@@ -782,8 +782,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     const auto effective_config = detail::standalone_config_from_environment(config_);
 #if !PULP_STANDALONE_INSPECTOR
-    if (!effective_config.inspector_profile.empty()
-        && effective_config.inspector_profile != "off") {
+    if ((!effective_config.inspector_profile.empty()
+         && effective_config.inspector_profile != "off")
+        || effective_config.inspector_runtime_eval) {
         runtime::log_error(
             "Standalone: Development Inspector requested but this build has inspector support disabled");
         return false;
@@ -949,7 +950,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto inspector_runtime = detail::StandaloneInspectorRuntime::create(
         *this, *processor_, *bridge, window_root, *window,
         effective_config.inspector_profile,
-        effective_config.inspector_capabilities);
+        effective_config.inspector_capabilities,
+        effective_config.inspector_runtime_eval);
     if (!inspector_runtime) {
         runtime::log_error(
             "Standalone: requested Development Inspector profile could not start");

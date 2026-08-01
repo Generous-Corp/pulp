@@ -1300,20 +1300,25 @@ TEST_CASE("Standalone environment imports Development Inspector activation",
           "[standalone][inspect]") {
     ScopedEnv profile("PULP_INSPECT_PROFILE");
     ScopedEnv capabilities("PULP_INSPECT_CAPABILITIES");
+    ScopedEnv runtime_eval("PULP_INSPECT_RUNTIME_EVAL");
     profile.set("custom");
     capabilities.set("session.describe,state.read,state.write");
+    runtime_eval.set("1");
 
     auto config = standalone_config_from_environment(StandaloneConfig{});
     REQUIRE(config.inspector_profile == "custom");
     REQUIRE(config.inspector_capabilities == std::vector<std::string>{
         "session.describe", "state.read", "state.write"});
+    REQUIRE(config.inspector_runtime_eval);
 
     StandaloneConfig explicit_config;
     explicit_config.inspector_profile = "observe";
     explicit_config.inspector_capabilities = {"ui.read"};
+    explicit_config.inspector_runtime_eval = false;
     config = standalone_config_from_environment(explicit_config);
     REQUIRE(config.inspector_profile == "observe");
     REQUIRE(config.inspector_capabilities == std::vector<std::string>{"ui.read"});
+    REQUIRE(config.inspector_runtime_eval);
 }
 
 TEST_CASE("Standalone frame delay env accepts only positive plain integers",
