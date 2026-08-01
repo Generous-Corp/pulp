@@ -86,6 +86,17 @@ timebase::BarPosition bar_at_tick(timebase::TickPosition tick, timebase::TickPos
     return {static_cast<std::int64_t>(projected)};
 }
 
+TransportPlayhead playhead_from_block(const TransportSnapshot& snapshot) noexcept {
+    TransportPlayhead reading;
+    reading.playback_epoch = snapshot.playback_epoch;
+    reading.position = snapshot.ranges[0].timeline_tick_start;
+    reading.loop = snapshot.loop;
+    reading.tempo_bpm = snapshot.tempo_bpm;
+    reading.is_playing = snapshot.is_playing;
+    reading.scrubbing = snapshot.scrubbing;
+    return reading;
+}
+
 } // namespace
 
 TransportError detail::advance_playback_epoch(std::uint64_t& epoch) noexcept {
@@ -283,6 +294,11 @@ void MasterTransport::finish_projected_block(const DesiredState& desired,
     first_block_ = false;
 }
 
+void MasterTransport::publish_playhead(TransportPlayhead reading) noexcept {
+    reading.sequence = ++playhead_sequence_;
+    playhead_.write(reading);
+}
+
 TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_map,
                                         const MasterTransportConfig& config) noexcept {
     reset();
@@ -328,6 +344,19 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
     previous_loop_ = config.loop;
     previous_tempo_bpm_ = tempo_cursor_.tempo_at_tick(config.initial_position);
     publish_desired();
+
+    // State the transport's starting position now rather than leaving the
+    // cleared reading reset() published readable until the first block. A view
+    // that draws between prepare() and the first callback otherwise shows tick
+    // zero at the default tempo, neither of which this transport was configured
+    // with.
+    TransportPlayhead initial;
+    initial.playback_epoch = playback_epoch_;
+    initial.position = config.initial_position;
+    initial.loop = config.loop;
+    initial.tempo_bpm = previous_tempo_bpm_;
+    initial.is_playing = config.initially_playing;
+    publish_playhead(initial);
     return TransportError::None;
 }
 
@@ -662,6 +691,7 @@ TransportError MasterTransport::begin_internal_block(std::uint32_t frame_count,
     }
 
     finish_projected_block(desired, projection, snapshot);
+    publish_playhead(playhead_from_block(snapshot));
     return TransportError::None;
 }
 
@@ -831,8 +861,12 @@ TransportError MasterTransport::begin_tempo_synced_block(std::uint32_t frame_cou
     applied_tempo_sync_playing_generation_ = desired.playing_generation;
     applied_tempo_sync_seek_generation_ = desired.seek_generation;
     applied_tempo_sync_tempo_generation_ = desired.tempo_sync_tempo_generation;
-    return valid_transport_ranges(snapshot) ? TransportError::None
-                                            : TransportError::InvalidTempoSyncState;
+    // A block whose ranges failed validation is one the caller is told not to
+    // render, so it must not become the position a view draws either.
+    if (!valid_transport_ranges(snapshot))
+        return TransportError::InvalidTempoSyncState;
+    publish_playhead(playhead_from_block(snapshot));
+    return TransportError::None;
 }
 
 void MasterTransport::reset() noexcept {
@@ -870,6 +904,24 @@ void MasterTransport::reset() noexcept {
     pending_discontinuity_ = false;
     has_expected_tempo_sync_beat_ = false;
     expected_tempo_sync_beat_ = 0.0;
+    // Retire the previous lifecycle's reading instead of leaving it readable
+    // until the first block of the next one, which is exactly the moment a
+    // reader would draw a playhead belonging to a program that is gone.
+    //
+    // This publishes from whichever thread calls reset(), while the ordinary
+    // publisher is the audio thread. That is the same shape reset() already has
+    // for desired_ above, whose ordinary publisher is the control thread, and
+    // it costs the same: a SeqLock write allocates nothing and takes no lock.
+    // The single-writer requirement is met the way it already was — a caller
+    // that reset a transport concurrently with begin_block() would be racing
+    // the plain assignments above long before it raced this one.
+    //
+    // playhead_sequence_ is deliberately not among the fields cleared above: a
+    // reader tells readings apart by sequence, so restarting the counter would
+    // let a new reading impersonate one the reader already acted on.
+    TransportPlayhead retired;
+    retired.playback_epoch = playback_epoch_;
+    publish_playhead(retired);
 }
 
 } // namespace pulp::playback
