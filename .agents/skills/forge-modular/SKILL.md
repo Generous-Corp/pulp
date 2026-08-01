@@ -323,6 +323,28 @@ removes both locations; `drive_app.py` identifies the app by the **executable
 path** (via `ps -o comm=`, since macOS `pgrep` has no `-a`) and refuses to drive
 when a copy from another build is running.
 
+Beside those sat 513 MB and 628 MB of hand-made `.prev` / `.prev-1301` /
+`.backup-<timestamp>` / `.signed-backup` bundle copies. Nothing in the repo
+creates them — they are interactive "let me keep the old one" copies, and none
+was ever the only record of anything, because the build directory is the
+previous build and git is the history. Do not make them.
+`tools/rack/clean_installs.sh` sweeps both kinds (dry-run by default, `--yes` to
+remove) and `setup_m5.sh` sends the same script over rather than reimplementing
+the rule, because two copies of a *removal* rule are two chances to disagree
+about what is safe to delete.
+
+## Spotlight does not notice a bundle that arrives by rsync
+
+An install can be complete, signed, notarized, stapled and known to
+LaunchServices while Cmd-Space finds nothing — which is indistinguishable from
+"it never installed", and is what one "I don't see it on m5" turned out to be.
+`mdimport /Applications/"Forge Modular.app"` fixes it. Indexing is
+**asynchronous**: checking immediately after reported CANNOT FIND IT for an app
+that was indexed a second later, so the check in `setup_m5.sh` retries for 10s.
+Query it as a structured search — `kMDItemContentType ==
+"com.apple.application-bundle" && kMDItemDisplayName == "Forge Modular"` —
+because `mdfind -name "Forge Modular.app"` finds it even when it is indexed.
+
 ## Driving the real window
 
 `tools/rack/prove_arrows.py` types `@br`, presses Down, presses Return, and
