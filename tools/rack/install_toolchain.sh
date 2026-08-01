@@ -122,6 +122,26 @@ if [ -z "${SAMPLE:-}" ]; then
   exit 1
 fi
 
+# The panel shaper. Every label on every panel is outlined by it, so an
+# installed toolchain without one cannot emit a panel at all -- it gets as far
+# as a model call and dies. It is a built binary rather than a source file, so
+# it is not in PARTS; it is copied when the source tree has one.
+#
+# Not built here on purpose: building it needs a populated Skia checkout, which
+# a machine being set up from scratch is exactly the machine that lacks. Saying
+# what is missing and how to get it beats a twenty-minute detour into Skia.
+if [ -x "$SRC/build/shape_text" ]; then
+  mkdir -p "$DEST/build"
+  cp "$SRC/build/shape_text" "$DEST/build/shape_text"
+  echo "  copied the panel shaper"
+else
+  echo "  FAILED: no panel shaper at $SRC/build/shape_text" >&2
+  echo "         Build it first:  tools/rack/build_shape_text.sh" >&2
+  echo "         Without it the installed toolchain cannot letter a panel," >&2
+  echo "         which surfaces as a failed generation after a model call." >&2
+  exit 1
+fi
+
 # The DSP vocabulary is injected into the contract at call time. When it comes
 # back empty the model is handed a prompt with no list of available DSP, so it
 # invents headers that do not exist and hand-rolls everything -- and the run
