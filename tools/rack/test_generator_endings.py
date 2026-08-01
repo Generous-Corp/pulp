@@ -25,6 +25,14 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATORS = [os.path.join(HERE, "patch.py"), os.path.join(HERE, "generate.py")]
+# Everything else that writes into the log the app watches. The monitor's rules
+# match sentences from all of these, not only the two entry points.
+LOG_WRITERS = GENERATORS + [
+    os.path.join(HERE, "forge_modular.py"),      # panel + manifest emitter
+    os.path.join(HERE, "patch_gate.cpp"),        # the audio gate
+    os.path.join(HERE, "behaviour_gate.cpp"),    # the module gate
+    os.path.join(HERE, "idiom_check.py"),        # the idiom verdicts
+]
 MONITOR = os.path.join(HERE, "..", "..", "forge-seam", "modular",
                        "build_monitor.cpp")
 
@@ -79,6 +87,56 @@ def main():
         bad += 1
     else:
         print(f"  ok     all {len(msgs)} generator endings are recognised")
+
+    # And the reverse: a rule matching wording nobody prints any more is a
+    # refusal or an error the app can no longer see. The rules are substrings
+    # of the generators' own sentences, so a reworded message leaves the rule
+    # pointing at nothing — and nothing about that is visible at runtime.
+    # Decoded, because a rule is written in C++ with \xNN escapes for the
+    # arrow while the Python prints the character itself — comparing the raw
+    # spellings reports a match as missing.
+    def decoded(rule):
+        # A C++ literal spells the arrow \xe2\x86\x92 — the UTF-8 BYTES of
+        # it — while the Python prints the character. Unescaping alone gives
+        # mojibake and reports a rule that matches as missing, which is a
+        # false alarm sending somebody hunting for nothing.
+        try:
+            raw = rule.encode("latin-1").decode("unicode_escape")
+            return raw.encode("latin-1").decode("utf-8")
+        except Exception:                                   # noqa: BLE001
+            return rule
+    generator_text = "\n".join(
+        open(g, encoding="utf-8", errors="replace").read()
+        for g in LOG_WRITERS if os.path.exists(g)).lower()
+    # Rules that legitimately match text from elsewhere: a Python traceback, a
+    # compiler, or the OS. Named so each is a decision.
+    NOT_FROM_A_GENERATOR = {
+        "fatal error":  "the compiler's, when a module fails to build",
+        "no such file": "the shell's, when something is missing",
+        "traceback":    "Python's own, from any raised exception",
+        # `gate`-kind rules whose wording no current tool prints. They decide
+        # how a line is DISPLAYED, not whether a build ended, so an orphan
+        # here is cosmetic — but it is listed rather than ignored, so a new
+        # one shows up instead of joining a silent pile.
+        "uses pulp dsp":    "an older module gate's wording; nothing prints it",
+        "uses no pulp dsp": "the same gate's other verdict",
+        "rejected at":      "an older lint's wording",
+    }
+    orphaned = []
+    for rule in sorted(rs):
+        if rule in generator_text or decoded(rule) in generator_text:
+            continue
+        if any(key in rule for key in NOT_FROM_A_GENERATOR):
+            continue
+        orphaned.append(rule)
+    if orphaned:
+        print(f"  WRONG  {len(orphaned)} rule(s) match wording no generator "
+              f"prints — the app can no longer see what they were for:")
+        for o in orphaned:
+            print(f"           {o!r}")
+        bad += 1
+    else:
+        print(f"  ok     every rule matches something a generator still says")
 
     print("\n" + ("all good" if bad == 0 else "FAILED"))
     return 1 if bad else 0
