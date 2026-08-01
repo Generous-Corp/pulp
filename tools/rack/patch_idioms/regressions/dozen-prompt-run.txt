@@ -48,4 +48,7 @@
 
 11 held, 1 did not
 across every attempt of the runs that failed: 4 silent, 0 rejected by the lint, 3 wrong idiom
-full transcripts: /private/tmp/claude-501/-Volumes-Workshop-Code-pulp/ae6b385d-a5c2-474e-848e-539c140a5c74/scratchpad/idiom-proof-2-logs
+full transcripts: GONE. They were written to a session scratchpad under
+/tmp, which the OS has since cleared, so the counts above are all that
+survives of twelve model calls. prove_idioms.sh now writes beside this
+file instead.

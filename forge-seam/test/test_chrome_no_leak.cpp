@@ -2397,6 +2397,29 @@ TEST_CASE("whether Rack is there is shown, not left to be discovered",
     CHECK(shell.rack_presence_phrase() == pill->text());
     // It has to say one of the four things, not any string at all.
     CHECK(said.count(shell.rack_presence_phrase()) == 1);
+
+    // And it becomes VISIBLE once there is something to open.
+    //
+    // Everything above this line passes with the pill hidden forever: the
+    // text is set on a label nobody can see, and the only visibility check
+    // asserts it is hidden. That is how the depth tabs shipped invisible
+    // while their tests were green -- the state was right and none of it
+    // reached the screen.
+    const auto patch = std::filesystem::temp_directory_path() /
+                       "presence-pill-probe.vcv";
+    { std::ofstream f(patch); f << "{}\n"; }
+    shell.set_open_patch(patch.string());
+    shell.on_poll();
+    CHECK(pill->visible());
+    CHECK(pill->text() == shell.rack_presence_phrase());
+
+    // And goes away again when there is not.
+    shell.set_open_patch("");
+    shell.on_poll();
+    CHECK_FALSE(pill->visible());
+
+    std::error_code rm;
+    std::filesystem::remove(patch, rm);
 }
 
 TEST_CASE("a patch nobody generated still says something", "[rack]") {

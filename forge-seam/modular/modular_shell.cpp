@@ -1211,7 +1211,14 @@ void ForgeModularShell::on_poll() {
     // all.
     if (open_button_) {
         const bool have = !artifact_path().empty();
-        const bool settled = monitor_.outcome() != BuildOutcome::running;
+        // Settled means "no build is running", which is not the same as "the
+        // log does not say running". An empty log has no success line in it,
+        // so outcome() reads `running` for a shell that has never watched
+        // anything -- and a project reopened from the shelf is exactly that.
+        // artifact_path() goes out of its way to return the patch on disk for
+        // that case, and this hid the button and the pill anyway, so the
+        // intent was stated in one function and undone in the next.
+        const bool settled = !busy();
         const bool ready = have && settled;
         if (ready != open_button_->visible()) {
             open_button_->set_visible(ready);

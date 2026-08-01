@@ -20,7 +20,15 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS="${FORGE_MODULAR_TOOLS:-$HOME/Library/Application Support/Forge Modular/tools/rack}"
-OUT="${PROVE_OUT:-/tmp/forge-idiom-proof.txt}"
+# Evidence outlives the run, so it does not live in a directory the OS clears.
+#
+# The last run's per-prompt transcripts went to a scratchpad under /tmp. The
+# summary that survived cites them by path, and they are gone -- so the one
+# record of what twelve model calls actually did is a file pointing at nothing.
+# Each run costs a dozen model calls and the better part of an hour; that is
+# not evidence to leave somewhere temporary.
+RUNS="$HERE/patch_idioms/regressions"
+OUT="${PROVE_OUT:-$RUNS/idiom-proof.txt}"
 
 # family, prompt, how the idiom is reached
 PROMPTS=(

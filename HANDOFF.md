@@ -13,8 +13,8 @@ and what will bite whoever picks it up.
 | | |
 |---|---|
 | Part 1 — it works everywhere | steps 1–6 done; **step 7 partly proven** |
-| Part 2 — patches worth distributing | library built and gating; **6 of 12 prompts hold** |
-| Part 3 — looks like the prototype | panel, degradation, spec table, legend, meta pill, glyphs **done**; hover-from-stage and the Rack presence pill **open** |
+| Part 2 — patches worth distributing | library built and gating; **11 of 12 prompts hold** |
+| Part 3 — looks like the prototype | panel, degradation, spec table, legend, meta pill, glyphs, hover-from-stage and the Rack presence pill **done** |
 | Part 4 — explanations teach | sidecars, structural roles, real port names, one-per-role primer, computed overview **done**; why-lint **done** |
 
 ### Evidenced
@@ -65,17 +65,22 @@ and what will bite whoever picks it up.
 3. **The app on the M5, by pressing Build.** Needs a live GUI session there.
    `prove_surfaces.sh app` drives it, capped, and quits afterwards.
 
-4. **Six of twelve prompts still fail, and it is now the AUDIO gate, not the
-   idiom check.** The patches are the right shape and make no sound. That is
-   the next real quality problem, and it is a different one from the one this
-   goal was written about.
+4. **One of twelve prompts still fails** — the kick drum, which builds the
+   right shape and never gets triggered. It is the audio gate, not the idiom
+   check. This entry read "six of twelve" for a day after the run that made it
+   eleven; the run is
+   `tools/rack/patch_idioms/regressions/dozen-prompt-run.txt`, counted from
+   the file rather than remembered.
 
-5. **Our "Open in Rack" lets Rack restore its autosave.** See the trap below.
-   The launch should hand Rack the patch so it opens that instead.
+5. ~~**Our "Open in Rack" lets Rack restore its autosave.**~~ Done:
+   `rack_open_command()` passes the patch positionally on a cold start and as a
+   document to a running Rack, with tests for both. The autosave trap below
+   still describes Rack's behaviour, which has not changed.
 
-6. **Two Part 3 items**: hovering a cable in the rack should light its line in
-   the explanation (the reverse already works), and the Rack presence state
-   (running / installed / absent) should be surfaced rather than inferred.
+6. ~~**Two Part 3 items**~~ Done: hovering a cable in the rack lights its
+   line in the explanation, driven from real pointer events in both
+   directions, and `RackPresence` surfaces running / installed / plugin-only /
+   absent in the pill rather than inferring it.
 
 ---
 
