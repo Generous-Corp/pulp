@@ -40,7 +40,22 @@ BuildLine::Kind BuildMonitor::classify(const std::string& line) {
     // A traceback is unambiguous. Checked before the generic "error", because a
     // Python traceback's first line says nothing about what broke.
     if (contains(line, "Traceback (most recent call last)") ||
-        contains(lower, "fatal error") || contains(lower, "no such file")) {
+        contains(lower, "fatal error") || contains(lower, "no such file") ||
+        // The generator's own way of ENDING without an artifact:
+        //
+        //   patch.py:  raise SystemExit(f"gave up after {n} attempts")
+        //
+        // Without it a build that gave up read as progress, the outcome stayed
+        // `running`, and the app watched a dead build forever — the same fault
+        // the success rule above was written to fix, from the other side.
+        //
+        // "PATCH GATE FAILED" is deliberately NOT here. It is an attempt
+        // ending, not a build ending: the generator retries, and most runs
+        // that print it go on to produce a patch. outcome_of ranks errored
+        // ABOVE succeeded, so counting it would make a recovered run report
+        // failed and hide the artifact it had just built — verified against a
+        // real log with two gate failures and a patch at the end.
+        contains(lower, "gave up after")) {
         return BuildLine::Kind::error;
     }
 

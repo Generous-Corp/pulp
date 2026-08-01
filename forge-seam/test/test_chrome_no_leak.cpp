@@ -6444,3 +6444,111 @@ TEST_CASE("the reader survives a map from the current scanner",
     CHECK(forge_modular::PortMap::draws_as_knob(lfo->params[0]));
     CHECK_FALSE(forge_modular::PortMap::draws_as_knob(lfo->params[1]));
 }
+
+// A run that FAILED must read as failed.
+//
+// The success half of this is covered against a real log. The failure half was
+// covered only by fixtures, and the monitor's own comment records what that
+// costs: a build stuck at "running" forever because the generator worded its
+// ending differently than the rule expected.
+//
+// A real failing run says "PATCH GATE FAILED: 1 failure(s)" and "gave up after
+// 5 attempts". If neither is an error or a refusal, the app watches a dead
+// build indefinitely — no verdict, no artifact, no way to tell it ended.
+TEST_CASE("a run that failed does not read as still running",
+          "[buildlog][join]") {
+    const auto log = baseline_dir().parent_path() / "real-generator-failure.log";
+    REQUIRE(std::filesystem::exists(log));
+
+    std::vector<forge_modular::BuildLine> lines;
+    {
+        std::ifstream f(log);
+        std::string text;
+        while (std::getline(f, text))
+            lines.push_back({forge_modular::BuildMonitor::classify(text), text});
+    }
+    REQUIRE(lines.size() > 10);
+
+    const auto outcome = forge_modular::BuildMonitor::outcome_of(lines);
+    INFO("outcome of a failed run: " << static_cast<int>(outcome));
+    // Anything but `running`. A finished failure that reads as running is the
+    // app waiting forever on a build that ended minutes ago.
+    CHECK(outcome != forge_modular::BuildOutcome::running);
+}
+
+// The generator's own terminal messages must end the build.
+//
+// patch.py exits with "gave up after N attempts" when a build exhausts its
+// retries. The monitor's error rules are Traceback, "fatal error" and "no such
+// file" — none of which that is. So a build that gave up reads as STILL
+// RUNNING: the app watches forever, the stage never resolves, and Open in Rack
+// never appears, which is the exact failure the success rule above it was
+// written to fix.
+//
+// The strings come from patch.py, not from memory.
+TEST_CASE("a build that gives up is not still running", "[buildlog][join]") {
+    using forge_modular::BuildMonitor;
+    using forge_modular::BuildLine;
+    using forge_modular::BuildOutcome;
+
+    // Terminal: the generator has stopped and produced nothing.
+    const std::string gave_up = "gave up after 5 attempts";
+    CHECK(BuildMonitor::classify(gave_up) != BuildLine::Kind::progress);
+
+    // NOT terminal: an attempt failed its gate and the generator retries.
+    // Classifying this as an error would be worse than missing it, because
+    // outcome_of ranks errored above succeeded — a recovered run would report
+    // failed and the app would hide the patch it had just built.
+    const std::string gate = "  PATCH GATE FAILED: 1 failure(s), 2 warning(s)";
+    CHECK(BuildMonitor::classify(gate) == BuildLine::Kind::progress);
+
+    // A run that gave up does not read as running.
+    std::vector<BuildLine> abandoned{
+        {BuildMonitor::classify("  asking the model"), "  asking the model"},
+        {BuildMonitor::classify(gate), gate},
+        {BuildMonitor::classify(gave_up), gave_up},
+    };
+    CHECK(BuildMonitor::outcome_of(abandoned) != BuildOutcome::running);
+
+    // And a run that hit the gate and then succeeded is DONE.
+    const std::string built = "  built 8 modules, 9 cables \u2192 /tmp/p.vcv";
+    std::vector<BuildLine> recovered{
+        {BuildMonitor::classify(gate), gate},
+        {BuildMonitor::classify(built), built},
+    };
+    CHECK(BuildMonitor::outcome_of(recovered) == BuildOutcome::done);
+}
+
+// A run that recovered is DONE, not failed.
+//
+// outcome_of ranks refused > errored > succeeded, so any line classified as an
+// error outranks a later success. Teaching the monitor that "PATCH GATE
+// FAILED" ends a build therefore risks the opposite fault: a run that failed
+// its first gate, retried, and produced a patch would report failed — and the
+// app would hide the artifact it just built.
+//
+// The real log for prompt 4 is exactly that shape: two gate failures, then a
+// patch.
+TEST_CASE("a run that recovered reads as done", "[buildlog][join]") {
+    const auto log = baseline_dir().parent_path() / "real-generator-failure.log";
+    REQUIRE(std::filesystem::exists(log));
+
+    std::vector<forge_modular::BuildLine> lines;
+    std::size_t gate_failures = 0;
+    {
+        std::ifstream f(log);
+        std::string text;
+        while (std::getline(f, text)) {
+            if (text.find("PATCH GATE FAILED") != std::string::npos)
+                ++gate_failures;
+            lines.push_back({forge_modular::BuildMonitor::classify(text), text});
+        }
+    }
+    // The fixture has to BE that shape, or this asserts nothing.
+    REQUIRE(gate_failures > 0);
+
+    const auto outcome = forge_modular::BuildMonitor::outcome_of(lines);
+    INFO("gate failures: " << gate_failures
+                           << "  outcome: " << static_cast<int>(outcome));
+    CHECK(outcome == forge_modular::BuildOutcome::done);
+}
