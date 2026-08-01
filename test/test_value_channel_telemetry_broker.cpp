@@ -380,6 +380,47 @@ TEST_CASE("telemetry poll retains source and transport loss debt until delivery"
           first_channel["sourceDropped"].getWithDefault<std::int64_t>(0));
 }
 
+TEST_CASE("telemetry poll accumulates debt across repeated targeted evictions",
+          "[inspect][telemetry][broker][backpressure]") {
+    ValueChannelSet channels;
+    REQUIRE(channels.declare_scalar("gain") != nullptr);
+    auto now = std::chrono::steady_clock::now();
+    ValueChannelTelemetryBroker broker({}, [&] { return now; });
+    REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
+
+    const std::array results{
+        InspectorTargetedEventResult::Queued,
+        InspectorTargetedEventResult::QueuedAfterLossyEviction,
+        InspectorTargetedEventResult::QueuedAfterLossyEviction,
+        InspectorTargetedEventResult::QueuedAfterLossyEviction,
+        InspectorTargetedEventResult::Queued,
+        InspectorTargetedEventResult::Queued,
+    };
+    std::vector<std::int64_t> reported_debt;
+    std::size_t attempt = 0;
+    broker.set_event_sink(
+        [&](std::string_view client, const InspectorMessage& event, std::string_view) {
+            REQUIRE(client == "slow-client");
+            reported_debt.push_back(
+                json(event)["transportDroppedSincePrevious"]
+                    .getWithDefault<std::int64_t>(-1));
+            REQUIRE(attempt < results.size());
+            return results[attempt++];
+        });
+    REQUIRE_FALSE(broker
+                      .handle(InspectorRequestContext{.client_id = "slow-client"},
+                              request(1, pulp::inspect::methods::kTelemetrySubscribe,
+                                      R"({"channels":["gain"],"rateHz":60})"))
+                      .is_error);
+
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        broker.poll();
+        now += 20ms;
+    }
+
+    CHECK(reported_debt == std::vector<std::int64_t>{0, 0, 1, 2, 3, 0});
+}
+
 TEST_CASE("telemetry subscription starts after the event overflow baseline",
           "[inspect][telemetry][broker][events]") {
     ValueChannelSet channels;
@@ -468,7 +509,7 @@ TEST_CASE("telemetry fans one event drain to isolated client delivery state",
     broker.poll();
     REQUIRE(slow.size() == 3);
     auto slow_third = json(slow[2]);
-    CHECK(slow_third["transportDroppedSincePrevious"].getWithDefault<std::int64_t>(0) == 1);
+    CHECK(slow_third["transportDroppedSincePrevious"].getWithDefault<std::int64_t>(0) == 2);
     broker.disconnect("healthy");
     CHECK(broker.subscription_count() == 1);
 }
