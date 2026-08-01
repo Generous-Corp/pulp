@@ -326,3 +326,30 @@ TEST_CASE("a calc() position does not corrupt its own colour",
         "linear-gradient(to right, #ff0000 calc(50% + 0%), #0000ff calc(50% + 0%))",
         "linear-gradient(to right, #ff0000 50%, #0000ff 50%)");
 }
+
+// CSS `background-image` takes a comma-separated LIST of layers, painted
+// first-on-top. `View` had one gradient slot, so the top-level comma split
+// never happened: the second layer's stops were swallowed into the first's
+// stop list and neither rendered.
+//
+// Two assertions, because either alone passes in a broken state. The first
+// pins the ORDER — an opaque top layer hides everything under it, so the pair
+// must render as that layer alone; a parser that simply ignored everything
+// after the first comma would also pass it. The second pins EXISTENCE — a
+// fully transparent top layer must reveal the one beneath, which that same
+// parser would render as nothing.
+TEST_CASE("comma-separated background layers paint first-on-top",
+          "[view][gradient][layers]") {
+    require_same_render(
+        "linear-gradient(to right, #ff0000 0%, #00ff00 100%), "
+        "linear-gradient(to right, #0000ff 0%, #ffff00 100%)",
+        "linear-gradient(to right, #ff0000 0%, #00ff00 100%)");
+}
+
+TEST_CASE("a transparent background layer reveals the one beneath it",
+          "[view][gradient][layers]") {
+    require_same_render(
+        "linear-gradient(to right, transparent 0%, transparent 100%), "
+        "linear-gradient(to right, #0000ff 0%, #ffff00 100%)",
+        "linear-gradient(to right, #0000ff 0%, #ffff00 100%)");
+}

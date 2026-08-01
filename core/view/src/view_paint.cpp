@@ -544,25 +544,30 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     // The canvas + Skia/CoreGraphics backends implement all three; the View
     // just dispatches on the stored type. cx/cy are box fractions; radial
     // radius is a fraction of the larger box dimension; conic angle is radians.
-    if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
-        const int grad_n = static_cast<int>(bg_gradient_colors_.size());
-        const Color* grad_c = bg_gradient_colors_.data();
-        const float* grad_p = bg_gradient_positions_.data();
-        if (bg_gradient_type_ == 2) {  // radial
+    // CSS lists background layers first-on-top, so paint the stack in reverse:
+    // the last entry goes down first and the first entry lands over it. Each
+    // pass is self-contained (set gradient → fill → clear), so layering needs
+    // only the loop.
+    for (auto layer = bg_gradients_.rbegin(); layer != bg_gradients_.rend(); ++layer) {
+        if (layer->type <= 0 || layer->colors.empty()) continue;
+        const int grad_n = static_cast<int>(layer->colors.size());
+        const Color* grad_c = layer->colors.data();
+        const float* grad_p = layer->positions.data();
+        if (layer->type == 2) {  // radial
             canvas.set_fill_gradient_radial(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_radius_ * std::max(bounds_.width, bounds_.height),
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->radius * std::max(bounds_.width, bounds_.height),
                 grad_c, grad_p, grad_n);
-        } else if (bg_gradient_type_ == 3) {  // conic / sweep
+        } else if (layer->type == 3) {  // conic / sweep
             // One call for both spellings: a plain conic spans a full turn, so
             // the repeating entry point resolves to the same shader for it.
             canvas.set_fill_gradient_conic_repeating(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_angle_, bg_grad_sweep_turns_, grad_c, grad_p, grad_n);
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->angle, layer->sweep_turns, grad_c, grad_p, grad_n);
         } else {  // linear
             canvas.set_fill_gradient_linear(
-                bg_grad_x0_ * bounds_.width, bg_grad_y0_ * bounds_.height,
-                bg_grad_x1_ * bounds_.width, bg_grad_y1_ * bounds_.height,
+                layer->x0 * bounds_.width, layer->y0 * bounds_.height,
+                layer->x1 * bounds_.width, layer->y1 * bounds_.height,
                 grad_c, grad_p, grad_n);
         }
         if (use_per_corner) {
@@ -578,7 +583,7 @@ void View::paint_background_and_border(canvas::Canvas& canvas) {
     }
 
     // Paint background if set
-    if (has_bg_ && bg_gradient_type_ == 0) {
+    if (has_bg_ && bg_gradients_.empty()) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
             build_corner_path(bounds_.width, bounds_.height,

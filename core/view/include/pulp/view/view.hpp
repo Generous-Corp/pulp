@@ -1762,28 +1762,54 @@ public:
     void set_host_actions(HostActionSurface* surface);
     HostActionSurface* host_actions() const { return host_actions_; }
 
+    /// One background-image layer.
+    ///
+    /// CSS `background-image` takes a comma-separated LIST and paints the FIRST
+    /// entry on top, so a view holds a stack of these rather than a single
+    /// gradient. The single-gradient setters below replace the whole stack with
+    /// one layer, which is what every caller that predates layering wants.
+    struct BackgroundGradient {
+        int type = 0;  // 0=none, 1=linear, 2=radial, 3=conic
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 1;
+        float radius = 0.7071f;     // radial: fraction of max(w,h)
+        float angle = 0.0f;         // conic: start angle in radians
+        float sweep_turns = 1.0f;   // conic: turns the stop list spans
+        std::vector<Color> colors;
+        std::vector<float> positions;
+    };
+
+    /// Replace the background-image stack, first layer on top.
+    void set_background_gradient_layers(std::vector<BackgroundGradient> layers) {
+        bg_gradients_ = std::move(layers);
+        invalidate_subtree_caches_up();
+    }
+    const std::vector<BackgroundGradient>& background_gradient_layers() const {
+        return bg_gradients_;
+    }
+
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,
                                          const std::vector<Color>& colors,
                                          const std::vector<float>& positions) {
-        bg_gradient_colors_ = colors;
-        bg_gradient_positions_ = positions;
-        bg_gradient_type_ = 1;  // linear
-        bg_grad_x0_ = x0; bg_grad_y0_ = y0;
-        bg_grad_x1_ = x1; bg_grad_y1_ = y1;
-        invalidate_subtree_caches_up();
+        BackgroundGradient g;
+        g.type = 1;  // linear
+        g.x0 = x0; g.y0 = y0; g.x1 = x1; g.y1 = y1;
+        g.colors = colors;
+        g.positions = positions;
+        set_background_gradient_layers({std::move(g)});
     }
     /// Radial gradient. cx/cy are fractions of the box; radius_frac is a
     /// fraction of the larger box dimension (resolved at paint).
     void set_background_gradient_radial(float cx, float cy, float radius_frac,
                                          const std::vector<Color>& colors,
                                          const std::vector<float>& positions) {
-        bg_gradient_colors_ = colors;
-        bg_gradient_positions_ = positions;
-        bg_gradient_type_ = 2;  // radial
-        bg_grad_x0_ = cx; bg_grad_y0_ = cy;
-        bg_grad_radius_ = radius_frac;
-        invalidate_subtree_caches_up();
+        BackgroundGradient g;
+        g.type = 2;  // radial
+        g.x0 = cx; g.y0 = cy;
+        g.radius = radius_frac;
+        g.colors = colors;
+        g.positions = positions;
+        set_background_gradient_layers({std::move(g)});
     }
     /// Conic (CSS conic-gradient / Figma angular). cx/cy are fractions of the
     /// box; start_angle is in radians (0 = +x axis, matching the canvas API).
@@ -1795,23 +1821,35 @@ public:
                                         const std::vector<Color>& colors,
                                         const std::vector<float>& positions,
                                         float sweep_turns = 1.0f) {
-        bg_gradient_colors_ = colors;
-        bg_gradient_positions_ = positions;
-        bg_gradient_type_ = 3;  // conic / sweep
-        bg_grad_x0_ = cx; bg_grad_y0_ = cy;
-        bg_grad_angle_ = start_angle;
-        bg_grad_sweep_turns_ = sweep_turns;
-        invalidate_subtree_caches_up();
+        BackgroundGradient g;
+        g.type = 3;  // conic / sweep
+        g.x0 = cx; g.y0 = cy;
+        g.angle = start_angle;
+        g.sweep_turns = sweep_turns;
+        g.colors = colors;
+        g.positions = positions;
+        set_background_gradient_layers({std::move(g)});
     }
+    // The queries below report the TOP layer — the one CSS lists first. They
+    // predate layering and every caller means "the gradient this view shows".
     /// Turns of the circle the conic stop list spans; < 1 means it repeats.
     /// Exposed for tests/inspection.
-    float background_gradient_sweep_turns() const { return bg_grad_sweep_turns_; }
-    void clear_background_gradient() { bg_gradient_type_ = 0; invalidate_subtree_caches_up(); }
-    bool has_background_gradient() const { return bg_gradient_type_ > 0; }
+    float background_gradient_sweep_turns() const {
+        return bg_gradients_.empty() ? 1.0f : bg_gradients_.front().sweep_turns;
+    }
+    void clear_background_gradient() {
+        bg_gradients_.clear();
+        invalidate_subtree_caches_up();
+    }
+    bool has_background_gradient() const { return !bg_gradients_.empty(); }
     /// 0=none, 1=linear, 2=radial, 3=conic. Exposed for tests/inspection.
-    int background_gradient_type() const { return bg_gradient_type_; }
+    int background_gradient_type() const {
+        return bg_gradients_.empty() ? 0 : bg_gradients_.front().type;
+    }
     /// Radial radius as a fraction of max(w,h). Exposed for tests/inspection.
-    float background_gradient_radius() const { return bg_grad_radius_; }
+    float background_gradient_radius() const {
+        return bg_gradients_.empty() ? 0.7071f : bg_gradients_.front().radius;
+    }
 
     /// Text overflow: ellipsis (CSS text-overflow: ellipsis)
     void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }
@@ -2209,13 +2247,8 @@ private:
     struct RunningAnimation { int clock_id = -1; std::string tag; FrameClock* clock = nullptr; };
     std::vector<RunningAnimation> animations_;
     std::shared_ptr<canvas::ViewEffect> effect_;
-    int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial, 3=conic
-    float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
-    float bg_grad_radius_ = 0.7071f;  // radial: fraction of max(w,h)
-    float bg_grad_angle_ = 0.0f;      // conic: start angle in radians
-    float bg_grad_sweep_turns_ = 1.0f;  // conic: turns the stop list spans
-    std::vector<Color> bg_gradient_colors_;
-    std::vector<float> bg_gradient_positions_;
+    // Background-image layers, first on top (CSS paint order).
+    std::vector<BackgroundGradient> bg_gradients_;
     std::string background_repeat_;  ///< CSS background-repeat keyword (storage-only)
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;

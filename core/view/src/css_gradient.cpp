@@ -387,20 +387,23 @@ float parse_angle(const std::string& t) {
 
 }  // namespace
 
-bool apply_css_background_gradient(View& v, std::string_view css_view,
-                                   const CssColorParser& parse_color) {
-    std::string gradient(css_view);
+namespace {
+
+// Parse ONE background-image layer. `box` is the view's local bounds, used to
+// resolve a `px` term inside a calc() stop position; a degenerate box means the
+// view is not laid out yet and such a position is refused rather than resolved
+// against zero.
+bool parse_one_gradient(const std::string& gradient,
+                        const CssColorParser& color_of,
+                        const Rect& box,
+                        View::BackgroundGradient& out) {
     if (gradient.empty()) return false;
-    const CssColorParser color_of = parse_color
-        ? parse_color
-        : CssColorParser(&parse_css_color);
 
     // The box a `px` term inside a calc() stop position resolves against.
     // Absent when the view has not been laid out yet — the importer applies
     // style before Yoga resolves bounds — so such a position is refused rather
     // than divided by a zero-sized box, which would place every stop at
     // infinity while looking like an ordinary parse.
-    const auto box = v.local_bounds();
     const bool box_known = box.width > 0.0f && box.height > 0.0f;
     const auto line_length = [&](float x0, float y0, float x1, float y1)
         -> std::optional<float> {
@@ -426,7 +429,9 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
                          /*angular=*/false, line_length(x0, y0, x1, y1)))
             return false;
         if (!colors.empty()) {
-            v.set_background_gradient_linear(x0, y0, x1, y1, colors, positions);
+            out = {}; out.type = 1;
+            out.x0 = x0; out.y0 = y0; out.x1 = x1; out.y1 = y1;
+            out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
         return false;
@@ -465,7 +470,9 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
                          /*angular=*/false, radius_px))
             return false;
         if (!colors.empty()) {
-            v.set_background_gradient_radial(cx, cy, radius_frac, colors, positions);
+            out = {}; out.type = 2;
+            out.x0 = cx; out.y0 = cy; out.radius = radius_frac;
+            out.colors = std::move(colors); out.positions = std::move(positions);
             return true;
         }
         return false;
@@ -520,12 +527,67 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
                 for (auto& p : positions) p /= span;
             }
         }
-        v.set_background_gradient_conic(cx, cy, from_rad - 1.57079633f, colors,
-                                        positions, sweep_turns);
+        out = {}; out.type = 3;
+        out.x0 = cx; out.y0 = cy;
+        out.angle = from_rad - 1.57079633f;
+        out.sweep_turns = sweep_turns;
+        out.colors = std::move(colors); out.positions = std::move(positions);
         return true;
     }
 
     return false;
+}
+
+// Split a background-image value into its layers on TOP-LEVEL commas only —
+// every comma inside `linear-gradient(...)` separates stops, not layers, so a
+// depth-0 scan is what tells the two apart. A single gradient wraps all of its
+// commas in one paren pair and comes back as one layer.
+std::vector<std::string> split_background_layers(const std::string& css) {
+    std::vector<std::string> layers;
+    std::string cur;
+    int paren = 0;
+    for (char c : css) {
+        if (c == '(') ++paren;
+        else if (c == ')') --paren;
+        if (c == ',' && paren <= 0) {
+            layers.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    layers.push_back(cur);
+    for (auto& layer : layers) {
+        const auto a = layer.find_first_not_of(" \t\r\n");
+        const auto b = layer.find_last_not_of(" \t\r\n");
+        layer = (a == std::string::npos) ? std::string() : layer.substr(a, b - a + 1);
+    }
+    return layers;
+}
+
+}  // namespace
+
+bool apply_css_background_gradient(View& v, std::string_view css_view,
+                                   const CssColorParser& parse_color) {
+    const std::string css(css_view);
+    if (css.empty()) return false;
+    const CssColorParser color_of = parse_color
+        ? parse_color
+        : CssColorParser(&parse_css_color);
+
+    // One unreadable layer refuses the whole list rather than painting the
+    // rest. A stack missing a layer is a wrong render that looks like a right
+    // one — the same reason an unevaluable calc() refuses its gradient.
+    std::vector<View::BackgroundGradient> layers;
+    for (const auto& layer_css : split_background_layers(css)) {
+        View::BackgroundGradient layer;
+        if (!parse_one_gradient(layer_css, color_of, v.local_bounds(), layer))
+            return false;
+        layers.push_back(std::move(layer));
+    }
+    if (layers.empty()) return false;
+    v.set_background_gradient_layers(std::move(layers));
+    return true;
 }
 
 }  // namespace pulp::view
