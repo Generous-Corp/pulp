@@ -338,9 +338,14 @@ about what is safe to delete.
 An install can be complete, signed, notarized, stapled and known to
 LaunchServices while Cmd-Space finds nothing — which is indistinguishable from
 "it never installed", and is what one "I don't see it on m5" turned out to be.
-`mdimport /Applications/"Forge Modular.app"` fixes it. Indexing is
-**asynchronous**: checking immediately after reported CANNOT FIND IT for an app
-that was indexed a second later, so the check in `setup_m5.sh` retries for 10s.
+**`touch` the bundle, then `mdimport`** — and the touch is the part that
+matters. `rsync -a` preserves the SOURCE directory's mtime, and a rebuild only
+changes the binary inside the bundle, so the installed .app arrives looking
+older than the last index pass and Spotlight skips it as unchanged. `mdimport`
+on its own does nothing; the tell that you are in this state is `mdls` reporting
+**null** for every attribute while `mdfind` finds 2,300 other app bundles fine.
+Indexing is **asynchronous**: checking immediately reported CANNOT FIND IT for
+an app indexed seconds later, so the check in `setup_m5.sh` retries for 20s.
 Query it as a structured search — `kMDItemContentType ==
 "com.apple.application-bundle" && kMDItemDisplayName == "Forge Modular"` —
 because `mdfind -name "Forge Modular.app"` finds it even when it is indexed.
@@ -360,6 +365,28 @@ compares captured regions. Two things make it a proof rather than a picture:
 through `setUnicodeString`, which carries no key code, so before this there was
 no way to send an arrow at all. Both need Accessibility and Screen Recording, so
 they run from a Terminal on the machine, never over SSH.
+
+## One generation at a time, and one log per run
+
+`patch.py` / `generate.py` are launched with `nohup` + `setsid` so a build
+survives the window closing. Every run used to redirect into one
+`last-run.log`, and nothing stopped a second Build — so two generations
+overlapping wrote over each other from offset zero. That file is not just a
+transcript: the shell reads the **outcome**, the **stage** and the **artifact
+path** out of it, so a collision puts one patch's explanation on screen beside
+another patch's filename and hands Rack the wrong file. Seen on m5, two patches
+finishing six seconds apart, with the log showing an acid explanation stopping
+mid-word and an ambient one continuing.
+
+Both halves are needed. The lock (`start_build_with`) is *a build this shell
+started, on a log it is watching, that has not reported an end* — **not**
+`busy()`, which is `watching_ && outcome == running` and therefore true for a
+shell merely watching a log nothing has written yet; using it refused the FIRST
+build of every session. The lock cannot see a run left over from a previous
+launch, so the engine is also asked whether a generator process exists, and each
+run claims its own log under `runs/` with `O_CREAT|O_EXCL` — an `exists()` check
+is not enough, because the log does not exist until the run writes it, in
+another process, so two submits in the same second pick the same name.
 
 ## Signing: `stapler validate` never says "validated"
 

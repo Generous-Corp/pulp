@@ -147,13 +147,23 @@ print(\"  vocabulary:\", len(V.render().splitlines()), \"lines\")
 # found nothing, which is indistinguishable from "it did not install". mdimport
 # is what puts it in the index.
 step "7. making it findable"
-# Indexing is asynchronous, so the check waits for it. Asking immediately after
-# mdimport reported CANNOT FIND IT for an app that was indexed a second later --
-# a false alarm is as bad as a missed one here, because the next person spends
-# their time on Spotlight instead of on the app.
-remote 'mdimport /Applications/"Forge Modular.app" >/dev/null 2>&1
+# `touch` first, and it is the part that actually matters.
+#
+# rsync -a preserves the SOURCE directory's mtime, and a rebuild only changes
+# the binary inside the bundle -- so the installed .app arrives looking older
+# than the last index pass and Spotlight skips it as unchanged. The symptom is
+# an app that is installed, signed, notarized, stapled, known to LaunchServices
+# and invisible to Cmd-Space, with `mdls` reporting null for every attribute.
+# mdimport alone does not fix it; touch + mdimport does, in about 10s.
+#
+# Indexing is asynchronous, so the check waits. Asking immediately reported
+# CANNOT FIND IT for an app that was indexed seconds later, and a false alarm
+# is as costly as a missed one -- the next person spends their time on
+# Spotlight instead of on the app.
+remote 'touch /Applications/"Forge Modular.app"
+mdimport /Applications/"Forge Modular.app" >/dev/null 2>&1
 found=0
-for i in $(seq 1 10); do
+for i in $(seq 1 20); do
     if mdfind '"'"'kMDItemContentType == "com.apple.application-bundle" && kMDItemDisplayName == "Forge Modular"'"'"' 2>/dev/null | grep -q .; then
         found=1; break
     fi
@@ -162,7 +172,7 @@ done
 if [ "$found" = 1 ]; then
     echo "  Spotlight can find it (after ${i}s)"
 else
-    echo "  SPOTLIGHT CANNOT FIND IT after 10s — open it from /Applications in Finder,"
+    echo "  SPOTLIGHT CANNOT FIND IT after 20s — open it from /Applications in Finder,"
     echo "  or run: mdimport -r /Applications/\"Forge Modular.app\""
 fi'
 
