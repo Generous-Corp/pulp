@@ -10,8 +10,15 @@
 #include <pulp/inspect/authentication.hpp>
 #include <pulp/inspect/discovery.hpp>
 #include <pulp/inspect/discovery_publisher.hpp>
+#if PULP_TEST_INSPECT_DOMAIN_HANDLER
+#include <pulp/inspect/domain_handler.hpp>
+#endif
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/protocol.hpp>
+#if PULP_TEST_INSPECT_DOMAIN_HANDLER
+#include <pulp/inspect/state_inspector.hpp>
+#include <pulp/state/store.hpp>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -397,12 +404,9 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
         return make_response(request.id, R"({"applied":true})");
     };
 
-    auto result = run_pulp(
-        {"inspect",
-         "--port", fixture.port_string(),
-         "--command", "State.setParameter",
-         "--params", R"({"id":"gain","value":0.75})"},
-        10000);
+    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+                            "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
+                           10000);
 
     INFO("stdout: " << result.stdout_output);
     INFO("stderr: " << result.stderr_output);
@@ -413,20 +417,63 @@ TEST_CASE("pulp inspect one-shot acquires a controller for mutations",
     REQUIRE(fixture.seen.size() == 1);
     CHECK(fixture.seen.front().method == "State.setParameter");
     CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
-          R"({"id":"gain","value":0.75})");
+          R"({"id":7,"value":0.75})");
 
-    result = run_pulp(
-        {"inspect",
-         "--port", fixture.port_string(),
-         "--command", "State.setParameter",
-         "--params", R"({"id":"gain","value":0.5})"},
-        10000);
+    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+                       "State.setParameter", "--params", R"({"id":7,"value":0.5})"},
+                      10000);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
     REQUIRE(fixture.seen.size() == 2);
-    CHECK(compact_json_for_assertion(fixture.seen.back().params_json) ==
-          R"({"id":"gain","value":0.5})");
+    CHECK(compact_json_for_assertion(fixture.seen.back().params_json) == R"({"id":7,"value":0.5})");
 }
+
+#if PULP_TEST_INSPECT_DOMAIN_HANDLER
+TEST_CASE("pulp inspect applies a typed parameter mutation through the production domain",
+          "[cli][shellout][inspect][controller][state]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    pulp::state::StateStore store;
+    pulp::state::ParamInfo gain;
+    gain.id = 7;
+    gain.name = "Gain";
+    gain.range = {0.0f, 1.0f, 0.25f, 0.0f};
+    store.add_parameter(gain);
+    pulp::inspect::StateInspector state_inspector(store);
+    pulp::inspect::DomainHandler domains;
+    domains.set_state_inspector(&state_inspector);
+    InspectServerFixture fixture;
+    fixture.handler = [&](const InspectorMessage& request) { return domains.handle(request); };
+
+    auto result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+                            "State.setParameter", "--params", R"({"id":7,"value":0.75})"},
+                           10000);
+
+    INFO("stdout: " << result.stdout_output);
+    INFO("stderr: " << result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output == R"({"ok": true})"
+                                    "\n");
+    CHECK(store.get_value(7) == 0.75f);
+    REQUIRE(fixture.seen.size() == 1);
+    CHECK(fixture.seen.front().method == "State.setParameter");
+    CHECK(compact_json_for_assertion(fixture.seen.front().params_json) ==
+          R"({"id":7,"value":0.75})");
+
+    result = run_pulp({"inspect", "--port", fixture.port_string(), "--command",
+                       "State.setParameter", "--params", R"({"id":"gain","value":0.5})"},
+                      10000);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 1);
+    CHECK(result.stderr_output.find("Invalid params for State.setParameter") != std::string::npos);
+    CHECK(store.get_value(7) == 0.75f);
+    REQUIRE(fixture.seen.size() == 2);
+}
+#endif
 
 TEST_CASE("pulp inspect one-shot writes output files and propagates errors",
           "[cli][shellout][inspect]") {

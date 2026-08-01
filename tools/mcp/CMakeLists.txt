@@ -77,6 +77,7 @@ target_link_libraries(pulp-mcp-core
         pulp::tool-audio
         pulp::tool-timeline
     PRIVATE
+        pulp::inspect-protocol
         pulp::platform
         pulp::timebase
         pulp::timeline)
@@ -87,10 +88,9 @@ target_compile_features(pulp-mcp PRIVATE cxx_std_20)
 target_link_libraries(pulp-mcp PRIVATE pulp-mcp-core)
 
 # The agent-request queue is a light, choc-only unit that lives in inspect/. The
-# MCP server reads it in-process, so compile just that translation unit into
-# pulp-mcp rather than linking all of pulp::inspect: pulp::inspect PUBLIC-links
-# pulp::view / pulp::render, which would drag the whole GPU/Skia chain into the
-# MCP server just to read a JSON queue file.
+# MCP server reads it in-process, so compile that translation unit into
+# pulp-mcp. Capability metadata comes from the CPU-only inspect-protocol target;
+# do not link all of pulp::inspect, which would drag in the GPU/Skia overlay.
 target_sources(pulp-mcp-core PRIVATE
     "${PROJECT_SOURCE_DIR}/inspect/src/agent_request_queue.cpp")
 target_include_directories(pulp-mcp-core PRIVATE

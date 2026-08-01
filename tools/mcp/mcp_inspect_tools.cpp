@@ -5,11 +5,92 @@
 #include "mcp_tools.hpp"
 
 #include <pulp/inspect/agent_request_queue.hpp>
+#include <pulp/inspect/capabilities.hpp>
+#include <pulp/inspect/protocol.hpp>
 
+#include <array>
 #include <cstddef>
 #include <string>
 
 namespace pulp_mcp {
+namespace {
+
+using namespace pulp::inspect;
+
+constexpr auto kInspectorMcpTools = std::to_array<InspectorMcpToolDescriptor>({
+    {"pulp_inspect_dom", methods::kDOMGetDocument},
+    {"pulp_inspect_params", methods::kStateGetParameters},
+    {"pulp_inspect_value_channels", methods::kStateGetValueChannels},
+    {"pulp_inspect_set_param", methods::kStateSetParameter},
+    {"pulp_inspect_screenshot", methods::kCaptureScreenshot},
+    {"pulp_inspect_evaluate", methods::kRuntimeEvaluate},
+    {"pulp_inspect_performance", methods::kPerfGetMetrics},
+    {"pulp_inspect_audio", methods::kAudioGetConfig},
+    {"pulp_motion_start_trace", methods::kMotionStartTrace},
+    {"pulp_motion_stop_trace", methods::kMotionStopTrace},
+    {"pulp_motion_snapshot", methods::kMotionSnapshot},
+    {"pulp_motion_list_traces", methods::kMotionListTraces},
+    {"pulp_motion_scrub_to", methods::kMotionScrubTo},
+    {"pulp_motion_play", methods::kMotionPlay},
+    {"pulp_motion_pause", methods::kMotionPause},
+    {"pulp_motion_enable_cost", methods::kMotionEnableCost},
+    {"pulp_motion_disable_cost", methods::kMotionDisableCost},
+    {"pulp_trace_start", methods::kTraceStartSession},
+    {"pulp_trace_stop", methods::kTraceStopSession},
+    {"pulp_trace_snapshot", methods::kTraceSnapshot},
+    {"pulp_trace_query", methods::kTraceQuery},
+    {"pulp_trace_explain", methods::kTraceExplain},
+});
+
+consteval bool inspector_mcp_tool_names_are_unique() {
+    for (std::size_t i = 0; i < kInspectorMcpTools.size(); ++i) {
+        if (kInspectorMcpTools[i].name.empty() || kInspectorMcpTools[i].method.empty())
+            return false;
+        for (std::size_t j = i + 1; j < kInspectorMcpTools.size(); ++j) {
+            if (kInspectorMcpTools[i].name == kInspectorMcpTools[j].name)
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(inspector_mcp_tool_names_are_unique());
+
+} // namespace
+
+std::span<const InspectorMcpToolDescriptor> inspector_mcp_tool_registry() {
+    return kInspectorMcpTools;
+}
+
+const InspectorMcpToolDescriptor* find_inspector_mcp_tool(std::string_view name) {
+    for (const auto& tool : kInspectorMcpTools) {
+        if (tool.name == name)
+            return &tool;
+    }
+    return nullptr;
+}
+
+std::string_view inspector_mcp_tool_capability(const InspectorMcpToolDescriptor& tool) {
+    const auto* method = find_inspector_method(tool.method);
+    return method ? capability_id(method->capability) : std::string_view{};
+}
+
+bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
+    for (const auto& tool : kInspectorMcpTools) {
+        const auto capability = inspector_mcp_tool_capability(tool);
+        if (capability.empty())
+            return false;
+
+        const auto tool_marker = "\"name\":\"" + std::string(tool.name) + "\",\"description\":\"";
+        const auto description = tools_json.find(tool_marker);
+        if (description == std::string::npos)
+            return false;
+        const auto insertion = description + tool_marker.size();
+        tools_json.insert(insertion, "Inspector method " + std::string(tool.method) +
+                                         " (capability " + std::string(capability) + "). ");
+    }
+    return true;
+}
 
 // Read the pull-based agent-request queue (.pulp-design-requests.json) for a
 // design project and return its not-yet-consumed requests as a JSON array.
