@@ -6,6 +6,8 @@
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
 
+#include "project_package_test_access.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -39,6 +41,15 @@ namespace {
 
 using namespace pulp::project_package;
 namespace fs = std::filesystem;
+
+fs::path g_remove_after_blob_verification;
+
+void remove_verified_blob(pulp::project_package::detail::PackageFaultPoint point) noexcept {
+    if (point != pulp::project_package::detail::PackageFaultPoint::ExistingBlobVerified)
+        return;
+    std::error_code ignored;
+    fs::remove(g_remove_after_blob_verification, ignored);
+}
 
 class TemporaryPackage {
   public:
@@ -525,4 +536,43 @@ TEST_CASE("Atomic project-package publisher anchors a relative destination at cr
     REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
     REQUIRE(read_text(first / "published" / "value.txt") == "anchored");
     REQUIRE_FALSE(fs::exists(second / "published"));
+}
+
+TEST_CASE("Atomic project-package publisher rejects staged symlinks",
+          "[project-package][atomic-publisher]") {
+    TemporaryPackage temporary("atomic-symlink");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+    const auto external = temporary.path / "external.txt";
+    std::ofstream(external) << "external";
+    std::error_code error;
+    fs::create_symlink(external, publisher->staging_directory() / "escape", error);
+    if (error)
+        SKIP("symlink creation is unavailable: " << error.message());
+
+    const auto committed = publisher->commit_directory();
+    REQUIRE_FALSE(committed);
+    REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
+    REQUIRE_FALSE(fs::exists(destination));
+}
+
+TEST_CASE("Package writer fences a verified pre-existing blob before admitting it",
+          "[project-package][durability]") {
+    TemporaryPackage temporary("existing-blob-fence");
+    const std::vector<std::uint8_t> bytes{'d', 'u', 'r', 'a', 'b', 'l', 'e'};
+    const auto hash = hash_bytes(bytes);
+    auto writer = PackageWriter::create(temporary.path, registry());
+    REQUIRE(writer);
+    REQUIRE(writer->stage_blob(BlobStore::Media, hash, bytes));
+
+    g_remove_after_blob_verification = temporary.path / "media" / hash.to_hex();
+    pulp::project_package::detail::ProjectPackageTestAccess::set_fault_hook(remove_verified_blob);
+    const auto restaged = writer->stage_blob(BlobStore::Media, hash, bytes);
+    pulp::project_package::detail::ProjectPackageTestAccess::clear_fault_hook();
+    g_remove_after_blob_verification.clear();
+
+    REQUIRE_FALSE(restaged);
+    REQUIRE(restaged.error().code == PackageErrorCode::DurabilityUncertain);
 }

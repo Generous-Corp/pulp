@@ -44,6 +44,8 @@ pulp_add_test_suite(pulp-test-project-package
         PULP_PROJECT_PACKAGE_MUTANT_HELPER="$<TARGET_FILE:pulp-project-package-mutant-helper>"
     LABELS timeline crash-recovery
     TIMEOUT 30)
+target_include_directories(pulp-test-project-package PRIVATE
+    "${CMAKE_SOURCE_DIR}/core/project_package/src")
 add_dependencies(pulp-test-project-package
     pulp-project-package-publish-helper pulp-project-package-mutant-helper)
 

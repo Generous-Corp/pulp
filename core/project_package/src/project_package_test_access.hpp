@@ -7,6 +7,7 @@ namespace pulp::project_package::detail {
 enum class PackageFaultPoint : std::uint8_t {
     StagedFileWritten,
     StagedFileFenced,
+    ExistingBlobVerified,
     BlobPublished,
     BlobDirectoryFenced,
     GenerationWritten,

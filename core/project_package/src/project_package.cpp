@@ -325,6 +325,9 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
     if (fs::exists(destination, error)) {
         if (error || !hash_matches(destination, expected, impl_->limits.max_blob_bytes))
             return failure<BlobReference>(PackageErrorCode::HashMismatch, destination);
+        detail::invoke_fault_hook(detail::PackageFaultPoint::ExistingBlobVerified);
+        if (!detail::fence_file(destination))
+            return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
         if (!detail::fence_directory(destination.parent_path()))
             return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
         return runtime::Result<BlobReference, PackageError>(runtime::Ok(reference));
@@ -338,6 +341,8 @@ PackageWriter::stage_blob(BlobStore store, const timeline::ContentHash& expected
         fs::remove(temporary, error);
         if (!hash_matches(destination, expected, impl_->limits.max_blob_bytes))
             return failure<BlobReference>(PackageErrorCode::PublicationConflict, destination);
+        if (!detail::fence_file(destination))
+            return failure<BlobReference>(PackageErrorCode::DurabilityUncertain, destination);
     }
     detail::invoke_fault_hook(detail::PackageFaultPoint::BlobPublished);
     if (!detail::fence_directory(destination.parent_path()))

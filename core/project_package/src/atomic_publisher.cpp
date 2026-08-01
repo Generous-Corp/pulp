@@ -166,7 +166,9 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
     for (fs::recursive_directory_iterator iterator(impl_->staging, error), end;
          !error && iterator != end; iterator.increment(error)) {
         const auto status = iterator->symlink_status(error);
-        if (error || status.type() == fs::file_type::symlink)
+        if (status.type() == fs::file_type::symlink)
+            return failure<AtomicPublishOutcome>(PackageErrorCode::InvalidLayout, iterator->path());
+        if (error)
             break;
         if (status.type() == fs::file_type::directory)
             directories.push_back(iterator->path());
