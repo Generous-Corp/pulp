@@ -1,3 +1,4 @@
+#include <pulp/playback/automation_cursor.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/program_wire.hpp>
 #include <pulp/playback/track_automation_program.hpp>
@@ -776,4 +777,71 @@ TEST_CASE("program wire equality compares values rather than shared ownership",
     const std::array shifted{TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
                              TempoPoint{{kTicksPerQuarter * 4}, 96.0}};
     REQUIRE_FALSE(program_wire_matches(decoded.value(), *fixture.program, shifted, kEpoch));
+}
+
+// The wire omits `instance_token` and the header justifies that by saying
+// `producer_epoch` "replaces that guard across a realm". It does not, and the
+// two cases are worth separating: `producer_epoch` distinguishes PRODUCERS,
+// while `instance_token` distinguished PROGRAMS FROM ONE PRODUCER. The
+// producer-restart case the exclusion was reasoned against is real and covered
+// above; a single producer recompiling is the common one and is not.
+//
+// The first half is a control with a known answer: two compiles of the same lane
+// at the same generation must NOT read as Unchanged in process. If that ever
+// stops holding, the premise is gone and this case says so rather than passing
+// quietly on a wire comparison that no longer means anything.
+TEST_CASE("one producer's successive programs are indistinguishable on the wire",
+          "[playback][wire]") {
+    const auto map = wire_tempo_map();
+    const auto lane = device_lane(50, 41, 7, 0.25f);
+    const auto first_program = take(AutomationProgram::compile(lane, map, 1));
+    const auto second_program = take(AutomationProgram::compile(lane, map, 1));
+
+    // Same lane, same generation — and a fresh token per compile, because
+    // next_instance_token() is a process-global monotonic counter.
+    REQUIRE(first_program->lane_id() == second_program->lane_id());
+    REQUIRE(first_program->generation() == second_program->generation());
+    REQUIRE(first_program->instance_token() != second_program->instance_token());
+
+    MasterTransport clock;
+    MasterTransportConfig config;
+    config.max_buffer_size = 64;
+    config.initially_playing = true;
+    REQUIRE(clock.prepare(*map, config) == TransportError::None);
+
+    std::array<AutomationBlockEvent, 32> events{};
+    AutomationCursor cursor;
+    TransportSnapshot snapshot;
+    REQUIRE(clock.begin_block(32, snapshot) == TransportError::None);
+    REQUIRE(cursor.process(*first_program, snapshot, events).adoption ==
+            AutomationProgramAdoption::Adopted);
+    REQUIRE(clock.begin_block(32, snapshot) == TransportError::None);
+    // The control: in process the cursor can tell these apart, because Unchanged
+    // requires the instance token to match as well as the lane key.
+    REQUIRE(cursor.process(*second_program, snapshot, events).adoption !=
+            AutomationProgramAdoption::Unchanged);
+
+    // Across a realm it cannot. Two compiles of one document, encoded by one
+    // producer at one epoch — every field the wire carries is equal, so the
+    // bytes are equal, and a consumer computing Unchanged from them reaches the
+    // opposite answer to the in-process cursor above. That is a silently wrong
+    // render rather than a decode error.
+    EncodedFixture fixture;
+    CompiledProgram rebuilt{wire_project()};
+    const auto second = rebuilt.store.read();
+    REQUIRE(second->generation() == fixture.program->generation());
+
+    WireBuffer again(fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch, again.span())) ==
+            fixture.size);
+    REQUIRE(fixture.size > 0);
+    REQUIRE(std::memcmp(fixture.bytes().data(), again.span().data(), fixture.size) == 0);
+
+    // Positive control for the comparison itself: the same two programs encoded
+    // under DIFFERENT epochs must differ. Without it, "the bytes matched" is
+    // equally consistent with a comparison that cannot report a difference.
+    WireBuffer separated(fixture.size);
+    REQUIRE(take(encode_program_wire(*second, kTempoPoints, kEpoch + 1, separated.span())) ==
+            fixture.size);
+    REQUIRE(std::memcmp(fixture.bytes().data(), separated.span().data(), fixture.size) != 0);
 }
