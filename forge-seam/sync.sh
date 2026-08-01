@@ -27,31 +27,61 @@ if [ ! -d "$SRC" ]; then
     exit 2
 fi
 
-# Every file Forge Modular owns. A file that exists in the checkout but is not
-# named here is NOT copied -- that is deliberate, because the checkout also
-# holds Forge's own sources, which this repo must never carry.
-MODULAR_FILES=(
-    build_monitor mention_overlay modular_shell module_summary
-    patch_explanation patch_loader module_catalog portmap process_engine rack_layout rack_preview
-)
+# Every file Forge Modular owns -- DERIVED, from the one place that already
+# has to be right.
+#
+# This was a hand-written list, and populate.sh carried a second copy of it.
+# They drifted: portmap and module_catalog were added to one and not the other,
+# and a rebuilt worktree compiled without two of its headers. Worse, a source
+# that exists only in the CHECKOUT is invisible to a list written HERE -- which
+# is a one-way door, because /tmp is cleared and the seam is the only copy.
+#
+# So the list comes from Forge's CMakeLists, where our chrome patch registers
+# these sources. A file that is not there is not compiled, so anything real is
+# named there by construction, and nothing has to be remembered.
+CHECKOUT_CMAKE="$SRC/CMakeLists.txt"
+registered=""
+if [ -f "$CHECKOUT_CMAKE" ]; then
+    registered="$(awk '/foreach\(_forge_modular_src/,/^endforeach/' \
+                      "$CHECKOUT_CMAKE" \
+                  | grep -oE '[a-z_]+\.cpp' | sed 's/\.cpp$//')"
+fi
 
-# A file this repo carries that the list above forgets is a file that drifts in
-# silence -- it is here, it looks synced, and nothing ever copies it.
-# module_summary was exactly that for as long as it existed.
+# Union with what this repo already carries, so a file dropped from the
+# registration is still synced rather than quietly abandoned here.
+carried=""
 for existing in "$SEAM"/modular/*.cpp "$SEAM"/modular/*.hpp; do
+    [ -f "$existing" ] || continue
     stem="$(basename "$existing")"; stem="${stem%.*}"
-    listed=0
-    for known in "${MODULAR_FILES[@]}"; do
-        [ "$known" = "$stem" ] && listed=1 && break
-    done
-    # The format entry points and the standalone main live in their own
-    # subdirectories in the checkout, so they are not stems of this list.
-    case "$stem" in main|*_entry) listed=1 ;; esac
-    if [ "$listed" -eq 0 ]; then
-        echo "  NOT SYNCED: modular/$stem — add it to MODULAR_FILES" >&2
-        exit 3
-    fi
+    case "$stem" in main|*_entry) continue ;; esac
+    carried="$carried$stem
+"
 done
+
+MODULAR_FILES=()
+while IFS= read -r stem; do
+    [ -n "$stem" ] && MODULAR_FILES+=("$stem")
+done < <(printf '%s\n%s\n' "$registered" "$carried" | sort -u | grep -v '^$')
+
+[ "${#MODULAR_FILES[@]}" -gt 0 ] || { echo "sync: no modular sources found —
+       neither $CHECKOUT_CMAKE nor $SEAM/modular named any" >&2; exit 3; }
+
+# A file this repo carries that the build does NOT register is a file that is
+# never compiled. CMake skips a missing source with if(EXISTS) rather than
+# failing, so this fails open unless something says so out loud.
+if [ -n "$registered" ]; then
+    for existing in "$SEAM"/modular/*.cpp; do
+        [ -f "$existing" ] || continue
+        stem="$(basename "$existing")"; stem="${stem%.*}"
+        case "$stem" in main|*_entry) continue ;; esac
+        printf '%s\n' "$registered" | grep -qx "$stem" || {
+            echo "  NOT BUILT: modular/$stem.cpp is carried here but is not in" >&2
+            echo "       the foreach(_forge_modular_src) list in the chrome patch," >&2
+            echo "       so CMake skips it silently and it is never compiled." >&2
+            exit 3
+        }
+    done
+fi
 
 drift=0
 report() { # <label> <src> <dst>

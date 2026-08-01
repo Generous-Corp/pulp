@@ -102,5 +102,121 @@ else
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# The two scripts must not disagree about which files the seam owns.
+#
+# They did. populate.sh and sync.sh each carried a hand-written list, portmap
+# and module_catalog were added to one only, and a rebuilt worktree failed to
+# compile with "file not found". Both lists are now derived, and these check
+# that the derivation actually covers the cases the lists got wrong.
+
+# Both are checked by RUNNING them over a file they have never heard of.
+#
+# Grepping the scripts for a hardcoded list was the first attempt, and it was
+# unfailable: removing sync.sh's derivation left the text still matching, and
+# the check reported ok on a script that had just been broken. A test that
+# passes on the broken thing tests nothing. So each script is handed a novel
+# file and asked to carry it.
+
+# populate.sh: a source the seam carries must land in the worktree, whether or
+# not anything ever named it.
+# populate.sh needs a real Forge worktree -- it applies the chrome patch first
+# and stops if that fails -- so this probes the checkout rather than a stub. A
+# stub dest made this report a failure that was really "not a git repo", which
+# is worse than no test.
+POP_DEST="${FORGE_SRC:-/tmp/forge-cur}"
+if [ ! -d "$POP_DEST/src" ]; then
+    printf '  skip   no Forge checkout at %s — cannot verify populate copies
+         an unnamed source. This is a skip, not a pass.\n' "$POP_DEST"
+else
+    echo "// novel" > "$HERE/modular/zz_probe.cpp"
+    echo "// novel" > "$HERE/modular/zz_probe.hpp"
+    bash "$HERE/populate.sh" "$POP_DEST" >/dev/null 2>&1
+    if [ -f "$POP_DEST/src/zz_probe.cpp" ] \
+       && [ -f "$POP_DEST/include/forge/zz_probe.hpp" ]; then
+        ok "populate.sh copies a source no list has ever named"
+    else
+        wrong "populate.sh did not copy zz_probe — it is naming files rather
+         than reading them, which is the drift that broke the last rebuild"
+    fi
+    rm -f "$HERE/modular/zz_probe.cpp" "$HERE/modular/zz_probe.hpp" \
+          "$POP_DEST/src/zz_probe.cpp" "$POP_DEST/include/forge/zz_probe.hpp"
+fi
+
+# sync.sh: a source that exists only in the CHECKOUT must come back here. This
+# is the one-way door -- /tmp is cleared, and a file the list forgets is gone.
+tmp_src="$(mktemp -d)/c"
+mkdir -p "$tmp_src/src" "$tmp_src/include/forge"
+# The fixture registers everything the seam really carries, plus the probe.
+# Registering only the probe would trip the not-built guard on every real
+# source, and the test would fail for a reason it is not about.
+{
+    echo "foreach(_forge_modular_src"
+    for f in "$HERE"/modular/*.cpp; do
+        b="$(basename "$f")"
+        case "$b" in main.cpp|*_entry.cpp) continue ;; esac
+        echo "    $b"
+    done
+    echo "    zz_probe.cpp)"
+    echo "endforeach()"
+} > "$tmp_src/CMakeLists.txt"
+echo "// born in the checkout" > "$tmp_src/src/zz_probe.cpp"
+sync_out="$(FORGE_CHECKOUT="$tmp_src" bash "$HERE/sync.sh" --check 2>&1)"
+case "$sync_out" in
+    *zz_probe*) ok "sync.sh brings back a source that exists only in the checkout" ;;
+    *) wrong "sync.sh ignored zz_probe.cpp — a file created in /tmp would be
+         lost when /tmp is cleared, which has already happened once
+         (got: $sync_out)" ;;
+esac
+rm -rf "$(dirname "$tmp_src")"
+
+# Every source the seam carries must be registered in the chrome patch, or
+# CMake's if(EXISTS) skips it in silence and it is never compiled.
+unbuilt=""
+for f in "$HERE"/modular/*.cpp; do
+    [ -f "$f" ] || continue
+    b="$(basename "$f")"; stem="${b%.cpp}"
+    case "$stem" in main|*_entry) continue ;; esac
+    grep -q "$stem\.cpp" "$PATCH" || unbuilt="$unbuilt $stem"
+done
+[ -z "$unbuilt" ] \
+    && ok "every carried source is registered in the chrome patch" \
+    || wrong "carried but never compiled (CMake skips a missing source
+         silently, so this fails open):$unbuilt"
+
+# ---------------------------------------------------------------------------
+# The scanner and the reader must agree on what a scan records.
+#
+# CARTOG writes "scan": N; PortMap::kScanVersion is what the reader expects.
+# They live in different products -- a Rack plugin and the app -- so nothing
+# links them, and a scanner taught to measure something new without bumping
+# both would keep reporting entries as fully measured while they are not.
+# That is the failure this whole field exists to catch, so it must not be
+# possible to reintroduce it in the mechanism itself.
+CARTOG_SRC="$(dirname "$HERE")/examples/forge-modular/src/CARTOG.cpp"
+PORTMAP_HDR="$HERE/modular/portmap.hpp"
+if [ ! -f "$CARTOG_SRC" ] || [ ! -f "$PORTMAP_HDR" ]; then
+    printf '  skip   CARTOG.cpp or portmap.hpp not found — cannot compare the
+         scan version. This is a skip, not a pass.\n'
+else
+    # The scanner writes its JSON from C++ string literals, so the quotes in
+    # the source are escaped -- matching on a bare "scan" finds nothing and
+    # reports the field as missing, which looks identical to it being missing.
+    written="$(grep -oE '\\?"scan\\?": *[0-9]+' "$CARTOG_SRC" \
+                | grep -oE '[0-9]+' | head -1)"
+    expected="$(grep -oE 'kScanVersion *= *[0-9]+' "$PORTMAP_HDR" \
+                | grep -oE '[0-9]+' | head -1)"
+    if [ -z "$written" ] || [ -z "$expected" ]; then
+        wrong "could not find the scan version in CARTOG.cpp ('$written') or
+         portmap.hpp ('$expected') — one of them stopped declaring it"
+    elif [ "$written" != "$expected" ]; then
+        wrong "CARTOG writes scan $written but the reader expects $expected —
+         every entry the new scanner writes would read as stale, or worse, an
+         older entry would read as current"
+    else
+        ok "the scanner and the port-map reader agree on scan version $written"
+    fi
+fi
+
 printf '\n%s\n' "$([ "$bad" -eq 0 ] && echo 'all good' || echo FAILED)"
 [ "$bad" -eq 0 ]

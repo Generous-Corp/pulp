@@ -22,12 +22,27 @@ set -uo pipefail
 SEAM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${1:-/tmp/forge-cur}"
 
-# The shell and its views. Same list sync.sh carries, for the same reason: a
-# file missing from it drifts in silence.
-MODULAR_FILES=(
-    build_monitor mention_overlay modular_shell module_summary
-    patch_explanation patch_loader process_engine rack_layout rack_preview
-)
+# The shell and its views: DERIVED, never listed.
+#
+# This carried its own copy of sync.sh's list and drifted -- portmap and
+# module_catalog were added to one and not the other, so a rebuilt worktree
+# was missing two headers and failed to compile with "file not found". Two
+# lists that must agree is one list too many, so this reads what is actually
+# here.
+#
+# The plugin directory's files live alongside them and go somewhere else, so
+# they are named as exclusions rather than the rest being named as inclusions:
+# a new shell source is picked up automatically, which is the case that keeps
+# happening.
+NOT_SHELL_SOURCES=(main.cpp au_v2_entry.cpp clap_entry.cpp vst3_entry.cpp)
+
+is_plugin_file() {
+    local base="$1"
+    for skip in "${NOT_SHELL_SOURCES[@]}"; do
+        [ "$base" = "$skip" ] && return 0
+    done
+    return 1
+}
 
 die() { echo "populate: $*" >&2; exit 1; }
 
@@ -44,8 +59,16 @@ if git -C "$DEST" apply --check "$SEAM/patches/0001-chrome-copy-from-the-shell.p
     echo "  applied the chrome patch"
 else
     # Already applied is fine and common; anything else is not.
-    if git -C "$DEST" apply --reverse --check \
-           "$SEAM/patches/0001-chrome-copy-from-the-shell.patch" 2>/dev/null; then
+    #
+    # Detected by what the patch PUT there, not by `git apply --reverse
+    # --check`. Reverse-check asks "does this diff undo exactly", which stops
+    # being true the moment anything else in those files changes -- and editing
+    # them is the entire point of the worktree. So a populated worktree with one
+    # hand edit in it reported "neither applies nor is already applied" and
+    # refused to re-populate, which made the idempotency this script claims a
+    # lie. The registrations are what actually has to be present.
+    if grep -q "add_subdirectory(modular)" "$DEST/CMakeLists.txt" 2>/dev/null \
+       && grep -q "forge-test-chrome-no-leak" "$DEST/CMakeLists.txt" 2>/dev/null; then
         echo "  chrome patch already applied"
     else
         die "the chrome patch neither applies nor is already applied to $DEST.
@@ -54,11 +77,18 @@ else
 fi
 
 # 2. The shell and its views, header beside header and source beside source.
-for stem in "${MODULAR_FILES[@]}"; do
-    [ -f "$SEAM/modular/$stem.hpp" ] && cp "$SEAM/modular/$stem.hpp" "$DEST/include/forge/"
-    [ -f "$SEAM/modular/$stem.cpp" ] && cp "$SEAM/modular/$stem.cpp" "$DEST/src/"
+copied=0
+for f in "$SEAM"/modular/*.hpp "$SEAM"/modular/*.cpp; do
+    [ -f "$f" ] || continue
+    base="$(basename "$f")"
+    is_plugin_file "$base" && continue
+    case "$base" in
+        *.hpp) cp "$f" "$DEST/include/forge/" ;;
+        *.cpp) cp "$f" "$DEST/src/" ;;
+    esac
+    copied=$((copied + 1))
 done
-echo "  copied ${#MODULAR_FILES[@]} shell sources"
+echo "  copied $copied shell files"
 
 # 3. The plugin directory: format entry points and its own CMakeLists.
 mkdir -p "$DEST/modular"
