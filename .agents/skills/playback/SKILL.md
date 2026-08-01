@@ -190,6 +190,16 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 
 ## Contracts
 
+- `ProgramCompileRequest::sample_rate` is required, and `submit()` rejects a
+  request that leaves it unset or states a rate that does not normalize-equal
+  `tempo_map->sample_rate()`. Do not "fix" that rejection by deriving the field
+  from the map at the call site — stating it is the point. The compiled tempo
+  map stays authoritative (its segments already hold frame anchors computed at
+  its own rate, and the compiler cannot recompile it), so the field can never
+  override the map; what it buys is catching a caller that compiled against one
+  rate and renders at another, which is otherwise silent and shows up only as
+  frame positions that mean the wrong thing. Compare normalized: `{96'000, 2}`
+  and `{48'000, 1}` are the same rate.
 - Playback owns integer `TickPosition`, `SamplePosition`, and `MonotonicBeat`
   state. Floating-point beat values exist only in the one-way format projection.
 - A block has one range normally and at most two ranges when it crosses one loop

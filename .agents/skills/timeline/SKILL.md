@@ -1405,6 +1405,19 @@ sole exception at the source boundary: it deliberately ignores `project` and
 delegates to `writer(options)`. Only the interchange adapter is the
 project-wide consent surface.
 
+## Compiling a project means stating the rate, not just the tempo map
+
+`compile_project()` and any other code that builds a `ProgramCompileRequest`
+must set `sample_rate` as well as `tempo_map`; `submit()` rejects a request
+whose rate is unset or disagrees with `tempo_map->sample_rate()`. Carry one rate
+value through the whole function — use it to compile the tempo map and to fill
+the request — rather than setting the field from `tempo_map->sample_rate()`
+after the fact. The two-carrier bug this guards against is a caller that renders
+the compiled program at a different rate than it compiled at, which produces no
+error and no obvious symptom, only frame positions that silently mean a
+different amount of time. Note that the comparison normalizes, so a rate written
+as `{96'000, 2}` is accepted against a map compiled at `{48'000, 1}`.
+
 ## Asset confinement is two layers, and they are not redundant
 
 A `PackageRelative` asset locator is checked twice, by checks with different

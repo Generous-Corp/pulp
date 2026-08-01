@@ -668,6 +668,19 @@ parameter. Find the INDEX (`infos.findIndex(...)`) and read `values[index]`. Thi
 long time because the page's `<select>` handler also set the same state directly — the broken
 path only ran for preset/host writes.
 
+## Landmine: the browser's device rate is not the rate you compiled a timeline at
+
+`AudioContext` gives you whatever rate the device runs at — commonly 44100 on
+one machine and 48000 on another, and it can differ from the rate a `.pulp`
+project or fixture was authored and compiled against. `ProgramCompileRequest`
+carries `sample_rate` as a required field, and `submit()` rejects it when it is
+unset or does not normalize-equal `tempo_map->sample_rate()`, so a wasm build
+that compiles a timeline program must compile the tempo map at the live
+`AudioContext.sampleRate` and pass that same value on the request. Do not pin a
+rate constant in the wasm entry point: it will compile fine, load fine, and be
+rejected at runtime on any visitor whose device disagrees — or, if the guard is
+ever bypassed, play back at the wrong tempo with no error anywhere.
+
 ## Landmine: the wasm UI build hand-lists its sources — a core refactor silently breaks it
 
 `tools/cmake/PulpWebUi.cmake` builds Pulp's own view+canvas render stack to wasm by
