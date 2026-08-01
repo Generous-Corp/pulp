@@ -14,6 +14,7 @@
 
 #include <pulp/state/parameter.hpp>
 
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -38,12 +39,9 @@ struct ForgeParamChoice {
     std::vector<std::string_view> realization_modes;
 
     ForgeParamChoice() = default;
-    ForgeParamChoice(std::string_view token_in, std::string_view label_in,
-                     float value_in,
+    ForgeParamChoice(std::string_view token_in, std::string_view label_in, float value_in,
                      std::vector<std::string_view> modes_in = {})
-        : token(token_in),
-          label(label_in),
-          value(value_in),
+        : token(token_in), label(label_in), value(value_in),
           realization_modes(std::move(modes_in)) {}
 };
 
@@ -80,20 +78,13 @@ struct ForgeParamDescriptor {
     std::vector<std::string_view> realization_modes;
 
     ForgeParamDescriptor() = default;
-    ForgeParamDescriptor(std::string_view key_in, state::ParamID id_in,
-                         std::string_view label_in, std::string_view unit_in,
-                         std::string_view description_in, ForgeParamKind kind_in,
-                         ForgeParamCurve curve_in,
+    ForgeParamDescriptor(std::string_view key_in, state::ParamID id_in, std::string_view label_in,
+                         std::string_view unit_in, std::string_view description_in,
+                         ForgeParamKind kind_in, ForgeParamCurve curve_in,
                          std::vector<ForgeParamChoice> choices_in = {},
                          std::vector<std::string_view> modes_in = {})
-        : key(key_in),
-          id(id_in),
-          label(label_in),
-          unit(unit_in),
-          description(description_in),
-          kind(kind_in),
-          curve(curve_in),
-          choices(std::move(choices_in)),
+        : key(key_in), id(id_in), label(label_in), unit(unit_in), description(description_in),
+          kind(kind_in), curve(curve_in), choices(std::move(choices_in)),
           realization_modes(std::move(modes_in)) {}
 };
 
@@ -121,18 +112,16 @@ struct ForgeRealizationSetting {
 /// settings that produced it.
 struct ForgeRealization {
     /// Stable mode key, e.g. "silicon_x4".
-    std::string_view mode;
+    std::string mode;
     /// The node type id registered with the graph.
-    std::string_view type_id;
+    std::string type_id;
     /// Exactly one selection for each declared realization axis.
     std::vector<ForgeRealizationSetting> settings;
 
     ForgeRealization() = default;
     ForgeRealization(std::string_view mode_in, std::string_view type_id_in,
                      std::vector<ForgeRealizationSetting> settings_in = {})
-        : mode(mode_in),
-          type_id(type_id_in),
-          settings(std::move(settings_in)) {}
+        : mode(mode_in), type_id(type_id_in), settings(std::move(settings_in)) {}
 };
 
 struct ForgeNodeDescriptor {
@@ -153,24 +142,27 @@ struct ForgeNodeDescriptor {
 inline const ForgeParamDescriptor* find_param(const ForgeNodeDescriptor& node,
                                               std::string_view key) noexcept {
     for (const auto& param : node.params)
-        if (param.key == key) return &param;
+        if (param.key == key)
+            return &param;
     return nullptr;
 }
 
 /// True when `param` applies to the named realization mode.
-inline bool param_applies(const ForgeParamDescriptor& param,
-                          std::string_view mode) noexcept {
-    if (param.realization_modes.empty()) return true;
+inline bool param_applies(const ForgeParamDescriptor& param, std::string_view mode) noexcept {
+    if (param.realization_modes.empty())
+        return true;
     for (const auto& allowed : param.realization_modes)
-        if (allowed == mode) return true;
+        if (allowed == mode)
+            return true;
     return false;
 }
 
-inline bool choice_applies(const ForgeParamChoice& choice,
-                           std::string_view mode) noexcept {
-    if (choice.realization_modes.empty()) return true;
+inline bool choice_applies(const ForgeParamChoice& choice, std::string_view mode) noexcept {
+    if (choice.realization_modes.empty())
+        return true;
     for (const auto& allowed : choice.realization_modes)
-        if (allowed == mode) return true;
+        if (allowed == mode)
+            return true;
     return false;
 }
 

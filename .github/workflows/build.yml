@@ -87,10 +87,10 @@ jobs:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
           # Linux runner selection (highest precedence in the resolver):
           #   1. workflow_dispatch input (per-run override), else
-          #   2. PULP_LOCAL_LINUX_RUNS_ON_JSON repo var — OPT-IN routing
-          #      to the self-hosted Linux ARM64 pool (e.g. ["self-hosted","Linux",
-          #      "ARM64","pulp-build-linux"]); served by tools/ci/tart-runner-linux.sh,
-          #      toggled per-platform in the Shipyard GUI.
+          #   2. PULP_LOCAL_LINUX_RUNS_ON_JSON repo var — OPT-IN routing to the
+          #      x64 Mac Pro Proxmox pool:
+          #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
+          #       "pulp-host-macpro"].
           #   3. unset → '' → resolver falls through to github-hosted (default).
           # Windows is deliberately different: the required PR leg is the
           # authoritative x64 functional gate and stays on the stable VS 2022
@@ -99,7 +99,10 @@ jobs:
           # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
           # it is not an Intel Windows replacement. Use a workflow_dispatch input
           # only for explicit one-off experiments.
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          # Until an organization runner group restricts the Mac Pro pool to
+          # trusted workflow refs outside PR-controlled YAML, keep its repo
+          # variable dispatch-only. Public pull_request jobs stay hosted.
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
@@ -129,7 +132,7 @@ jobs:
           LOCAL_MAC_OVERFLOW_THRESHOLD: ${{ vars.PULP_LOCAL_MAC_OVERFLOW_THRESHOLD || '2' }}
           # The runner label the overflow logic queries for `busy`. Must
           # match the label PULP_LOCAL_MACOS_RUNS_ON_JSON targets.
-          LOCAL_MAC_RUNNER_LABEL: ${{ vars.PULP_LOCAL_MAC_RUNNER_LABEL || 'sanitizer' }}
+          LOCAL_MAC_RUNNER_LABEL: ${{ vars.PULP_LOCAL_MAC_RUNNER_LABEL || 'pulp-gate-fast' }}
           NAMESPACE_LINUX_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON }}
           NAMESPACE_WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON }}
           # macOS overflow target. Defaults to GitHub-hosted macos-15,

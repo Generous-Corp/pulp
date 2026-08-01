@@ -659,6 +659,42 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "expected-before-track-id",
+          "required": false,
+          "schema_field": "expected_before_track_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "replacement-before-track-id",
+          "required": false,
+          "schema_field": "replacement_before_track_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:move-track",
+      "schema_type": "pulp.timeline.command.move_track",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "asset-id",
           "required": true,
           "schema_field": "asset_id",
@@ -1392,6 +1428,42 @@
       ],
       "name": "timeline:command:set-track-mixer",
       "schema_type": "pulp.timeline.command.set_track_mixer",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "string"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-track-name",
+      "schema_type": "pulp.timeline.command.set_track_name",
       "version": 1
     },
     {

@@ -607,6 +607,29 @@ set_tests_properties(cmake-examples-reorder-init-guard PROPERTIES
     LABELS "cmake;examples"
     TIMEOUT 60)
 
+# Inbound link-floor check. The gate itself (tools/cmake/PulpLinkFloor.cmake)
+# runs at configure time over CMake's resolved link graph, so a configure that
+# reached this point is already its verdict — and a verdict is worth nothing
+# without evidence the checker can still say no. The selftest configures fixture
+# projects with known graphs and asserts both the verdict and the reason given;
+# --mutate then weakens the checker itself nine ways and requires each weakening
+# to be caught, so a green run cannot be the walk failing to arrive.
+#
+# Note what the configure-time verdict does and does not cover: the assertion on
+# a plugin lives in that plugin's CMakeLists, so it is evaluated only where
+# examples are configured — the Shipyard mac/windows lanes
+# (PULP_BUILD_EXAMPLES=ON) and ordinary dev builds, not the GitHub-hosted legs
+# of build.yml, which configure with PULP_BUILD_EXAMPLES=OFF. The selftest below
+# runs everywhere.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME cmake-link-floor-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/link_floor_selftest.py --mutate)
+    set_tests_properties(cmake-link-floor-selftest PROPERTIES
+        LABELS "cmake;gate"
+        TIMEOUT 600)
+endif()
+
 # Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)

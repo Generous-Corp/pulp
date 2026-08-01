@@ -97,11 +97,11 @@ build     = "tools/ci/governed-build.sh cmake --build build"
 #   * `validation` — the example plugins' real-host format-validators
 #     (`pluginval-*`, `auval-*`, `clap-dlopen-*`; all live under examples/ and
 #     are the only users of this label). They are slow and flaky under load and
-#     have no business gating unrelated core PRs. configure keeps
-#     PULP_BUILD_EXAMPLES=ON, so example *compile* breakage is still caught here;
-#     only the runtime validators move off the required lane. They are enforced
-#     on the path-filtered example-validation lane (examples/** changes) and run
-#     nightly. See docs/guides/test-lanes.md.
+#     have no business gating unrelated core PRs. Runtime validation lives on
+#     the path-filtered example-validation lane. Compilation deliberately stays
+#     ON here until that stable context is promoted to a required check; only
+#     then may a follow-up turn examples OFF in Shipyard. See
+#     docs/guides/test-lanes.md.
 # `--repeat until-pass:2` retries a failed test once before failing the leg, so a
 # single timing-flake self-heals instead of reddening the required `macos` gate
 # and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is

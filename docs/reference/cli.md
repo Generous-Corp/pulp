@@ -752,14 +752,16 @@ busy; it does not cancel in-flight jobs.
 ```bash
 pulp overflow status
 pulp overflow enable
-pulp overflow enable --to '"namespace-profile-generouscorp-macos"'
+pulp overflow enable --to '"macos-15"'
 pulp overflow disable
 pulp overflow threshold
 pulp overflow threshold 1
 ```
 
-`enable` sets the overflow target, `disable` removes it for future dispatches,
-and `threshold` gets or sets the busy-run count that trips overflow. See
+`enable` sets the overflow target, `disable` sets the `local-only` sentinel for
+future dispatches, and `threshold` gets or sets the busy-run count that trips
+overflow. An unset overflow variable restores the hosted `macos-15` fallback;
+it does not disable overflow. See
 [local-ci.md](../guides/local-ci.md#pulp-overflow-operator-surface) for the
 exact repository variables and rollback notes.
 

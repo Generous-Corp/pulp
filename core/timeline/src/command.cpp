@@ -460,6 +460,18 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.before_track_id == right.before_track_id;
             } else if constexpr (std::is_same_v<T, RemoveTrack>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id;
+            } else if constexpr (std::is_same_v<T, SetTrackName>) {
+                // Byte equality: a rename that differs only in whitespace or
+                // case is an edit the user made and the journal must keep.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, MoveTrack>) {
+                // Both endpoints matter. Two moves of the same track that agree
+                // on the destination but disagree on where it came from are
+                // different edits with different inverses.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected_before_track_id == right.expected_before_track_id &&
+                       left.replacement_before_track_id == right.replacement_before_track_id;
             } else if constexpr (std::is_same_v<T, InsertSequence>) {
                 return equal_sequence(left.sequence, right.sequence);
             } else if constexpr (std::is_same_v<T, CloneSequence>) {
@@ -519,6 +531,9 @@ std::size_t retained_size(const Command& command) noexcept {
                     detail::launcher_slot_list_owned_storage(value.scene.slots));
             if constexpr (std::is_same_v<T, InsertTrack>)
                 return saturated_add(sizeof(T), track_retained_size(value.track));
+            if constexpr (std::is_same_v<T, SetTrackName>)
+                return saturated_add(sizeof(T),
+                                     saturated_add(value.expected.size(), value.replacement.size()));
             if constexpr (std::is_same_v<T, InsertSequence>)
                 return saturated_add(sizeof(T), sequence_retained_size(value.sequence));
             if constexpr (std::is_same_v<T, CloneSequence>)
