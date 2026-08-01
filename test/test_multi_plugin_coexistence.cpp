@@ -42,7 +42,6 @@
 
 #include <array>
 #include <atomic>
-#include <cmath>
 #include <memory>
 #include <string>
 #include <thread>
@@ -350,6 +349,7 @@ TEST_CASE("three plugin instances render concurrently without crossing streams",
     // Three audio threads, one per instance — the DAW's real shape. Each thread
     // owns its own buffers; the only thing they share is the process.
     std::atomic<int> mismatches{0};
+    std::atomic<int> midi_faults{0};
     std::vector<std::thread> threads;
     for (std::size_t i = 0; i < family.size(); ++i) {
         threads.emplace_back([&, i] {
@@ -358,7 +358,11 @@ TEST_CASE("three plugin instances render concurrently without crossing streams",
             std::array<float*, 2> out_ptrs{l.data(), r.data()};
             std::array<const float*, 2> in_ptrs{in_l.data(), in_r.data()};
             pulp::midi::MidiBuffer midi_in, midi_out;
-            const float expected = family[i]->processor->mark() * amounts[i];
+            // Read the amount back rather than reusing the literal: the
+            // assertion is about WHICH instance's mark and WHICH instance's
+            // parameter reached the buffer, not about the store's rounding.
+            const float expected =
+                family[i]->processor->mark() * family[i]->store.get_value(kAmount);
             for (int b = 0; b < kBlocks; ++b) {
                 pulp::audio::BufferView<float> out(out_ptrs.data(), 2, kFrames);
                 const pulp::audio::BufferView<const float> in(in_ptrs.data(), 2, kFrames);
@@ -366,6 +370,13 @@ TEST_CASE("three plugin instances render concurrently without crossing streams",
                 family[i]->processor->process(out, in, midi_in, midi_out, ProcessContext{});
                 for (std::size_t n = 0; n < kFrames; ++n)
                     if (l[n] != expected || r[n] != expected) ++mismatches;
+                // Only the MIDI effect emits, and it emits its own note number.
+                const bool is_midi_fx = i == 0;
+                if (midi_out.size() != (is_midi_fx ? 1u : 0u)) ++midi_faults;
+                if (is_midi_fx && !midi_out.empty() &&
+                    midi_out.begin()->message.getNoteNumber() !=
+                        static_cast<int>(family[i]->processor->mark()))
+                    ++midi_faults;
             }
         });
     }
@@ -374,6 +385,8 @@ TEST_CASE("three plugin instances render concurrently without crossing streams",
     // Every sample of every block carried the rendering instance's own mark and
     // its own parameter — no instance ever wrote another's buffer.
     CHECK(mismatches.load() == 0);
+    // ...and the MIDI stream stayed with the one instance that produces one.
+    CHECK(midi_faults.load() == 0);
 }
 
 // ── 2. Editor-side coexistence ──────────────────────────────────────────────

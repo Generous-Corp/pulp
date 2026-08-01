@@ -703,7 +703,7 @@ void WidgetBridge::clear() {
     shortcuts_.clear();
     release_all_param_gesture_routes();
     param_bindings_.clear();  // bindings reference widgets torn down below
-    ComboBox::close_active_popup();
+    ComboBox::close_active_popup_in(root_);  // this editor's popup, not the process's
     while (root_.child_count() > 0) {
         auto* child = root_.child_at(root_.child_count() - 1);
         auto removed = root_.remove_child(child);
