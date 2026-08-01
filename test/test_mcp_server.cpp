@@ -894,7 +894,7 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-TEST_CASE("pulp_inspect_set_param delegates a typed payload to pulp-cpp",
+TEST_CASE("pulp_inspect_set_param delegates a typed payload and exact selector to pulp-cpp",
           "[mcp][tools][mcp-set-param]") {
 #if defined(_WIN32)
     SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
@@ -906,12 +906,21 @@ TEST_CASE("pulp_inspect_set_param delegates a typed payload to pulp-cpp",
     make_fake_inspector_cli(project.path);
     ScopedCurrentPath cwd(project.path);
 
-    auto response = handle_request(
-        tool_call("60", "pulp_inspect_set_param", R"({"id":0,"value":1.0,"normalized":true})"));
+    auto response = handle_request(tool_call(
+        "60", "pulp_inspect_set_param",
+        R"({"id":0,"value":1.0,"normalized":true,"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})"));
     require_contains(response, R"JSON("jsonrpc":"2.0")JSON");
     require_contains(
         response,
-        R"JSON(fake-inspector [inspect] [--command] [State.setParameter] [--params] [{\"id\":0,\"value\":1.000000,\"normalized\":true}])JSON");
+        R"JSON(fake-inspector [inspect] [--session] [session-a] [--instance] [instance-b] [--publication] [publication-c] [--command] [State.setParameter] [--params] [{\"id\":0,\"value\":1.000000,\"normalized\":true}])JSON");
+
+    const auto partial = handle_request(tool_call(
+        "61", "pulp_inspect_set_param",
+        R"JSON({"id":0,"value":1.0,"session_id":"session-a","instance_id":"instance-b"})JSON"));
+    require_contains(partial, R"JSON("isError":true)JSON");
+    require_contains(partial,
+                     "session_id, instance_id, and publication_id must be supplied together");
+    REQUIRE(partial.find("fake-inspector") == std::string::npos);
 #endif
 }
 
@@ -1032,6 +1041,120 @@ TEST_CASE("MCP capture workflows pin start and require the same stop identity",
     require_contains(
         unpinned_stop,
         "session_id, instance_id, and publication_id must be the exact safe identities");
+#endif
+}
+
+TEST_CASE("MCP inspector wrappers advertise optional exact selectors",
+          "[mcp][tools][inspect][selection][schema]") {
+    const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":69,"method":"tools/list"})JSON");
+    for (const char* tool : {
+             "pulp_inspect_dom",
+             "pulp_inspect_params",
+             "pulp_inspect_value_channels",
+             "pulp_inspect_set_param",
+             "pulp_inspect_screenshot",
+             "pulp_inspect_evaluate",
+             "pulp_inspect_performance",
+             "pulp_inspect_audio",
+             "pulp_motion_snapshot",
+             "pulp_motion_list_traces",
+             "pulp_trace_snapshot",
+         }) {
+        INFO("tool=" << tool);
+        const auto position = tools.find(std::string(R"JSON("name":")JSON") + tool + "\"");
+        REQUIRE(position != std::string::npos);
+        const auto next_tool = tools.find(R"JSON({"name":")JSON", position + 1);
+        const auto schema = tools.substr(position, next_tool - position);
+        require_contains(schema, R"JSON("session_id":{"type":"string")JSON");
+        require_contains(schema, R"JSON("instance_id":{"type":"string")JSON");
+        require_contains(schema, R"JSON("publication_id":{"type":"string")JSON");
+        REQUIRE(schema.find(R"JSON("required":["session_id")JSON") == std::string::npos);
+    }
+}
+
+TEST_CASE("MCP read-only inspector wrappers forward only complete exact selectors",
+          "[mcp][tools][inspect][selection]") {
+#if defined(_WIN32)
+    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.24)\n";
+    make_fake_inspector_cli(project.path);
+    ScopedCurrentPath cwd(project.path);
+
+    constexpr auto exact =
+        R"JSON({"session_id":"session-a","instance_id":"instance-b","publication_id":"publication-c"})JSON";
+    const std::pair<const char*, const char*> exact_cases[] = {
+        {"pulp_inspect_dom", "DOM.getDocument"},
+        {"pulp_motion_snapshot", "Motion.snapshot"},
+        {"pulp_motion_list_traces", "Motion.listTraces"},
+        {"pulp_trace_snapshot", "Trace.snapshot"},
+    };
+    int id = 70;
+    for (const auto& [tool, method] : exact_cases) {
+        INFO("exact selector tool=" << tool);
+        const auto response = handle_request(tool_call(std::to_string(id++), tool, exact));
+        require_contains(response,
+                         std::string("fake-inspector [inspect] [--session] [session-a] ") +
+                             "[--instance] [instance-b] [--publication] [publication-c] " +
+                             "[--command] [" + method + "]");
+        REQUIRE(response.find(R"JSON("isError":true)JSON") == std::string::npos);
+    }
+
+    for (const char* tool : {
+             "pulp_inspect_dom",
+             "pulp_motion_snapshot",
+             "pulp_trace_snapshot",
+         }) {
+        INFO("partial selector tool=" << tool);
+        const auto response = handle_request(
+            tool_call(std::to_string(id++), tool,
+                      R"JSON({"session_id":"session-a","instance_id":"instance-b"})JSON"));
+        require_contains(response, R"JSON("isError":true)JSON");
+        require_contains(response, "session_id, instance_id, and publication_id must be");
+        REQUIRE(response.find("fake-inspector") == std::string::npos);
+    }
+
+    const auto unsafe = handle_request(tool_call(
+        std::to_string(id++), "pulp_inspect_dom",
+        R"JSON({"session_id":"../session","instance_id":"instance-b","publication_id":"publication-c"})JSON"));
+    require_contains(unsafe, R"JSON("isError":true)JSON");
+    REQUIRE(unsafe.find("fake-inspector") == std::string::npos);
+#endif
+}
+
+TEST_CASE("MCP inspector wrappers reject malformed selector fields instead of discovering",
+          "[mcp][tools][inspect][selection][security]") {
+#if defined(_WIN32)
+    SUCCEED("The Windows multi-config pulp-cpp path is covered by the resolver test");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::ofstream(project.path / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.24)\n";
+    make_fake_inspector_cli(project.path);
+    ScopedCurrentPath cwd(project.path);
+
+    const char* tools[] = {
+        "pulp_inspect_dom",     "pulp_inspect_evaluate", "pulp_inspect_set_param",
+        "pulp_motion_snapshot", "pulp_trace_snapshot",
+    };
+    const char* malformed_selectors[] = {
+        R"JSON({"session_id":""})JSON",
+        R"JSON({"session_id":null,"instance_id":null,"publication_id":null})JSON",
+        R"JSON({"session_id":1,"instance_id":2,"publication_id":3})JSON",
+    };
+    int id = 80;
+    for (const auto* tool : tools) {
+        for (const auto* selector : malformed_selectors) {
+            INFO("tool=" << tool << " selector=" << selector);
+            const auto response = handle_request(tool_call(std::to_string(id++), tool, selector));
+            require_contains(response, R"JSON("isError":true)JSON");
+            require_contains(
+                response, "session_id, instance_id, and publication_id must be supplied together");
+            REQUIRE(response.find("fake-inspector") == std::string::npos);
+        }
+    }
 #endif
 }
 
