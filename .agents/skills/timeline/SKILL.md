@@ -1254,8 +1254,19 @@ by construction — and the plain debt list reads that absence as rot, failing w
 gate is asking you to delete an entry the wider configure genuinely needs, so
 **taking the advice literally trades a false failure on GPU-less trees for a
 false pass on GPU-enabled ones.** Declare such entries in
-`PULP_LINK_FLOOR_DEBT_CONDITIONAL_<target>` instead: allowed in the closure
-exactly as debt is, exempt from the absence check and nothing else. Note the
+the entry under that same condition instead — `if(PULP_ENABLE_GPU)
+list(APPEND PULP_LINK_FLOOR_DEBT_<target> render)` — so where the condition
+holds the entry is an ordinary debt entry and is still rot-checked, and only the
+configure that cannot have the edge stops asking. Guard on the condition that
+decides whether the module is **built**, never on one edge: `render` has two
+independent edges (`pulp_add_plugin` under `PULP_HAS_SKIA`, and `core/view`'s
+`if(TARGET pulp-render)`), so guarding either leaves it unfalsifiable from one
+side. `playback` and `timeline` are guarded on the same `NOT IOS` for a
+*different* reason worth stating wherever it is written: both **are** built on
+iOS and are guarded because the target's only route to them runs through `host`.
+Establish that by configuring both ways — **not** from the closure report, which
+records one shortest chain per module (`PATHS_OUT`, BFS first-arrival), so a
+second longer edge is invisible in it. Note the
 blast radius before dismissing this as a test failure — the assertion runs at
 configure time from the plugin's `CMakeLists.txt`, so with
 `PULP_BUILD_EXAMPLES=ON` a mismatch kills `cmake --build` at

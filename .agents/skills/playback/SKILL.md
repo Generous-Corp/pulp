@@ -897,8 +897,9 @@ disallows dlopen of third-party plugins, so hosting is not built there and the
 `host`, `playback` *and* `timeline` from an iOS closure, because that edge is the
 plugin's only route to all three. Anything asserting `playback` is present in a
 plugin binary must say which configure it means; entries a guard can remove
-belong in `PULP_LINK_FLOOR_DEBT_CONDITIONAL_<target>`, not the plain debt list,
-which reads their absence as rot. See the `timeline` skill for the full rule.
+must be appended to `PULP_LINK_FLOOR_DEBT_<target>` under that same condition
+rather than declared unconditionally, which reads their absence as rot. See the
+`timeline` skill for the full rule.
 
 Read that report as an upper bound and nothing more. `TIER` proves only that
 nothing outside it is reached, so a tier can name `playback` — or the editor
