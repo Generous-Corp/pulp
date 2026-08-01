@@ -124,6 +124,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
+        {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
     },
     // smf
     {
@@ -177,6 +178,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // tempo.value-quantized
         {ImportLevel::None, "", ""}, // clip.media-window
         {ImportLevel::None, "", ""}, // clip.fade-shape
+        {ImportLevel::None, "", "per-clip controller and expression streams"}, // clip.midi-expression-lane
     },
 };
 
@@ -233,6 +235,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer references the complete media asset, so a nonzero source start or partial frame count is dropped"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits no fade at all, so a non-linear fade curve goes with the fade it shaped"}, // clip.fade-shape
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"}, // clip.midi-expression-lane
     },
     // smf
     {
@@ -286,6 +289,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Degrade, Concept::TempoMap, LossClass::Approximated, "tempo values are rounded to the nearest representable integer microseconds per quarter note"}, // tempo.value-quantized
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI File declares no support for clip.media-window"}, // clip.media-window
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"}, // clip.fade-shape
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"}, // clip.midi-expression-lane
     },
 };
 } // namespace detail

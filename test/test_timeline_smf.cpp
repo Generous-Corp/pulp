@@ -757,6 +757,44 @@ TEST_CASE("SMF export rejects values with no MIDI representation",
                   std::string::npos);
         }
     }
+    SECTION("controller and expression lanes") {
+        // The raw entry point must fail closed here for the same reason it
+        // does for modifiers: a lane's points are authored independently of
+        // the notes, so writing the notes alone yields a file that opens
+        // successfully with the controller movement silently gone. Only the
+        // interchange adapter may proceed, and only after the loss is
+        // accepted by exact concept id.
+        NoteEvent note{ItemId{1}, timebase::TickPosition{0},
+                       timebase::TickDuration{kQuarter}, 0xffffu, 60, 0};
+        MidiExpressionLane lane;
+        lane.id = ItemId{6};
+        lane.address = {0, 0, 0x0B, 0, 1};
+        lane.points = {{ItemId{7}, timebase::TickPosition{0}, 0u}};
+        auto content = MidiContent::create({note}, {}, 0, {lane});
+        REQUIRE(content);
+        auto clip = Clip::create(ItemId{2}, timebase::TickPosition{0},
+                                 timebase::TickDuration{kQuarter},
+                                 std::move(content.value()));
+        REQUIRE(clip);
+        auto track = Track::create(ItemId{3}, "Expressive", {std::move(clip.value())});
+        REQUIRE(track);
+        auto sequence = Sequence::create(ItemId{4}, "Arrangement", std::nullopt,
+                                         {std::move(track.value())});
+        REQUIRE(sequence);
+        ProjectInput input{};
+        input.id = ItemId{5};
+        input.next_item_id = 8;
+        input.root_sequence_id = ItemId{4};
+        input.sequences.push_back(std::move(sequence.value()));
+        auto project = Project::create(std::move(input));
+        REQUIRE(project);
+
+        auto exported = export_smf(project.value());
+        REQUIRE_FALSE(exported);
+        CHECK(exported.error().code == SmfErrorCode::UnsupportedFeature);
+        CHECK(exported.error().message.find("controller and expression lanes") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("SMF round trip preserves grid-aligned notes exactly",

@@ -82,6 +82,7 @@
     { "id": "clip.note-velocity-quantized", "detect": "model", "summary": "A note velocity that cannot be encoded as a sounding nonzero 7-bit Standard MIDI Note On without changing value." },
     { "id": "tempo.value-quantized", "detect": "model", "summary": "A tempo value that cannot round-trip exactly through an integer-microseconds-per-quarter representation." },
     { "id": "clip.media-window", "detect": "model", "summary": "A media clip that plays a source subrange rather than the referenced asset's complete frame range." },
-    { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." }
+    { "id": "clip.fade-shape", "detect": "model", "summary": "A fade whose gain curve is not the linear ramp, so a format carrying only fade durations changes what the transition sounds like." },
+    { "id": "clip.midi-expression-lane", "detect": "model", "summary": "A continuous controller stream authored alongside a clip's notes -- control change, pitch bend, channel or poly pressure, program change, or a registered or assignable parameter -- carrying its own points independently of any note." }
   ]
 }

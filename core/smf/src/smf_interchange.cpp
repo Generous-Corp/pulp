@@ -22,6 +22,7 @@ timeline::detail::SmfExportLossPolicy loss_policy(const interchange::ExportPlan&
         .drop_nested_sequences = loses(plan, Concept::SequenceNested),
         .drop_absolute_clips = loses(plan, Concept::ClipAbsolute),
         .strip_note_modifiers = loses(plan, Concept::ClipNoteModifier),
+        .drop_midi_expression_lanes = loses(plan, Concept::ClipMidiExpressionLane),
         .quantize_note_velocity = loses(plan, Concept::ClipNoteVelocityQuantized),
         .drop_non_root_sequences = loses(plan, Concept::SequenceMultiple),
         .step_tempo_ramps = loses(plan, Concept::TempoRamp),

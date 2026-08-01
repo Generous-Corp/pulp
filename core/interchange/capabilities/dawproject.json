@@ -69,6 +69,10 @@
       "level": "none",
       "refusal": "per-note probability, conditions, and ratchets"
     },
+    "clip.midi-expression-lane": {
+      "level": "none",
+      "refusal": "per-clip controller and expression streams"
+    },
     "clip.fades": {
       "level": "none",
       "refusal": "per-clip fades"
@@ -205,6 +209,11 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once"
+    },
+    "clip.midi-expression-lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "the writer emits clip notes without their controller streams, so authored control change, pitch bend, pressure, program change, and parameter movement are omitted"
     },
     "automation.device-param": {
       "level": "drop",

@@ -38,6 +38,7 @@
     "clip.empty": { "level": "none", "refusal": "empty positioned clips" },
     "clip.media": { "level": "none", "refusal": "media clips" },
     "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
+    "clip.midi-expression-lane": { "level": "none", "refusal": "per-clip controller and expression streams" },
     "tempo.ramp": { "level": "none", "refusal": "continuous tempo ramps" },
     "marker": { "level": "none", "refusal": "arrangement markers" },
     "automation.device-param": { "level": "none", "refusal": "automation lanes" },
@@ -81,6 +82,11 @@
       "level": "drop",
       "loss_class": "dropped",
       "loss": "Standard MIDI Files have no per-clip fades, so a non-linear fade curve is omitted with the fade it shaped"
+    },
+    "clip.midi-expression-lane": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "Pulp's Standard MIDI File writer emits note, tempo, and meter events only, so an authored controller stream is omitted and the file plays with every controller left wherever the receiving instrument already had it"
     },
     "clip.launch": {
       "level": "drop",
