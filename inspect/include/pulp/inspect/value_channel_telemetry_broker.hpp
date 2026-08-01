@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string_view>
@@ -45,6 +46,10 @@ class ValueChannelTelemetryBroker {
     /// clears the prior source and returns false. Subscriptions retain their
     /// channel names and are resolved again against each valid generation.
     bool replace_attachment(view::ValueChannelTelemetryAttachment attachment);
+    /// Record a source generation whose catalog is intentionally empty without
+    /// retaining a reader attachment. Existing subscriptions observe the
+    /// generation transition and resolve their names as unavailable.
+    void replace_with_empty_source();
     void clear_attachment();
 
     /// Handle Telemetry.getSnapshot, Telemetry.subscribe, or
@@ -56,6 +61,7 @@ class ValueChannelTelemetryBroker {
     void poll();
     void disconnect(std::string_view client_id);
     std::size_t subscription_count() const noexcept;
+    std::uint64_t source_generation() const noexcept;
 
   private:
     struct Impl;

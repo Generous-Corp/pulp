@@ -583,6 +583,11 @@ bool ValueChannelTelemetryBroker::replace_attachment(
     return true;
 }
 
+void ValueChannelTelemetryBroker::replace_with_empty_source() {
+    impl_->clear_source();
+    ++impl_->source_generation;
+}
+
 void ValueChannelTelemetryBroker::clear_attachment() {
     impl_->clear_source();
 }
@@ -679,6 +684,10 @@ InspectorMessage ValueChannelTelemetryBroker::handle(const InspectorRequestConte
     const auto requested_rate = impl_->parse_rate(params, error);
     if (!error.empty())
         return make_error(request.id, std::move(error), "invalid_params");
+    // Establish the cumulative event-overflow baseline before the new
+    // subscription exists. Losses and occurrences from before admission
+    // remain attributable only to subscriptions that were already active.
+    impl_->refresh_sources();
     Impl::Subscription subscription;
     subscription.id = "telemetry-" + std::to_string(impl_->next_subscription_id++);
     subscription.names = std::move(names);
@@ -804,6 +813,10 @@ void ValueChannelTelemetryBroker::disconnect(std::string_view client_id) {
 
 std::size_t ValueChannelTelemetryBroker::subscription_count() const noexcept {
     return impl_->subscriptions.size();
+}
+
+std::uint64_t ValueChannelTelemetryBroker::source_generation() const noexcept {
+    return impl_->source_generation;
 }
 
 } // namespace pulp::inspect

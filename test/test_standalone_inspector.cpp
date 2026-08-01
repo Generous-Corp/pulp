@@ -66,13 +66,11 @@ struct ScopedEnv {
         ::unsetenv(name_.c_str());
 #endif
     }
-
 private:
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
 };
-
 class TestProcessor : public Processor {
 public:
     PluginDescriptor descriptor() const override { return {}; }
@@ -83,9 +81,7 @@ public:
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const ProcessContext&) override {}
 };
-
 std::unique_ptr<Processor> null_processor_factory() { return {}; }
-
 class StubWindowHost final : public WindowHost {
 public:
     int repaint_calls = 0;
@@ -102,7 +98,6 @@ public:
     int run_until_calls = 0;
     int readiness_checks = 0;
     bool run_until_ready = false;
-
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
@@ -151,7 +146,6 @@ public:
         }
     }
 };
-
 #if PULP_TEST_STANDALONE_INSPECTOR
 std::vector<std::uint8_t> inspector_test_png() {
     return {
@@ -163,14 +157,12 @@ std::vector<std::uint8_t> inspector_test_png() {
         0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     };
 }
-
 class InspectorProcessor : public TestProcessor {
 public:
     InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
         : store_(store), script_(std::move(script)) {
         gain_reduction_ = channels_.declare_meter("gain_reduction", "dB", 0.0f);
     }
-
     PluginDescriptor descriptor() const override {
         PluginDescriptor descriptor;
         descriptor.name = "Inspector Test";
@@ -298,6 +290,14 @@ private:
     std::size_t post_count_ = 0;
     pulp::events::MainThreadDispatcher::Token token_ = 0;
 };
+template <typename Predicate>
+bool spin_until(Predicate&& predicate, std::chrono::milliseconds timeout =
+                                           std::chrono::seconds(2)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!predicate() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    return predicate();
+}
 pulp::inspect::InspectorMessage request_with_dispatch(
     pulp::inspect::InspectorClient& client, QueuedMainThreadBackend& dispatcher, std::string method,
     std::string params) {
@@ -305,12 +305,10 @@ pulp::inspect::InspectorMessage request_with_dispatch(
         [&client, method = std::move(method), params = std::move(params)] {
             return client.request(method, params, std::chrono::seconds(1));
         });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (response.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready &&
-           std::chrono::steady_clock::now() < deadline) {
+    REQUIRE(spin_until([&] {
         if (!dispatcher.pump_one()) std::this_thread::yield();
-    }
-    REQUIRE(response.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
+        return response.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+    }));
     return response.get();
 }
 #endif
@@ -582,7 +580,16 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     REQUIRE(catalog_json.size() == 1);
     REQUIRE(catalog_json[0]["name"].getString() == "after_reload");
     client.disconnect();
+    REQUIRE(spin_until([&] {
+        return runtime->telemetry_state_for_testing().pending_disconnects != 0;
+    }, std::chrono::seconds(1)));
+    auto disconnect_state = runtime->telemetry_state_for_testing();
+    REQUIRE(disconnect_state.pending_disconnects == 1);
+    REQUIRE(disconnect_state.active_subscriptions == 1);
     runtime->pump();
+    disconnect_state = runtime->telemetry_state_for_testing();
+    REQUIRE(disconnect_state.pending_disconnects == 0);
+    REQUIRE(disconnect_state.active_subscriptions == 0);
     pulp::inspect::InspectorClient replacement_client;
     REQUIRE(replacement_client.connect(records.front(), reader));
     const auto replacement_subscription = request_with_dispatch(replacement_client, dispatcher,
@@ -595,6 +602,7 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     runtime->pump();
     runtime->pump();
     REQUIRE(processor.value_channel_visits == visits_before_empty + 1);
+    REQUIRE(runtime->telemetry_state_for_testing().source_generation == 3);
     const auto empty_catalog = request_with_dispatch(
         replacement_client, dispatcher, "State.getValueChannels", "{}");
     REQUIRE_FALSE(empty_catalog.is_error);
@@ -909,11 +917,7 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         return cancellation_client.request("State.setParameter", R"({"id":2,"value":7})",
                                            std::chrono::seconds(1));
     });
-    const auto queued_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (dispatcher.pending_count() == pending_before &&
-           std::chrono::steady_clock::now() < queued_deadline) {
-        std::this_thread::yield();
-    }
+    REQUIRE(spin_until([&] { return dispatcher.pending_count() != pending_before; }));
     REQUIRE(dispatcher.pending_count() == pending_before + 1);
 
     const auto stop_started = std::chrono::steady_clock::now();
@@ -993,11 +997,7 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     auto reentrant_capture = std::async(std::launch::async, [&] {
         return reentrant_client.request("Capture.screenshot", "{}", std::chrono::seconds(1));
     });
-    const auto reentrant_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (dispatcher.pending_count() == 0 &&
-           std::chrono::steady_clock::now() < reentrant_deadline) {
-        std::this_thread::yield();
-    }
+    REQUIRE(spin_until([&] { return dispatcher.pending_count() != 0; }));
     REQUIRE(dispatcher.pending_count() == 1);
     REQUIRE(dispatcher.pump_one());
     REQUIRE(capture_source_touches == 1);

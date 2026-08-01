@@ -35,6 +35,7 @@
 #include <optional>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -224,7 +225,10 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                 domains_.release_test_input(event.reason);
             });
         session_.set_client_disconnect_handler(
-            [this](std::string_view client_id) { telemetry_.disconnect(client_id); });
+            [this](std::string_view client_id) {
+                std::lock_guard lock(pending_disconnects_mutex_);
+                pending_disconnects_.emplace_back(client_id);
+            });
         if (overlay_)
             overlay_->set_tweak_store(&tweaks_);
     }
@@ -275,6 +279,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         active_ = false;
         indicator_->active = false;
         app_.test_input_host().release_test_input();
+        session_.set_client_disconnect_handler({});
         if (server_) {
             shutdown_fence_ = server_->shutdown_fence();
             server_->stop();
@@ -306,6 +311,15 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                               entry.method, outcome, entry.error_code});
         }
         return result;
+    }
+
+    StandaloneInspectorTelemetryState telemetry_state_for_testing() const {
+        std::lock_guard lock(pending_disconnects_mutex_);
+        return {
+            .pending_disconnects = pending_disconnects_.size(),
+            .active_subscriptions = telemetry_.subscription_count(),
+            .source_generation = telemetry_.source_generation(),
+        };
     }
 #endif
 
@@ -440,6 +454,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
     void pump() {
+        drain_client_disconnects();
         refresh_value_channel_sources(false);
         if (telemetry_enabled_)
             telemetry_.poll();
@@ -447,6 +462,16 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
   private:
+    void drain_client_disconnects() {
+        std::vector<std::string> disconnected;
+        {
+            std::lock_guard lock(pending_disconnects_mutex_);
+            disconnected.swap(pending_disconnects_);
+        }
+        for (const auto& client_id : disconnected)
+            telemetry_.disconnect(client_id);
+    }
+
     void refresh_value_channel_sources(bool force) {
         const auto generation = processor_.supports_editor_reload()
             ? processor_.editor_reload_generation()
@@ -462,13 +487,13 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             if (!channels) {
                 state_.set_value_channels(
                     std::span<const view::ValueChannelInfo>{});
-                telemetry_.clear_attachment();
+                telemetry_.replace_with_empty_source();
                 attachment_ready = true;
                 return;
             }
             state_.set_value_channels(channels->infos());
             if (channels->infos().empty()) {
-                telemetry_.clear_attachment();
+                telemetry_.replace_with_empty_source();
                 attachment_ready = true;
                 return;
             }
@@ -553,6 +578,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::AudioInspector audio_;
     inspect::TweakStore tweaks_;
     inspect::ValueChannelTelemetryBroker telemetry_;
+    mutable std::mutex pending_disconnects_mutex_;
+    std::vector<std::string> pending_disconnects_;
     std::shared_ptr<inspect::InspectorMainThreadRpc> rpc_;
     inspect::InspectorSession session_;
     std::shared_ptr<inspect::InspectorAuditLog> audit_log_ =
@@ -842,6 +869,12 @@ std::vector<StandaloneInspectorAuditEntry>
 StandaloneInspectorRuntime::audit_snapshot_for_testing() const {
     return impl_ ? impl_->audit_snapshot_for_testing()
                  : std::vector<StandaloneInspectorAuditEntry>{};
+}
+
+StandaloneInspectorTelemetryState
+StandaloneInspectorRuntime::telemetry_state_for_testing() const {
+    return impl_ ? impl_->telemetry_state_for_testing()
+                 : StandaloneInspectorTelemetryState{};
 }
 #endif
 
