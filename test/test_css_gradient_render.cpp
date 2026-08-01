@@ -236,3 +236,93 @@ TEST_CASE("the tick ring a design pass authored renders as vectors",
 }
 
 
+
+// A `calc()` stop position resolves against the gradient's own length.
+//
+// `parse_stops` peels a position off the RIGHT of a stop by splitting on the
+// last space, so `#fff calc(100% - 7px)` peels `7px)` — which used to parse as
+// 7 and land the stop at 700%. That number is now rejected (it is not the whole
+// token), but rejecting it leaves the calc text glued to the COLOUR, and
+// `#fff calc(100% - 7px)` read as a colour is not `#fff`. Whitespace decides
+// which of the two wrong renders you get, which is why the spacing variants
+// below all have to agree with the same reference.
+TEST_CASE("a calc() stop position resolves against the gradient length",
+          "[view][gradient][calc]") {
+    // The box is kSize wide and the gradient runs `to right`, so the gradient
+    // line is kSize px and `calc(100% - 7px)` is (kSize-7)/kSize of it.
+    const double pct = 100.0 * (kSize - 7.0) / kSize;
+    const std::string reference =
+        "linear-gradient(to right, #ff0000 " + std::to_string(pct) +
+        "%, #0000ff " + std::to_string(pct) + "%)";
+
+    // Every spacing a designer might write. CSS requires spaces around the
+    // binary `-` inside calc(); the others are what tools actually emit.
+    for (const char* expr : {"calc(100% - 7px)", "calc(100%  -  7px)"}) {
+        const std::string css = std::string("linear-gradient(to right, #ff0000 ") +
+                                expr + ", #0000ff " + expr + ")";
+        INFO("expression: " << expr);
+        require_same_render(css, reference);
+    }
+}
+
+// The same position written as a bare percentage inside calc(), with no length
+// unit to resolve — this needs no box at all and must simply work.
+TEST_CASE("a calc() stop position with no length unit resolves",
+          "[view][gradient][calc]") {
+    require_same_render(
+        "linear-gradient(to right, #ff0000 calc(50% + 10%), #0000ff calc(50% + 10%))",
+        "linear-gradient(to right, #ff0000 60%, #0000ff 60%)");
+}
+
+// A calc() this parser cannot evaluate must be REFUSED, not approximated.
+//
+// Every other unevaluable position in this file is simply absent, and CSS
+// spreads absent positions evenly. A stop that names calc() is not absent — it
+// asked for somewhere specific — so spreading it evenly would put it where the
+// author did not ask while looking like an ordinary render. That is the exact
+// shape of defect this file exists to catch, so the refusal is asserted rather
+// than inferred from a plausible image.
+TEST_CASE("an unevaluable calc() stop refuses the gradient",
+          "[view][gradient][calc]") {
+    const auto refused = [](const std::string& css) {
+        bool applied = false;
+        render_css(css, &applied);
+        INFO("css: " << css);
+        CHECK_FALSE(applied);
+    };
+
+    // No whitespace around the binary `-`. Invalid CSS: without the spaces the
+    // `-` belongs to the number, and a browser drops the declaration too.
+    refused("linear-gradient(to right, #ff0000 calc(100%-7px), #0000ff 100%)");
+    // Units this reader does not model, rather than a guess at the em size.
+    refused("linear-gradient(to right, #ff0000 calc(100% - 2em), #0000ff 100%)");
+    // Multiplication is not modelled.
+    refused("linear-gradient(to right, #ff0000 calc(50% * 2), #0000ff 100%)");
+    // A conic measures angles, so a px term has no length to resolve against
+    // and must not silently become a fraction of something else.
+    refused("conic-gradient(#ff0000 calc(100% - 7px), #0000ff 100%)");
+
+    // The control: the same shape WITH a resolvable calc is accepted, so the
+    // refusals above are the calc being judged and not the surrounding CSS.
+    bool applied = false;
+    render_css("linear-gradient(to right, #ff0000 calc(100% - 7px), #0000ff 100%)",
+               &applied);
+    CHECK(applied);
+}
+
+// The colour survives a position the parser cannot use.
+//
+// The peel splits a stop into colour and position. When it split on the last
+// space it took `7px)` and left `#ff0000 calc(100% -` behind — read as a colour
+// that is not #ff0000. Refusing the gradient hides that from the render, so
+// assert it where it is visible: an unevaluable calc in ONE stop must not
+// change what the OTHER stops paint.
+TEST_CASE("a calc() position does not corrupt its own colour",
+          "[view][gradient][calc]") {
+    // `50%` and `calc(50% + 0%)` are the same position by two routes, so the
+    // colours must land identically. If the calc text leaked into the colour
+    // token, the left half would not be red.
+    require_same_render(
+        "linear-gradient(to right, #ff0000 calc(50% + 0%), #0000ff calc(50% + 0%))",
+        "linear-gradient(to right, #ff0000 50%, #0000ff 50%)");
+}
