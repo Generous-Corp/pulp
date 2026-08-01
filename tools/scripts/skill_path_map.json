@@ -186,6 +186,13 @@
         "tools/cmake/PulpFaust.cmake"
       ]
     },
+    "forge-modular": {
+      "paths": [
+        "tools/rack/**",
+        "examples/forge-modular/**",
+        "forge-seam/**"
+      ]
+    },
     "friction-report": [],
     "handoff": {
       "_doc": {
