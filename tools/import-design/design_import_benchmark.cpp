@@ -244,11 +244,56 @@ IRNode panel_node(std::string id,
     return node;
 }
 
+/// The fixture's palette, in the semantic vocabulary a captured design states
+/// — an accent, a signal ramp, line and surface levels — never Pulp's widget
+/// keys. Materialization maps those onto `knob.arc`, `meter.green` and the
+/// rest, so the baked-native lane paints the fixture's own colours rather than
+/// the framework defaults a design-less IR would leave every primitive on.
+/// That default fallback is precisely what the `design-token-unmapped`
+/// diagnostic reports, and a benchmark measuring the import path should not be
+/// an instance of the defect it can detect.
+///
+/// The values are deliberately unlike Pulp's built-in theme (a warm accent, not
+/// the built-in blue) so a regression that drops the palette shows up as colour,
+/// not just as a re-appearing diagnostic.
+void apply_bench_tokens(IRTokens& tokens) {
+    auto& c = tokens.colors;
+    c["accent"] = "#e0863c";
+    c["accent-soft"] = "#6c7fd8";
+    c["danger"] = "#e4574f";
+    c["warning"] = "#e0a83c";
+    c["success"] = "#4fbf7e";
+    c["info"] = "#4fa3e4";
+
+    c["signal-low"] = "#4fbf7e";
+    c["signal-mid"] = "#e0a83c";
+    c["signal-high"] = "#e4574f";
+    c["signal-wave"] = "#e0863c";
+
+    c["line-strong"] = "#3a3c52";
+    c["line-soft"] = "#2a2c3e";
+    c["border"] = "#34364a";
+
+    c["text-strong"] = "#e8e8f0";
+    c["text-muted"] = "#9a9bb0";
+    c["text-faint"] = "#64657a";
+    c["on-ink"] = "#1a1206";
+
+    // `surface-panel` is the same value the panel nodes state inline, so the
+    // themed surfaces and the fixture's own geometry agree.
+    c["surface-app"] = "#14151f";
+    c["surface-sunken"] = "#191a27";
+    c["surface-panel"] = "#1f2030";
+    c["surface-raised"] = "#262838";
+    c["surface-overlay"] = "#2b2d3f";
+}
+
 DesignIR build_baked_ir() {
     DesignIR ir;
     ir.source = DesignSource::jsx;
     ir.source_adapter = "phase5-benchmark-fixture";
     ir.capture_method = "hand-authored-live-equivalent";
+    apply_bench_tokens(ir.tokens);
 
     ir.root.type = "frame";
     ir.root.stable_anchor_id = "bench-root";

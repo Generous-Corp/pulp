@@ -2247,10 +2247,6 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
             // design's. That is a gap in what was captured, not a rendering
             // bug, and it is invisible in the pixels — the render just quietly
             // carries a colour from nowhere. Name it.
-            // A widget key the design states no colour for is left unset, so
-            // the widget paints its own built-in default. That is invisible in
-            // the pixels — the render just quietly carries a colour from
-            // nowhere — so name the gap.
             std::vector<std::string> unresolved;
             root->set_theme(ir_tokens_to_theme(ir.tokens, &unresolved));
             if (auto gap = unmapped_widget_token_diagnostic(unresolved))
