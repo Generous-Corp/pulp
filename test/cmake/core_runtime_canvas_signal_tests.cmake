@@ -378,6 +378,48 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
         "PULP_STANDALONE_INSPECTOR_WORKFLOW_PROCESS_FIXTURE=\"$<TARGET_FILE:pulp-standalone-inspector-workflow-process-fixture>\"")
     add_dependencies(pulp-test-standalone-inspector-workflow-process
         pulp-standalone-inspector-workflow-process-fixture)
+
+    function(_pulp_register_packaged_inspector_clients_test)
+        get_property(python_executable GLOBAL
+            PROPERTY PULP_PACKAGED_INSPECTOR_CLIENTS_PYTHON)
+        if(NOT CMAKE_CROSSCOMPILING
+           AND python_executable
+           AND TARGET pulp-rust-cli
+           AND TARGET pulp-cli
+           AND TARGET pulp-mcp)
+            add_custom_target(pulp-test-packaged-inspector-clients
+                DEPENDS
+                    pulp-rust-cli
+                    pulp-cli
+                    pulp-mcp
+                    pulp-standalone-inspector-workflow-process-fixture)
+            add_test(
+                NAME packaged-inspector-clients-reach-real-standalone-workflow
+                COMMAND "${python_executable}"
+                    "${PROJECT_SOURCE_DIR}/test/test_packaged_inspector_clients.py"
+                    --rust "${CMAKE_BINARY_DIR}/pulp${CMAKE_EXECUTABLE_SUFFIX}"
+                    --cpp "$<TARGET_FILE:pulp-cli>"
+                    --mcp "$<TARGET_FILE:pulp-mcp>"
+                    --fixture "$<TARGET_FILE:pulp-standalone-inspector-workflow-process-fixture>"
+                    --packager "${PROJECT_SOURCE_DIR}/tools/scripts/package_cli.py"
+                    --build-dir "${CMAKE_BINARY_DIR}")
+            set_tests_properties(
+                packaged-inspector-clients-reach-real-standalone-workflow
+                PROPERTIES
+                    LABELS "slow;installed;inspect;workflow;gpu"
+                    PROCESSORS 8
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 120)
+        endif()
+    endfunction()
+    if(Python3_Interpreter_FOUND)
+        # CLI and MCP targets are declared after the test subtree, so defer the
+        # cross-artifact registration until the root directory is complete.
+        set_property(GLOBAL PROPERTY PULP_PACKAGED_INSPECTOR_CLIENTS_PYTHON
+            "${Python3_EXECUTABLE}")
+        cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}"
+            CALL _pulp_register_packaged_inspector_clients_test)
+    endif()
 endif()
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
