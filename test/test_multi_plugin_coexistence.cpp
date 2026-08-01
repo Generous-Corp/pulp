@@ -125,6 +125,15 @@ public:
         scroll->set_content_size({200, 2000});
         root->add_child(std::move(scroll));
 
+        // A second scroll pane placed directly UNDER where the ComboBox's open
+        // menu hangs. That overlap is the whole point: it makes "who consumed
+        // this wheel" observable without asking the popup-routing helper — the
+        // pane moves only if this editor's own tree handled the event.
+        auto under_menu = std::make_unique<ScrollView>();
+        under_menu->set_bounds({0, 40, 160, 120});
+        under_menu->set_content_size({160, 2000});
+        root->add_child(std::move(under_menu));
+
         // A label whose text names this instance, so a paint recording proves
         // WHICH editor produced it.
         auto label = std::make_unique<Label>(name_);
@@ -206,6 +215,13 @@ struct LoadedPlugin {
         editor = processor->create_view();
         REQUIRE(editor != nullptr);
         processor->on_view_opened(*editor);
+        // The accessors below index create_view()'s fixed child order; a
+        // reordered editor must fail here, not by dereferencing a null cast
+        // three cases later.
+        REQUIRE(combo() != nullptr);
+        REQUIRE(field() != nullptr);
+        REQUIRE(scroll() != nullptr);
+        REQUIRE(under_menu() != nullptr);
     }
     void close_editor() {
         if (!editor) return;
@@ -217,6 +233,7 @@ struct LoadedPlugin {
     ComboBox* combo() const { return dynamic_cast<ComboBox*>(editor->child_at(0)); }
     TextEditor* field() const { return dynamic_cast<TextEditor*>(editor->child_at(1)); }
     ScrollView* scroll() const { return dynamic_cast<ScrollView*>(editor->child_at(2)); }
+    ScrollView* under_menu() const { return dynamic_cast<ScrollView*>(editor->child_at(3)); }
 
     std::unique_ptr<FamilyMember> processor;
     pulp::state::StateStore store;
@@ -427,21 +444,30 @@ TEST_CASE("a wheel in one editor never scrolls another editor's open dropdown",
     REQUIRE(family[0]->combo()->is_open());
     REQUIRE(ComboBox::active_popup_ == family[0]->combo());
 
-    // A point inside editor 0's open menu. Editor 2's scroll pane is elsewhere,
-    // so route a wheel at a point that IS inside the (identical-geometry) menu
-    // rect but belongs to editor 2's tree.
+    // Pick a point that is inside editor 0's open menu AND over editor 2's
+    // under-menu scroll pane. Because all three editors are the same binary
+    // with the same layout, this is the everyday overlap, not a contrived one.
+    const Point p{80, 90};
     float mx = 0, my = 0, mw = 0, mh = 0;
     REQUIRE(family[0]->combo()->dropdown_window_rect(mx, my, mw, mh));
-    const Point inside_editor0_menu{mx + mw * 0.5f, my + mh * 0.5f};
+    REQUIRE(p.x >= mx);
+    REQUIRE(p.x <= mx + mw);
+    REQUIRE(p.y >= my);
+    REQUIRE(p.y <= my + mh);  // the premise: p really is inside editor 0's menu
 
-    // Editor 2 receives the wheel. Its own tree must handle it; editor 0's menu
-    // must not move. Before the root-scoped read, editor 0's combo consumed it.
-    deliver_mouse_wheel(*family[2]->editor, inside_editor0_menu, 0.0f, 40.0f, WheelHost{});
+    // Editor 2 receives the wheel, so editor 2's own pane must scroll. This is
+    // the load-bearing assertion and it observes the TREE, not the routing
+    // helper: reading the process-wide mirror sends the wheel into editor 0's
+    // menu instead and editor 2's pane never moves.
+    REQUIRE(family[2]->under_menu()->target_scroll_y() == 0.0f);
+    deliver_mouse_wheel(*family[2]->editor, p, 0.0f, 40.0f, WheelHost{});
+    CHECK(family[2]->under_menu()->target_scroll_y() > 0.0f);
 
-    // Editor 0's popup is untouched and still open — it never saw the event.
+    // Editor 0 is untouched: its popup is still open and its own pane, which
+    // sits at the same coordinates in its own tree, never scrolled.
     CHECK(family[0]->combo()->is_open());
+    CHECK(family[0]->under_menu()->target_scroll_y() == 0.0f);
     CHECK(ComboBox::active_popup_in(*family[0]->editor) == family[0]->combo());
-    // Editor 2 has no popup of its own, so the read for its root is empty.
     CHECK(ComboBox::active_popup_in(*family[2]->editor) == nullptr);
 
     reset_mirrors();
