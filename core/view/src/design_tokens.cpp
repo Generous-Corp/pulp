@@ -255,8 +255,40 @@ const std::vector<WidgetTokenRule>& widget_token_rules() {
         {"meter.red",    {"signal-high"}},
 
         {"waveform.line", {"signal-wave", "primary", "accent"}},
+        {"waveform.grid", {"line-soft"}},
+        {"waveform.fill", {"signal-wave", "primary", "accent"}},
 
         {"focus.ring", {"accent-ring", "primary", "accent"}},
+
+        // Text and surfaces. Not primitives, but the same bug one widget
+        // over: outline_api.cpp resolves `text.primary` and would paint its
+        // built-in near-white the first time an imported design set an
+        // outline. Nothing here is derived either — `text.secondary` is the
+        // design's own muted text, not a blend of its foreground toward its
+        // muted, which is how theme_presets.cpp builds it for a built-in theme.
+        {"text.primary",   {"foreground", "text-strong", "text"}},
+        {"text.secondary", {"muted-foreground", "text-muted"}},
+        {"text.disabled",  {"text-faint"}},
+        {"text.link",      {"primary", "accent"}},
+        {"accent.text",    {"primary-foreground", "accent-text", "on-ink"}},
+
+        {"bg.primary",   {"background", "surface-app"}},
+        {"bg.secondary", {"secondary", "surface-sunken"}},
+        {"bg.surface",   {"card", "surface-panel"}},
+        {"bg.elevated",  {"popover", "surface-raised"}},
+
+        {"divider",      {"border", "line"}},
+        {"modal.bg",     {"popover", "surface-overlay", "card"}},
+        {"modal.border", {"border", "line"}},
+
+        // Unprefixed spellings a few older panels resolve directly. They mean
+        // the same thing as their dotted siblings above and would otherwise
+        // miss for exactly the same reason.
+        {"text",        {"foreground", "text-strong", "text"}},
+        {"text_muted",  {"muted-foreground", "text-muted"}},
+        {"surface",     {"card", "surface-panel"}},
+        {"accent",      {"primary", "accent"}},
+        {"border",      {"border", "control-line", "line"}},
     };
     return rules;
 }

@@ -176,6 +176,50 @@ TEST_CASE("a design's own widget colour outranks the derived one",
     CHECK(is_rgb(theme.colors.at("control.fill"), 0x16, 0xDA, 0xC2));
 }
 
+TEST_CASE("a CSS-captured design reaches text and surfaces too",
+          "[design][tokens]") {
+    // Same bug as the fader, one widget over: outline_api.cpp resolves
+    // `text.primary` and would paint its built-in near-white the first time an
+    // imported design set an outline. Nothing here is derived — `text.secondary`
+    // is the design's own muted text, not a blend toward its muted colour.
+    IRTokens tokens = captured_css_design();
+    tokens.colors["css/text"] = "#2A2418";
+    tokens.colors["css/text-muted"] = "#7A6E58";
+    tokens.colors["css/text-faint"] = "#9C8F76";
+    tokens.colors["css/accent-text"] = "#FFF4E8";
+    tokens.colors["css/surface-app"] = "#232019";
+    tokens.colors["css/surface-panel"] = "#EFE6D2";
+    tokens.colors["css/surface-raised"] = "#F7F0E0";
+    tokens.colors["css/line"] = "#3C321E";
+
+    const auto theme = ir_tokens_to_theme(tokens);
+    REQUIRE(theme.colors.count("text.primary") == 1);
+    CHECK(is_rgb(theme.colors.at("text.primary"), 0x2A, 0x24, 0x18));
+    // The near-white outline_api.cpp would otherwise have painted.
+    CHECK_FALSE(is_rgb(theme.colors.at("text.primary"), 220, 220, 220));
+    REQUIRE(theme.colors.count("text.secondary") == 1);
+    CHECK(is_rgb(theme.colors.at("text.secondary"), 0x7A, 0x6E, 0x58));
+    REQUIRE(theme.colors.count("text.disabled") == 1);
+    CHECK(is_rgb(theme.colors.at("text.disabled"), 0x9C, 0x8F, 0x76));
+    REQUIRE(theme.colors.count("accent.text") == 1);
+    CHECK(is_rgb(theme.colors.at("accent.text"), 0xFF, 0xF4, 0xE8));
+
+    REQUIRE(theme.colors.count("bg.primary") == 1);
+    CHECK(is_rgb(theme.colors.at("bg.primary"), 0x23, 0x20, 0x19));
+    REQUIRE(theme.colors.count("bg.surface") == 1);
+    CHECK(is_rgb(theme.colors.at("bg.surface"), 0xEF, 0xE6, 0xD2));
+    REQUIRE(theme.colors.count("bg.elevated") == 1);
+    CHECK(is_rgb(theme.colors.at("bg.elevated"), 0xF7, 0xF0, 0xE0));
+    REQUIRE(theme.colors.count("divider") == 1);
+    CHECK(is_rgb(theme.colors.at("divider"), 0x3C, 0x32, 0x1E));
+
+    // The unprefixed spellings a few older panels resolve directly.
+    REQUIRE(theme.colors.count("surface") == 1);
+    CHECK(is_rgb(theme.colors.at("surface"), 0xEF, 0xE6, 0xD2));
+    REQUIRE(theme.colors.count("accent") == 1);
+    CHECK(is_rgb(theme.colors.at("accent"), 0xC4, 0x62, 0x2A));
+}
+
 TEST_CASE("a translucent CSS token survives into the theme", "[design][tokens]") {
     // A design captured from CSS states a hairline as `rgba(60,50,30,0.18)`,
     // not as hex. Reading it with a hex-only parser yields a

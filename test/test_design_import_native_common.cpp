@@ -2,6 +2,7 @@
 #include "../core/view/src/design_import_internal.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
 
+#include <pulp/view/design_tokens.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
@@ -807,17 +808,18 @@ TEST_CASE("a design that states every widget colour reports no gap",
           "[view][import][native][tokens]") {
     // The other half of the contract: the diagnostic must be able to be
     // absent, or its presence above proves nothing.
+    // Ask the mapper which keys it cannot fill, then state exactly those. This
+    // stays true as the rule table grows — a hardcoded list would go stale the
+    // next time a key is added and would then assert nothing. It is also the
+    // stronger property: every key reported as a gap must be closable by
+    // stating it.
     DesignIR ir;
     ir.source = DesignSource::figma_plugin;
     ir.root.type = "frame";
-    for (const char* key : {"accent.primary", "accent.secondary", "accent.error",
-                            "accent.warning", "accent.success", "accent.info",
-                            "control.fill", "control.track", "control.thumb",
-                            "control.border", "knob.arc", "knob.arc.bg",
-                            "knob.thumb", "slider.track", "slider.fill",
-                            "slider.thumb", "meter.green", "meter.yellow",
-                            "meter.red", "waveform.line", "focus.ring"})
-        ir.tokens.colors[key] = "#C4622A";
+    std::vector<std::string> gaps;
+    ir_tokens_to_theme(ir.tokens, &gaps);
+    REQUIRE_FALSE(gaps.empty());
+    for (const auto& key : gaps) ir.tokens.colors[key] = "#C4622A";
 
     std::vector<ImportDiagnostic> diagnostics;
     NativeMaterializeOptions options;
