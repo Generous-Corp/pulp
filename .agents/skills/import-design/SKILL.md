@@ -2896,6 +2896,22 @@ Gotchas:
   — the load-bearing one is `[movement]`, which renders the pointer at five
   values and asserts the drawn geometry MOVED. A one-frame similarity score
   cannot tell a live indicator from a frozen one.
+
+**Both consumers now receive the pointer.** `knob_ind_*` used to reach only the
+native materializer, so the same import rendered the design's pointer when
+materialized (`build_native_view_tree`, `--emit cpp`, embedders) and the generic
+white notch when scripted (`--emit js`, the CLI default). `design_codegen` now
+emits `setKnobCapturedIndicator(id, rIn, rOut, width, color)` beside
+`setKnobSpriteCore`, and the bridge registers it in the `widget_assets` group
+(so `reload_autocaps` gates it as Filesystem, like its siblings). Two traps:
+- **The bridge parses `#rrggbb` only** and silently substitutes near-white for
+  anything else, while the materializer parses any CSS colour. The browser lane
+  normalizes computed `rgb()` to hex at production for this reason. A Figma-lane
+  pointer whose colour came off a demoted stroke as `rgba(...)` still loses its
+  colour on the scripted path.
+- **Emit nothing when there is no recovered pointer.** The call installs a
+  captured indicator unconditionally, and a zero-length one suppresses the
+  synthetic notch — leaving an imported knob with no visible indicator at all.
 - **Import-time disc clean** (`clean_baked_knob_indicator` →
   `clear_baked_knob_antenna`, `design_import_png.cpp`), NOT a render-time cover. Many
   captured discs (ELYSIUM's included) BAKE an indicator into the disc PNG — here
