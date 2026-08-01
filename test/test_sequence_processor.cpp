@@ -83,7 +83,7 @@ std::shared_ptr<const Project> host_tempo_note_project() {
     event.duration = {kTicksPerQuarter / 4};
     event.velocity = 0xffff;
     event.pitch = 60;
-    auto content = take(NoteContent::create({event}));
+    auto content = take(MidiContent::create({event}));
     auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
     auto track = take(Track::create({10}, "host-tempo notes", {std::move(clip)}));
     auto sequence =
@@ -105,7 +105,7 @@ std::shared_ptr<const Project> host_tempo_same_sample_boundary_project() {
     starting.duration = {kTicksPerQuarter / 4};
     starting.velocity = 0xffff;
     starting.pitch = 61;
-    auto content = take(NoteContent::create({ending, starting}));
+    auto content = take(MidiContent::create({ending, starting}));
     auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
     auto track = take(Track::create({10}, "same-sample boundary", {std::move(clip)}));
     auto sequence =
@@ -131,7 +131,7 @@ std::shared_ptr<const Project> dense_multitrack_note_project(std::size_t notes_p
             event.channel = static_cast<std::uint8_t>(note_index / 128);
             events.push_back(event);
         }
-        auto content = take(NoteContent::create(std::move(events)));
+        auto content = take(MidiContent::create(std::move(events)));
         auto clip =
             take(Clip::create({next_id++}, {0}, {2 * kTicksPerQuarter}, std::move(content)));
         tracks.push_back(take(Track::create({next_id++}, "dense", {std::move(clip)})));
@@ -149,7 +149,7 @@ std::shared_ptr<const Project> single_note_project(std::uint8_t pitch) {
     event.duration = {kTicksPerQuarter};
     event.velocity = 0xffff;
     event.pitch = pitch;
-    auto content = take(NoteContent::create({event}));
+    auto content = take(MidiContent::create({event}));
     auto clip = take(Clip::create({100}, {0}, {2 * kTicksPerQuarter}, std::move(content)));
     auto track = take(Track::create({10}, "adopted note", {std::move(clip)}));
     auto sequence =

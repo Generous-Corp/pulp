@@ -43,7 +43,7 @@ void record_clip(ConceptCensus& out, const timeline::Project& project,
                     media.frame_count != asset->frame_count)
                     out.record(Concept::ClipMediaWindow, id, limits);
             },
-            [&](const timeline::NoteContent& notes) {
+            [&](const timeline::MidiContent& notes) {
                 out.record(Concept::ClipNote, id, limits);
                 if (std::any_of(notes.notes().begin(), notes.notes().end(), [](const auto& note) {
                         const auto encoded = velocity_16_to_7(note.velocity);

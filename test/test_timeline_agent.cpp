@@ -700,7 +700,7 @@ TEST_CASE("timeline agent derives duration-less render length from active conten
 
 TEST_CASE("timeline agent derives duration-less render length from musical clips") {
     auto notes =
-        take(NoteContent::create({{{5}, {0}, {timebase::kTicksPerQuarter}, 0x8000, 60, 0}}));
+        take(MidiContent::create({{{5}, {0}, {timebase::kTicksPerQuarter}, 0x8000, 60, 0}}));
     auto clip = take(Clip::create({4}, {0}, {2 * timebase::kTicksPerQuarter}, std::move(notes)));
     auto track = take(Track::create({3}, "notes", {std::move(clip)}));
     auto sequence =

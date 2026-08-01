@@ -1427,6 +1427,13 @@
       "domain": "Content",
       "flags": [
         {
+          "kind": "Array",
+          "name": "lanes",
+          "required": true,
+          "schema_field": "lanes",
+          "value_type": "json"
+        },
+        {
           "kind": "U64String",
           "name": "modifier-seed",
           "required": true,
@@ -1450,7 +1457,7 @@
       ],
       "name": "timeline:content:notes",
       "schema_type": "pulp.timeline.content.notes",
-      "version": 2
+      "version": 3
     },
     {
       "domain": "Content",

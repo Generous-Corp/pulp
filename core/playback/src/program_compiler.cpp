@@ -466,7 +466,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 clip_started_ = true;
             }
             const auto* notes = role == detail::ClipContentRole::Notes
-                                    ? std::get_if<timeline::NoteContent>(&clip.content())
+                                    ? std::get_if<timeline::MidiContent>(&clip.content())
                                     : nullptr;
             if (!notes || note_index_ == notes->notes().size()) {
                 note_index_ = 0;

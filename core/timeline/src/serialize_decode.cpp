@@ -19,6 +19,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::Clip);
     if (value == "note")
         return runtime::Ok(ItemKind::Note);
+    if (value == "midi_lane")
+        return runtime::Ok(ItemKind::MidiLane);
+    if (value == "midi_lane_point")
+        return runtime::Ok(ItemKind::MidiLanePoint);
     if (value == "device_placement")
         return runtime::Ok(ItemKind::DevicePlacement);
     if (value == "automation_lane")

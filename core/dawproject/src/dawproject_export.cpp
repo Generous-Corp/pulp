@@ -85,7 +85,7 @@ std::string element_id(std::string_view prefix, timeline::ItemId id) {
 /// the plan refuses any concept this writer does not emit.
 bool track_holds_notes(const timeline::Track& track) noexcept {
     for (const timeline::Clip& clip : track.clips())
-        if (std::holds_alternative<timeline::NoteContent>(clip.content()))
+        if (std::holds_alternative<timeline::MidiContent>(clip.content()))
             return true;
     return false;
 }
@@ -104,7 +104,7 @@ void write_clip(pugi::xml_node clips, const timeline::Project& project,
     node.append_attribute("duration") = number(beats(clip.duration())).c_str();
     node.append_attribute("name") = element_id("clip", clip.id()).c_str();
 
-    if (const auto* notes = std::get_if<timeline::NoteContent>(&clip.content())) {
+    if (const auto* notes = std::get_if<timeline::MidiContent>(&clip.content())) {
         auto notes_node = node.append_child("Notes");
         for (const timeline::NoteEvent& note : notes->notes()) {
             auto note_node = notes_node.append_child("Note");

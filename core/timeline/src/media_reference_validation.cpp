@@ -26,7 +26,7 @@ std::optional<ModelError> validate_clip(const Clip& clip, FindAsset&& find_asset
         ClipContentCases{
             [](const EmptyContent&) { return std::optional<ModelError>{}; },
             [&](const MediaRef& media) { return validate_reference(media, clip.id(), find_asset); },
-            [](const NoteContent&) { return std::optional<ModelError>{}; },
+            [](const MidiContent&) { return std::optional<ModelError>{}; },
             [](const RegisteredContent&) { return std::optional<ModelError>{}; },
             [](const OpaqueContent&) { return std::optional<ModelError>{}; },
             [](const SequenceRef&) { return std::optional<ModelError>{}; },

@@ -218,7 +218,7 @@ stretch_sibling_project(const CompiledTempoMap& map, std::uint64_t frames = 32'7
         Track::create({10}, "live Stretch", {std::move(stretch_clip_result).value()});
     REQUIRE(stretch_track_result);
 
-    auto notes_result = NoteContent::create({note(map, 202, 5, 20)});
+    auto notes_result = MidiContent::create({note(map, 202, 5, 20)});
     REQUIRE(notes_result);
     auto sibling_note_result = Clip::create(
         {201}, {0}, map.samples_to_ticks({128}) - TickPosition{0}, std::move(notes_result).value());
@@ -252,7 +252,7 @@ stretch_sibling_project(const CompiledTempoMap& map, std::uint64_t frames = 32'7
 }
 
 [[maybe_unused]] std::shared_ptr<const Project> note_project(const CompiledTempoMap& map) {
-    auto content = take(NoteContent::create({note(map, 101, 5, 20)}));
+    auto content = take(MidiContent::create({note(map, 101, 5, 20)}));
     auto clip = take(Clip::create({100}, {0}, map.samples_to_ticks({128}) - TickPosition{0},
                                   std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));
@@ -264,7 +264,7 @@ stretch_sibling_project(const CompiledTempoMap& map, std::uint64_t frames = 32'7
 
 [[maybe_unused]] std::shared_ptr<const Project>
 instrument_mixer_project(const CompiledTempoMap& map) {
-    auto content = take(NoteContent::create({note(map, 101, 5, 20)}));
+    auto content = take(MidiContent::create({note(map, 101, 5, 20)}));
     auto clip = take(Clip::create({100}, {0}, map.samples_to_ticks({128}) - TickPosition{0},
                                   std::move(content)));
     auto track = take(Track::create(TrackInput{

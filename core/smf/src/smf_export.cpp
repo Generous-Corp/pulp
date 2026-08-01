@@ -66,7 +66,7 @@ bool may_drop_non_note_content(const ClipContent& content,
     return std::visit(ClipContentCases{
                           [](const EmptyContent&) { return true; },
                           [&](const MediaRef&) { return policy.drop_media_clips; },
-                          [](const NoteContent&) { return false; },
+                          [](const MidiContent&) { return false; },
                           [&](const RegisteredContent&) {
                               return policy.drop_registered_content;
                           },
@@ -294,7 +294,7 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
         if (clip.time_anchor() != ClipTimeAnchor::Musical &&
             loss_policy_.drop_absolute_clips)
             continue;
-        const auto* notes = std::get_if<NoteContent>(&clip.content());
+        const auto* notes = std::get_if<MidiContent>(&clip.content());
         if (notes == nullptr) {
             if (may_drop_non_note_content(clip.content(), loss_policy_))
                 continue;

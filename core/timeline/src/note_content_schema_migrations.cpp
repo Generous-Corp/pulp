@@ -124,4 +124,61 @@ migrate_note_content_v2_to_v1(std::string_view source, BoundedJsonSink& output,
                   output);
 }
 
+// A v2 note content authored no controller or expression streams, so it
+// upgrades to the degenerate case: an empty lane array, leaving every note,
+// modifier, and the seed byte-identical. "lanes" sorts before every other
+// member, so the insertion lands immediately inside the object and the result
+// stays canonical.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_note_content_v2_to_v3(std::string_view source, BoundedJsonSink& output,
+                              const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 2) || !common_shape(*data) ||
+        member(*data, "lanes") || !member(*data, "modifiers") || !member(*data, "modifier_seed") ||
+        data->begin >= data->end || version->begin >= version->end)
+        return fail();
+    return finish(
+        apply_edits(source,
+                    {RawEdit{data->begin + 1, data->begin + 1, "\"lanes\":[],"},
+                     RawEdit{version->begin, version->end, "3"}},
+                    output),
+        output);
+}
+
+// The downgrade is offered only when it loses nothing: a document that authors
+// a lane has no v2 spelling, and dropping the lane would silently change what
+// the clip's controllers say. Refusing is the honest answer.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_note_content_v3_to_v2(std::string_view source, BoundedJsonSink& output,
+                              const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    auto* lanes = data ? member(*data, "lanes") : nullptr;
+    if (!data || !version || !version_is(*version, 3) || !common_shape(*data) || !lanes ||
+        lanes->kind != JsonValue::Kind::Array || !lanes->array.empty() ||
+        version->begin >= version->end)
+        return fail();
+    // "lanes" is the first member in canonical order, so the erase runs from
+    // just inside the object to the separator that follows it.
+    if (data->object.size() < 2 || data->object[0].first != "lanes")
+        return fail();
+    const auto comma = source.find(',', lanes->end);
+    if (comma == std::string_view::npos || comma >= data->end)
+        return fail();
+    return finish(apply_edits(source,
+                              {RawEdit{data->begin + 1, comma + 1, {}},
+                               RawEdit{version->begin, version->end, "2"}},
+                              output),
+                  output);
+}
+
 } // namespace pulp::timeline::detail

@@ -33,7 +33,7 @@ Its deterministic device-free validation path is:
 does not widen or redesign that channel. The channel-owned snapshot is persisted
 as the registered `pulp.examples.timeline.step_pattern` typed document content.
 Its control-thread pump drains and reduces queued edits, updates that component,
-lowers the resulting grid into a timeline `NoteContent` clip, and publishes the
+lowers the resulting grid into a timeline `MidiContent` clip, and publishes the
 recompiled program. `ArrangementNoteRenderer` then injects notes through the
 binding's stable `MidiInput` to a small audible sine destination inside the same
 `SignalGraph`. Its one-bar transport loop repeats the arrangement and flushes

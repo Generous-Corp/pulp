@@ -48,7 +48,7 @@ std::shared_ptr<const timeline::Project> make_demo_project() {
             0,
         });
     }
-    auto content = timeline::NoteContent::create(std::move(notes));
+    auto content = timeline::MidiContent::create(std::move(notes));
     if (!content)
         return {};
     const timebase::TickDuration duration{16 * timebase::kTicksPerQuarter};
