@@ -372,6 +372,20 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-engine-dependency-floor-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_engine_dependency_floor_check.py"
         --selftest)
+
+    # A construct a user can author and the compiler then refuses leaves the
+    # document unplayable with nothing saying so at authoring time, which is
+    # worse than the construct not existing. Every such refusal must carry a
+    # written reason and an owner. The selftest proves the check names a
+    # refusal dropped from the allowlist, names a newly added one, and still
+    # passes a refusal that reads nothing a document can carry.
+    add_test(NAME playback-negative-capability COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/negative_capability_check.py"
+        --repo-root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME playback-negative-capability-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/negative_capability_check.py"
+        --selftest)
+
     add_test(NAME web-timeline-source-closure
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/web_timeline_source_closure_check.py

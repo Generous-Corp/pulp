@@ -706,6 +706,43 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
 
+## A refusal of something authorable costs a written reason
+
+`tools/scripts/negative_capability_check.py` (ctest
+`playback-negative-capability`, selftest
+`playback-negative-capability-selftest`) reads the refusal-shaped members of
+`CompileErrorCode` — anything spelled `Unsupported`, `NotSupported`,
+`Rejected`, `Refused`, or `Disallowed` — finds every site that raises one, and
+decides whether the refused construct is reachable from the timeline authoring
+surface. An authorable refusal needs an entry in
+`tools/scripts/negative_capability_allowlist.json` carrying an owner, a
+`status` of `live-defect` or `intended`, and a reason.
+
+The class it guards is worth naming: a construct a user **can** author and the
+compiler then refuses is worse than the construct not existing. The document
+saves, reloads, copies and round-trips, and only playback says no — with
+nothing at authoring time to warn anyone. The gate does not forbid these; it
+forbids adding one for free.
+
+A refusal reads as authorable when the source above the raise reads a symbol
+declared in `core/timeline/include/pulp/timeline/**` or named by
+`core/timeline/schema/timeline_schema.json` — a model accessor, a model type,
+an enum constant, a schema field. A refusal that only inspects internal
+lowering state passes without an entry.
+
+**Three things it cannot see, so do not read a pass as "the compiler accepts
+everything authorable":** a refusal expressed by dropping, clamping, or
+substituting rather than by naming a code; a refusal raised through a different
+error enum, such as an importer's or a renderer's; and an authored read that
+sits further than `AUTHORING_LOOKBACK_LINES` above the raise or arrives through
+an internal struct field that no longer names its model origin.
+
+All three seeded entries are `live-defect` — expression lanes on a clip,
+expression lanes on a trimmed nested clip, and the nested-sequence flattening
+refusals. They are tracked, not resolved. Removing one from the allowlist is
+how you assert the refusal is gone; the gate fails an entry whose raise site no
+longer exists, so a reason cannot outlive its code.
+
 ## Dependency floor
 
 `playback`'s floor is declared in `MODULE_FLOORS` in
