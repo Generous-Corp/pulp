@@ -107,6 +107,17 @@ target_include_directories(pulp-inspect-authoring
 target_link_libraries(pulp-inspect-authoring PUBLIC pulp::runtime)
 
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
+# Arbitrary live-realm execution is a separate authoring archive. Safe
+# protocol, transport, client, runtime, and visual inspector targets never
+# link it; an explicitly opted-in host injects RuntimeEvaluator.
+add_library(pulp-inspect-runtime-eval src/runtime_eval_component.cpp)
+add_library(pulp::inspect-runtime-eval ALIAS pulp-inspect-runtime-eval)
+target_include_directories(pulp-inspect-runtime-eval
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-runtime-eval PRIVATE pulp::view)
+
 add_library(pulp-inspect)
 add_library(pulp::inspect ALIAS pulp-inspect)
 
@@ -143,3 +154,30 @@ target_link_libraries(pulp-inspect
         pulp::inspect-telemetry
         pulp::inspect-authoring)
 endif()
+
+# Configure-time dependency proof: these base targets must remain usable
+# without pulling the high-risk evaluator archive into their link closure.
+foreach(_pulp_eval_free_target IN ITEMS
+        pulp-inspect-protocol
+        pulp-inspect-discovery-support
+        pulp-inspect-discovery
+        pulp-inspect-publication
+        pulp-inspect-client
+        pulp-inspect-runtime
+        pulp-inspect-telemetry
+        pulp-inspect-authoring
+        pulp-inspect
+        pulp-format)
+    if(TARGET ${_pulp_eval_free_target})
+        get_target_property(_pulp_private_links ${_pulp_eval_free_target} LINK_LIBRARIES)
+        get_target_property(_pulp_public_links ${_pulp_eval_free_target} INTERFACE_LINK_LIBRARIES)
+        if("${_pulp_private_links};${_pulp_public_links}" MATCHES
+           "pulp::inspect-runtime-eval|pulp-inspect-runtime-eval")
+            message(FATAL_ERROR
+                "${_pulp_eval_free_target} must not depend on pulp-inspect-runtime-eval")
+        endif()
+    endif()
+endforeach()
+unset(_pulp_eval_free_target)
+unset(_pulp_private_links)
+unset(_pulp_public_links)

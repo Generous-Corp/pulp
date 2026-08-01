@@ -15,6 +15,7 @@
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/main_thread_rpc.hpp>
+#include <pulp/inspect/runtime_eval_component.hpp>
 #include <pulp/inspect/session.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/test_input.hpp>
@@ -370,7 +371,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         state_.set_value_channels(
             std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
-        domains_.set_script_inspector(nullptr);
+        domains_.set_runtime_evaluator(nullptr);
         const auto generation = processor_.supports_editor_reload()
             ? processor_.editor_reload_generation()
             : 0;
@@ -513,16 +514,21 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         bridge_.visit_scripted_ui([this, &request, &response, &visited](
                                       view::ScriptedUiSession* scripted) {
             visited = true;
-            domains_.set_script_inspector(
-                scripted ? scripted->script_inspector() : nullptr);
-            struct ResetScriptInspector {
+            auto evaluator = scripted
+                ? inspect::make_script_runtime_evaluator(
+                      scripted->script_inspector())
+                : nullptr;
+            domains_.set_runtime_evaluator(evaluator.get());
+            struct ResetRuntimeEvaluator {
                 inspect::DomainHandler& domains;
-                ~ResetScriptInspector() { domains.set_script_inspector(nullptr); }
+                ~ResetRuntimeEvaluator() {
+                    domains.set_runtime_evaluator(nullptr);
+                }
             } reset{domains_};
             response = domains_.handle(request);
         });
         if (!visited) {
-            domains_.set_script_inspector(nullptr);
+            domains_.set_runtime_evaluator(nullptr);
             response = domains_.handle(request);
         }
         return response;
@@ -630,6 +636,9 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     }
 
     void refresh_live_state() {
+        // Requests can arrive between host pumps. Rebind the evaluator before
+        // any domain dispatch so a retired scripted session is never called.
+        refresh_scripted_sources();
         const auto& config = app_.config();
         audio_.set_config(inspect::AudioConfig{config.sample_rate, config.buffer_size,
                                                config.input_channels, config.output_channels,
