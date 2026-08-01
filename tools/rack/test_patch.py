@@ -370,6 +370,54 @@ def check_attempt_keeping() -> int:
         print("  ok     every keep_attempt call has its argument in scope")
     return bad
 
+def check_mention_resolves() -> int:
+    """The form the APP writes must resolve in the generator.
+
+    Picking VCO from the @ list inserts "@ForgeModular/VCO" — qualified,
+    because two plugins can both have a VCO and the slug is what tells them
+    apart. find_modules matched on "<model> <name>", which never contains a
+    slash, so every mention the app produced resolved to nothing. And our own
+    pack is installed but unpublished, so it is absent from VCV's module index
+    entirely: even the bare name found somebody else's VCO first.
+
+    Both halves had tests. Neither crossed the join, which is where it broke.
+    """
+    bad = 0
+    inv = P.inventory()
+    cat = P.catalog()
+    idx = P.module_index()
+
+    def hits(term):
+        return P.find_modules(term, idx, cat, inv)
+
+    # Qualified, with and without the @ the field carries.
+    for term in ("ForgeModular/VCO", "@ForgeModular/VCO"):
+        got = hits(term)
+        if not got or got[0]["plugin"] != "ForgeModular":
+            print(f"  WRONG  '{term}' does not resolve to ForgeModular/VCO "
+                  f"— the app writes this form")
+            bad += 1
+        else:
+            print(f"  ok     '{term}' resolves to "
+                  f"{got[0]['plugin']}/{got[0]['module']}")
+
+    # Qualifying must actually SELECT, not merely be tolerated.
+    other = hits("Fundamental/VCO")
+    if other and all(h["plugin"] == "Fundamental" for h in other):
+        print("  ok     a qualified term is confined to that plugin")
+    else:
+        print(f"  WRONG  'Fundamental/VCO' leaked other plugins: "
+              f"{sorted({h['plugin'] for h in other})[:4]}")
+        bad += 1
+
+    # And a name that does not exist still resolves to nothing.
+    if hits("@ForgeModular/NoSuchModule"):
+        print("  WRONG  a module nobody has resolved to something")
+        bad += 1
+    else:
+        print("  ok     an unknown module still resolves to nothing")
+    return bad
+
 def main():
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
@@ -400,7 +448,8 @@ def main():
     bad += check_silence_mechanism()
     bad += check_preview_matches_rack()
     bad += check_attempt_keeping()
-    print(f"\n{len(CASES) + 5 - bad}/{len(CASES) + 5} correct")
+    bad += check_mention_resolves()
+    print(f"\n{len(CASES) + 6 - bad}/{len(CASES) + 6} correct")
     return 1 if bad else 0
 
 

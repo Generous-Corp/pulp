@@ -936,10 +936,26 @@ def module_index(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS
 
 
 def find_modules(term: str, midx: dict, cat: dict, inv: dict) -> list:
-    """Search 4,705 modules by name or slug, across every plugin."""
+    """Search 4,705 modules by name or slug, across every plugin.
+
+    Accepts a QUALIFIED term, "Plugin/Model", as well as a bare one. That is
+    the form the app writes: picking VCO from the @ list inserts
+    "@ForgeModular/VCO", because two plugins can both have a VCO and the slug
+    is what tells them apart. It matched nothing here — the haystack is
+    "<model> <name>", which never contains a slash — so every mention the app
+    produced was unresolvable by the thing that consumes it. Each half was
+    tested and neither test crossed the join.
+    """
     t = term.lstrip("@").strip().lower()
+    want_plugin = ""
+    if "/" in t:
+        want_plugin, _, t = t.partition("/")
+        want_plugin = want_plugin.strip()
+        t = t.strip()
     out = []
     for pslug, mods in midx.items():
+        if want_plugin and pslug.lower() != want_plugin:
+            continue
         for mslug, m in mods.items():
             hay = f"{mslug} {m['name']}".lower()
             if t not in hay:
@@ -953,6 +969,31 @@ def find_modules(term: str, midx: dict, cat: dict, inv: dict) -> list:
                 # An exact name match should outrank a substring buried in a
                 # longer one, so "VCO" finds VCO before "Chord VCO".
                 "score": 100 if m["name"].lower() == t or mslug.lower() == t else 50,
+            })
+    # Installed plugins the published index does not carry — ours above all.
+    #
+    # module_index() is VCV's library database, so ForgeModular is not in it:
+    # it is installed and unpublished. Searching only that database meant a
+    # mention of one of OUR OWN modules resolved to nothing, which is the most
+    # common mention this app will ever see.
+    seen = {(h["plugin"], h["module"]) for h in out}
+    for pslug, plug in inv.items():
+        if want_plugin and pslug.lower() != want_plugin:
+            continue
+        if pslug in midx:
+            continue                      # already searched, above
+        for mslug, m in (plug.get("modules") or {}).items():
+            name = m.get("name", mslug)
+            if t and t not in f"{mslug} {name}".lower():
+                continue
+            if (pslug, mslug) in seen:
+                continue
+            out.append({
+                "plugin": pslug, "module": mslug, "name": name,
+                "brand": plug.get("name", pslug), "tags": m.get("tags", []),
+                "premium": False,
+                "installed": True,
+                "score": 100 if name.lower() == t or mslug.lower() == t else 50,
             })
     return sorted(out, key=lambda h: (-h["score"], not h["installed"], h["plugin"]))
 

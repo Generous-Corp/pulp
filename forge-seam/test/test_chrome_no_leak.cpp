@@ -6053,3 +6053,61 @@ TEST_CASE("render the mention list for a look", "[.mention-look]") {
     REQUIRE(read_all(out).size() > 8000);
     WARN("wrote " << out.string());
 }
+
+// Typing @, arrowing, and pressing Enter puts the module in the field.
+//
+// The whole point of the list, and the path it takes changed tonight: keys now
+// arrive through the root the window dispatches to rather than a hook on the
+// shell's own view. Every piece was tested separately — the keys move the
+// selection, the choice fires on_choose, the composer inserts — and none of
+// that says the three of them are joined up.
+TEST_CASE("choosing from the list writes the module into the prompt",
+          "[mention][insert]") {
+    forge_modular::ForgeModularShell shell;
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+
+    // Wrapped, as the standalone wraps it.
+    auto outer = std::make_unique<pulp::view::View>();
+    auto* inner = view.get();
+    outer->add_child(std::move(view));
+    REQUIRE(inner->parent() == outer.get());
+    shell.on_poll();
+
+    auto* input = shell.chrome() ? shell.chrome()->prompt_input() : nullptr;
+    REQUIRE(input != nullptr);
+    pulp::view::View* top = input;
+    while (top->parent()) top = top->parent();
+    REQUIRE(top->on_global_key != nullptr);
+
+    // Only installed modules can be inserted, so drive the list with one.
+    shell.mentions().set_source([](const std::string&) {
+        std::vector<forge_modular::MentionCandidate> out;
+        forge_modular::MentionCandidate c;
+        c.brand = "ForgeModular";
+        c.name = "VCO";
+        c.slug = "ForgeModular/VCO";
+        c.state = forge_modular::MentionCandidate::Availability::ready;
+        out.push_back(c);
+        return out;
+    });
+
+    input->set_text("@vc");
+    shell.mentions().handle_text("@vc", 3);
+    REQUIRE(shell.mentions().is_open());
+
+    pulp::view::KeyEvent enter;
+    enter.key = pulp::view::KeyCode::enter;
+    enter.is_down = true;
+    CHECK(top->on_global_key(enter));
+
+    // The list closes and the field carries the module.
+    CHECK_FALSE(shell.mentions().is_open());
+    INFO("field now: '" << input->text() << "'");
+    CHECK(input->text().find("VCO") != std::string::npos);
+    // And the half-typed token is gone rather than left in front of it.
+    CHECK(input->text().find("@vc ") == std::string::npos);
+}
