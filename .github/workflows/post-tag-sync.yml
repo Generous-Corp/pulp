@@ -34,7 +34,7 @@ env:
   # the required checks it needs to merge. Nine changelog PRs accumulated
   # unmergeable that way (v0.751.0 → v0.759.0) and blocked the release
   # pipeline behind them. Keep in lockstep with tools/shipyard.toml.
-  SHIPYARD_VERSION: "0.80.2"
+  SHIPYARD_VERSION: "0.80.4"
 
 jobs:
   sync:

@@ -396,7 +396,7 @@ and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
 
-### Why the pin sits at v0.80.2 — the merge queue made it load-bearing
+### Why the pin sits at v0.80.3 — the merge queue made it load-bearing
 
 The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
 **Shipyard's post-tag hook could no longer push.**
@@ -439,3 +439,10 @@ it in a comment that goes stale — which is exactly what happened here.
 Keep the three in step — the pin, the installed binary on every fleet Mac, and
 `push_mode` — because a host still on an older Shipyard silently ignores
 `push_mode` and reverts to a direct push that the ruleset then rejects.
+
+v0.80.3 also fixes the local queue scheduler so a worker slot is refilled as
+soon as its target finishes rather than only after the entire dispatched batch.
+That is a throughput dependency for Pulp's shared Macs, not a cosmetic upgrade.
+The same release expands Shipyard's own version trigger to root-level
+`src/*.rs`; without it, the scheduler fix could merge without creating the CLI
+release referenced by this pin.
