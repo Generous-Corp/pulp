@@ -305,6 +305,9 @@ TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads")
     error = validate_note_edit_intent(ambiguous);
     REQUIRE(error);
     REQUIRE(error->code == ModelErrorCode::InvalidNote);
+    auto rejected_for_host = ValidatedNoteEditIntent::create(ambiguous);
+    REQUIRE_FALSE(rejected_for_host);
+    REQUIRE(rejected_for_host.error().code == ModelErrorCode::InvalidNote);
 
     auto mismatched = note_intent(NoteEditIntentKind::Move);
     mismatched.expected = note({20});
@@ -334,7 +337,7 @@ TEST_CASE("Note edit intent validation rejects ambiguous or malformed payloads")
 }
 
 TEST_CASE("A note gesture crosses the host seam as one comparable value") {
-    static_assert(std::is_same_v<NoteEditIntentHost::IntentType, NoteEditIntent>);
+    static_assert(std::is_same_v<NoteEditIntentHost::IntentType, ValidatedNoteEditIntent>);
 
     auto submitted = note_intent(NoteEditIntentKind::Move);
     submitted.phase = GesturePhase::Update;
@@ -342,14 +345,18 @@ TEST_CASE("A note gesture crosses the host seam as one comparable value") {
     submitted.replacement = note();
     submitted.replacement->start = {kTicksPerQuarter};
     REQUIRE_FALSE(validate_note_edit_intent(submitted));
+    auto validated = ValidatedNoteEditIntent::create(submitted);
+    REQUIRE(validated);
 
-    ScriptedUiHost<NoteEditIntent> concrete;
+    ScriptedUiHost<ValidatedNoteEditIntent> concrete;
     NoteEditIntentHost& host = concrete;
-    REQUIRE(host.submit_intent(submitted).status == IntentStatus::Accepted);
+    REQUIRE(host.submit_intent(validated.value()).status == IntentStatus::Accepted);
     REQUIRE(concrete.intents().size() == 1);
-    REQUIRE(concrete.intents().front() == submitted);
+    REQUIRE(concrete.intents().front().value() == submitted);
 
     auto different = submitted;
     different.replacement->pitch = 65;
-    REQUIRE_FALSE(different == submitted);
+    auto different_validated = ValidatedNoteEditIntent::create(different);
+    REQUIRE(different_validated);
+    REQUIRE_FALSE(different_validated.value() == validated.value());
 }

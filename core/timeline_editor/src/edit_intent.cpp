@@ -155,6 +155,13 @@ std::optional<ModelError> validate_note_edit_intent(const NoteEditIntent& intent
     return unexpected();
 }
 
+runtime::Result<ValidatedNoteEditIntent, ModelError>
+ValidatedNoteEditIntent::create(NoteEditIntent intent) noexcept {
+    if (auto error = validate_note_edit_intent(intent))
+        return runtime::Result<ValidatedNoteEditIntent, ModelError>(runtime::Err(*error));
+    return runtime::Ok(ValidatedNoteEditIntent(std::move(intent)));
+}
+
 runtime::Result<Transaction, ModelError> lower_edit_intent(const EditIntent& intent,
                                                            const EditIntentIdentity& identity) {
     const auto invalid = [&](ModelErrorCode code, ItemId item = {}, ItemId related = {}) {

@@ -7,6 +7,7 @@
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
 
 #include <optional>
+#include <utility>
 
 namespace pulp::timeline_editor {
 
@@ -110,8 +111,30 @@ struct NoteEditIntent {
 std::optional<timeline::ModelError>
 validate_note_edit_intent(const NoteEditIntent& intent) noexcept;
 
+/// A note intent that passed validate_note_edit_intent and may cross a host seam.
+class ValidatedNoteEditIntent {
+  public:
+    /// Validates and owns one complete intent, or returns its first error.
+    static runtime::Result<ValidatedNoteEditIntent, timeline::ModelError>
+    create(NoteEditIntent intent) noexcept;
+
+    /// Returns the immutable validated value retained by this wrapper.
+    const NoteEditIntent& value() const noexcept {
+        return value_;
+    }
+
+    bool operator==(const ValidatedNoteEditIntent& other) const noexcept {
+        return value_ == other.value_;
+    }
+
+  private:
+    explicit ValidatedNoteEditIntent(NoteEditIntent intent) noexcept : value_(std::move(intent)) {}
+
+    NoteEditIntent value_;
+};
+
 /// Host binding used by a piano-roll front-end before command lowering.
-using NoteEditIntentHost = SequencerUiHostT<NoteEditIntent>;
+using NoteEditIntentHost = SequencerUiHostT<ValidatedNoteEditIntent>;
 
 /// Identities a lowered transaction needs and an intent deliberately does not carry.
 ///

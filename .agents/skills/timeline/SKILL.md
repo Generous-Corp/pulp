@@ -958,7 +958,8 @@ Consequences worth knowing before you touch this:
 - Piano-roll gestures use the sibling `NoteEditIntent` and
   `NoteEditIntentHost`. Insert carries only `replacement`, erase carries only
   `expected`, and move/resize/velocity carry both with one identity;
-  `validate_note_edit_intent` rejects malformed or ambiguous shapes before they
+  `ValidatedNoteEditIntent::create` rejects malformed or ambiguous shapes, and
+  `NoteEditIntentHost` accepts only that wrapper so invalid raw values cannot
   cross the host seam. There is intentionally no note lowerer until the granular
   note commands land — do not route these through the O(clip)
   `ReplaceNoteContent` command as an interim implementation.
