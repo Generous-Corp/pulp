@@ -617,7 +617,7 @@ commands:
         description: Add one capability id to --inspect=custom; repeatable. Mutating capabilities require session.control.
       - name: --inspect-runtime-eval
         kind: flag
-        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control; no profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
+        description: High-risk separate acknowledgement for runtime.eval. Requires develop, or custom with runtime.eval and session.control, plus a live ScriptedUiSession with no effectful ReloadCapability grants; the stock all-capabilities editor path is refused. No profile or saved preference implies it. Forwarded as argv and PULP_INSPECT_RUNTIME_EVAL=1.
       - name: --audio-inspector
         kind: flag
         description: Open the live Audio Inspector window (realtime output-boundary probe). Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1 env var. Composes with --screenshot.

@@ -9,6 +9,7 @@
 #include <pulp/inspect/test_input.hpp>
 
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace pulp::view { class View; class ScriptInspectorBridge; }
@@ -60,7 +61,16 @@ public:
     /// this only for a trusted development session. `Runtime.getCapabilities`
     /// reflects the flag via `canEvaluate`; read-only surfaces (logs, DOM,
     /// state) are unaffected.
-    void set_runtime_eval_enabled(bool enabled) { runtime_eval_enabled_ = enabled; }
+    void set_runtime_eval_enabled(bool enabled) {
+        runtime_eval_enabled_ = enabled;
+        runtime_eval_denial_.clear();
+    }
+    /// Fail-closed runtime-eval state with an exact host-owned diagnostic.
+    /// This does not alter the attached JS realm or mask any of its globals.
+    void set_runtime_eval_denied(std::string reason) {
+        runtime_eval_enabled_ = false;
+        runtime_eval_denial_ = std::move(reason);
+    }
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }
     void set_motion_scrubber(MotionScrubber* scrubber) { motion_scrubber_ = scrubber; }
@@ -116,6 +126,7 @@ private:
     ConsoleCapture* console_ = nullptr;
     view::ScriptInspectorBridge* script_inspector_ = nullptr;
     bool runtime_eval_enabled_ = false;
+    std::string runtime_eval_denial_;
     AudioInspector* audio_ = nullptr;
     MotionInspector* motion_ = nullptr;
     MotionScrubber* motion_scrubber_ = nullptr;

@@ -65,9 +65,14 @@ number (`1/0`) is reported as `null` rather than a bare `NaN`/`Infinity` token.
 
 **Opt-in required.** Evaluate is arbitrary code execution in the plugin's JS
 context, so it is **off by default** even when the debug console is wired: a host
-must call `DomainHandler::set_runtime_eval_enabled(true)` for a trusted dev
-session. Until then, `Runtime.evaluate` / `Runtime.interrupt` return a "disabled"
-error and `getCapabilities` reports `canEvaluate:false`.
+must separately enable it for a trusted dev session. The live
+`ScriptedUiSession` must also have an empty effectful `ReloadCapability` grant
+set. Any `exec`, clipboard, filesystem, storage, AI, runtime-import, or network
+grant refuses evaluation; `getCapabilities` reports `canEvaluate:false` plus
+`evaluateDeniedReason`. Pulp does not mask those globals in place. A custom
+production host can explicitly pass an empty
+`ScriptedUiOptions::granted_capabilities`; the stock `build_editor_ui` path
+retains its historical all-capabilities posture and is therefore ineligible.
 
 ### `Runtime.interrupt`
 
