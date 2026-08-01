@@ -222,6 +222,39 @@ def check_success_line_agrees() -> int:
               f"         Every app-driven proof reports INCONCLUSIVE on success.")
         bad += 1
 
+    # The MODULE path has the same shape and the same weakness: generate.py
+    # prints two lines, drive_app requires both, and the fixture that covers it
+    # here is a hand-written copy that can drift from either.
+    gen = open(os.path.join(HERE, "generate.py")).read()
+    # The printed string may contain ESCAPED quotes — generate.py wraps the
+    # app path in them — so the pattern has to skip \" rather than stop at it.
+    mod_line = re.search(r'log\(f"(installed (?:[^"\\]|\\.)*)"\)', gen)
+    open_line = re.search(r'log\(f"(open it with(?:[^"\\]|\\.)*)"\)', gen)
+    if not mod_line or not open_line:
+        print("  WRONG  generate.py no longer prints the two lines drive_app "
+              "requires for a module — its PASS branch is unreachable")
+        bad += 1
+    else:
+        rendered = (mod_line.group(1).replace("{pkg}", "/tmp/p.vcvplugin") +
+                    "\n" +
+                    open_line.group(1).replace("{RACK_APP}", "/Applications/R.app")
+                                      .replace("{patch}", "/tmp/p.vcv"))
+        needs = re.search(r'if "([^"]+)" in text and "([^"]+)" in text:', drv)
+        if not needs:
+            print("  WRONG  drive_app's module condition is not where this "
+                  "expects it")
+            bad += 1
+        elif needs.group(1) in rendered and needs.group(2) in rendered:
+            print("  ok     drive_app's module test matches what generate.py "
+                  "prints")
+        else:
+            print(f"  WRONG  drive_app wants {needs.group(1)!r} and "
+                  f"{needs.group(2)!r}; generate.py prints:\n"
+                  f"         {rendered!r}\n"
+                  f"         The module PASS branch is dead — a successful "
+                  f"build reports INCONCLUSIVE.")
+            bad += 1
+
     # And the app's looser rule: it scans for a line naming a .vcv.
     if ".vcv" in line:
         print("  ok     the line names a .vcv, which is what the app scans for")
