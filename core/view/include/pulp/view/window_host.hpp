@@ -361,6 +361,28 @@ public:
     virtual bool event_loop_blocks_until_close() const { return true; }
     virtual void run_event_loop() = 0;
 
+    // True only when run_event_loop_until() can continue dispatching accepted
+    // main-thread work after the native loop receives its stop signal. An
+    // external factory host must override this together with
+    // run_event_loop_until(); advertising support while inheriting the fallback
+    // below violates the lifetime contract.
+    virtual bool event_loop_supports_exit_drain() const {
+        return false;
+    }
+
+    // Run the event loop and, after the host receives its stop signal, keep
+    // dispatching main-thread work until `ready_to_return` reports that
+    // stack-borrowed state may be destroyed. Platform hosts with a native
+    // dispatcher should override this so the callback runs before that
+    // dispatcher is unregistered. The fallback is only for hosts that leave
+    // event_loop_supports_exit_drain() false; it makes one readiness check but
+    // does not claim to drain accepted work.
+    virtual void run_event_loop_until(std::function<bool()> ready_to_return) {
+        run_event_loop();
+        if (ready_to_return)
+            (void)ready_to_return();
+    }
+
     // ── D.1 Client-side window decoration ───────────────────────────────
     /// Remove native title bar and let the app draw its own.
     virtual void set_client_decoration(bool enabled) {

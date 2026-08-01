@@ -1,11 +1,16 @@
 # Development inspector capabilities
 
-The development inspector is an opt-in platform under construction. On a
-GPU-enabled desktop, `pulp run --inspect[=PROFILE]` constructs an authenticated
-network session for the selected standalone window and displays a visual Cmd+I
-indicator. A run without `--inspect`, a GPU-disabled or mobile build, and every
-plugin-format launch constructs no endpoint. The low-level CLI and MCP clients
-remain experimental source-checkout surfaces.
+The development inspector is an opt-in platform under construction. In a
+GPU-enabled desktop build with a compatible window host,
+`pulp run --inspect[=PROFILE]` constructs an authenticated network session for
+the selected standalone window and displays a visual Cmd+I indicator. Pulp's
+built-in macOS standalone window hosts currently provide the required event-loop
+exit drain. Windows and Linux use external `WindowHost` factories; an external
+host must explicitly implement the exit-drain contract before active inspector
+profiles are accepted. A run without `--inspect`, a host without that contract,
+a GPU-disabled or mobile build, and every plugin-format launch constructs no
+endpoint. The low-level CLI and MCP clients remain experimental source-checkout
+surfaces.
 
 This page records the checked baseline so public descriptions do not confuse
 code presence with runtime reachability.
@@ -44,7 +49,8 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 
 | Area | Present | Missing |
 |---|---|---|
-| Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for the selected GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership, if deliberately supported later |
+| Constructor/reachability | Explicit `pulp run --inspect[=PROFILE]` activation constructs one authenticated owner for a compatible GPU desktop standalone window; ordinary and plugin-format launches remain endpoint-free | Additional host-format ownership |
+| Window host | Built-in macOS standalone hosts keep their owning-thread dispatcher alive after native-loop stop until accepted inspector work retires | Windows/Linux external factories must implement `event_loop_supports_exit_drain()` and `run_event_loop_until()` to opt into active profiles |
 | Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses | Processor-level editor replacement remains fail-closed |
 | Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |

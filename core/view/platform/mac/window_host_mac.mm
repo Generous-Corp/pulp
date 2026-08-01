@@ -143,6 +143,17 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
     };
 }
 
+static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_return) {
+    if (!ready_to_return)
+        return;
+    while (!ready_to_return()) {
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
+    }
+}
+
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
 @implementation PulpView {
@@ -1612,6 +1623,14 @@ public:
     }
 
     void run_event_loop() override {
+        run_event_loop_until({});
+    }
+
+    bool event_loop_supports_exit_drain() const override {
+        return true;
+    }
+
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
@@ -1630,6 +1649,7 @@ public:
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
+            pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }
@@ -1981,6 +2001,14 @@ public:
     }
 
     void run_event_loop() override {
+        run_event_loop_until({});
+    }
+
+    bool event_loop_supports_exit_drain() const override {
+        return true;
+    }
+
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
         @autoreleasepool {
             [NSApplication sharedApplication];
             auto dispatcher_alive = std::make_shared<std::atomic<bool>>(true);
@@ -2011,6 +2039,7 @@ public:
                 [NSApp activateIgnoringOtherApps:YES];
             }
             [NSApp run];
+            pump_cocoa_main_thread_until(ready_to_return);
             dispatcher_alive->store(false, std::memory_order_release);
             pulp::events::MainThreadDispatcher::unregister_backend(dispatcher_token);
         }

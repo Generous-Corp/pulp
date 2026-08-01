@@ -91,16 +91,49 @@ public:
     std::vector<std::uint8_t> capture_bytes;
     bool capture_supported = true;
     bool blocking_event_loop = true;
+    bool exit_drain_supported = true;
+    std::function<void()> close_callback;
+    std::function<void()> capture_callback;
+    std::function<bool()> event_loop_step;
+    int run_until_calls = 0;
+    int readiness_checks = 0;
+    bool run_until_ready = false;
 
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
     void repaint() override { ++repaint_calls; }
-    std::vector<std::uint8_t> capture_png() override { return capture_bytes; }
+    std::vector<std::uint8_t> capture_png() override {
+        if (capture_callback)
+            capture_callback();
+        return capture_bytes;
+    }
     bool supports_compositor_capture() const override { return capture_supported; }
     bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
-    void set_close_callback(std::function<void()>) override {}
+    bool event_loop_supports_exit_drain() const override {
+        return exit_drain_supported;
+    }
+    void request_close() override {
+        if (close_callback)
+            close_callback();
+    }
+    void set_close_callback(std::function<void()> callback) override {
+        close_callback = std::move(callback);
+    }
     void run_event_loop() override {}
+    void run_event_loop_until(std::function<bool()> ready_to_return) override {
+        ++run_until_calls;
+        run_event_loop();
+        for (int attempt = 0; attempt < 64; ++attempt) {
+            ++readiness_checks;
+            if (!ready_to_return || ready_to_return()) {
+                run_until_ready = true;
+                return;
+            }
+            if (!event_loop_step || !event_loop_step())
+                return;
+        }
+    }
 };
 
 #if PULP_TEST_STANDALONE_INSPECTOR
@@ -171,6 +204,7 @@ public:
         backend.post = [this](pulp::events::Task task) {
             std::lock_guard lock(mutex_);
             tasks_.push_back(std::move(task));
+            ++post_count_;
             return true;
         };
         backend.is_main_thread =
@@ -182,6 +216,14 @@ public:
         pulp::events::MainThreadDispatcher::unregister_backend(token_);
     }
     bool valid() const { return token_ != 0; }
+    std::size_t post_count() const {
+        std::lock_guard lock(mutex_);
+        return post_count_;
+    }
+    std::size_t pending_count() const {
+        std::lock_guard lock(mutex_);
+        return tasks_.size();
+    }
     bool pump_one() {
         pulp::events::Task task;
         {
@@ -194,11 +236,18 @@ public:
         task();
         return true;
     }
+    std::size_t pump_all() {
+        std::size_t pumped = 0;
+        while (pump_one())
+            ++pumped;
+        return pumped;
+    }
 
 private:
     std::thread::id main_thread_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::deque<pulp::events::Task> tasks_;
+    std::size_t post_count_ = 0;
     pulp::events::MainThreadDispatcher::Token token_ = 0;
 };
 #endif
@@ -254,6 +303,20 @@ TEST_CASE("Standalone inspector rejects a non-blocking window event loop",
     window.blocking_event_loop = false;
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, root, window, "develop", {});
+    REQUIRE(runtime == nullptr);
+}
+
+TEST_CASE("Standalone inspector rejects an event loop without exit draining",
+          "[standalone][inspect][lifecycle][negative]") {
+    StandaloneApp app(null_processor_factory);
+    TestProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    View root;
+    StubWindowHost window;
+    window.exit_drain_supported = false;
+    auto runtime =
+        StandaloneInspectorRuntime::create(app, processor, bridge, root, window, "develop", {});
     REQUIRE(runtime == nullptr);
 }
 
@@ -438,9 +501,11 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(context_json["hotReload"]["available"].getBool());
     REQUIRE_FALSE(context_json["binary"]["path"].getString().empty());
 
+    const auto posts_before_document = dispatcher.post_count();
     const auto document = request("DOM.getDocument", "{}");
     REQUIRE_FALSE(document.is_error);
     REQUIRE(document.params_json.find("\"v\"") != std::string::npos);
+    REQUIRE(dispatcher.post_count() == posts_before_document + 1);
 
     const auto parameters = request("State.getParameters", "{}");
     REQUIRE_FALSE(parameters.is_error);
@@ -514,6 +579,136 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     observe_runtime.reset();
     REQUIRE(reader.list().empty());
     bridge.view()->interaction().overlay_queue.clear();
+
+    auto cancellation_runtime = StandaloneInspectorRuntime::create(
+        app, *processor, bridge, *bridge.view(), window, "develop", {});
+    REQUIRE(cancellation_runtime != nullptr);
+    cancellation_runtime->pump();
+    const auto cancellation_records = reader.list();
+    REQUIRE(cancellation_records.size() == 1);
+    pulp::inspect::InspectorClient cancellation_client;
+    REQUIRE(cancellation_client.connect(cancellation_records.front(), reader));
+    REQUIRE_FALSE(request_from(cancellation_client, "Session.acquireController", "{}").is_error);
+
+    int app_quit_close_calls = 0;
+    auto app_quit_source = std::make_shared<int>(1);
+    std::weak_ptr<int> app_quit_source_lifetime = app_quit_source;
+    auto app_quit_close = cancellation_runtime->wrap_close([&] {
+        ++app_quit_close_calls;
+        app_quit_source.reset();
+    });
+    const auto pending_before = dispatcher.pending_count();
+    auto cancelled_mutation = std::async(std::launch::async, [&] {
+        return cancellation_client.request("State.setParameter", R"({"id":2,"value":7})",
+                                           std::chrono::seconds(1));
+    });
+    const auto queued_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (dispatcher.pending_count() == pending_before &&
+           std::chrono::steady_clock::now() < queued_deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(dispatcher.pending_count() == pending_before + 1);
+
+    const auto stop_started = std::chrono::steady_clock::now();
+    cancellation_runtime->stop();
+    const auto stop_elapsed = std::chrono::steady_clock::now() - stop_started;
+    app_quit_close();
+    cancellation_runtime->stop();
+    REQUIRE(stop_elapsed < std::chrono::milliseconds(500));
+    REQUIRE(cancellation_runtime->retirement_pending());
+    const auto cancellation_pending_state = cancellation_runtime->lifecycle_state();
+    REQUIRE_FALSE(cancellation_pending_state.rpc_accepting);
+    REQUIRE_FALSE(cancellation_pending_state.dispatch_accepting);
+    REQUIRE(cancellation_pending_state.borrowed_sources_attached);
+    REQUIRE(app_quit_close_calls == 0);
+    REQUIRE_FALSE(app_quit_source_lifetime.expired());
+    REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
+    REQUIRE(cancelled_mutation.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    const auto cancelled_response = cancelled_mutation.get();
+    REQUIRE(cancelled_response.is_error);
+    REQUIRE((cancelled_response.error_code == "dispatch_cancelled" ||
+             cancelled_response.error_code == "connection_closed"));
+
+    window.event_loop_step = [&] { return dispatcher.pump_one(); };
+    window.run_event_loop_until([&] { return cancellation_runtime->try_finish_retirement(); });
+    REQUIRE(window.run_until_calls == 1);
+    REQUIRE(window.readiness_checks >= 2);
+    REQUIRE(window.run_until_ready);
+    REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
+    REQUIRE(cancellation_runtime->try_finish_retirement());
+    REQUIRE(app_quit_close_calls == 1);
+    REQUIRE(app_quit_source_lifetime.expired());
+    REQUIRE_FALSE(cancellation_runtime->lifecycle_state().borrowed_sources_attached);
+    app_quit_close();
+    cancellation_runtime->stop();
+    REQUIRE(cancellation_runtime->try_finish_retirement());
+    REQUIRE(app_quit_close_calls == 1);
+    cancellation_client.disconnect();
+    cancellation_runtime.reset();
+    dispatcher.pump_all();
+    window.event_loop_step = {};
+    REQUIRE(reader.list().empty());
+
+    auto reentrant_runtime = StandaloneInspectorRuntime::create(
+        app, *processor, bridge, *bridge.view(), window, "develop", {});
+    REQUIRE(reentrant_runtime != nullptr);
+    reentrant_runtime->pump();
+    const auto reentrant_records = reader.list();
+    REQUIRE(reentrant_records.size() == 1);
+    pulp::inspect::InspectorClient reentrant_client;
+    REQUIRE(reentrant_client.connect(reentrant_records.front(), reader));
+
+    int reentrant_close_calls = 0;
+    int capture_source_touches = 0;
+    auto borrowed_source = std::make_shared<int>(1);
+    std::weak_ptr<int> borrowed_source_lifetime = borrowed_source;
+    auto reentrant_close = reentrant_runtime->wrap_close([&] {
+        ++reentrant_close_calls;
+        borrowed_source.reset();
+    });
+    window.capture_callback = [&] {
+        ++capture_source_touches;
+        const auto close_started = std::chrono::steady_clock::now();
+        reentrant_close();
+        const auto close_elapsed = std::chrono::steady_clock::now() - close_started;
+        reentrant_runtime->stop();
+        reentrant_close();
+        REQUIRE(close_elapsed < std::chrono::milliseconds(500));
+        REQUIRE(reentrant_runtime->retirement_pending());
+        const auto reentrant_pending_state = reentrant_runtime->lifecycle_state();
+        REQUIRE_FALSE(reentrant_pending_state.rpc_accepting);
+        REQUIRE_FALSE(reentrant_pending_state.dispatch_accepting);
+        REQUIRE(reentrant_pending_state.borrowed_sources_attached);
+        REQUIRE(reentrant_close_calls == 0);
+        REQUIRE_FALSE(borrowed_source_lifetime.expired());
+        REQUIRE(processor->active_scripted_ui() != nullptr);
+    };
+    auto reentrant_capture = std::async(std::launch::async, [&] {
+        return reentrant_client.request("Capture.screenshot", "{}", std::chrono::seconds(1));
+    });
+    const auto reentrant_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (dispatcher.pending_count() == 0 &&
+           std::chrono::steady_clock::now() < reentrant_deadline) {
+        std::this_thread::yield();
+    }
+    REQUIRE(dispatcher.pending_count() == 1);
+    REQUIRE(dispatcher.pump_one());
+    REQUIRE(capture_source_touches == 1);
+    REQUIRE(reentrant_runtime->try_finish_retirement());
+    REQUIRE(reentrant_close_calls == 1);
+    REQUIRE(borrowed_source_lifetime.expired());
+    REQUIRE_FALSE(reentrant_runtime->lifecycle_state().borrowed_sources_attached);
+    reentrant_close();
+    reentrant_runtime->stop();
+    REQUIRE(reentrant_runtime->try_finish_retirement());
+    REQUIRE(reentrant_close_calls == 1);
+    REQUIRE(reentrant_capture.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    (void)reentrant_capture.get();
+    reentrant_client.disconnect();
+    window.capture_callback = {};
+    reentrant_runtime.reset();
+    dispatcher.pump_all();
+    REQUIRE(reader.list().empty());
 
     {
         std::ofstream out(script);

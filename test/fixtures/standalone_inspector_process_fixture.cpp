@@ -1,11 +1,21 @@
+#include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/format/detail/standalone_inspector.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/widgets.hpp>
 
+#import <AppKit/AppKit.h>
+
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -83,6 +93,10 @@ int main(int argc, char** argv) {
     bool dsp_only = false;
     std::string exit_screenshot;
     int frames = 180;
+    int app_quit_after_ms = 0;
+    std::string quit_on_request_arm;
+    std::string close_on_request_arm;
+    std::string accepted_marker;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--dsp-only") {
@@ -91,6 +105,14 @@ int main(int argc, char** argv) {
             exit_screenshot = argv[++i];
         } else if (arg == "--frames" && i + 1 < argc) {
             frames = std::atoi(argv[++i]);
+        } else if (arg == "--app-quit-after-ms" && i + 1 < argc) {
+            app_quit_after_ms = std::atoi(argv[++i]);
+        } else if (arg == "--quit-on-request-arm" && i + 1 < argc) {
+            quit_on_request_arm = argv[++i];
+        } else if (arg == "--close-on-request-arm" && i + 1 < argc) {
+            close_on_request_arm = argv[++i];
+        } else if (arg == "--accepted-marker" && i + 1 < argc) {
+            accepted_marker = argv[++i];
         }
     }
 
@@ -109,9 +131,112 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (exit_screenshot.empty() || frames <= 0) return 3;
-    config.screenshot_path = std::move(exit_screenshot);
-    config.screenshot_frame_delay = frames;
+    if ((exit_screenshot.empty() || frames <= 0) && app_quit_after_ms <= 0 &&
+        quit_on_request_arm.empty() && close_on_request_arm.empty())
+        return 3;
+    if (!exit_screenshot.empty()) {
+        config.screenshot_path = std::move(exit_screenshot);
+        config.screenshot_frame_delay = frames;
+    }
     app.set_config(config);
-    return app.run_with_editor(/*use_gpu=*/true) ? 0 : 4;
+    const auto request_arm =
+        !quit_on_request_arm.empty() ? quit_on_request_arm : close_on_request_arm;
+    const bool quit_on_request = !quit_on_request_arm.empty();
+    auto hook_fired = std::make_shared<std::atomic<bool>>(false);
+    auto action_executed = std::make_shared<std::atomic<bool>>(false);
+    auto held_task_mutex = std::make_shared<std::mutex>();
+    auto held_task = std::make_shared<std::function<void()>>();
+    std::jthread held_task_releaser;
+    if (!request_arm.empty()) {
+        pulp::format::detail::set_standalone_inspector_rpc_post_override_for_testing(
+            [request_arm, accepted_marker, quit_on_request, hook_fired, action_executed,
+             held_task_mutex, held_task](std::function<void()>& task) -> std::optional<bool> {
+                if (hook_fired->load(std::memory_order_acquire) ||
+                    !std::filesystem::exists(request_arm)) {
+                    return std::nullopt;
+                }
+                bool expected = false;
+                if (!hook_fired->compare_exchange_strong(expected, true,
+                                                         std::memory_order_acq_rel)) {
+                    return std::nullopt;
+                }
+                {
+                    std::lock_guard lock(*held_task_mutex);
+                    *held_task = std::move(task);
+                }
+                const bool action_posted = pulp::events::MainThreadDispatcher::call_async(
+                    [quit_on_request, action_executed] {
+                        if (quit_on_request) {
+                            [NSApp stop:nil];
+                        } else if (auto* window = [[NSApp windows] firstObject]) {
+                            [window performClose:nil];
+                        }
+                        auto* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                                         location:NSZeroPoint
+                                                    modifierFlags:0
+                                                        timestamp:0
+                                                     windowNumber:0
+                                                          context:nil
+                                                          subtype:0
+                                                            data1:0
+                                                            data2:0];
+                        [NSApp postEvent:event atStart:NO];
+                        action_executed->store(true, std::memory_order_release);
+                    });
+                if (action_posted && !accepted_marker.empty()) {
+                    std::ofstream marker(accepted_marker);
+                    marker << "accepted\n";
+                }
+                return action_posted;
+            });
+        held_task_releaser = std::jthread([action_executed, held_task_mutex,
+                                           held_task](std::stop_token stop) {
+            while (!stop.stop_requested() && !action_executed->load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (stop.stop_requested())
+                return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::function<void()> task;
+            {
+                std::lock_guard lock(*held_task_mutex);
+                task = std::move(*held_task);
+            }
+            if (task)
+                pulp::events::MainThreadDispatcher::call_async(std::move(task));
+        });
+    }
+    std::jthread app_quit;
+    if (app_quit_after_ms > 0) {
+        app_quit = std::jthread([app_quit_after_ms](std::stop_token stop) {
+            while (!stop.stop_requested() && !pulp::events::MainThreadDispatcher::has_backend()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(app_quit_after_ms);
+            while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (!stop.stop_requested()) {
+                pulp::events::MainThreadDispatcher::call_async([] {
+                    [NSApp stop:nil];
+                    auto* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                                     location:NSZeroPoint
+                                                modifierFlags:0
+                                                    timestamp:0
+                                                 windowNumber:0
+                                                      context:nil
+                                                      subtype:0
+                                                        data1:0
+                                                        data2:0];
+                    [NSApp postEvent:event atStart:NO];
+                });
+            }
+        });
+    }
+    const bool result = app.run_with_editor(/*use_gpu=*/true);
+    app_quit.request_stop();
+    held_task_releaser.request_stop();
+    pulp::format::detail::set_standalone_inspector_rpc_post_override_for_testing({});
+    return result ? 0 : 4;
 }
