@@ -22,6 +22,27 @@ template <typename Size> std::optional<Size> checked_size_limit(std::uint64_t va
 enum class PackageFaultPoint : std::uint8_t;
 enum class NativeReadOutcome : std::uint8_t { Ok, InvalidFile, LimitExceeded, IoError };
 
+class AnchoredDirectory {
+  public:
+    AnchoredDirectory() noexcept = default;
+    ~AnchoredDirectory();
+    AnchoredDirectory(AnchoredDirectory&& other) noexcept;
+    AnchoredDirectory& operator=(AnchoredDirectory&& other) noexcept;
+    AnchoredDirectory(const AnchoredDirectory&) = delete;
+    AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
+
+    static std::optional<AnchoredDirectory> open(const std::filesystem::path& path) noexcept;
+    bool write_exclusive_and_fence(const std::filesystem::path& relative,
+                                   std::span<const std::uint8_t> bytes,
+                                   PackageFaultPoint written_point,
+                                   PackageFaultPoint fenced_point) const noexcept;
+    void close() noexcept;
+
+  private:
+    explicit AnchoredDirectory(std::intptr_t native) noexcept : native_(native) {}
+    std::intptr_t native_ = -1;
+};
+
 bool write_exclusive_and_fence(const std::filesystem::path& path,
                                std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,
                                PackageFaultPoint fenced_point) noexcept;

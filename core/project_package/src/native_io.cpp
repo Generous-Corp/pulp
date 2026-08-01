@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <string>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -14,6 +16,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <winternl.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -31,6 +34,62 @@ namespace pulp::project_package::detail {
 namespace {
 
 #if defined(_WIN32)
+using NtCreateFileFunction = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                              PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG,
+                                              ULONG, PVOID, ULONG);
+
+constexpr ULONG object_dont_reparse = 0x00001000L;
+
+NtCreateFileFunction nt_create_file() noexcept {
+    static const auto function = reinterpret_cast<NtCreateFileFunction>(
+        ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "NtCreateFile"));
+    return function;
+}
+
+HANDLE open_relative(HANDLE parent, const std::filesystem::path& component,
+                     bool directory) noexcept {
+    const auto& name = component.native();
+    if (name.empty() || name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
+        return INVALID_HANDLE_VALUE;
+
+    UNICODE_STRING unicode_name{};
+    unicode_name.Buffer = const_cast<PWSTR>(name.data());
+    unicode_name.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
+    unicode_name.MaximumLength = unicode_name.Length;
+    OBJECT_ATTRIBUTES attributes{};
+    attributes.Length = sizeof(attributes);
+    attributes.RootDirectory = parent;
+    attributes.ObjectName = &unicode_name;
+    attributes.Attributes = OBJ_CASE_INSENSITIVE | object_dont_reparse;
+
+    IO_STATUS_BLOCK status_block{};
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    const auto access = directory ? FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY |
+                                        FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE
+                                  : GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE;
+    const auto share =
+        directory ? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE : FILE_SHARE_READ;
+    const auto disposition = directory ? FILE_OPEN_IF : FILE_CREATE;
+    const auto options = FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
+                         (directory ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE) |
+                         (directory ? 0u : FILE_WRITE_THROUGH);
+    const auto function = nt_create_file();
+    if (function == nullptr ||
+        function(&handle, access, &attributes, &status_block, nullptr, FILE_ATTRIBUTE_NORMAL, share,
+                 disposition, options, nullptr, 0) < 0)
+        return INVALID_HANDLE_VALUE;
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool valid = ::GetFileInformationByHandle(handle, &info) != 0 &&
+                       (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
+                       ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+    if (!valid) {
+        ::CloseHandle(handle);
+        return INVALID_HANDLE_VALUE;
+    }
+    return handle;
+}
+
 bool write_all(HANDLE handle, std::span<const std::uint8_t> bytes) noexcept {
     std::size_t offset = 0;
     while (offset < bytes.size()) {
@@ -69,6 +128,152 @@ bool fence_descriptor(int descriptor) noexcept {
 #endif
 
 } // namespace
+
+AnchoredDirectory::~AnchoredDirectory() {
+    close();
+}
+
+AnchoredDirectory::AnchoredDirectory(AnchoredDirectory&& other) noexcept
+    : native_(std::exchange(other.native_, -1)) {}
+
+AnchoredDirectory& AnchoredDirectory::operator=(AnchoredDirectory&& other) noexcept {
+    if (this != &other) {
+        close();
+        native_ = std::exchange(other.native_, -1);
+    }
+    return *this;
+}
+
+std::optional<AnchoredDirectory>
+AnchoredDirectory::open(const std::filesystem::path& path) noexcept {
+#if defined(_WIN32)
+    const auto handle = ::CreateFileW(
+        path.c_str(),
+        FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE |
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileInformationByHandle(handle, &info) == 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        ::CloseHandle(handle);
+        return std::nullopt;
+    }
+    return AnchoredDirectory(reinterpret_cast<std::intptr_t>(handle));
+#else
+    const auto descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC
+#ifdef O_DIRECTORY
+                                                     | O_DIRECTORY
+#endif
+#ifdef O_NOFOLLOW
+                                                     | O_NOFOLLOW
+#endif
+    );
+    if (descriptor < 0)
+        return std::nullopt;
+    return AnchoredDirectory(descriptor);
+#endif
+}
+
+bool AnchoredDirectory::write_exclusive_and_fence(const std::filesystem::path& relative,
+                                                  std::span<const std::uint8_t> bytes,
+                                                  PackageFaultPoint written_point,
+                                                  PackageFaultPoint fenced_point) const noexcept {
+    if (native_ == -1 || relative.empty() || relative.is_absolute() || relative.has_root_name() ||
+        relative.has_root_directory())
+        return false;
+    std::vector<std::filesystem::path> components;
+    for (const auto& component : relative) {
+        if (component.empty() || component == "." || component == "..")
+            return false;
+        components.push_back(component);
+    }
+    if (components.empty())
+        return false;
+
+#if defined(_WIN32)
+    const auto root = reinterpret_cast<HANDLE>(native_);
+    auto current = root;
+    for (std::size_t index = 0; index + 1 < components.size(); ++index) {
+        const auto next = open_relative(current, components[index], true);
+        if (current != root)
+            ::CloseHandle(current);
+        if (next == INVALID_HANDLE_VALUE)
+            return false;
+        current = next;
+    }
+    const auto file = open_relative(current, components.back(), false);
+    if (current != root)
+        ::CloseHandle(current);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    const bool written = write_all(file, bytes);
+    if (written)
+        invoke_fault_hook(written_point);
+    const bool fenced = written && ::FlushFileBuffers(file) != 0;
+    if (fenced)
+        invoke_fault_hook(fenced_point);
+    const bool closed = ::CloseHandle(file) != 0;
+    return fenced && closed;
+#else
+    const auto root = static_cast<int>(native_);
+    auto current = root;
+    for (std::size_t index = 0; index + 1 < components.size(); ++index) {
+        if (::mkdirat(current, components[index].c_str(), 0700) != 0 && errno != EEXIST) {
+            if (current != root)
+                ::close(current);
+            return false;
+        }
+        const auto next = ::openat(current, components[index].c_str(),
+                                   O_RDONLY | O_CLOEXEC
+#ifdef O_DIRECTORY
+                                       | O_DIRECTORY
+#endif
+#ifdef O_NOFOLLOW
+                                       | O_NOFOLLOW
+#endif
+        );
+        if (current != root)
+            ::close(current);
+        if (next < 0)
+            return false;
+        current = next;
+    }
+    const auto descriptor = ::openat(current, components.back().c_str(),
+                                     O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                         | O_NOFOLLOW
+#endif
+                                     ,
+                                     0600);
+    if (current != root)
+        ::close(current);
+    if (descriptor < 0)
+        return false;
+    const bool written = write_all(descriptor, bytes);
+    if (written)
+        invoke_fault_hook(written_point);
+    const bool fenced = written && fence_descriptor(descriptor);
+    if (fenced)
+        invoke_fault_hook(fenced_point);
+    const bool closed = ::close(descriptor) == 0;
+    return fenced && closed;
+#endif
+}
+
+void AnchoredDirectory::close() noexcept {
+    if (native_ == -1)
+        return;
+#if defined(_WIN32)
+    ::CloseHandle(reinterpret_cast<HANDLE>(native_));
+#else
+    ::close(static_cast<int>(native_));
+#endif
+    native_ = -1;
+}
 
 bool write_exclusive_and_fence(const std::filesystem::path& path,
                                std::span<const std::uint8_t> bytes, PackageFaultPoint written_point,

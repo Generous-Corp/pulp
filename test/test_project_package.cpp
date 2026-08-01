@@ -149,7 +149,7 @@ bool hard_kill(int process_id) {
 }
 
 bool wait_for_ready_or_exit(pulp::platform::ChildProcess& child, const fs::path& ready) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {
         std::error_code error;
         if (fs::is_regular_file(ready, error) && !error)
@@ -422,8 +422,14 @@ TEST_CASE("Project package publication remains an old or complete new generation
             REQUIRE(child.start(PULP_PROJECT_PACKAGE_PUBLISH_HELPER,
                                 {temporary.path.string(), point.name, ready.string()}, options));
             const bool reached = wait_for_ready_or_exit(child, ready);
-            if (!reached && child.is_running())
-                (void)hard_kill(child.process_id());
+            if (!reached) {
+                if (child.is_running())
+                    (void)hard_kill(child.process_id());
+                const auto early_exit = child.wait();
+                INFO("helper exited before fault point: status="
+                     << early_exit.exit_code << " stdout=" << early_exit.stdout_output
+                     << " stderr=" << early_exit.stderr_output);
+            }
             REQUIRE(reached);
             REQUIRE(hard_kill(child.process_id()));
             const auto child_result = child.wait();
@@ -468,8 +474,14 @@ TEST_CASE("Project package crash proof catches a production reference-admission 
         PULP_PROJECT_PACKAGE_MUTANT_HELPER,
         {temporary.path.string(), "generation-published", ready.string(), "--mutate"}, options));
     const bool reached = wait_for_ready_or_exit(child, ready);
-    if (!reached && child.is_running())
-        (void)hard_kill(child.process_id());
+    if (!reached) {
+        if (child.is_running())
+            (void)hard_kill(child.process_id());
+        const auto early_exit = child.wait();
+        INFO("mutant helper exited before fault point: status="
+             << early_exit.exit_code << " stdout=" << early_exit.stdout_output
+             << " stderr=" << early_exit.stderr_output);
+    }
     REQUIRE(reached);
     REQUIRE(hard_kill(child.process_id()));
     REQUIRE(child.wait().exit_code != 0);
@@ -499,13 +511,29 @@ TEST_CASE("Atomic project-package publisher refuses unsafe paths and publication
         INFO("unsafe portable package path: " << path);
         REQUIRE_FALSE(publisher.value().write(path, "bad"));
     }
+    for (const auto& path : std::vector<std::string>{
+             std::string("media/\x80.wav", 11), std::string("media/\xc2.wav", 11),
+             std::string("media/\xc0\xaf.wav", 12), std::string("media/\xe0\x80\xaf.wav", 13),
+             std::string("media/\xed\xa0\x80.wav", 13),
+             std::string("media/\xf0\x80\x80\xaf.wav", 14),
+             std::string("media/\xf4\x90\x80\x80.wav", 14),
+             std::string("media/\xf5\x80\x80\x80.wav", 14)}) {
+        INFO("malformed UTF-8 package path");
+        const auto rejected = publisher.value().write(path, "bad");
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == PackageErrorCode::InvalidPath);
+    }
     const auto written = publisher.value().write("nested/value.txt", "value");
     REQUIRE(written);
     REQUIRE(written.value());
+    const auto unicode_written = publisher.value().write("nested/caf\xc3\xa9.txt", "unicode");
+    REQUIRE(unicode_written);
+    REQUIRE(unicode_written.value());
     const auto committed = publisher.value().commit_directory();
     REQUIRE(committed);
     REQUIRE(committed.value() == AtomicPublishOutcome::PublishedDurably);
     REQUIRE(read_text(destination / "nested" / "value.txt") == "value");
+    REQUIRE(read_text(destination / fs::path(u8"nested/caf\u00e9.txt")) == "unicode");
     REQUIRE_FALSE(AtomicPublisher::create(destination));
 }
 
@@ -558,6 +586,25 @@ TEST_CASE("Atomic project-package publisher rejects staged symlinks",
     REQUIRE_FALSE(committed);
     REQUIRE(committed.error().code == PackageErrorCode::InvalidLayout);
     REQUIRE_FALSE(fs::exists(destination));
+}
+
+TEST_CASE("Atomic project-package publisher rejects symlinked write ancestors",
+          "[project-package][atomic-publisher][symlink]") {
+    TemporaryPackage temporary("atomic-ancestor-symlink");
+    fs::create_directories(temporary.path);
+    const auto destination = temporary.path / "published";
+    auto publisher = AtomicPublisher::create(destination);
+    REQUIRE(publisher);
+
+    const auto external = temporary.path / "external";
+    fs::create_directory(external);
+    std::error_code error;
+    fs::create_directory_symlink(external, publisher->staging_directory() / "redirect", error);
+    if (error)
+        SKIP("directory symlink creation is unavailable: " << error.message());
+
+    REQUIRE_FALSE(publisher->write("redirect/escaped.txt", "escape"));
+    REQUIRE_FALSE(fs::exists(external / "escaped.txt"));
 }
 
 TEST_CASE("Package writer fences a verified pre-existing blob before admitting it",

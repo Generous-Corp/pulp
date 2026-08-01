@@ -44,6 +44,7 @@ fs::path path_from_utf8(std::string_view value) {
 struct AtomicPublisher::Impl {
     fs::path destination;
     fs::path staging;
+    detail::AnchoredDirectory staging_root;
     bool committed = false;
 };
 
@@ -84,9 +85,15 @@ AtomicPublisher::create(const fs::path& destination) noexcept {
     for (std::size_t attempt = 0; attempt < 128; ++attempt) {
         auto staging = staging_sibling(anchored_destination, serial.fetch_add(1) + attempt);
         if (fs::create_directory(staging, error)) {
+            auto staging_root = detail::AnchoredDirectory::open(staging);
+            if (!staging_root) {
+                fs::remove(staging, error);
+                return failure<AtomicPublisher>(PackageErrorCode::IoError, staging);
+            }
             auto impl = std::make_unique<Impl>();
             impl->destination = anchored_destination;
             impl->staging = std::move(staging);
+            impl->staging_root = std::move(*staging_root);
             return runtime::Result<AtomicPublisher, PackageError>(
                 runtime::Ok(AtomicPublisher(std::move(impl))));
         }
@@ -115,11 +122,9 @@ AtomicPublisher::write(std::string_view relative_utf8,
         relative.has_root_directory())
         return failure<bool>(PackageErrorCode::InvalidPath, relative);
     const auto output = impl_->staging / relative;
-    std::error_code error;
-    fs::create_directories(output.parent_path(), error);
-    if (error || !detail::write_exclusive_and_fence(output, bytes,
-                                                    detail::PackageFaultPoint::StagedFileWritten,
-                                                    detail::PackageFaultPoint::StagedFileFenced))
+    if (!impl_->staging_root.write_exclusive_and_fence(relative, bytes,
+                                                       detail::PackageFaultPoint::StagedFileWritten,
+                                                       detail::PackageFaultPoint::StagedFileFenced))
         return failure<bool>(PackageErrorCode::IoError, output);
     return runtime::Result<bool, PackageError>(runtime::Ok(true));
 }
@@ -143,6 +148,7 @@ AtomicPublisher::commit_file(const fs::path& staged_file) noexcept {
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
     impl_->committed = true;
+    impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     std::error_code ignored;
     fs::remove(impl_->staging, ignored);
@@ -193,6 +199,7 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
         return runtime::Result<AtomicPublishOutcome, PackageError>(
             runtime::Ok(AtomicPublishOutcome::NotPublished));
     impl_->committed = true;
+    impl_->staging_root.close();
     detail::invoke_fault_hook(detail::PackageFaultPoint::DirectoryPublished);
     auto parent = impl_->destination.parent_path();
     if (parent.empty())
@@ -207,6 +214,7 @@ runtime::Result<AtomicPublishOutcome, PackageError> AtomicPublisher::commit_dire
 void AtomicPublisher::cancel() noexcept {
     if (!impl_ || impl_->committed || impl_->staging.empty())
         return;
+    impl_->staging_root.close();
     std::error_code ignored;
     fs::remove_all(impl_->staging, ignored);
     impl_->staging.clear();
