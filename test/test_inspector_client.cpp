@@ -217,6 +217,103 @@ TEST_CASE("rejected post operation destruction can cancel RPC",
     CHECK_FALSE(rpc->set_posted_lifetime_callbacks({}, {}));
 }
 
+TEST_CASE("post admission exceptions are contained and retire pending work",
+          "[inspect][client][main-thread][post-exception]") {
+    bool throw_non_standard = false;
+    SECTION("standard exception") {}
+    SECTION("non-standard exception") { throw_non_standard = true; }
+
+    struct CaptureState {
+        std::atomic<bool> armed{false};
+        std::atomic<bool> retired{false};
+    };
+    struct Capture {
+        std::shared_ptr<CaptureState> state;
+        ~Capture() {
+            if (state->armed.load(std::memory_order_acquire))
+                state->retired.store(true, std::memory_order_release);
+        }
+    };
+    auto capture_state = std::make_shared<CaptureState>();
+    std::atomic<int> posted_begins{0};
+    std::atomic<int> posted_ends{0};
+    std::atomic<int> completions{0};
+    std::atomic<bool> operation_ran{false};
+    std::function<void()> retained_post;
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto task) -> bool {
+            retained_post = std::move(task);
+            capture_state->armed.store(true, std::memory_order_release);
+            if (throw_non_standard)
+                throw 7;
+            throw std::runtime_error("post failed");
+        },
+        [] { return false; });
+    REQUIRE(rpc->set_posted_lifetime_callbacks(
+        [&] { posted_begins.fetch_add(1, std::memory_order_relaxed); },
+        [&] { posted_ends.fetch_add(1, std::memory_order_relaxed); }));
+    InspectorMainThreadRpc::Operation operation =
+        [capture = Capture{capture_state}, &operation_ran] {
+            operation_ran.store(true, std::memory_order_release);
+            return make_response(1, "{}");
+        };
+
+    const auto response = rpc->call(
+        1,
+        std::move(operation),
+        [&] { completions.fetch_add(1, std::memory_order_relaxed); });
+
+    REQUIRE(response.is_error);
+    CHECK(response.error_code == "dispatch_failed");
+    CHECK(response.error_data_json.find("\"mayHaveApplied\":false") !=
+          std::string::npos);
+    CHECK_FALSE(operation_ran.load(std::memory_order_acquire));
+    CHECK(capture_state->retired.load(std::memory_order_acquire));
+    CHECK(completions.load(std::memory_order_acquire) == 1);
+    CHECK(posted_begins.load(std::memory_order_acquire) == 1);
+    CHECK(posted_ends.load(std::memory_order_acquire) == 0);
+    retained_post();
+    CHECK_FALSE(operation_ran.load(std::memory_order_acquire));
+    CHECK(completions.load(std::memory_order_acquire) == 1);
+    retained_post = {};
+    CHECK(posted_ends.load(std::memory_order_acquire) == 1);
+}
+
+TEST_CASE("inline post response survives an admission exception",
+          "[inspect][client][main-thread][post-exception][inline]") {
+    std::atomic<int> posted_begins{0};
+    std::atomic<int> posted_ends{0};
+    std::atomic<int> completions{0};
+    std::atomic<int> operations{0};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [](auto task) -> bool {
+            task();
+            throw std::runtime_error("post threw after execution");
+        },
+        [] { return false; });
+    REQUIRE(rpc->set_posted_lifetime_callbacks(
+        [&] { posted_begins.fetch_add(1, std::memory_order_relaxed); },
+        [&] { posted_ends.fetch_add(1, std::memory_order_relaxed); }));
+
+    const auto response = rpc->call(
+        1,
+        [&] {
+            operations.fetch_add(1, std::memory_order_relaxed);
+            return make_response(1, R"({"applied":true})");
+        },
+        [&] { completions.fetch_add(1, std::memory_order_relaxed); });
+
+    REQUIRE_FALSE(response.is_error);
+    CHECK(response.params_json.find("\"applied\":true") !=
+          std::string::npos);
+    CHECK(operations.load(std::memory_order_acquire) == 1);
+    CHECK(completions.load(std::memory_order_acquire) == 1);
+    CHECK(posted_begins.load(std::memory_order_acquire) == 1);
+    CHECK(posted_ends.load(std::memory_order_acquire) == 1);
+}
+
 TEST_CASE("oversized inspector responses return a bounded protocol error",
           "[inspect][client][resource-limit]") {
     TemporaryDirectory temporary;

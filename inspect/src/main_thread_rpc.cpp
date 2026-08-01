@@ -228,6 +228,45 @@ public:
             pending.end());
         pending_cv.notify_all();
     }
+
+    void fail_post_admission(
+        const std::shared_ptr<PendingCall>& call,
+        std::int64_t request_id,
+        std::string message,
+        std::string code) {
+        InspectorMainThreadRpc::Operation retired_operation;
+        bool complete_before_start = false;
+        bool notify_started_failure = false;
+        {
+            std::lock_guard lock(call->mutex);
+            if (call->response_ready)
+                return;
+            const bool may_have_applied = call->started;
+            call->response = make_error(
+                request_id,
+                std::move(message),
+                std::move(code),
+                std::string(R"({"mayHaveApplied":)") +
+                    (may_have_applied ? "true}" : "false}"));
+            call->response_ready = true;
+            if (call->started) {
+                notify_started_failure = true;
+            } else {
+                call->cancelled_before_start = true;
+                retired_operation = std::move(call->operation);
+                complete_before_start = true;
+            }
+        }
+        retired_operation = {};
+        if (notify_started_failure) {
+            call->cv.notify_all();
+            return;
+        }
+        if (complete_before_start) {
+            complete_call(call, {});
+            call->cv.notify_all();
+        }
+    }
 };
 
 InspectorMainThreadRpc::InspectorMainThreadRpc()
@@ -345,15 +384,26 @@ InspectorMessage InspectorMainThreadRpc::call(
             impl->complete_call(pending, std::move(response));
         };
     bool posted = false;
-    if (impl->post)
-        posted = impl->post(std::move(posted_task));
+    bool post_threw = false;
+    try {
+        if (impl->post)
+            posted = impl->post(std::move(posted_task));
+    } catch (...) {
+        post_threw = true;
+    }
     posted_task = {};
-    if (!posted) {
-        impl->complete_call(
+    if (post_threw) {
+        impl->fail_post_admission(
             pending,
-            make_error(request_id,
-                       "No main-thread dispatcher accepted the request",
-                       "main_thread_unavailable"));
+            request_id,
+            "Main-thread dispatcher admission threw an exception",
+            "dispatch_failed");
+    } else if (!posted) {
+        impl->fail_post_admission(
+            pending,
+            request_id,
+            "No main-thread dispatcher accepted the request",
+            "main_thread_unavailable");
     }
 
     std::unique_lock lock(pending->mutex);
