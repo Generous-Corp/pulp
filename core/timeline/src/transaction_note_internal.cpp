@@ -1,8 +1,10 @@
 #include "transaction_note_internal.hpp"
 
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <algorithm>
+#include <variant>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -219,8 +221,7 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
 } // namespace
 
 bool is_note_command(const Command& command) noexcept {
-    return std::holds_alternative<SetNoteVelocity>(command) ||
-           std::holds_alternative<ReplaceNoteContent>(command);
+    return std::visit([]<typename T>(const T&) { return is_note_command_type<T>; }, command);
 }
 
 runtime::Result<NoteCommandReduction, TransactionError>

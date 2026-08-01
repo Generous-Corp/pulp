@@ -671,6 +671,39 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         return runtime::Ok(Command(RemoveTrack{sequence.value(), track.value()}));
     }
+    if (type.value() == "pulp.timeline.command.set_track_name") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto expected = detail::decode_string_field(command, "expected", data_path);
+        auto replacement = detail::decode_string_field(command, "replacement", data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(SetTrackName{sequence.value(), track.value(),
+                                                std::move(expected).value(),
+                                                std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.move_track") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        // Both endpoints are absent when a track moves from last to last, so an
+        // absent member is a position rather than a missing field.
+        auto expected =
+            decode_optional_command_item_id(command, "expected_before_track_id", data_path);
+        auto replacement =
+            decode_optional_command_item_id(command, "replacement_before_track_id", data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(MoveTrack{sequence.value(), track.value(), expected.value(),
+                                             replacement.value()}));
+    }
     if (type.value() == "pulp.timeline.command.insert_sequence") {
         auto sequence = required(command, "sequence", data_path);
         if (!sequence)

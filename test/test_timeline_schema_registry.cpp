@@ -122,6 +122,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.insert_take_lane",
         "pulp.timeline.command.insert_track",
         "pulp.timeline.command.move_clip",
+        "pulp.timeline.command.move_track",
         "pulp.timeline.command.remove_asset",
         "pulp.timeline.command.remove_automation_lane",
         "pulp.timeline.command.remove_clip",
@@ -146,6 +147,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_tempo_map",
         "pulp.timeline.command.set_track_freeze",
         "pulp.timeline.command.set_track_mixer",
+        "pulp.timeline.command.set_track_name",
     };
     static_assert(expected.size() == std::variant_size_v<Command>);
 

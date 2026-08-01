@@ -153,6 +153,14 @@ export interface PulpTimelineCommandMoveClip {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.move_track` — domain Command, schema version 1. */
+export interface PulpTimelineCommandMoveTrack {
+  expected_before_track_id?: number | string;
+  replacement_before_track_id?: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.remove_asset` — domain Command, schema version 1. */
 export interface PulpTimelineCommandRemoveAsset {
   asset_id: number | string;
@@ -329,6 +337,14 @@ export interface PulpTimelineCommandSetTrackMixer {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_track_name` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTrackName {
+  expected: string;
+  replacement: string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.content.empty` — domain Content, schema version 1. */
 export interface PulpTimelineContentEmpty {}
 
@@ -491,6 +507,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_take_lane"
   | "pulp.timeline.command.insert_track"
   | "pulp.timeline.command.move_clip"
+  | "pulp.timeline.command.move_track"
   | "pulp.timeline.command.remove_asset"
   | "pulp.timeline.command.remove_automation_lane"
   | "pulp.timeline.command.remove_clip"
@@ -515,6 +532,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_tempo_map"
   | "pulp.timeline.command.set_track_freeze"
   | "pulp.timeline.command.set_track_mixer"
+  | "pulp.timeline.command.set_track_name"
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
@@ -554,6 +572,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
   "pulp.timeline.command.insert_track": PulpTimelineCommandInsertTrack;
   "pulp.timeline.command.move_clip": PulpTimelineCommandMoveClip;
+  "pulp.timeline.command.move_track": PulpTimelineCommandMoveTrack;
   "pulp.timeline.command.remove_asset": PulpTimelineCommandRemoveAsset;
   "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
@@ -578,6 +597,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_tempo_map": PulpTimelineCommandSetTempoMap;
   "pulp.timeline.command.set_track_freeze": PulpTimelineCommandSetTrackFreeze;
   "pulp.timeline.command.set_track_mixer": PulpTimelineCommandSetTrackMixer;
+  "pulp.timeline.command.set_track_name": PulpTimelineCommandSetTrackName;
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;
