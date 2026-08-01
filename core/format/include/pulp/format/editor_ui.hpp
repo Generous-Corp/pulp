@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>

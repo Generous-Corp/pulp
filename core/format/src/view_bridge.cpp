@@ -260,6 +260,34 @@ const view::ScriptedUiSession* ViewBridge::scripted_ui() const {
     PULP_CATCH_ALL { return nullptr; }
 }
 
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(view::ScriptedUiSession*)>& visitor) {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    processor_.visit_active_scripted_ui(visitor);
+}
+
+void ViewBridge::visit_scripted_ui(
+    const std::function<void(const view::ScriptedUiSession*)>& visitor) const {
+    if (!visitor) return;
+    if (scripted_ui_) {
+        visitor(scripted_ui_.get());
+        return;
+    }
+    if (!owner_is_alive()) {
+        visitor(nullptr);
+        return;
+    }
+    static_cast<const Processor&>(processor_).visit_active_scripted_ui(visitor);
+}
+
 void ViewBridge::notify_attached() {
     if (!view_raw_ || attached_) return;
     attached_ = true;
