@@ -3061,7 +3061,7 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     fs::remove_all(dir);
     fs::create_directories(dir);
 
-    auto auv3 = run_pulp({"validate", "--target", "auv3", "--json",
+    auto auv3 = run_pulp({"validate", "--target", "all", "--json",
                           (dir / "Missing.appex").string()});
     REQUIRE_FALSE(auv3.timed_out);
     REQUIRE(auv3.stdout_output.find(
@@ -3074,6 +3074,14 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     fs::create_directories(first);
     fs::create_directories(second);
     {
+        std::ofstream executable(first / "First", std::ios::binary);
+        executable << "ordinary standalone";
+    }
+    {
+        std::ofstream executable(second / "Second", std::ios::binary);
+        executable << "ordinary standalone";
+    }
+    {
         std::ofstream manifest(first / "First.inspector-capabilities.json");
         manifest << R"({"product_name":"First","shipping_override":false,"unsafe_runtime_eval_acknowledged":false,"capabilities":[]})";
     }
@@ -3084,4 +3092,15 @@ TEST_CASE("pulp validate scopes inspector evidence to standalone artifacts",
     REQUIRE(multiple.stdout_output.find(
         "\"inspector_capability_evidence_complete\": false") != std::string::npos);
     REQUIRE(multiple.exit_code != 0);
+
+    {
+        std::ofstream executable(first / "First", std::ios::binary);
+        executable << "PULP_INSPECT_SHIPPING_MANIFEST_V1";
+    }
+    auto stale = run_pulp({"validate", "--target", "standalone", "--json",
+                           (dir / "First.app").string()});
+    REQUIRE_FALSE(stale.timed_out);
+    REQUIRE(stale.stdout_output.find(
+        "\"inspector_capability_evidence_complete\": false") != std::string::npos);
+    REQUIRE(stale.exit_code != 0);
 }

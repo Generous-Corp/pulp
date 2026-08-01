@@ -142,11 +142,32 @@ int cmd_validate(const std::vector<std::string>& args) {
             if (std::find(targets.begin(), targets.end(), "standalone") !=
                 targets.end()) {
                 std::vector<pulp::cli::inspector_shipping::Report> artifact_reports;
-                artifact_reports.reserve(positional.size());
-                for (const auto& artifact : positional) {
-                    artifact_reports.push_back(
+                for (const auto& artifact_string : positional) {
+                    const fs::path artifact = artifact_string;
+                    if (artifact.extension() != ".app") continue;
+                    auto artifact_report =
                         pulp::cli::inspector_shipping::load_report(
-                            inspector_evidence_root(artifact)));
+                            inspector_evidence_root(artifact));
+                    if (artifact_report.complete) {
+                        const auto executable =
+                            mr::resolve_standalone_executable(artifact, env);
+                        if (executable.empty()) {
+                            artifact_report.complete = false;
+                            artifact_report.error =
+                                "could not resolve standalone executable for inspector "
+                                "capability scan: " + artifact.string();
+                        } else if (artifact_report.manifests.size() != 1) {
+                            artifact_report.complete = false;
+                            artifact_report.error =
+                                "expected exactly one inspector capability manifest for " +
+                                artifact.string();
+                        } else if (!pulp::cli::inspector_shipping::scan_artifact(
+                                       executable, artifact_report.manifests.front(),
+                                       artifact_report.error)) {
+                            artifact_report.complete = false;
+                        }
+                    }
+                    artifact_reports.push_back(std::move(artifact_report));
                 }
                 inspector_report = pulp::cli::inspector_shipping::combine_reports(
                     std::move(artifact_reports));
