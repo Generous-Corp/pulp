@@ -17,6 +17,7 @@
 #include <pulp/inspect/main_thread_rpc.hpp>
 #include <pulp/inspect/session.hpp>
 #include <pulp/inspect/state_inspector.hpp>
+#include <pulp/inspect/test_input.hpp>
 #include <pulp/inspect/tweak_store.hpp>
 #include <pulp/runtime/build_info.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -111,7 +112,8 @@ standalone_capabilities(bool compositor_capture) {
     using C = inspect::InspectorCapability;
     std::vector<inspect::InspectorCapability> result{
         C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
-        C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::AuthoringTweaks};
+        C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::TestInput,
+        C::AuthoringTweaks};
     if (compositor_capture)
         result.push_back(C::CaptureImage);
     return result;
@@ -146,7 +148,8 @@ png_dimensions(const std::vector<std::uint8_t>& png) {
 } // namespace
 
 class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentContextSource,
-                                               public inspect::InspectorCaptureSource {
+                                               public inspect::InspectorCaptureSource,
+                                               public inspect::InspectorTestInputSource {
   public:
     struct IndicatorState {
         bool active = false;
@@ -193,7 +196,12 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         domains_.set_console_capture(&console_);
         domains_.set_audio_inspector(&audio_);
         domains_.set_tweak_store(&tweaks_);
+        domains_.set_test_input_source(this);
         domains_.set_overlay(overlay_);
+        session_.set_controller_scope_end_handler(
+            [this](const inspect::InspectorControllerScopeEnd& event) {
+                domains_.release_test_input(event.reason);
+            });
         if (auto* scripted = bridge_.scripted_ui()) {
             log_subscription_ = scripted->add_log_callback(console_.callback());
             domains_.set_script_inspector(scripted->script_inspector());
@@ -247,6 +255,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         stopped_ = true;
         active_ = false;
         indicator_->active = false;
+        app_.test_input_host().release_test_input();
         if (server_) {
             shutdown_fence_ = server_->shutdown_fence();
             server_->stop();
@@ -267,6 +276,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         if (sources_detached_)
             return;
         sources_detached_ = true;
+        domains_.set_test_input_source(nullptr);
         domains_.set_script_inspector(nullptr);
         if (auto* scripted = bridge_.scripted_ui();
             scripted && log_subscription_ != 0) {
@@ -315,6 +325,53 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         result.width = dimensions->first;
         result.height = dimensions->second;
         return result;
+    }
+
+    inspect::TestInputApplyResult inject_midi(
+        const inspect::MidiTestInput& input) override {
+        const auto kind = input.kind == inspect::MidiTestInputKind::NoteOn
+            ? StandaloneTestMidiKind::NoteOn
+            : StandaloneTestMidiKind::NoteOff;
+        const auto result = app_.test_input_host().inject_note({
+            .kind = kind,
+            .channel = static_cast<std::uint8_t>(input.channel + 1),
+            .note = input.note,
+            .velocity = input.velocity,
+        });
+        switch (result) {
+        case StandaloneTestInputResult::Applied:
+            return inspect::TestInputApplyResult::success();
+        case StandaloneTestInputResult::QueueFull:
+            return inspect::TestInputApplyResult::failure(
+                "test_input_queue_full",
+                "Standalone test MIDI queue is full");
+        case StandaloneTestInputResult::InvalidArgument:
+            return inspect::TestInputApplyResult::failure(
+                "invalid_params",
+                "Standalone rejected invalid MIDI test input");
+        }
+        return inspect::TestInputApplyResult::failure(
+            "test_input_rejected",
+            "Standalone rejected MIDI test input");
+    }
+
+    inspect::TestInputApplyResult set_transport(
+        const inspect::StandaloneTransportTestInput& input) override {
+        const auto result = app_.test_input_host().update_transport({
+            .playing = input.playing,
+            .position_samples = input.position_samples,
+            .tempo_bpm = input.tempo_bpm,
+        });
+        if (result == StandaloneTestInputResult::Applied)
+            return inspect::TestInputApplyResult::success();
+        return inspect::TestInputApplyResult::failure(
+            "invalid_params",
+            "Standalone rejected invalid transport test input");
+    }
+
+    void release_test_input(
+        inspect::TestInputReleaseReason) noexcept override {
+        app_.test_input_host().release_test_input();
     }
 
     void enqueue_indicator() {

@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <string_view>
 
 #if defined(__APPLE__)
@@ -59,6 +60,209 @@
 #include <pulp/runtime/trace_session.hpp>
 
 namespace pulp::format {
+
+detail::StandaloneTestInputResult detail::StandaloneTestInputHost::inject_note(
+    StandaloneTestMidiNote note) {
+    if (note.channel == 0 || note.channel > active_notes_.size() ||
+        note.note >= active_notes_.front().size() || note.velocity > 127) {
+        return StandaloneTestInputResult::InvalidArgument;
+    }
+    const QueuedNote queued{
+        .note = note,
+        .generation = midi_generation_.load(std::memory_order_acquire),
+    };
+    return midi_queue_.try_push(queued)
+        ? StandaloneTestInputResult::Applied
+        : StandaloneTestInputResult::QueueFull;
+}
+
+detail::StandaloneTestInputResult detail::StandaloneTestInputHost::update_transport(
+    const StandaloneTestTransportUpdate& update) {
+    if (!update.playing && !update.position_samples && !update.tempo_bpm)
+        return StandaloneTestInputResult::InvalidArgument;
+    if (update.position_samples && *update.position_samples < 0)
+        return StandaloneTestInputResult::InvalidArgument;
+    if (update.tempo_bpm &&
+        (!std::isfinite(*update.tempo_bpm) ||
+         *update.tempo_bpm < kMinimumTempoBpm ||
+         *update.tempo_bpm > kMaximumTempoBpm)) {
+        return StandaloneTestInputResult::InvalidArgument;
+    }
+
+    if (update.playing)
+        control_transport_.playing = *update.playing;
+    if (update.tempo_bpm)
+        control_transport_.tempo_bpm = *update.tempo_bpm;
+    if (update.position_samples) {
+        control_transport_.position_samples = *update.position_samples;
+        ++control_transport_.position_revision;
+    }
+    transport_commands_.write(control_transport_);
+    return StandaloneTestInputResult::Applied;
+}
+
+void detail::StandaloneTestInputHost::release_test_input() noexcept {
+    midi_generation_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+detail::StandaloneTestTransportState
+detail::StandaloneTestInputHost::transport_snapshot() const noexcept {
+    return observed_transport_.read();
+}
+
+std::uint64_t
+detail::StandaloneTestInputHost::midi_overflow_count() const noexcept {
+    return midi_queue_.overflow_count();
+}
+
+void detail::StandaloneTestInputHost::prepare(bool playing,
+                                               double tempo_bpm) noexcept {
+    while (midi_queue_.try_pop()) {}
+    midi_queue_.reset_overflow_count();
+    const auto generation =
+        midi_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    audio_midi_generation_ = generation;
+    active_notes_ = {};
+    note_release_pending_ = false;
+
+    const auto previous = observed_transport_.read();
+    control_transport_.playing = playing;
+    control_transport_.tempo_bpm = tempo_bpm;
+    control_transport_.position_samples =
+        prepared_ ? previous.position_samples : 0;
+    ++control_transport_.position_revision;
+    transport_commands_.write(control_transport_);
+    audio_transport_ = {
+        .playing = playing,
+        .tempo_bpm = tempo_bpm,
+        .position_samples = control_transport_.position_samples,
+    };
+    audio_position_revision_ = control_transport_.position_revision;
+    observed_transport_.write(audio_transport_);
+    prepared_ = true;
+}
+
+bool detail::StandaloneTestInputHost::release_active_notes(
+    midi::MidiBuffer& out, int sample_offset) noexcept {
+    bool all_released = true;
+    for (std::size_t channel = 0; channel < active_notes_.size(); ++channel) {
+        for (std::size_t note = 0; note < active_notes_[channel].size(); ++note) {
+            if (!active_notes_[channel][note])
+                continue;
+            auto event = midi::MidiEvent::note_off(
+                static_cast<std::uint8_t>(channel),
+                static_cast<std::uint8_t>(note));
+            event.sample_offset = sample_offset;
+            if (out.add(event))
+                active_notes_[channel][note] = false;
+            else
+                all_released = false;
+        }
+    }
+    return all_released;
+}
+
+std::size_t detail::StandaloneTestInputHost::drain_midi_into(
+    midi::MidiBuffer& out, int block_size_samples) noexcept {
+    const int release_offset = std::max(0, block_size_samples - 1);
+    auto generation = midi_generation_.load(std::memory_order_acquire);
+    if (generation != audio_midi_generation_) {
+        audio_midi_generation_ = generation;
+        note_release_pending_ = true;
+    }
+    if (note_release_pending_) {
+        note_release_pending_ =
+            !release_active_notes(out, /*sample_offset=*/0);
+        if (note_release_pending_)
+            return 0;
+    }
+
+    std::size_t drained = 0;
+    while (auto queued = midi_queue_.try_pop()) {
+        generation = midi_generation_.load(std::memory_order_acquire);
+        if (generation != audio_midi_generation_) {
+            audio_midi_generation_ = generation;
+            note_release_pending_ = true;
+        }
+        if (note_release_pending_) {
+            note_release_pending_ =
+                !release_active_notes(out, release_offset);
+            if (note_release_pending_)
+                return drained;
+        }
+        if (queued->generation != audio_midi_generation_) {
+            // A controlled client releases its short-lived lease immediately
+            // after Test.injectMidi returns. If audio has not consumed that
+            // accepted note-on yet, preserve the truthful delivery contract as
+            // a bounded one-block pulse instead of silently discarding it.
+            // Stale note-offs are safe to drop because generation release
+            // already emitted note-offs for every note that reached DSP.
+            const auto& stale = queued->note;
+            if (stale.kind != StandaloneTestMidiKind::NoteOn ||
+                stale.velocity == 0) {
+                continue;
+            }
+            const auto channel =
+                static_cast<std::uint8_t>(stale.channel - 1);
+            auto note_on = midi::MidiEvent::note_on(
+                channel, stale.note, stale.velocity);
+            if (!out.add(note_on))
+                continue;
+            ++drained;
+            active_notes_[channel][stale.note] = true;
+            auto note_off = midi::MidiEvent::note_off(channel, stale.note);
+            note_off.sample_offset = release_offset;
+            if (out.add(note_off))
+                active_notes_[channel][stale.note] = false;
+            continue;
+        }
+
+        const auto& note = queued->note;
+        const auto channel = static_cast<std::uint8_t>(note.channel - 1);
+        auto event = note.kind == StandaloneTestMidiKind::NoteOn
+            ? midi::MidiEvent::note_on(channel, note.note, note.velocity)
+            : midi::MidiEvent::note_off(channel, note.note, note.velocity);
+        if (!out.add(event))
+            continue;
+        ++drained;
+        active_notes_[channel][note.note] =
+            note.kind == StandaloneTestMidiKind::NoteOn && note.velocity != 0;
+    }
+
+    generation = midi_generation_.load(std::memory_order_acquire);
+    if (generation != audio_midi_generation_) {
+        audio_midi_generation_ = generation;
+        note_release_pending_ = true;
+    }
+    if (note_release_pending_)
+        note_release_pending_ = !release_active_notes(out, release_offset);
+    return drained;
+}
+
+detail::StandaloneTestTransportState
+detail::StandaloneTestInputHost::begin_audio_block() noexcept {
+    const auto command = transport_commands_.read();
+    audio_transport_.playing = command.playing;
+    audio_transport_.tempo_bpm = command.tempo_bpm;
+    if (command.position_revision != audio_position_revision_) {
+        audio_transport_.position_samples = command.position_samples;
+        audio_position_revision_ = command.position_revision;
+    }
+    return audio_transport_;
+}
+
+void detail::StandaloneTestInputHost::end_audio_block(
+    int block_size_samples) noexcept {
+    if (audio_transport_.playing && block_size_samples > 0) {
+        const auto frames = static_cast<std::int64_t>(block_size_samples);
+        audio_transport_.position_samples =
+            audio_transport_.position_samples >
+                    std::numeric_limits<std::int64_t>::max() - frames
+                ? std::numeric_limits<std::int64_t>::max()
+                : audio_transport_.position_samples + frames;
+    }
+    observed_transport_.write(audio_transport_);
+}
 
 namespace {
 
@@ -125,6 +329,7 @@ void StandaloneApp::prepare_render_state() {
     midi_out_.reserve(detail::kStandaloneMidiBufferEventCapacity);
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
+    test_input_host_.prepare(config_.transport_playing, config_.tempo_bpm);
 
     // Pre-allocate test signal buffer and pointer arrays (no audio-thread allocation)
     test_signal_.set_sample_rate(config_.sample_rate);
@@ -211,6 +416,7 @@ void StandaloneApp::render_audio_block(
     const audio::BufferView<const float>& input,
     audio::BufferView<float>& output,
     const audio::CallbackContext& ctx) {
+        const auto transport = test_input_host_.begin_audio_block();
         // Hard guard: the processor and all scratch buffers were prepared for at
         // most `max_callback_block_` frames (see start()). A block beyond that —
         // which would indicate a backend not honoring MaximumFramesPerSlice —
@@ -234,10 +440,7 @@ void StandaloneApp::render_audio_block(
             // The normal path advances by ctx.buffer_size after process();
             // skipping it here would lag transport position (and the MIDI
             // timeline derived from it) by exactly the silenced frames.
-            if (config_.transport_playing) {
-                transport_position_samples_.fetch_add(
-                    ctx.buffer_size, std::memory_order_relaxed);
-            }
+            test_input_host_.end_audio_block(ctx.buffer_size);
             return;
         }
 
@@ -251,14 +454,14 @@ void StandaloneApp::render_audio_block(
         midi_in.clear_sysex();
         midi_out.clear();
         midi_out.clear_sysex();
+        test_input_host_.drain_midi_into(midi_in, ctx.buffer_size);
         detail::drain_standalone_midi_input(hardware_midi_queue_, midi_in);
 
         // Drain UI-thread MIDI into this block at the correct sample offsets.
         // The standalone host treats its own audio clock as the master
         // timeline: block_start_seconds is
         // `transport_position_samples / sample_rate`.
-        const int64_t block_start_samples =
-            transport_position_samples_.load(std::memory_order_relaxed);
+        const int64_t block_start_samples = transport.position_samples;
         const double block_start_seconds =
             ctx.sample_rate > 0.0
                 ? static_cast<double>(block_start_samples) / ctx.sample_rate
@@ -308,10 +511,7 @@ void StandaloneApp::render_audio_block(
 #if PULP_ENABLE_AUDIO_PROBES
             analyze_output_probe();
 #endif
-            if (config_.transport_playing) {
-                transport_position_samples_.fetch_add(
-                    ctx.buffer_size, std::memory_order_relaxed);
-            }
+            test_input_host_.end_audio_block(ctx.buffer_size);
             return;
         }
 
@@ -361,23 +561,23 @@ void StandaloneApp::render_audio_block(
         proc_ctx.process_mode = ProcessMode::Realtime;
         proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
-        proc_ctx.is_playing = config_.transport_playing;
+        proc_ctx.is_playing = transport.playing;
         proc_ctx.is_recording = config_.transport_recording;
-        proc_ctx.tempo_bpm = config_.tempo_bpm;
+        proc_ctx.tempo_bpm = transport.tempo_bpm;
         proc_ctx.time_sig_numerator = config_.time_sig_numerator;
         proc_ctx.time_sig_denominator = config_.time_sig_denominator;
         proc_ctx.transport_validity.set(TransportField::SamplePosition);
         proc_ctx.transport_validity.set(TransportField::Playing);
         proc_ctx.transport_validity.set(TransportField::Recording);
         proc_ctx.transport_validity.set(TransportField::Looping);
-        if (config_.tempo_bpm > 0.0) {
+        if (transport.tempo_bpm > 0.0) {
             proc_ctx.transport_validity.set(TransportField::Tempo);
         }
         if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
             proc_ctx.transport_validity.set(TransportField::TimeSignature);
         }
-        if (config_.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
-            const double seconds_per_beat = 60.0 / config_.tempo_bpm;
+        if (transport.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
+            const double seconds_per_beat = 60.0 / transport.tempo_bpm;
             const double samples_per_beat = seconds_per_beat * ctx.sample_rate;
             if (samples_per_beat > 0.0) {
                 proc_ctx.position_beats =
@@ -438,10 +638,7 @@ void StandaloneApp::render_audio_block(
         // Advance the rolling sample clock so the next block reads a
         // monotonic timeline. Done after process() so the in-block
         // transport state is consistent with what the plugin saw.
-        if (config_.transport_playing) {
-            transport_position_samples_.fetch_add(
-                ctx.buffer_size, std::memory_order_relaxed);
-        }
+        test_input_host_.end_audio_block(ctx.buffer_size);
 }
 
 bool StandaloneApp::start() {
