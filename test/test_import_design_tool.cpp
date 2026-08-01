@@ -3,6 +3,7 @@
 #include <miniz.h>
 #include "envelope_merge.hpp"
 #include "fig_lane.hpp"
+#include "node_runtime.hpp"
 #include "render_artifact_path.hpp"
 
 #include <iostream>
@@ -2736,7 +2737,9 @@ TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (n
 namespace {
 
 bool node_available() {
-    return pulp::platform::find_on_path("node").has_value();
+    // Matches what the fig lane itself resolves, so these cases are not
+    // skipped on a machine whose Node.js lives off PATH.
+    return pulp::import_design::browser_capture::resolve_node().ok();
 }
 
 // Point the CLI at the in-tree decoder regardless of the runner's cwd.

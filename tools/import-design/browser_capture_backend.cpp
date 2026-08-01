@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "browser_capture_backend.hpp"
 #include "browser_capture_diagnostics.hpp"
+#include "node_runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -29,7 +30,6 @@ namespace pulp::import_design::browser_capture {
 
 namespace {
 
-constexpr int kMinimumNodeMajor = 22;
 constexpr int kLauncherCleanupGraceMs = 5000;
 
 int outer_process_timeout(int runtime_timeout_ms) {
@@ -139,12 +139,33 @@ std::optional<std::string> capture_error_code(std::string_view stderr_text) {
     return std::string(candidate);
 }
 
-std::optional<fs::path> resolve_node(
+NodeResolution resolve_node_runtime(
     const std::optional<fs::path>& override_path) {
-    if (override_path && !override_path->empty()) return *override_path;
-    if (auto node = platform::find_on_path("node")) return node;
-    if (auto node = platform::find_on_path("nodejs")) return node;
-    return std::nullopt;
+    NodeSearchOptions node_options;
+    node_options.explicit_path = override_path;
+    return resolve_node(node_options);
+}
+
+// One line naming what went wrong, so "not installed" and "installed but too
+// old" never read the same.
+std::string node_probe_failure_summary(const NodeResolution& resolution) {
+    if (resolution.failure == NodeResolutionFailure::not_found) {
+        return "Node.js was not found; browser capture needs Node.js "
+            + std::to_string(kMinimumNodeMajor) + " or newer";
+    }
+    const NodeAttempt* best = nullptr;
+    for (const auto& attempt : resolution.attempts) {
+        if (attempt.version.empty()) continue;
+        if (!best || attempt.major > best->major) best = &attempt;
+    }
+    if (!best) {
+        return "Node.js was found but could not report its version; browser "
+               "capture needs Node.js "
+            + std::to_string(kMinimumNodeMajor) + " or newer";
+    }
+    return "Node.js is too old (found " + best->version + " at "
+        + best->executable.string() + "); browser capture needs Node.js "
+        + std::to_string(kMinimumNodeMajor) + " or newer";
 }
 
 std::optional<fs::path> current_process_executable() {
@@ -290,23 +311,6 @@ bool parse_browser_version(std::string_view output,
         return false;
     }
     return !product.empty() && major > 0;
-}
-
-bool parse_node_version(std::string_view output,
-                        std::string& version,
-                        int& major) {
-    static const std::regex kVersionPattern{
-        R"(\bv?([0-9]+(?:\.[0-9]+){1,3})\b)"};
-    std::smatch match;
-    const std::string line = one_line(std::string(output));
-    if (!std::regex_search(line, match, kVersionPattern)) return false;
-    version = match[1].str();
-    try {
-        major = std::stoi(match[1].str());
-    } catch (...) {
-        return false;
-    }
-    return major > 0;
 }
 
 Diagnostic discovery_diagnostic(
@@ -532,41 +536,16 @@ BrowserProbeResult probe_browser(
         return result;
     }
 
-    const auto node = resolve_node(options.node_executable);
-    if (!node || !is_executable_file(*node)) {
-        result.failure_kind = BrowserProbeFailure::node_unavailable;
-        result.failure =
-            "Node.js was not found; browser capture needs Node.js 22 or newer";
+    result.node = resolve_node_runtime(options.node_executable);
+    if (!result.node.ok()) {
+        result.failure_kind =
+            result.node.failure == NodeResolutionFailure::not_found
+                ? BrowserProbeFailure::node_unavailable
+                : BrowserProbeFailure::node_incompatible;
+        result.failure = node_probe_failure_summary(result.node);
         return result;
     }
-    platform::ProcessOptions node_version_options;
-    node_version_options.timeout_ms = std::min(options.probe_timeout_ms, 5000);
-    node_version_options.max_output_bytes = 64 * 1024;
-    auto node_version_process = platform::ChildProcess::run(
-        node->string(), {"--version"}, node_version_options);
-    if (node_version_process.timed_out ||
-        node_version_process.exit_code != 0) {
-        result.failure_kind = BrowserProbeFailure::node_incompatible;
-        result.failure = "Node.js version probe failed";
-        return result;
-    }
-    const auto node_version_output =
-        !node_version_process.stdout_output.empty()
-            ? node_version_process.stdout_output
-            : node_version_process.stderr_output;
-    std::string node_version;
-    int node_major = 0;
-    if (!parse_node_version(node_version_output, node_version, node_major)) {
-        result.failure_kind = BrowserProbeFailure::node_incompatible;
-        result.failure = "Node.js version output was not recognized";
-        return result;
-    }
-    if (node_major < kMinimumNodeMajor) {
-        result.failure_kind = BrowserProbeFailure::node_incompatible;
-        result.failure = "Node.js is too old (found " + node_version +
-            ", need 22 or newer)";
-        return result;
-    }
+    const auto node = result.node.executable;
     const auto script = resolve_capture_script(options.capture_script);
     if (!script || !fs::is_regular_file(*script)) {
         result.failure_kind =
@@ -657,6 +636,8 @@ BrowserDiscoveryResult discover_browser(
     for (const auto& candidate : candidates) {
         auto candidate_result = probe(candidate);
         candidate_result.candidate = candidate;
+        if (result.node.attempts.empty() && result.node.searched.empty())
+            result.node = candidate_result.node;
         result.probes.push_back(candidate_result);
         if (!candidate_result.compatible) continue;
 
@@ -705,13 +686,14 @@ CaptureResult capture_document(
             request.output_directory);
     }
 
-    const auto node = resolve_node(request.node_executable);
-    if (!node || !is_executable_file(*node)) {
+    const auto node_runtime = resolve_node_runtime(request.node_executable);
+    if (!node_runtime.ok()) {
         return capture_failure(
             "capture-runtime-unavailable", "capture-setup",
-            "Node.js was not found; browser capture needs Node.js 22 or newer",
+            node_probe_failure_summary(node_runtime),
             request.output_directory);
     }
+    const auto node = node_runtime.executable;
     const auto script = resolve_capture_script(request.capture_script);
     if (!script || !fs::is_regular_file(*script)) {
         return capture_failure(

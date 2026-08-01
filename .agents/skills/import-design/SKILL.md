@@ -5122,3 +5122,33 @@ Before concluding anything from an import run, confirm the binary matches the
 worktree you edited: check `git log --oneline -1` in the checkout you built
 from, and rebuild if the change you are validating is not in it. Testing an old
 worktree and reporting the result as current has burned real debugging hours.
+
+## Node.js discovery must not depend on the caller's PATH
+
+macOS hands a Finder-launched app a minimal `PATH`
+(`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew, mise, nvm, fnm and asdf all install
+outside it, so a PATH-only lookup reports "Node.js was not found" for a Node.js
+that is installed and new enough — while the same binary launched from a
+terminal works, because it inherits the shell's PATH. Any import path that
+resolves a helper executable has this failure mode, and it only shows up in the
+double-click launch that most users actually take.
+
+`tools/import-design/node_runtime.{hpp,cpp}` is the resolver: PATH first, then
+the fixed install locations, then the version-manager roots (mise, nvm, fnm,
+asdf), taking the first installation that meets the version floor. Version
+directories are ordered by the version parsed out of the name, numerically —
+lexical order puts `9.1.0` above `22.22.3`. Candidates are de-duplicated by
+canonical path, which collapses mise's `22`/`22.22`/`latest`/`lts-jod` aliases
+onto the one real install instead of probing it five times.
+
+Two rules when working on it:
+
+- **Verify under a stripped environment, not your shell.** `env -i
+  PATH=/usr/bin:/bin <binary>` is the only run that proves the GUI case; a pass
+  under your own PATH proves nothing, and that blind spot is what shipped the
+  bug. `NodeSearchOptions::search_path` reproduces it in-process without
+  touching the environment.
+- **"Not found" and "too old" are different messages.** A failure names the
+  Node.js installations it checked (with versions) or, when there were none, the
+  locations it searched. Listing the *browsers* it probed — the pre-fix
+  behaviour — tells the user nothing about a missing Node.js.

@@ -7,7 +7,10 @@
 add_executable(pulp-browser-capture-launcher-fixture
     fixtures/browser_capture_launcher_fixture.cpp)
 add_executable(pulp-test-browser-capture-backend
-    test_browser_capture_backend.cpp)
+    test_browser_capture_backend.cpp
+    # Node.js discovery: PATH plus the standard install locations, so a
+    # GUI-launched app (minimal PATH) resolves the same Node a terminal does.
+    test_node_runtime.cpp)
 target_link_libraries(pulp-test-browser-capture-backend PRIVATE
     pulp::browser-capture-backend
     Catch2::Catch2WithMain)
@@ -155,7 +158,9 @@ add_executable(pulp-test-import-design-tool test_import_design_tool.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/fig_lane.cpp
     # fig_lane's multi-state merge lives here (and is shared with the
     # repeated---file lane), so the in-process fig_lane cases need it linked.
-    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp)
+    ${CMAKE_SOURCE_DIR}/tools/import-design/envelope_merge.cpp
+    # fig_lane resolves the Node decoder through the shared search.
+    ${CMAKE_SOURCE_DIR}/tools/import-design/node_runtime.cpp)
 target_include_directories(pulp-test-import-design-tool PRIVATE
     ${CMAKE_SOURCE_DIR}/external/miniz
     ${CMAKE_SOURCE_DIR}/tools/import-design
