@@ -1434,7 +1434,14 @@ def generate(prompt: str, inv: dict, prefer: str | None, retries: int = 2):
                 pass                       # prose is optional; the patch is not
         errs = lint(patch, inv)
         if errs:
-            keep_attempt(patch, report, attempt + 1, "rejected")
+            # The LINT's reasons, not `report` -- that is the gate's, and the
+            # gate has not run when a patch is rejected here. Passing it
+            # crashed the generator outright on the first attempt of any
+            # prompt whose first patch failed the lint, which is a bug I
+            # introduced adding this line and did not see because I only ever
+            # exercised the branch that runs after the gate.
+            keep_attempt(patch, "rejected by the lint:\n" + "\n".join(errs),
+                         attempt + 1, "rejected")
             print(f"  rejected (attempt {attempt + 1}):", flush=True)
             for e in errs[:5]:
                 print(f"    {e}", flush=True)

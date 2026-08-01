@@ -338,6 +338,38 @@ def check_model_failure() -> int:
     return bad
 
 
+def check_attempt_keeping() -> int:
+    """Every keep_attempt call site can actually run.
+
+    A failed attempt is written out for diagnosis, and the call in the LINT
+    branch was handed `report` -- the GATE's output, which does not exist yet
+    when a patch is rejected before the gate runs. That is an UnboundLocalError
+    that kills the whole generation, and it only fires when a prompt's first
+    patch fails the lint, so it survived a full dozen-prompt run and then took
+    out two prompts on the next.
+
+    Checked by reading the source rather than by generating: reproducing it
+    needs a model call and a patch that happens to be malformed, and the thing
+    that is wrong is visible without either.
+    """
+    import re
+    src = open(P.__file__).read()
+    body = src[src.index("def generate("):]
+    body = body[:body.index("\n# \u2500")] if "\n# \u2500" in body else body
+
+    # Where does `report` first get a value, and where is it used?
+    assign = body.find("report =")
+    bad = 0
+    for m in re.finditer(r"keep_attempt\([^)]*?\breport\b", body, re.S):
+        if assign == -1 or m.start() < assign:
+            print("  WRONG  keep_attempt is handed `report` before anything "
+                  "assigns it — that is an UnboundLocalError, and it ends the "
+                  "run rather than the attempt")
+            bad += 1
+    if not bad:
+        print("  ok     every keep_attempt call has its argument in scope")
+    return bad
+
 def main():
     inv = P.inventory()
     if "Fundamental" not in inv or "Core" not in inv:
@@ -367,7 +399,8 @@ def main():
     bad += check_model_failure()
     bad += check_silence_mechanism()
     bad += check_preview_matches_rack()
-    print(f"\n{len(CASES) + 4 - bad}/{len(CASES) + 4} correct")
+    bad += check_attempt_keeping()
+    print(f"\n{len(CASES) + 5 - bad}/{len(CASES) + 5} correct")
     return 1 if bad else 0
 
 
