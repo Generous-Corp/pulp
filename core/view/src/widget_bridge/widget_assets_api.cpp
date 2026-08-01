@@ -110,6 +110,31 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // setKnobCapturedIndicator(id, rIn, rOut, width, color) — the design's OWN
+    // pointer geometry, as fractions of the disc's half extent. Knob::paint
+    // sweeps THIS pointer along the value arc instead of the synthetic notch.
+    //
+    // Without it a knob that carries an imported disc plus the design's pointer
+    // metadata still renders the generic white notch on the scripted path,
+    // because only the native materializer forwarded the geometry — the same
+    // captured art looked right when materialized and wrong when scripted.
+    register_bridge_function(api, "setKnobCapturedIndicator",
+        [&self](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto* k = dynamic_cast<Knob*>(self.widget(id));
+            if (!k) return choc::value::Value();
+            auto color = canvas::Color::rgba(0.92f, 0.92f, 0.92f, 1.0f);
+            if (auto [c, ok] = parse_skin_hex(args.get<std::string>(4, "")); ok)
+                color = c;
+            k->set_captured_indicator(
+                static_cast<float>(args.get<double>(1, 0.0)),
+                static_cast<float>(args.get<double>(2, 0.0)),
+                static_cast<float>(args.get<double>(3, 0.0)),
+                color);
+            k->request_repaint();
+            return choc::value::Value();
+        });
+
     // setFaderSkin(id, trackColor, fillColor, thumbColor, thumbBorderColor?,
     //              thumbW?, thumbH?, cornerRadius?)
     register_bridge_function(api, "setFaderSkin",

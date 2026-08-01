@@ -778,8 +778,11 @@ TEST_CASE("a declared knob indicator lowers to movable pointer geometry",
     CHECK(std::stof(declared.at("knob_ind_w")) ==
           Catch::Approx(0.1682f).margin(0.001f));
     // The pointer's colour is the design's, resolved by the browser -- not the
-    // pack's text token, which is what design_indicator carries.
-    CHECK(declared.at("knob_ind_color") == "rgb(184, 248, 192)");
+    // pack's text token, which is what design_indicator carries. Normalized to
+    // hex because the two consumers disagree about what they can parse: the
+    // materializer reads any CSS colour, the scripted bridge reads hex only and
+    // silently substitutes near-white for anything else.
+    CHECK(declared.at("knob_ind_color") == "#b8f8c0");
     // Hand-off to the sprite pass: the control's own pixels and the pointer's,
     // in the capture PNG's frame at its device scale (DPR 2 here).
     CHECK(declared.at("browser_sprite_crop_px") == "20,20,200,200");

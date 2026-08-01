@@ -17,6 +17,7 @@
 #include "tools/import-design/import_png_codec.hpp"
 
 #include <pulp/canvas/recording_canvas.hpp>
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -396,4 +397,72 @@ TEST_CASE("the imported knob's indicator moves with its parameter",
         for (std::size_t j = i + 1; j < frames.size(); ++j)
             CHECK(std::abs(frames[i].x1 - frames[j].x1) +
                       std::abs(frames[i].y1 - frames[j].y1) > 1.0f);
+}
+
+TEST_CASE("the producer's pointer reaches the scripted path too",
+          "[import-design][browser-capture][knob][indicator][codegen]") {
+    // The materializer is not the only consumer. `--emit js` — the CLI default,
+    // and what a generated project ships — goes through design_codegen and the
+    // WidgetBridge, which had no way to receive a captured pointer at all. A
+    // knob that gained a disc sprite but no pointer call renders the generic
+    // white notch: the SAME import would look right materialized and wrong
+    // scripted, and only a screenshot of the scripted path would say so.
+    TempDirectory temp;
+    write_png(temp.root / "browser.png", synthetic_panel());
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = static_cast<float>(kPanelWidth) * 0.5f;
+    auto knob = declared_knob();
+    knob.name = "Cutoff";
+    ir.root.children.push_back(std::move(knob));
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_knob_sprites(
+                ir, temp.root / "browser.png", temp.root / "sprites",
+                &error) == 1);
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    options.use_silver_knobs = false;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+    REQUIRE(js.find("setKnobSpriteStrip('Cutoff") != std::string::npos);
+    REQUIRE(js.find("setKnobCapturedIndicator('Cutoff") != std::string::npos);
+    REQUIRE(js.find("0.845") != std::string::npos);
+    // Hex, because the bridge parses hex only and quietly substitutes
+    // near-white for anything else -- a colour that survives the materializer
+    // can still be dropped here.
+    REQUIRE(js.find("'#fa1e1e'") != std::string::npos);
+}
+
+TEST_CASE("a knob with no recovered pointer emits no pointer call",
+          "[import-design][browser-capture][knob][indicator][codegen]") {
+    // The synthetic notch stays the fallback. Emitting a captured-pointer call
+    // for a knob that has none would install a zero-length stroke and suppress
+    // the notch, leaving an imported knob with no visible indicator at all.
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "Plain";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.style.width = 64.0f;
+    knob.style.height = 64.0f;
+    knob.attributes["asset_path"] = "/tmp/synthetic-knob-body.png";
+    knob.attributes["png_natural_w"] = "128";
+    knob.attributes["png_natural_h"] = "128";
+    knob.attributes["sprite_strip_frame_count"] = "1";
+    ir.root.children.push_back(std::move(knob));
+
+    pulp::view::CodeGenOptions options;
+    options.mode = pulp::view::CodeGenMode::bridge_native_js;
+    options.use_silver_knobs = false;
+    const auto js = pulp::view::generate_pulp_js(ir, options);
+    REQUIRE(js.find("setKnobSpriteStrip('Plain") != std::string::npos);
+    REQUIRE(js.find("setKnobCapturedIndicator") == std::string::npos);
 }

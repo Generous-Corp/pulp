@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -257,6 +258,54 @@ std::optional<DeclaredPointer> pointer_fractions(double dial_left,
     return out;
 }
 
+/// A browser-resolved colour as `#rrggbb` / `#rrggbbaa`.
+///
+/// `getComputedStyle` always answers in `rgb()` / `rgba()` form, and the two
+/// consumers of `knob_ind_color` do not agree on what they can read: the native
+/// materializer parses any CSS colour, the scripted bridge parses hex only and
+/// silently falls back to near-white. Normalizing here means the design's
+/// pointer colour survives BOTH paths instead of only the one that happens to
+/// be exercised. Anything else — an author-declared `oklch()`, a named colour —
+/// is carried through verbatim for the parser that can read it.
+std::string css_color_to_hex(const std::string& value) {
+    const auto open = value.find('(');
+    if (open == std::string::npos ||
+        (value.compare(0, 4, "rgb(") != 0 && value.compare(0, 5, "rgba(") != 0))
+        return value;
+    double channels[4] = {0.0, 0.0, 0.0, 1.0};
+    int count = 0;
+    std::size_t cursor = open + 1;
+    while (count < 4 && cursor < value.size()) {
+        try {
+            std::size_t consumed = 0;
+            channels[count] = std::stod(value.substr(cursor), &consumed);
+            if (consumed == 0) break;
+            cursor += consumed;
+            ++count;
+        } catch (const std::exception&) {
+            break;
+        }
+        while (cursor < value.size() &&
+               (value[cursor] == ',' || value[cursor] == ' ' ||
+                value[cursor] == '/'))
+            ++cursor;
+    }
+    if (count < 3) return value;
+    const auto byte = [](double v) {
+        return static_cast<int>(std::lround(std::clamp(v, 0.0, 255.0)));
+    };
+    char buffer[10];
+    if (count == 4 && channels[3] < 0.999) {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]),
+                      byte(channels[3] * 255.0));
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "#%02x%02x%02x",
+                      byte(channels[0]), byte(channels[1]), byte(channels[2]));
+    }
+    return buffer;
+}
+
 /// A CSS-pixel page rectangle as the capture PNG's own integer pixel rectangle,
 /// serialized "x,y,w,h".
 ///
@@ -465,7 +514,7 @@ int lower_semantic_controls(const fs::path& path,
                     std::to_string(pointer->width);
                 if (const auto color = string_member(indicator, "color");
                     !color.empty())
-                    control.attributes["knob_ind_color"] = color;
+                    control.attributes["knob_ind_color"] = css_color_to_hex(color);
                 control.attributes["browser_sprite_crop_px"] =
                     device_pixel_rect(dial_left, dial_top, dial_w, dial_h, dpr);
                 control.attributes["browser_sprite_indicator_px"] =
