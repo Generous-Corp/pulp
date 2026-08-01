@@ -6661,3 +6661,109 @@ TEST_CASE("an unmapped module says how to fix it", "[portmap][note]") {
     CHECK(note.find("SCAN") != std::string::npos);
     CHECK(note.find("on screen") != std::string::npos);
 }
+
+TEST_CASE("a new build stops offering the patch that was open before it",
+          "[artifact][stale]") {
+    // Reported as "if I pick a prompt I have built before it shows me the
+    // prebuilt one". A patch reopened from the shelf is remembered in
+    // `open_patch_`, and artifact_path() falls back to it when this session's
+    // log has no patch line yet -- which is deliberately right for a reopened
+    // project with no build behind it, and wrong the moment a NEW build starts:
+    // for the whole of that build "Open in Rack" hands over the PREVIOUS patch,
+    // and if the build fails it never stops doing so.
+    //
+    // The clear existed, but only on the Home path. Pressing Build again from
+    // the Build screen -- which is where a user already is after one build, and
+    // where they land after opening a project -- skipped it.
+    HermeticProjects isolated;
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-stale-artifact";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto earlier = dir / "built-before.vcv";
+    {
+        std::ofstream f(earlier);
+        f << R"({"modules":[{"plugin":"ForgeModular","model":"VCO","id":1,
+             "pos":[0,0]}],"cables":[]})";
+    }
+
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    shell.set_artifact(forge_modular::Artifact::patch);
+
+    // A project reopened from the shelf: no build behind it, so offering its
+    // file IS the right answer. This is the behaviour the fix must not break.
+    shell.set_open_patch(earlier.string());
+    REQUIRE(shell.artifact_path() == earlier.string());
+
+    // Now ask for something else, from the Build screen, the way a second
+    // prompt is actually typed.
+    chrome->enter_build();
+    REQUIRE(chrome->mode() == forge::ForgeChrome::Mode::Build);
+    REQUIRE(shell.start_build_with("something completely different").empty());
+    REQUIRE(engine.submissions.size() == 1);
+
+    // The build is running and has produced nothing. There is no patch to
+    // offer, and saying so is the only honest answer -- the earlier file is
+    // not what was asked for.
+    INFO("artifact_path() returned: " << shell.artifact_path());
+    CHECK(shell.artifact_path().empty());
+    CHECK(shell.open_patch().empty());
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("a new build stops drawing the rack that was on screen before it",
+          "[artifact][stale]") {
+    // The other half of the same report. Offering the wrong FILE is the half a
+    // user only finds by pressing Open in Rack; the half they see is the rack
+    // itself, which is drawn from the loaded patch and has no reason of its own
+    // to go away when a different prompt is submitted.
+    HermeticProjects isolated;
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path() / "fm-stale-rack";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto earlier = dir / "built-before.vcv";
+    {
+        std::ofstream f(earlier);
+        f << R"({"modules":[{"plugin":"ForgeModular","model":"VCO","id":1,
+             "pos":[0,0]},{"plugin":"ForgeModular","model":"VCA","id":2,
+             "pos":[8,0]}],"cables":[]})";
+    }
+
+    forge_modular::ForgeModularShell shell;
+    FakeEngine engine;
+    shell.set_engine(&engine);
+    pulp::state::StateStore store;
+    shell.set_state_store(&store);
+    shell.define_parameters(store);
+    auto view = shell.create_view();
+    REQUIRE(view != nullptr);
+    auto* chrome = shell.chrome();
+    REQUIRE(chrome != nullptr);
+    shell.set_artifact(forge_modular::Artifact::patch);
+
+    // Loaded, and genuinely on screen: without this REQUIRE the check below
+    // passes over a preview that was empty the whole time.
+    REQUIRE(shell.open_patch_file(earlier.string()).empty());
+    auto* preview = shell.rack_preview();
+    REQUIRE(preview != nullptr);
+    REQUIRE(preview->modules().size() == 2);
+
+    chrome->enter_build();
+    REQUIRE(shell.start_build_with("something completely different").empty());
+
+    // Nothing has been built yet, so there is no rack to show.
+    CHECK(preview->modules().empty());
+
+    std::filesystem::remove_all(dir, ec);
+}

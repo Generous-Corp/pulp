@@ -846,10 +846,24 @@ std::string ForgeModularShell::start_build_with(const std::string& prompt) {
     // A prompt typed on Home starts a NEW project, so the transcript goes too.
     // A follow-up refines the project already open and keeps its conversation;
     // only the clock and the card restart.
-    if (c->mode() == forge::ForgeChrome::Mode::Home) {
+    if (c->mode() == forge::ForgeChrome::Mode::Home)
         c->begin_new_session();
-        open_patch_.clear();
-    }
+
+    // The patch that was open is not the patch being built, whichever screen
+    // the request came from. artifact_path() falls back to `open_patch_` when
+    // this session's log holds no patch line -- right for a project reopened
+    // from the shelf with no build behind it, wrong from the instant a new
+    // build starts. Clearing it only on the Home path left a build begun from
+    // the Build screen -- where a user already is after one build, and where
+    // opening a project puts them -- offering the PREVIOUS patch to Rack for
+    // the whole run, and forever if the run failed. Reported as "I pick a
+    // prompt I have built before and it shows me the prebuilt one".
+    open_patch_.clear();
+    // And the rack drawn from it goes with it. The drawing has no reason of its
+    // own to change when a different prompt is submitted, so the previous
+    // patch stayed on screen for the whole of the next build -- the half of
+    // that report a user sees without pressing anything.
+    show_rack({}, {});
 
     // Move to the Build screen BEFORE submitting: a user who presses Build and
     // stays on Home cannot tell whether anything happened, which is exactly
