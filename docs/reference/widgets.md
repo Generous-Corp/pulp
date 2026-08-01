@@ -182,6 +182,7 @@ lowercase names for serialization and the JS bridge.
 | `Panel` | Styled container | background/border tokens, corner radius, border width | `widgets.hpp` |
 | `GroupBox` | Titled (optionally collapsible) container | title chip, collapse chevron, header-click toggle, child show/hide | `widgets.hpp` |
 | `ScrollView` | Scrollable container | direction, content size, smooth scroll, fading bars, wheel/track-page | `ui_components.hpp` |
+| `DesignFitView` | Fits a fixed-size design into its own bounds | gives the content subtree the authored design size, uniform letterbox scale (never stretch), centred, opt-in upscale, hit-testing through the same transform | `design_fit_view.hpp` |
 | `SplitView` | Resizable split pane | orientation, split fraction, min sizes, divider, change callback | `split_view.hpp` |
 | `ConcertinaPanel` | Accordion sections | sections (title+content), expand/collapse/toggle, exclusive mode | `concertina_panel.hpp` |
 | `ModalOverlay` | Modal overlay | backdrop opacity, dismiss-on-backdrop, focus trap, Esc close | `modal.hpp` |
