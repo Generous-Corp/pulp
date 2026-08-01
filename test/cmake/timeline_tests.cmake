@@ -40,7 +40,7 @@ pulp_add_test_suite(pulp-test-timeline-production-mode
 # the document model, and never pulp::playback. A member of the interface that
 # grew into an engine type would fail to build here.
 pulp_add_test_suite(pulp-test-sequencer-ui-host
-    SOURCES test_sequencer_ui_host.cpp
+    SOURCES test_sequencer_ui_host.cpp test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-production
     SOURCES test_playback_production_class.cpp
