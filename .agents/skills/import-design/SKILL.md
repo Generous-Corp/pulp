@@ -27,6 +27,8 @@ exists:
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
+| **"Where did that colour come from?" → did Pulp inject a colour the design never asked for** | `python3 tools/import-design/design_colour_audit.py --capture-dir <design>/ir-browser-capture` |
+| Prove control primitives take the design's colours (seven-test acceptance battery) | `python3 tools/import-design/design_colour_battery.py --import-design <bin> --design <dir> --packs <dir>` |
 
 The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
 outputs, and availability for each), and its digest is generated into CLAUDE.md
@@ -4805,6 +4807,71 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 **Recommending sprite to a user**: don't position it as a "fallback". For designers who chose a specific Figma knob style, sprite IS the right path. Frame it as "pixel-exact PNG (with bleed)" vs "native vector (without bleed)" — the tradeoff is real and per-design.
 
 **Claude Code surfacing**: when someone runs `/import-design` on a Figma file, ask if they want silver (default) or sprite. If they're unsure, default silver and add a note that they can re-import with `--knob-style=sprite` to compare. If they have one specific knob that "needs to look like the Figma", suggest the `@sprite` suffix on that node's name in the Figma file.
+
+## Colour provenance — the render tells you who chose each colour
+
+A browser-solved import composites Chromium's screenshot as the panel backdrop
+and re-renders the controls natively on top. So the two images are pixel-aligned
+over the primary surface, and **the pixels where they differ are exactly the
+pixels Pulp drew itself** — the value arc, the pointer, the meter fill, the
+fader track and thumb. Masking by difference gives a census of what Pulp chose,
+with no geometry model and no list of primitives in it, so a primitive nobody
+enumerated still shows up. `design_colour_audit.py` is that census.
+
+It found the stock constants by their exact values, straight out of the pixels:
+`#404752` navy track and `#EBF0F5` pointer (`DesignedControlSkin`'s defaults),
+`#50C850` meter green, `#6496FF` fader blue, `#1E1E1E` meter body — on a cream
+faceplate whose only accent is `#C4622A`.
+
+Things that made this measurement lie before it was right:
+
+- **A stencil colour is not a paint colour.** `mask-image` and `clip-path`
+  resolve to real colours in the computed styles, but they only ever act as an
+  alpha channel. Admitting a mask's `rgb(0,0,0)` put black in the design's
+  palette, where it then served as a compositing backdrop and legitimised a
+  flat black meter body.
+- **A translucent token is not its full-strength colour.** A declared
+  `rgba(225,235,250,0.1)` highlight is a warm cream once composited; taken at
+  face value it is a near-white that legitimises a white pointer. Composite
+  under-1 alpha over backdrops the design actually PAINTED — compositing over
+  merely-declared colours turns a drop shadow over a never-painted white into a
+  mid grey, and that grey then anchors a neutral axis belonging to no one.
+- **One witness must answer both distances.** Judge a colour on ΔE and on the
+  chromatic part alone (`hypot(Δa*, Δb*)`), but from the *same* design colour.
+  Minimise them independently and a declared white — chroma zero — answers the
+  chromatic distance for every neutral Pulp could draw while some warm
+  near-black answers the lightness one, so a stock `#1E1E1E` scores clean
+  against a design containing neither.
+- **Which distance decided matters.** A cream rendered slightly too bright is
+  the design's colour with a gradient-fidelity problem; a navy on a warm palette
+  is Pulp's own. The chromatic axis separates them, and the audit reports
+  `decided_by` so the two are not filed as the same defect.
+
+Put the thresholds in a measured gap and re-measure it every run. Against the
+reference design the colours Pulp reproduces from the design reach ΔE 0.47 and
+every colour it injected starts at ΔE 2.48 — a factor of five, reported back as
+`margins` so a design that narrows it says so instead of quietly passing.
+
+### Changing a design to see whether Pulp follows
+
+Tests that recolour a token, swap packs, or strip hue all work by changing the
+design and watching the render move — so each has to prove the change reached
+Chromium first. **An `@import` appended to `styles.css` does nothing**: CSS
+requires `@import` to precede every other rule, and the pack's entry sheet ends
+with a `body` rule, so the import is invalid and silently dropped. That produced
+a byte-identical Chromium render and two tests that confidently reported the
+product red for an edit that never landed. Append to
+`tokens/zz-pack-overrides.css` instead — a plain sheet, imported last — and
+compare the variant's `browser.png` against the baseline's before believing any
+verdict. A variant whose reference is unchanged is a broken fixture, never a
+result.
+
+Staging a design under a different pack: `index.html` and `assets/` belong to
+the design, everything else to the pack — and stage the pack's fonts at
+`tokens/fonts/` as well, because `tokens/fonts.css` resolves `url('fonts/…')`
+relative to itself and a font Chromium cannot fetch fails the whole capture with
+`capture-source-unresolved`, not one glyph.
+
 
 ## Native-import gotchas
 

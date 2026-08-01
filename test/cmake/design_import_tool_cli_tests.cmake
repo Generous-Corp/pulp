@@ -281,3 +281,17 @@ if(TARGET pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-import-figma-url
     PROPERTIES LABELS "parser-import")
+
+# Colour-provenance audit: decides whether a colour in a native design render
+# belongs to the design or was injected by Pulp. Registered here because the
+# analyzer is a judgement call encoded in thresholds and palette rules, and
+# every case it covers is one where a wrong rule returned a plausible answer
+# instead of an error. Needs no browser, no build and no render: the image
+# cases are synthesised.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME design-colour-audit-unit COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/import-design/test_design_colour_audit.py")
+    set_tests_properties(design-colour-audit-unit PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "parser-import;design-colour")
+endif()

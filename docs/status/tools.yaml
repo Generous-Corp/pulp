@@ -65,6 +65,30 @@ tools:
     skill: import-design
     docs: guides/importing-designs.md
 
+  - name: design-colour-audit
+    path: tools/import-design/design_colour_audit.py
+    category: visual-compare
+    use_when: Ask whether a native design render contains any colour the design never asked for — a value arc, pointer, meter fill or fader in Pulp's palette rather than the design's.
+    invocation: python3 tools/import-design/design_colour_audit.py --capture-dir <design>/ir-browser-capture [--ir <design>/ir.json] [--json-out report.json] [--annotate mask.png]
+    inputs: A browser-capture directory holding Chromium's reference screenshot, the capture envelope, the DOM snapshot's computed styles, and Pulp's own render under validation-proof/render/. Optionally the DesignIR for per-control boxes.
+    outputs: Two audits — every colour Pulp added judged against the whole design, and every solid mark on a bound control judged for identity against that control's own design values. Per colour a pixel count, a CIE76 dE, a chromatic dCh, and the design colour that justified it. Exit 1 on any finding.
+    caveat: It compares Pulp's render against Chromium's screenshot of the SAME page, so it measures provenance, not correctness — a stock colour that happens to equal one the design painted is indistinguishable from a derived one. Recolour the design (design_colour_battery test 3) or render two packs (test 4) to separate those. Thresholds sit in a measured gap and the run re-reports that gap as `margins`; a thin margin is a warning, not a pass.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
+  - name: design-colour-battery
+    path: tools/import-design/design_colour_battery.py
+    category: visual-compare
+    use_when: Run the seven-test acceptance battery proving imported control primitives take their colours from the design and never from Pulp's own palette.
+    invocation: python3 tools/import-design/design_colour_battery.py --import-design <build>/tools/import-design/pulp-import-design --design <design dir> --packs <design_systems dir> [--tests 1,2,7] [--json-out battery.json]
+    inputs: A built pulp-import-design binary, a browser-solvable design directory carrying a pack (tokens/zz-pack-overrides.css), and optionally a design_systems directory holding two or more packs.
+    outputs: Seven pass/fail lines, each a count rather than a word — foreign colours, controls carrying an invented mark, controls that followed a recoloured token, controls sharing a colour across packs, the instrument's own red/green controls, coloured marks on a greyscale design, and similarity plus colour agreement. A JSON report with every underlying audit.
+    caveat: Each variant is one headless Chromium capture, so a full run is several minutes. Tests 3, 4 and 6 change the design and watch Pulp follow, so each first proves the change reached Chromium — a variant whose reference render is unchanged reports SKIP with the fixture named, never a verdict against the product. Appending an @import to styles.css does NOT work as a variant hook; CSS requires @import before every other rule and the entry sheet ends with a body rule, so the override is silently dropped.
+    availability: always
+    skill: import-design
+    docs: guides/importing-designs.md
+
   - name: montage
     path: tools/import-design/montage.py
     category: visual-compare
