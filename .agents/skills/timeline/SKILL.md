@@ -1369,6 +1369,44 @@ carrying its install hint. Assert the typed envelope and the absence of an
 argument refusal — that is what proves the loop reached the compare stage — and
 leave the measurement to the tool's own suite.
 
+## `std::int64_t` is a different type on Linux and Darwin — never let CTAD see a bare `LL`
+
+`std::int64_t` is **`long` on LP64 Linux** and **`long long` on Darwin**. A bare `0LL` literal is
+`long long` on *both*. So a sibling written with `LL` alongside a `std::int64_t` expression **unifies
+on macOS and diverges on Linux** — and `std::array` class-template argument deduction requires every
+element to have the *same* type, so it fails on exactly one platform:
+
+```cpp
+// BROKEN on Linux, compiles on macOS. kTicksPerQuarter is std::int64_t.
+const std::array windows{
+    std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4},  // pair<long,long> on Linux
+    std::pair{0LL,                  3 * kTicksPerQuarter / 4},  // pair<long long,long>  <-- diverges
+};
+```
+
+GCC reports `no matching function for call to 'array(std::pair<long int, long int>…)'` plus a
+`no type named 'type' in 'struct std::enable_if<false, …>'` — which reads like a container problem
+and is a *type-identity* problem.
+
+**Fix by spelling the element type, not by correcting the literal.** Correcting `0LL` leaves CTAD
+deducing, so the next sibling reintroduces it:
+
+```cpp
+using TrimWindow = std::pair<std::int64_t, std::int64_t>;
+const std::array<TrimWindow, 3> windows{ TrimWindow{…}, TrimWindow{0, …}, TrimWindow{…} };
+```
+
+**Why this class is dangerous here specifically:** the required gate is **macOS**, and there is *no
+macOS signal at all* — the code compiles cleanly on the platform that gates the merge. Only the
+advisory Linux lane can see it.
+
+**Reproduce it without a Linux toolchain** — a standalone TU with `using i64 = long;` in place of
+`std::int64_t` gives the identical deduction error on Apple clang, so the diagnosis is
+positive-controlled locally even though the confirming build is CI's.
+
+Applies to any deduced aggregate over timebase quantities — ticks, frames, sample counts — since
+those are `std::int64_t` throughout.
+
 ## Foreign-format import (interop)
 
 Read [references/dawproject-import.md](references/dawproject-import.md) before
