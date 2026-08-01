@@ -49,14 +49,31 @@ std::string browser_unavailable_human(
     const BrowserDiscoveryResult& discovery) {
     std::ostringstream out;
     const auto& code = discovery.diagnostic.code;
-    if (code == "node-unavailable" || code == "node-incompatible") {
+    const bool node_failure =
+        code == "node-unavailable" || code == "node-incompatible";
+    if (node_failure) {
         out << discovery.diagnostic.message << "\n"
-            << "Install or update Node.js: " << kNodeDownloadUrl << "\n\n"
+            << "Install or update Node.js: " << kNodeDownloadUrl << "\n";
+        if (code == "node-unavailable") {
+            out << "\n"
+                << "An app launched from Finder or Explorer inherits a minimal "
+                   "PATH, so a Node.js\n"
+                << "installed by Homebrew or a version manager is invisible "
+                   "through PATH alone. Pulp\n"
+                << "also looks in the standard install locations directly; "
+                   "none of them held a\n"
+                << "Node.js either.\n";
+        }
+        out << "\n"
             << "Node.js launches the isolated browser-capture helper at import "
                "time only.\n"
             << "It is not embedded in your generated plugin.\n"
             << "Use --offline for the lower-fidelity static/runtime fallback.";
-    } else if (code == "capture-runtime-unavailable") {
+        const auto report = node_search_report(discovery.node);
+        if (!report.empty()) out << "\n\n" << report;
+        return out.str();
+    }
+    if (code == "capture-runtime-unavailable") {
         out << discovery.diagnostic.message << "\n"
             << "Repair the Pulp installation with: pulp upgrade\n\n"
             << "The versioned browser-capture runtime must be installed beside "
@@ -148,6 +165,37 @@ std::string browser_unavailable_json(
                 : "")
         << "\","
         << "\"offline_flag\":\"--offline\","
+        << "\"node\":{"
+        << "\"path\":\""
+        << detail::json_escape(
+               discovery.node.executable
+                   ? discovery.node.executable->string()
+                   : std::string{})
+        << "\","
+        << "\"version\":\"" << detail::json_escape(discovery.node.version)
+        << "\","
+        << "\"source\":\"" << detail::json_escape(discovery.node.source)
+        << "\","
+        << "\"searched\":[";
+    for (std::size_t i = 0; i < discovery.node.searched.size(); ++i) {
+        if (i != 0) out << ",";
+        const auto& location = discovery.node.searched[i];
+        out << "{\"source\":\"" << detail::json_escape(location.source)
+            << "\",\"location\":\""
+            << detail::json_escape(location.location) << "\"}";
+    }
+    out << "],\"attempts\":[";
+    for (std::size_t i = 0; i < discovery.node.attempts.size(); ++i) {
+        if (i != 0) out << ",";
+        const auto& attempt = discovery.node.attempts[i];
+        out << "{\"source\":\"" << detail::json_escape(attempt.source)
+            << "\",\"path\":\""
+            << detail::json_escape(attempt.executable.string())
+            << "\",\"version\":\"" << detail::json_escape(attempt.version)
+            << "\",\"failure\":\"" << detail::json_escape(attempt.failure)
+            << "\"}";
+    }
+    out << "]},"
         << "\"probes\":[";
     for (std::size_t i = 0; i < discovery.probes.size(); ++i) {
         if (i != 0) out << ",";

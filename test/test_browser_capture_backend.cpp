@@ -501,13 +501,25 @@ TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",
         capture::BrowserProbeFailure::node_incompatible,
     });
 
+    discovery.node.failure = capture::NodeResolutionFailure::incompatible;
+    discovery.node.attempts.push_back(
+        {"/usr/local/bin/node", "Homebrew or installer", "20.0.0", 20,
+         "too old (need 22 or newer)"});
+
     auto human = capture::browser_unavailable_human(discovery);
     CHECK(human.find("nodejs.org/en/download") != std::string::npos);
     CHECK(human.find("Install Google Chrome") == std::string::npos);
+    // The failure is about Node.js, so the report names the Node.js
+    // installations that were checked — not the browsers.
+    CHECK(human.find("Node.js installations checked") != std::string::npos);
+    CHECK(human.find("/usr/local/bin/node") != std::string::npos);
+    CHECK(human.find("v20.0.0") != std::string::npos);
+    CHECK(human.find("/Applications/Google Chrome") == std::string::npos);
     auto json = capture::browser_unavailable_json(discovery);
     CHECK(json.find("\"code\":\"node-incompatible\"") != std::string::npos);
     CHECK(json.find("\"remediation\":\"install-node-22\"")
           != std::string::npos);
+    CHECK(json.find("\"version\":\"20.0.0\"") != std::string::npos);
 
     discovery.diagnostic = {
         "capture-runtime-unavailable",
@@ -524,6 +536,50 @@ TEST_CASE("prerequisite guidance preserves Node and capture-runtime failures",
     CHECK(json.find("\"code\":\"capture-runtime-unavailable\"")
           != std::string::npos);
     CHECK(json.find("\"remediation\":\"pulp-upgrade\"")
+          != std::string::npos);
+}
+
+TEST_CASE("a missing Node explains the GUI PATH and lists searched locations",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryResult discovery;
+    discovery.diagnostic = {
+        "node-unavailable",
+        "Node.js was not found; faithful HTML import needs Node.js 22 or "
+        "newer.",
+        "runtime-discovery",
+    };
+    // A browser probe is present and reports the Node failure, exactly as the
+    // real discovery pass leaves it.
+    discovery.probes.push_back({
+        {"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+         capture::BrowserOrigin::system},
+        false,
+        "Google Chrome",
+        "123.0.0.0",
+        123,
+        "Node.js was not found; browser capture needs Node.js 22 or newer",
+        capture::BrowserProbeFailure::node_unavailable,
+    });
+    discovery.node.failure = capture::NodeResolutionFailure::not_found;
+    discovery.node.searched = {
+        {"PATH", "node on PATH"},
+        {"Homebrew", "/opt/homebrew/bin/node"},
+        {"mise", "/home/u/.local/share/mise/installs/node/*/bin/node"},
+    };
+
+    const auto human = capture::browser_unavailable_human(discovery);
+    INFO(human);
+    CHECK(human.find("minimal PATH") != std::string::npos);
+    CHECK(human.find("Searched for Node.js in") != std::string::npos);
+    CHECK(human.find("/opt/homebrew/bin/node") != std::string::npos);
+    CHECK(human.find("mise") != std::string::npos);
+    // The browser list is what made the old message confusing: it named
+    // Chrome when the missing prerequisite was Node.js.
+    CHECK(human.find("Google Chrome") == std::string::npos);
+
+    const auto json = capture::browser_unavailable_json(discovery);
+    CHECK(json.find("\"code\":\"node-unavailable\"") != std::string::npos);
+    CHECK(json.find("\"location\":\"/opt/homebrew/bin/node\"")
           != std::string::npos);
 }
 

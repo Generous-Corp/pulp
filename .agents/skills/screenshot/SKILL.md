@@ -187,6 +187,35 @@ missing comparison backend, not proof that the rendered PNG was empty.
   parses IHDR), so you cannot get RGBA by round-tripping a PNG through it — use
   `render_to_rgba` for raw pixels.
 
+## A standalone `--screenshot` run opens NO audio device
+
+`StandaloneApp::start()` skips the audio backend entirely for a screenshot-only
+launch: no `AudioSystem`, no device, no render callback, and no hardware MIDI
+(nothing drains it without the callback). That is what makes the Standalone
+format capturable on a shared or unattended machine — before it, every capture
+opened a CoreAudio device, so the format could only be verified with a human at
+the desk.
+
+Consequences when you read such a capture:
+
+- **Meters, scopes and any live-signal UI read zero.** That is the mode, not a
+  broken UI. To capture a UI that must show real signal, set
+  `StandaloneConfig::screenshot_keeps_audio` or export
+  `PULP_SCREENSHOT_KEEP_AUDIO=1`.
+- **The Settings tab's device lists are empty** — there is no audio system to
+  enumerate. Capture with the keep-audio opt-in if the device picker is the
+  subject of the shot.
+- **Asking for a live readout in the same run keeps audio on**, because those
+  readouts are produced BY the render callback: `--audio-probe-json`,
+  `--audio-scope-json`, `--audio-capture-wav`, `--audio-capture-rolling`.
+
+Verify a capture really stayed silent by process state, not by listening: while
+the app is alive, `lsof -p <pid>` must not map
+`/System/Library/Components/CoreAudio.component/…/CoreAudio`, and
+`sample <pid> 1` must show no `com.apple.audio.IOThread.client` thread running
+`HALC_ProxyIOContext::IOWorkLoop()`. Both appear when a device IS open, so
+their absence is a two-state result rather than a hopeful one.
+
 ## Render size: use the design's true root, not the source bbox
 
 `--render-size WxH` must match the imported design's **root frame** size, not
