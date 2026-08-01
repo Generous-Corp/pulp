@@ -67,6 +67,7 @@ file(WRITE "${_consumer_source}/main.cpp"
 set(_consumer_configure_args
     -S "${_consumer_source}"
     -B "${_consumer_build}"
+    "-DCMAKE_PREFIX_PATH=${_prefix}"
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
     "-DCMAKE_BUILD_TYPE=${_producer_config}")
 if(_producer_config_lower STREQUAL "debug")
