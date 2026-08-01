@@ -7,11 +7,13 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -153,18 +155,181 @@ TEST_CASE("Explicit standalone subprocess serves its selected compositor frame",
                      static_cast<std::streamsize>(captured_png.size()));
     }
     REQUIRE(std::filesystem::file_size(inspector_png) == captured_png.size());
-    client.disconnect();
+    std::atomic<std::size_t> terminal_requests_started{0};
+    auto request_through_exit = std::async(std::launch::async, [&] {
+        for (;;) {
+            terminal_requests_started.fetch_add(1, std::memory_order_relaxed);
+            auto response =
+                client.request("Inspector.getAgentContext", "{}", std::chrono::seconds(1));
+            if (response.is_error)
+                return response;
+        }
+    });
 
     const auto result = child.wait();
     INFO("stdout=" << result.stdout_output);
     INFO("stderr=" << result.stderr_output);
     REQUIRE_FALSE(result.timed_out);
     REQUIRE(result.exit_code == 0);
+    REQUIRE(request_through_exit.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    const auto terminal_response = request_through_exit.get();
+    REQUIRE(terminal_response.is_error);
+    REQUIRE(terminal_requests_started.load(std::memory_order_relaxed) > 0);
+    client.disconnect();
     const auto exit_capture = read_bytes(exit_png);
     REQUIRE_FALSE(exit_capture.empty());
     REQUIRE(pulp::view::analyze_screenshot_content(exit_capture)
                 .passes_content_floor());
     REQUIRE(reader.list().empty());
+}
+
+TEST_CASE("Application quit drains an in-flight inspector request before teardown",
+          "[standalone][inspect][process][lifecycle][gpu]") {
+    ScratchDir scratch("pulp-inspector-process-app-quit");
+    ScopedEnv runtime_dir("PULP_INSPECTOR_RUNTIME_DIR");
+    ScopedEnv profile("PULP_INSPECT_PROFILE");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    configure_real_window_environment(scratch, "develop");
+
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 10'000;
+    const auto arm = scratch.path / "arm-quit";
+    const auto accepted = scratch.path / "accepted-quit";
+    pulp::platform::ChildProcess child;
+    REQUIRE(child.start(
+        PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,
+        {"--quit-on-request-arm", arm.string(), "--accepted-marker", accepted.string()}, options));
+
+    const auto runtime_path = scratch.path / "runtime";
+    pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
+    std::vector<pulp::inspect::InspectorDiscoveryRecord> records;
+    const auto discovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (records.empty() && child.is_running() &&
+           std::chrono::steady_clock::now() < discovery_deadline) {
+        records = reader.list();
+        if (records.empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (records.empty()) {
+        child.cancel();
+        const auto result = child.wait();
+        INFO("stdout=" << result.stdout_output);
+        INFO("stderr=" << result.stderr_output);
+    }
+    REQUIRE(records.size() == 1);
+
+    pulp::inspect::InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    {
+        std::ofstream marker(arm);
+        marker << "armed\n";
+    }
+    auto request_through_app_quit = std::async(std::launch::async, [&] {
+        return client.request("Inspector.getAgentContext", "{}", std::chrono::seconds(2));
+    });
+
+    const auto result = child.wait();
+    INFO("stdout=" << result.stdout_output);
+    INFO("stderr=" << result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(request_through_app_quit.wait_for(std::chrono::seconds(2)) ==
+            std::future_status::ready);
+    const auto terminal_response = request_through_app_quit.get();
+    REQUIRE(terminal_response.is_error);
+    REQUIRE(std::filesystem::exists(accepted));
+    client.disconnect();
+    REQUIRE(reader.list().empty());
+}
+
+TEST_CASE("Window close drains an accepted pending inspector request before teardown",
+          "[standalone][inspect][process][lifecycle][gpu]") {
+    ScratchDir scratch("pulp-inspector-process-window-close");
+    ScopedEnv runtime_dir("PULP_INSPECTOR_RUNTIME_DIR");
+    ScopedEnv profile("PULP_INSPECT_PROFILE");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    configure_real_window_environment(scratch, "develop");
+
+    const auto arm = scratch.path / "arm-close";
+    const auto accepted = scratch.path / "accepted-close";
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 10'000;
+    pulp::platform::ChildProcess child;
+    REQUIRE(child.start(
+        PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,
+        {"--close-on-request-arm", arm.string(), "--accepted-marker", accepted.string()}, options));
+
+    const auto runtime_path = scratch.path / "runtime";
+    pulp::inspect::InspectorDiscoveryReader reader(runtime_path);
+    std::vector<pulp::inspect::InspectorDiscoveryRecord> records;
+    const auto discovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (records.empty() && child.is_running() &&
+           std::chrono::steady_clock::now() < discovery_deadline) {
+        records = reader.list();
+        if (records.empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (records.empty()) {
+        child.cancel();
+        const auto result = child.wait();
+        INFO("stdout=" << result.stdout_output);
+        INFO("stderr=" << result.stderr_output);
+    }
+    REQUIRE(records.size() == 1);
+
+    pulp::inspect::InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    {
+        std::ofstream marker(arm);
+        marker << "armed\n";
+    }
+    auto request_through_close = std::async(std::launch::async, [&] {
+        return client.request("Inspector.getAgentContext", "{}", std::chrono::seconds(2));
+    });
+
+    const auto result = child.wait();
+    INFO("stdout=" << result.stdout_output);
+    INFO("stderr=" << result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(request_through_close.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    REQUIRE(request_through_close.get().is_error);
+    REQUIRE(std::filesystem::exists(accepted));
+    client.disconnect();
+    REQUIRE(reader.list().empty());
+}
+
+TEST_CASE("Late inspector startup failure makes the standalone process fail",
+          "[standalone][inspect][process][lifecycle][negative][gpu]") {
+    ScratchDir scratch("pulp-inspector-process-startup-failure");
+    ScopedEnv runtime_dir("PULP_INSPECTOR_RUNTIME_DIR");
+    ScopedEnv profile("PULP_INSPECT_PROFILE");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    configure_real_window_environment(scratch, "develop");
+    {
+        std::ofstream blocker(scratch.path / "runtime");
+        blocker << "not a discovery directory\n";
+    }
+
+    const auto unused_capture = scratch.path / "unused.png";
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 10'000;
+    pulp::platform::ChildProcess child;
+    REQUIRE(child.start(PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE,
+                        {"--exit-screenshot", unused_capture.string(), "--frames", "30"}, options));
+
+    const auto result = child.wait();
+    INFO("stdout=" << result.stdout_output);
+    INFO("stderr=" << result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code == 4);
+    REQUIRE_FALSE(std::filesystem::exists(unused_capture));
 }
 
 TEST_CASE("Off-mode standalone subprocess creates no inspector artifact",

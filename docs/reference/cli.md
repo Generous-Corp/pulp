@@ -288,9 +288,17 @@ without a real window or virtual display.
 
 #### Development Inspector profiles
 
-Standalone inspector activation requires a GPU-enabled desktop build. A build
-with `PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime
-disabled even when the protocol/client SDK components are present.
+Standalone inspector activation requires a GPU-enabled desktop build and a
+window host that can drain accepted owning-thread work while its event loop
+exits. Pulp currently supplies that complete host contract in its built-in macOS
+standalone window hosts, for both rendering paths. On Windows and Linux,
+`WindowHost` instances come from an external factory. A factory host that wants
+to support an active inspector profile must override both
+`event_loop_supports_exit_drain()` and `run_event_loop_until()`, keeping its
+owning-thread dispatcher live until the readiness callback returns true. Active
+profiles fail closed when that contract is absent. A build with
+`PULP_ENABLE_GPU=OFF`, or a mobile build, keeps the inspector runtime disabled
+even when the protocol/client SDK components are present.
 
 - `--inspect` enables the `develop` profile for this standalone instance.
 - `--inspect=observe|develop` selects a named capability set.
@@ -305,10 +313,9 @@ record and credential, and displays an `INSPECT <profile>` badge in the live
 window. `PULP_INSPECT_PROFILE` and comma-separated
 `PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
 Plugin scanning, validation, and an ordinary `pulp run` never activate it.
-This first standalone runtime supports in-place scripted-UI hot reload. A
-processor that replaces its entire editor at runtime fails inspector startup
-closed; complete source reattachment for that processor-level swap is a later
-capability-platform phase.
+The standalone runtime supports in-place scripted-UI hot reload. A processor
+that replaces its entire editor at runtime fails inspector startup closed
+because its borrowed sources cannot be reattached atomically.
 
 #### Live Audio Inspector flags
 

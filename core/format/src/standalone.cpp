@@ -1049,13 +1049,18 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // already fired bridge->close(), but application-quit paths can return
     // from the event loop without going through that callback. Close here
     // while the processor is still alive; the call is idempotent.
-    window->run_event_loop();
-
 #if PULP_STANDALONE_INSPECTOR
-    inspector_runtime->stop();
-    const bool inspector_started = !inspector_runtime->startup_failed();
-#endif
-
+    // Application quit can leave the event loop without invoking the window's
+    // close callback. Begin the same fence-gated retirement used by ordinary
+    // window close, then keep the platform's main-thread dispatcher alive until
+    // the accepted operation unwinds and the borrowed state is detached.
+    window->run_event_loop_until([&] {
+        inspector_runtime->stop();
+        return inspector_runtime->try_finish_retirement();
+    });
+    return !inspector_runtime->startup_failed();
+#else
+    window->run_event_loop();
     // Application quit can leave the event loop without invoking the window's
     // close callback. Remove this owner's entry before the bridge/window or
     // processor is torn down; removal is harmless on platforms where no
@@ -1063,9 +1068,6 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
     detail::retire_standalone_editor(*window, *bridge);
     stop();
-#if PULP_STANDALONE_INSPECTOR
-    return inspector_started;
-#else
     return true;
 #endif
 }

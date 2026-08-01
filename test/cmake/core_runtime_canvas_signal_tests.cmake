@@ -331,8 +331,13 @@ pulp_add_test_suite(pulp-test-standalone-inspector
     LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 if(TARGET pulp::inspect AND NOT IOS)
+    target_compile_definitions(pulp-standalone PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
+    target_compile_definitions(pulp-inspect-protocol PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_compile_definitions(pulp-test-standalone-inspector PRIVATE
-        PULP_TEST_STANDALONE_INSPECTOR=1)
+        PULP_TEST_STANDALONE_INSPECTOR=1
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_link_libraries(pulp-test-standalone-inspector PRIVATE
         pulp::inspect-client)
 else()
@@ -340,8 +345,13 @@ else()
         PULP_TEST_STANDALONE_INSPECTOR=0)
 endif()
 if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
+    set_source_files_properties(
+        fixtures/standalone_inspector_process_fixture.cpp
+        PROPERTIES LANGUAGE OBJCXX)
     add_executable(pulp-standalone-inspector-process-fixture
         fixtures/standalone_inspector_process_fixture.cpp)
+    target_compile_definitions(pulp-standalone-inspector-process-fixture PRIVATE
+        PULP_STANDALONE_INSPECTOR_TEST_HOOKS=1)
     target_link_libraries(pulp-standalone-inspector-process-fixture PRIVATE
         pulp::standalone)
 
