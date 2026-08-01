@@ -5,6 +5,7 @@
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 
 #include <compare>
@@ -69,6 +70,8 @@ enum class ModelErrorCode : std::uint8_t {
     UnorderedChordScaleLane,
     InvalidGrooveTemplate,
     InvalidNoteModifier,
+    InvalidMidiLane,
+    DuplicateMidiLaneAddress,
     MissingSequenceReference,
     SequenceReferenceCycle,
     SequenceNestingTooDeep,
@@ -205,28 +208,50 @@ struct NoteEvent {
     std::uint8_t channel = 0;
 };
 
-/// Immutable, start-then-identity-ordered note content with sparse deterministic modifiers.
-class NoteContent {
+/// Immutable MIDI clip content: start-then-identity-ordered notes with sparse
+/// deterministic modifiers, beside the controller and expression streams those
+/// notes sound against.
+///
+/// Notes and lanes are separate storage because they answer different
+/// questions. A note is asked "which notes start inside this block", which
+/// wants events ordered by time across the whole clip. A controller stream is
+/// asked "what was your value at this instant", which wants each stream's own
+/// history, independently searchable, so that seeking never costs a walk over
+/// unrelated streams.
+class MidiContent {
   public:
-    /// Notes alone: no modifiers, and a zero seed. Every note plays once,
-    /// unconditionally.
-    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes);
+    /// Notes alone: no modifiers, no lanes, and a zero seed. Every note plays
+    /// once, unconditionally.
+    static runtime::Result<MidiContent, ModelError> create(std::vector<NoteEvent> notes);
     /// Notes plus their sparse modifier companion array. Each modifier must
     /// name a note in `notes`, must be well-formed, and must not be neutral —
     /// a neutral entry is a second encoding of a note that already plays that
     /// way. `modifier_seed` is the document's authored seed for probability
     /// draws; the same seed always reproduces the same decisions.
-    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes,
+    static runtime::Result<MidiContent, ModelError> create(std::vector<NoteEvent> notes,
                                                            std::vector<NoteModifier> modifiers,
                                                            std::uint64_t modifier_seed);
+    /// Notes, modifiers, seed, and the clip's controller/expression lanes.
+    ///
+    /// Every lane and point identity must be valid and distinct from every
+    /// other identity this content owns, including the note identities, and no
+    /// two lanes may share an address. Lanes are returned in `(address, id)`
+    /// order and their points in `(position, id)` order regardless of the order
+    /// supplied.
+    static runtime::Result<MidiContent, ModelError> create(std::vector<NoteEvent> notes,
+                                                           std::vector<NoteModifier> modifiers,
+                                                           std::uint64_t modifier_seed,
+                                                           std::vector<MidiExpressionLane> lanes);
     /// Returns a new snapshot replacing the note with the same identity.
     ///
+    /// Modifiers, seed, and every lane carry over untouched: replacing a note
+    /// changes what that note plays, never what the clip's controllers say.
     /// Fails if the identity is absent or the replacement note is invalid.
-    runtime::Result<NoteContent, ModelError> replace_note(NoteEvent note) const;
+    runtime::Result<MidiContent, ModelError> replace_note(NoteEvent note) const;
 
     /// Returns notes in canonical `(start, id)` order.
     ///
-    /// The span remains valid while this NoteContent snapshot remains alive.
+    /// The span remains valid while this MidiContent snapshot remains alive.
     std::span<const NoteEvent> notes() const noexcept {
         return data_->notes;
     }
@@ -242,6 +267,20 @@ class NoteContent {
         return data_->modifier_seed;
     }
 
+    /// Controller and expression streams in `(address, id)` order, each lane's
+    /// points in `(position, id)` order.
+    ///
+    /// Both orderings are what makes a seek cheap: the stream is found by
+    /// binary search over this span, and its value at an instant by binary
+    /// search within that lane's points. A clip that authors no controllers
+    /// carries no lanes.
+    std::span<const MidiExpressionLane> lanes() const noexcept {
+        return data_->lanes;
+    }
+
+    /// The lane addressing `address`, or nullptr when the clip authors none.
+    const MidiExpressionLane* lane_for(const MidiLaneAddress& address) const noexcept;
+
     /// The modifier for `note_id`, or nullptr when the note plays by default.
     const NoteModifier* modifier_for(ItemId note_id) const noexcept;
 
@@ -250,9 +289,10 @@ class NoteContent {
         std::vector<NoteEvent> notes;
         std::vector<NoteModifier> modifiers;
         std::uint64_t modifier_seed = 0;
+        std::vector<MidiExpressionLane> lanes;
     };
 
-    explicit NoteContent(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+    explicit MidiContent(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
 
     std::shared_ptr<const Data> data_;
 };
@@ -347,7 +387,7 @@ class OpaqueContent {
 
 /// Exhaustive set of immutable payloads a Clip can own or reference.
 using ClipContent =
-    std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent,
+    std::variant<EmptyContent, MediaRef, MidiContent, RegisteredContent, OpaqueContent,
                  SequenceRef>;
 
 /// Overload set for visiting a ClipContent with **no generic fallback**.
@@ -367,7 +407,7 @@ using ClipContent =
 ///     std::visit(ClipContentCases{
 ///                    [&](const EmptyContent&) { ... },
 ///                    [&](const MediaRef& media) { ... },
-///                    [&](const NoteContent& notes) { ... },
+///                    [&](const MidiContent& notes) { ... },
 ///                    [&](const RegisteredContent& registered) { ... },
 ///                    [&](const OpaqueContent& opaque) { ... },
 ///                },

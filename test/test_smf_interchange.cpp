@@ -70,7 +70,7 @@ SchemaRegistry registered_test_registry() {
     return std::move(registry).value();
 }
 
-NoteContent notes(ItemId note_id, bool modified, std::uint16_t velocity = 0xffffu) {
+MidiContent notes(ItemId note_id, bool modified, std::uint16_t velocity = 0xffffu) {
     NoteEvent note{note_id, TickPosition{0}, TickDuration{kQuarter}, velocity, 60, 0};
     std::vector<NoteModifier> modifiers;
     if (modified) {
@@ -79,7 +79,7 @@ NoteContent notes(ItemId note_id, bool modified, std::uint16_t velocity = 0xffff
         modifier.probability = 0;
         modifiers.push_back(modifier);
     }
-    return take(NoteContent::create({note}, std::move(modifiers), 0));
+    return take(MidiContent::create({note}, std::move(modifiers), 0));
 }
 
 Project lossless_project(std::uint16_t velocity = 0xffffu) {
@@ -155,7 +155,7 @@ std::size_t note_count(const Project& project) {
     REQUIRE(root != nullptr);
     for (const Track& track : root->tracks())
         for (const Clip& clip : track.clips())
-            if (const auto* content = std::get_if<NoteContent>(&clip.content()))
+            if (const auto* content = std::get_if<MidiContent>(&clip.content()))
                 count += content->notes().size();
     return count;
 }
@@ -251,7 +251,7 @@ TEST_CASE("SMF interchange makes low velocity quantization explicit",
     auto imported = import_smf(artifact(exported.value(), "project.mid").bytes);
     REQUIRE(imported);
     const auto& clip = imported.value().project.sequences()[0].tracks()[0].clips()[0];
-    REQUIRE(std::get<NoteContent>(clip.content()).notes()[0].velocity == 516);
+    REQUIRE(std::get<MidiContent>(clip.content()).notes()[0].velocity == 516);
 }
 
 TEST_CASE("SMF interchange drops registered content only after exact consent",

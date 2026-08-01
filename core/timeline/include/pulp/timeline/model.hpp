@@ -695,6 +695,8 @@ enum class ItemKind : std::uint8_t {
     Track,
     Clip,
     Note,
+    MidiLane,
+    MidiLanePoint,
     DevicePlacement,
     AutomationLane,
     AutomationPoint,
@@ -708,8 +710,9 @@ enum class ItemKind : std::uint8_t {
 
 /// Derives the canonical immediate owner from an item's kind and coordinates.
 ///
-/// `lane_id` supplies the owning automation lane, take lane, or scene for
-/// AutomationPoint, Take, and Slot respectively.
+/// `lane_id` supplies the owning automation lane, take lane, MIDI expression
+/// lane, or scene for AutomationPoint, Take, MidiLanePoint, and Slot
+/// respectively.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
                                      ItemId track_id, ItemId clip_id,
                                      ItemId lane_id = {}) noexcept {
@@ -732,9 +735,11 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::TakeLane:
         return track_id;
     case ItemKind::Note:
+    case ItemKind::MidiLane:
         return clip_id;
     case ItemKind::AutomationPoint:
     case ItemKind::Take:
+    case ItemKind::MidiLanePoint:
         return lane_id;
     }
     return {};

@@ -655,7 +655,7 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
         events.push_back(ev);
     }
 
-    auto made = NoteContent::create(std::move(events));
+    auto made = MidiContent::create(std::move(events));
     if (made.is_err())
         return DawProjectImportError{DawProjectImportErrorCode::ModelRejected,
                                      "model rejected notes", made.error()};

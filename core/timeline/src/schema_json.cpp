@@ -54,6 +54,8 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_slots = 250'000;
     limits.max_chord_scale_events = 250'000;
     limits.max_groove_steps = 25'000;
+    limits.max_midi_lanes = 25'000;
+    limits.max_midi_lane_points = 1'000'000;
     return limits;
 }
 

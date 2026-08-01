@@ -273,7 +273,7 @@ make_arrangement_project(const timebase::CompiledTempoMap& compiled_map, std::ui
     const auto note_start = compiled_map.samples_to_ticks({32});
     const auto note_end = compiled_map.samples_to_ticks({40});
     auto notes = value_or_none(
-        timeline::NoteContent::create({{{103}, note_start, note_end - note_start, 0xffff, 60, 0}}));
+        timeline::MidiContent::create({{{103}, note_start, note_end - note_start, 0xffff, 60, 0}}));
     auto note_clip =
         notes ? value_or_none(timeline::Clip::create(
                     {102}, {0}, compiled_map.samples_to_ticks({frames}) - timebase::TickPosition{0},

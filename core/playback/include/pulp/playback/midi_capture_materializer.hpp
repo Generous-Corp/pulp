@@ -25,7 +25,7 @@ struct MidiCaptureMaterializationConfig {
 
 struct MaterializedMidiCapture {
     timebase::TickPosition clip_start;
-    timeline::NoteContent notes;
+    timeline::MidiContent notes;
     std::vector<CapturedMidiEvent> mpe_expression;
     std::uint64_t next_item_id = 1;
 };

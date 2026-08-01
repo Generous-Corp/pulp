@@ -30,7 +30,7 @@ constexpr std::int64_t kQuarter = kTicksPerQuarter;
 /// clips, inline notes, one tempo, one meter. Nothing here is lost, so the plan
 /// must report lossless and run_export must proceed without consent.
 Project note_project() {
-    auto notes = take(NoteContent::create({
+    auto notes = take(MidiContent::create({
         NoteEvent{{20}, {0}, {kQuarter}, 40'000, 60, 0},
         NoteEvent{{21}, {2 * kQuarter}, {kQuarter}, 52'000, 67, 1},
     }));
@@ -124,7 +124,7 @@ std::vector<FlatNote> flatten_notes(const Project& project) {
     REQUIRE(sequence != nullptr);
     for (const Track& track : sequence->tracks())
         for (const Clip& clip : track.clips())
-            if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+            if (const auto* notes = std::get_if<MidiContent>(&clip.content()))
                 for (const NoteEvent& note : notes->notes())
                     out.push_back({clip.start().value + note.start.value, note.duration.value,
                                    note.pitch, note.channel});
@@ -308,7 +308,7 @@ TEST_CASE("consented absolute clips are omitted instead of serialized at zero",
           "[interchange][dawproject][export]") {
     auto absolute = take(Clip::create_absolute(
         {10}, {48'000}, 48'000, {48'000, 1},
-        take(NoteContent::create({NoteEvent{{20}, {0}, {kQuarter}, 0xffffu, 60, 0}}))));
+        take(MidiContent::create({NoteEvent{{20}, {0}, {kQuarter}, 0xffffu, 60, 0}}))));
     auto track = take(Track::create({5}, "absolute", {std::move(absolute)}));
     auto sequence = take(Sequence::create({3}, "arrangement", TickDuration{4 * kQuarter},
                                           {std::move(track)}));

@@ -12,7 +12,7 @@
 namespace pulp::examples::timeline_phase1 {
 
 /// One-bar pattern example. SequencerStateChannel remains the frozen typed
-/// grid/UI transport; the persistent pattern is lowered to timeline NoteContent
+/// grid/UI transport; the persistent pattern is lowered to timeline MidiContent
 /// and ArrangementNoteRenderer feeds a stable SignalGraph MidiInput connected
 /// to the example's audible synth destination.
 class TimelineStepSequencerProcessor final : public format::Processor {

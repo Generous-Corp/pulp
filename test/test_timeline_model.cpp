@@ -108,8 +108,8 @@ template <typename T> T take_value(pulp::runtime::Result<T, ModelError> result) 
     return std::move(result).value();
 }
 
-NoteContent notes(std::vector<NoteEvent> events) {
-    return take_value(NoteContent::create(std::move(events)));
+MidiContent notes(std::vector<NoteEvent> events) {
+    return take_value(MidiContent::create(std::move(events)));
 }
 
 Clip clip(ItemId id, std::int64_t start, std::int64_t duration,
@@ -540,7 +540,7 @@ TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content")
     REQUIRE(track->find_clip({5}) == &track->clips()[1]);
     REQUIRE(track->find_clip({99}) == nullptr);
 
-    const auto& note_content = std::get<NoteContent>(track->find_clip({5})->content());
+    const auto& note_content = std::get<MidiContent>(track->find_clip({5})->content());
     REQUIRE(note_content.notes().size() == 2);
     REQUIRE(note_content.notes()[0].id == ItemId{7});
     REQUIRE(note_content.notes()[1].id == ItemId{8});
@@ -558,7 +558,7 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
     REQUIRE_FALSE(overlap.has_value());
     REQUIRE(overlap.error().code == ModelErrorCode::OverlappingClips);
 
-    auto bad_note = NoteContent::create({{{1}, {0}, {1}, 0xffff, 128, 0}});
+    auto bad_note = MidiContent::create({{{1}, {0}, {1}, 0xffff, 128, 0}});
     REQUIRE_FALSE(bad_note.has_value());
     REQUIRE(bad_note.error().code == ModelErrorCode::InvalidNote);
 
@@ -979,7 +979,7 @@ TEST_CASE("Timeline remap allocates first then fixes internal references") {
 
     const auto* note_clip = track->find_clip(*remapped.ids.find({5}));
     REQUIRE(note_clip != nullptr);
-    const auto& remapped_notes = std::get<NoteContent>(note_clip->content()).notes();
+    const auto& remapped_notes = std::get<MidiContent>(note_clip->content()).notes();
     REQUIRE(remapped_notes[0].id == *remapped.ids.find({7}));
     REQUIRE(remapped_notes[1].id == *remapped.ids.find({8}));
 

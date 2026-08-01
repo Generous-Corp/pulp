@@ -53,7 +53,7 @@ NoteTransformRegistry::preview(const DocumentView& view, WriterToken& writer,
     const auto* clip = track ? track->find_clip(request.clip_id) : nullptr;
     if (!clip)
         return runtime::Err(fail(NoteTransformErrorCode::TargetMissing, request, request.clip_id));
-    const auto* note_content = std::get_if<NoteContent>(&clip->content());
+    const auto* note_content = std::get_if<MidiContent>(&clip->content());
     if (!note_content)
         return runtime::Err(
             fail(NoteTransformErrorCode::WrongTargetKind, request, request.clip_id));
@@ -128,7 +128,7 @@ NoteTransformRegistry::preview(const DocumentView& view, WriterToken& writer,
         return runtime::Err(
             fail(NoteTransformErrorCode::DuplicateOutputIdentity, request, *duplicate));
 
-    auto canonical_output = NoteContent::create(std::move(output));
+    auto canonical_output = MidiContent::create(std::move(output));
     if (!canonical_output) {
         auto error = fail(NoteTransformErrorCode::InvalidOutput, request, request.clip_id);
         error.model_error = canonical_output.error();

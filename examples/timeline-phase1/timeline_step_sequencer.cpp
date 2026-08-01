@@ -208,7 +208,7 @@ make_playback_pattern_project(const state::Snapshot& pattern) {
                              0});
         }
     }
-    auto content = value_or_none(timeline::NoteContent::create(std::move(notes)));
+    auto content = value_or_none(timeline::MidiContent::create(std::move(notes)));
     if (!content)
         return {};
     const auto duration = pattern_duration_ticks(pattern);
