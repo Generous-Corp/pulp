@@ -658,14 +658,45 @@ in `test_timeline_schema_registry.cpp` (`static_assert`ed against
 `test_timeline_command_persistence.cpp` (which asserts one decoded command per
 alternative, in variant order).
 
-### Device neutrality is enforced by the module graph, not by discipline
+### The edit vocabulary sits at the editor rung, and "cannot see `view`" is not why
 
-`EditIntent` (`edit_intent.hpp`) lives in `core/timeline` **because** that module's
-dependency floor is `{timeline, timebase, platform, runtime}` — it cannot link
-`view`, so the header physically cannot name a pointer type. That placement is the
-guarantee. Moving intents "up" into an editor module that *can* see `view` would
-turn a structural impossibility back into a convention people have to remember,
-which is how the touch-retrofit bug class returns.
+`EditIntent` (`core/timeline_editor/include/pulp/timeline_editor/edit_intent.hpp`)
+is device-neutral because the module cannot link `view`, so the header cannot name
+a pointer type. True — but **that fact does not choose where the type lives**, and
+reasoning from it is the trap. Check `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py`: the `timeline_editor`
+row is a strict superset of the `timeline` row, and *neither* admits `view`. The
+neutrality guarantee is identical at both addresses.
+
+The argument that does discriminate runs the other way. `core/timeline`'s floor
+excludes `timeline_editor`, so with the verbs at the editor rung the gate rejects a
+reducer, migration, or serializer that reaches for one — an edge it simply does not
+have while the verbs are in the model, where every file may include them and no
+gate can object. `Draw`/`Erase`/`Move`/`Resize` are hit-test verbs: `Move` and
+`Resize` lower to the *same* command and are distinct only because a front-end
+tells a clip body from its edge. A headless importer, a `.pulpgraph` loader, and a
+plugin that wants only commands should not carry that distinction.
+
+Both directions are pinned by `--selftest`, so neither can be relaxed silently.
+
+Consequences worth knowing before you touch this:
+
+- `pulp-timeline-editor` is **not header-only**. It carries `src/edit_intent.cpp`
+  and is built `-fno-exceptions -fno-rtti` to match `pulp-timeline`. Those flags
+  are the target's own exception-free proof — the rung sits outside
+  `pulp-test-timeline-no-exceptions`, which covers only the portable timeline
+  list, so a TU added here that needs exceptions must fail at its own build.
+- The verbs are therefore **absent from the WAM/WebCLAP lanes**, which compile
+  `PulpTimelineSources.cmake`'s portable list directly and do not link the editor
+  rung. A browser build that wants to lower intents adds the rung; it does not add
+  the file back to the timeline manifest.
+- `GesturePhase` belongs in `core/timeline/command.hpp` by the same test that
+  places the verbs: an undo group opens and closes on a bracket whether or not an
+  editor produced it, so it is transaction-level vocabulary, not a tool verb.
+- `EditIntentHost` (`= SequencerUiHostT<EditIntent>`) is declared beside the
+  vocabulary. `SequencerUiHostT`'s parameter exists so the playback seam and the
+  intent vocabulary can evolve apart; the alias is what keeps that parameter bound
+  to something real instead of only ever meeting a test stand-in.
 
 The corollary for anyone extending this: a front-end resolves device differences
 **before** it builds an intent, and hands the kernel only resolved scalars. Hit

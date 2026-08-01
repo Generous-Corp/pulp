@@ -1154,7 +1154,8 @@ separate target exists for consumers that want manifest handling alone.
 
 ## timeline_editor
 
-Interfaces for building a timeline editor over the document model. Header-only.
+Interfaces for building a timeline editor over the document model, plus the edit
+vocabulary a gesture speaks.
 
 The module exists so an editor view can show a moving playhead, let a user hear
 what they are editing, and hand out the edits a gesture produced — without
@@ -1197,6 +1198,18 @@ Edit intents are the editor's own vocabulary, so intent submission lives on
 `SequencerUiHostT<Intent>`, a thin templated shim over the same interface. The
 non-template base carries the two duties that do not depend on how edits are
 expressed.
+
+`EditIntent` is that vocabulary, and `lower_edit_intent` turns one intent into the
+ordinary `timeline::Transaction` that performs it — `Draw` to `InsertClip`, `Erase`
+to `RemoveClip`, `Move` and `Resize` both to `MoveClip`, since a resize is a move
+whose replacement range changes extent. An intent carries no coordinates, no
+button, and no pointer id: a front-end resolves those against its hit metrics
+first, so mouse, touch, and pen produce identical transactions by construction.
+`EditIntentHost` names the concrete `SequencerUiHostT<EditIntent>` a front-end
+submits to. The verbs live at this rung rather than in the document model so the
+floor check can reject a reducer or serializer that reaches for one; the model's
+floor excludes this module, which is the only direction in which the two rungs
+differ.
 
 `ScriptedUiHost<Intent>` is a host whose playhead is written by the caller and
 which keeps what a view emitted, so an editor is testable with no audio and no
