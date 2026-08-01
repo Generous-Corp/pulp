@@ -1290,12 +1290,23 @@ an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
 ```bash
-pulp inspect
-pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID
-pulp inspect --port 49152
-pulp inspect --command DOM.getDocument
-pulp inspect --command State.getParameters
+pulp inspect profiles --json
+pulp inspect list --json
+pulp inspect capabilities --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --json
+pulp inspect doctor --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --json
+pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --command State.getParameters
+pulp inspect --session SESSION_ID --instance INSTANCE_ID --publication PUBLICATION_ID --command State.setParameter --params '{"id":7,"value":0.75}'
 ```
+
+The agent workflow is `list` → select the exact session/instance/publication →
+`capabilities` → perform a typed read or mutation → reread or capture → report
+the exact identity and evidence. `doctor` combines authenticated capability and
+agent-context probes into one readiness result. The stable JSON envelopes are
+`pulp.inspect.profiles.v1`, `pulp.inspect.sessions.v1`,
+`pulp.inspect.capabilities.v1`, and `pulp.inspect.doctor.v1`.
+The raw `State.setParameter` params object is
+`{"id":7,"value":0.75}`: replace the example ID and value with a parameter
+reported by `State.getParameters`, then reread using the same exact selectors.
 
 Options:
 
@@ -1303,6 +1314,7 @@ Options:
 - `--instance ID` - disambiguate an exact instance when a session ID is shared
 - `--publication ID` - pin one non-reusable publication generation; requires
   `--session` and `--instance`
+- `--json` - emit stable JSON for `profiles`, `list`, `capabilities`, or `doctor`
 - `--host HOST` - filter discovery by loopback host
 - `--port PORT` - filter discovery by port; this never bypasses authentication
 - `--command METHOD` - send one inspector command and print the response
@@ -1321,18 +1333,44 @@ dimensions. Screenshot-capable sessions and clients use a bounded 16 MiB
 message ceiling (large enough for ordinary multi-megabyte compositor PNGs);
 larger responses fail explicitly. `Capture.screenshotNode` remains explicitly
 unavailable.
+
+`--output` saves the JSON response, not the decoded image. Decode it and verify
+the PNG signature explicitly:
+
+```bash
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command Capture.screenshot \
+  --output inspector-screenshot.json
+python3 - <<'PY'
+import base64, json, pathlib
+response = json.loads(pathlib.Path("inspector-screenshot.json").read_text())
+assert response["mimeType"] == "image/png"
+png = base64.b64decode(response["data"], validate=True)
+assert png.startswith(b"\x89PNG\r\n\x1a\n")
+pathlib.Path("inspector-screenshot.png").write_bytes(png)
+PY
+file inspector-screenshot.png
+```
+
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.
+
+The installed `pulp-mcp` links the same authenticated inspector-client library
+as `pulp-cpp`; inspector tools do not shell through a source checkout or parse
+CLI output. `pulp_inspect_list`, `pulp_inspect_capabilities`, and
+`pulp_inspect_context` establish the exact identity and authority used by the
+typed read, parameter-mutation, and screenshot tools.
 
 ### motion
 
 **Status**: experimental
 
-Experimental wrappers around the inspector `Motion.*` protocol. Normal Pulp
-launches do not start this endpoint, and `PULP_MOTION_SERVER` is not
-implemented. The live commands require a Pulp source checkout plus a custom
-fixture that explicitly constructs and wires the inspector server.
+Experimental wrappers around the inspector `Motion.*` protocol. The ordinary
+standalone does not bind `MotionInspector`, including when launched with
+`pulp run --inspect`. Live commands require a custom host/runtime built from a
+Pulp source checkout that binds Motion to authenticated discovery. The
+installed `pulp` wrapper still resolves its sibling `pulp-cpp`.
 
 ```bash
 pulp motion record --view Card --out card-fade.motion.jsonl
@@ -1377,11 +1415,11 @@ authority. Load replay fixtures inside an explicitly owned test host instead.
 
 **Status**: experimental
 
-The live-session `Trace.*` wrappers are experimental. Normal Pulp launches do
-not start their endpoint, and `PULP_TRACE_SERVER` is not implemented. They
-require a Pulp source checkout plus an explicitly owned host that constructs
-`InspectorServer`, wires `DomainHandler`, and publishes authenticated
-discovery. Offline
+The live-session `Trace.*` wrappers are experimental. The ordinary standalone
+does not bind `TraceInspector`, including when launched with
+`pulp run --inspect`. Live commands require a custom host/runtime built from a
+Pulp source checkout that binds Trace to authenticated discovery. The installed
+`pulp` wrapper still resolves its sibling `pulp-cpp`. Offline
 `query --trace`, `fetch`, `doctor`, and `open` remain usable without a live
 inspector session.
 

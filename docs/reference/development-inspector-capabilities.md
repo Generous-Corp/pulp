@@ -10,8 +10,8 @@ factories; an external host must explicitly implement both contracts before
 active inspector profiles are accepted. A run without `--inspect`, a host
 without those contracts,
 a GPU-disabled or mobile build, and every plugin-format launch constructs no
-endpoint. The low-level CLI and MCP clients remain experimental source-checkout
-surfaces.
+endpoint. The installed CLI and MCP clients use the same authenticated shared
+client library and do not require a source checkout.
 
 This page records the checked baseline so public descriptions do not confuse
 code presence with runtime reachability.
@@ -55,8 +55,8 @@ enforced policy definitions. `develop` deliberately excludes `runtime.eval`.
 | Build/link/install | Optional protocol, reader discovery, neutral discovery-path support, publisher/runtime, client, and authoring targets are component-gated and separate from the GPU overlay. Publisher/runtime link closure does not grant reader authority; an installed consumer checks that split, and an ordinary `pulp::format` fixture proves no inspector symbols are present | Per-target shipped-product declaration and final product-manifest proof |
 | Threading | The standalone owner uses bounded owning-thread RPC, responds after timely application, cancels queued work during teardown, and fences started timeouts as `mayHaveApplied` while discarding late responses | Processor-level editor replacement remains fail-closed |
 | Discovery/security | owner-private ephemeral record/token files, exclusive session/instance publication, non-reusable publication generations, exact publication selection, mutual nonce/HMAC transcript proofs, replay rejection, auth/I/O timeouts, teardown, and one-controller lease | None for the explicitly activated standalone path |
-| CLI | `pulp run --inspect[=PROFILE]` selects the explicit runtime profile; the shared typed client performs authenticated publication discovery and acquires a same-connection controller lease for one-shot mutations | Stable list/capabilities/doctor JSON and complete exact multi-session targeting |
-| MCP | Source-tree shell wrapper can reach one unambiguous explicitly activated publication | Direct installed shared client and complete exact multi-session targeting |
+| CLI | `pulp run --inspect[=PROFILE]` selects the explicit runtime profile; installed `pulp` resolves its sibling `pulp-cpp`; profiles/list/capabilities/doctor have stable JSON; every live operation uses exact session/instance/publication targeting through the shared typed client | Typed test-input and telemetry subscription surfaces land in later phases |
+| MCP | Installed `pulp-mcp` uses the same in-process authenticated typed client as the CLI; inspector dispatch does not shell through `pulp inspect` or require source-build paths | Marketplace/fresh-agent evidence remains part of complete-feature validation |
 | Capture/telemetry | Whole-window compositor capture and the value-channel catalog are attached to the standalone session | Node capture and independent bounded live telemetry fan-out |
 | Shipping | The component gate removes inspector targets and CLI commands fail explicitly when disabled; ordinary-format symbol stripping is continuously checked | Per-target declaration, shipped-product manifest, and override proof |
 

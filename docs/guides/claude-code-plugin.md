@@ -64,6 +64,7 @@ examples rather than the full source-tree inventory.
 | `/create <name>` | Scaffold a new plugin or app project |
 | `/status` | Show project status, build state, configuration |
 | `/validate` | Run plugin format validators and validation reports |
+| `/inspect` | Discover, diagnose, and control an explicitly inspector-enabled standalone session |
 | `/seq` | Inspect, validate, edit, explain, import, or consent-gated export of a timeline project |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
@@ -104,11 +105,49 @@ clients) can drive them in one turn instead of multiple shell calls.
 |---|---|
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate` (`screenshot=true` for validation editor PNGs), `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
-| Experimental inspector clients | `pulp_inspect_*`, `pulp_motion_*`, and live-session `pulp_trace_*` wrappers currently require a Pulp source checkout plus a custom host/test fixture that explicitly constructs the server. Normal and installed-user launches do not expose these RPCs. Offline trace query remains usable without an inspector session. |
+| Development Inspector clients | `pulp_inspect_list`, `pulp_inspect_capabilities`, `pulp_inspect_context`, and typed `pulp_inspect_*` reads/mutation/capture use the installed in-process authenticated client against an explicitly enabled standalone; no source checkout or sibling CLI is required. `pulp_motion_*` and live-session `pulp_trace_*` require a custom host/runtime that binds those domains; the ordinary standalone does not. Offline trace query remains usable without a live session. |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
 | Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
+
+For Development Inspector work, launch the standalone explicitly with
+`pulp run --inspect` (`develop`) or `pulp run --inspect=observe` (read-only),
+then use `/inspect` or begin with `pulp_inspect_list`. Copy the exact session, instance, and publication
+identifiers into subsequent calls, check
+`pulp_inspect_capabilities` before acting, and verify mutations with a typed
+reread or `pulp_inspect_screenshot`. Ordinary launches publish no endpoint.
+
+When using the CLI's raw generic command, pass `State.setParameter` an integer
+parameter ID and numeric value, then reread with the same exact selectors:
+
+```bash
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command State.setParameter \
+  --params '{"id":7,"value":0.75}'
+```
+
+`pulp inspect --output` saves a screenshot response as JSON; it does not decode
+the image. A fresh agent can turn that response into a verified PNG exactly as
+follows:
+
+```bash
+pulp inspect --session SESSION_ID --instance INSTANCE_ID \
+  --publication PUBLICATION_ID --command Capture.screenshot \
+  --output inspector-screenshot.json
+python3 - <<'PY'
+import base64, json, pathlib
+response = json.loads(pathlib.Path("inspector-screenshot.json").read_text())
+assert response["mimeType"] == "image/png"
+png = base64.b64decode(response["data"], validate=True)
+assert png.startswith(b"\x89PNG\r\n\x1a\n")
+pathlib.Path("inspector-screenshot.png").write_bytes(png)
+PY
+file inspector-screenshot.png
+```
+
+The `pulp_inspect_screenshot` MCP result exposes the same base64 `data` field;
+decode it and verify the same PNG signature before presenting the artifact.
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through

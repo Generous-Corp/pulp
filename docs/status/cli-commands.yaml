@@ -1100,8 +1100,21 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Experimental client for a custom host/test fixture that explicitly starts an inspector server; normal Pulp launches do not.
+    summary: Discover, diagnose, and control an explicitly inspector-enabled standalone session.
+    subcommands:
+      - name: profiles
+        summary: List the built-in inspector profiles and capability sets
+      - name: list
+        summary: List owner-private live inspector publications
+      - name: capabilities
+        summary: Authenticate and return the selected session's effective policy in the pulp.inspect.capabilities.v1 JSON envelope
+      - name: doctor
+        summary: Prove authentication, capabilities, and live agent context
     args:
+      - name: --json
+        kind: flag
+        required: false
+        description: Emit stable machine-readable JSON for workflow subcommands
       - name: --session
         kind: option
         required: false

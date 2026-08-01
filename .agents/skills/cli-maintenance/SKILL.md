@@ -209,11 +209,13 @@ stays — it is how you reach a remote machine's loopback through an SSH tunnel.
 `test_inspector_server.cpp`'s `[security]` case pins this: loopback must connect
 (the control) and the host's real IPv4 must be refused.
 
-Normal Pulp standalone and plugin-format launches do **not** construct this
-server. `pulp inspect` is currently an experimental client for an explicitly
-hosted custom/test fixture, and the inspector-proxy MCP tools additionally
-shell through a Pulp source checkout's build-tree CLI. Do not describe either
-surface as an installed-user or ordinary `pulp run` workflow. Keep
+Ordinary Pulp standalone runs and plugin-format launches do **not** construct
+this server. An explicitly activated `pulp run --inspect[=PROFILE]` standalone
+does. `pulp inspect` and the installed `pulp-mcp` both use the shared
+`pulp::inspect-client` library for owner-private discovery, exact publication
+selection, mutual authentication, framing, controller leases, and structured
+errors; MCP must never regress to shelling through a source checkout's CLI.
+Keep
 `tools/cli/pulp_cli.cpp`, `cmd_inspect.cpp`,
 `experimental/pulp-rs/src/help.rs`, the slash commands, MCP tool descriptions,
 `docs/reference/cli.md`, and
@@ -223,13 +225,20 @@ client-description claims, including these shipped agent workflows, but does
 not prove runtime construction sites.
 
 **Inspector-proxy MCP tools use a different, lighter pattern than the
-`mcp_tools.cpp`-handler tools above.** `pulp_motion_*` and `pulp_trace_*` do NOT
-have `mcp_tools.cpp` handlers — they **inline-forward** in `pulp_mcp.cpp`'s
-dispatch (an `else if (name == "pulp_X_*" || …)` block that maps each tool to an
-`inspector_method` + `--params '<args_json>'` and shells `pulp inspect --command`).
-So a new inspector-proxy tool needs only: tool JSON in `tools_list_json()`, the
-inline dispatch block, membership in `test/test_mcp_server.cpp`'s expected list,
-and the `docs/guides/claude-code-plugin.md` table — no handler, no `mcp_tools.*`.
+`mcp_tools.cpp`-handler tools above.** `pulp_inspect_*`, `pulp_motion_*`, and
+live `pulp_trace_*` derive name, method, description, schema fields, and
+selector policy from the canonical descriptors in `mcp_inspect_tools.cpp`.
+`mcp_inspector_schema.cpp` renders those descriptors and
+`mcp_inspector_tools.cpp` validates and executes them through the shared
+in-process authenticated client. `pulp_mcp.cpp` contains only the generic live
+handler call. Every live operation except discovery requires exact
+`session_id`/`instance_id`/`publication_id` selectors; mutating tools acquire a
+same-connection controller lease and never use `Runtime.evaluate` as a control
+escape hatch.
+So a new inspector-proxy tool requires one canonical descriptor, any typed
+argument/response handling, registry/schema/dispatch tests, and the
+`docs/guides/claude-code-plugin.md` table — never a duplicate tool table or a
+shell-out arm.
 Parity: a tool whose top-level CLI command already carries a `cli_only` baseline
 entry (e.g. `trace`) needs NO new baseline row; only add an `mcp_only` entry for
 a tool with no CLI peer at all. Client-side CLI verbs with no inspector RPC
