@@ -1,11 +1,13 @@
 #include "transaction_scene_internal.hpp"
 
 #include "sequence_scene_internal.hpp"
+#include "transaction_dispatch_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <array>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace pulp::timeline::detail {
@@ -149,10 +151,7 @@ remove_slot(const Project& project, const RemoveSlot& remove, const Transaction&
 } // namespace
 
 bool is_scene_command(const Command& command) noexcept {
-    return std::holds_alternative<InsertScene>(command) ||
-           std::holds_alternative<RemoveScene>(command) ||
-           std::holds_alternative<InsertSlot>(command) ||
-           std::holds_alternative<RemoveSlot>(command);
+    return std::visit([]<typename T>(const T&) { return is_scene_command_type<T>; }, command);
 }
 
 runtime::Result<SceneCommandReduction, TransactionError>

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.769.0
+    VERSION 0.769.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -438,6 +438,11 @@ endif()
 # ── CMake Module Path (for pulp_add_plugin, pulp_add_app) ──────────────────
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
+
+# Inbound link-floor check. Reads the resolved link graph, so it has to be
+# included after the module targets exist and before the consumers that assert
+# a bound over them (examples/, tools/).
+include(PulpLinkFloor)
 
 # ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
 # pulp-cli unconditionally links pulp::inspect (for `pulp inspect`), and

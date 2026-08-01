@@ -27,6 +27,40 @@ std::string render(const std::vector<ForgeAuditFinding>& findings) {
     return out;
 }
 
+const ForgeCatalogExportNode& require_node(const std::vector<ForgeCatalogExportNode>& nodes,
+                                           std::string_view key) {
+    const auto found = std::find_if(nodes.begin(), nodes.end(),
+                                    [key](const auto& node) { return node.descriptor.key == key; });
+    REQUIRE(found != nodes.end());
+    return *found;
+}
+
+std::set<std::string> realization_modes(const ForgeCatalogExportNode& node) {
+    std::set<std::string> modes;
+    for (const auto& realization : node.realizations)
+        modes.emplace(realization.mode);
+    return modes;
+}
+
+const ForgeCatalogExportRealization& require_realization(const ForgeCatalogExportNode& node,
+                                                         std::string_view mode) {
+    const auto found = std::find_if(node.realizations.begin(), node.realizations.end(),
+                                    [mode](const auto& realization) {
+                                        return realization.mode == mode;
+                                    });
+    REQUIRE(found != node.realizations.end());
+    return *found;
+}
+
+const CustomNodeBakedParam& require_baked_param(
+    const ForgeCatalogExportRealization& realization, pulp::state::ParamID id) {
+    const auto found = std::find_if(realization.baked_params.begin(),
+                                    realization.baked_params.end(),
+                                    [id](const auto& param) { return param.id == id; });
+    REQUIRE(found != realization.baked_params.end());
+    return *found;
+}
+
 } // namespace
 
 TEST_CASE("fuzz descriptors agree with the DSP they annotate", "[forge][catalog]") {
@@ -237,8 +271,7 @@ TEST_CASE("a blank description is a failure", "[forge][catalog]") {
 TEST_CASE("two catalog entries sharing a node key is a failure", "[forge][catalog]") {
     const auto descriptor = fuzz::descriptor();
 
-    const auto findings =
-        audit_forge_catalog_membership({descriptor, descriptor}, {"fuzz"});
+    const auto findings = audit_forge_catalog_membership({descriptor, descriptor}, {"fuzz"});
     INFO(render(findings));
     REQUIRE(has_fault(findings, ForgeAuditFault::duplicate_key));
 }
@@ -295,9 +328,8 @@ TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[for
         }
     }
 
-    const auto fuzz_node =
-        std::find_if(nodes.begin(), nodes.end(),
-                     [](const auto& node) { return node.descriptor.key == "fuzz"; });
+    const auto fuzz_node = std::find_if(
+        nodes.begin(), nodes.end(), [](const auto& node) { return node.descriptor.key == "fuzz"; });
     REQUIRE(fuzz_node != nodes.end());
     const auto* mix = find_param(fuzz_node->descriptor, "mix");
     REQUIRE(mix != nullptr);
@@ -320,6 +352,38 @@ TEST_CASE("every declared export realization is constructed and type checked", "
     const auto findings = audit_forge_catalog_export(nodes);
     INFO(render(findings));
     REQUIRE(has_fault(findings, ForgeAuditFault::mismatched_type_id));
+}
+
+TEST_CASE("dynamic Forge families export every supported finite realization", "[forge][catalog]") {
+    const auto nodes = forge_catalog_export_nodes();
+
+    REQUIRE(realization_modes(require_node(nodes, "feedforward_compressor")) ==
+            std::set<std::string>{"lookahead_10ms", "lookahead_3ms", "zero_lookahead"});
+    REQUIRE(realization_modes(require_node(nodes, "vca_compressor")) ==
+            std::set<std::string>{"default", "lookahead_10ms_k4", "lookahead_3ms_k4",
+                                  "zero_latency_k2", "zero_latency_k8"});
+    REQUIRE(realization_modes(require_node(nodes, "delay_vibrato")) ==
+            std::set<std::string>{"8", "default"});
+    REQUIRE(realization_modes(require_node(nodes, "flanger")) ==
+            std::set<std::string>{"barberpole", "classic", "through_zero", "through_zero_1ms",
+                                  "through_zero_2ms", "through_zero_8ms"});
+    REQUIRE(realization_modes(require_node(nodes, "tape_machine")) ==
+            std::set<std::string>{"ampex", "ampex_7_5ips", "ampex_7_5ips_pre_echo",
+                                  "ampex_pre_echo", "cassette", "cassette_pre_echo", "studer",
+                                  "studer_30ips", "studer_30ips_pre_echo", "studer_7_5ips",
+                                  "studer_7_5ips_pre_echo", "studer_pre_echo"});
+
+    const auto& flanger = require_node(nodes, "flanger");
+    const auto* depth = find_param(flanger.descriptor, "depth_ms");
+    REQUIRE(depth != nullptr);
+    const auto& one_ms = require_baked_param(require_realization(flanger, "through_zero_1ms"),
+                                             depth->id);
+    REQUIRE(one_ms.max_value == 1.0f);
+    REQUIRE(one_ms.default_value == 1.0f);
+    const auto& two_ms = require_baked_param(require_realization(flanger, "through_zero_2ms"),
+                                             depth->id);
+    REQUIRE(two_ms.max_value == 2.0f);
+    REQUIRE(two_ms.default_value == 1.5f);
 }
 
 TEST_CASE("a declared export realization cannot be omitted", "[forge][catalog]") {
@@ -350,8 +414,7 @@ TEST_CASE("the committed installed-artifact snapshot matches the audited seriali
     REQUIRE(findings.empty());
 
     const std::string serialized = serialize_forge_catalog_json(nodes);
-    std::ifstream input(std::string(PULP_SOURCE_DIR) +
-                            "/docs/status/forge-catalog.json",
+    std::ifstream input(std::string(PULP_SOURCE_DIR) + "/docs/status/forge-catalog.json",
                         std::ios::binary);
     REQUIRE(input);
     const std::string snapshot{std::istreambuf_iterator<char>(input),
@@ -359,12 +422,9 @@ TEST_CASE("the committed installed-artifact snapshot matches the audited seriali
     REQUIRE(snapshot == serialized);
 
     // Pin the consumer-facing joins that are easy to accidentally flatten.
-    REQUIRE(serialized.find("\"schema\": \"pulp.forge-catalog.v1\"") !=
-            std::string::npos);
+    REQUIRE(serialized.find("\"schema\": \"pulp.forge-catalog.v1\"") != std::string::npos);
     REQUIRE(serialized.find("\"settings\": {") != std::string::npos);
     REQUIRE(serialized.find("\"contracts\": [") != std::string::npos);
-    REQUIRE(serialized.find("\"realization_modes\": [\"studer\"]") !=
-            std::string::npos);
-    REQUIRE(serialized.find("\"realization_modes\": [\"cassette\"]") !=
-            std::string::npos);
+    REQUIRE(serialized.find("\"realization_modes\": [\"studer_7_5ips\"") != std::string::npos);
+    REQUIRE(serialized.find("\"cassette\", \"cassette_pre_echo\"]") != std::string::npos);
 }

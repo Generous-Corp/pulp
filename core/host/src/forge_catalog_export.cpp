@@ -118,32 +118,26 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         });
     add(saturator::saturator_descriptor(),
         {
-            realization("tanh_adaa",
-                        saturator::make_saturator_node(saturator::Shape::tanh_soft,
+            realization("tanh_adaa", saturator::make_saturator_node(saturator::Shape::tanh_soft,
                                                        saturator::AliasPolicy::adaa)),
             realization("tanh_x2",
                         saturator::make_saturator_node(saturator::Shape::tanh_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
-            realization("tanh_off",
-                        saturator::make_saturator_node(saturator::Shape::tanh_soft,
+            realization("tanh_off", saturator::make_saturator_node(saturator::Shape::tanh_soft,
                                                        saturator::AliasPolicy::off)),
-            realization("atan_adaa",
-                        saturator::make_saturator_node(saturator::Shape::atan_soft,
+            realization("atan_adaa", saturator::make_saturator_node(saturator::Shape::atan_soft,
                                                        saturator::AliasPolicy::adaa)),
             realization("atan_x2",
                         saturator::make_saturator_node(saturator::Shape::atan_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
-            realization("atan_off",
-                        saturator::make_saturator_node(saturator::Shape::atan_soft,
+            realization("atan_off", saturator::make_saturator_node(saturator::Shape::atan_soft,
                                                        saturator::AliasPolicy::off)),
-            realization("cubic_adaa",
-                        saturator::make_saturator_node(saturator::Shape::cubic_soft,
+            realization("cubic_adaa", saturator::make_saturator_node(saturator::Shape::cubic_soft,
                                                        saturator::AliasPolicy::adaa)),
             realization("cubic_x2",
                         saturator::make_saturator_node(saturator::Shape::cubic_soft,
                                                        saturator::AliasPolicy::oversample_2x)),
-            realization("cubic_off",
-                        saturator::make_saturator_node(saturator::Shape::cubic_soft,
+            realization("cubic_off", saturator::make_saturator_node(saturator::Shape::cubic_soft,
                                                        saturator::AliasPolicy::off)),
             realization("sinh_arc_adaa",
                         saturator::make_saturator_node(saturator::Shape::sinh_arc,
@@ -158,8 +152,7 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
 
     add(forge_lofi::analog_vcf_descriptor(),
         {
-            realization("juno",
-                        forge_lofi::make_analog_vcf_node(signal::AnalogVcf::Voicing::juno)),
+            realization("juno", forge_lofi::make_analog_vcf_node(signal::AnalogVcf::Voicing::juno)),
             realization("jupiter",
                         forge_lofi::make_analog_vcf_node(signal::AnalogVcf::Voicing::jupiter)),
             realization("prophet5",
@@ -170,61 +163,47 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
 
     add(character_delay::character_delay_descriptor(),
         {
-            realization("clean",
-                        character_delay::make_character_delay_node(
+            realization("clean", character_delay::make_character_delay_node(
                             character_delay::Character::clean)),
-            realization("vintage",
-                        character_delay::make_character_delay_node(
+            realization("vintage", character_delay::make_character_delay_node(
                             character_delay::Character::vintage_digital)),
             realization("tape",
                         character_delay::make_character_delay_node(
-                            character_delay::Character::tape,
-                            character_delay::TapeTier::standard)),
+                            character_delay::Character::tape, character_delay::TapeTier::standard)),
             realization("tape_physical",
                         character_delay::make_character_delay_node(
-                            character_delay::Character::tape,
-                            character_delay::TapeTier::physical)),
-            realization("bbd",
-                        character_delay::make_character_delay_node(
-                            character_delay::Character::bbd)),
-            realization("diffusion",
-                        character_delay::make_character_delay_node(
+                            character_delay::Character::tape, character_delay::TapeTier::physical)),
+            realization(
+                "bbd", character_delay::make_character_delay_node(character_delay::Character::bbd)),
+            realization("diffusion", character_delay::make_character_delay_node(
                             character_delay::Character::diffusion)),
         });
 
     add(distortion::distortion_descriptor(),
         {
             realization("to_ground_x1",
-                        distortion::make_distortion_node(
-                            distortion::Topology::to_ground,
+                        distortion::make_distortion_node(distortion::Topology::to_ground,
                             distortion::OversampleTier::x1)),
             realization("to_ground_x2",
-                        distortion::make_distortion_node(
-                            distortion::Topology::to_ground,
+                        distortion::make_distortion_node(distortion::Topology::to_ground,
                             distortion::OversampleTier::x2)),
             realization("to_ground_x4",
-                        distortion::make_distortion_node(
-                            distortion::Topology::to_ground,
+                        distortion::make_distortion_node(distortion::Topology::to_ground,
                             distortion::OversampleTier::x4)),
             realization("to_ground_x8",
-                        distortion::make_distortion_node(
-                            distortion::Topology::to_ground,
+                        distortion::make_distortion_node(distortion::Topology::to_ground,
                             distortion::OversampleTier::x8)),
             realization("in_loop_x1",
-                        distortion::make_distortion_node(
-                            distortion::Topology::in_loop,
+                        distortion::make_distortion_node(distortion::Topology::in_loop,
                             distortion::OversampleTier::x1)),
             realization("in_loop_x2",
-                        distortion::make_distortion_node(
-                            distortion::Topology::in_loop,
+                        distortion::make_distortion_node(distortion::Topology::in_loop,
                             distortion::OversampleTier::x2)),
             realization("in_loop_x4",
-                        distortion::make_distortion_node(
-                            distortion::Topology::in_loop,
+                        distortion::make_distortion_node(distortion::Topology::in_loop,
                             distortion::OversampleTier::x4)),
             realization("in_loop_x8",
-                        distortion::make_distortion_node(
-                            distortion::Topology::in_loop,
+                        distortion::make_distortion_node(distortion::Topology::in_loop,
                             distortion::OversampleTier::x8)),
         });
 
@@ -249,69 +228,62 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add_drum(forge_drum::EngineId::fm8);
 
     add(dynamics::feedforward_compressor_descriptor(),
-        {realization("zero_lookahead", dynamics::make_feedforward_compressor_node())});
+        {realization("zero_lookahead", dynamics::make_feedforward_compressor_node(0.0f)),
+         realization("lookahead_3ms", dynamics::make_feedforward_compressor_node(3.0f)),
+         realization("lookahead_10ms", dynamics::make_feedforward_compressor_node(10.0f))});
     add(dynamics::vca::vca_compressor_descriptor(),
-        {realization("default", dynamics::vca::make_vca_compressor_node())});
+        {realization("default", dynamics::vca::make_vca_compressor_node(0.0f, 4.0)),
+         realization("lookahead_3ms_k4", dynamics::vca::make_vca_compressor_node(3.0f, 4.0)),
+         realization("lookahead_10ms_k4", dynamics::vca::make_vca_compressor_node(10.0f, 4.0)),
+         realization("zero_latency_k2", dynamics::vca::make_vca_compressor_node(0.0f, 2.0)),
+         realization("zero_latency_k8", dynamics::vca::make_vca_compressor_node(0.0f, 8.0))});
     add(dynamics::fet::fet_compressor_descriptor(),
         {realization("default", dynamics::fet::make_fet_compressor_node())});
     add(dynamics::diode::diode_bridge_compressor_descriptor(),
         {
-            realization("feedback",
-                        dynamics::diode::make_diode_bridge_compressor_node(true)),
-            realization("feedforward",
-                        dynamics::diode::make_diode_bridge_compressor_node(false)),
+            realization("feedback", dynamics::diode::make_diode_bridge_compressor_node(true)),
+            realization("feedforward", dynamics::diode::make_diode_bridge_compressor_node(false)),
         });
 
     add(modulation::frequency_shifter_descriptor(),
         {realization("default", modulation::make_frequency_shifter_node())});
     add(modulation::chorus::chorus_descriptor(),
         {
-            realization("ce2_clean",
-                        modulation::chorus::make_chorus_node(
+            realization("ce2_clean", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::ce2,
                             modulation::chorus::JunoMode::mode_I, false)),
-            realization("ce2_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("ce2_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::ce2,
                             modulation::chorus::JunoMode::mode_I, true)),
-            realization("juno_i_clean",
-                        modulation::chorus::make_chorus_node(
+            realization("juno_i_clean", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I, false)),
-            realization("juno_i_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("juno_i_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I, true)),
-            realization("juno_ii_clean",
-                        modulation::chorus::make_chorus_node(
+            realization("juno_ii_clean", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_II, false)),
-            realization("juno_ii_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("juno_ii_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_II, true)),
             realization("juno_i_ii_clean",
                         modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I_plus_II, false)),
-            realization("juno_i_ii_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("juno_i_ii_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I_plus_II, true)),
-            realization("dimension_d_clean",
-                        modulation::chorus::make_chorus_node(
+            realization("dimension_d_clean", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::dimension_d,
                             modulation::chorus::JunoMode::mode_I, false)),
-            realization("dimension_d_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("dimension_d_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::dimension_d,
                             modulation::chorus::JunoMode::mode_I, true)),
-            realization("tri_chorus_clean",
-                        modulation::chorus::make_chorus_node(
+            realization("tri_chorus_clean", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::tri_chorus,
                             modulation::chorus::JunoMode::mode_I, false)),
-            realization("tri_chorus_bbd",
-                        modulation::chorus::make_chorus_node(
+            realization("tri_chorus_bbd", modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::tri_chorus,
                             modulation::chorus::JunoMode::mode_I, true)),
         });
@@ -324,8 +296,8 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
             realization("twelve", modulation::phaser::make_phaser_node(12)),
         });
     add(modulation::vibrato::delay_line::delay_vibrato_descriptor(),
-        {realization("default",
-                     modulation::vibrato::delay_line::make_delay_vibrato_node())});
+        {realization("default", modulation::vibrato::delay_line::make_delay_vibrato_node(4.0f)),
+         realization("8", modulation::vibrato::delay_line::make_delay_vibrato_node(8.0f))});
     add(modulation::vibrato::phase::phase_vibrato_descriptor(),
         {
             realization("one", modulation::vibrato::phase::make_phase_vibrato_node(1)),
@@ -338,14 +310,17 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(modulation::flanger::flanger_descriptor(),
         {
             realization("classic",
-                        modulation::flanger::make_flanger_node(
-                            modulation::flanger::Mode::classic)),
-            realization("through_zero",
-                        modulation::flanger::make_flanger_node(
+                        modulation::flanger::make_flanger_node(modulation::flanger::Mode::classic)),
+            realization("through_zero", modulation::flanger::make_flanger_node(
                             modulation::flanger::Mode::through_zero)),
-            realization("barberpole",
-                        modulation::flanger::make_flanger_node(
+            realization("barberpole", modulation::flanger::make_flanger_node(
                             modulation::flanger::Mode::barberpole)),
+            realization("through_zero_1ms", modulation::flanger::make_flanger_node(
+                                                modulation::flanger::Mode::through_zero, 1.0)),
+            realization("through_zero_2ms", modulation::flanger::make_flanger_node(
+                                                modulation::flanger::Mode::through_zero, 2.0)),
+            realization("through_zero_8ms", modulation::flanger::make_flanger_node(
+                                                modulation::flanger::Mode::through_zero, 8.0)),
         });
     add(modulation::leslie::leslie_descriptor(),
         {realization("default", modulation::leslie::make_leslie_node())});
@@ -356,48 +331,34 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         {
             realization("room", forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::room)),
             realization("hall", forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::hall)),
-            realization("galaxy",
-                        forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::galaxy)),
-            realization("shimmer",
-                        forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::shimmer)),
+            realization("galaxy", forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::galaxy)),
+            realization("shimmer", forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::shimmer)),
             realization("lofi", forge_fdn::make_fdn_reverb_node(forge_fdn::fdn::Mode::lofi)),
         });
 
-    add(forge_lofi::delay_descriptor(),
-        {realization("default", forge_lofi::make_delay_node())});
+    add(forge_lofi::delay_descriptor(), {realization("default", forge_lofi::make_delay_node())});
     add(forge_lofi::filter_descriptor(),
         {
-            realization("lowpass",
-                        forge_lofi::make_filter_node(signal::Svf::Mode::lowpass)),
-            realization("highpass",
-                        forge_lofi::make_filter_node(signal::Svf::Mode::highpass)),
-            realization("bandpass",
-                        forge_lofi::make_filter_node(signal::Svf::Mode::bandpass)),
-            realization("notch",
-                        forge_lofi::make_filter_node(signal::Svf::Mode::notch)),
+            realization("lowpass", forge_lofi::make_filter_node(signal::Svf::Mode::lowpass)),
+            realization("highpass", forge_lofi::make_filter_node(signal::Svf::Mode::highpass)),
+            realization("bandpass", forge_lofi::make_filter_node(signal::Svf::Mode::bandpass)),
+            realization("notch", forge_lofi::make_filter_node(signal::Svf::Mode::notch)),
         });
     add(forge_lofi::waveshaper_descriptor(),
         {realization("default", forge_lofi::make_waveshaper_node())});
-    add(forge_lofi::drywet_descriptor(),
-        {realization("default", forge_lofi::make_drywet_node())});
-    add(forge_lofi::noise_descriptor(),
-        {realization("default", forge_lofi::make_noise_node())});
+    add(forge_lofi::drywet_descriptor(), {realization("default", forge_lofi::make_drywet_node())});
+    add(forge_lofi::noise_descriptor(), {realization("default", forge_lofi::make_noise_node())});
     add(forge_lofi::bitcrush_descriptor(),
         {realization("default", forge_lofi::make_bitcrush_node())});
-    add(forge_lofi::trim_descriptor(),
-        {realization("default", forge_lofi::make_trim_node())});
+    add(forge_lofi::trim_descriptor(), {realization("default", forge_lofi::make_trim_node())});
     add(forge_lofi::ping_pong_descriptor(),
         {realization("default", forge_lofi::make_ping_pong_node())});
-    add(forge_lofi::reverb_descriptor(),
-        {realization("default", forge_lofi::make_reverb_node())});
+    add(forge_lofi::reverb_descriptor(), {realization("default", forge_lofi::make_reverb_node())});
     add(forge_lofi::compressor_descriptor(),
         {realization("default", forge_lofi::make_compressor_node())});
-    add(forge_lofi::gate_descriptor(),
-        {realization("default", forge_lofi::make_gate_node())});
-    add(forge_lofi::lfo_descriptor(),
-        {realization("default", forge_lofi::make_lfo_node())});
-    add(forge_lofi::vca_descriptor(),
-        {realization("default", forge_lofi::make_vca_node())});
+    add(forge_lofi::gate_descriptor(), {realization("default", forge_lofi::make_gate_node())});
+    add(forge_lofi::lfo_descriptor(), {realization("default", forge_lofi::make_lfo_node())});
+    add(forge_lofi::vca_descriptor(), {realization("default", forge_lofi::make_vca_node())});
     add(forge_lofi::env_follower_descriptor(),
         {realization("default", forge_lofi::make_env_follower_node())});
     add(forge_lofi::filter_cv_descriptor(),
@@ -406,10 +367,8 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         {realization("default", forge_lofi::make_delay_cv_node())});
     add(forge_lofi::auto_pan_descriptor(),
         {realization("default", forge_lofi::make_auto_pan_node())});
-    add(forge_lofi::width_descriptor(),
-        {realization("default", forge_lofi::make_width_node())});
-    add(forge_lofi::phaser_descriptor(),
-        {realization("default", forge_lofi::make_phaser_node())});
+    add(forge_lofi::width_descriptor(), {realization("default", forge_lofi::make_width_node())});
+    add(forge_lofi::phaser_descriptor(), {realization("default", forge_lofi::make_phaser_node())});
 
     add(forge_modulation::mod_lfo_descriptor(),
         {realization("default", forge_modulation::make_mod_lfo_node())});
@@ -422,8 +381,7 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
     add(forge_modulation::mod_env_descriptor(),
         {realization("default", forge_modulation::make_mod_env_node())});
 
-    add(pitch::whammy::descriptor(),
-        {realization("default", pitch::whammy::make_whammy_node())});
+    add(pitch::whammy::descriptor(), {realization("default", pitch::whammy::make_whammy_node())});
     add(pitch::harmony::descriptor(),
         {realization("default", pitch::harmony::make_harmony_engine_node())});
 
@@ -431,11 +389,9 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
         {realization("default", sequencing::stage_seq::make_stage_seq_node())});
     add(sequencing::cartesian::descriptor(),
         {
-            realization("cartesian",
-                        sequencing::cartesian::make_cartesian_walk_node(
+            realization("cartesian", sequencing::cartesian::make_cartesian_walk_node(
                             sequencing::cartesian::default_grid(), false)),
-            realization("row_major",
-                        sequencing::cartesian::make_cartesian_walk_node(
+            realization("row_major", sequencing::cartesian::make_cartesian_walk_node(
                             sequencing::cartesian::default_grid(), true)),
         });
     add(sequencing::rungler::descriptor(),
@@ -461,22 +417,18 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
 
     add(synthesis::additive::descriptor(),
         {
-            realization("organ",
-                        synthesis::additive::make_additive_bank_node(
+            realization("organ", synthesis::additive::make_additive_bank_node(
                             synthesis::additive::Voice::organ)),
-            realization("bell",
-                        synthesis::additive::make_additive_bank_node(
+            realization("bell", synthesis::additive::make_additive_bank_node(
                             synthesis::additive::Voice::bell)),
         });
     add(synthesis::vocoder::descriptor(),
         {realization("default", synthesis::vocoder::make_vocoder_node())});
     add(synthesis::cyclic::descriptor(),
         {
-            realization("short",
-                        synthesis::cyclic::make_cyclic_stretch_node(
+            realization("short", synthesis::cyclic::make_cyclic_stretch_node(
                             synthesis::cyclic::Regime::short_frame)),
-            realization("long",
-                        synthesis::cyclic::make_cyclic_stretch_node(
+            realization("long", synthesis::cyclic::make_cyclic_stretch_node(
                             synthesis::cyclic::Regime::long_frame)),
         });
     add(synthesis::granular::descriptor(),
@@ -484,11 +436,29 @@ std::vector<ForgeCatalogExportNode> forge_catalog_export_nodes() {
 
     add(tape::descriptor(),
         {
+            realization("ampex_7_5ips",
+                        tape::make_tape_machine_node(tape::Archetype::ampex_350_440, 7.5)),
+            realization("ampex_7_5ips_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::ampex_350_440, 7.5, true)),
             realization("ampex",
-                        tape::make_tape_machine_node(tape::Archetype::ampex_350_440)),
-            realization("studer", tape::make_tape_machine_node(tape::Archetype::studer_a800)),
+                        tape::make_tape_machine_node(tape::Archetype::ampex_350_440, 15.0)),
+            realization("ampex_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::ampex_350_440, 15.0, true)),
+            realization("studer_7_5ips",
+                        tape::make_tape_machine_node(tape::Archetype::studer_a800, 7.5)),
+            realization("studer_7_5ips_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::studer_a800, 7.5, true)),
+            realization("studer", tape::make_tape_machine_node(tape::Archetype::studer_a800, 15.0)),
+            realization("studer_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::studer_a800, 15.0, true)),
+            realization("studer_30ips",
+                        tape::make_tape_machine_node(tape::Archetype::studer_a800, 30.0)),
+            realization("studer_30ips_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::studer_a800, 30.0, true)),
             realization("cassette",
-                        tape::make_tape_machine_node(tape::Archetype::cassette_deck)),
+                        tape::make_tape_machine_node(tape::Archetype::cassette_deck, 1.875)),
+            realization("cassette_pre_echo",
+                        tape::make_tape_machine_node(tape::Archetype::cassette_deck, 1.875, true)),
         });
 
     add(wavetable::descriptor(),
