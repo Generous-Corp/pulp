@@ -220,11 +220,22 @@ class InspectorTruthCheckTests(unittest.TestCase):
             "Connect to a running plugin inspector\n", encoding="utf-8"
         )
         (root / "tools/mcp/pulp_mcp.cpp").write_text(
-            '"name":"pulp_inspect_dom","description":"Live plugin inspector"\n',
+            '"name":"pulp_inspect_dom","description":"Experimental '
+            'source-checkout client. Requires a custom host/test fixture that '
+            'explicitly constructs an inspector endpoint"\n'
+            '"name":"pulp_inspect_params","description":"Live plugin inspector"\n',
+            encoding="utf-8",
+        )
+        capability_doc = root / "docs/reference/development-inspector-capabilities.md"
+        capability_doc.write_text(
+            capability_doc.read_text(encoding="utf-8")
+            + "A normal `pulp run` constructs no network session.\n",
             encoding="utf-8",
         )
         errors = " ".join(self.check_root(root))
         self.assertIn("stale claim", errors)
+        self.assertIn("A normal `pulp run`", errors)
+        self.assertIn("Requires a custom host/test fixture", errors)
         self.assertIn("source-checkout-only", errors)
 
     def test_rejects_obsolete_unauthenticated_transport_claims(self) -> None:
