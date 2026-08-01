@@ -8,6 +8,7 @@
 #include "inspector_container_report.hpp"
 #include "inspector_shipping_report.hpp"
 #include "json_writer.hpp"
+#include "mac_runtime_validators.hpp"
 #include "shell_redirect.hpp"
 #include "xcode_developer_path.hpp"
 
@@ -1943,8 +1944,14 @@ static int ship_share(const std::vector<std::string>& args,
         }
         pulp::cli::inspector_shipping::Report inspector_report;
         if (ext == ".app") {
-            const auto executable = fs::path(input) / "Contents/MacOS" /
-                fs::path(input).stem();
+            const auto executable =
+                pulp::cli::mac_runtime::resolve_standalone_executable(
+                    input, pulp::cli::mac_runtime::make_default_env());
+            if (executable.empty()) {
+                std::cerr << "pulp ship share: could not resolve CFBundleExecutable "
+                             "for inspector evidence scan: " << input << "\n";
+                return 2;
+            }
             inspector_report =
                 pulp::cli::inspector_shipping::load_exact_artifact_report(
                     executable, executable.parent_path());

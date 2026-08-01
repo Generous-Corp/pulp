@@ -449,6 +449,7 @@ catch_discover_tests(pulp-test-cli-validator-discovery)
 add_executable(pulp-test-cli-mac-runtime-validators
     test_cli_mac_runtime_validators.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
 )
 target_include_directories(pulp-test-cli-mac-runtime-validators PRIVATE
     ${CMAKE_SOURCE_DIR}

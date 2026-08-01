@@ -192,6 +192,8 @@ TEST_CASE("inspector evidence rejects standalone artifacts without copied sideca
           std::string::npos);
 
     fs::remove(temporary.path / "pulp-inspector-manifests" / "Missing.json");
+    write_artifact(executable,
+        "PULP_INSPECT_SHIPPING_MANIFEST_V1 PULP_INSPECT_CAPABILITY_UI_READ_V1");
     const auto unconfigured =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
     CHECK_FALSE(unconfigured.complete);
@@ -267,6 +269,20 @@ TEST_CASE("AUv3 container apps are not standalone inspector artifacts") {
         "Contents" / "MacOS" / "PluginHost";
     fs::create_directories(executable.parent_path());
     write_artifact(executable, "ordinary AUv3 host app");
+
+    const auto report =
+        pulp::cli::inspector_shipping::load_artifact_report(temporary.path);
+    CHECK(report.complete);
+    CHECK(report.manifests.empty());
+}
+
+TEST_CASE("unrelated app bundles do not require standalone evidence") {
+    TemporaryDirectory temporary;
+    fs::remove_all(temporary.path / "pulp-inspector-manifests");
+    const auto executable = temporary.path / "Helpers" / "Preview.app" /
+        "Contents" / "MacOS" / "Preview";
+    fs::create_directories(executable.parent_path());
+    write_artifact(executable, "ordinary helper app");
 
     const auto report =
         pulp::cli::inspector_shipping::load_artifact_report(temporary.path);

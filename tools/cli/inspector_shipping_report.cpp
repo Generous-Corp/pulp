@@ -131,6 +131,18 @@ bool inside_plugin_format(const fs::path& path) {
     return false;
 }
 
+bool matches_configured_standalone(const fs::path& executable,
+                                   const Report& configured) {
+    const auto name = executable.filename().string();
+    return std::any_of(configured.manifests.begin(), configured.manifests.end(),
+        [&](const Manifest& manifest) {
+            return name == manifest.product_name ||
+                name == manifest.product_name + ".exe" ||
+                (!manifest.target.empty() &&
+                 (name == manifest.target || name == manifest.target + ".exe"));
+        });
+}
+
 } // namespace
 
 Report empty_report() {
@@ -249,7 +261,10 @@ Report load_artifact_report(const fs::path& search_root) {
             !inside_plugin_format(path)) {
             const auto executable = path / "Contents/MacOS" / path.stem();
             if (fs::is_regular_file(executable) &&
-                !has_matching_inspector_sidecar(executable)) {
+                !has_matching_inspector_sidecar(executable) &&
+                ((has_configured_manifests &&
+                  matches_configured_standalone(executable, configured)) ||
+                 artifact_has_capability_marker(executable))) {
                 Report missing;
                 missing.error =
                     "standalone artifact is missing inspector capability sidecar: " +
@@ -262,18 +277,8 @@ Report load_artifact_report(const fs::path& search_root) {
                 const bool executable = path.extension() == ".exe" ||
                     (permissions & (fs::perms::owner_exec | fs::perms::group_exec |
                                     fs::perms::others_exec)) != fs::perms::none;
-                bool configured_standalone = false;
-                if (has_configured_manifests) {
-                    const auto name = path.filename().string();
-                    for (const auto& manifest : configured.manifests) {
-                        configured_standalone |=
-                            name == manifest.product_name ||
-                            name == manifest.product_name + ".exe" ||
-                            (!manifest.target.empty() &&
-                             (name == manifest.target ||
-                              name == manifest.target + ".exe"));
-                    }
-                }
+                const bool configured_standalone = has_configured_manifests &&
+                    matches_configured_standalone(path, configured);
                 if (executable && !has_matching_inspector_sidecar(path) &&
                     (configured_standalone || artifact_has_capability_marker(path))) {
                     Report missing;
