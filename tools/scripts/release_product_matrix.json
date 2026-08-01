@@ -59,6 +59,7 @@
     "pulp-state",
     "pulp-timebase",
     "pulp-timeline",
+    "pulp-timeline-agent-view",
     "pulp-timeline-editor",
     "pulp-view",
     "pulp-view-core",

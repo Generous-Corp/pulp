@@ -23,6 +23,17 @@ MODULE_FLOORS = {
     # model — a headless importer, a .pulpgraph loader, a plugin that wants only
     # commands — with no gate able to object.
     "timeline": {"timeline", "timebase", "platform", "runtime"},
+    # Agent-facing read projections sit directly above the immutable document.
+    # They may hash and summarize timeline values but must not acquire editor,
+    # playback, interchange, UI, host, or adapter dependencies.
+    "timeline_agent_view": {
+        "timeline_agent_view",
+        "timeline-agent-view",
+        "timeline",
+        "timebase",
+        "platform",
+        "runtime",
+    },
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
     # host, or a view must never become something it can reach for.
