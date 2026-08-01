@@ -560,6 +560,14 @@ fresh pending row on a merged PR helps nobody. A dispatch of the freeze check
 checks out `refs/pull/N/merge` explicitly — the default would be whatever branch
 it was fired from, and the inventory steps would then validate `main` instead of
 the PR.
+
+The trusted gate also groups `pull_request_target` and manual dispatch runs by
+PR number with `cancel-in-progress: false`. Editing a PR can fire repeatedly
+without changing its head; GitHub therefore keeps the active required-check run
+and only the newest pending run instead of accumulating one hosted job per edit.
+Merge-group runs fall back to their queue ref, so separate queue entries never
+share the PR group. Closed-PR `edited` events are filtered at the job boundary
+and checked again by the resolver before checkout or commit-status mutation.
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
