@@ -56,6 +56,14 @@ enum class CompileErrorCode : std::uint8_t {
     // dropping it and carrying it are both wrong. Lowering such a clip requires
     // the chase rule that decides which point the window inherits.
     TrimmedMidiLaneUnsupported,
+    // A clip carried controller or expression lanes into the note program,
+    // which has no representation for them. Compiling it would emit the notes
+    // and drop every authored controller point with nothing to read the loss
+    // from, so the clip is refused instead. Distinct from the trimmed refusal
+    // above: this one is answered by a renderer that chases and emits lane
+    // values, whereas trimming still has no defined inherited value even once
+    // that renderer exists.
+    MidiExpressionLaneUnsupported,
 };
 
 struct CompileError {

@@ -903,6 +903,9 @@ stream, ordered by address with each lane's points ordered by
 `(position, ItemId)`; a lane address is the MIDI wire's own group, channel,
 status nibble, controller bank, and controller index, and a point value is the
 32-bit channel-voice data width. Clips authoring no controllers carry no lanes.
+Lane storage is complete, but playback does not yet emit lane values: compiling a
+clip that carries lanes fails with a named error rather than producing a program
+that plays the notes and drops the controllers.
 Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
