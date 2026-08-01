@@ -23,3 +23,7 @@ concept.tempo.single 1
 concept.meter.single 1
 concept.clip.note-modifier 1
 concept.clip.note-velocity-quantized 1
+order.sequences 2
+order.sequence.2.tracks 3
+order.sequence.2.track_order 3
+order.track.3.clips 4

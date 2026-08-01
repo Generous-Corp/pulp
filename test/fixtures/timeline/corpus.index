@@ -10,9 +10,21 @@
 # Kinds — the corpus holds more than one shape of artifact, and nothing in the
 # files themselves says which is which:
 #
-#   document  A complete `pulp.timeline.project` envelope. Fully validated:
-#             structural summary, interchange concept census, and serialize
-#             idempotence, against a sibling `<path>.expect` manifest.
+#   document  A complete `pulp.timeline.project` envelope, validated against a
+#             sibling `<path>.expect` manifest on four axes: structural
+#             summary, interchange concept census, the ordered identities of
+#             every collection in the arrangement, and serialize idempotence.
+#
+#             The order axis is what makes the other three more than a
+#             head count. Counts say how many survived; the identity orders say
+#             which ones and in what sequence, so a dropped authored ordering or
+#             a remapped identity is visible. Idempotence is deliberately not
+#             one of those checks: it compares the pipeline against itself and
+#             therefore cannot see an error both directions share.
+#
+#             Leaf content below a track — notes, automation points, MIDI lane
+#             points, takes, comp segments — is still covered only by counts and
+#             the census.
 #   fragment  A single entity envelope (not a project), used for entity-level
 #             migration tests. Declared so it is accounted for; entity-level
 #             validation is not yet implemented, so it is reported as skipped

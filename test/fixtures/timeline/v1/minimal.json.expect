@@ -18,3 +18,4 @@ counts.midi_lanes 0
 counts.midi_lane_points 0
 concept.tempo.single 1
 concept.meter.single 1
+order.sequences 2

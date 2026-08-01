@@ -19,3 +19,6 @@ counts.midi_lane_points 0
 concept.track.flat 3
 concept.tempo.single 1
 concept.meter.single 1
+order.sequences 2
+order.sequence.2.tracks 9,3,12
+order.sequence.2.track_order 12,9,3

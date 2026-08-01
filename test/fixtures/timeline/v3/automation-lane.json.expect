@@ -21,3 +21,8 @@ concept.tempo.single 1
 concept.meter.single 1
 concept.automation.device-param 1
 concept.device.placement 1
+order.sequences 2
+order.sequence.2.tracks 3
+order.sequence.2.track_order 3
+order.track.3.device_chain 4
+order.track.3.automation_lanes 5

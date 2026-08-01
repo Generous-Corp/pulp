@@ -21,3 +21,7 @@ concept.clip.musical 1
 concept.tempo.single 1
 concept.meter.single 1
 concept.content.opaque 1
+order.sequences 2
+order.sequence.2.tracks 3
+order.sequence.2.track_order 3
+order.track.3.clips 4
