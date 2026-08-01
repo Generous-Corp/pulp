@@ -44,10 +44,24 @@ export const TOKEN_EXPRESSION = `(() => {
   // throw is swallowed. When it does, NO name is collected and every token
   // silently resolves empty. Computed style needs no sheet access, so it names
   // what actually applies -- including anything the walk could not see.
+  // A real CSSStyleDeclaration is iterable, but a stubbed getComputedStyle is
+  // often only array-like (length + item) or a plain object. Iterating it
+  // directly throws "computed is not iterable" outside a browser, so probe the
+  // shape instead of assuming it.
+  const collectName = name => {
+    if (typeof name === 'string' && name.startsWith('--')) names.add(name);
+  };
   for (const root of roots) {
     const computed = getComputedStyle(root);
-    for (const name of computed) {
-      if (typeof name === 'string' && name.startsWith('--')) names.add(name);
+    if (!computed) continue;
+    if (typeof computed[Symbol.iterator] === 'function') {
+      for (const name of computed) collectName(name);
+    } else if (typeof computed.length === 'number') {
+      for (let i = 0; i < computed.length; i++) {
+        collectName(typeof computed.item === 'function' ? computed.item(i) : computed[i]);
+      }
+    } else {
+      for (const name of Object.keys(computed)) collectName(name);
     }
   }
   const records = [];
