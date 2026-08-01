@@ -261,6 +261,7 @@ playback::ProgramCompileRequest request;
 request.project = redone->snapshot;
 request.sequence_id = redone->snapshot->root_sequence_id();
 request.tempo_map = std::move(tempo);
+request.sample_rate = request.tempo_map->sample_rate();
 request.document_revision = redone->revision.value;
 request.dirty = playback::lower_dirty_set(
     *redone->snapshot, request.sequence_id, redone->dirty);
