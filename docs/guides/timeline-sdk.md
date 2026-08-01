@@ -404,6 +404,14 @@ transform with a different input. The durable journal therefore contains only
 canonical expected/replacement note arrays, and undo/redo use ordinary inverse
 commands with the identity directory's tombstone rules.
 
+An inverse additionally restates the clip's modifiers, because a modifier keys
+on a note identity and vanishes with the note its edit removed — nothing in the
+edited clip could bring it back. The `expected_modifiers` and
+`replacement_modifiers` fields are optional: authoring code omits them and the
+reducer carries the surviving modifiers across on its own. Expression lanes need
+no such field. They key on a channel-voice address that names no note, so an
+edit to the note set never filters them.
+
 ## Scrubbing the playhead
 
 Dragging the playhead is audible through `MasterTransport` itself, not through a
