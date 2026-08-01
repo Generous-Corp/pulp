@@ -772,7 +772,7 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
         out,
         "pulp run — launch a standalone Pulp application\n\n\
          Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>]\n\
-                [--watch] [--audio-inspector] [--audio-probe-json <file>]\n\
+                [--watch] [--inspect[=<profile>]] [--audio-inspector] [--audio-probe-json <file>]\n\
                 [--audio-scope-json <file>] [--audio-scope-window <n>]\n\
                 [--audio-scope-trigger <mode>] [--audio-scope-channel <n>]\n\
                 [--audio-capture-wav <file>] [--audio-capture-frames <n>] [-- args...]\n\n\
@@ -789,6 +789,10 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          Default 1. (Forwarded as --frames <n> and\n                          \
          PULP_FRAMES=<n>.)\n  \
          --watch                 Re-launch the binary on source changes.\n                          \
+         --inspect[=<profile>]   Enable the local Development Inspector. Bare --inspect\n                          \
+                                 selects develop; profiles: off, observe, develop, custom.\n  \
+         --inspect-capability <id>\n                          \
+                                 Add a capability to --inspect=custom; repeatable.\n  \
          Composes with --headless / --screenshot.\n  \
          --audio-inspector       Open the live Audio Inspector window.\n                          \
          (Forwarded as --audio-inspector and PULP_AUDIO_INSPECTOR=1.)\n  \

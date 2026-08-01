@@ -292,7 +292,7 @@ public:
 };
 
 InspectorClient::InspectorClient() : impl_(std::make_unique<Impl>()) {
-    impl_->connection.set_max_message_bytes(1024u * 1024u);
+    impl_->connection.set_max_message_bytes(kInspectorExtendedMessageBytes);
 }
 
 InspectorClient::~InspectorClient() = default;

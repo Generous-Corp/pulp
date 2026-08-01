@@ -67,6 +67,13 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
+    // Development Inspector activation. Empty/"off" starts no endpoint.
+    // Capability ids are only used with the "custom" profile. Kept as plain
+    // strings so public standalone headers remain independent of inspector SDK
+    // types when inspector support is compiled out.
+    std::string inspector_profile;
+    std::vector<std::string> inspector_capabilities;
+
     // When non-empty, run_with_editor() installs a one-shot idle callback
     // that captures the first painted frame via WindowHost::capture_png()
     // and writes to this path, then closes the window. Codified in the SDK
@@ -186,6 +193,9 @@ public:
     bool start();
     void stop();
     bool is_running() const { return running_.load(); }
+    std::uint64_t audio_xrun_count() const {
+        return audio_device_ ? audio_device_->xrun_count() : 0;
+    }
     bool run_with_editor(bool use_gpu = false);
 
     /// Restart audio with a new config (stop → reconfigure → start).

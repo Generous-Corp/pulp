@@ -249,6 +249,8 @@ pulp run MyApp -- --arg1                            # pass arguments to the laun
 pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
 pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
 pulp run --watch                                    # re-launch on source-file changes
+pulp run --inspect                                  # authenticated develop-profile inspector
+pulp run --inspect=observe                          # read-only inspector profile
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
 pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
@@ -283,6 +285,26 @@ These flags are intended for CI auto-validation: any plugin standalone
 that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
 the matching argv flags) can be exercised end-to-end on every PR
 without a real window or virtual display.
+
+#### Development Inspector profiles
+
+- `--inspect` enables the `develop` profile for this standalone instance.
+- `--inspect=observe|develop` selects a named capability set.
+- `--inspect=custom --inspect-capability <id>...` selects an explicit,
+  nonempty capability set; the capability option is repeatable. A custom set
+  containing `state.write` or `authoring.tweaks` must also contain
+  `session.control`, because mutations require a controller lease.
+- `--inspect=off` is the default and starts no listener or discovery artifact.
+
+The active session binds only to loopback, publishes an owner-private ephemeral
+record and credential, and displays an `INSPECT <profile>` badge in the live
+window. `PULP_INSPECT_PROFILE` and comma-separated
+`PULP_INSPECT_CAPABILITIES` are the equivalent host environment contract.
+Plugin scanning, validation, and an ordinary `pulp run` never activate it.
+This first standalone runtime supports in-place scripted-UI hot reload. A
+processor that replaces its entire editor at runtime fails inspector startup
+closed; complete source reattachment for that processor-level swap is a later
+capability-platform phase.
 
 #### Live Audio Inspector flags
 
@@ -1245,8 +1267,9 @@ Remaining limitation:
 **Status**: experimental
 
 Authenticated low-level client for an explicitly enabled inspector session.
-Normal `pulp run` and plugin-format launches do not currently start an
-endpoint. The client reads owner-private ephemeral discovery records, selects
+Use `pulp run --inspect` (or `--inspect=<profile>`) to activate a standalone;
+normal `pulp run` and plugin-format launches start no endpoint. The client reads
+owner-private ephemeral discovery records, selects
 an exact non-reusable publication when requested, and proves possession of the
 session credential before sending a request.
 
@@ -1277,9 +1300,11 @@ response, the client reports `{"mayHaveApplied":true}`; a timeout also fences
 the connection. Do not automatically retry that operation: the server may
 already have executed it.
 
-`Capture.screenshot` and `Capture.screenshotNode` are reserved inspector
-protocol methods that currently return explicit unavailable errors until
-host-capture references are wired into the inspector domain.
+`Capture.screenshot` returns a base64 PNG plus the selected standalone window's
+dimensions. Screenshot-capable sessions and clients use a bounded 16 MiB
+message ceiling (large enough for ordinary multi-megabyte compositor PNGs);
+larger responses fail explicitly. `Capture.screenshotNode` remains explicitly
+unavailable.
 `Runtime.evaluate` is unavailable in normal launches, but an explicitly wired
 and enabled custom fixture can evaluate code; treat that opt-in as remote code
 execution.

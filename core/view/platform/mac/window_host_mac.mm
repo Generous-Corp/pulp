@@ -1560,6 +1560,7 @@ public:
         auto live = pulp::view::mac_capture::capture_window_screencapture_png(window_);
         return !live.empty() ? live : pulp::view::mac_capture::capture_window_content_png(window_, view_);
     }
+    bool supports_compositor_capture() const override { return true; }
 
     // Host-managed pixels only. CG-backed host has no GPU
     // back-buffer, so the deterministic surface is the rasterized content
@@ -1894,6 +1895,7 @@ public:
 
         return pulp::view::mac_capture::capture_window_content_png(window_, metal_view_);
     }
+    bool supports_compositor_capture() const override { return true; }
 
     // Deterministic GPU back-buffer readback for hidden /
     // headless test windows. Bypasses screencapture (which fails on hidden

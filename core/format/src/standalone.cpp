@@ -43,7 +43,7 @@
 #endif
 
 #if PULP_STANDALONE_INSPECTOR
-#include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/format/detail/standalone_inspector.hpp>
 #endif
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
@@ -593,6 +593,14 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     command_registry_.reset();
 
     const auto effective_config = detail::standalone_config_from_environment(config_);
+#if !PULP_STANDALONE_INSPECTOR
+    if (!effective_config.inspector_profile.empty()
+        && effective_config.inspector_profile != "off") {
+        runtime::log_error(
+            "Standalone: Development Inspector requested but this build has inspector support disabled");
+        return false;
+    }
+#endif
 #if !PULP_ENABLE_AUDIO_PROBES
     if (detail::standalone_probe_json_requested_but_disabled(effective_config)) {
         runtime::log_error(
@@ -740,21 +748,31 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
     auto* window_raw = window.get();
-    window->set_close_callback([this, window_raw, bridge_raw]() {
+    std::function<void()> close_editor = [this, window_raw, bridge_raw]() {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
         if (processor_) processor_->set_editor_resize_handler(this, nullptr);
         if (window_raw && bridge_raw)
             detail::retire_standalone_editor(*window_raw, *bridge_raw);
         stop();
-    });
+    };
 
 #if PULP_STANDALONE_INSPECTOR
-    // Create inspector overlay — activated via Cmd+I / Ctrl+I
-    auto* inspector_host = &window_root;
-    auto inspector = std::make_unique<inspect::InspectorOverlay>(*inspector_host);
-    auto* inspector_ptr = inspector.get();
-    inspect::install_inspector_hooks(*inspector);
+    auto inspector_runtime = detail::StandaloneInspectorRuntime::create(
+        *this, *processor_, *bridge, window_root, *window,
+        effective_config.inspector_profile,
+        effective_config.inspector_capabilities);
+    if (!inspector_runtime) {
+        runtime::log_error(
+            "Standalone: requested Development Inspector profile could not start");
+        detail::retire_standalone_editor(*window, *bridge);
+        stop();
+        return false;
+    }
+    window->set_close_callback(
+        inspector_runtime->wrap_close(std::move(close_editor)));
+#else
+    window->set_close_callback(std::move(close_editor));
 #endif
 
 #if PULP_ENABLE_AUDIO_PROBES
@@ -793,25 +811,16 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
 #if PULP_STANDALONE_INSPECTOR
-    pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
+    auto* inspector_runtime_ptr = inspector_runtime.get();
+    pre_screenshot_idle = [settings_ptr, inspector_runtime_ptr] {
         if (settings_ptr) settings_ptr->poll();
-        if (inspector_ptr->is_active()) {
-            // Enqueue on the window root's own queue (S11): paint_overlays
-            // drains the painting root's queue, and inspector_host IS that
-            // root, so the inspector overlay paints exactly once.
-            inspector_host->interaction().overlay_queue.push_back({
-                [inspector_ptr](canvas::Canvas& canvas) {
-                    inspector_ptr->paint(canvas);
-                },
-                inspector_host
-            });
-        }
+        inspector_runtime_ptr->pump();
     };
     window->set_idle_callback(pre_screenshot_idle);
 
     // Enable inspector by default when PULP_INSPECTOR env var is set
     if (runtime::get_env("PULP_INSPECTOR")) {
-        inspector_ptr->set_active(true);
+        inspector_runtime->set_overlay_active(true);
         runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
     }
 #else
@@ -1042,6 +1051,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // while the processor is still alive; the call is idempotent.
     window->run_event_loop();
 
+#if PULP_STANDALONE_INSPECTOR
+    inspector_runtime->stop();
+    const bool inspector_started = !inspector_runtime->startup_failed();
+#endif
+
     // Application quit can leave the event loop without invoking the window's
     // close callback. Remove this owner's entry before the bridge/window or
     // processor is torn down; removal is harmless on platforms where no
@@ -1049,7 +1063,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     if (processor_) processor_->set_editor_resize_handler(this, nullptr);
     detail::retire_standalone_editor(*window, *bridge);
     stop();
+#if PULP_STANDALONE_INSPECTOR
+    return inspector_started;
+#else
     return true;
+#endif
 }
 
 void StandaloneApp::stop_audio_keep_processor() {

@@ -481,6 +481,13 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE_FALSE(set_param.is_error);
     REQUIRE(store.get_value(9) == -12.5f);
 
+    // JSON parsers preserve whole-number literals as integers. The wire API
+    // accepts either JSON numeric representation for a parameter value.
+    auto set_integer_param = handler.handle(
+        make_request(53, methods::kStateSetParameter, R"({"id":9,"value":3})"));
+    REQUIRE_FALSE(set_integer_param.is_error);
+    REQUIRE(store.get_value(9) == 3.0f);
+
     auto bad_set_param = handler.handle(make_request(22, methods::kStateSetParameter, "not json"));
     REQUIRE(bad_set_param.is_error);
 

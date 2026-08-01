@@ -326,6 +326,19 @@ pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
 # hazard as pulp-test-audio above, so they get the same PROCESSORS reservation.
 pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-inspector
+    SOURCES test_standalone_inspector.cpp
+    LIBRARIES pulp::standalone
+    PROPERTIES PROCESSORS 8)
+if(TARGET pulp::inspect AND NOT IOS)
+    target_compile_definitions(pulp-test-standalone-inspector PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=1)
+    target_link_libraries(pulp-test-standalone-inspector PRIVATE
+        pulp::inspect-client)
+else()
+    target_compile_definitions(pulp-test-standalone-inspector PRIVATE
+        PULP_TEST_STANDALONE_INSPECTOR=0)
+endif()
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
