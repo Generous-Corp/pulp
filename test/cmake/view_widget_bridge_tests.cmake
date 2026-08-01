@@ -64,6 +64,19 @@ target_link_libraries(pulp-test-inspector-session PRIVATE
     pulp::canvas pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-session)
 
+add_executable(pulp-test-inspector-test-input
+    test_inspector_test_input.cpp)
+target_link_libraries(pulp-test-inspector-test-input PRIVATE
+    pulp::inspect-protocol Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-test-input)
+
+add_executable(pulp-test-inspector-audit
+    test_inspector_audit.cpp
+    ${CMAKE_SOURCE_DIR}/inspect/src/main_thread_rpc.cpp)
+target_link_libraries(pulp-test-inspector-audit PRIVATE
+    pulp::inspect-protocol pulp::events Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-audit)
+
 add_executable(pulp-test-inspector-server
     test_inspector_server.cpp
     unsafe_legacy_inspector_server.cpp)
