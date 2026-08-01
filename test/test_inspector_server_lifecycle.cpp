@@ -609,6 +609,123 @@ TEST_CASE("shutdown fence waits for callback-deferred server teardown",
         CHECK(response.error_code == "connection_closed");
 }
 
+TEST_CASE("shutdown fence waits for a synchronous-post server callback",
+          "[inspect][client][teardown][main-thread][shutdown-fence]"
+          "[synchronous-post]") {
+    TemporaryDirectory temporary;
+    InspectorDiscoveryPublisher publisher(temporary.path);
+    InspectorDiscoveryReader reader(temporary.path);
+    InspectorPolicyConfig policy;
+    policy.profile = InspectorProfile::Observe;
+    policy.available_capabilities = {
+        InspectorCapability::SessionDescribe,
+        InspectorCapability::StateRead,
+    };
+    struct RawSource {
+        bool alive = true;
+        ~RawSource() { alive = false; }
+    };
+    auto source = std::make_unique<RawSource>();
+    auto* raw_source = source.get();
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool synchronous_task_returned = false;
+    bool release_post = false;
+    std::atomic<bool> post_survived{false};
+    auto rpc = std::make_shared<InspectorMainThreadRpc>(
+        InspectorMainThreadRpc::Config{std::chrono::seconds(1), 1},
+        [&](auto task) {
+            task();
+            std::unique_lock lock(mutex);
+            synchronous_task_returned = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_post; });
+            post_survived.store(raw_source->alive,
+                                std::memory_order_release);
+            return true;
+        },
+        [] { return false; });
+    std::weak_ptr<InspectorMainThreadRpc> rpc_lifetime = rpc;
+    auto binding = std::make_shared<ThrowingPublicationBinding>();
+    StaticPublicationBindings bindings({{
+        InspectorCapability::StateRead,
+        binding,
+    }});
+    auto server = std::make_unique<InspectorServer>();
+    const auto shutdown_fence = server->shutdown_fence();
+    InspectorSession session(
+        {"session-synchronous-post-fence", "instance", "plugin", "1"},
+        policy,
+        [&](const auto& request) {
+            server.reset();
+            return make_response(request.id, "{}");
+        });
+    const auto token = generate_inspector_secret();
+    REQUIRE(token.has_value());
+    InspectorDiscoveryRecord record;
+    record.session_id = session.info().session_id;
+    record.instance_id = session.info().instance_id;
+    record.plugin_id = session.info().plugin_id;
+    InspectorServerConfig config{
+        &session, &publisher, record, *token};
+    config.domain_bindings = &bindings;
+    config.main_thread_rpc = rpc;
+    REQUIRE(server->start_authenticated(std::move(config)));
+    rpc.reset();
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+
+    std::atomic<bool> waiter_returned{false};
+    std::atomic<bool> wait_succeeded{false};
+    std::atomic<bool> source_survived_wait{false};
+    std::thread waiter([&] {
+        wait_succeeded.store(
+            shutdown_fence.wait_for(std::chrono::seconds(2)),
+            std::memory_order_release);
+        source_survived_wait.store(raw_source->alive,
+                                   std::memory_order_release);
+        waiter_returned.store(true, std::memory_order_release);
+    });
+    pulp::inspect::InspectorMessage response;
+    std::thread requester([&] {
+        response = client.request("State.getParameters");
+    });
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, std::chrono::seconds(1), [&] {
+            return synchronous_task_returned;
+        }));
+    }
+
+    CHECK_FALSE(server);
+    CHECK(binding->unbind_calls.load(std::memory_order_acquire) == 1);
+    CHECK(reader.list().empty());
+    CHECK_FALSE(rpc_lifetime.expired());
+    CHECK_FALSE(shutdown_fence.wait_for(std::chrono::milliseconds(100)));
+    CHECK_FALSE(waiter_returned.load(std::memory_order_acquire));
+    CHECK_FALSE(shutdown_fence.ready());
+
+    {
+        std::lock_guard lock(mutex);
+        release_post = true;
+    }
+    cv.notify_all();
+    requester.join();
+    waiter.join();
+
+    REQUIRE(wait_succeeded.load(std::memory_order_acquire));
+    CHECK(waiter_returned.load(std::memory_order_acquire));
+    CHECK(post_survived.load(std::memory_order_acquire));
+    CHECK(source_survived_wait.load(std::memory_order_acquire));
+    CHECK(shutdown_fence.ready());
+    CHECK(rpc_lifetime.expired());
+    source.reset();
+    if (response.is_error)
+        CHECK(response.error_code == "connection_closed");
+}
+
 TEST_CASE("server can be released from a request callback",
           "[inspect][client][teardown][owner-lifetime]") {
     TemporaryDirectory temporary;

@@ -26,11 +26,12 @@ struct InspectorServerShutdownFence::State {
     bool worker_exited = false;
     std::size_t active_stop_transitions = 0;
     std::size_t deferred_teardowns = 0;
+    std::size_t active_server_callbacks = 0;
     std::atomic<bool> ready{false};
 
     bool ready_locked() const noexcept {
         return worker_exited && active_stop_transitions == 0 &&
-               deferred_teardowns == 0;
+               deferred_teardowns == 0 && active_server_callbacks == 0;
     }
 
     void publish_ready_locked() noexcept {
@@ -62,6 +63,21 @@ struct InspectorServerShutdownFence::State {
         {
             std::lock_guard lock(mutex);
             --deferred_teardowns;
+            publish_ready_locked();
+        }
+        cv.notify_all();
+    }
+
+    void begin_server_callback() {
+        std::lock_guard lock(mutex);
+        ++active_server_callbacks;
+        publish_ready_locked();
+    }
+
+    void end_server_callback() {
+        {
+            std::lock_guard lock(mutex);
+            --active_server_callbacks;
             publish_ready_locked();
         }
         cv.notify_all();
@@ -219,6 +235,7 @@ public:
             if (!impl->stopping_callbacks) {
                 ++impl->active_callbacks;
                 ++impl->callback_threads[std::this_thread::get_id()];
+                impl->cleanup_fence->begin_server_callback();
             } else {
                 impl.reset();
             }
@@ -237,6 +254,7 @@ public:
                     impl->callback_threads.erase(found);
                 }
             }
+            impl->cleanup_fence->end_server_callback();
             impl->cleanup_cv.notify_all();
         }
 
