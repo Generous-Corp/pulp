@@ -1,9 +1,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/format/detail/standalone_inspector.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
 #if PULP_TEST_STANDALONE_INSPECTOR
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -14,6 +16,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -116,7 +119,9 @@ class InspectorProcessor : public TestProcessor {
 public:
     InspectorProcessor(pulp::state::StateStore& store,
                        std::filesystem::path script)
-        : store_(store), script_(std::move(script)) {}
+        : store_(store), script_(std::move(script)) {
+        channels_.declare_meter("gain_reduction", "dB", 0.0f);
+    }
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor descriptor;
@@ -142,10 +147,14 @@ public:
     const ScriptedUiSession* active_scripted_ui() const override {
         return scripted_.get();
     }
+    pulp::view::ValueChannelSet* value_channels() override {
+        return &channels_;
+    }
 
 private:
     pulp::state::StateStore& store_;
     std::filesystem::path script_;
+    pulp::view::ValueChannelSet channels_;
     std::unique_ptr<ScriptedUiSession> scripted_;
 };
 
@@ -375,15 +384,26 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     runtime->pump();
     REQUIRE(bridge.view()->interaction().overlay_queue.size() == 1);
     REQUIRE(window.repaint_calls == repaint_calls + 1);
+    pulp::canvas::RecordingCanvas indicator_canvas;
+    View::paint_overlays(indicator_canvas, bridge.view());
+    REQUIRE(std::any_of(
+        indicator_canvas.commands().begin(), indicator_canvas.commands().end(),
+        [](const pulp::canvas::DrawCommand& command) {
+            return command.type == pulp::canvas::DrawCommand::Type::fill_text
+                && command.text == "INSPECT develop";
+        }));
+    REQUIRE(bridge.view()->interaction().overlay_queue.empty());
 
     const auto records = reader.list();
     REQUIRE(records.size() == 1);
     pulp::inspect::InspectorClient client;
     REQUIRE(client.connect(records.front(), reader));
-    const auto request = [&](std::string method, std::string params) {
+    const auto request_from = [&](pulp::inspect::InspectorClient& active_client,
+                                  std::string method, std::string params) {
         auto response = std::async(std::launch::async,
-            [&client, method = std::move(method), params = std::move(params)] {
-                return client.request(method, params, std::chrono::seconds(1));
+            [&active_client, method = std::move(method), params = std::move(params)] {
+                return active_client.request(
+                    method, params, std::chrono::seconds(1));
             });
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -397,10 +417,49 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
                 == std::future_status::ready);
         return response.get();
     };
+    const auto request = [&](std::string method, std::string params) {
+        return request_from(client, std::move(method), std::move(params));
+    };
 
     const auto capabilities = request("Session.getCapabilities", "{}");
     REQUIRE_FALSE(capabilities.is_error);
     REQUIRE(capabilities.params_json.find("state.write") != std::string::npos);
+    const auto context = request("Inspector.getAgentContext", "{}");
+    REQUIRE_FALSE(context.is_error);
+    const auto context_json = choc::json::parse(context.params_json);
+    REQUIRE(context_json["identity"]["pluginId"].getString()
+            == "com.pulp.test.standalone-inspector");
+    REQUIRE(context_json["identity"]["sessionId"].getString()
+            == records.front().session_id);
+    REQUIRE(context_json["identity"]["instanceId"].getString()
+            == records.front().instance_id);
+    REQUIRE(context_json["editor"]["open"].getBool());
+    REQUIRE_FALSE(context_json["editor"]["windowVisible"].getBool());
+    REQUIRE(context_json["hotReload"]["available"].getBool());
+    REQUIRE_FALSE(context_json["binary"]["path"].getString().empty());
+
+    const auto document = request("DOM.getDocument", "{}");
+    REQUIRE_FALSE(document.is_error);
+    REQUIRE(document.params_json.find("\"v\"") != std::string::npos);
+
+    const auto parameters = request("State.getParameters", "{}");
+    REQUIRE_FALSE(parameters.is_error);
+    const auto parameters_json = choc::json::parse(parameters.params_json);
+    REQUIRE(parameters_json.isArray());
+    REQUIRE(parameters_json.size() == 1);
+    REQUIRE(parameters_json[0]["id"].getInt64() == 2);
+    REQUIRE(parameters_json[0]["name"].getString() == "Gain");
+    REQUIRE(parameters_json[0]["value"].getWithDefault<double>(-1.0) == 0.0);
+
+    const auto value_channels = request("State.getValueChannels", "{}");
+    REQUIRE_FALSE(value_channels.is_error);
+    const auto value_channels_json = choc::json::parse(value_channels.params_json);
+    REQUIRE(value_channels_json.isArray());
+    REQUIRE(value_channels_json.size() == 1);
+    REQUIRE(value_channels_json[0]["name"].getString() == "gain_reduction");
+    REQUIRE(value_channels_json[0]["unit"].getString() == "dB");
+    REQUIRE(value_channels_json[0]["shape"].getString() == "meter");
+
     const auto audio = request("Audio.getConfig", "{}");
     REQUIRE_FALSE(audio.is_error);
     const auto audio_json = choc::json::parse(audio.params_json);
@@ -435,6 +494,27 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     client.disconnect();
     runtime->stop();
     REQUIRE(reader.list().empty());
+    runtime.reset();
+
+    auto observe_runtime = StandaloneInspectorRuntime::create(
+        app, *processor, bridge, *bridge.view(), window, "observe", {});
+    REQUIRE(observe_runtime != nullptr);
+    observe_runtime->pump();
+    const auto observe_records = reader.list();
+    REQUIRE(observe_records.size() == 1);
+    pulp::inspect::InspectorClient observe_client;
+    REQUIRE(observe_client.connect(observe_records.front(), reader));
+    const auto observe_denied = request_from(
+        observe_client, "State.setParameter", R"({"id":2,"value":4})");
+    REQUIRE(observe_denied.is_error);
+    REQUIRE(observe_denied.error_code == "capability_denied");
+    REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
+    observe_client.disconnect();
+    observe_runtime->stop();
+    observe_runtime.reset();
+    REQUIRE(reader.list().empty());
+    bridge.view()->interaction().overlay_queue.clear();
+
     {
         std::ofstream out(script);
         out << "console.error('after-stop'); createLabel('v', 'three', '');";
@@ -445,8 +525,6 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     bridge.view()->set_window_host(nullptr);
     bridge.close();
     processor.reset();
-    runtime->stop();
-    runtime.reset();
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
 }
