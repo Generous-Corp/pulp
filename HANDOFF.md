@@ -49,6 +49,22 @@ and what will bite whoever picks it up.
 
 ---
 
+## What the M5 carries, and what is waiting
+
+The M5 has the **21:57 build**: the four things reported from using it —
+arrows/Tab in the mention list, GET rows explaining themselves, the audio
+interface's jacks, and hover naming both ends of a cable.
+
+Built, signed, notarized and NOT yet pushed (the M5 slept mid-transfer): the
+mention list ranked by what was typed, slug matches showing their alias
+("Macro Oscillator · Braids"), the brand column aligned, and long names cut so
+they stop running under their badge. `tools/rack/setup_m5.sh` pushes it.
+
+Four of those eight were found by RENDERING and looking, not by a failing
+test. Three had shipped green while being invisible or unreachable: a key hook
+the window never called, a badge asking the wrong question, a list that
+rendered blank. The `forge-modular` skill carries the rules that catch them.
+
 ## What is left
 
 1. **The M5 CLI fails on the login keychain.** Diagnosed; it is not an empty
