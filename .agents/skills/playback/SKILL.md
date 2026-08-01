@@ -686,6 +686,14 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   wall-clock lookahead and the largest audio callback, while
   `StreamingSampleSource` independently caps producer read-ahead at the
   declaration's horizon.
+- `GeneratedEventSource` is a bounded push handoff for producer-generated MIDI:
+  keep revisable staging separate from immutable committed SPSC slots, begin a
+  nonzero strictly newer playback epoch quiescently on seek/restart, and commit
+  complete half-open monotonic-tick batches only at the declared quantization
+  grid. Validate each UMP word count from its message type. Audio pulls never
+  regress the permanent elapsed frontier; a missing or discarded span reports
+  exact lag, emits no generated events, and requests active-note flush. A
+  deadline miss selects only the producer-declared fallback policy.
 - A new `core/playback/src/*.cpp` is compiled by
   `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both

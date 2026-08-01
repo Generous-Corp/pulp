@@ -1196,6 +1196,15 @@ opt-in Audio Quality Lab tool is installed.
 
 ## Production mode and reproducibility class
 
+Generated live-event batches use monotonic half-open tick spans plus playback
+epoch. Keep producer-owned revisable staging physically separate from the
+immutable committed SPSC ring; publish a complete batch with one release cursor.
+Starvation advances the requested span, counts lag, emits zero events, and
+requests an active-note flush so a missed note-off cannot hang. Seek/restart
+must quiescently begin a new playback epoch, invalidating pending work. Validate
+each UMP packet's word count from its message-type nibble. Deadline degradation
+selects only a producer-supplied fallback policy; it never invents thinning.
+
 `production_mode.hpp` declares `ProductionMode` (`Synchronous` / `Buffered`) and
 `ReproducibilityClass` (`Deterministic` / `Tolerance` / `Materialized` /
 `BestEffort`). Three rules that are easy to get wrong:

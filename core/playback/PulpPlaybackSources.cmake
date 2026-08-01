@@ -14,6 +14,7 @@ function(pulp_resolve_playback_sources root output)
         compile_executor.cpp
         external_sync_output.cpp
         external_sync_timecode.cpp
+        generated_event_source.cpp
         midi_capture_materializer.cpp
         note_renderer.cpp
         offline_stretch_artifact.cpp
