@@ -5636,3 +5636,24 @@ with `unbound variable` under `set -u`, and the failure looks like the new gate
 itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
 the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
 Pass the same value through to a script that takes a root argument.
+
+## Apple's clang ships no libFuzzer runtime — fuzzing cannot live on the macOS lanes
+
+`libclang_rt.fuzzer_osx.a` is **absent from the Xcode toolchain** (Homebrew LLVM has it). Pulp's
+sanitizer lane runs on GitHub-hosted `macos-15` with Apple clang, so **a `-fsanitize=fuzzer`
+target would not build there at all** — a libFuzzer-only fuzzing design runs nowhere in this
+repo's CI.
+
+The shape that works, and the one `timeline-fuzz.yml` uses:
+
+- **Oracles live outside the fuzzer** and are toolchain-independent, so both lanes share them.
+- A **deterministic seeded replay** is the always-on lane — plain Catch2, runs on every platform,
+  and a failure is reproducible from a `(seed, index)` pair rather than a corpus artifact.
+- The **libFuzzer target is opt-in** behind a CMake option and **Linux-only** in CI, with a
+  configure-time probe that fails naming the missing runtime instead of dying at link with an
+  unresolved-symbol error that reads like a code bug.
+
+**A fuzz job's wall clock is usually its build, not its fuzzing** — measured here at ~37k
+cases/sec, so the whole PR budget is well under a second and the nightly budget can be raised
+almost for free. Budget the build, not the iterations, and keep `timeout-minutes` on both jobs
+plus `-max_total_time` on libFuzzer.

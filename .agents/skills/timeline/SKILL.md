@@ -1279,6 +1279,45 @@ keeping the define fails at link on `RtNoAllocScope`'s out-of-line constructor,
 which is the intended behavior — the `playback` skill explains why that guard
 exists and what still needs a hand-run control.
 
+### Fuzzing the untrusted-document surface
+
+`pulp-test-timeline-document-fuzz` (registered under the `fuzz` ctest label)
+drives `deserialize_project`, `peek_project_summary`, and
+`deserialize_commands` over a mutated corpus seeded from
+`test/fixtures/timeline/corpus.index`. The oracles live in
+`test/fuzz/timeline_document_oracle.*` and are shared with the optional
+libFuzzer target, so there is one definition of what a finding is.
+
+Three things about it are easy to get wrong:
+
+- **A rejection is not a finding.** Refusing malformed input is the surface
+  working. The oracles that carry the quota contract are the *tightening
+  sweep* — lower one declared ceiling below the document's own measured count
+  and require a `LimitExceeded` that reports `actual > limit` — and *admission*,
+  which rejects a document accepted over a ceiling that was in force. A harness
+  whose only oracle is "did not crash" would pass with every structural quota
+  unenforced.
+- **The census must not come from the parser's own counters.** The decode path
+  is measured by walking the returned `Project`; the scan path reports
+  `ProjectSnapshotCounts` from the source bytes. Comparing the two is what
+  detects a counter that is never incremented. Measuring a quota with the
+  counter that enforces it confirms itself.
+- **`max_clips` and its siblings are enforced twice** — once in
+  `schema_json_preflight.cpp` and again in `serialize_project_decode.cpp`.
+  Weakening only the preflight leaves `deserialize_project` rejecting and
+  surfaces on `peek_project_summary` alone. Expect a finding to name one
+  surface and not the other, and do not read that as the oracle being flaky.
+
+Adding a structural ceiling to `DecodeLimits` means adding a row to
+`quota_axes()`; the axis-count assertion fails otherwise, which is deliberate —
+a ceiling with no axis is a quota the sweep silently never exercises.
+
+`PULP_ENABLE_FUZZING=ON` builds the coverage-guided target and is **off by
+default**: `-fsanitize=fuzzer` needs a compiler runtime Apple's clang does not
+ship, so on macOS it requires a Homebrew LLVM. The configure step fails with
+that cause named rather than at link time. The deterministic replay needs no
+special toolchain and is the lane that runs on the PR path.
+
 ### Writing a render-continuity assertion
 
 A "gap-free during playback" test must distinguish two things that both look
