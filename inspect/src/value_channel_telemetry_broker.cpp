@@ -792,8 +792,9 @@ void ValueChannelTelemetryBroker::poll() {
                             result == InspectorTargetedEventResult::QueuedAfterLossyEviction;
         if (queued) {
             impl_->commit_delivery(subscription);
-            subscription.transport_loss_debt =
-                result == InspectorTargetedEventResult::QueuedAfterLossyEviction ? 1 : 0;
+        }
+        if (result == InspectorTargetedEventResult::Queued) {
+            subscription.transport_loss_debt = 0;
         } else {
             ++subscription.transport_loss_debt;
         }
