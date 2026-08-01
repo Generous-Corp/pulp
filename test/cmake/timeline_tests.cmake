@@ -72,6 +72,13 @@ pulp_add_test_suite(pulp-test-timeline-arranger-view
     SOURCES test_timeline_arranger_view.cpp
     LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
         pulp::canvas)
+# The piano roll: the same rung as the arranger, over one MIDI clip's notes.
+# Its acceptance vehicle is likewise a serialize round trip, so the editor stack
+# is proven durable without a package format underneath it.
+pulp_add_test_suite(pulp-test-timeline-piano-roll-view
+    SOURCES test_timeline_piano_roll_view.cpp
+    LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
+        pulp::canvas)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
