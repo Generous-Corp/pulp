@@ -87,6 +87,7 @@ DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
+UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -449,7 +450,21 @@ if [ -f "$THREAD_ASSERT_GUARD" ]; then
     fi
 fi
 
-# ── 14. framework-neutrality guard ─────────────────────────────────────────
+# ── 14. unbounded-wait lint (diff-scoped) ──────────────────────────────────
+# A test wait that cannot time out — `while (!flag.load())`, a bare
+# `future.wait()`, `cv.wait(lock, pred)` — turns a real regression into a CI job
+# timeout with no output, which is worse than the flake such waits are usually
+# added to fix. Diff-scoped on purpose: it stops the population growing without
+# blocking on the pre-existing backlog, which needs a reproduction per site.
+if [ -f "$UNBOUNDED_WAIT_LINT" ]; then
+    echo "" >&2
+    echo "▸ unbounded-wait lint (a test wait must be able to time out)" >&2
+    if ! "$PYTHON" "$UNBOUNDED_WAIT_LINT" --base "$BASE"; then
+        fail=1
+    fi
+fi
+
+# ── 15. framework-neutrality guard ─────────────────────────────────────────
 # Global invariant (not diff-scoped): Pulp's own source names no other
 # framework, and adopts none of their class names into its API. A comment that
 # says "mirrors the X class of the same name" is a written admission of

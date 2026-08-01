@@ -5655,3 +5655,46 @@ with `unbound variable` under `set -u`, and the failure looks like the new gate
 itself is broken. The script sets `ROOT="$(git rev-parse --show-toplevel)"` near
 the top and every existing check builds its paths from that (`DEPS_AUDIT="$ROOT/..."`).
 Pass the same value through to a script that takes a root argument.
+
+## `unbounded-wait lint` — a test wait must be able to time out
+
+`gates.sh` runs `tools/scripts/unbounded_wait_lint.py` (also a ctest selftest,
+`unbounded-wait-lint-selftest`). It fails a PR that introduces a wait a test
+cannot escape:
+
+```cpp
+while (!started.load(std::memory_order_acquire)) std::this_thread::yield();
+started_future.wait();
+cv.wait(lock, [&] { return ready; });
+```
+
+**Why it is a CI gate and not a style note.** These waits are usually added to
+*fix* a flake — a worker that had not been scheduled before a fixed budget
+elapsed. They do fix it, and they replace it with something worse: if a real
+regression means the worker never reaches that state, none of them ever return.
+The suite does not fail, it parks, and the run ends as a job timeout with no
+output. A flake at least tells you which assertion failed.
+
+Bound it so the outcome that never arrives becomes a named failed assertion —
+helpers are in `test/support/thread_progress.hpp`:
+
+```cpp
+CHECK(pulp::test::wait_for_condition([&] { return started.load(); }));
+CHECK(fut.wait_for(pulp::test::kProgressDeadline) == std::future_status::ready);
+CHECK(cv.wait_for(lock, std::chrono::seconds(10), [&] { return ready; }));
+```
+
+Use `CHECK`, not `REQUIRE`: a Catch2 throw at a barrier unwinds past the
+worker's `join()`, and destroying a joinable thread terminates the process
+instead of reporting the failure.
+
+**It is diff-scoped on purpose.** It flags added/changed lines only. The tree
+still carries a large backlog of unbounded waits (`--all` reports them); each
+needs its own reproduction before it is touched, so the gate stops the
+population growing rather than forcing a blind mass edit. `--all` is a
+reporting mode, not a gate, and it over-reports — a worker's own
+`while (!stop)` exit loop and waits bounded elsewhere both show up.
+
+Escape a genuinely-bounded wait with `// unbounded-wait: allow <reason>`. "The
+OS eventually schedules a runnable thread" is not a reason — it does not cover
+the code under test never publishing the value, which is the case that hangs.
