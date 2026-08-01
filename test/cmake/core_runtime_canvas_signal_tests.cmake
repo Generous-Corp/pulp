@@ -361,6 +361,23 @@ if(APPLE AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
         "PULP_STANDALONE_INSPECTOR_PROCESS_FIXTURE=\"$<TARGET_FILE:pulp-standalone-inspector-process-fixture>\"")
     add_dependencies(pulp-test-standalone-inspector-process
         pulp-standalone-inspector-process-fixture)
+
+    set_source_files_properties(
+        fixtures/installed_inspector_workflow_fixture.cpp
+        PROPERTIES LANGUAGE OBJCXX)
+    add_executable(pulp-installed-inspector-workflow-fixture
+        fixtures/installed_inspector_workflow_fixture.cpp)
+    target_link_libraries(pulp-installed-inspector-workflow-fixture PRIVATE
+        pulp::standalone pulp::inspect-client)
+
+    pulp_add_test_suite(pulp-test-installed-inspector-workflow-fixture
+        SOURCES test_installed_inspector_workflow_fixture.cpp
+        LIBRARIES pulp::standalone pulp::inspect-client pulp::platform pulp::runtime pulp::view
+        PROPERTIES RESOURCE_LOCK pulp_gpu PROCESSORS 8)
+    target_compile_definitions(pulp-test-installed-inspector-workflow-fixture PRIVATE
+        "PULP_INSTALLED_INSPECTOR_WORKFLOW_FIXTURE=\"$<TARGET_FILE:pulp-installed-inspector-workflow-fixture>\"")
+    add_dependencies(pulp-test-installed-inspector-workflow-fixture
+        pulp-installed-inspector-workflow-fixture)
 endif()
 pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
