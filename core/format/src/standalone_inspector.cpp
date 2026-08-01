@@ -183,6 +183,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
                        refresh_live_state();
                        return domains_.handle(request);
                    }) {
+        session_.set_audit_log(audit_log_);
         state_.set_value_channels(processor_.value_channels());
         audio_.set_config(inspect::AudioConfig{app_.config().sample_rate, app_.config().buffer_size,
                                                app_.config().input_channels,
@@ -271,6 +272,24 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             .borrowed_sources_attached = !sources_detached_,
         };
     }
+
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+    std::vector<StandaloneInspectorAuditEntry> audit_snapshot_for_testing() const {
+        const auto audit = audit_log_->snapshot();
+        std::vector<StandaloneInspectorAuditEntry> result;
+        result.reserve(audit.size());
+        for (const auto& entry : audit) {
+            auto outcome = StandaloneInspectorAuditOutcome::Rejected;
+            if (entry.outcome == inspect::InspectorAuditOutcome::Denied)
+                outcome = StandaloneInspectorAuditOutcome::Denied;
+            else if (entry.outcome == inspect::InspectorAuditOutcome::Applied)
+                outcome = StandaloneInspectorAuditOutcome::Applied;
+            result.push_back({entry.session_id, entry.instance_id, entry.client_id,
+                              entry.method, outcome, entry.error_code});
+        }
+        return result;
+    }
+#endif
 
     void detach_borrowed_sources() {
         if (sources_detached_)
@@ -435,6 +454,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::TweakStore tweaks_;
     std::shared_ptr<inspect::InspectorMainThreadRpc> rpc_;
     inspect::InspectorSession session_;
+    std::shared_ptr<inspect::InspectorAuditLog> audit_log_ =
+        std::make_shared<inspect::InspectorAuditLog>();
     std::unique_ptr<inspect::InspectorServer> server_ =
         std::make_unique<inspect::InspectorServer>();
     inspect::InspectorServerShutdownFence shutdown_fence_;
@@ -702,6 +723,14 @@ bool StandaloneInspectorRuntime::retirement_pending() const {
 StandaloneInspectorLifecycleState StandaloneInspectorRuntime::lifecycle_state() const {
     return impl_ ? impl_->lifecycle_state() : StandaloneInspectorLifecycleState{};
 }
+
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+std::vector<StandaloneInspectorAuditEntry>
+StandaloneInspectorRuntime::audit_snapshot_for_testing() const {
+    return impl_ ? impl_->audit_snapshot_for_testing()
+                 : std::vector<StandaloneInspectorAuditEntry>{};
+}
+#endif
 
 void StandaloneInspectorRuntime::set_overlay_active(bool active) {
     if (retirement_->begun())

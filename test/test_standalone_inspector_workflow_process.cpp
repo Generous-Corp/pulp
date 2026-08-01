@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/inspect/client.hpp>
+#include <pulp/inspect/client_session.hpp>
 #include <pulp/inspect/discovery.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -214,24 +215,45 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     const double target = minimum + ((maximum - minimum) * 0.73);
     REQUIRE(target != Catch::Approx(original));
 
-    REQUIRE_FALSE(client.request(
-        "Session.acquireController", "{}", std::chrono::seconds(2)).is_error);
-    const auto set_json = std::string("{\"id\":")
-        + std::to_string(parameter_id) + ",\"value\":"
-        + std::to_string(target) + "}";
-    REQUIRE_FALSE(client.request(
-        "State.setParameter", set_json, std::chrono::seconds(2)).is_error);
+    pulp::inspect::InspectorClientSelection selection;
+    selection.session_id = records.front().session_id;
+    selection.instance_id = records.front().instance_id;
+    selection.publication_id = records.front().publication_id;
+    pulp::inspect::InspectorClientFailure typed_connect_failure;
+    auto typed_client = pulp::inspect::InspectorClientSession::connect(
+        selection, &typed_connect_failure, std::chrono::seconds(2), runtime_path);
+    INFO("typed client failure=" << typed_connect_failure.code << ": "
+                                  << typed_connect_failure.message);
+    REQUIRE(typed_client);
 
-    REQUIRE_FALSE(client.request(
-        "Test.setTransport",
-        R"({"playing":false,"position_samples":96000,"tempo_bpm":90})",
-        std::chrono::seconds(2)).is_error);
-    REQUIRE_FALSE(client.request(
-        "Test.injectMidi",
-        R"({"kind":"note_on","channel":3,"note":64,"velocity":99})",
-        std::chrono::seconds(2)).is_error);
-    REQUIRE_FALSE(client.request(
-        "Session.releaseController", "{}", std::chrono::seconds(2)).is_error);
+    const auto set_result = typed_client->set_parameter_typed(
+        parameter_id, target, false, std::chrono::seconds(2));
+    INFO("typed set failure=" << set_result.failure.code << ": "
+                               << set_result.failure.message);
+    REQUIRE(set_result);
+    REQUIRE(set_result.value->applied);
+
+    pulp::inspect::StandaloneTransportTestInput transport_input;
+    transport_input.playing = false;
+    transport_input.position_samples = 96'000;
+    transport_input.tempo_bpm = 90.0;
+    const auto transport_result = typed_client->set_transport_typed(
+        transport_input, std::chrono::seconds(2));
+    INFO("typed transport failure=" << transport_result.failure.code << ": "
+                                     << transport_result.failure.message);
+    REQUIRE(transport_result);
+    REQUIRE(transport_result.value->applied);
+
+    const auto midi_result = typed_client->inject_midi_typed(
+        {.kind = pulp::inspect::MidiTestInputKind::NoteOn,
+         .channel = 2,
+         .note = 64,
+         .velocity = 99},
+        std::chrono::seconds(2));
+    INFO("typed MIDI failure=" << midi_result.failure.code << ": "
+                                << midi_result.failure.message);
+    REQUIRE(midi_result);
+    REQUIRE(midi_result.value->accepted);
 
     const auto observation_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -322,6 +344,7 @@ TEST_CASE("Standalone source-build workflow exposes real scripted UI, state, and
     const auto credential_path = records.front().credential_path;
     auto ownership_path = record_path;
     ownership_path.replace_extension(".lock");
+    typed_client.reset();
     client.disconnect();
     {
         std::ofstream stop(stop_path);

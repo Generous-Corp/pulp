@@ -30,6 +30,23 @@ struct StandaloneInspectorLifecycleState {
 };
 
 #if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+enum class StandaloneInspectorAuditOutcome : std::uint8_t {
+    Denied,
+    Applied,
+    Rejected,
+};
+
+/// Test-only metadata projection. It intentionally cannot expose request
+/// parameters even if the production audit representation later grows.
+struct StandaloneInspectorAuditEntry {
+    std::string session_id;
+    std::string instance_id;
+    std::string client_id;
+    std::string method;
+    StandaloneInspectorAuditOutcome outcome = StandaloneInspectorAuditOutcome::Rejected;
+    std::string error_code;
+};
+
 /// Process-local fixture seam that may take ownership of the next inspector
 /// RPC closure and report whether it accepted that closure.
 using StandaloneInspectorRpcPostOverride =
@@ -60,6 +77,9 @@ class StandaloneInspectorRuntime {
     bool try_finish_retirement();
     bool retirement_pending() const;
     StandaloneInspectorLifecycleState lifecycle_state() const;
+#if defined(PULP_STANDALONE_INSPECTOR_TEST_HOOKS)
+    std::vector<StandaloneInspectorAuditEntry> audit_snapshot_for_testing() const;
+#endif
     void set_overlay_active(bool active);
     bool startup_failed() const { return startup_failed_; }
     std::function<void()> wrap_close(std::function<void()> close_editor);

@@ -573,13 +573,31 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(screenshot_json["height"].getWithDefault<std::int64_t>(0) == 1);
     REQUIRE_FALSE(screenshot_json["data"].getString().empty());
 
-    const auto denied = request("State.setParameter", R"({"id":2,"value":3})");
+    const auto denied = request(
+        "State.setParameter",
+        R"({"id":2,"value":3,"secret":"must-not-enter-audit"})");
     REQUIRE(denied.is_error);
     REQUIRE(denied.error_code == "controller_lease_required");
     REQUIRE_FALSE(request("Session.acquireController", "{}").is_error);
     REQUIRE_FALSE(request(
         "State.setParameter", R"({"id":2,"value":3})").is_error);
     REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
+
+    const auto audit = runtime->audit_snapshot_for_testing();
+    REQUIRE(audit.size() == 2);
+    REQUIRE(audit[0].session_id == records.front().session_id);
+    REQUIRE(audit[0].instance_id == records.front().instance_id);
+    REQUIRE(audit[0].client_id == audit[1].client_id);
+    REQUIRE_FALSE(audit[0].client_id.empty());
+    REQUIRE(audit[0].method == "State.setParameter");
+    REQUIRE(audit[0].outcome ==
+            pulp::format::detail::StandaloneInspectorAuditOutcome::Denied);
+    REQUIRE(audit[0].error_code == "controller_lease_required");
+    REQUIRE(audit[1].method == "State.setParameter");
+    REQUIRE(audit[1].outcome ==
+            pulp::format::detail::StandaloneInspectorAuditOutcome::Applied);
+    REQUIRE(audit[1].error_code.empty());
+    REQUIRE(audit[0].method.find("must-not-enter-audit") == std::string::npos);
 
     {
         std::ofstream out(script);

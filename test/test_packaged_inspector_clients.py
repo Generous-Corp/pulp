@@ -359,6 +359,44 @@ def exercise_clients(
     reread = parse_json_output(reread_result, "packaged CLI parameter reread")
     require(abs(parameter_value(reread) - CLI_PARAMETER_VALUE) < 0.001, str(reread))
 
+    transport_result = run_cli(
+        [
+            "inspect",
+            "set-transport",
+            "--playing",
+            "false",
+            "--position-samples",
+            "96000",
+            "--tempo-bpm",
+            "90",
+            "--json",
+            *exact_selector,
+        ]
+    )
+    transport = parse_json_output(transport_result, "packaged CLI transport mutation")
+    require(transport.get("schemaVersion") == "pulp.inspect.set-transport.v1", str(transport))
+    require(transport.get("result", {}).get("applied") is True, str(transport))
+
+    midi_result = run_cli(
+        [
+            "inspect",
+            "inject-midi",
+            "--kind",
+            "note_on",
+            "--channel",
+            "3",
+            "--note",
+            "64",
+            "--velocity",
+            "99",
+            "--json",
+            *exact_selector,
+        ]
+    )
+    midi = parse_json_output(midi_result, "packaged CLI MIDI injection")
+    require(midi.get("schemaVersion") == "pulp.inspect.inject-midi.v1", str(midi))
+    require(midi.get("result", {}).get("accepted") is True, str(midi))
+
     dom_result = run_cli(
         ["inspect", "--json", *exact_selector, "--command", "DOM.getDocument"]
     )
@@ -419,6 +457,16 @@ def exercise_clients(
         mcp_request(7, "pulp_inspect_params", selector),
         mcp_request(8, "pulp_inspect_dom", selector),
         mcp_request(9, "pulp_inspect_screenshot", selector),
+        mcp_request(
+            10,
+            "pulp_inspect_set_transport",
+            {**selector, "playing": False, "position_samples": 96000, "tempo_bpm": 90},
+        ),
+        mcp_request(
+            11,
+            "pulp_inspect_inject_midi",
+            {**selector, "kind": "note_on", "channel": 3, "note": 64, "velocity": 99},
+        ),
     ]
     mcp_env = env.copy()
     mcp_command = marketplace_mcp_command(mcp_config, mcp, mcp_env)
@@ -442,12 +490,12 @@ def exercise_clients(
     except json.JSONDecodeError as error:
         fail(f"packaged MCP emitted invalid JSON: {error}\n{mcp_result.stdout}")
     by_id = {response.get("id"): response for response in responses}
-    require(set(by_id) == set(range(1, 10)), f"unexpected MCP responses: {responses!r}")
+    require(set(by_id) == set(range(1, 12)), f"unexpected MCP responses: {responses!r}")
     require(by_id[1].get("result", {}).get("serverInfo", {}).get("name") == "pulp-mcp", str(by_id[1]))
 
     structured = {
         request_id: by_id[request_id].get("result", {}).get("structuredContent")
-        for request_id in range(2, 10)
+        for request_id in range(2, 12)
     }
     for request_id, payload in structured.items():
         require(isinstance(payload, dict), f"MCP response {request_id} lacks structured content: {by_id[request_id]!r}")
@@ -458,7 +506,7 @@ def exercise_clients(
     require(mcp_sessions[0].get("sessionId") == ready["session_id"], str(structured[2]))
     require(mcp_sessions[0].get("pluginId") == ready["plugin_id"], str(structured[2]))
 
-    for request_id in range(3, 10):
+    for request_id in range(3, 12):
         identity = structured[request_id].get("session", {})
         require_selected_session(identity, ready)
 
@@ -484,9 +532,11 @@ def exercise_clients(
 
     screenshot = structured[9].get("result", {})
     mcp_width, mcp_height, mcp_digest = require_png(screenshot, "MCP screenshot")
+    require(structured[10].get("result", {}).get("applied") is True, str(structured[10]))
+    require(structured[11].get("result", {}).get("accepted") is True, str(structured[11]))
     print(
         "proved independent packaged CLI and marketplace-configured MCP "
-        "list/capabilities/read/mutate/reread/capture workflows; "
+        "list/capabilities/read/mutate/reread/capture/test-input workflows; "
         f"cli-screenshot={cli_width}x{cli_height} sha256={cli_digest}; "
         f"mcp-screenshot={mcp_width}x{mcp_height} sha256={mcp_digest}"
     )
@@ -522,13 +572,15 @@ def main() -> int:
         client_cwd.mkdir()
         ready_path = scratch / "ready.json"
         stop_path = scratch / "stop"
+        observation_path = scratch / "test-input-observation.json"
         fixture_env = os.environ.copy()
         fixture_env["PULP_INSPECTOR_RUNTIME_DIR"] = str(runtime_dir)
         for name in ("PULP_INSPECT_PROFILE", "PULP_HEADLESS", "PULP_TEST_MODE", "CI"):
             fixture_env.pop(name, None)
         try:
             fixture = subprocess.Popen(
-                [str(args.fixture), "--ready", str(ready_path), "--stop", str(stop_path)],
+                [str(args.fixture), "--ready", str(ready_path), "--stop", str(stop_path),
+                 "--observation", str(observation_path)],
                 cwd=scratch,
                 env=fixture_env,
                 text=True,
@@ -554,6 +606,24 @@ def main() -> int:
                 ready,
                 args.mcp_config,
             )
+            observation_deadline = time.monotonic() + 5
+            observation: dict[str, Any] = {}
+            while time.monotonic() < observation_deadline:
+                try:
+                    observation = json.loads(observation_path.read_text(encoding="utf-8"))
+                except (FileNotFoundError, json.JSONDecodeError, OSError):
+                    time.sleep(0.02)
+                    continue
+                if (
+                    observation.get("note_on_count", 0) >= 2
+                    and observation.get("note_off_count", 0) >= 2
+                    and observation.get("transport_match") is True
+                ):
+                    break
+                time.sleep(0.02)
+            require(observation.get("note_on_count", 0) >= 2, str(observation))
+            require(observation.get("note_off_count", 0) >= 2, str(observation))
+            require(observation.get("transport_match") is True, str(observation))
             stop_path.write_text("stop\n", encoding="utf-8")
             fixture_output = fixture.communicate(timeout=30)
             require(
