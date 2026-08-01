@@ -22,6 +22,8 @@ target_sources(pulp-view-core PRIVATE
     src/gesture.cpp
     src/value_channel_json.cpp
     src/value_channel_set.cpp
+    src/value_channel_telemetry.cpp
+    src/value_source.cpp
     src/value_source_binding.cpp
     src/view.cpp
     src/view_paint.cpp

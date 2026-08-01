@@ -11,7 +11,6 @@
 /// reader polled on the frame clock), and the subscription that lets a live
 /// meter keep an editor's frames alive (see needs_continuous_frames).
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <type_traits>
@@ -19,6 +18,21 @@
 #include <pulp/runtime/triple_buffer.hpp>
 
 namespace pulp::view {
+
+class ValueChannelSet;
+
+namespace detail {
+class ScalarTelemetryState;
+class MeterTelemetryState;
+class VectorTelemetryState;
+class EventTelemetryState;
+
+template <typename T>
+struct PublishedValue {
+    T value{};
+    std::uint64_t publication = 0;
+};
+}  // namespace detail
 
 /// A single multi-channel meter reading. Fixed-capacity and trivially copyable
 /// so it can ride a `TripleBuffer` with no allocation on the publish path.
@@ -62,16 +76,21 @@ private:
 /// writer and one reader thread (the `TripleBuffer` contract).
 class MeterSource : public PublishCounter {
 public:
+    ~MeterSource();
+
     /// Publish the latest reading. Call from the writer (audio/host) thread.
     /// Alloc-free and non-blocking — a fixed-size copy into the back buffer.
-    void publish(const MeterFrame& frame) { buffer_.write(frame); note_publish(); }
+    void publish(const MeterFrame& frame);
 
     /// Read the latest published reading. Call from the reader (UI) thread.
     /// Returns by value so the caller never holds a reference into the buffer.
-    MeterFrame read() { return buffer_.read(); }
+    MeterFrame read();
 
 private:
-    runtime::TripleBuffer<MeterFrame> buffer_;
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<MeterFrame>> buffer_;
+    detail::MeterTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
 };
 
 /// A block of samples for a scope-style display — an envelope curve, a
@@ -129,27 +148,22 @@ static_assert(std::is_trivially_copyable_v<EventFrame>);
 /// current state of the signal, not a lossless history of it.
 class VectorSource : public PublishCounter {
 public:
+    ~VectorSource();
+
     /// Publish a block from the writer (audio/host) thread. Alloc-free and
     /// non-blocking: a bounded copy into the back buffer. More than
     /// `VectorFrame::kMaxSamples` is truncated rather than rejected, so an
     /// oversized block still renders its leading window instead of vanishing.
-    void publish(const float* samples, int count) {
-        VectorFrame frame;
-        frame.count = count < 0 ? 0 : (count > VectorFrame::kMaxSamples
-                                           ? VectorFrame::kMaxSamples
-                                           : count);
-        if (samples != nullptr && frame.count > 0) {
-            std::copy_n(samples, static_cast<std::size_t>(frame.count), frame.samples.begin());
-        }
-        buffer_.write(frame);
-        note_publish();
-    }
+    void publish(const float* samples, int count);
 
     /// Read the latest published block from the reader (UI) thread.
-    VectorFrame read() { return buffer_.read(); }
+    VectorFrame read();
 
 private:
-    runtime::TripleBuffer<VectorFrame> buffer_;
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<VectorFrame>> buffer_;
+    detail::VectorTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
 };
 
 /// Lock-free event channel: the writer publishes the occurrences from one
@@ -159,31 +173,21 @@ private:
 /// queue. A UI that misses an intermediate block observes the newest one.
 class EventSource : public PublishCounter {
 public:
+    ~EventSource();
+
     /// Publish a block's occurrences from the writer thread. Alloc-free and
     /// non-blocking. Oversized lists are truncated to their leading events.
-    void publish(const ValueEvent* events, int count) {
-        EventFrame frame;
-        frame.count = events == nullptr || count < 0
-                          ? 0
-                          : (count > EventFrame::kMaxEvents
-                                 ? EventFrame::kMaxEvents
-                                 : count);
-        if (frame.count > 0) {
-            std::copy_n(events, static_cast<std::size_t>(frame.count),
-                        frame.events.begin());
-        }
-        frame.publication = ++writer_publication_;
-        buffer_.write(frame);
-        note_publish();
-    }
+    void publish(const ValueEvent* events, int count);
 
     /// Read the latest completed block from the reader thread.
-    EventFrame read() { return buffer_.read(); }
+    EventFrame read();
 
 private:
-    runtime::TripleBuffer<EventFrame> buffer_;
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<EventFrame>> buffer_;
+    detail::EventTelemetryState* telemetry_ = nullptr;
     // Single-writer state: only publish() touches this counter.
-    std::uint32_t writer_publication_ = 0;
+    std::uint64_t writer_publication_ = 0;
 };
 
 /// Lock-free scalar channel: a single paint-safe cached number (a readout value,
@@ -191,14 +195,19 @@ private:
 /// contract as `MeterSource`.
 class ScalarSource : public PublishCounter {
 public:
+    ~ScalarSource();
+
     /// Publish the latest value from the writer (audio/host) thread.
-    void publish(float value) { buffer_.write(value); note_publish(); }
+    void publish(float value);
 
     /// Read the latest value from the reader (UI) thread.
-    float read() { return buffer_.read(); }
+    float read();
 
 private:
-    runtime::TripleBuffer<float> buffer_{0.0f};
+    friend class ValueChannelSet;
+    runtime::TripleBuffer<detail::PublishedValue<float>> buffer_;
+    detail::ScalarTelemetryState* telemetry_ = nullptr;
+    std::uint64_t writer_publication_ = 0;
 };
 
 } // namespace pulp::view
