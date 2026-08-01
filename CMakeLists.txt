@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.769.1
+    VERSION 0.770.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -638,27 +638,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 # at the END of every consumer's link line. No-op on macOS/Windows/Android.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
-
-    function(_pulp_collect_executables_recursive out_var dir)
-        get_property(_sub_dirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
-        get_property(_dir_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
-        set(_acc "")
-        foreach(_t ${_dir_targets})
-            if(TARGET ${_t})
-                get_target_property(_ttype ${_t} TYPE)
-                if(_ttype STREQUAL "EXECUTABLE")
-                    list(APPEND _acc ${_t})
-                endif()
-            endif()
-        endforeach()
-        foreach(_s ${_sub_dirs})
-            _pulp_collect_executables_recursive(_inner "${_s}")
-            list(APPEND _acc ${_inner})
-        endforeach()
-        set(${out_var} "${_acc}" PARENT_SCOPE)
-    endfunction()
-
-    _pulp_collect_executables_recursive(_all_executables "${PULP_ROOT_DIR}")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake")
+    pulp_collect_targets_recursive(
+        _all_executables
+        "${PULP_ROOT_DIR}"
+        TYPES EXECUTABLE
+    )
     foreach(_exec ${_all_executables})
         pulp_link_fontconfig_after_skia(${_exec})
     endforeach()

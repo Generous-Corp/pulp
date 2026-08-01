@@ -9,8 +9,8 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR | **yes** (blocking) | yes (compile only) | all tests **except** `validation` and `slow` labels; `--repeat until-pass:2` |
-| **Example-validation** (`example-validation`) | PRs touching `examples/**` | yes on example PRs (see status below) | yes | **only** `validation`-labeled example format-validators |
+| **Required core gate** (`macos`) | every PR | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** `validation` and `slow` labels; `--repeat until-pass:2` |
+| **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including `validation` + `slow`; results eyeballed, build failures file an issue |
 | **cross-platform-check** | per PR (Linux/Windows) | advisory | no | core tests, excludes `validation` + `slow` |
 
@@ -26,7 +26,8 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   `clap-dlopen-*`). **Every user of this label lives under `examples/`** — it is,
   in practice, "an example plugin's runtime validation." Slow (a `pluginval` run
   is ~25-30 s) and flaky under concurrent load. **Excluded from the required
-  gate**; enforced on the example-validation lane; also run nightly.
+  gate**; reported by the advisory `example-validation` lane and also run
+  nightly. They do not block merges until that context is promoted.
 - **`slow`** — a genuinely long test (e.g. `cmake-ios-auv3-configure`, a
   ~25-30 min iOS try-compile). **Excluded from the required gate**; run nightly.
 - **no special label** — a normal unit/integration test. Runs on the **required
@@ -46,15 +47,25 @@ core PR**. Historically `pluginval-SuperConvolver-VST3` (an *example*) flaked ~3
 of the time on the required gate and cost unrelated PRs hours (see
 `planning/friction/2026-07-15-*`). Two things follow:
 
-1. **Compile is still gated.** The required gate configures with
-   `PULP_BUILD_EXAMPLES=ON`, so an example that fails to *build* still reddens the
-   gate. Only the runtime *validators* move off.
-2. **Validation is still enforced — on the PR that changes the example.** The
+1. **Compile is checked on relevant changes.** `build.yml`'s required `macos`
+   Actions job configures examples OFF. Shipyard's separate blocking
+   `[validation.default]` temporarily keeps `PULP_BUILD_EXAMPLES=ON` until the
+   always-reporting context below is promoted to a required check. The
+   `example-validation` workflow compiles the full examples tree on Linux and
+   macOS whenever an example, watched state/format header, core CMake surface,
+   or shared dependency
+   infrastructure changes, so a failure is visible on the
+   relevant PR. Only the runtime *validators* are macOS-specific. This remains
+   advisory until the status below is promoted.
+2. **Available hosted validation runs on the PR that changes the example.** The
    `example-validation` lane
    ([`.github/workflows/examples-validation.yml`](../../.github/workflows/examples-validation.yml))
-   runs the `validation`-labeled tests and **blocks** whenever a PR touches
-   `examples/**`. It is deliberately **not** a nightly-only deferral: a broken
-   example validator fails the PR that introduced it. The nightly is only a
+   runs the registered `validation`-labeled tests whenever a PR touches
+   `examples/**`. Hosted macOS supplies `auval` and the built-in CLAP dlopen
+   checks; `pluginval` and `clap-validator` run only on an operator-dispatched
+   isolated advisory image that installs them.
+   It is deliberately **not** a nightly-only deferral: a broken example
+   validator is reported on the PR that introduced it. The nightly is only a
    backstop.
 
 ### example-validation lane status
@@ -84,6 +95,8 @@ real-runner run on an `examples/**` PR. Until then it is visible-but-advisory.
 Labeling a test `slow` or `validation` **removes it from the required gate**. If
 nothing else runs it as a *gate*, you have silently disabled it — the nightly
 runs it but does **not** fail on it. Before moving a test off the required gate,
-make sure it is enforced somewhere: the `example-validation` lane for example
-validators, or a dedicated gating lane otherwise. "It runs nightly" is a backstop,
-not enforcement.
+make sure it is enforced somewhere. During the staged rollout,
+`example-validation` reports example-validator failures but remains advisory;
+promotion to a required context is what turns that signal into enforcement.
+Use a dedicated gating lane for anything that must block before then. "It runs
+nightly" is a backstop, not enforcement.

@@ -833,6 +833,15 @@ const auto sample = tempo.ticks_to_samples({4 * kTicksPerQuarter});
 clock; the transport owns advancement while timeline positions may seek or
 wrap. `CompiledMeterMap` provides the corresponding validated meter lookup.
 
+`LoopRegion` is the loop bounds a transport honours, in document ticks. It lives
+here rather than beside either consumer because that is all it is — two document
+positions and whether they are in force — so the rung that runs the transport
+(`playback::LoopRegion`) and the rung that draws the ruler
+(`timeline_editor::UiPlayhead::loop`) name one type instead of two structurally
+identical ones. A disabled loop keeps its bounds, so turning looping off and back
+on returns the user to the region they set up and a view keeps drawing it
+meanwhile.
+
 ## timeline
 
 Immutable document-model foundations and a bounded typed editing core for musical timelines. `Project`,
@@ -1175,7 +1184,12 @@ Two properties make the split hold, and both are enforced rather than asserted.
 Everything crosses the interface by value, so a playhead reading a view is
 holding cannot be invalidated when the engine adopts a different compiled
 program — it goes stale, never dangling, and `UiPlayhead::program_generation`
-is how a view tells the difference. And the vocabulary is document-side:
+is how a view tells the difference. `UiPlayhead::continuity_epoch` answers the
+separate question of whether the position moved *continuously* between two
+readings: a loop wrap, a seek, and a scrub anchor all break continuity without
+recompiling anything, so a view that smooths motion between readings must hold
+the newer position outright across a change in this value rather than
+interpolating into it. And the vocabulary is document-side:
 positions are `timebase` ticks, subjects are `timeline::ItemId`s. Nothing here
 describes how audio is produced.
 `tools/scripts/timeline_engine_dependency_floor_check.py` holds the module to
@@ -1191,6 +1205,13 @@ using namespace pulp::timeline_editor;
 // A view repaints its ruler from a value it owns outright.
 const UiPlayhead reading = host.playhead();
 if (reading.moving())
+    draw_playhead_at(reading.position);
+
+// Smoothing between publishes stops at a continuity break, so a loop wrap
+// never draws the playhead sliding backwards through the whole timeline.
+if (reading.continuity_epoch == previous.continuity_epoch)
+    draw_playhead_at(interpolate(previous.position, reading.position, alpha));
+else
     draw_playhead_at(reading.position);
 
 // Clicking a note asks to hear it, in document terms only.
