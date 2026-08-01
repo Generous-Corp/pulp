@@ -17,7 +17,8 @@
 # plugin that wants only the interfaces — pay for the view stack.
 
 add_library(pulp-timeline-view
-    src/arranger_view.cpp)
+    src/arranger_view.cpp
+    src/piano_roll_view.cpp)
 add_library(pulp::timeline-view ALIAS pulp-timeline-view)
 
 target_compile_features(pulp-timeline-view PUBLIC cxx_std_20)

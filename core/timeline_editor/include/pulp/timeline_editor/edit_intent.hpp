@@ -7,6 +7,7 @@
 #include <pulp/timeline_editor/sequencer_ui_host.hpp>
 
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace pulp::timeline_editor {
@@ -159,6 +160,54 @@ struct EditIntentIdentity {
 /// which vocabulary an editor submits, while the template itself stays ignorant
 /// of that answer.
 using EditIntentHost = SequencerUiHostT<EditIntent>;
+
+/// Why a note intent could not be lowered to a transaction.
+///
+/// Distinct from ModelError because the interesting refusal is not a malformed
+/// value: it is a well-formed gesture this lowering deliberately does not serve.
+enum class NoteLoweringError : std::uint8_t {
+    /// The intent's phase is not Single. See lower_note_edit_intent.
+    ContinuousGestureUnsupported,
+    /// Insert supplied a note identity the clip already carries.
+    DuplicateNoteIdentity,
+    /// Erase or a transform named a note the supplied content does not carry.
+    NoteNotInClip,
+    /// The expected note does not match the one the clip currently carries.
+    ExpectedNoteMismatch,
+    /// The transaction or command identity is malformed.
+    InvalidIdentity,
+};
+
+/// Lowers one commit-on-release note intent to the ordinary transaction that
+/// performs it.
+///
+/// `current_notes` is the target clip's note array as the caller believes it to
+/// be. It is a parameter rather than a project lookup so this stays pure for the
+/// same reason `lower_edit_intent` is: one intent can be lowered twice — once
+/// per input device in a parity test, once per retry after a stale revision —
+/// without the intent being rewritten. The array becomes the command's expected
+/// value, so a caller that passes a stale one gets `ExpectedValueMismatch` from
+/// the reducer rather than a silent overwrite.
+///
+/// SCOPE — `GesturePhase::Single` ONLY, and the boundary is deliberate.
+/// `ReplaceNoteContent` carries both note arrays, so a session charges one edit
+/// `retained_size(forward) + retained_size(inverse)`. A Single-phase transaction
+/// is closed on admission and immediately evictable, so a stream of them costs
+/// undo depth and nothing else. A `Begin`/`Update`/.../`End` drag instead
+/// coalesces into a group that stays open, and an open group is evictable by
+/// nothing — so a per-frame drag accumulates until it dies mid-gesture with
+/// `ConflictCode::UndoFull`. Serving a continuous drag needs granular note
+/// commands, not a different lowering of this one, so this function refuses a
+/// non-Single phase with `ContinuousGestureUnsupported` rather than emitting a
+/// transaction that would fail partway through a user's gesture.
+///
+/// That makes commit-on-release the shape this serves, which is also the right
+/// product shape: a drag over a large clip pays a whole-content replacement per
+/// frame, while committing on release pays one per edit.
+runtime::Result<timeline::Transaction, NoteLoweringError>
+lower_note_edit_intent(const ValidatedNoteEditIntent& intent,
+                       std::span<const timeline::NoteEvent> current_notes,
+                       const EditIntentIdentity& identity);
 
 /// Lowers one intent to the ordinary transaction that performs it.
 ///
