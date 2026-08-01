@@ -193,7 +193,15 @@ cd "$HOME/Library/Application Support/Forge Modular/tools/rack" || exit 1
 exec python3 prove_arrows.py "$@"
 LAUNCH
 chmod +x ~/bin/forge-modular-prove
-echo "  installed: ~/bin/forge-modular-prove"
+# ~/bin is NOT on the PATH by default on macOS, and printing the bare name
+# assumed it was: the first person to follow this got "command not found" and
+# had to be told the real path. Say what actually works on THIS machine.
+case ":$PATH:" in
+    *":$HOME/bin:"*) echo "  installed: forge-modular-prove (~/bin is on your PATH)" ;;
+    *) echo "  installed: ~/bin/forge-modular-prove"
+       echo "             (~/bin is not on your PATH, so use the full path —"
+       echo "              or add it: echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> ~/.zshrc)" ;;
+esac
 python3 - <<'"'"'PY'"'"'
 import subprocess, os
 # Both permissions are per-APPLICATION (the terminal running this), so they are
@@ -215,15 +223,48 @@ else:
     print("  Screen Recording: granted")
     os.remove("/tmp/fm-perm.png")
 if ok:
-    print("  run it on this machine with:  forge-modular-prove")
+    print("  run it on this machine with:  ~/bin/forge-modular-prove")
 elif os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
-    print("  in a Terminal ON this machine, run:  forge-modular-prove")
+    print("  in a Terminal ON this machine, run:  ~/bin/forge-modular-prove")
 else:
     print("  grant it in System Settings > Privacy & Security, then run:")
-    print("      forge-modular-prove")
+    print("      ~/bin/forge-modular-prove")
 PY'
 
-step "9. signature and quarantine"
+# Does it actually START on this machine?
+#
+# Everything above proves the bundle is present, signed, notarized, stapled and
+# indexed. None of it launches the thing. A build was signed and shipped here
+# without ever being run, and it crashed on the first launch — into a
+# three-day-old startup crash nobody had counted, because a crash that happens
+# before a window appears leaves no trace anyone reads.
+#
+# So: launch it, wait, and see whether it is still alive. Then count the crash
+# reports, because "it survived this time" is not the same as "it is well" for
+# a fault that is intermittent.
+step "9. does it start"
+remote 'before=$(ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -c "^Forge Modular")
+open -a /Applications/"Forge Modular.app" 2>/dev/null
+alive=0
+for i in $(seq 1 12); do
+    sleep 1
+    pgrep -f "/Applications/Forge Modular.app/Contents/MacOS" >/dev/null && alive=1 || alive=0
+done
+after=$(ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -c "^Forge Modular")
+if [ "$alive" = 1 ]; then
+    echo "  it launched and was still running after 12s"
+else
+    echo "  IT DID NOT SURVIVE LAUNCH"
+fi
+if [ "$after" -gt "$before" ]; then
+    echo "  and it left $((after - before)) new crash report(s) — see"
+    echo "  ~/Library/Logs/DiagnosticReports"
+fi
+echo "  crash reports on this machine, all time: $after"
+osascript -e '"'"'tell application "Forge Modular" to quit'"'"' >/dev/null 2>&1
+'
+
+step "10. signature and quarantine"
 # A bundle that arrives without a valid signature will be refused by Gatekeeper
 # on a machine that did not build it, which reads as "the plugin is broken".
 remote '
@@ -241,4 +282,4 @@ for p in ~/Library/Audio/Plug-Ins/Components/"Forge Modular.component" \
 done
 '
 
-step "done. Step 9 proves it: CLI, the app by clicking Build, and REAPER."
+step "done. Step 10 proves it: CLI, the app by clicking Build, and REAPER."
