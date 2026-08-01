@@ -998,6 +998,28 @@ that row to admit `view` makes every consumer of the kernel pay for `core/view`,
 which is the exact coupling the rung split exists to prevent. A view target gets
 its own directory and its own row, sitting above this one.
 
+**A type two rungs both need goes in their floors' intersection, not in either
+rung.** `playback` and `timeline_editor` exclude each other, and `timebase` is
+in both rows — so it is where a shared value type lives, and moving one there is
+legal with no floor change at all. `timebase::LoopRegion` is the worked case: the
+editor's `UiLoopRegion` and playback's `LoopRegion` had been the same three
+fields in the same order. Check `MODULE_FLOORS` for the intersection before
+placing anything; if the rows do not admit the home you want, the placement
+argument is wrong and widening a row is not the repair.
+
+The same reasoning bounds what may *not* move down. A converter between two
+rungs' types names both, so it belongs above both — not in either rung, and not
+in `timebase`, which may name neither. Until an engine above both exists there is
+no legal home for one, and adding it anywhere reachable would mean widening a row.
+
+`UiPlayhead` speaks the editor's nouns rather than mirroring the transport's:
+`UiTransportState` in place of `is_playing`/`scrubbing`, and `continuity_epoch`
+in place of `playback_epoch` — the rung's floor excludes `playback`, and a host
+backed by a scripted value or a plugin's own engine has a continuity guarantee
+without having a playback epoch. `continuity_epoch` is what a view checks before
+smoothing motion between two readings; `program_generation` cannot substitute,
+because a loop wrap breaks continuity without recompiling anything.
+
 ### Derived surfaces are projections of the manifest, not the registry
 
 Every downstream agent surface is a **pure function of the committed
