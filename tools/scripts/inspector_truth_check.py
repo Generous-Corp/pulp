@@ -197,56 +197,123 @@ REQUIRED_BUILD_CONTRACTS = {
     ),
 }
 
-REQUIRED_SECURITY_TESTS = {
-    "test/test_inspector_discovery.cpp": (
-        "discovery publishes owner-private ephemeral credentials and cleans up",
-        "discovery publication generation cannot rebind a stale selector",
-        "discovery rejects a stale record after process id reuse",
-        "discovery rejects a zombie publisher on macOS",
-        "discovery rejects expired, insecure, and ambiguous records",
-    ),
-    "test/test_trace_inspector.cpp": (
-        "TraceInspector bounds the capture ring",
-        "TraceInspector enforces process-global publication ownership",
-        "TraceInspector stale ownership cannot stop a replacement capture",
-        "trace-capable server validates its domain-owned controller",
-        "ungranted trace availability does not require a publication binding",
-    ),
-    "test/test_inspector_client.cpp": (
-        "server rejects deeply nested JSON before authentication",
-        "mutual authentication rejects reflection and gates early events",
-        "response timeout fences may-have-applied requests",
-    ),
-    "test/test_inspector_server_lifecycle.cpp": (
-        "callback stop cancels a concurrent authenticated restart",
-        "session restart serializes publication with heartbeat refresh",
-        "publication binding exceptions cannot escape server lifecycle",
-        "publication retirement hides visibility before releasing its binding",
-    ),
-    "test/test_ipc.cpp": (
-        "IPC read callback destruction coordinates with external disconnect",
-        "IPC socket write timeout includes writer admission",
-        "IPC timeout disconnect serializes with explicit teardown",
-    ),
-    "experimental/pulp-rs/src/cmd/inspector.rs": (
-        "exact_selection_default_preserves_compatibility_but_fails_closed",
-        "capabilities_selection_requires_safe_complete_identity",
-    ),
-    "experimental/pulp-rs/src/cmd/trace_dispatch_tests.rs": (
-        "dispatch_stop_requires_exact_selection_before_calling_inspector",
-        "dispatch_live_followups_require_exact_selection",
-    ),
-    "experimental/pulp-rs/src/cmd/motion_tests.rs": (
-        "dispatch_stateful_followups_require_exact_selection_before_calling_inspector",
-    ),
-}
+SECURITY_IMPLEMENTATION_PATHS = (
+    "inspect/src/client.cpp",
+    "inspect/src/inspector_server.cpp",
+    "inspect/src/discovery_reader.cpp",
+    "experimental/pulp-rs/src/cmd/inspector.rs",
+)
+
+
+def _without_source_comments(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def _contains_in_order(text: str, fragments: tuple[str, ...]) -> bool:
+    offset = 0
+    for fragment in fragments:
+        found = text.find(fragment, offset)
+        if found < 0:
+            return False
+        offset = found + len(fragment)
+    return True
+
+
+def security_implementation_errors(root: pathlib.Path) -> list[str]:
+    """Check executable security invariants in production implementations."""
+    sources = {
+        path: _without_source_comments((root / path).read_text(encoding="utf-8"))
+        for path in SECURITY_IMPLEMENTATION_PATHS
+    }
+    client = sources["inspect/src/client.cpp"]
+    server = sources["inspect/src/inspector_server.cpp"]
+    discovery = sources["inspect/src/discovery_reader.cpp"]
+    rust = sources["experimental/pulp-rs/src/cmd/inspector.rs"]
+    errors: list[str] = []
+
+    if not re.search(
+        r"challenge\.session_id\s*!=\s*record\.session_id\s*\|\|\s*"
+        r"challenge\.instance_id\s*!=\s*record\.instance_id\s*\|\|\s*"
+        r"challenge\.publication_id\s*!=\s*record\.publication_id",
+        client,
+    ):
+        errors.append("client authentication no longer binds the exact publication")
+    if "verify_inspector_server_auth_proof(" not in client:
+        errors.append("client authentication no longer verifies the server proof")
+    if not re.search(
+        r"if\s*\(!event_state->authenticated\).*?"
+        r"event_state->pre_auth_events\.push_back",
+        client,
+        re.DOTALL,
+    ):
+        errors.append("client events are no longer quarantined before authentication")
+
+    if not re.search(
+        r"if\s*\(!authenticated\)\s*\{.*?"
+        r"request\.method\s*!=\s*methods::kSessionAuthenticate",
+        server,
+        re.DOTALL,
+    ):
+        errors.append("server accepts requests before authentication")
+    if not _contains_in_order(
+        server,
+        (
+            "found->second->verifier->authenticate(proof)",
+            "found->second->verifier.reset()",
+            "found->second->authenticated =",
+        ),
+    ):
+        errors.append("server authentication verifier can be replayed")
+    if not _contains_in_order(
+        server,
+        (
+            "session->suspend_dispatches()",
+            "server.stop()",
+            "client->outbound->shutdown()",
+            "cleanup_cv.wait(",
+            "publication.clear_after_endpoint_stop()",
+            "secure_zero_memory(token.data(), token.size())",
+        ),
+    ):
+        errors.append("server teardown no longer drains clients before retirement")
+
+    if not re.search(
+        r"current->session_id\s*!=\s*record\.session_id\s*\|\|\s*"
+        r"current->instance_id\s*!=\s*record\.instance_id\s*\|\|\s*"
+        r"current->publication_id\s*!=\s*record\.publication_id",
+        discovery,
+    ):
+        errors.append("credential reread no longer rejects stale publication identity")
+    if not re.search(
+        r"record\.session_id\s*!=\s*session_id\).*?"
+        r"record\.instance_id\s*!=\s*instance_id\).*?"
+        r"record\.publication_id\s*!=\s*publication_id",
+        discovery,
+        re.DOTALL,
+    ):
+        errors.append("discovery selection no longer matches the complete identity")
+
+    if "is_some_and(|selection| !selection.publication_id.is_empty())" not in rust:
+        errors.append("Rust mutation routing no longer requires a publication id")
+    if not _contains_in_order(
+        rust,
+        (
+            'value.get("sessionId")?.as_str()?',
+            'value.get("instanceId")?.as_str()?',
+            'value.get("publicationId")?.as_str()?',
+            "!valid_session_identity(publication_id)",
+        ),
+    ):
+        errors.append("Rust capability discovery no longer validates exact identity")
+
+    return errors
 
 def check_root(
     root: pathlib.Path,
     *,
     required_claims=REQUIRED_CLAIMS,
     required_build_contracts=REQUIRED_BUILD_CONTRACTS,
-    required_security_tests=REQUIRED_SECURITY_TESTS,
 ) -> list[str]:
     errors: list[str] = []
     definitions = (
@@ -324,13 +391,7 @@ def check_root(
                     f"{relative_path} omits inspector build contract: {contract}"
                 )
 
-    for relative_path, test_names in required_security_tests.items():
-        text = (root / relative_path).read_text(encoding="utf-8")
-        for test_name in test_names:
-            if test_name not in text:
-                errors.append(
-                    f"{relative_path} omits inspector security test: {test_name}"
-                )
+    errors.extend(security_implementation_errors(root))
 
     reader_header = (
         root / "inspect/include/pulp/inspect/discovery.hpp"

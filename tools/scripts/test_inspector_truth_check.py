@@ -20,11 +20,6 @@ TEST_REQUIRED_BUILD_CONTRACTS = {
         "PULP_ENABLE_INSPECTOR",
     ),
 }
-TEST_REQUIRED_SECURITY_TESTS = {
-    "test/security_behavior.cpp": (
-        "rejects insecure publication",
-    ),
-}
 
 
 class InspectorTruthCheckTests(unittest.TestCase):
@@ -46,7 +41,6 @@ class InspectorTruthCheckTests(unittest.TestCase):
         canonical_contracts = (
             TEST_REQUIRED_CLAIMS,
             TEST_REQUIRED_BUILD_CONTRACTS,
-            TEST_REQUIRED_SECURITY_TESTS,
         )
         for contract in canonical_contracts:
             for relative, requirements in contract.items():
@@ -65,6 +59,9 @@ class InspectorTruthCheckTests(unittest.TestCase):
         )
         for relative in inspector_truth_check.FORBIDDEN_CLAIMS:
             files.setdefault(relative, "safe fixture\n")
+        repository = pathlib.Path(inspector_truth_check.__file__).parents[2]
+        for relative in inspector_truth_check.SECURITY_IMPLEMENTATION_PATHS:
+            files[relative] = (repository / relative).read_text(encoding="utf-8")
         for relative, text in files.items():
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,8 +79,15 @@ class InspectorTruthCheckTests(unittest.TestCase):
             root,
             required_claims=TEST_REQUIRED_CLAIMS,
             required_build_contracts=TEST_REQUIRED_BUILD_CONTRACTS,
-            required_security_tests=TEST_REQUIRED_SECURITY_TESTS,
         )
+
+    def mutate(
+        self, root: pathlib.Path, relative: str, before: str, after: str
+    ) -> None:
+        path = root / relative
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(before, text)
+        path.write_text(text.replace(before, after, 1), encoding="utf-8")
 
     def test_accepts_truthful_fixture(self) -> None:
         self.assertEqual(self.check_root(self.make_root()), [])
@@ -105,15 +109,72 @@ class InspectorTruthCheckTests(unittest.TestCase):
                 seen.add(key.value)
         self.assertEqual(duplicates, [])
 
-    def test_rejects_missing_security_behavior(self) -> None:
+    def test_detects_exact_publication_authentication_mutation(self) -> None:
         root = self.make_root()
-        (root / "test/security_behavior.cpp").write_text(
-            "accepts everything\n", encoding="utf-8"
+        self.mutate(
+            root,
+            "inspect/src/client.cpp",
+            "challenge.publication_id != record.publication_id",
+            "false",
         )
         self.assertIn(
-            "omits inspector security test",
+            "authentication no longer binds the exact publication",
             " ".join(self.check_root(root)),
         )
+
+    def test_detects_authentication_replay_mutation(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "inspect/src/inspector_server.cpp",
+            "found->second->verifier.reset();",
+            "",
+        )
+        self.assertIn("verifier can be replayed", " ".join(self.check_root(root)))
+
+    def test_detects_preauthentication_event_mutation(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "inspect/src/client.cpp",
+            "if (!event_state->authenticated) {",
+            "if (false) {",
+        )
+        self.assertIn(
+            "events are no longer quarantined", " ".join(self.check_root(root))
+        )
+
+    def test_detects_teardown_order_mutation(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "inspect/src/inspector_server.cpp",
+            "client->outbound->shutdown();",
+            "client->outbound->request_stop();",
+        )
+        self.assertIn(
+            "teardown no longer drains clients", " ".join(self.check_root(root))
+        )
+
+    def test_detects_cpp_exact_selection_mutation(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "inspect/src/discovery_reader.cpp",
+            "record.publication_id != publication_id",
+            "false",
+        )
+        self.assertIn("complete identity", " ".join(self.check_root(root)))
+
+    def test_detects_rust_exact_selection_mutation(self) -> None:
+        root = self.make_root()
+        self.mutate(
+            root,
+            "experimental/pulp-rs/src/cmd/inspector.rs",
+            "is_some_and(|selection| !selection.publication_id.is_empty())",
+            "is_some_and(|_| true)",
+        )
+        self.assertIn("requires a publication id", " ".join(self.check_root(root)))
 
     def test_rejects_omitted_capability(self) -> None:
         root = self.make_root()
