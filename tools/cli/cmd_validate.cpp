@@ -3,6 +3,7 @@
 #include "cli_common.hpp"
 #include "mac_runtime_validators.hpp"
 #include "validator_discovery.hpp"
+#include "inspector_shipping_report.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -135,6 +136,15 @@ int cmd_validate(const std::vector<std::string>& args) {
                    << ", \"skipped\": " << skip_count << "},\n";
             report << "  \"install_ready\": " << (tgt_install_ready ? "true" : "false")
                    << ",\n";
+            auto inspector_evidence_dir = fs::path(positional.front());
+            if (inspector_evidence_dir.extension() == ".app")
+                inspector_evidence_dir /= "Contents/MacOS";
+            else if (!fs::is_directory(inspector_evidence_dir))
+                inspector_evidence_dir = inspector_evidence_dir.parent_path();
+            const auto inspector_report =
+                pulp::cli::inspector_shipping::load_report(inspector_evidence_dir);
+            report << "  \"inspector_capabilities\": "
+                   << inspector_report.json << ",\n";
             report << "  \"results\": [\n";
             for (size_t i = 0; i < results.size(); ++i) {
                 const auto& r = results[i];
@@ -585,6 +595,9 @@ int cmd_validate(const std::vector<std::string>& args) {
                << ", \"skipped\": " << skipped
                << ", \"skipped_missing_tool\": " << skipped_missing_tool << "},\n";
         report << "  \"install_ready\": " << (install_ready ? "true" : "false") << ",\n";
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::load_report(build_dir);
+        report << "  \"inspector_capabilities\": " << inspector_report.json << ",\n";
         report << "  \"reports\": [\n";
         for (size_t i = 0; i < report_entries.size(); ++i) {
             report << report_entries[i];

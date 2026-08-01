@@ -5,10 +5,12 @@
 #include "sdk_distribution_guard.hpp"
 #include "notary_env.hpp"
 #include "ship_tracing_guard.hpp"
+#include "inspector_shipping_report.hpp"
 #include "xcode_developer_path.hpp"
 
 #include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -93,6 +95,9 @@ static int print_ship_help() {
     std::cout << "             --version 1.0.0\n";
     std::cout << "             --pkg | --dmg  (item 7.5: per-artifact macOS packaging)\n";
     std::cout << "             --allow-tracing  (override the guard that refuses a PULP_TRACING=ON build)\n";
+    std::cout << "             --ship-inspector  (acknowledge an exactly declared inspector endpoint)\n";
+    std::cout << "             --ship-inspector-runtime-eval  (separate unsafe-eval acknowledgement)\n";
+    std::cout << "             --json  (emit inspector capability evidence)\n";
     std::cout << "             --installer-identity \"Developer ID Installer: ...\"  (sign the .pkg)\n";
     std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
     std::cout << "  release    macOS: sign → package → notarize → staple in one command\n";
@@ -107,6 +112,7 @@ static int print_ship_help() {
     std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
     std::cout << "             --url <artifact-or-url> [--download-url https://...] --version 1.0.0\n";
     std::cout << "  check      Check signing status of built desktop plugins or Android APK/AAB artifacts\n";
+    std::cout << "             --json  (include inspector capability declarations)\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
     std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
     std::cout << "             --check-online  (validate the .p8 against Apple, refresh pulp-notary profile)\n";
@@ -423,6 +429,9 @@ static int ship_package(const std::vector<std::string>& args,
         std::string icon_path;     // Linux AppImage: optional .png icon
         bool per_user = false, apk_only = false, aab_only = false;
         bool allow_tracing = false;  // override the PULP_TRACING ship guard
+        bool json_output = false;
+        bool ship_inspector = false;
+        bool ship_inspector_runtime_eval = false;
         // macOS packaging. DEFAULT: one component-selectable installer — a single
         // signed `.pkg` whose "Customize" pane lets the user install only the
         // formats they want (AU/VST3/CLAP/Standalone, all pre-checked). This is
@@ -474,6 +483,10 @@ static int ship_package(const std::vector<std::string>& args,
             else if (args[i] == "--dmg") want_dmg = true;
             else if (args[i] == "--separate") want_separate = true;
             else if (args[i] == "--allow-tracing") allow_tracing = true;
+            else if (args[i] == "--json") json_output = true;
+            else if (args[i] == "--ship-inspector") ship_inspector = true;
+            else if (args[i] == "--ship-inspector-runtime-eval")
+                ship_inspector_runtime_eval = true;
             else return unknown_ship_arg(sub, args[i]);
         }
 
@@ -483,6 +496,37 @@ static int ship_package(const std::vector<std::string>& args,
             rc != 0) {
             return rc;
         }
+
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::load_report(build_dir);
+        if (inspector_report.ships_inspector != ship_inspector) {
+            std::cerr << "pulp ship package: inspector manifest/acknowledgement mismatch; "
+                         "an intentional endpoint requires --ship-inspector and an ordinary "
+                         "package must not pass it\n";
+            return 2;
+        }
+        if (inspector_report.ships_runtime_eval != ship_inspector_runtime_eval) {
+            std::cerr << "pulp ship package: runtime.eval requires the distinct unsafe "
+                         "--ship-inspector-runtime-eval acknowledgement; --ship-inspector "
+                         "does not imply it\n";
+            return 2;
+        }
+        if (ship_inspector_runtime_eval && !ship_inspector) {
+            std::cerr << "pulp ship package: --ship-inspector-runtime-eval also requires "
+                         "--ship-inspector\n";
+            return 2;
+        }
+        const auto capability_evidence =
+            artifacts / "inspector-capability-package-input.json";
+        if (!pulp::cli::inspector_shipping::write_evidence(
+                capability_evidence, inspector_report, "package-input")) {
+            std::cerr << "pulp ship package: could not write inspector capability evidence\n";
+            return 1;
+        }
+        if (json_output)
+            std::cout << "\n{\"inspector_capabilities\": "
+                      << inspector_report.json << ", \"evidence\": "
+                      << std::quoted(capability_evidence.string()) << "}\n";
 
         if (apk_only && aab_only) {
             std::cerr << "Error: --apk-only and --aab-only are mutually exclusive.\n";
@@ -824,12 +868,30 @@ static int ship_check(const std::vector<std::string>& args,
                        const fs::path& root, const fs::path& build_dir) {
     const std::string sub = "check";
         std::string target;
+        bool json_output = false;
         for (size_t i = 1; i < args.size(); ++i)
             if (args[i] == "--target") {
                 if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else if (args[i] == "--json") {
+                json_output = true;
             } else {
                 return unknown_ship_arg(sub, args[i]);
             }
+
+        const auto inspector_report =
+            pulp::cli::inspector_shipping::load_report(build_dir);
+        std::vector<std::pair<std::string, bool>> checked_artifacts;
+        const auto emit_json = [&] {
+            std::cout << "{\"inspector_capabilities\": "
+                      << inspector_report.json << ",\"artifacts\":[";
+            for (std::size_t i = 0; i < checked_artifacts.size(); ++i) {
+                if (i != 0) std::cout << ",";
+                std::cout << "{\"name\":" << std::quoted(checked_artifacts[i].first)
+                          << ",\"signed\":"
+                          << (checked_artifacts[i].second ? "true" : "false") << "}";
+            }
+            std::cout << "]}\n";
+        };
 
         if (target == "android") {
             auto art_dir = root / "artifacts";
@@ -840,9 +902,11 @@ static int ship_check(const std::vector<std::string>& args,
             for (auto& entry : fs::directory_iterator(art_dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".apk" || ext == ".aab") {
-                    std::cout << entry.path().filename().string() << ": ";
                     auto info = pulp::ship::check_android_signing(entry.path());
-                    if (info.is_signed) {
+                    checked_artifacts.emplace_back(
+                        entry.path().filename().string(), info.is_signed);
+                    if (!json_output && info.is_signed) {
+                        std::cout << entry.path().filename().string() << ": ";
                         std::cout << "signed";
                         if (ext == ".apk") {
                             if (info.v2_signed) std::cout << " v2";
@@ -850,11 +914,13 @@ static int ship_check(const std::vector<std::string>& args,
                         }
                         if (!info.signer_cn.empty()) std::cout << " (" << info.signer_cn << ")";
                         std::cout << "\n";
-                    } else {
-                        std::cout << "unsigned\n";
+                    } else if (!json_output) {
+                        std::cout << entry.path().filename().string()
+                                  << ": unsigned\n";
                     }
                 }
             }
+            if (json_output) emit_json();
             return 0;
         }
 
@@ -864,12 +930,16 @@ static int ship_check(const std::vector<std::string>& args,
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
-                    std::cout << entry.path().filename().string() << ": ";
                     auto info = pulp::ship::check_codesign(entry.path().string());
-                    std::cout << (info.is_valid ? "signed" : "unsigned") << "\n";
+                    checked_artifacts.emplace_back(
+                        entry.path().filename().string(), info.is_valid);
+                    if (!json_output)
+                        std::cout << entry.path().filename().string() << ": "
+                                  << (info.is_valid ? "signed" : "unsigned") << "\n";
                 }
             }
         }
+        if (json_output) emit_json();
         return 0;
 }
 

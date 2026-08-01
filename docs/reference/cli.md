@@ -298,6 +298,11 @@ when the pixels themselves must show live signal.
 
 #### Development Inspector profiles
 
+Shipping is a separate build/package decision from these runtime profiles. See
+[Shipping a Development Inspector Endpoint](../guides/development-inspector-shipping.md)
+for the exact target manifest, binary proof, and the separate unsafe
+`runtime.eval` acknowledgement.
+
 Standalone inspector activation requires a GPU-enabled desktop build and a
 window host that can drain accepted owning-thread work while its event loop
 exits and defer a startup-failure close to a later native event turn. Pulp
