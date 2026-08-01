@@ -77,12 +77,9 @@ void ScriptInspectorBridge::detach() {
             running_->detach_requested = true;
             running = running_;
         }
-        lock.unlock();
-
         if (running)
-            interrupt_if_active(running);
+            interrupt_if_active_locked(running);
 
-        lock.lock();
         state_cv_.wait(lock, [&] { return !running_; });
     }
 }
@@ -160,8 +157,7 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
                                    [&] { return req->state == RequestState::finished; }))
                 return;
             req->timeout_requested = true;
-            lock.unlock();
-            interrupt_if_active(req);
+            interrupt_if_active_locked(req);
         });
 
         EvalResult result = serialize_eval(engine, code);
@@ -201,8 +197,7 @@ ScriptInspectorBridge::evaluate(const std::string& code, std::chrono::millisecon
     }
 
     req->timeout_requested = true;
-    lock.unlock();
-    interrupt_if_active(req);
+    interrupt_if_active_locked(req);
     return timeout_result;
 }
 
@@ -229,7 +224,6 @@ bool ScriptInspectorBridge::interrupt() {
         return false;
     request->interrupt_requested = true;
     auto* engine = request->engine;
-    lock.unlock();
     engine->request_interrupt();
     return true;
 }
@@ -299,7 +293,8 @@ void ScriptInspectorBridge::finish_locked(const std::shared_ptr<Request>& reques
     state_cv_.notify_all();
 }
 
-bool ScriptInspectorBridge::interrupt_if_active(const std::shared_ptr<Request>& request) {
+bool ScriptInspectorBridge::interrupt_if_active_locked(
+    const std::shared_ptr<Request>& request) {
     if (!request->can_interrupt || !request->engine)
         return false;
     if (!request->interrupt_window_open.exchange(false, std::memory_order_acq_rel))
