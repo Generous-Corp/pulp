@@ -109,6 +109,14 @@ public:
     // Throws std::runtime_error on parse/runtime errors.
     virtual choc::value::Value evaluate(const std::string& code) = 0;
 
+    // Evaluate and serialize directly inside the backend while enforcing the
+    // byte/depth/cycle bounds during traversal. Backends that cannot provide
+    // that resource guarantee must leave this unsupported.
+    virtual bool supports_bounded_json_evaluation() const { return false; }
+    virtual std::string evaluate_bounded_json(const std::string&, std::size_t) {
+        throw std::runtime_error("bounded JSON evaluation is unsupported");
+    }
+
     // Run JS code as a module with import resolution. Completion is invoked
     // when the engine reports module execution has either succeeded or failed.
     virtual void run_module(const std::string& code,

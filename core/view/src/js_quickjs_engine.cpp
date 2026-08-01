@@ -7,7 +7,10 @@
 
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <charconv>
+#include <cmath>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace pulp::view {
 
@@ -46,6 +49,250 @@ static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) 
 // bundled prelude) and logs a warning when it fires so the runaway is visible.
 namespace {
 constexpr int kQuickJsPumpJobCap = 1'000'000;
+
+namespace qjs = choc::javascript::quickjs;
+
+qjs::QuickJSContext* quickjs_context(choc::javascript::Context& context) {
+    struct ContextLayout {
+        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
+    };
+    auto& layout = reinterpret_cast<ContextLayout&>(context);
+    return static_cast<qjs::QuickJSContext*>(layout.pimpl.get());
+}
+
+class BoundedJsonWriter {
+public:
+    BoundedJsonWriter(qjs::QuickJSContext& owner, std::size_t limit)
+        : owner_(owner), context_(owner.context), limit_(limit) {
+        output_.reserve(std::min<std::size_t>(limit, 4096));
+    }
+
+    std::string write(qjs::JSValueConst value) {
+        write_value(value, 0);
+        return std::move(output_);
+    }
+
+private:
+    static constexpr std::size_t kMaxDepth = 32;
+
+    qjs::QuickJSContext& owner_;
+    qjs::JSContext* context_;
+    std::size_t limit_;
+    std::string output_;
+    std::unordered_set<const void*> active_objects_;
+
+    [[noreturn]] void result_too_large() const {
+        throw std::length_error(
+            "Runtime.evaluate result exceeds the "
+            + std::to_string(limit_) + "-byte limit");
+    }
+
+    [[noreturn]] void throw_pending_exception() {
+        auto exception = owner_.takeValue(qjs::JS_GetException(context_));
+        exception.throwIfError();
+        throw std::runtime_error("QuickJS operation failed");
+    }
+
+    void check_interrupted() {
+        if (owner_.shouldCancel.exchange(false, std::memory_order_acq_rel))
+            throw std::runtime_error("interrupted");
+    }
+
+    void append(std::string_view text) {
+        check_interrupted();
+        if (text.size() > limit_ - output_.size())
+            result_too_large();
+        output_.append(text);
+    }
+
+    void append_byte(char value) {
+        check_interrupted();
+        if (output_.size() == limit_)
+            result_too_large();
+        output_.push_back(value);
+    }
+
+    void append_codepoint(std::uint32_t value) {
+        if (value == '"' || value == '\\') {
+            append_byte('\\');
+            append_byte(static_cast<char>(value));
+        } else if (value == '\b') {
+            append("\\b");
+        } else if (value == '\f') {
+            append("\\f");
+        } else if (value == '\n') {
+            append("\\n");
+        } else if (value == '\r') {
+            append("\\r");
+        } else if (value == '\t') {
+            append("\\t");
+        } else if (value < 0x20) {
+            constexpr char hex[] = "0123456789abcdef";
+            char escaped[] = {'\\', 'u', '0', '0',
+                              hex[(value >> 4) & 0xf], hex[value & 0xf]};
+            append(std::string_view(escaped, sizeof(escaped)));
+        } else if (value <= 0x7f) {
+            append_byte(static_cast<char>(value));
+        } else if (value <= 0x7ff) {
+            char encoded[] = {
+                static_cast<char>(0xc0 | (value >> 6)),
+                static_cast<char>(0x80 | (value & 0x3f))};
+            append(std::string_view(encoded, sizeof(encoded)));
+        } else if (value <= 0xffff) {
+            char encoded[] = {
+                static_cast<char>(0xe0 | (value >> 12)),
+                static_cast<char>(0x80 | ((value >> 6) & 0x3f)),
+                static_cast<char>(0x80 | (value & 0x3f))};
+            append(std::string_view(encoded, sizeof(encoded)));
+        } else {
+            char encoded[] = {
+                static_cast<char>(0xf0 | (value >> 18)),
+                static_cast<char>(0x80 | ((value >> 12) & 0x3f)),
+                static_cast<char>(0x80 | ((value >> 6) & 0x3f)),
+                static_cast<char>(0x80 | (value & 0x3f))};
+            append(std::string_view(encoded, sizeof(encoded)));
+        }
+    }
+
+    void write_string(const qjs::JSString& string) {
+        append_byte('"');
+        for (std::uint32_t i = 0; i < string.len; ++i) {
+            std::uint32_t codepoint = string.is_wide_char
+                ? string.u.str16[i]
+                : string.u.str8[i];
+            if (string.is_wide_char
+                && codepoint >= 0xd800 && codepoint <= 0xdbff
+                && i + 1 < string.len) {
+                const auto low = static_cast<std::uint32_t>(string.u.str16[i + 1]);
+                if (low >= 0xdc00 && low <= 0xdfff) {
+                    codepoint =
+                        0x10000 + ((codepoint - 0xd800) << 10) + (low - 0xdc00);
+                    ++i;
+                }
+            }
+            if (codepoint >= 0xd800 && codepoint <= 0xdfff) {
+                constexpr char hex[] = "0123456789abcdef";
+                char escaped[] = {
+                    '\\', 'u',
+                    hex[(codepoint >> 12) & 0xf],
+                    hex[(codepoint >> 8) & 0xf],
+                    hex[(codepoint >> 4) & 0xf],
+                    hex[codepoint & 0xf]};
+                append(std::string_view(escaped, sizeof(escaped)));
+            } else {
+                append_codepoint(codepoint);
+            }
+        }
+        append_byte('"');
+    }
+
+    void write_value(qjs::JSValueConst value, std::size_t depth) {
+        if (qjs::JS_IsNull(value) || qjs::JS_IsUndefined(value)) {
+            append("null");
+            return;
+        }
+        if (qjs::JS_IsBool(value)) {
+            append(qjs::JS_ToBool(context_, value) ? "true" : "false");
+            return;
+        }
+        if (qjs::JS_IsNumber(value)) {
+            double number = 0.0;
+            if (qjs::JS_ToFloat64(context_, &number, value) != 0
+                || !std::isfinite(number)) {
+                append("null");
+                return;
+            }
+            char text[64];
+            const auto converted = std::to_chars(
+                std::begin(text), std::end(text), number,
+                std::chars_format::general);
+            if (converted.ec != std::errc{})
+                throw std::runtime_error("could not serialize evaluation number");
+            append(std::string_view(text, converted.ptr));
+            return;
+        }
+        if (qjs::JS_IsString(value)) {
+            write_string(*static_cast<qjs::JSString*>(value.u.ptr));
+            return;
+        }
+        if (!qjs::JS_IsObject(value)) {
+            append("null");
+            return;
+        }
+        if (depth >= kMaxDepth)
+            throw std::runtime_error(
+                "Runtime.evaluate result exceeds the 32-level depth limit");
+
+        const void* identity = value.u.ptr;
+        if (!active_objects_.insert(identity).second)
+            throw std::runtime_error("Runtime.evaluate result contains a cycle");
+        struct ActiveScope {
+            std::unordered_set<const void*>& objects;
+            const void* identity;
+            ~ActiveScope() { objects.erase(identity); }
+        } active_scope{active_objects_, identity};
+
+        const int is_array = qjs::JS_IsArray(context_, value);
+        if (is_array < 0)
+            throw_pending_exception();
+        if (is_array) {
+            auto length_value = owner_.takeValue(
+                qjs::JS_GetPropertyStr(context_, value, "length"));
+            length_value.throwIfError();
+            std::uint32_t length = 0;
+            if (qjs::JS_ToUint32(context_, &length, length_value.get()) != 0)
+                throw_pending_exception();
+            if (length > limit_)
+                result_too_large();
+            append_byte('[');
+            for (std::uint32_t i = 0; i < length; ++i) {
+                if (i != 0) append_byte(',');
+                auto element = owner_.takeValue(
+                    qjs::JS_GetPropertyUint32(context_, value, i));
+                element.throwIfError();
+                write_value(element.get(), depth + 1);
+            }
+            append_byte(']');
+            return;
+        }
+
+        qjs::JSPropertyEnum* properties = nullptr;
+        std::uint32_t property_count = 0;
+        if (qjs::JS_GetOwnPropertyNames(
+                context_, &properties, &property_count, value,
+                qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) != 0) {
+            throw_pending_exception();
+        }
+        struct PropertyScope {
+            qjs::JSContext* context;
+            qjs::JSPropertyEnum* properties;
+            std::uint32_t count;
+            ~PropertyScope() {
+                for (std::uint32_t i = 0; i < count; ++i)
+                    qjs::JS_FreeAtom(context, properties[i].atom);
+                if (properties)
+                    qjs::js_free(context, properties);
+            }
+        } property_scope{context_, properties, property_count};
+        if (property_count > limit_)
+            result_too_large();
+
+        append_byte('{');
+        for (std::uint32_t i = 0; i < property_count; ++i) {
+            if (i != 0) append_byte(',');
+            auto key = owner_.takeValue(
+                qjs::JS_AtomToValue(context_, properties[i].atom));
+            key.throwIfError();
+            write_string(*static_cast<qjs::JSString*>(key.get().u.ptr));
+            append_byte(':');
+            auto member = owner_.takeValue(
+                qjs::JS_GetProperty(context_, value, properties[i].atom));
+            member.throwIfError();
+            write_value(member.get(), depth + 1);
+        }
+        append_byte('}');
+    }
+};
 }
 
 // Pulp #3206 — Promise-rejection tracker.
@@ -151,6 +398,20 @@ public:
         return context_.evaluateExpression(code);
     }
 
+    bool supports_bounded_json_evaluation() const override { return true; }
+
+    std::string evaluate_bounded_json(const std::string& code,
+                                      std::size_t max_bytes) override {
+        auto* owner = quickjs_context(context_);
+        if (!owner || !owner->context)
+            throw std::runtime_error("QuickJS context is unavailable");
+        auto value = owner->takeValue(qjs::JS_Eval(
+            owner->context, code.data(), code.size(), "",
+            0));
+        value.throwIfError();
+        return BoundedJsonWriter(*owner, max_bytes).write(value.get());
+    }
+
     void run_module(const std::string& code,
                     ModuleResolver resolver,
                     ModuleCompletionHandler completion) override {
@@ -233,11 +494,8 @@ public:
     bool supports_interrupt() const override { return true; }
     void request_interrupt() override { context_.cancel(); }
     void clear_pending_interrupt() override {
-        try {
-            (void)context_.evaluateExpression("void 0");
-        } catch (...) {
-            // A pending cancellation is consumed by this engine-thread probe.
-        }
+        if (auto* owner = quickjs_context(context_))
+            owner->shouldCancel.store(false, std::memory_order_release);
     }
 
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
