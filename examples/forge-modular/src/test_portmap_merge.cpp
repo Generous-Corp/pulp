@@ -9,6 +9,35 @@ static std::string mod(const char* plug, const char* model) {
     return std::string("    {\n      \"plugin\": \"") + plug +
            "\",\n      \"model\": \"" + model + "\",\n      \"params\": []\n    }";
 }
+/// A module block exactly as the CURRENT scanner writes one: scan 3, controls
+/// carrying a kind, and lights and displays that no earlier map has.
+///
+/// The merge is TEXTUAL — module blocks are found by indentation — so a shape
+/// with nested arrays inside a module is the case it has never seen. Getting
+/// this wrong on the first real scan would take the whole map with it.
+static std::string mod_v3(const char* plug, const char* model) {
+    return std::string("    {\n      \"plugin\": \"") + plug +
+           "\",\n      \"model\": \"" + model +
+           "\",\n      \"pluginVersion\": \"2.6.4\""
+           ",\n      \"scan\": 3"
+           ",\n      \"size\": [135.000000, 380.000000]"
+           ",\n      \"params\": ["
+           "\n        {\"index\": 0, \"name\": \"Freq\", \"x\": 30.0,"
+           " \"y\": 90.0, \"w\": 20.0, \"h\": 20.0, \"kind\": \"knob\"}"
+           "\n      ]"
+           ",\n      \"inputs\": ["
+           "\n        {\"index\": 0, \"name\": \"FM\", \"x\": 20.0, \"y\": 286.0}"
+           "\n      ]"
+           ",\n      \"outputs\": []"
+           ",\n      \"lights\": ["
+           "\n        {\"x\": 60.0, \"y\": 40.0, \"w\": 6.0, \"h\": 6.0},"
+           "\n        {\"x\": 75.0, \"y\": 40.0, \"w\": 6.0, \"h\": 6.0}"
+           "\n      ]"
+           ",\n      \"displays\": ["
+           "\n        {\"x\": 67.0, \"y\": 200.0, \"w\": 100.0, \"h\": 30.0}"
+           "\n      ]"
+           "\n    }";
+}
 static std::string doc(const std::string& body) {
     return "{\n  \"modules\": [\n" + body + "\n  ]\n}\n";
 }
@@ -67,6 +96,33 @@ int main() {
     } else {
         printf("  skip   no real port map on this machine (a skip, not a pass)\n");
     }
+    // The shape the next real SCAN will produce, merged into a map of the
+    // shape every existing one has. Nested arrays inside a module block are
+    // the case the textual merge has never seen, and the first scan after
+    // tonight is when it meets them.
+    {
+        const auto old_map = doc(mod("Vendor", "Kept") + ",\n" +
+                                 mod("Vendor", "Replaced"));
+        const auto scan3 = doc(mod_v3("Vendor", "Replaced") + ",\n" +
+                               mod_v3("Vendor", "Added"));
+        const auto merged = merge(old_map, scan3);
+        const auto keys = module_keys(merged);
+        if (keys.size() == 3 && keys.count("Vendor/Kept") &&
+            keys.count("Vendor/Replaced") && keys.count("Vendor/Added"))
+            ok("a scan carrying lights and displays merges without loss");
+        else {
+            wrong("a v3 scan broke the merge");
+            printf("         got %zu module(s)\n", keys.size());
+        }
+        // The re-measured one must come from the FRESH scan, so its new
+        // fields are the ones kept.
+        if (merged.find("\"lights\"") != std::string::npos &&
+            merged.find("\"scan\": 3") != std::string::npos)
+            ok("the re-measured module keeps its new fields");
+        else
+            wrong("the merge dropped the fields the new scan added");
+    }
+
     printf("\n%s\n", bad ? "FAILED" : "all good");
     return bad ? 1 : 0;
 }

@@ -6379,3 +6379,68 @@ TEST_CASE("a measured slider is not drawn as a knob", "[portmap][kind]") {
     // Unclassified still draws, or every pre-classification map empties.
     CHECK(PortMap::draws_as_knob(old_entry->params[0]));
 }
+
+// A map from the CURRENT scanner, which no real file is yet.
+//
+// Pressing SCAN will write a shape nothing has ever read: scan 3, controls
+// carrying `kind`, and lights and displays that no consumer wants. The reader
+// must take what it needs and ignore the rest — a parser that trips on an
+// unknown field would turn a scan, which is meant to improve the drawing, into
+// the thing that empties it.
+//
+// Written from CARTOG's own emitted shape: lights and displays are
+// {x, y, w, h}, params carry kind, and the module carries scan 3.
+TEST_CASE("the reader survives a map from the current scanner",
+          "[portmap][scan3]") {
+    const std::string fresh = R"({
+  "modules": [
+    {
+      "plugin": "Fundamental",
+      "model": "LFO",
+      "pluginVersion": "2.6.4",
+      "scan": 3,
+      "size": [135.0, 380.0],
+      "params": [
+        {"index": 0, "name": "Frequency", "x": 30.0, "y": 90.0,
+         "w": 20.0, "h": 20.0, "kind": "knob"},
+        {"index": 1, "name": "Level", "x": 90.0, "y": 90.0,
+         "w": 8.0, "h": 60.0, "kind": "slider"}
+      ],
+      "inputs": [
+        {"index": 0, "name": "Frequency modulation", "x": 20.0, "y": 286.0}
+      ],
+      "outputs": [
+        {"index": 0, "name": "Sine", "x": 20.0, "y": 330.0}
+      ],
+      "lights": [
+        {"x": 60.0, "y": 40.0, "w": 6.0, "h": 6.0},
+        {"x": 75.0, "y": 40.0, "w": 6.0, "h": 6.0}
+      ],
+      "displays": [
+        {"x": 67.0, "y": 200.0, "w": 100.0, "h": 30.0, "type": "LedDisplay"}
+      ]
+    }
+  ]
+})";
+    const auto pm = forge_modular::PortMap::parse(fresh);
+    REQUIRE(pm.size() == 1);
+    const auto* lfo = pm.find("Fundamental", "LFO");
+    REQUIRE(lfo != nullptr);
+
+    // What it needs survives the fields it does not want.
+    CHECK(lfo->scan_version == 3);
+    CHECK(lfo->width == 135.0f);
+    REQUIRE(lfo->params.size() == 2);
+    REQUIRE(lfo->inputs.size() == 1);
+    CHECK(lfo->inputs[0].name == "Frequency modulation");
+
+    // A scan this fresh is not stale, and its controls are known.
+    CHECK(pm.gap_for("Fundamental", "LFO", "2.6.4") ==
+          forge_modular::PortMap::Gap::none);
+    CHECK(forge_modular::PortMap::controls_known(*lfo));
+
+    // And the drawing rule reads the new field: the knob draws, the fader
+    // does not get drawn as one.
+    CHECK(forge_modular::PortMap::draws_as_knob(lfo->params[0]));
+    CHECK_FALSE(forge_modular::PortMap::draws_as_knob(lfo->params[1]));
+}
