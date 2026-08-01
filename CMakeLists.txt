@@ -353,6 +353,9 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The arranger rung sits above both the editor kernel and the view stack, so it
+# is added after core/view rather than beside core/timeline_editor.
+add_subdirectory(core/timeline_view)
 add_subdirectory(core/osc)
 add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen

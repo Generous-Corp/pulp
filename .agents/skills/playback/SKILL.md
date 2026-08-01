@@ -967,3 +967,20 @@ audio thread otherwise owns. That is the shape `reset()` already has for
 `desired_`, whose ordinary writer is the control thread, and it is bounded the
 same way: a caller that reset a transport concurrently with `begin_block()`
 would be racing the plain assignments in `reset()` long before it raced this one.
+
+### A view rung does not reach `playback`, and that absence is the contract
+
+`MODULE_FLOORS` carries a `timeline_view` row above the editor kernel. It admits
+`timeline_editor`, `timeline`, `timebase`, `view`, `canvas`, `platform`, `runtime` — and
+**deliberately omits `playback`**.
+
+That omission is the load-bearing part, not an oversight: it keeps a view's only coupling toward
+audio the `SequencerUiHost` interface, so **an arranger drawn over somebody else's engine acquires
+no transport.** If you find yourself wanting to widen that row to reach `playback`, the thing you
+actually want is a host implementing `SequencerUiHost` — the row is what stops a view reaching past
+the seam and binding to this engine specifically.
+
+(It also omits `project_package`, keeping storage a sibling rung rather than a base: an editor is
+proven against a `serialize_project` round trip, and re-hosting it on a package protocol later is
+adapter work above the row rather than a change to it.)
+

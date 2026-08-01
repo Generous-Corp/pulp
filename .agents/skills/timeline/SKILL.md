@@ -1579,6 +1579,35 @@ Things that are easy to get wrong here:
   without that route. Keep stopped automation parked, and evaluate precise
   host-mapped ticks without round-tripping through integer samples.
 
+## A view rung consumes the editor kernel; it never owns a projection
+
+`core/timeline_view` sits above `core/timeline_editor` and is the **first production consumer** of
+that kernel — everything else referencing it is build files, the floor script, docs and tests.
+
+**The convention that keeps it composable: a view takes resolved scalars, never a projection
+object.** The arranger is handed an origin tick and a `px_per_tick`, not a `ViewportProjection`;
+hit-testing takes a resolved `tolerance_px`, not a device-pixel-ratio to interpret. Two consequences
+worth keeping:
+
+- Two slices can build a viewport and a view **concurrently without racing**, because the view has
+  no projection to diverge from. The shell feeds the projection's *output* into the seam.
+- A view stays testable headlessly with plain numbers — no viewport fixture, no DPI plumbing.
+
+**The consumption chain, which is what makes a view worth shipping rather than deferring:**
+
+```
+arranger view -> EditIntent -> SequencerUiHost::submit_intent
+              -> lower_edit_intent -> timeline::Transaction -> reducer -> serialize_project
+```
+
+Every link existed before the arranger and **every link except the arranger was exercised only by
+tests.** When adding to this stack, check the chain more than one level up: this codebase has a
+long history of capabilities whose caller had no caller.
+
+**Acceptance for an editing surface is a `serialize_project` round trip with values asserted** —
+drive it with `simulate_click` / `simulate_drag` and assert the document's values survive, not that
+the view's internal state changed.
+
 ## Scope boundary
 
 This subsystem owns authored take/comp state, durable launch scenes, slots, and
