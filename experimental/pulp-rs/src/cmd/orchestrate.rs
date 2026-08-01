@@ -789,8 +789,9 @@ fn write_run_help(out: &mut impl Write) -> Result<()> {
          Default 1. (Forwarded as --frames <n> and\n                          \
          PULP_FRAMES=<n>.)\n  \
          --watch                 Re-launch the binary on source changes.\n                          \
-         --inspect[=<profile>]   Enable the local Development Inspector. Bare --inspect\n                          \
-                                 selects develop; profiles: off, observe, develop, custom.\n  \
+         --inspect[=<profile>]   Enable the local Development Inspector in a GPU-enabled\n                          \
+                                 desktop build. Bare --inspect selects develop; profiles:\n                          \
+                                 off, observe, develop, custom.\n  \
          --inspect-capability <id>\n                          \
                                  Add a capability to --inspect=custom; repeatable.\n  \
          Composes with --headless / --screenshot.\n  \
@@ -2244,6 +2245,7 @@ mod tests {
         assert_eq!(rc, 0);
         assert!(spawner.calls.borrow().is_empty());
         let help = String::from_utf8(out).unwrap();
+        assert!(help.contains("GPU-enabled"));
         assert!(help.contains("--audio-inspector"));
         assert!(help.contains("--audio-probe-json"));
         assert!(help.contains("--audio-scope-json"));
