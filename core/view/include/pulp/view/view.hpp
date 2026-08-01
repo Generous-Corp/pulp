@@ -19,6 +19,7 @@ namespace pulp::view {
 
 class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
+class WidgetBridge;
 class HostParamSurface;   // pulp/view/host_param_surface.hpp — runtime param accessor
 class HostActionSurface;  // pulp/view/host_param_surface.hpp — host command channel
 class GestureArbiter; class GestureRecognizer;
@@ -234,7 +235,14 @@ public:
     // ── Visibility ───────────────────────────────────────────────────────
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; invalidate_subtree_caches_up(); }
+    void set_visible(bool v) {
+        if (visibility_quarantine_count_ > 0) {
+            visible_after_quarantine_ = v;
+            return;
+        }
+        visible_ = v;
+        invalidate_subtree_caches_up();
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
 
@@ -1907,6 +1915,34 @@ public:
     UserSelect user_select() const { return user_select_; }
 
 private:
+    friend class WidgetBridge;
+
+    void begin_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_++ == 0)
+            visible_after_quarantine_ = visible_;
+        set_visible_from_quarantine(false);
+    }
+    void refresh_visibility_quarantine() noexcept {
+        set_visible_from_quarantine(false);
+    }
+    void end_visibility_quarantine() noexcept {
+        if (visibility_quarantine_count_ == 0)
+            return;
+        --visibility_quarantine_count_;
+        if (visibility_quarantine_count_ == 0)
+            set_visible(visible_after_quarantine_);
+    }
+    void set_visible_from_quarantine(bool visible) noexcept {
+        visible_ = visible;
+        invalidate_subtree_caches_up();
+    }
+    void prepare_children_for_realm_reset();
+    void retire_interaction_state_for_realm_reset(
+        std::unique_ptr<ActiveDrag>& retired_drag,
+        std::unique_ptr<RootInteractionState>& retired_interaction) noexcept;
+    void retire_children_for_realm_reset(
+        std::vector<std::unique_ptr<View>>& retired) noexcept;
+
     /// Recursively fire `on_frame_clock_changed()` on this view and every
     /// descendant. Used by `set_frame_clock()` so a clock installed on a root
     /// after the subtree was built reaches self-subscribing descendants.
@@ -2017,6 +2053,8 @@ private:
     std::string access_disabled_;
     std::string access_hidden_;
     bool visible_ = true;
+    std::size_t visibility_quarantine_count_ = 0;
+    bool visible_after_quarantine_ = true;
     bool focusable_ = false;
     bool enabled_ = true;
     bool layout_dirty_ = false;

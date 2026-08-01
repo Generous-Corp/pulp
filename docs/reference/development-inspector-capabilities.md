@@ -112,8 +112,16 @@ The arbitrary-execution adapter is compiled into the separate
 and ordinary format archives do not depend on that component or contain its
 high-risk binary marker. Requests are limited to 64 KiB of decoded code, use a
 fixed two-second deadline, and reject serialized results or encoded responses
-over 1 MiB. These limits compose with the bridge's single-flight, cooperative
-interrupt, engine-detach, and teardown fences.
+over 1 MiB. Result bytes, nesting depth, and cycles are bounded during QuickJS
+traversal. The scripted realm is rebuilt from source after each evaluation,
+preserving widget values but discarding deferred callbacks and global
+mutations before the next frame pump. That rebuild has a fixed 500 ms cleanup
+grace inside a three-second outer RPC fence; a failed rebuild destroys the
+engine fail-closed. One owned, bounded server worker keeps the controller's
+authenticated connection free to send `Runtime.interrupt` while evaluation is
+in flight, and is included in the server's module-unload shutdown fence. These
+limits compose with the bridge's single-flight, cooperative interrupt,
+engine-detach, and teardown fences.
 
 ## Typed test input and authoring boundary
 

@@ -70,6 +70,8 @@ target_link_libraries(pulp-inspect-client
     PRIVATE pulp::events)
 
 add_library(pulp-inspect-runtime
+    src/inspector_async_request_executor.cpp
+    src/inspector_async_request_executor.hpp
     src/inspector_connected_client.hpp
     src/inspector_publication.hpp
     src/inspector_server.cpp

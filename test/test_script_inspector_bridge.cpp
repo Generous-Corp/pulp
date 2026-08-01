@@ -72,6 +72,99 @@ TEST_CASE("Same-thread evaluate runs inline without a pump", "[view][script][ins
     REQUIRE(err.error.find("boom") != std::string::npos);
 }
 
+TEST_CASE("Realm reset may reattach before an inline result is published",
+          "[view][script][inspector][reset]") {
+    ScriptEngine original;
+    ScriptEngine replacement;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&original);
+
+    int resets = 0;
+    bridge.set_post_evaluation_reset([&](auto) {
+        ++resets;
+        bridge.detach();
+        bridge.attach(&replacement);
+        return std::string{};
+    });
+
+    const auto result = bridge.evaluate("40 + 2");
+    REQUIRE(result.ok);
+    REQUIRE(result.json == "42");
+    REQUIRE(resets == 1);
+    REQUIRE(bridge.capabilities().engine == "QuickJS");
+}
+
+TEST_CASE("Realm reset failure fails evaluation closed",
+          "[view][script][inspector][reset]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+    bridge.set_post_evaluation_reset(
+        [](auto) { return std::string{"reload failed"}; });
+
+    const auto result = bridge.evaluate("40 + 2");
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "evaluated realm reset failed: reload failed");
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
+TEST_CASE("External detach cannot cross an in-progress realm reset",
+          "[view][script][inspector][reset][lifetime]") {
+    ScriptEngine engine;
+    ScriptInspectorBridge bridge;
+    bridge.attach(&engine);
+
+    std::mutex gate;
+    std::condition_variable gate_cv;
+    bool reset_started = false;
+    bool reset_saw_detacher = false;
+    bool detacher_saw_reset = false;
+    bool detach_started = false;
+    bool detach_returned = false;
+    bool detach_crossed_reset = false;
+    bridge.set_post_evaluation_reset([&](auto) {
+        std::unique_lock<std::mutex> lock(gate);
+        reset_started = true;
+        gate_cv.notify_all();
+        reset_saw_detacher = gate_cv.wait_for(
+            lock, 3s, [&] { return detach_started; });
+        detach_crossed_reset = gate_cv.wait_for(
+            lock, 100ms, [&] { return detach_returned; });
+        return std::string{};
+    });
+
+    ScriptInspectorBridge::EvalResult result;
+    std::thread client([&] { result = bridge.evaluate("6 * 7", 3s); });
+    REQUIRE(ScriptInspectorBridgeTestAccess::wait_until_queued(bridge));
+
+    std::thread detacher([&] {
+        {
+            std::unique_lock<std::mutex> lock(gate);
+            detacher_saw_reset = gate_cv.wait_for(
+                lock, 3s, [&] { return reset_started; });
+            detach_started = true;
+            gate_cv.notify_all();
+        }
+        bridge.detach();
+        {
+            std::lock_guard<std::mutex> lock(gate);
+            detach_returned = true;
+        }
+        gate_cv.notify_all();
+    });
+
+    REQUIRE(bridge.pump());
+    client.join();
+    detacher.join();
+
+    REQUIRE_FALSE(detach_crossed_reset);
+    REQUIRE(reset_saw_detacher);
+    REQUIRE(detacher_saw_reset);
+    REQUIRE(detach_returned);
+    REQUIRE(result.detached);
+    REQUIRE_FALSE(bridge.is_busy());
+}
+
 TEST_CASE("A late engine interrupt is cleared before the next evaluation",
           "[view][script][inspector][interrupt]") {
     ScriptEngine engine;

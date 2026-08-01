@@ -281,6 +281,9 @@ public:
     void advance_time(View& root, double timestamp_seconds = -1.0);
     bool wants_time_updates() const;
     void reset();
+    /// Drop active recognition sessions without invoking user callbacks.
+    /// Reserved for fail-closed realm teardown after bridge callbacks are dead.
+    void abandon() noexcept;
 
 private:
     bool claimed_pointer_ = false;

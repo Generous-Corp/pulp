@@ -7,6 +7,7 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
+#include "support/standalone_inspector_test_support.hpp"
 #if PULP_TEST_STANDALONE_INSPECTOR
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/inspect/client.hpp>
@@ -37,336 +38,8 @@
 using namespace pulp::format;
 using namespace pulp::format::detail;
 using namespace pulp::view;
+using namespace pulp::test::standalone_inspector;
 
-namespace {
-
-struct ScopedEnv {
-    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
-        if (const char* previous = std::getenv(name_.c_str())) {
-            previous_ = previous;
-            had_previous_ = true;
-        }
-    }
-    ~ScopedEnv() {
-        if (had_previous_)
-            set(previous_);
-        else
-            unset();
-    }
-    void set(const std::string& value) {
-#if defined(_WIN32)
-        _putenv_s(name_.c_str(), value.c_str());
-#else
-        ::setenv(name_.c_str(), value.c_str(), 1);
-#endif
-    }
-    void unset() {
-#if defined(_WIN32)
-        _putenv_s(name_.c_str(), "");
-#else
-        ::unsetenv(name_.c_str());
-#endif
-    }
-private:
-    std::string name_;
-    std::string previous_;
-    bool had_previous_ = false;
-};
-
-#if PULP_TEST_STANDALONE_INSPECTOR
-struct ScopedInspectorTelemetryClock {
-    explicit ScopedInspectorTelemetryClock(
-        StandaloneInspectorTelemetryClock clock) {
-        set_standalone_inspector_telemetry_clock_for_testing(std::move(clock));
-    }
-    ~ScopedInspectorTelemetryClock() {
-        set_standalone_inspector_telemetry_clock_for_testing({});
-    }
-};
-#endif
-
-class TestProcessor : public Processor {
-public:
-    PluginDescriptor descriptor() const override { return {}; }
-    void define_parameters(pulp::state::StateStore&) override {}
-    void prepare(const PrepareContext&) override {}
-    void process(pulp::audio::BufferView<float>&,
-                 const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const ProcessContext&) override {}
-};
-std::unique_ptr<Processor> null_processor_factory() { return {}; }
-class StubWindowHost final : public WindowHost {
-public:
-    int repaint_calls = 0;
-    std::vector<std::uint8_t> capture_bytes;
-    bool capture_supported = true;
-    bool blocking_event_loop = true;
-    bool exit_drain_supported = true;
-    bool deferred_close_supported = true;
-    std::function<void()> close_callback;
-    std::function<void()> capture_callback;
-    std::function<bool()> event_loop_step;
-    std::function<void()> deferred_close;
-    int deferred_close_calls = 0;
-    int run_until_calls = 0;
-    int readiness_checks = 0;
-    bool run_until_ready = false;
-    void show() override {}
-    void hide() override {}
-    bool is_visible() const override { return false; }
-    void repaint() override { ++repaint_calls; }
-    std::vector<std::uint8_t> capture_png() override {
-        if (capture_callback)
-            capture_callback();
-        return capture_bytes;
-    }
-    bool supports_compositor_capture() const override { return capture_supported; }
-    bool event_loop_blocks_until_close() const override { return blocking_event_loop; }
-    bool event_loop_supports_exit_drain() const override {
-        return exit_drain_supported;
-    }
-    bool supports_deferred_close() const override {
-        return deferred_close_supported;
-    }
-    void request_close_deferred() override {
-        ++deferred_close_calls;
-        deferred_close = [this] { request_close(); };
-    }
-    void run_deferred_close() {
-        auto close = std::move(deferred_close);
-        if (close)
-            close();
-    }
-    void request_close() override {
-        if (close_callback)
-            close_callback();
-    }
-    void set_close_callback(std::function<void()> callback) override {
-        close_callback = std::move(callback);
-    }
-    void run_event_loop() override {}
-    void run_event_loop_until(std::function<bool()> ready_to_return) override {
-        ++run_until_calls;
-        run_event_loop();
-        for (int attempt = 0; attempt < 64; ++attempt) {
-            ++readiness_checks;
-            if (!ready_to_return || ready_to_return()) {
-                run_until_ready = true;
-                return;
-            }
-            if (!event_loop_step || !event_loop_step())
-                return;
-        }
-    }
-};
-#if PULP_TEST_STANDALONE_INSPECTOR
-std::vector<std::uint8_t> inspector_test_png() {
-    return {
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-        0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0xf8, 0xff,
-        0x1f, 0x00, 0x03, 0x02, 0x01, 0xff, 0xe6, 0x77, 0x0b, 0xae, 0x00, 0x00,
-        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-    };
-}
-class InspectorProcessor : public TestProcessor {
-public:
-    InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script,
-                       CapabilitySet capabilities = CapabilitySet::all())
-        : store_(store), script_(std::move(script)), capabilities_(capabilities) {
-        gain_reduction_ = channels_.declare_meter("gain_reduction", "dB", 0.0f);
-    }
-    PluginDescriptor descriptor() const override {
-        PluginDescriptor descriptor;
-        descriptor.name = "Inspector Test";
-        descriptor.manufacturer = "Pulp";
-        descriptor.bundle_id = "com.pulp.test.standalone-inspector";
-        descriptor.version = "1.0.0";
-        return descriptor;
-    }
-    int latency_samples() const override { return 128; }
-    std::unique_ptr<View> create_view() override {
-        auto root = std::make_unique<View>();
-        root_ = root.get();
-        if (!replace_scripted_ui(capabilities_))
-            return nullptr;
-        return root;
-    }
-    ScriptedUiSession* active_scripted_ui() override { return scripted_.get(); }
-    const ScriptedUiSession* active_scripted_ui() const override {
-        return scripted_.get();
-    }
-    bool supports_editor_reload() const override { return true; }
-    std::uint64_t editor_reload_generation() const override {
-        return scripted_ui_generation_;
-    }
-    pulp::view::ValueChannelSet* value_channels() override {
-        return &channels_;
-    }
-    bool replace_scripted_ui(CapabilitySet capabilities) {
-        capabilities_ = capabilities;
-        if (!root_)
-            return false;
-        auto replacement = std::make_unique<ScriptedUiSession>(
-            *root_, store_, ScriptedUiOptions{
-                .script_path = script_,
-                .granted_capabilities = capabilities_});
-        std::string error;
-        if (!replacement->load(&error))
-            return false;
-        if (scripted_)
-            ++retired_scripted_sessions;
-        scripted_ = std::move(replacement);
-        ++scripted_ui_generation_;
-        return true;
-    }
-    void publish_gain_reduction(float rms, float peak) {
-        REQUIRE(gain_reduction_ != nullptr);
-        pulp::view::MeterFrame frame;
-        frame.channels = 1;
-        frame.rms[0] = rms;
-        frame.peak[0] = peak;
-        gain_reduction_->publish(frame);
-        (void)gain_reduction_->read();
-    }
-    std::size_t retired_scripted_sessions = 0;
-
-private:
-    pulp::state::StateStore& store_;
-    std::filesystem::path script_;
-    CapabilitySet capabilities_ = CapabilitySet::all();
-    View* root_ = nullptr;
-    std::uint64_t scripted_ui_generation_ = 0;
-    pulp::view::ValueChannelSet channels_;
-    pulp::view::MeterSource* gain_reduction_ = nullptr;
-    std::unique_ptr<ScriptedUiSession> scripted_;
-};
-
-class NonReloadingInspectorProcessor final : public InspectorProcessor {
-public:
-    using InspectorProcessor::InspectorProcessor;
-    bool supports_editor_reload() const override { return false; }
-    std::uint64_t editor_reload_generation() const override { return 0; }
-};
-
-class ReloadingInspectorProcessor final : public InspectorProcessor {
-public:
-    ReloadingInspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
-        : InspectorProcessor(store, std::move(script)) {
-        replace_value_channels("before_reload", false);
-    }
-    bool supports_editor_reload() const override { return true; }
-    std::uint64_t editor_reload_generation() const override { return generation_; }
-    pulp::view::ValueChannelSet* value_channels() override {
-        ++value_channel_visits;
-        return reload_channels_.get();
-    }
-    void visit_active_scripted_ui(
-        const std::function<void(ScriptedUiSession*)>& visitor) override {
-        ++scripted_ui_visits;
-        InspectorProcessor::visit_active_scripted_ui(visitor);
-    }
-    void visit_active_scripted_ui(
-        const std::function<void(const ScriptedUiSession*)>& visitor) const override {
-        ++scripted_ui_visits;
-        InspectorProcessor::visit_active_scripted_ui(visitor);
-    }
-    void replace_value_channels(std::string name, bool bump = true) {
-        auto replacement = std::make_shared<pulp::view::ValueChannelSet>();
-        REQUIRE(replacement->declare_scalar(std::move(name)) != nullptr);
-        reload_channels_ = std::move(replacement);
-        if (bump)
-            ++generation_;
-    }
-    void replace_with_empty_value_channels() {
-        reload_channels_ = std::make_shared<pulp::view::ValueChannelSet>();
-        ++generation_;
-    }
-    std::weak_ptr<pulp::view::ValueChannelSet> value_channel_lifetime() const { return reload_channels_; }
-    std::size_t value_channel_visits = 0;
-    mutable std::size_t scripted_ui_visits = 0;
-private:
-    std::shared_ptr<pulp::view::ValueChannelSet> reload_channels_;
-    std::uint64_t generation_ = 0;
-};
-
-class QueuedMainThreadBackend {
-public:
-    QueuedMainThreadBackend() : main_thread_(std::this_thread::get_id()) {
-        pulp::events::MainThreadDispatcher::Backend backend;
-        backend.post = [this](pulp::events::Task task) {
-            std::lock_guard lock(mutex_);
-            tasks_.push_back(std::move(task));
-            ++post_count_;
-            return true;
-        };
-        backend.is_main_thread =
-            [this] { return std::this_thread::get_id() == main_thread_; };
-        token_ = pulp::events::MainThreadDispatcher::register_backend(
-            std::move(backend));
-    }
-    ~QueuedMainThreadBackend() {
-        pulp::events::MainThreadDispatcher::unregister_backend(token_);
-    }
-    bool valid() const { return token_ != 0; }
-    std::size_t post_count() const {
-        std::lock_guard lock(mutex_);
-        return post_count_;
-    }
-    std::size_t pending_count() const {
-        std::lock_guard lock(mutex_);
-        return tasks_.size();
-    }
-    bool pump_one() {
-        pulp::events::Task task;
-        {
-            std::lock_guard lock(mutex_);
-            if (tasks_.empty())
-                return false;
-            task = std::move(tasks_.front());
-            tasks_.pop_front();
-        }
-        task();
-        return true;
-    }
-    std::size_t pump_all() {
-        std::size_t pumped = 0;
-        while (pump_one())
-            ++pumped;
-        return pumped;
-    }
-private:
-    std::thread::id main_thread_;
-    mutable std::mutex mutex_;
-    std::deque<pulp::events::Task> tasks_;
-    std::size_t post_count_ = 0;
-    pulp::events::MainThreadDispatcher::Token token_ = 0;
-};
-template <typename Predicate>
-bool spin_until(Predicate&& predicate, std::chrono::milliseconds timeout =
-                                           std::chrono::seconds(2)) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (!predicate() && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
-    return predicate();
-}
-pulp::inspect::InspectorMessage request_with_dispatch(
-    pulp::inspect::InspectorClient& client, QueuedMainThreadBackend& dispatcher, std::string method,
-    std::string params) {
-    auto response = std::async(std::launch::async,
-        [&client, method = std::move(method), params = std::move(params)] {
-            return client.request(method, params, std::chrono::seconds(1));
-        });
-    REQUIRE(spin_until([&] {
-        if (!dispatcher.pump_one()) std::this_thread::yield();
-        return response.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-    }));
-    return response.get();
-}
-#endif
-} // namespace
 
 #if PULP_TEST_STANDALONE_INSPECTOR
 TEST_CASE("Standalone inspector off mode publishes no endpoint or artifact",
@@ -391,183 +64,6 @@ TEST_CASE("Standalone inspector off mode publishes no endpoint or artifact",
     REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
 }
 
-TEST_CASE("Standalone inspector runtime evaluation requires an active controller profile",
-          "[standalone][inspect][runtime-eval][negative]") {
-    StandaloneApp app(null_processor_factory);
-    TestProcessor processor;
-    pulp::state::StateStore store;
-    ViewBridge bridge(processor, store);
-    View root;
-    StubWindowHost window;
-
-    REQUIRE(StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "off", {}, true) == nullptr);
-    REQUIRE(StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "observe", {}, true) == nullptr);
-    REQUIRE(StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "custom",
-        {"session.control", "runtime.eval"}) == nullptr);
-    REQUIRE(StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "custom",
-        {"runtime.eval"}, true) == nullptr);
-    REQUIRE(StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "custom",
-        {"session.describe", "session.control"}, true) == nullptr);
-
-    auto develop = StandaloneInspectorRuntime::create(
-        app, processor, bridge, root, window, "develop", {}, true);
-    REQUIRE(develop != nullptr);
-}
-
-TEST_CASE("Standalone inspector runtime evaluation rejects every effectful live-realm grant",
-          "[standalone][inspect][runtime-eval][capabilities][negative]") {
-    const auto suffix = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto temp = std::filesystem::temp_directory_path()
-        / ("pulp-standalone-inspector-eval-grants-" + suffix);
-    const auto script = temp / "ui.js";
-    std::filesystem::create_directories(temp);
-    {
-        std::ofstream source(script);
-        source << "createLabel('v', 'safe fixture', '');";
-    }
-
-    constexpr std::array effectful{
-        ReloadCapability::Exec,
-        ReloadCapability::Clipboard,
-        ReloadCapability::Filesystem,
-        ReloadCapability::Storage,
-        ReloadCapability::Ai,
-        ReloadCapability::RuntimeImport,
-        ReloadCapability::Network,
-    };
-    for (const auto capability : effectful) {
-        DYNAMIC_SECTION("grant=" << capability_name(capability)) {
-            StandaloneApp app(null_processor_factory);
-            CapabilitySet granted;
-            granted.grant(capability);
-            InspectorProcessor processor(app.state(), script, granted);
-            ViewBridge bridge(processor, app.state());
-            REQUIRE(bridge.open());
-            REQUIRE(processor.active_scripted_ui()->granted_capabilities().has(capability));
-            REQUIRE(processor.active_scripted_ui()->bridge()
-                        ->granted_capabilities().has(capability));
-
-            const auto expected =
-                "Runtime.evaluate denied: live scripted-UI realm grants effectful capability '" +
-                std::string(capability_name(capability)) + "'";
-            REQUIRE(standalone_runtime_eval_realm_denial(
-                        processor.active_scripted_ui()) == expected);
-
-            StubWindowHost window;
-            REQUIRE(StandaloneInspectorRuntime::create(
-                        app, processor, bridge, *bridge.view(), window,
-                        "develop", {}, true) == nullptr);
-            // The refusal observes the actual realm; it never mutates its grant
-            // set or masks the corresponding native API registration.
-            REQUIRE(processor.active_scripted_ui()->bridge()
-                        ->granted_capabilities().has(capability));
-            bridge.close();
-        }
-    }
-
-    std::error_code cleanup_error;
-    std::filesystem::remove_all(temp, cleanup_error);
-}
-
-TEST_CASE("Standalone inspector runtime evaluation survives safe reload and refuses unsafe rebind",
-          "[standalone][inspect][runtime-eval][capabilities][reload]") {
-    const auto suffix = std::to_string(
-        std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto temp = std::filesystem::temp_directory_path()
-        / ("pulp-standalone-inspector-eval-rebind-" + suffix);
-    const auto runtime_dir = temp / "runtime";
-    const auto script = temp / "ui.js";
-    std::filesystem::create_directories(temp);
-    {
-        std::ofstream source(script);
-        source << "globalThis.fixtureVersion = 1; createLabel('v', 'safe', '');";
-    }
-    ScopedEnv runtime_env("PULP_INSPECTOR_RUNTIME_DIR");
-    runtime_env.set(runtime_dir.string());
-
-    StandaloneApp app(null_processor_factory);
-    CapabilitySet safe;
-    NonReloadingInspectorProcessor processor(app.state(), script, safe);
-    ViewBridge bridge(processor, app.state());
-    REQUIRE(bridge.open());
-    REQUIRE(processor.active_scripted_ui()->granted_capabilities().empty());
-    StubWindowHost window;
-    QueuedMainThreadBackend dispatcher;
-    REQUIRE(dispatcher.valid());
-    auto runtime = StandaloneInspectorRuntime::create(
-        app, processor, bridge, *bridge.view(), window, "develop", {}, true);
-    REQUIRE(runtime != nullptr);
-    runtime->pump();
-
-    pulp::inspect::InspectorDiscoveryReader reader(runtime_dir);
-    const auto records = reader.list();
-    REQUIRE(records.size() == 1);
-    pulp::inspect::InspectorClient client;
-    REQUIRE(client.connect(records.front(), reader));
-    const auto request = [&](std::string method, std::string params) {
-        return request_with_dispatch(client, dispatcher,
-                                     std::move(method), std::move(params));
-    };
-    REQUIRE_FALSE(request("Session.acquireController", "{}").is_error);
-
-    auto capabilities = request("Runtime.getCapabilities", "{}");
-    REQUIRE_FALSE(capabilities.is_error);
-    REQUIRE(choc::json::parse(capabilities.params_json)
-                ["canEvaluate"].getWithDefault(false));
-    auto evaluated = request("Runtime.evaluate", R"({"code":"fixtureVersion + 1"})");
-    REQUIRE_FALSE(evaluated.is_error);
-    REQUIRE(choc::json::parse(evaluated.params_json)
-                ["result"].getWithDefault<std::int64_t>(0) == 2);
-
-    {
-        std::ofstream source(script);
-        source << "globalThis.fixtureVersion = 2; createLabel('v', 'reloaded', '');";
-    }
-    std::string reload_error;
-    REQUIRE(processor.active_scripted_ui()->reload(&reload_error));
-    REQUIRE(processor.active_scripted_ui()->granted_capabilities().empty());
-    REQUIRE(processor.active_scripted_ui()->bridge()
-                ->granted_capabilities().empty());
-    evaluated = request("Runtime.evaluate", R"({"code":"fixtureVersion + 1"})");
-    REQUIRE_FALSE(evaluated.is_error);
-    REQUIRE(choc::json::parse(evaluated.params_json)
-                ["result"].getWithDefault<std::int64_t>(0) == 3);
-
-    CapabilitySet unsafe;
-    unsafe.grant(ReloadCapability::Exec);
-    REQUIRE(processor.replace_scripted_ui(unsafe));
-    capabilities = request("Runtime.getCapabilities", "{}");
-    REQUIRE_FALSE(capabilities.is_error);
-    const auto unsafe_caps = choc::json::parse(capabilities.params_json);
-    REQUIRE_FALSE(unsafe_caps["canEvaluate"].getWithDefault(true));
-    const std::string denial =
-        "Runtime.evaluate denied: live scripted-UI realm grants effectful capability 'exec'";
-    REQUIRE(unsafe_caps["evaluateDeniedReason"].toString() == denial);
-    const auto denied = request("Runtime.evaluate", R"({"code":"1 + 1"})");
-    REQUIRE(denied.is_error);
-    REQUIRE(denied.params_json.find(denial) != std::string::npos);
-    REQUIRE(processor.active_scripted_ui()->bridge()
-                ->granted_capabilities().has(ReloadCapability::Exec));
-
-    REQUIRE(processor.replace_scripted_ui(safe));
-    capabilities = request("Runtime.getCapabilities", "{}");
-    REQUIRE(choc::json::parse(capabilities.params_json)
-                ["canEvaluate"].getWithDefault(false));
-    REQUIRE_FALSE(request("Runtime.evaluate", R"({"code":"6 * 7"})").is_error);
-
-    client.disconnect();
-    runtime->stop();
-    runtime.reset();
-    bridge.close();
-    std::error_code cleanup_error;
-    std::filesystem::remove_all(temp, cleanup_error);
-}
 
 TEST_CASE("Standalone inspector rejects capture when the host cannot provide it",
           "[standalone][inspect][capabilities][negative]") {
@@ -728,7 +224,9 @@ TEST_CASE("Standalone inspector accepts processor-level editor replacement",
     const auto agent_context = request_with_dispatch(
         client, dispatcher, "Inspector.getAgentContext", "{}");
     REQUIRE_FALSE(agent_context.is_error);
-    REQUIRE(processor.scripted_ui_visits == scripted_visits_before_context + 1);
+    // The request refreshes subscription ownership, then the context payload
+    // independently visits the live scripted source it describes.
+    REQUIRE(processor.scripted_ui_visits == scripted_visits_before_context + 2);
     std::mutex event_mutex;
     std::condition_variable event_cv;
     std::vector<std::string> samples;
@@ -1090,8 +588,36 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(primary_logs == std::vector<std::string>{"after-start"});
     const auto console = request("Console.getMessages", "{}");
     REQUIRE_FALSE(console.is_error);
-    REQUIRE(console.params_json.find("after-start") != std::string::npos);
+    const auto console_json = choc::json::parse(console.params_json);
+    REQUIRE(console_json["messages"].size() == 1);
+    REQUIRE(console_json["messages"][0]["message"].getString() == "after-start");
+    const auto console_cursor = console_json["nextSeq"].getWithDefault<std::int64_t>(0);
 
+    // A host may advance its editor generation while retaining the same
+    // ScriptedUiSession. Refreshing the inspector subscription must replace,
+    // rather than duplicate, its callback on that stable session.
+    processor->bump_scripted_ui_generation_without_replacement();
+    runtime->pump();
+    {
+        std::ofstream out(script);
+        out << "console.warn('same-session-generation'); createLabel('v', 'two', '');";
+    }
+    REQUIRE(processor->active_scripted_ui()->reload(&reload_error));
+    REQUIRE(primary_logs ==
+            std::vector<std::string>{"after-start", "same-session-generation"});
+    const auto same_session_console = request(
+        "Console.getMessages",
+        std::string("{\"sinceSeq\":") + std::to_string(console_cursor) + "}");
+    REQUIRE_FALSE(same_session_console.is_error);
+    const auto same_session_console_json =
+        choc::json::parse(same_session_console.params_json);
+    REQUIRE(same_session_console_json["messages"].size() == 1);
+    REQUIRE(same_session_console_json["messages"][0]["message"].getString()
+            == "same-session-generation");
+
+    // Teardown must use session identity, not require the last observed
+    // generation, or a host-side generation bump can leave a dangling callback.
+    processor->bump_scripted_ui_generation_without_replacement();
     client.disconnect();
     runtime->stop();
     REQUIRE(reader.list().empty());
@@ -1277,7 +803,8 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     }
     REQUIRE(processor->active_scripted_ui()->reload(&reload_error));
     REQUIRE(primary_logs ==
-            std::vector<std::string>{"after-start", "after-stop"});
+            std::vector<std::string>{"after-start", "same-session-generation",
+                                     "after-stop"});
     bridge.view()->set_window_host(nullptr);
     bridge.close();
     processor.reset();

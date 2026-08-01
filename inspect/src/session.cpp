@@ -406,6 +406,15 @@ public:
         return true;
     }
 
+    bool begin_concurrent_dispatch() {
+        std::lock_guard lock(dispatch_mutex);
+        if (!dispatch_accepting)
+            return false;
+        ++concurrent_dispatches;
+        ++concurrent_dispatch_threads[std::this_thread::get_id()];
+        return true;
+    }
+
     void end_dispatch() {
         std::lock_guard lock(dispatch_mutex);
         if (!dispatch_active ||
@@ -420,8 +429,54 @@ public:
         dispatch_cv.notify_all();
     }
 
+    void end_concurrent_dispatch() {
+        std::vector<std::function<void()>> completions;
+        {
+            std::lock_guard lock(dispatch_mutex);
+            const auto caller = std::this_thread::get_id();
+            const auto active = concurrent_dispatch_threads.find(caller);
+            if (active != concurrent_dispatch_threads.end()) {
+                if (--active->second == 0)
+                    concurrent_dispatch_threads.erase(active);
+                --concurrent_dispatches;
+            }
+            if (concurrent_dispatches == 0)
+                completions.swap(concurrent_dispatch_completions);
+        }
+        dispatch_cv.notify_all();
+        for (auto& completion : completions) {
+            try {
+                completion();
+            } catch (...) {
+                // A teardown continuation cannot safely unwind through the
+                // transport dispatch guard that releases the final request.
+            }
+        }
+    }
+
+    void after_concurrent_dispatches(std::function<void()> completion) {
+        if (!completion)
+            return;
+        {
+            std::lock_guard lock(dispatch_mutex);
+            if (concurrent_dispatches != 0) {
+                concurrent_dispatch_completions.push_back(
+                    std::move(completion));
+                return;
+            }
+        }
+        try {
+            completion();
+        } catch (...) {
+            // Match deferred delivery above: shutdown completion is terminal
+            // cleanup and must not unwind through an RPC callback.
+        }
+    }
+
     InspectorSessionInfo info;
     ContextRequestHandler handler;
+    std::unordered_map<std::string, ContextRequestHandler>
+        concurrent_request_handlers;
     InspectorControllerLease lease;
     std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc;
     ControllerScopeEndHandler controller_scope_end_handler;
@@ -438,6 +493,10 @@ public:
     bool dispatch_active = false;
     std::thread::id dispatch_owner;
     std::size_t dispatch_recursion = 0;
+    std::size_t concurrent_dispatches = 0;
+    std::unordered_map<std::thread::id, std::size_t>
+        concurrent_dispatch_threads;
+    std::vector<std::function<void()>> concurrent_dispatch_completions;
     std::shared_ptr<State> expiry_keep_alive;
     std::jthread expiry_thread;
 };
@@ -505,6 +564,8 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
     std::optional<InspectorMessage> immediate_response;
     InspectorCapability capability = InspectorCapability::Unavailable;
     bool controller_operation = false;
+    bool concurrent_dispatch = false;
+    ContextRequestHandler dispatch_handler;
     std::uint64_t client_epoch = 0;
     {
         std::lock_guard lock(state->mutex);
@@ -530,7 +591,15 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
                                                 "controller_lease_required");
             } else {
                 controller_operation = requires_controller;
-                main_thread_rpc = state->main_thread_rpc;
+                const auto concurrent =
+                    state->concurrent_request_handlers.find(request.method);
+                if (concurrent != state->concurrent_request_handlers.end()) {
+                    concurrent_dispatch = true;
+                    dispatch_handler = concurrent->second;
+                } else {
+                    dispatch_handler = state->handler;
+                    main_thread_rpc = state->main_thread_rpc;
+                }
                 client_epoch = state->client_epochs[std::string(client_id)];
                 ++state->admitted_client_dispatches[std::string(client_id)];
             }
@@ -577,7 +646,7 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
         if (deliver_disconnect)
             deliver_client_disconnect(disconnect_handler, owned_client_id);
     };
-    if (!state->handler) {
+    if (!dispatch_handler) {
         finish_operation();
         auto response = make_error(request.id, "No inspector dispatch handler is attached",
                                    "dispatch_unavailable");
@@ -589,19 +658,27 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
     }
     const auto owned_request = request;
     auto operation = [state, owned_request, owned_client_id, owned_info, audit_log, capability,
-                      controller_operation, client_epoch] {
+                      controller_operation, client_epoch, concurrent_dispatch,
+                      dispatch_handler = std::move(dispatch_handler)] {
         InspectorMessage response;
-        if (!state->begin_dispatch()) {
+        const auto admitted = concurrent_dispatch
+            ? state->begin_concurrent_dispatch()
+            : state->begin_dispatch();
+        if (!admitted) {
             response =
                 make_error(owned_request.id, "Inspector dispatch was cancelled during teardown",
                            "dispatch_cancelled");
         } else {
             struct DispatchGuard {
                 std::shared_ptr<State> state;
+                bool concurrent = false;
                 ~DispatchGuard() {
-                    state->end_dispatch();
+                    if (concurrent)
+                        state->end_concurrent_dispatch();
+                    else
+                        state->end_dispatch();
                 }
-            } guard{state};
+            } guard{state, concurrent_dispatch};
             {
                 std::lock_guard lock(state->mutex);
                 const auto current_epoch = state->client_epochs[owned_client_id];
@@ -614,7 +691,7 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
             }
             if (!response.is_error) {
                 try {
-                    response = state->handler(
+                    response = dispatch_handler(
                         InspectorRequestContext{owned_client_id}, owned_request);
                 } catch (const std::exception& error) {
                     response = make_error(owned_request.id,
@@ -655,9 +732,18 @@ InspectorMessage InspectorSession::handle(std::string_view client_id,
 
 void InspectorSession::suspend_dispatches() {
     const auto state = state_;
+    close_dispatch_admission();
     {
-        std::lock_guard lock(state->dispatch_mutex);
-        state->dispatch_accepting = false;
+        std::unique_lock lock(state->dispatch_mutex);
+        const auto caller = state->concurrent_dispatch_threads.find(
+            std::this_thread::get_id());
+        const auto caller_dispatches =
+            caller == state->concurrent_dispatch_threads.end()
+            ? std::size_t{0}
+            : caller->second;
+        state->dispatch_cv.wait(lock, [&] {
+            return state->concurrent_dispatches <= caller_dispatches;
+        });
     }
     state->dispatch_cv.notify_all();
 
@@ -670,6 +756,20 @@ void InspectorSession::suspend_dispatches() {
         handler = state->controller_scope_end_handler;
     }
     deliver_scope_ends(info_, std::move(ended), handler);
+}
+
+void InspectorSession::close_dispatch_admission() {
+    const auto state = state_;
+    {
+        std::lock_guard lock(state->dispatch_mutex);
+        state->dispatch_accepting = false;
+    }
+    state->dispatch_cv.notify_all();
+}
+
+void InspectorSession::after_concurrent_dispatches(
+    std::function<void()> completion) {
+    state_->after_concurrent_dispatches(std::move(completion));
 }
 
 void InspectorSession::resume_dispatches() {
@@ -691,6 +791,19 @@ void InspectorSession::set_main_thread_rpc(
     std::shared_ptr<InspectorMainThreadRpc> rpc) {
     std::lock_guard lock(state_->mutex);
     state_->main_thread_rpc = std::move(rpc);
+}
+
+void InspectorSession::set_concurrent_request_handler(
+    std::string method, ContextRequestHandler handler) {
+    if (method.empty())
+        return;
+    std::lock_guard lock(state_->mutex);
+    if (handler) {
+        state_->concurrent_request_handlers.insert_or_assign(
+            std::move(method), std::move(handler));
+    } else {
+        state_->concurrent_request_handlers.erase(method);
+    }
 }
 
 void InspectorSession::set_controller_scope_end_handler(

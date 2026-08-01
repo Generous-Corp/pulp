@@ -19,20 +19,10 @@ namespace pulp::view {
 // (appendChild → _reparentNative → native bridge → back to JS) exhausts
 // QuickJS's default 256KB JS stack. We increase it to 1MB.
 //
-// CHOC's Context::pimpl is private, but we need the JSRuntime* to call
-// JS_SetMaxStackSize. Since this file includes the full QuickJS implementation,
-// we have access to quickjs::QuickJSContext (which has a public JSRuntime*
-// runtime member). We access it through the Context's known single-member
-// layout: { unique_ptr<Pimpl> pimpl }.
-
-static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) {
-    struct ContextLayout {
-        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
-    };
-    auto& layout = reinterpret_cast<ContextLayout&>(ctx);
-    auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
-    if (qjctx && qjctx->runtime)
-        JS_SetMaxStackSize(qjctx->runtime, size);
+static void set_quickjs_stack_size(
+    choc::javascript::quickjs::QuickJSContext& context, size_t size) {
+    if (context.runtime)
+        JS_SetMaxStackSize(context.runtime, size);
 }
 
 // Drive QuickJS's pending-job queue ourselves: CHOC's pumpMessageLoop() is
@@ -51,14 +41,6 @@ namespace {
 constexpr int kQuickJsPumpJobCap = 1'000'000;
 
 namespace qjs = choc::javascript::quickjs;
-
-qjs::QuickJSContext* quickjs_context(choc::javascript::Context& context) {
-    struct ContextLayout {
-        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
-    };
-    auto& layout = reinterpret_cast<ContextLayout&>(context);
-    return static_cast<qjs::QuickJSContext*>(layout.pimpl.get());
-}
 
 class BoundedJsonWriter {
 public:
@@ -340,27 +322,17 @@ static void pulp_quickjs_promise_rejection_tracker(
     choc::javascript::quickjs::JS_FreeValue(ctx, stack);
 }
 
-static void install_quickjs_rejection_tracker(choc::javascript::Context& ctx) {
-    struct ContextLayout {
-        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
-    };
-    auto& layout = reinterpret_cast<ContextLayout&>(ctx);
-    auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
-    if (!qjctx || !qjctx->runtime) return;
+static void install_quickjs_rejection_tracker(qjs::QuickJSContext& context) {
+    if (!context.runtime) return;
     choc::javascript::quickjs::JS_SetHostPromiseRejectionTracker(
-        qjctx->runtime, &pulp_quickjs_promise_rejection_tracker, nullptr);
+        context.runtime, &pulp_quickjs_promise_rejection_tracker, nullptr);
 }
 
-static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
-    struct ContextLayout {
-        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
-    };
-    auto& layout = reinterpret_cast<ContextLayout&>(ctx);
-    auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
-    if (!qjctx || !qjctx->runtime) return;
+static void pump_quickjs_jobs(qjs::QuickJSContext& context) {
+    if (!context.runtime) return;
     choc::javascript::quickjs::JSContext* pctx = nullptr;
     for (int executed = 0; executed < kQuickJsPumpJobCap; ++executed) {
-        int rc = JS_ExecutePendingJob(qjctx->runtime, &pctx);
+        int rc = JS_ExecutePendingJob(context.runtime, &pctx);
         if (rc <= 0) return;  // 0 = empty queue, <0 = JS exception inside job
     }
     pulp::runtime::log_warn(
@@ -383,11 +355,12 @@ static std::string_view logging_level_name(choc::javascript::LoggingLevel level)
 
 class QuickJsEngine final : public JsEngine {
 public:
-    QuickJsEngine()
-        : context_(choc::javascript::createQuickJSContext())
-    {
-        set_quickjs_stack_size(context_, 1024 * 1024);  // 1MB (up from 256KB)
-        install_quickjs_rejection_tracker(context_);    // pulp #3206
+    QuickJsEngine() {
+        auto backend = std::make_unique<qjs::QuickJSContext>();
+        backend_ = backend.get();
+        context_ = choc::javascript::Context(std::move(backend));
+        set_quickjs_stack_size(*backend_, 1024 * 1024);  // 1MB (up from 256KB)
+        install_quickjs_rejection_tracker(*backend_);    // pulp #3206
         setup_console();
     }
 
@@ -402,14 +375,13 @@ public:
 
     std::string evaluate_bounded_json(const std::string& code,
                                       std::size_t max_bytes) override {
-        auto* owner = quickjs_context(context_);
-        if (!owner || !owner->context)
+        if (!backend_ || !backend_->context)
             throw std::runtime_error("QuickJS context is unavailable");
-        auto value = owner->takeValue(qjs::JS_Eval(
-            owner->context, code.data(), code.size(), "",
+        auto value = backend_->takeValue(qjs::JS_Eval(
+            backend_->context, code.data(), code.size(), "",
             0));
         value.throwIfError();
-        return BoundedJsonWriter(*owner, max_bytes).write(value.get());
+        return BoundedJsonWriter(*backend_, max_bytes).write(value.get());
     }
 
     void run_module(const std::string& code,
@@ -477,7 +449,7 @@ public:
         // CHOC's pumpMessageLoop is a no-op for QuickJS (#746); drive the
         // pending-job queue ourselves so queueMicrotask / Promise.then /
         // async-await actually drain when callers ask.
-        pump_quickjs_jobs(context_);
+        pump_quickjs_jobs(*backend_);
     }
 
     bool supports_host_objects() const override { return true; }
@@ -494,14 +466,14 @@ public:
     bool supports_interrupt() const override { return true; }
     void request_interrupt() override { context_.cancel(); }
     void clear_pending_interrupt() override {
-        if (auto* owner = quickjs_context(context_))
-            owner->shouldCancel.store(false, std::memory_order_release);
+        backend_->shouldCancel.store(false, std::memory_order_release);
     }
 
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
     choc::javascript::Context& choc_context() { return context_; }
 
 private:
+    qjs::QuickJSContext* backend_ = nullptr;  // owned by context_
     choc::javascript::Context context_;
     LogCallback log_callback_;
 

@@ -137,6 +137,16 @@ void WidgetBridge::release_all_param_gesture_routes() noexcept {
     }
 }
 
+void WidgetBridge::defer_all_param_gesture_routes() {
+    for (auto& [widget_id, route] : param_gesture_routes_) {
+        (void)widget_id;
+        if (!route->active) continue;
+        store_.defer_gesture_release(route->active_param_id);
+        route->active = false;
+    }
+    param_gesture_routes_.clear();
+}
+
 // ── Transform mini-spec ──────────────────────────────────────────────────
 // Applied to the source before it reaches the widget, in order:
 //   optional dB→linear map → scale → offset → optional clamp.

@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -71,6 +72,13 @@ public:
     // running work is interrupted and detach waits for engine quiescence.
     void detach();
 
+    // [engine thread] Install the host-owned realm reset run after evaluated
+    // code has stopped but before its result is published. Returning a
+    // non-empty string fails the request closed with that reset error.
+    using EvaluationDeadline = std::chrono::steady_clock::time_point;
+    void set_post_evaluation_reset(
+        std::function<std::string(EvaluationDeadline)> reset);
+
     // [any thread] Evaluate `code`, marshaled to the engine thread. Blocks up
     // to `timeout`. On timeout the running evaluation is interrupted (if the
     // engine supports it) so a runaway loop cannot wedge the bridge forever.
@@ -103,6 +111,8 @@ private:
         bool timeout_requested = false;
         bool detach_requested = false;
         bool interrupt_requested = false;
+        bool evaluation_finished = false;
+        EvaluationDeadline deadline{};
         ScriptEngine* engine = nullptr;
         bool can_interrupt = false;
         // Protected by mutex_. A cancelling thread closes the window and arms
@@ -118,6 +128,10 @@ private:
     // caller's snapshot is the one used. Caller guarantees engine-thread.
     EvalResult serialize_eval(ScriptEngine* engine, const std::string& code,
                               std::size_t max_result_bytes) const;
+    // [engine thread] Execute, reset, normalize, and publish one already
+    // claimed request. Inline evaluation and pump share this state machine.
+    EvalResult run_claimed_request(const std::shared_ptr<Request>& request,
+                                   ScriptEngine* engine);
 
     // mutex_ must be held. Publishes a terminal result and releases the
     // single-flight slot. Request waiters use the same mutex, so completion and
@@ -137,8 +151,11 @@ private:
     std::thread::id engine_thread_{};
     bool have_engine_thread_ = false;
     bool in_flight_ = false;
+    bool reset_in_progress_ = false;
+    std::thread::id reset_thread_{};
     std::shared_ptr<Request> pending_;  // single-slot queue, drained by pump()
     std::shared_ptr<Request> running_;  // engine remains attached until this clears
+    std::function<std::string(EvaluationDeadline)> post_evaluation_reset_;
 };
 
 } // namespace pulp::view

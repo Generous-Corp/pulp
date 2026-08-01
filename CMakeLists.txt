@@ -399,7 +399,9 @@ endif()
 # targets from inheriting inspector archives through the format SDK.
 if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect AND NOT IOS)
     target_sources(pulp-standalone PRIVATE
-        core/format/src/standalone_inspector.cpp)
+        core/format/src/standalone_inspector.cpp
+        core/format/src/standalone_inspector_policy.cpp
+        core/format/src/standalone_runtime_eval_dispatch.cpp)
     target_link_libraries(pulp-standalone PRIVATE pulp::inspect)
     target_link_libraries(pulp-standalone PRIVATE pulp::inspect-runtime-eval)
     target_compile_definitions(pulp-standalone PRIVATE

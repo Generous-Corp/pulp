@@ -54,6 +54,10 @@ public:
     void set_runtime_evaluator(RuntimeEvaluator* evaluator) {
         runtime_evaluator_ = evaluator;
     }
+    /// Dispatch one Runtime request with a scoped borrowed evaluator. The
+    /// previous binding is restored on every exit, including exceptions.
+    InspectorMessage handle_runtime_with_evaluator(
+        const InspectorMessage& request, RuntimeEvaluator* evaluator);
 
     /// Opt in to `Runtime.evaluate` / `Runtime.interrupt`. OFF by default:
     /// evaluate is arbitrary code execution in the plugin's JS context, and the

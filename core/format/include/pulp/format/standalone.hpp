@@ -161,6 +161,7 @@ struct StandaloneConfig {
     // UI MIDI path, so they reach the processor only if it accepts MIDI input;
     // on a processor that ignores MIDI the keys are silent by construction.
     bool enable_musical_typing_keyboard = false;
+
 };
 
 namespace detail {
