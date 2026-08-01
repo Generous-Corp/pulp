@@ -117,7 +117,8 @@ inline std::string extract_string(const std::string& json, const std::string& ke
     return json.substr(start + 1, end - start - 1);
 }
 
-// Pull the raw token (string-with-quotes, number, or null) for `key`.
+// Pull the complete raw JSON value for `key`. This includes nested arrays and
+// objects, with delimiters inside strings ignored by the scanner.
 inline std::string extract_raw(const std::string& json, const std::string& key) {
     auto key_pos = json.find("\"" + key + "\"");
     if (key_pos == std::string::npos) return {};
@@ -131,21 +132,69 @@ inline std::string extract_raw(const std::string& json, const std::string& key) 
 
     if (start >= json.size()) return {};
 
-    // If it's a string
+    // If it's a string, stop at the first unescaped closing quote.
     if (json[start] == '"') {
-        auto end = json.find('"', start + 1);
-        while (end != std::string::npos && json[end - 1] == '\\')
-            end = json.find('"', end + 1);
-        if (end == std::string::npos) return {};
-        return json.substr(start, end - start + 1);
+        bool escaped = false;
+        for (auto end = start + 1; end < json.size(); ++end) {
+            const auto current = json[end];
+            if (escaped) {
+                escaped = false;
+            } else if (current == '\\') {
+                escaped = true;
+            } else if (current == '"') {
+                return json.substr(start, end - start + 1);
+            }
+        }
+        return {};
     }
 
-    // If it's a number or null
-    auto end = json.find_first_of(",}", start);
-    if (end == std::string::npos) end = json.size();
+    // Arrays and objects may contain arbitrarily nested values. Preserve the
+    // complete value so callers can pass structured arguments through without
+    // truncating at the first inner comma or closing brace.
+    if (json[start] == '[' || json[start] == '{') {
+        int array_depth = 0;
+        int object_depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (auto end = start; end < json.size(); ++end) {
+            const auto current = json[end];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (current == '\\') {
+                    escaped = true;
+                } else if (current == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (current == '"') {
+                in_string = true;
+            } else if (current == '[') {
+                ++array_depth;
+            } else if (current == ']') {
+                --array_depth;
+            } else if (current == '{') {
+                ++object_depth;
+            } else if (current == '}') {
+                --object_depth;
+            }
+            if (array_depth == 0 && object_depth == 0)
+                return json.substr(start, end - start + 1);
+            if (array_depth < 0 || object_depth < 0)
+                return {};
+        }
+        return {};
+    }
+
+    // Scalar values end at a separator or whitespace.
+    auto end = start;
+    while (end < json.size() && json[end] != ',' && json[end] != '}' &&
+           json[end] != ']' &&
+           !std::isspace(static_cast<unsigned char>(json[end]))) {
+        ++end;
+    }
     auto value = json.substr(start, end - start);
-    // Trim
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\n')) value.pop_back();
     return value;
 }
 

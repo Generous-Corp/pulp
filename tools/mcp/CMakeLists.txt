@@ -64,6 +64,7 @@ add_library(pulp-mcp-core STATIC
     mcp_kit_content_tools.cpp
     mcp_audio_tools.cpp
     mcp_inspect_tools.cpp
+    mcp_inspector_tools.cpp
     mcp_timeline_tools.cpp
     timeline_session_store.cpp)
 target_compile_features(pulp-mcp-core PRIVATE cxx_std_20)
@@ -78,6 +79,7 @@ target_link_libraries(pulp-mcp-core
         pulp::tool-timeline
     PRIVATE
         pulp::platform
+        pulp::inspect-client
         pulp::timebase
         pulp::timeline)
 if(TARGET pulp::inspect-protocol)

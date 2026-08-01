@@ -147,32 +147,4 @@ inline std::filesystem::path resolve_cli_binary(const std::filesystem::path& roo
 #endif
 }
 
-/// Resolve the source-built C++ CLI that owns the native `inspect` command.
-///
-/// The top-level `build/pulp` is the Rust CLI and may delegate unknown verbs
-/// through PATH. MCP already knows the source root, so use the native binary
-/// directly and support both single-config and multi-config generators.
-inline std::filesystem::path resolve_inspect_cli_binary(
-    const std::filesystem::path& root) {
-    const auto cli_dir = root / "build" / "tools" / "cli";
-    std::vector<std::filesystem::path> candidates;
-    auto add_candidates = [&](const std::filesystem::path& dir) {
-        candidates.push_back(dir / "pulp-cpp");
-        candidates.push_back(dir / "pulp-cpp.exe");
-    };
-
-    add_candidates(cli_dir);
-    for (const char* config : {"Release", "RelWithDebInfo", "Debug", "MinSizeRel"})
-        add_candidates(cli_dir / config);
-
-    for (const auto& candidate : candidates) {
-        if (std::filesystem::exists(candidate)) return candidate;
-    }
-#if defined(_WIN32)
-    return cli_dir / "pulp-cpp.exe";
-#else
-    return cli_dir / "pulp-cpp";
-#endif
-}
-
 }  // namespace pulp_mcp
