@@ -109,6 +109,12 @@ target_link_libraries(pulp-test-inspector-client PRIVATE
     pulp::inspect-client pulp::inspect-runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-client)
 
+add_executable(pulp-test-inspector-value-channel-telemetry
+    test_value_channel_telemetry_broker.cpp)
+target_link_libraries(pulp-test-inspector-value-channel-telemetry PRIVATE
+    pulp::inspect-telemetry pulp::inspect-client Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-inspector-value-channel-telemetry)
+
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)

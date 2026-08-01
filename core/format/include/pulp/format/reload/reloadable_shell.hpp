@@ -117,6 +117,24 @@ public:
         return slot_.with_active([](Processor& p) { return p.create_view(); });
     }
 
+    // Value channels belong to the active logic processor, just like its view.
+    // Resolve them through the slot so a successful swap exposes the replacement
+    // set. The pointer remains non-owning: editor consumers observe
+    // editor_reload_generation() on their UI tick and rebuild before their next
+    // channel read.
+    view::ValueChannelSet* value_channels() override {
+        return slot_.with_active([](Processor& p) { return p.value_channels(); });
+    }
+
+    void visit_value_channels(
+        const std::function<void(view::ValueChannelSet*)>& visitor) override {
+        const bool visited = slot_.with_active([&](Processor& p) {
+            p.visit_value_channels(visitor);
+            return true;
+        });
+        if (!visited && visitor) visitor(nullptr);
+    }
+
     // Live-swap 1.9: this shell's editor rebuilds IN PLACE on each hot-swap. The
     // ViewBridge hosts create_view() under a stable root container and rebuilds
     // its content whenever editor_reload_generation() changes — polled on the
