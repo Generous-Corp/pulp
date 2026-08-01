@@ -124,9 +124,38 @@ bool contains_fold(const std::string& hay, const std::string& needle) {
 
 }  // namespace
 
+namespace {
+
+/// The model half of "Plugin/Model", which is the name people actually use.
+std::string model_of(const std::string& slug) {
+    const auto slash = slug.rfind('/');
+    return slash == std::string::npos ? slug : slug.substr(slash + 1);
+}
+
+/// How well a query matches, lower being better.
+///
+/// Insertion order alone put "Calibrator" and "Macro Oscillator" above
+/// "Breakout" for the query "br" — every one a real match, none of them the
+/// one anybody meant. What a person types is nearly always the start of the
+/// name they are reaching for, so that ranks first.
+int match_rank(const Entry& e, const std::string& q) {
+    const auto starts = [&](const std::string& hay) {
+        return hay.size() >= q.size() && contains_fold(hay.substr(0, q.size()), q);
+    };
+    if (starts(e.name)) return 0;
+    if (starts(model_of(e.slug))) return 1;
+    if (contains_fold(e.name, q)) return 2;
+    if (contains_fold(e.slug, q)) return 3;
+    return 4;                                   // brand only
+}
+
+}  // namespace
+
 std::vector<MentionCandidate> search_modules(const std::string& query,
                                              std::size_t limit) {
-    std::vector<MentionCandidate> ready, rest;
+    struct Scored { MentionCandidate c; int rank; std::size_t seq; };
+    std::vector<Scored> hits;
+    std::size_t seq = 0;
     for (const auto& e : all()) {
         if (!contains_fold(e.name, query) && !contains_fold(e.slug, query) &&
             !contains_fold(e.brand, query))
@@ -135,17 +164,32 @@ std::vector<MentionCandidate> search_modules(const std::string& query,
         c.brand = e.brand;
         c.name = e.name;
         c.slug = e.slug;
+        // Say WHY it matched when the reason is invisible. "Macro Oscillator"
+        // answering "br" looks wrong until you know it is Braids.
+        const auto model = model_of(e.slug);
+        if (!query.empty() && !contains_fold(e.name, query) &&
+            contains_fold(model, query) && !contains_fold(e.name, model))
+            c.alias = model;
         c.state = e.installed ? MentionCandidate::Availability::ready
                               : MentionCandidate::Availability::available;
-        (e.installed ? ready : rest).push_back(std::move(c));
-        if (ready.size() >= limit) break;
+        hits.push_back({std::move(c), match_rank(e, query), seq++});
     }
-    // Installed first: only those can be wired into a patch that will sound.
-    for (auto& c : rest) {
-        if (ready.size() >= limit) break;
-        ready.push_back(std::move(c));
+    // Installed first — only those can be wired into a patch that will sound —
+    // then by how well the query matched, then by the order the catalogue
+    // holds them, so the list does not reshuffle between keystrokes.
+    std::sort(hits.begin(), hits.end(), [](const Scored& a, const Scored& b) {
+        const bool ar = a.c.state == MentionCandidate::Availability::ready;
+        const bool br = b.c.state == MentionCandidate::Availability::ready;
+        if (ar != br) return ar;
+        if (a.rank != b.rank) return a.rank < b.rank;
+        return a.seq < b.seq;
+    });
+    std::vector<MentionCandidate> out;
+    for (auto& h : hits) {
+        if (out.size() >= limit) break;
+        out.push_back(std::move(h.c));
     }
-    return ready;
+    return out;
 }
 
 CatalogCounts catalog_counts() {

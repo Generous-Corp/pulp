@@ -5966,3 +5966,90 @@ TEST_CASE("the audio interface draws where its cables land", "[audio][render]") 
     // another machine fixes nothing.
     CHECK(differing > 2000);
 }
+
+// What you typed ranks first, and a match you cannot see says what it was.
+//
+// Reported from a screenshot: "@br" returned Macro Oscillator, Bernoulli
+// Gate, Breakout, Calibrator, PSI OP, Planck. Every one is a real match — the
+// first two are Braids and Branches by slug, Calibrator has "br" in the middle
+// — but the one anybody typing "br" wants is Breakout, and it was fourth.
+TEST_CASE("the mention list ranks what you typed first", "[mention][rank]") {
+    const auto hits = forge_modular::search_modules("br", 40);
+    if (hits.empty()) {
+        WARN("no library index on this machine — skipped, not passed");
+        return;
+    }
+
+    // Among matches of the same installed-ness, a name STARTING with the
+    // query comes before one that merely contains it somewhere.
+    auto rank_of = [&](const std::string& name) {
+        for (std::size_t i = 0; i < hits.size(); ++i)
+            if (hits[i].name == name) return static_cast<int>(i);
+        return -1;
+    };
+    const int breakout = rank_of("Breakout");
+    const int calibrator = rank_of("Calibrator");
+    if (breakout >= 0 && calibrator >= 0) {
+        INFO("Breakout at " << breakout << ", Calibrator at " << calibrator);
+        CHECK(breakout < calibrator);
+    }
+
+    // A row matched by its slug says which name matched, or it reads as a
+    // random result. Audible Instruments' Macro Oscillator is Braids.
+    for (const auto& h : hits) {
+        if (h.name != "Macro Oscillator") continue;
+        INFO("alias: '" << h.alias << "'");
+        CHECK_FALSE(h.alias.empty());
+    }
+
+    // A long name is cut rather than allowed to run under its badge. Ohmer's
+    // 'BRK ("Break") expander for RKD' is thirty characters and overlapped
+    // GET · FREE; a Label sizes to its text and flex_shrink cannot shorten a
+    // string, so the string is what has to give.
+    {
+        auto view = std::make_unique<forge_modular::MentionOverlay>();
+        // The row builder is internal, so this checks the rule it applies.
+        const std::string long_name = R"(BRK ("Break") expander for RKD)";
+        CHECK(long_name.size() == 30);
+        CHECK(forge_modular::elide_for_row(long_name).size() < long_name.size());
+        CHECK(forge_modular::elide_for_row("Breakout") == "Breakout");
+    }
+
+    // And the ordering is stable: the same query twice gives the same list,
+    // or the row under the pointer changes between keystrokes.
+    const auto again = forge_modular::search_modules("br", 40);
+    REQUIRE(again.size() == hits.size());
+    for (std::size_t i = 0; i < hits.size(); ++i)
+        CHECK(again[i].slug == hits[i].slug);
+}
+
+// A picture of the mention list, for a person to judge. Not part of the suite.
+//   forge-test-chrome-no-leak "[.mention-look]"
+TEST_CASE("render the mention list for a look", "[.mention-look]") {
+    forge_modular::MentionOverlay overlay;
+    overlay.set_source([](const std::string& q) {
+        return forge_modular::search_modules(q, 8);
+    });
+    // build() FIRST: the rows are made into the view it returns, so filling
+    // the list before there is anywhere to put them leaves an empty frame.
+    auto view = overlay.build();
+    REQUIRE(view != nullptr);
+    overlay.handle_text("@br", 3);
+    REQUIRE(overlay.is_open());
+    // Tall enough to CONTAIN the list. It places itself under the composer,
+    // ~448 points down, so a 300-point frame renders it off the bottom — and
+    // a blank picture passes every assertion here just as well as a good one.
+    // Inside a PARENT. The overlay places itself absolutely, which resolves
+    // against a containing view — rendered as a root there is nothing to
+    // place it against and the frame comes back empty.
+    auto host = std::make_unique<pulp::view::View>();
+    host->set_bounds(pulp::view::Rect{0, 0, 900, 760});
+    host->add_child(std::move(view));
+    host->layout_children();
+    const auto out = std::filesystem::temp_directory_path() / "mention-list.png";
+    REQUIRE(pulp::view::render_to_file(*host, 900, 760, out.string(), 2.0f,
+                                       pulp::view::ScreenshotBackend::skia));
+    // A blank frame is not a picture of anything.
+    REQUIRE(read_all(out).size() > 8000);
+    WARN("wrote " << out.string());
+}

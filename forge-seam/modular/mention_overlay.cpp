@@ -23,6 +23,21 @@ using pulp::view::FlexDirection;
 using pulp::view::Label;
 using pulp::view::View;
 
+constexpr float kBrandColumn = 116.0f;
+/// Longest name drawn before it is cut. A Label sizes to its text and does not
+/// ellipsize, and flex_shrink cannot shorten a string — so Ohmer's
+/// 'BRK ("Break") expander for RKD' ran straight under its GET · FREE badge.
+/// Cutting the string is the only thing that actually shortens it.
+constexpr std::size_t kNameChars = 22;
+
+/// `text`, cut to `max` with an ellipsis, on a character boundary.
+std::string elide(const std::string& text, std::size_t max) {
+    if (text.size() <= max) return text;
+    std::size_t cut = max;
+    // Do not split a UTF-8 sequence; back up to a lead byte.
+    while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) --cut;
+    return text.substr(0, cut) + "\u2026";
+}
 constexpr float kRowHeight = 34.0f;
 constexpr int kMaxRows = 6;
 /// Where the list hangs: just below the composer card, which ends around
@@ -53,6 +68,10 @@ std::optional<std::string> active_token(const std::string& text, std::size_t car
 }
 
 }  // namespace
+
+std::string elide_for_row(const std::string& text) {
+    return elide(text, kNameChars);
+}
 
 std::unique_ptr<View> MentionOverlay::build() {
     auto root = std::make_unique<View>();
@@ -207,19 +226,41 @@ void MentionOverlay::rebuild_rows() {
         if (static_cast<int>(i) == selected_)
             row->set_background_color(surface_raised);
 
+        // The brand sits in a column of ITS OWN WIDTH, so the names start
+        // wherever the brand happens to end: "Audible Instruments" pushes one
+        // name far right while "Count Modula" leaves the next one short, and
+        // the list reads as ragged text rather than a table. A fixed column
+        // makes the names line up, which is what a person scans down.
         auto brand = std::make_unique<Label>(c.brand);
         brand->set_font_family(forge::design::type::mono);
         brand->set_font_size(10);
         brand->set_text_color(text_faint);
+        brand->flex().preferred_width = kBrandColumn;
+        brand->flex().flex_shrink = 0;
         row->add_child(std::move(brand));
 
-        auto name = std::make_unique<Label>(c.name);
+        auto name = std::make_unique<Label>(elide_for_row(c.name));
         name->set_font_family(forge::design::type::display);
         name->set_font_size(13);
         // An uninstallable row is visibly quieter, because it is an offer
         // rather than a choice.
         name->set_text_color(c.insertable() ? text : text_muted);
+        // A long name must give way rather than run under the badge. Ohmer's
+        // 'BRK ("Break") expander for RKD' overlapped its GET · FREE, which
+        // reads as two pieces of text fighting rather than one row.
+        name->flex().flex_shrink = 1;
+        name->flex().min_width = 0;
         row->add_child(std::move(name));
+
+        // What the query matched, when it was not the displayed name. Braids
+        // answering "br" is right, and only says so if it says so.
+        if (!c.alias.empty()) {
+            auto alias = std::make_unique<Label>(c.alias);
+            alias->set_font_family(forge::design::type::mono);
+            alias->set_font_size(10);
+            alias->set_text_color(text_faint);
+            row->add_child(std::move(alias));
+        }
 
         if (!c.insertable()) {
             // "GET" said only that you could not pick it. It reads as a
@@ -233,6 +274,9 @@ void MentionOverlay::rebuild_rows() {
             state->set_text_color(c.state == MentionCandidate::Availability::paid
                                       ? forge::design::color::amber
                                       : accent);
+            // The badge never shrinks: it is short, and it is the thing that
+            // says whether the row can be picked at all.
+            state->flex().flex_shrink = 0;
             row->add_child(std::move(state));
         }
         row_views_.push_back(row.get());

@@ -37,6 +37,18 @@ struct MentionCandidate {
     std::string slug;       ///< what gets inserted
     Availability state = Availability::available;
 
+    /// The name the query actually matched, when it is not the one displayed.
+    ///
+    /// VCV's display names and the names people use are often different words:
+    /// Audible Instruments' "Macro Oscillator" is Braids, "Bernoulli Gate" is
+    /// Branches. Typing "br" finds them by slug, and the row showed neither
+    /// the query nor anything containing it, so a correct match read as a
+    /// random one.
+    ///
+    /// LAST on purpose: every existing brace-initialiser in the tests is
+    /// positional, and a field added in the middle breaks all of them.
+    std::string alias;
+
     /// Only an installed module can be wired into a patch that will sound.
     bool insertable() const { return state == Availability::ready; }
 };
@@ -51,6 +63,14 @@ using MentionSource = std::function<std::vector<MentionCandidate>(const std::str
 /// Owns no text: it observes what was typed and reports what was chosen. The
 /// composer stays the single source of truth for the prompt, so there is never
 /// a second copy to disagree with.
+/// A row's name, cut to the width a row can hold.
+///
+/// Exposed so the rule can be tested directly. A Label sizes to its text and
+/// does not ellipsize, and flex_shrink cannot shorten a string, so a long name
+/// ran under the badge beside it — cutting the string is the only thing that
+/// actually shortens it.
+std::string elide_for_row(const std::string& text);
+
 class MentionOverlay {
 public:
     /// Build the view. Hidden until `open()`.
