@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <string>
 #include <vector>
@@ -13,7 +14,7 @@ namespace runtime = pulp::runtime;
 
 namespace {
 
-template <typename T> T ok(runtime::Result<T, ModelError> result) {
+template <typename T, typename E> T ok(runtime::Result<T, E> result) {
     REQUIRE(result.has_value());
     return std::move(result).value();
 }
@@ -282,4 +283,60 @@ TEST_CASE("Remap fixes take identities embedded in comp selections") {
             ->find_take_lane(lane_id);
     REQUIRE(comp_lane->comp_segments().size() == 1);
     REQUIRE(comp_lane->comp_segments()[0].take_id == take_id);
+}
+
+TEST_CASE("A track copy issues a fresh identity for every kind a track owns") {
+    // Lifting one track out of a sequence enumerates what it owns exactly once,
+    // and nothing rejects an enumeration that stops emitting a kind: the copy
+    // simply comes back without those objects, or carrying the source's
+    // identities. Each per-kind case elsewhere covers one branch of that walk
+    // and passes while a sibling kind goes missing, so this one carries every
+    // kind a track can own at once and asserts the complete identity set.
+    const MidiExpressionLane expression{{18}, {0, 0, 11, 0, 74}, {{{19}, {0}, 0x8000}}};
+    auto content = ok(MidiContent::create({{{16}, {0}, {2}, 0xffff, 60, 0}}, {}, 0, {expression}));
+    auto midi_clip = ok(Clip::create({15}, {0}, {100}, std::move(content)));
+    auto automation = ok(AutomationLane::create({12}, DeviceParameterTarget{{11}, 7},
+                                                ok(AutomationCurve::create({{{13}, {0}, 0.25f}}))));
+    auto take_lane = ok(TakeLane::create({4}, "comp A", {make_take({5}, {6})}));
+    const auto track = ok(Track::create(TrackInput{.id = {3},
+                                                   .name = "track",
+                                                   .clips = {midi_clip},
+                                                   .device_chain = {DevicePlacement{{11}}},
+                                                   .automation_lanes = {automation},
+                                                   .take_lanes = {take_lane}}));
+
+    ItemIdAllocator allocator(100);
+    const auto copied = ok(remap_ids(track, allocator));
+    // Track, device placement, clip, note, MIDI lane, MIDI lane point,
+    // automation lane, automation point, take lane, take.
+    REQUIRE(copied.ids.entries().size() == 10);
+    REQUIRE(allocator.next_value() == 110);
+
+    std::vector<ItemId> issued;
+    for (const auto& [source, copy] : copied.ids.entries()) {
+        CHECK(copy != source);
+        CHECK(copy.value >= 100);
+        CHECK(copy.value < allocator.next_value());
+        issued.push_back(copy);
+    }
+    // Distinctness is asserted separately from freshness: a walk that visited
+    // every kind but issued one identity twice satisfies every check above.
+    std::sort(issued.begin(), issued.end());
+    CHECK(std::adjacent_find(issued.begin(), issued.end()) == issued.end());
+
+    // The table is only half the claim — the copied track has to actually carry
+    // the identities the walk issued, at every level.
+    const auto* copied_takes = copied.track.find_take_lane(*copied.ids.find({4}));
+    REQUIRE(copied_takes != nullptr);
+    REQUIRE(copied_takes->find_take(*copied.ids.find({5})) != nullptr);
+    const auto* copied_automation = copied.track.find_automation_lane(*copied.ids.find({12}));
+    REQUIRE(copied_automation != nullptr);
+    REQUIRE(copied_automation->curve().points()[0].id == *copied.ids.find({13}));
+    const auto* copied_clip = copied.track.find_clip(*copied.ids.find({15}));
+    REQUIRE(copied_clip != nullptr);
+    const auto& copied_content = std::get<MidiContent>(copied_clip->content());
+    REQUIRE(copied_content.notes()[0].id == *copied.ids.find({16}));
+    REQUIRE(copied_content.lanes()[0].id == *copied.ids.find({18}));
+    REQUIRE(copied_content.lanes()[0].points[0].id == *copied.ids.find({19}));
+    REQUIRE(copied.track.device_chain()[0].id == *copied.ids.find({11}));
 }
