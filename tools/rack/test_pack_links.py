@@ -3,17 +3,22 @@
 
 Rack loads a plugin by calling init(), which calls addModel once per module.
 Each `modelX` is defined in that module's own source file, so a source the
-build does not compile is not a missing module -- it is an undefined symbol,
-and the linker rejects the whole plugin. Every other module goes with it.
+build does not compile is a symbol nothing resolves.
 
-The source list had drifted to three of twenty-eight while plugin.json declared
-all thirty. Nothing noticed, because the Rack SDK is developer-supplied and
-absent on most machines, so the pack is simply not configured and the target
-never exists. The failure waits for whoever does have the SDK.
+The linker does NOT reject it. A Rack plugin is a shared MODULE, which macOS
+links with -undefined dynamic_lookup: a source list naming three of
+twenty-eight produces a dylib that builds perfectly green with twenty-eight
+undefined model symbols, and dies when Rack dlopens it -- rejecting the whole
+plugin, every other module with it. That was measured, not assumed; building
+the truncated list on purpose gives exit 0 and `nm -u` gives 28.
 
-None of that needs the SDK to check. The manifest says which models must
-exist, the generated plugin.cpp says which ones are registered, and the sources
-say which ones are defined -- three lists that must agree, all of them text.
+Which is why it survived: the build was never anything but green, and the SDK
+is developer-supplied so most machines never configure the target at all.
+
+Most of it needs no SDK. The manifest says which models must exist, the
+generated plugin.cpp says which are registered, and the sources say which are
+defined -- three lists that must agree, all of them text. The last check needs
+a built plugin and says so when there is none.
 
     tools/rack/test_pack_links.py
 """
@@ -22,6 +27,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -91,7 +97,7 @@ def main():
     undefined = sorted(registered - set(defined))
     if undefined:
         wrong(f"init() registers models nothing defines: {undefined} — the "
-              f"plugin will not link")
+              f"plugin builds and then fails to load")
     else:
         ok(f"every registered model has a definition")
 
@@ -108,6 +114,38 @@ def main():
     else:
         ok(f"all {len(registered)} model sources are in the build "
            f"({len(compiled)} compiled)")
+
+    # And the built plugin, when there is one.
+    #
+    # The source-list check above is a proxy. The real failure is at LOAD: a
+    # Rack plugin is a shared MODULE, which macOS links with
+    # -undefined dynamic_lookup, so leaving out twenty-seven sources produces
+    # a dylib that builds green with twenty-eight undefined model symbols and
+    # is rejected by Rack when it dlopens it -- taking every other module with
+    # it. "It compiled" says nothing about this, which is why the truncated
+    # source list survived: the build was never anything but green.
+    for root in ("build-rack", "build"):
+        dylib = os.path.join(HERE, "..", "..", root, "rack", "ForgeModular",
+                             "plugin.dylib")
+        if not os.path.exists(dylib):
+            continue
+        try:
+            out = subprocess.run(["nm", "-u", dylib], capture_output=True,
+                                 text=True, timeout=60).stdout
+        except Exception:                                   # noqa: BLE001
+            break
+        undef = [l.strip() for l in out.splitlines() if "model" in l]
+        if undef:
+            wrong(f"the built plugin has {len(undef)} undefined model "
+                  f"symbol(s) — it loads into Rack and is rejected whole: "
+                  f"{undef[:4]}")
+        else:
+            ok(f"the built plugin resolves every model it registers ({root})")
+        break
+    else:
+        print("  skip   no built plugin found — configure with "
+              "-DPULP_ENABLE_RACK=ON to check the load path.")
+        print("         This is a skip, not a pass.")
 
     print()
     print("all good" if bad == 0 else "FAILED")
