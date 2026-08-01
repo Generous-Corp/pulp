@@ -506,6 +506,55 @@ def main() -> int:
     else:
         print(f"  ok     all {len(idioms)} idioms describe themselves")
 
+    # A requirement must be satisfiable by the modules the contract asks for.
+    #
+    # The fixture that certifies these idioms builds its patch from the
+    # TOPOLOGY, inventing a module for whatever role a requirement names. The
+    # model gets `at_least`. So an idiom could require a cable to a module the
+    # contract never asked for, and the self-test would still prove it
+    # satisfiable -- the instrument knowing more than the thing it tested.
+    # Forty-seven requirements were in that state.
+    #
+    # needed_modules() now derives the list from both, so the contract cannot
+    # omit a role its own requirements use. This checks that it does not.
+    missing = []
+    for slug, idiom in sorted(idioms.items()):
+        listed = set(patch_vocabulary.needed_modules(idiom))
+        for req in idiom.get("topology") or []:
+            for key in ("from_module", "to_module"):
+                role = req.get(key)
+                if role and role != "any" and role not in listed:
+                    missing.append(f"{slug}/{req.get('id')} needs {role}")
+    if missing:
+        print(f"  WRONG  requirements naming a module the contract never asks "
+              f"for: {missing[:6]}")
+        bad += 1
+    else:
+        print("  ok     every requirement's modules are in the contract")
+
+    # And a gate has to come from somewhere. A requirement can say "from any
+    # module" -- which is unsatisfiable when nothing in the patch emits a
+    # gate at all. The kick drum was exactly that: told "something has to
+    # trigger it" and never told to include something that could, so it was
+    # the one prompt of twelve that never built.
+    GATE_SOURCES = {"clock", "sequencer", "clock_modulator", "logic",
+                    "random", "function_generator", "lfo"}
+    ungated = []
+    for slug, idiom in sorted(idioms.items()):
+        listed = set(patch_vocabulary.needed_modules(idiom))
+        for req in idiom.get("topology") or []:
+            if req.get("from_module") not in (None, "any"):
+                continue
+            if req.get("from_port") not in ("gate_out", "clock_out"):
+                continue
+            if not (listed & GATE_SOURCES):
+                ungated.append(f"{slug}/{req.get('id')}")
+    if ungated:
+        print(f"  WRONG  requires a gate no listed module can emit: {ungated}")
+        bad += 1
+    else:
+        print("  ok     every gate requirement has a module that can emit one")
+
     print("\nFAILED" if bad else "\nall good")
     return 1 if bad else 0
 

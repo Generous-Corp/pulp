@@ -172,7 +172,7 @@
       "is": "A MIDI or keyboard interface supplying pitch and gate to a voice, so a person plays it rather than the patch playing itself.",
       "sounds_right_when": "nothing happens until a key is pressed.",
       "source": "Standard practice",
-      "at_least": {"audio_oscillator": 1},
+      "at_least": {"audio_oscillator": 1, "sequencer": 1},
       "topology": [
         {"id": "pitch", "from_module": "any", "from_port": "cv_out",
          "to_module": "audio_oscillator", "to_port": "pitch_in",

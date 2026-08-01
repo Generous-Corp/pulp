@@ -147,7 +147,8 @@
       "source": "Standard drum-synthesis practice",
       "at_least": {
         "envelope": 1,
-        "audio_oscillator": 1
+        "audio_oscillator": 1,
+        "clock": 1
       },
       "topology": [
         {
@@ -214,7 +215,8 @@
       "sounds_right_when": "there is broadband noise with a sharp attack and a short tail.",
       "source": "Standard drum-synthesis practice",
       "at_least": {
-        "noise": 1
+        "noise": 1,
+        "clock": 1
       },
       "topology": [
         {

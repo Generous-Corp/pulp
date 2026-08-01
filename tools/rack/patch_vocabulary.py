@@ -29,6 +29,33 @@ MARKER = "<!--PATCH_VOCABULARY-->"
 MIN_IDIOMS = 50
 
 
+def needed_modules(idiom: dict) -> dict:
+    """Every module the idiom's requirements actually need, with counts.
+
+    `at_least` alone under-states it. A requirement names the roles at both
+    ends of a cable, and those modules have to be in the patch for the cable
+    to exist -- but only some of them appear in `at_least`, so the contract
+    asked for a connection to a module it never asked for. Across the library
+    that is 47 requirements.
+
+    The self-test could not catch it: its fixture builds a patch from the
+    TOPOLOGY, inventing whatever role a requirement names, so every idiom
+    proved satisfiable using modules the model was never told to include. The
+    instrument had more information than the thing it was testing.
+
+    Derived rather than written down, so an edited requirement cannot leave a
+    stale module list behind it.
+    """
+    need = dict(idiom.get("at_least") or {})
+    for req in idiom.get("topology") or []:
+        for key in ("from_module", "to_module"):
+            role = req.get(key)
+            if not role or role == "any":
+                continue
+            need.setdefault(role, 1)
+    return need
+
+
 def render(idioms: dict | None = None) -> str:
     """The library as the model sees it, grouped by family."""
     idioms = idioms if idioms is not None else load_idioms()
@@ -48,6 +75,11 @@ def render(idioms: dict | None = None) -> str:
         for slug, idiom in families[family]:
             out.append(f"### {slug}")
             out.append(f"    {idiom.get('is', '')}")
+            need = needed_modules(idiom)
+            if need:
+                out.append("    modules: " +
+                           ", ".join(f"{n} {role}" for role, n in
+                                     sorted(need.items())))
             reqs = idiom.get("topology") or []
             if reqs:
                 out.append("    required:")
@@ -96,9 +128,10 @@ def for_prompt(prompt: str, idioms: dict | None = None) -> str:
         lines += ["", "These are the ways it usually goes wrong:"]
         for m in mistakes:
             lines.append(f"  - {m.get('message', '')}")
-    if idiom.get("at_least"):
-        need = ", ".join(f"{n} {role}" for role, n in idiom["at_least"].items())
-        lines += ["", f"It needs at least: {need}."]
+    need = needed_modules(idiom)
+    if need:
+        listed = ", ".join(f"{n} {role}" for role, n in sorted(need.items()))
+        lines += ["", f"It needs at least: {listed}."]
     return "\n".join(lines) + "\n"
 
 

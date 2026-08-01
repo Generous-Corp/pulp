@@ -188,7 +188,7 @@
       "is": "A trigger-driven envelope closing an amplifier on a different signal, so one part steps aside for another.",
       "sounds_right_when": "the ducked part dips in time with the trigger and recovers.",
       "source": "Standard practice, borrowed from mixing",
-      "at_least": {"envelope": 1, "amplifier": 1},
+      "at_least": {"envelope": 1, "amplifier": 1, "clock": 1},
       "topology": [
         {"id": "trigger", "from_module": "any", "from_port": "gate_out",
          "to_module": "envelope", "to_port": "gate_in",
