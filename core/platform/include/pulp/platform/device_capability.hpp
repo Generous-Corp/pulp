@@ -5,7 +5,16 @@
 #include <cstdint>
 
 /// Device capability vocabulary: one tier ladder, one thermal ladder, and the
-/// quota table they index.
+/// projection from observed inputs onto them.
+///
+/// Everything here is an observation about the machine or a pure function of
+/// observations. What the product then *grants* at a given rung is policy, and
+/// policy is not here: `pulp/format/device_quotas.hpp` holds the quota table,
+/// at a rung the engine modules cannot reach. `core/platform` is named in every
+/// row of the engine's declared dependency floors, so anything placed here is
+/// reachable by every module and no floor row can object to it — which makes it
+/// the right address for a shared vocabulary and the wrong address for a
+/// budget.
 ///
 /// This header is deliberately dependency-free. It includes no Pulp header, so
 /// it cannot name a document, a session, a transport, or a view, and every
@@ -49,6 +58,9 @@ inline constexpr std::size_t kDeviceCapabilityTierCount = 3;
 /// all can only ever report `Nominal`, which is why the absence of a thermal
 /// API lowers the capability tier rather than being ignored — see
 /// `DeviceCapabilityInputs::thermal_reporting_available`.
+///
+/// Consumers index a quota table by tier and thermal state together; the table
+/// itself is `pulp::format::device_quotas`.
 enum class ThermalState : std::uint8_t {
     Nominal = 0,
     Fair = 1,
@@ -176,94 +188,6 @@ project_device_capability_tier(DeviceCapabilityInputs inputs) {
     tier = detail::min_tier(tier, by_pointer);
     tier = detail::min_tier(tier, by_keyboard);
     return tier;
-}
-
-// ── Quotas ─────────────────────────────────────────────────────────────────
-
-/// How much work a preview render may do, ascending in cost.
-enum class PreviewQuality : std::uint8_t {
-    /// Previews are not rendered; consumers show authored geometry only.
-    Disabled = 0,
-    /// Decimated previews: coarser resolution, fewer passes.
-    Reduced = 1,
-    /// Full-detail previews.
-    Full = 2,
-};
-
-/// Ceilings a consumer may grant at one (tier, thermal state) cell.
-///
-/// These are declarations, not enforcement. Nothing consumes them yet; each
-/// field names a quantity an existing owner could enforce at its own admission
-/// point — a voice pool for `max_voices`, a compiled render program's node
-/// admission for `max_nodes`, writer registration for
-/// `max_simultaneous_editors`, and a preview request for `preview_quality`.
-struct DeviceQuotas {
-    /// Simultaneously sounding voices across all instruments.
-    std::uint32_t max_voices = 0;
-    /// Nodes in the compiled render graph.
-    std::uint32_t max_nodes = 0;
-    /// Editing surfaces held open against one document at once.
-    std::uint32_t max_simultaneous_editors = 0;
-    /// Detail budget for preview rendering.
-    PreviewQuality preview_quality = PreviewQuality::Disabled;
-
-    constexpr auto operator<=>(const DeviceQuotas&) const = default;
-};
-
-namespace detail {
-
-/// The quota table, indexed `[tier][thermal state]`.
-///
-/// Written out cell by cell rather than derived from a scaling formula so the
-/// table is reviewable as data and so the monotonicity property is a real
-/// assertion about these numbers rather than a restatement of a formula.
-///
-/// Two orderings hold across the table and are asserted in test: along a row,
-/// no field ever rises as the device gets hotter; down a column, no field ever
-/// falls as the tier rises.
-inline constexpr DeviceQuotas
-    kQuotaTable[kDeviceCapabilityTierCount][kThermalStateCount] = {
-        // Constrained: Nominal, Fair, Serious, Critical
-        {
-            {16, 48, 1, PreviewQuality::Reduced},
-            {12, 40, 1, PreviewQuality::Reduced},
-            {8, 32, 1, PreviewQuality::Reduced},
-            {4, 16, 1, PreviewQuality::Disabled},
-        },
-        // Standard: Nominal, Fair, Serious, Critical
-        {
-            {64, 192, 2, PreviewQuality::Full},
-            {48, 160, 2, PreviewQuality::Full},
-            {32, 112, 1, PreviewQuality::Reduced},
-            {16, 64, 1, PreviewQuality::Disabled},
-        },
-        // Full: Nominal, Fair, Serious, Critical
-        {
-            {256, 768, 4, PreviewQuality::Full},
-            {192, 640, 3, PreviewQuality::Full},
-            {128, 448, 2, PreviewQuality::Reduced},
-            {64, 256, 1, PreviewQuality::Disabled},
-        },
-};
-
-} // namespace detail
-
-/// Returns the quotas granted at one tier under one live thermal state.
-///
-/// A value cast in from outside the declared enumerators clamps to the most
-/// restrictive cell rather than reading past the table: a quota lookup that
-/// cannot be trusted should grant the least, not the most.
-[[nodiscard]] constexpr DeviceQuotas device_quotas(DeviceCapabilityTier tier,
-                                                   ThermalState thermal) {
-    std::size_t tier_index = static_cast<std::size_t>(tier);
-    if (tier_index >= kDeviceCapabilityTierCount) {
-        tier_index = 0;
-    }
-    std::size_t thermal_index = static_cast<std::size_t>(thermal);
-    if (thermal_index >= kThermalStateCount) {
-        thermal_index = kThermalStateCount - 1;
-    }
-    return detail::kQuotaTable[tier_index][thermal_index];
 }
 
 } // namespace pulp::platform

@@ -358,8 +358,9 @@ pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
 # Platform tests
 pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
 
-# Device capability tier, thermal ladder, and the quota table they index.
-# Header-only over pulp::platform — linked for the include path only.
+# Device capability tier and thermal ladder. The quota table they index is
+# policy and lives above the engine, so it is registered with the format tests
+# instead. Header-only over pulp::platform — linked for the include path only.
 pulp_add_test_suite(pulp-test-device-capability LIBRARIES pulp::platform)
 
 # Permissions tests

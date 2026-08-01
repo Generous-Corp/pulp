@@ -3,36 +3,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
 
 using pulp::platform::DeviceCapabilityInputs;
 using pulp::platform::DeviceCapabilityTier;
-using pulp::platform::DeviceQuotas;
 using pulp::platform::PointerPrecision;
-using pulp::platform::PreviewQuality;
-using pulp::platform::ThermalState;
-using pulp::platform::device_quotas;
 using pulp::platform::project_device_capability_tier;
 
 namespace {
 
 constexpr std::uint64_t kGiB = 1024ull * 1024 * 1024;
-
-constexpr std::array<DeviceCapabilityTier, 3> kAllTiers = {
-    DeviceCapabilityTier::Constrained,
-    DeviceCapabilityTier::Standard,
-    DeviceCapabilityTier::Full,
-};
-
-constexpr std::array<ThermalState, 4> kAllThermalStates = {
-    ThermalState::Nominal,
-    ThermalState::Fair,
-    ThermalState::Serious,
-    ThermalState::Critical,
-};
 
 /// One synthetic device, named so a failure says which shape broke.
 struct CapabilityCase {
@@ -164,61 +146,6 @@ TEST_CASE("browser and mobile capability inputs land on one tier ladder",
     REQUIRE(browser_low == mobile_low);
     REQUIRE(mobile_low < mobile_mid);
     REQUIRE(mobile_mid < mobile_high);
-
-    // The same enumerator indexes the same quota row regardless of which lane
-    // observed it.
-    REQUIRE(device_quotas(browser_low, ThermalState::Nominal) ==
-            device_quotas(mobile_low, ThermalState::Nominal));
-}
-
-TEST_CASE("thermal state transition only lowers quotas monotonically",
-          "[platform][device-capability]") {
-    for (const DeviceCapabilityTier tier : kAllTiers) {
-        INFO("tier index: " << static_cast<int>(tier));
-
-        // Every adjacent pair on the thermal ladder, not a sampled one.
-        for (std::size_t index = 0; index + 1 < kAllThermalStates.size(); ++index) {
-            const ThermalState cooler = kAllThermalStates[index];
-            const ThermalState hotter = kAllThermalStates[index + 1];
-            INFO("thermal transition: " << static_cast<int>(cooler) << " -> "
-                                        << static_cast<int>(hotter));
-
-            const DeviceQuotas cool = device_quotas(tier, cooler);
-            const DeviceQuotas hot = device_quotas(tier, hotter);
-
-            REQUIRE(hot.max_voices <= cool.max_voices);
-            REQUIRE(hot.max_nodes <= cool.max_nodes);
-            REQUIRE(hot.max_simultaneous_editors <= cool.max_simultaneous_editors);
-            REQUIRE(hot.preview_quality <= cool.preview_quality);
-        }
-
-        // A table that never moved would satisfy the property above without
-        // saying anything. Assert the table actually descends within each tier
-        // so the monotonicity check has something to be true about.
-        const DeviceQuotas nominal = device_quotas(tier, ThermalState::Nominal);
-        const DeviceQuotas critical = device_quotas(tier, ThermalState::Critical);
-        REQUIRE(critical.max_voices < nominal.max_voices);
-        REQUIRE(critical.max_nodes < nominal.max_nodes);
-        REQUIRE(critical.preview_quality < nominal.preview_quality);
-    }
-}
-
-TEST_CASE("rising tier never lowers a quota at a fixed thermal state",
-          "[platform][device-capability]") {
-    for (const ThermalState thermal : kAllThermalStates) {
-        INFO("thermal state: " << static_cast<int>(thermal));
-        for (std::size_t index = 0; index + 1 < kAllTiers.size(); ++index) {
-            const DeviceQuotas lower = device_quotas(kAllTiers[index], thermal);
-            const DeviceQuotas higher = device_quotas(kAllTiers[index + 1], thermal);
-            INFO("tier transition: " << static_cast<int>(kAllTiers[index]) << " -> "
-                                     << static_cast<int>(kAllTiers[index + 1]));
-
-            REQUIRE(higher.max_voices >= lower.max_voices);
-            REQUIRE(higher.max_nodes >= lower.max_nodes);
-            REQUIRE(higher.max_simultaneous_editors >= lower.max_simultaneous_editors);
-            REQUIRE(higher.preview_quality >= lower.preview_quality);
-        }
-    }
 }
 
 TEST_CASE("document is never mutated by tier projection",
@@ -235,7 +162,6 @@ TEST_CASE("document is never mutated by tier projection",
     // assertion could only ever check the documents this test happened to
     // build.
     static_assert(std::is_trivially_copyable_v<DeviceCapabilityInputs>);
-    static_assert(std::is_trivially_copyable_v<DeviceQuotas>);
 
     static_assert(project_device_capability_tier({}) == DeviceCapabilityTier::Constrained);
     static_assert(project_device_capability_tier(
@@ -246,8 +172,6 @@ TEST_CASE("document is never mutated by tier projection",
                        .pointer_precision = PointerPrecision::Fine,
                        .precision_keyboard_available = true}) ==
                   DeviceCapabilityTier::Full);
-    static_assert(device_quotas(DeviceCapabilityTier::Full, ThermalState::Critical)
-                      .preview_quality == PreviewQuality::Disabled);
 
     SUCCEED("tier projection has no reachable mutable state");
 }
