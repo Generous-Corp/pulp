@@ -1380,6 +1380,41 @@ The `timeline-mcp-drift` ctest byte-checks the artifact;
 determinism, exact operation membership, complete domain projection,
 fail-closed empty command behavior, and confirm-the-failure.
 
+### One clean drift run proves one artifact, and a clean auto-merge proves nothing
+
+Two ways to believe a generated tree is in sync when it is not.
+
+**A bare `schema_drift_check.py` guards only its own `DEFAULT_ARTIFACT`**
+(`timeline_schema.json`). It is a reusable gate, not a whole-repo check, so its
+exit 0 says nothing about the four sibling projections or the three interchange
+artifacts. The enforced set is eight registrations, each naming its own
+`--artifact`/`--emit-cmd`: five in `test/cmake/timeline_tests.cmake` (the
+manifest plus `.d.ts`, CLI verbs, JS facade, MCP tools) and three in
+`test/cmake/interchange_tests.cmake` (`concepts.hpp`, `capability_tables.hpp`,
+`docs/reference/interchange-matrix.md`). Verify the set — `ctest -R 'drift'` —
+rather than a single hand run. Note the interchange three come from
+`capability_emit.py` over `core/interchange/capabilities/*.json`, a different
+generator with different inputs; `--update` on the schema gate does not touch
+them.
+
+**After a merge that touches any generator's inputs, regenerate every artifact
+that generator produces — whether or not git reported a conflict.** These
+artifacts are single-line or densely minified, so git will often auto-merge them
+cleanly and be wrong, with no conflict to alert you. A merge bringing in schema
+changes from both sides can leave `.d.ts`, CLI verbs, and the JS facade silently
+stale while the manifest's own gate passes. "Never resolve a generated artifact
+as text" covers only the conflicting case; the set that matters is every output
+of every generator whose inputs the merge touched.
+
+Two adjacent invariants the drift gates do not cover, both fail *after* a merge
+looks fine: `tools/mcp/CMakeLists.txt` FATAL_ERRORs at configure time unless
+`timeline_mcp_tools.json` carries exactly ten tools in an exact name order, and
+`core/interchange/capabilities/concepts.json` is append-only **and
+order-significant** because position fixes the generated enum ordinal. For
+`concepts.json`, check that the *other* side's entries survived at their
+original ordinals — confirming only your own additions passes a resolution that
+silently dropped theirs, and both wrong resolutions compile.
+
 ### Headless operations and CLI
 
 `pulp::tool-timeline` is the shared headless implementation for agent-facing
