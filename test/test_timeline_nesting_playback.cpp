@@ -537,7 +537,7 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
 
     const std::array windows{
         std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
-        std::pair{0LL, 3 * kTicksPerQuarter / 4},                  // right trim only
+        std::pair{std::int64_t{0}, 3 * kTicksPerQuarter / 4},      // right trim only
         std::pair{kTicksPerQuarter / 4, kTicksPerQuarter / 2},    // both sides
     };
     for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
