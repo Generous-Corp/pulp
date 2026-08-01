@@ -1,6 +1,10 @@
 #include "timeline_nesting_test_support.hpp"
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
+#include <array>
+#include <cstdint>
+#include <utility>
+
 TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty children") {
     const auto nested = nested_note_project(false, 2);
     auto nested_program = compile(shared(nested));
@@ -535,10 +539,15 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
     const auto assets = pool({{{50}, data}});
     const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
 
-    const std::array windows{
-        std::pair{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
-        std::pair{0LL, 3 * kTicksPerQuarter / 4},                  // right trim only
-        std::pair{kTicksPerQuarter / 4, kTicksPerQuarter / 2},    // both sides
+    // Spelled rather than deduced: `std::int64_t` is `long` on LP64 Linux and
+    // `long long` on Darwin, so a bare `0LL` sibling deduces a different
+    // `std::pair` there and class-template argument deduction for the array
+    // fails on one platform only.
+    using TrimWindow = std::pair<std::int64_t, std::int64_t>;
+    const std::array<TrimWindow, 3> windows{
+        TrimWindow{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
+        TrimWindow{0, 3 * kTicksPerQuarter / 4},                    // right trim only
+        TrimWindow{kTicksPerQuarter / 4, kTicksPerQuarter / 2},     // both sides
     };
     for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
         for (const auto [source_start, duration] : windows) {
