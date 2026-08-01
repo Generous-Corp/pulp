@@ -321,13 +321,13 @@ TEST_CASE("pulp inspect exposes bounded typed MIDI and transport commands",
          "--note", "60", "--json"},
         10000);
     REQUIRE(missing_velocity.exit_code == 2);
-    CHECK(missing_velocity.stdout_output.find("note_on requires --velocity") !=
+    CHECK(missing_velocity.stderr_output.find("note_on requires --velocity") !=
           std::string::npos);
 
     const auto empty_transport = run_pulp(
         {"inspect", "set-transport", "--json"}, 10000);
     REQUIRE(empty_transport.exit_code == 2);
-    CHECK(empty_transport.stdout_output.find(
+    CHECK(empty_transport.stderr_output.find(
               "set-transport requires --playing, --position-samples, or --tempo-bpm") !=
           std::string::npos);
 }

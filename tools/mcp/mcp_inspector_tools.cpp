@@ -165,7 +165,9 @@ std::optional<std::string> parse_arguments(
             const auto value = object["value"];
             if (!value.isInt() && !value.isFloat())
                 return "value must be a number";
-            const auto number = value.getFloat64();
+            const auto number = value.isInt()
+                ? static_cast<double>(value.getInt64())
+                : value.getFloat64();
             if (!std::isfinite(number))
                 return "value must be finite";
             output.value = number;
@@ -284,7 +286,9 @@ std::optional<std::string> parse_arguments(
         const auto value = object["tempo_bpm"];
         if (!value.isInt() && !value.isFloat())
             return "tempo_bpm must be a number";
-        const auto number = value.getFloat64();
+        const auto number = value.isInt()
+            ? static_cast<double>(value.getInt64())
+            : value.getFloat64();
         if (!std::isfinite(number) || number < 20.0 || number > 400.0)
             return "tempo_bpm must be finite and from 20 to 400";
         output.tempo_bpm = number;
