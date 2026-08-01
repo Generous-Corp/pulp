@@ -34,16 +34,25 @@ add_custom_command(
     VERBATIM)
 add_custom_target(forge-modular-codegen DEPENDS "${_fm_generated}")
 
+# Every module in src/, found rather than listed.
+#
+# Each module defines its own `modelX`, and the generated plugin.cpp calls
+# addModel for every module in the manifest -- so a source left off this list
+# is not a missing feature, it is an undefined symbol that fails the whole
+# plugin. The list had drifted to three of twenty-eight, which links nothing.
+#
+# CONFIGURE_DEPENDS for the same reason the manifest glob has it: a module
+# added after configure has to trigger a reconfigure, or the build carries on
+# with a source list from before it existed.
+file(GLOB _fm_module_srcs CONFIGURE_DEPENDS "${_fm_dir}/src/*.cpp")
+
 pulp_add_rack_plugin(forge-modular
     SLUG "ForgeModular"
     VERSION "2.0.0"
     MANIFEST "${_fm_dir}/plugin.json"
     RES_DIR "${_fm_dir}/res"
     LICENSES "${_fm_dir}/LICENSE.md" "${_fm_dir}/LICENSE-MIT.txt"
-    SOURCES
-        "${_fm_dir}/src/plugin.cpp"
-        "${_fm_dir}/src/VCO.cpp"
-        "${_fm_dir}/src/MIX.cpp")
+    SOURCES ${_fm_module_srcs})
 
 add_dependencies(forge-modular forge-modular-codegen)
 
