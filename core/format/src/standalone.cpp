@@ -493,28 +493,6 @@ void StandaloneApp::render_audio_block(
         };
 #endif
 
-        if (test_signal_.is_active() && config_.route_test_signal_to_output) {
-            const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
-            for (size_t c = 0; c < out_ch; ++c)
-                direct_output_ptrs_[c] = output.channel_ptr(c);
-            test_signal_.fill(direct_output_ptrs_.data(),
-                              static_cast<int>(out_ch),
-                              ctx.buffer_size);
-            for (size_t c = 0; c < out_ch && c < output_meter_ptrs_.size(); ++c)
-                output_meter_ptrs_[c] = output.channel_ptr(c);
-            if (out_ch > 0) {
-                output_meter_bridge_.analyze_and_push(
-                    output_meter_ptrs_.data(),
-                    static_cast<int>(out_ch),
-                    ctx.buffer_size);
-            }
-#if PULP_ENABLE_AUDIO_PROBES
-            analyze_output_probe();
-#endif
-            test_input_host_.end_audio_block(ctx.buffer_size);
-            return;
-        }
-
         // Determine actual input: test signal overrides hardware input
         const audio::BufferView<const float>* actual_input = &input;
         audio::BufferView<const float> test_input_view;
@@ -614,6 +592,19 @@ void StandaloneApp::render_audio_block(
             // regression in test builds.
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
             processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
+        }
+
+        // Direct test-signal routing owns the final device output, but it must
+        // not bypass Processor::process(): accepted inspector MIDI and transport
+        // still reach the normal processor path before the deterministic signal
+        // replaces the rendered samples.
+        if (test_signal_.is_active() && config_.route_test_signal_to_output) {
+            const size_t out_ch = std::min(output.num_channels(), direct_output_ptrs_.size());
+            for (size_t c = 0; c < out_ch; ++c)
+                direct_output_ptrs_[c] = output.channel_ptr(c);
+            test_signal_.fill(direct_output_ptrs_.data(),
+                              static_cast<int>(out_ch),
+                              ctx.buffer_size);
         }
 
         const size_t out_ch = std::min(output.num_channels(), output_meter_ptrs_.size());
