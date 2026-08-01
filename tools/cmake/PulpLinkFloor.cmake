@@ -98,8 +98,8 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # gate in its healthy direction — it asks for an entry to be DELETED because a
 # narrower configure could not reach it, and deleting it then breaks the wider
 # configure where the link genuinely exists. An upper bound is not violated by
-# reaching less, so entries that a documented guard can remove are declared
-# CONDITIONAL below and exempted from that one check only.
+# reaching less, so an entry a documented guard can remove is APPENDED under
+# that same guard below, which keeps it rot-checked wherever the guard holds.
 #
 # StepSequencer_CLAP: measured, not chosen. Two edges the plugin does not
 # write and cannot cut from its own CMakeLists account for all of it.
@@ -112,9 +112,11 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 #         -> pulp-host -> pulp-playback -> pulp-timeline
 #     which is the only reason this plugin reaches pulp-timeline at all: the
 #     sequencer's own code carries no pulp/timeline include and no timeline
-#     link. view, host, playback, timeline, render and canvas all arrive this
-#     way, so cutting the one unconditional link would delete six entries at
-#     once.
+#     link. view, host, playback, timeline and canvas all arrive this way, so
+#     cutting the one unconditional link would delete five entries at once.
+#     `render` is NOT among them: pulp_add_plugin links it directly per format
+#     under PULP_HAS_SKIA (tools/cmake/PulpUtils.cmake), which is the edge the
+#     closure report names, so cutting the view link alone leaves it reached.
 #
 #   pulp-format — the adapter the plugin is packaged as. Its own closure brings
 #     the parameter store and the buffer types: state and events directly,
@@ -127,35 +129,67 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
     canvas events graph native-components sample_bank_manifest signal state view)
 
-# The four entries above that a guard can remove, and the guard that removes
-# each. They are still debt — reached on an ordinary desktop configure, and
-# still rejected if they appear where the tier already grants them — but their
-# ABSENCE is not rot, so it is not reported as such.
-#
-#   render    — CMakeLists.txt gates `add_subdirectory(core/render)` on
-#               PULP_ENABLE_GPU, so with GPU off the pulp-render target is never
-#               defined and no closure can contain it. A worktree whose
-#               external/skia-build is headers-only forces exactly that, which
-#               is an ordinary fresh-checkout state rather than an exotic one.
-#
-#   host      — CMakeLists.txt gates `add_subdirectory(core/host)` on NOT IOS,
-#   playback    and core/view drops the pulp-view-core -> pulp::host edge there
-#   timeline    too: iOS disallows dlopen of third-party plugins, so hosting is
-#               not built at all. That single edge is the plugin's only route to
-#               all three (StepSequencer_CLAP -> pulp-view -> pulp-view-script
-#               -> pulp-view-core -> pulp-host -> pulp-playback -> pulp-timeline),
-#               so the guard takes the chain, not just its first rung.
-#
-# An entry here is a weaker claim than a plain debt entry: nothing detects it
-# going stale, because "absent" is indistinguishable from "absent for the
-# declared reason". Keep the list short, and move an entry back to the debt list
-# above the moment its guard stops applying to it.
-set(PULP_LINK_FLOOR_DEBT_CONDITIONAL_StepSequencer_CLAP
-    host playback render timeline)
-
+# The loadable editor proof plugin reaches the same modules by the same routes,
+# being packaged by the same format machinery over the same view stack. It has
+# no `timeline` entry because it REQUIREs timeline and timeline_editor outright
+# and links them directly, so they are a lower bound here rather than debt —
+# which is why the conditional appends below must never name them.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    canvas events graph host native-components playback render
-    sample_bank_manifest signal state view)
+    canvas events graph native-components sample_bank_manifest signal state view)
+
+# Entries whose edge only exists in some configurations, appended under the
+# condition that creates them. Appending rather than exempting is deliberate:
+# where the condition HOLDS the entry is back in the ordinary debt list and is
+# rot-checked exactly like any other, so a link genuinely cut on desktop still
+# fails the gate. Only the configure that cannot have the edge stops asking.
+#
+# The condition to guard an entry with is the one that decides whether the
+# module is BUILT, never a restatement of the edge itself. That keeps the entry
+# refutable from both sides:
+#
+#   condition true, module not reached  -> "no longer linked" (the edge was cut)
+#   condition false, module reached     -> "outside tier"     (the edge escaped)
+#
+# so a guard that is wrong in either direction fails in one of the two
+# configurations instead of quietly permitting whatever it finds.
+#
+#   render — core/render is added only under PULP_ENABLE_GPU (CMakeLists.txt),
+#     so a GPU=OFF build defines no such target for any consumer to reach. A
+#     worktree whose external/skia-build is headers-only forces exactly that,
+#     which is an ordinary fresh-checkout state rather than an exotic one. Note
+#     the condition is the module's EXISTENCE and not any one edge: two
+#     independent links carry it — pulp_add_plugin's per-format
+#     `target_link_libraries(... pulp::render)` under PULP_HAS_SKIA
+#     (tools/cmake/PulpUtils.cmake), which is the edge the closure report names,
+#     and core/view's `if(TARGET pulp-render)` block. Guarding on either edge
+#     would make the entry unfalsifiable from one side.
+#
+#   host, playback, timeline — core/host is skipped on iOS (App Store policy
+#     disallows dlopen of third-party plugins), so the pulp-view-core ->
+#     pulp-host hop does not exist there. `playback` and `timeline` are guarded
+#     on the same condition for a DIFFERENT reason, and the difference matters:
+#     core/playback and core/timeline are added unconditionally and ARE built on
+#     iOS. They are guarded because this target's only route to them runs
+#     THROUGH host — reachability, not existence. The iOS configure is what
+#     established that, by naming all three as unreached; the closure report
+#     could not have, since it records one shortest chain per module and a
+#     second, longer edge would be invisible in it.
+#
+#     That claim stays refutable: add a direct pulp::playback link on iOS and
+#     the module is reached while the condition is false, which the walk reports
+#     as "outside tier". What it does NOT catch is the carrying hop being
+#     rerouted rather than removed. The way to close that is to DERIVE the set
+#     from the graph — re-run the closure with pulp-host excluded and take the
+#     difference — so the exemption is recomputed per configure instead of
+#     asserted here. Recorded as the follow-up; this list is the interim.
+if(PULP_ENABLE_GPU)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
+    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
+endif()
+if(NOT IOS)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP host playback timeline)
+    list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP host playback)
+endif()
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
 
@@ -372,18 +406,13 @@ function(pulp_assert_link_floor target)
     endif()
     set(_allowed ${PULP_LINK_FLOOR_TIER_${PALF_TIER}})
     set(_debt ${PULP_LINK_FLOOR_DEBT_${target}})
-    # Conditional debt: allowed in the closure exactly as debt is, but exempt
-    # from the "no longer linked" check, because a guarded subdirectory or a
-    # guarded edge legitimately removes it in a narrower configure.
-    set(_conditional ${PULP_LINK_FLOOR_DEBT_CONDITIONAL_${target}})
 
     pulp_link_closure(${target} MODULES_OUT _modules PATHS_OUT _paths)
 
     set(_failures "")
     set(_over FALSE)
     foreach(_module IN LISTS _modules)
-        if(_module IN_LIST _allowed OR _module IN_LIST _debt
-                OR _module IN_LIST _conditional)
+        if(_module IN_LIST _allowed OR _module IN_LIST _debt)
             continue()
         endif()
         set(_over TRUE)
@@ -415,29 +444,6 @@ function(pulp_assert_link_floor target)
         endif()
     endforeach()
 
-    # Conditional entries keep every declaration check that does not depend on
-    # this configure reaching them. Only the absence check is relaxed; naming a
-    # module the tier already grants is still a stale declaration, and naming
-    # one in both lists is a contradiction rather than a belt-and-braces.
-    foreach(_entry IN LISTS _conditional)
-        if(_entry IN_LIST _allowed)
-            set(_over TRUE)
-            # One string, not two arguments: list(APPEND) would make a second
-            # element and the JOIN below would break the sentence across lines.
-            string(CONCAT _line
-                "  conditional debt entry '${_entry}' is already inside tier "
-                "'${PALF_TIER}'; delete it")
-            list(APPEND _failures "${_line}")
-        elseif(_entry IN_LIST _debt)
-            set(_over TRUE)
-            string(CONCAT _line
-                "  '${_entry}' is in both PULP_LINK_FLOOR_DEBT_${target} and "
-                "PULP_LINK_FLOOR_DEBT_CONDITIONAL_${target}; an entry is either "
-                "checked for rot or exempt from that check, not both")
-            list(APPEND _failures "${_line}")
-        endif()
-    endforeach()
-
     # The lower bound. Absence is the failure mode an upper bound cannot see, so
     # it is checked against the same measured closure rather than against the
     # declaration: a REQUIRE entry is satisfied by the module being reached, by
@@ -450,8 +456,7 @@ function(pulp_assert_link_floor target)
             list(APPEND _failures
                 "  pulp/${_required} is required by this target but is not linked at all")
         endif()
-        if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt
-                AND NOT _required IN_LIST _conditional)
+        if(NOT _required IN_LIST _allowed AND NOT _required IN_LIST _debt)
             set(_undeclared TRUE)
             # One string, not two arguments: list(APPEND) would make a second
             # element and the JOIN below would break the sentence across lines.
