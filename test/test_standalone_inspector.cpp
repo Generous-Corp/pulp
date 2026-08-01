@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
@@ -165,10 +166,9 @@ std::vector<std::uint8_t> inspector_test_png() {
 
 class InspectorProcessor : public TestProcessor {
 public:
-    InspectorProcessor(pulp::state::StateStore& store,
-                       std::filesystem::path script)
+    InspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
         : store_(store), script_(std::move(script)) {
-        channels_.declare_meter("gain_reduction", "dB", 0.0f);
+        gain_reduction_ = channels_.declare_meter("gain_reduction", "dB", 0.0f);
     }
 
     PluginDescriptor descriptor() const override {
@@ -198,18 +198,52 @@ public:
     pulp::view::ValueChannelSet* value_channels() override {
         return &channels_;
     }
+    void publish_gain_reduction(float rms, float peak) {
+        REQUIRE(gain_reduction_ != nullptr);
+        pulp::view::MeterFrame frame;
+        frame.channels = 1;
+        frame.rms[0] = rms;
+        frame.peak[0] = peak;
+        gain_reduction_->publish(frame);
+        (void)gain_reduction_->read();
+    }
 
 private:
     pulp::state::StateStore& store_;
     std::filesystem::path script_;
     pulp::view::ValueChannelSet channels_;
+    pulp::view::MeterSource* gain_reduction_ = nullptr;
     std::unique_ptr<ScriptedUiSession> scripted_;
 };
 
 class ReloadingInspectorProcessor final : public InspectorProcessor {
 public:
-    using InspectorProcessor::InspectorProcessor;
+    ReloadingInspectorProcessor(pulp::state::StateStore& store, std::filesystem::path script)
+        : InspectorProcessor(store, std::move(script)) {
+        replace_value_channels("before_reload", false);
+    }
     bool supports_editor_reload() const override { return true; }
+    std::uint64_t editor_reload_generation() const override { return generation_; }
+    pulp::view::ValueChannelSet* value_channels() override {
+        ++value_channel_visits;
+        return reload_channels_.get();
+    }
+    void replace_value_channels(std::string name, bool bump = true) {
+        auto replacement = std::make_shared<pulp::view::ValueChannelSet>();
+        REQUIRE(replacement->declare_scalar(std::move(name)) != nullptr);
+        reload_channels_ = std::move(replacement);
+        if (bump)
+            ++generation_;
+    }
+    void replace_with_empty_value_channels() {
+        reload_channels_ = std::make_shared<pulp::view::ValueChannelSet>();
+        ++generation_;
+    }
+    std::weak_ptr<pulp::view::ValueChannelSet> value_channel_lifetime() const { return reload_channels_; }
+    std::size_t value_channel_visits = 0;
+private:
+    std::shared_ptr<pulp::view::ValueChannelSet> reload_channels_;
+    std::uint64_t generation_ = 0;
 };
 
 class QueuedMainThreadBackend {
@@ -257,7 +291,6 @@ public:
             ++pumped;
         return pumped;
     }
-
 private:
     std::thread::id main_thread_;
     mutable std::mutex mutex_;
@@ -265,8 +298,22 @@ private:
     std::size_t post_count_ = 0;
     pulp::events::MainThreadDispatcher::Token token_ = 0;
 };
+pulp::inspect::InspectorMessage request_with_dispatch(
+    pulp::inspect::InspectorClient& client, QueuedMainThreadBackend& dispatcher, std::string method,
+    std::string params) {
+    auto response = std::async(std::launch::async,
+        [&client, method = std::move(method), params = std::move(params)] {
+            return client.request(method, params, std::chrono::seconds(1));
+        });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (response.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline) {
+        if (!dispatcher.pump_one()) std::this_thread::yield();
+    }
+    REQUIRE(response.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
+    return response.get();
+}
 #endif
-
 } // namespace
 
 #if PULP_TEST_STANDALONE_INSPECTOR
@@ -445,8 +492,8 @@ TEST_CASE("Standalone inspector failed startup detaches borrowed UI hooks",
     std::filesystem::remove_all(temp, cleanup_error);
 }
 
-TEST_CASE("Standalone inspector fails closed for processor-level editor replacement",
-          "[standalone][inspect][negative]") {
+TEST_CASE("Standalone inspector accepts processor-level editor replacement",
+          "[standalone][inspect][telemetry][reload]") {
     const auto suffix = std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
     const auto temp = std::filesystem::temp_directory_path()
@@ -463,13 +510,101 @@ TEST_CASE("Standalone inspector fails closed for processor-level editor replacem
 
     StandaloneApp app(null_processor_factory);
     ReloadingInspectorProcessor processor(app.state(), script);
+    auto competing_telemetry = processor.value_channels()->attach_telemetry();
+    REQUIRE(competing_telemetry.valid());
     ViewBridge bridge(processor, app.state());
     REQUIRE(bridge.open());
     StubWindowHost window;
+    QueuedMainThreadBackend dispatcher;
+    REQUIRE(dispatcher.valid());
     auto runtime = StandaloneInspectorRuntime::create(
         app, processor, bridge, *bridge.view(), window, "develop", {});
-    REQUIRE(runtime == nullptr);
-    REQUIRE_FALSE(std::filesystem::exists(runtime_dir));
+    REQUIRE(runtime != nullptr);
+    pulp::inspect::InspectorDiscoveryReader reader(runtime_dir);
+    REQUIRE(reader.list().empty());
+    runtime->pump();
+    competing_telemetry = {};
+    runtime->pump();
+    const auto records = reader.list();
+    REQUIRE(records.size() == 1);
+    pulp::inspect::InspectorClient client;
+    REQUIRE(client.connect(records.front(), reader));
+    std::mutex event_mutex;
+    std::condition_variable event_cv;
+    std::vector<std::string> samples;
+    client.set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
+        if (event.method != pulp::inspect::methods::kTelemetrySample)
+            return;
+        {
+            std::lock_guard lock(event_mutex);
+            samples.push_back(event.params_json);
+        }
+        event_cv.notify_all();
+    });
+    const auto subscription = request_with_dispatch(
+        client, dispatcher, "Telemetry.subscribe",
+        R"({"channels":["before_reload"],"rateHz":60})");
+    REQUIRE_FALSE(subscription.is_error);
+    const auto subscription_id = std::string(choc::json::parse(subscription.params_json)
+                                                 ["subscriptionId"].getString());
+    REQUIRE_FALSE(subscription_id.empty());
+    runtime->pump();
+    {
+        std::unique_lock lock(event_mutex);
+        REQUIRE(event_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return !samples.empty(); }));
+        samples.clear();
+    }
+    auto retired_source = processor.value_channel_lifetime();
+    processor.replace_value_channels("after_reload");
+    REQUIRE(retired_source.expired());
+    runtime->pump();
+    std::string reattached_json;
+    {
+        std::unique_lock lock(event_mutex);
+        REQUIRE(event_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return !samples.empty(); }));
+        reattached_json = samples.back();
+    }
+    const auto reattached = choc::json::parse(reattached_json);
+    REQUIRE(reattached["subscriptionId"].getString() == subscription_id);
+    REQUIRE(reattached["reattached"].getBool());
+    REQUIRE(reattached["sourceGeneration"].getWithDefault<std::int64_t>(0) == 2);
+    REQUIRE(reattached["channels"].size() == 1);
+    REQUIRE(reattached["channels"][0]["name"].getString() == "before_reload");
+    REQUIRE(reattached["channels"][0]["staleReason"].getString() == "unavailable_after_reattach");
+    REQUIRE_FALSE(processor.value_channels()->attach_telemetry().valid());
+
+    const auto catalog = request_with_dispatch(
+        client, dispatcher, "State.getValueChannels", "{}");
+    REQUIRE_FALSE(catalog.is_error);
+    const auto catalog_json = choc::json::parse(catalog.params_json);
+    REQUIRE(catalog_json.size() == 1);
+    REQUIRE(catalog_json[0]["name"].getString() == "after_reload");
+    client.disconnect();
+    runtime->pump();
+    pulp::inspect::InspectorClient replacement_client;
+    REQUIRE(replacement_client.connect(records.front(), reader));
+    const auto replacement_subscription = request_with_dispatch(replacement_client, dispatcher,
+        "Telemetry.subscribe", R"({"channels":["after_reload"]})");
+    REQUIRE_FALSE(replacement_subscription.is_error);
+    REQUIRE(choc::json::parse(replacement_subscription.params_json)["subscriptionId"].getString()
+            != subscription_id);
+    processor.replace_with_empty_value_channels();
+    const auto visits_before_empty = processor.value_channel_visits;
+    runtime->pump();
+    runtime->pump();
+    REQUIRE(processor.value_channel_visits == visits_before_empty + 1);
+    const auto empty_catalog = request_with_dispatch(
+        replacement_client, dispatcher, "State.getValueChannels", "{}");
+    REQUIRE_FALSE(empty_catalog.is_error);
+    const auto empty_catalog_json = choc::json::parse(empty_catalog.params_json);
+    REQUIRE(empty_catalog_json.isArray());
+    REQUIRE(empty_catalog_json.size() == 0);
+    replacement_client.disconnect();
+    runtime->stop();
+    REQUIRE(reader.list().empty());
+    runtime.reset();
     bridge.close();
     std::error_code cleanup_error;
     std::filesystem::remove_all(temp, cleanup_error);
@@ -542,22 +677,8 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(client.connect(records.front(), reader));
     const auto request_from = [&](pulp::inspect::InspectorClient& active_client,
                                   std::string method, std::string params) {
-        auto response = std::async(std::launch::async,
-            [&active_client, method = std::move(method), params = std::move(params)] {
-                return active_client.request(
-                    method, params, std::chrono::seconds(1));
-            });
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (response.wait_for(std::chrono::milliseconds(0))
-                   != std::future_status::ready
-               && std::chrono::steady_clock::now() < deadline) {
-            if (!dispatcher.pump_one())
-                std::this_thread::yield();
-        }
-        REQUIRE(response.wait_for(std::chrono::milliseconds(0))
-                == std::future_status::ready);
-        return response.get();
+        return request_with_dispatch(
+            active_client, dispatcher, std::move(method), std::move(params));
     };
     const auto request = [&](std::string method, std::string params) {
         return request_from(client, std::move(method), std::move(params));
@@ -603,6 +724,62 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
     REQUIRE(value_channels_json[0]["name"].getString() == "gain_reduction");
     REQUIRE(value_channels_json[0]["unit"].getString() == "dB");
     REQUIRE(value_channels_json[0]["shape"].getString() == "meter");
+
+    processor->publish_gain_reduction(0.25f, 0.75f);
+    const auto telemetry_snapshot = request(
+        "Telemetry.getSnapshot",
+        R"({"channels":["gain_reduction"]})");
+    REQUIRE_FALSE(telemetry_snapshot.is_error);
+    const auto telemetry_snapshot_json =
+        choc::json::parse(telemetry_snapshot.params_json);
+    REQUIRE(telemetry_snapshot_json["schema"].getString() ==
+            "pulp.inspect.telemetry.snapshot.v1");
+    REQUIRE(telemetry_snapshot_json["channels"].size() == 1);
+    const auto telemetry_channel = telemetry_snapshot_json["channels"][0];
+    REQUIRE(telemetry_channel["available"].getBool());
+    REQUIRE(telemetry_channel["payload"]["rms"][0]
+                .getWithDefault<double>(0.0) == Catch::Approx(0.25));
+    REQUIRE(telemetry_channel["payload"]["peak"][0]
+                .getWithDefault<double>(0.0) == Catch::Approx(0.75));
+
+    std::mutex telemetry_event_mutex;
+    std::condition_variable telemetry_event_cv;
+    std::string telemetry_event_json;
+    client.set_event_handler([&](const pulp::inspect::InspectorMessage& event) {
+        if (event.method != pulp::inspect::methods::kTelemetrySample)
+            return;
+        {
+            std::lock_guard lock(telemetry_event_mutex);
+            telemetry_event_json = event.params_json;
+        }
+        telemetry_event_cv.notify_all();
+    });
+    const auto telemetry_subscription = request(
+        "Telemetry.subscribe",
+        R"({"channels":["gain_reduction"],"rateHz":60})");
+    REQUIRE_FALSE(telemetry_subscription.is_error);
+    const auto telemetry_subscription_json =
+        choc::json::parse(telemetry_subscription.params_json);
+    const auto telemetry_subscription_id = std::string(
+        telemetry_subscription_json["subscriptionId"].getString());
+    REQUIRE_FALSE(telemetry_subscription_id.empty());
+    runtime->pump();
+    {
+        std::unique_lock lock(telemetry_event_mutex);
+        REQUIRE(telemetry_event_cv.wait_for(
+            lock, std::chrono::seconds(1),
+            [&] { return !telemetry_event_json.empty(); }));
+    }
+    const auto telemetry_sample_json =
+        choc::json::parse(telemetry_event_json);
+    REQUIRE(telemetry_sample_json["schema"].getString() ==
+            "pulp.inspect.telemetry.sample.v1");
+    REQUIRE(telemetry_sample_json["subscriptionId"].getString() ==
+            telemetry_subscription_id);
+    REQUIRE_FALSE(request(
+        "Telemetry.unsubscribe",
+        std::string("{\"subscriptionId\":\"") +
+            telemetry_subscription_id + "\"}").is_error);
 
     const auto audio = request("Audio.getConfig", "{}");
     REQUIRE_FALSE(audio.is_error);
@@ -662,6 +839,12 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         app, *processor, bridge, *bridge.view(), window, "observe", {});
     REQUIRE(observe_runtime != nullptr);
     observe_runtime->pump();
+    // Observe does not grant telemetry.stream and therefore must not reserve
+    // the telemetry sidecars' exclusive reader slot.
+    auto observe_external_telemetry =
+        processor->value_channels()->attach_telemetry();
+    REQUIRE(observe_external_telemetry.valid());
+    observe_external_telemetry = {};
     const auto observe_records = reader.list();
     REQUIRE(observe_records.size() == 1);
     pulp::inspect::InspectorClient observe_client;
@@ -670,10 +853,37 @@ TEST_CASE("Standalone inspector composition root serves and tears down a live se
         observe_client, "State.setParameter", R"({"id":2,"value":4})");
     REQUIRE(observe_denied.is_error);
     REQUIRE(observe_denied.error_code == "capability_denied");
+    const auto observe_telemetry_denied = request_from(
+        observe_client, "Telemetry.getSnapshot", "{}");
+    REQUIRE(observe_telemetry_denied.is_error);
+    REQUIRE(observe_telemetry_denied.error_code == "capability_denied");
     REQUIRE(app.state().get_value(2) == Catch::Approx(3.0f));
     observe_client.disconnect();
     observe_runtime->stop();
     observe_runtime.reset();
+    REQUIRE(reader.list().empty());
+    bridge.view()->interaction().overlay_queue.clear();
+
+    auto custom_runtime = StandaloneInspectorRuntime::create(
+        app, *processor, bridge, *bridge.view(), window, "custom",
+        {"session.describe", "state.read"});
+    REQUIRE(custom_runtime != nullptr);
+    custom_runtime->pump();
+    auto custom_external_telemetry =
+        processor->value_channels()->attach_telemetry();
+    REQUIRE(custom_external_telemetry.valid());
+    custom_external_telemetry = {};
+    const auto custom_records = reader.list();
+    REQUIRE(custom_records.size() == 1);
+    pulp::inspect::InspectorClient custom_client;
+    REQUIRE(custom_client.connect(custom_records.front(), reader));
+    const auto custom_telemetry_denied = request_from(
+        custom_client, "Telemetry.getSnapshot", "{}");
+    REQUIRE(custom_telemetry_denied.is_error);
+    REQUIRE(custom_telemetry_denied.error_code == "capability_denied");
+    custom_client.disconnect();
+    custom_runtime->stop();
+    custom_runtime.reset();
     REQUIRE(reader.list().empty());
     bridge.view()->interaction().overlay_queue.clear();
 
