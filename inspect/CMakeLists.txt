@@ -86,6 +86,18 @@ target_link_libraries(pulp-inspect-runtime
         pulp::inspect-publication
         pulp::events)
 
+add_library(pulp-inspect-telemetry
+    src/value_channel_telemetry_broker.cpp)
+add_library(pulp::inspect-telemetry ALIAS pulp-inspect-telemetry)
+target_include_directories(pulp-inspect-telemetry
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-telemetry
+    PUBLIC
+        pulp::inspect-runtime
+        pulp::view-core)
+
 add_library(pulp-inspect-authoring src/tweak_store.cpp)
 add_library(pulp::inspect-authoring ALIAS pulp-inspect-authoring)
 target_include_directories(pulp-inspect-authoring
@@ -126,5 +138,8 @@ target_sources(pulp-inspect PRIVATE
 
 target_link_libraries(pulp-inspect
     PUBLIC pulp::view pulp::render pulp::state pulp::events pulp::audio
-    PRIVATE pulp::inspect-runtime pulp::inspect-authoring)
+    PRIVATE
+        pulp::inspect-runtime
+        pulp::inspect-telemetry
+        pulp::inspect-authoring)
 endif()

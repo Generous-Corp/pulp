@@ -19,10 +19,12 @@
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/test_input.hpp>
 #include <pulp/inspect/tweak_store.hpp>
+#include <pulp/inspect/value_channel_telemetry_broker.hpp>
 #include <pulp/runtime/build_info.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>
@@ -113,7 +115,7 @@ standalone_capabilities(bool compositor_capture) {
     std::vector<inspect::InspectorCapability> result{
         C::SessionDescribe, C::SessionControl, C::StateRead, C::UiRead,
         C::DiagnosticsRead, C::LogsRead, C::StateWrite, C::TestInput,
-        C::AuthoringTweaks};
+        C::AuthoringTweaks, C::TelemetryStream};
     if (compositor_capture)
         result.push_back(C::CaptureImage);
     return result;
@@ -162,7 +164,14 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
          inspect::InspectorProfile profile, std::vector<inspect::InspectorCapability> custom,
          std::string session_id, std::string instance_id)
         : app_(app), processor_(processor), bridge_(bridge), root_(root), window_(window),
-          overlay_(overlay), profile_(profile), session_id_(std::move(session_id)),
+          overlay_(overlay), profile_(profile),
+          telemetry_enabled_(
+              profile == inspect::InspectorProfile::Develop ||
+              (profile == inspect::InspectorProfile::Custom &&
+               std::find(custom.begin(), custom.end(),
+                         inspect::InspectorCapability::TelemetryStream) !=
+                   custom.end())),
+          session_id_(std::move(session_id)),
           instance_id_(std::move(instance_id)), executable_(executable_path()), state_(app.state()),
           rpc_(std::make_shared<inspect::InspectorMainThreadRpc>(
               inspect::InspectorMainThreadRpc::Config{},
@@ -179,12 +188,23 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
           session_(inspect::InspectorSessionInfo{session_id_, instance_id_,
                                                  processor.descriptor().bundle_id, "1"},
                    make_policy(profile, std::move(custom), window.supports_compositor_capture()),
-                   [this](const inspect::InspectorMessage& request) {
+                   [this](const inspect::InspectorRequestContext& context,
+                          const inspect::InspectorMessage& request) {
                        refresh_live_state();
+                       if (request.method.rfind("Telemetry.", 0) == 0)
+                           return telemetry_.handle(context, request);
                        return domains_.handle(request);
                    }) {
         session_.set_audit_log(audit_log_);
-        state_.set_value_channels(processor_.value_channels());
+        telemetry_.set_event_sink(
+            [this](std::string_view client_id,
+                   const inspect::InspectorMessage& event,
+                   std::string_view loss_owner) {
+                if (!server_)
+                    return inspect::InspectorTargetedEventResult::EventUnavailable;
+                return server_->send_to_client(client_id, event, loss_owner);
+            });
+        refresh_value_channel_sources(true);
         audio_.set_config(inspect::AudioConfig{app_.config().sample_rate, app_.config().buffer_size,
                                                app_.config().input_channels,
                                                app_.config().output_channels,
@@ -203,10 +223,8 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
             [this](const inspect::InspectorControllerScopeEnd& event) {
                 domains_.release_test_input(event.reason);
             });
-        if (auto* scripted = bridge_.scripted_ui()) {
-            log_subscription_ = scripted->add_log_callback(console_.callback());
-            domains_.set_script_inspector(scripted->script_inspector());
-        }
+        session_.set_client_disconnect_handler(
+            [this](std::string_view client_id) { telemetry_.disconnect(client_id); });
         if (overlay_)
             overlay_->set_tweak_store(&tweaks_);
     }
@@ -295,12 +313,17 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         if (sources_detached_)
             return;
         sources_detached_ = true;
+        telemetry_.clear_attachment();
+        telemetry_.set_event_sink({});
+        state_.set_value_channels(
+            std::span<const view::ValueChannelInfo>{});
         domains_.set_test_input_source(nullptr);
         domains_.set_script_inspector(nullptr);
-        if (auto* scripted = bridge_.scripted_ui();
-            scripted && log_subscription_ != 0) {
-            scripted->remove_log_callback(log_subscription_);
+        if (auto* current = bridge_.scripted_ui();
+            current && current == scripted_ui_ && log_subscription_ != 0) {
+            current->remove_log_callback(log_subscription_);
         }
+        scripted_ui_ = nullptr;
         log_subscription_ = 0;
         if (overlay_)
             overlay_->set_tweak_store(nullptr);
@@ -416,7 +439,83 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
         root_.request_repaint();
     }
 
+    void pump() {
+        refresh_value_channel_sources(false);
+        if (telemetry_enabled_)
+            telemetry_.poll();
+        enqueue_indicator();
+    }
+
   private:
+    void refresh_value_channel_sources(bool force) {
+        const auto generation = processor_.supports_editor_reload()
+            ? processor_.editor_reload_generation()
+            : 0;
+        if (!force && value_channel_generation_
+            && *value_channel_generation_ == generation) {
+            return;
+        }
+
+        bool attachment_ready = !telemetry_enabled_;
+        processor_.visit_value_channels([this, &attachment_ready, generation](
+                                            view::ValueChannelSet* channels) {
+            if (!channels) {
+                state_.set_value_channels(
+                    std::span<const view::ValueChannelInfo>{});
+                telemetry_.clear_attachment();
+                attachment_ready = true;
+                return;
+            }
+            state_.set_value_channels(channels->infos());
+            if (channels->infos().empty()) {
+                telemetry_.clear_attachment();
+                attachment_ready = true;
+                return;
+            }
+            if (!telemetry_enabled_) {
+                telemetry_.clear_attachment();
+                return;
+            }
+            // Release the prior exclusive claim before asking the current set
+            // for its attachment. A reload generation may legitimately retain
+            // the same ValueChannelSet object; constructing the replacement
+            // argument first would then fail against our own old claim.
+            telemetry_.clear_attachment();
+            attachment_ready = telemetry_.replace_attachment(
+                channels->attach_telemetry());
+            if (!attachment_ready) {
+                if (!failed_value_channel_generation_ ||
+                    *failed_value_channel_generation_ != generation) {
+                    runtime::log_error(
+                        "Standalone: could not claim value-channel telemetry reader");
+                }
+            }
+        });
+        refresh_scripted_sources();
+        if (attachment_ready) {
+            value_channel_generation_ = generation;
+            failed_value_channel_generation_.reset();
+        } else {
+            failed_value_channel_generation_ = generation;
+        }
+    }
+
+    void refresh_scripted_sources() {
+        auto* current = bridge_.scripted_ui();
+        if (current == scripted_ui_)
+            return;
+
+        // A replaced processor may already have destroyed the prior session.
+        // Compare its identity only; never call remove_log_callback through the
+        // retired pointer. Its own destruction removes the old callback.
+        scripted_ui_ = current;
+        log_subscription_ = 0;
+        domains_.set_script_inspector(
+            current ? current->script_inspector() : nullptr);
+        if (current)
+            log_subscription_ = current->add_log_callback(console_.callback());
+    }
+
     void refresh_live_state() {
         const auto& config = app_.config();
         audio_.set_config(inspect::AudioConfig{config.sample_rate, config.buffer_size,
@@ -443,6 +542,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     view::WindowHost& window_;
     inspect::InspectorOverlay* overlay_ = nullptr;
     inspect::InspectorProfile profile_ = inspect::InspectorProfile::Off;
+    bool telemetry_enabled_ = false;
     std::string session_id_;
     std::string instance_id_;
     std::filesystem::path executable_;
@@ -452,6 +552,7 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::ConsoleCapture console_;
     inspect::AudioInspector audio_;
     inspect::TweakStore tweaks_;
+    inspect::ValueChannelTelemetryBroker telemetry_;
     std::shared_ptr<inspect::InspectorMainThreadRpc> rpc_;
     inspect::InspectorSession session_;
     std::shared_ptr<inspect::InspectorAuditLog> audit_log_ =
@@ -461,6 +562,9 @@ class StandaloneInspectorRuntime::Impl final : public inspect::InspectorAgentCon
     inspect::InspectorServerShutdownFence shutdown_fence_;
     std::shared_ptr<IndicatorState> indicator_ = std::make_shared<IndicatorState>();
     std::uint64_t log_subscription_ = 0;
+    view::ScriptedUiSession* scripted_ui_ = nullptr;
+    std::optional<std::uint64_t> value_channel_generation_;
+    std::optional<std::uint64_t> failed_value_channel_generation_;
     bool active_ = false;
     bool stopped_ = false;
     bool sources_detached_ = false;
@@ -622,17 +726,6 @@ StandaloneInspectorRuntime::create(StandaloneApp& app, Processor& processor, Vie
             "Standalone: Development Inspector requires deferred window close support");
         return nullptr;
     }
-    // Processor-level editor replacement needs every borrowed inspector source
-    // to detach before the swap and reattach to the new processor lifetime.
-    // That complete workflow is Phase 8; Phase 2 fails closed instead of
-    // publishing an endpoint whose scripted bridge could become stale.
-    if (processor.supports_editor_reload()) {
-        runtime::log_error(
-            "Standalone: Development Inspector does not yet support processors "
-            "that replace the editor at runtime");
-        return nullptr;
-    }
-
     std::vector<inspect::InspectorCapability> custom;
     if (*parsed_profile == inspect::InspectorProfile::Custom) {
         bool has_session_control = false;
@@ -696,7 +789,7 @@ void StandaloneInspectorRuntime::pump() {
         }
     }
     if (impl_)
-        impl_->enqueue_indicator();
+        impl_->pump();
     if (overlay_->is_active()) {
         auto* overlay = overlay_.get();
         root_.interaction().overlay_queue.push_back(

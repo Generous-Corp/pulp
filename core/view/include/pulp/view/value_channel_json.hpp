@@ -12,6 +12,8 @@
 
 #include <choc/containers/choc_Value.h>
 
+#include <span>
+
 namespace pulp::view {
 
 /// Stable wire name for a channel's shape. Spelled out per case rather than
@@ -26,5 +28,11 @@ choc::value::Value value_channel_to_value(const ValueChannelInfo& info);
 /// ARRAY, never undefined: no channels is the default every processor inherits,
 /// so iterating the result must be safe without a guard.
 choc::value::Value value_channels_to_value(const ValueChannelSet* channels);
+
+/// Serialize an owned metadata snapshot. Inspector hosts use this overload so
+/// a hot-swappable processor cannot leave a retained raw ValueChannelSet
+/// pointer behind after its logic instance is reclaimed.
+choc::value::Value
+value_channels_to_value(std::span<const ValueChannelInfo> channels);
 
 } // namespace pulp::view

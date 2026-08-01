@@ -1018,6 +1018,27 @@ TEST_CASE("DomainHandler: State.getValueChannels is [] when none are declared",
     CHECK(resp.params_json == "[]");
 }
 
+TEST_CASE("StateInspector owns value-channel metadata across source destruction",
+          "[inspect][domain][value-channel][lifecycle]") {
+    StateStore store;
+    StateInspector state_inspector(store);
+    {
+        pulp::view::ValueChannelSet channels;
+        channels.declare_scalar("retired_envelope", "dB", -90.0f);
+        state_inspector.set_value_channels(&channels);
+    }
+
+    DomainHandler handler;
+    handler.set_state_inspector(&state_inspector);
+    const auto response = handler.handle(make_request(1, "State.getValueChannels"));
+    REQUIRE_FALSE(response.is_error);
+    const auto parsed = choc::json::parse(response.params_json);
+    REQUIRE(parsed.isArray());
+    REQUIRE(parsed.size() == 1);
+    CHECK(parsed[0]["name"].getString() == "retired_envelope");
+    CHECK(parsed[0]["neutral"].getWithDefault<double>(0.0) == -90.0);
+}
+
 TEST_CASE("the inspector and the scripted-UI bridge describe channels identically",
           "[inspect][domain][value-channel][parity]") {
     // The whole reason value_channel_json exists. Two consumers describe the
