@@ -89,6 +89,24 @@ bool decorate_inspector_mcp_tool_descriptions(std::string& tools_json) {
         tools_json.insert(insertion, "Inspector method " + std::string(tool.method) +
                                          " (capability " + std::string(capability) + "). ");
     }
+
+    constexpr std::string_view name_marker = "\"name\":\"";
+    std::size_t cursor = 0;
+    while ((cursor = tools_json.find(name_marker, cursor)) != std::string::npos) {
+        const auto name_start = cursor + name_marker.size();
+        const auto name_end = tools_json.find('"', name_start);
+        if (name_end == std::string::npos)
+            return false;
+        const std::string_view name(tools_json.data() + name_start, name_end - name_start);
+        const bool inspector_shaped = name.starts_with("pulp_inspect_") ||
+                                      name.starts_with("pulp_motion_") ||
+                                      name.starts_with("pulp_trace_");
+        if (inspector_shaped && name != "pulp_inspect_pending_requests" &&
+            find_inspector_mcp_tool(name) == nullptr) {
+            return false;
+        }
+        cursor = name_end + 1;
+    }
     return true;
 }
 

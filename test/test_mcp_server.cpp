@@ -2670,6 +2670,9 @@ TEST_CASE("MCP inspector registry derives methods, capabilities, and description
                                     std::string(capability) + "). ");
     }
     REQUIRE(find_inspector_mcp_tool("pulp_inspect_missing") == nullptr);
+
+    auto unregistered = tools + R"({"name":"pulp_inspect_unregistered","description":""})";
+    REQUIRE_FALSE(decorate_inspector_mcp_tool_descriptions(unregistered));
 }
 
 // Per-tool SDK feature detection (min_sdk_version).
