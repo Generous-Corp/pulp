@@ -359,6 +359,16 @@ void RackPreview::draw_knobs(pulp::canvas::Canvas& canvas, const PanelBox& panel
         // without our knowing anything about the vendor's conventions.
         for (const auto& p : m->params) {
             if (!(p.w > 0.0f)) continue;
+            // Only things that ARE knobs, on the same principle the manifest
+            // path states above: a slider or a switch drawn as a circle is
+            // wrong in a way a reader cannot see. This path drew every control
+            // as a knob sized min(w,h), so a fader came out a small dial —
+            // the one rule the other path exists to keep.
+            //
+            // An unclassified control still draws, because every map written
+            // before CARTOG classified controls has no kind at all and
+            // refusing those would empty panels that draw correctly today.
+            if (!PortMap::draws_as_knob(p)) continue;
             knobs.push_back({p.x, p.y, std::min(p.w, p.h), /*already_points=*/true});
         }
     }

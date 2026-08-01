@@ -27,6 +27,11 @@ struct MappedWidget {
     std::string name;      ///< the label its author gave it
     float x = 0, y = 0;    ///< centre, in panel units
     float w = 0, h = 0;    ///< drawn size; 0 for jacks, which are not measured
+    /// What Rack draws it AS — "knob", "slider", "button", "switch".
+    ///
+    /// Empty for a scan taken before CARTOG classified controls, which is what
+    /// every existing map is. Absent means "unknown", never "knob".
+    std::string kind;
 };
 
 /// One module's measured layout.
@@ -104,6 +109,22 @@ public:
     /// caller, and reverting it left every assertion green.
     static bool controls_known(const MappedModule& m) {
         return !m.params.empty() || m.scan_version >= kScanVersionWithParams;
+    }
+
+    /// Should this measured control be drawn as a knob?
+    ///
+    /// Yes for a knob, and yes for a control from a scan that never classified
+    /// anything — every map written before CARTOG recorded `kind` has none,
+    /// and refusing those would empty panels that draw correctly today. No for
+    /// a slider, switch or button: the manifest path already refuses to draw
+    /// those as circles, on the grounds that a fader drawn as a dial is wrong
+    /// in a way a reader cannot see, and the measured path was doing exactly
+    /// that.
+    ///
+    /// Free-standing so a test can ask the RULE, rather than reach the
+    /// process-wide map this machine happens to have scanned.
+    static bool draws_as_knob(const MappedWidget& w) {
+        return w.kind.empty() || w.kind == "knob";
     }
 
     /// Why a module cannot be drawn faithfully, if it cannot.

@@ -30,9 +30,6 @@ READER = os.path.join(HERE, "..", "..", "forge-seam", "modular", "portmap.cpp")
 UNREAD_BY_DESIGN = {
     "lights":   "measured for a future light-drawing pass; nothing draws them",
     "displays": "same — a screen's rectangle, with nothing drawing screens yet",
-    "kind":     "knob / slider / button / switch. The preview draws every "
-                "control as a knob; reading this is how a fader stops looking "
-                "like a dial",
     "type":     "the widget's class name, kept for diagnosing a bad scan",
 }
 

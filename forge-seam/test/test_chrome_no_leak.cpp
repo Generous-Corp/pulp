@@ -6257,3 +6257,72 @@ TEST_CASE("the build monitor reads a real generator log",
     // the app paints an error state and stops watching.
     CHECK(errors < lines / 4);
 }
+
+// A vendor slider is not drawn as a knob, and an unclassified one still draws.
+//
+// The manifest path already refuses to guess: it maps four knob kinds to
+// diameters and skips the rest, because "a switch or a slider drawn as a knob
+// is wrong in a way a reader cannot see". The port-map path did the opposite —
+// every measured control became a knob sized min(w,h), so a fader came out a
+// small dial. CARTOG measures the kind; nothing read it.
+//
+// The second half matters as much: every map written before CARTOG classified
+// controls carries no kind at all, and refusing those would empty panels that
+// draw correctly today.
+TEST_CASE("a measured slider is not drawn as a knob", "[portmap][kind]") {
+    const std::string map = R"({
+  "modules": [
+    {
+      "plugin": "Vendor",
+      "model": "Mixer",
+      "pluginVersion": "1.0",
+      "scan": 3,
+      "size": [150.0, 380.0],
+      "params": [
+        {"index": 0, "name": "Level", "x": 30.0, "y": 120.0,
+         "w": 18.0, "h": 18.0, "kind": "knob"},
+        {"index": 1, "name": "Fader", "x": 70.0, "y": 200.0,
+         "w": 10.0, "h": 90.0, "kind": "slider"},
+        {"index": 2, "name": "Mute", "x": 110.0, "y": 300.0,
+         "w": 14.0, "h": 14.0, "kind": "button"}
+      ],
+      "inputs": [], "outputs": []
+    },
+    {
+      "plugin": "Vendor",
+      "model": "Old",
+      "pluginVersion": "1.0",
+      "size": [150.0, 380.0],
+      "params": [
+        {"index": 0, "name": "Something", "x": 30.0, "y": 120.0,
+         "w": 18.0, "h": 18.0}
+      ],
+      "inputs": [], "outputs": []
+    }
+  ]
+})";
+    const auto pm = forge_modular::PortMap::parse(map);
+    const auto* mixer = pm.find("Vendor", "Mixer");
+    REQUIRE(mixer != nullptr);
+    REQUIRE(mixer->params.size() == 3);
+    CHECK(mixer->params[0].kind == "knob");
+    CHECK(mixer->params[1].kind == "slider");
+    CHECK(mixer->params[2].kind == "button");
+
+    // An entry from before classification says nothing rather than "knob".
+    const auto* old_entry = pm.find("Vendor", "Old");
+    REQUIRE(old_entry != nullptr);
+    REQUIRE(old_entry->params.size() == 1);
+    CHECK(old_entry->params[0].kind.empty());
+
+    // And the DRAWING decision, which is the thing that was wrong. Asserting
+    // the parsed kind alone would pass with every control still drawn as a
+    // circle — the rule lives in the caller, and that is where it has to be
+    // asked.
+    using forge_modular::PortMap;
+    CHECK(PortMap::draws_as_knob(mixer->params[0]));        // knob
+    CHECK_FALSE(PortMap::draws_as_knob(mixer->params[1]));  // slider
+    CHECK_FALSE(PortMap::draws_as_knob(mixer->params[2]));  // button
+    // Unclassified still draws, or every pre-classification map empties.
+    CHECK(PortMap::draws_as_knob(old_entry->params[0]));
+}

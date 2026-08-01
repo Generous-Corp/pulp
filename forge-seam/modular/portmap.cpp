@@ -26,6 +26,9 @@ std::vector<MappedWidget> read_group(const choc::value::ValueView& mod,
         // says "not measured" rather than "zero wide".
         one.w = static_cast<float>(w["w"].getWithDefault<double>(0.0));
         one.h = static_cast<float>(w["h"].getWithDefault<double>(0.0));
+        // Empty when the scan predates control classification, which every
+        // existing map does. Absent must read as "unknown", not as "knob".
+        one.kind = w["kind"].getWithDefault<std::string>("");
         out.push_back(one);
     }
     return out;
