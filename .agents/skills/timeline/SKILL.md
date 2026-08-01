@@ -1000,6 +1000,40 @@ Three things bite when adding a row:
   no floor at all.** When a row's defining rule is that it cannot reach a module
   that *is* in the table — `timeline_editor` and playback — assert that pair by
   name too, or the rule survives someone widening the other row.
+- **A row constrains the whole link closure, not the module's own build file.**
+  The check follows `target_link_libraries` through `core/<module>/CMakeLists.txt`
+  to a fixed point, so a row is only honest if every module it reaches
+  transitively is in the set. Measure before declaring: a row that names one
+  in-floor dependency can still be breached three links down, and the error names
+  the chain (`playback -> audio -> state`) rather than only the destination.
+  Where the closure genuinely exceeds the floor, record the surplus in
+  `LINK_CLOSURE_DEBT` instead of widening the row — the row also governs
+  includes, and folding a link fact into it silently grants a header permission
+  nobody argued for.
+
+Two rules keep the walk honest and are easy to break by accident:
+
+- **Executables are not followed.** Nothing can link an executable, so a helper
+  binary in a dependency (`pulp-timeline-schema-emit`, `pulp-fixture-runner`)
+  must not raise the floors of everything above it. Its links are still policed
+  at depth zero by the direct scan of its own module's build file — that is the
+  half the selftest's helper-target assertions cover.
+- **A token that resolves to no `core/` directory is not a module.**
+  `pulp-tracing` (defined in `tools/cmake/PulpTracing.cmake`) and
+  `pulp-cpp-httplib` (an INTERFACE shim inside `core/runtime/CMakeLists.txt`) are
+  build plumbing reachable from every row. They are skipped transitively rather
+  than added to five floors; a module's own build file naming one is still caught
+  at depth zero.
+
+**A `core/` module that links a declared engine module but owns no row is the
+other half of the contract.** The intuitive rule — flag an engine module that
+links something undeclared — is useless: it fires on `platform`, `runtime`,
+`audio` and `midi`, which are floor primitives by design. The rule that bites is
+the inverse, and `ENGINE_CONSUMERS` carries the ones that exist, each with a
+reason. `format` and `host` are the sanctioned upper layers; `sequence`, `smf`
+and `dawproject` sit above or beside the engine and have not been given floors.
+The list rejects an entry with no reason and an entry whose subject no longer
+links the engine, so it can neither grow silently nor rot.
 
 A new `core/<module>` directory also drifts `codecov.yml`, whose flags and
 components mirror `core/*`. Add the flag and the component alongside the target;
